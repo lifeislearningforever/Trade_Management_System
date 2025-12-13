@@ -1,0 +1,54 @@
+<!-- Reusable Status Badge Component -->
+<!-- Usage: {% include 'includes/status_badge.html' with status='DRAFT' %} -->
+
+{% if status == 'DRAFT' %}
+    <span class="badge bg-secondary">
+        <i class="bi bi-pencil"></i> Draft
+    </span>
+{% elif status == 'PENDING_APPROVAL' %}
+    <span class="badge bg-warning text-dark">
+        <i class="bi bi-clock"></i> Pending Approval
+    </span>
+{% elif status == 'APPROVED' %}
+    <span class="badge bg-success">
+        <i class="bi bi-check-circle"></i> Approved
+    </span>
+{% elif status == 'REJECTED' %}
+    <span class="badge bg-danger">
+        <i class="bi bi-x-circle"></i> Rejected
+    </span>
+{% elif status == 'ACTIVE' %}
+    <span class="badge bg-success">
+        <i class="bi bi-check-circle"></i> Active
+    </span>
+{% elif status == 'SUBMITTED' %}
+    <span class="badge bg-info">
+        <i class="bi bi-send"></i> Submitted
+    </span>
+{% elif status == 'PARTIALLY_FILLED' %}
+    <span class="badge bg-warning text-dark">
+        <i class="bi bi-hourglass-split"></i> Partially Filled
+    </span>
+{% elif status == 'FILLED' %}
+    <span class="badge bg-success">
+        <i class="bi bi-check-all"></i> Filled
+    </span>
+{% elif status == 'CANCELLED' %}
+    <span class="badge bg-secondary">
+        <i class="bi bi-x-circle"></i> Cancelled
+    </span>
+{% elif status == 'EXPIRED' %}
+    <span class="badge bg-dark">
+        <i class="bi bi-calendar-x"></i> Expired
+    </span>
+{% elif status == 'SUSPENDED' %}
+    <span class="badge bg-warning text-dark">
+        <i class="bi bi-pause-circle"></i> Suspended
+    </span>
+{% elif status == 'CLOSED' %}
+    <span class="badge bg-secondary">
+        <i class="bi bi-lock"></i> Closed
+    </span>
+{% else %}
+    <span class="badge bg-secondary">{{ status }}</span>
+{% endif %}

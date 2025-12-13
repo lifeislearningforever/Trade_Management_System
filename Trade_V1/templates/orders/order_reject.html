@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+
+{% block title %}Reject Order {{ order.order_id }} - Trade Management{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="card border-danger">
+                <div class="card-header bg-danger text-white">
+                    <h4 class="mb-0"><i class="bi bi-x-circle"></i> Reject Order</h4>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-warning">
+                        <strong>Order ID:</strong> {{ order.order_id }}<br>
+                        <strong>Stock:</strong> {{ order.stock.symbol }}<br>
+                        <strong>Side:</strong> {{ order.get_side_display }}<br>
+                        <strong>Quantity:</strong> {{ order.quantity }}
+                    </div>
+
+                    <p>Please provide a reason for rejecting this order:</p>
+
+                    <form method="post">
+                        {% csrf_token %}
+
+                        <div class="mb-3">
+                            <label for="{{ form.rejection_reason.id_for_label }}" class="form-label">Rejection Reason *</label>
+                            {{ form.rejection_reason }}
+                            {% if form.rejection_reason.errors %}
+                            <div class="invalid-feedback d-block">{{ form.rejection_reason.errors }}</div>
+                            {% endif %}
+                            <small class="form-text text-muted">{{ form.rejection_reason.help_text }}</small>
+                        </div>
+
+                        <div class="d-flex justify-content-between">
+                            <a href="{% url 'order_detail' order.pk %}" class="btn btn-secondary">
+                                <i class="bi bi-arrow-left"></i> Cancel
+                            </a>
+                            <button type="submit" class="btn btn-danger">
+                                <i class="bi bi-x-circle"></i> Confirm Rejection
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

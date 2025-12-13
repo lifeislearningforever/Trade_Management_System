@@ -1,0 +1,141 @@
+{% load static %}
+<!-- Professional Footer -->
+<footer class="footer mt-5 py-4 bg-white border-top">
+    <div class="container-fluid px-4">
+        <div class="row">
+            <!-- Company Info -->
+            <div class="col-md-4 mb-3 mb-md-0">
+                <div class="d-flex align-items-center mb-3">
+                    <img src="{% static 'images/logo.svg' %}" alt="Logo" width="32" height="32" class="me-2">
+                    <h5 class="mb-0 fw-bold">Trade Management</h5>
+                </div>
+                <p class="text-muted small mb-2">
+                    Professional order management platform with maker-checker workflow and comprehensive audit trail.
+                </p>
+                <p class="text-muted small mb-0">
+                    <i class="bi bi-shield-check text-success"></i> Secure • 
+                    <i class="bi bi-lock-fill text-primary"></i> Compliant • 
+                    <i class="bi bi-speedometer2 text-info"></i> Fast
+                </p>
+            </div>
+
+            <!-- Quick Links -->
+            <div class="col-md-2 mb-3 mb-md-0">
+                <h6 class="fw-bold mb-3">Quick Links</h6>
+                <ul class="list-unstyled">
+                    <li class="mb-2">
+                        <a href="{% url 'dashboard' %}" class="text-muted text-decoration-none small">
+                            <i class="bi bi-grid-fill"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="mb-2">
+                        <a href="{% url 'order_list' %}" class="text-muted text-decoration-none small">
+                            <i class="bi bi-receipt"></i> Orders
+                        </a>
+                    </li>
+                    <li class="mb-2">
+                        <a href="{% url 'portfolio_list' %}" class="text-muted text-decoration-none small">
+                            <i class="bi bi-briefcase-fill"></i> Portfolio
+                        </a>
+                    </li>
+                </ul>
+            </div>
+
+            <!-- Reference Data -->
+            <div class="col-md-2 mb-3 mb-md-0">
+                <h6 class="fw-bold mb-3">Reference Data</h6>
+                <ul class="list-unstyled">
+                    <li class="mb-2">
+                        <a href="{% url 'currency_list' %}" class="text-muted text-decoration-none small">
+                            <i class="bi bi-currency-exchange"></i> Currencies
+                        </a>
+                    </li>
+                    <li class="mb-2">
+                        <a href="{% url 'broker_list' %}" class="text-muted text-decoration-none small">
+                            <i class="bi bi-building"></i> Brokers
+                        </a>
+                    </li>
+                    <li class="mb-2">
+                        <a href="{% url 'client_list' %}" class="text-muted text-decoration-none small">
+                            <i class="bi bi-people-fill"></i> Clients
+                        </a>
+                    </li>
+                </ul>
+            </div>
+
+            <!-- System Info -->
+            <div class="col-md-4">
+                <h6 class="fw-bold mb-3">System Information</h6>
+                <div class="small text-muted">
+                    <div class="mb-2">
+                        <i class="bi bi-person-badge"></i>
+                        <strong>User:</strong> {{ user.get_display_name|default:"Guest" }}
+                    </div>
+                    <div class="mb-2">
+                        <i class="bi bi-building"></i>
+                        <strong>Role:</strong> 
+                        {% if user.is_authenticated %}
+                            {% if user.is_superuser %}Admin{% else %}{{ user.employee_id|default:"User" }}{% endif %}
+                        {% else %}
+                            Not Logged In
+                        {% endif %}
+                    </div>
+                    <div class="mb-2">
+                        <i class="bi bi-clock"></i>
+                        <strong>Server Time:</strong> <span id="currentTime"></span>
+                    </div>
+                    <div class="mb-2">
+                        <i class="bi bi-shield-check"></i>
+                        <strong>Version:</strong> 1.0.0
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <hr class="my-4">
+
+        <!-- Bottom Bar -->
+        <div class="row">
+            <div class="col-md-6 text-center text-md-start mb-2 mb-md-0">
+                <p class="text-muted small mb-0">
+                    © {% now "Y" %} Trade Management System. All rights reserved.
+                </p>
+            </div>
+            <div class="col-md-6 text-center text-md-end">
+                <div class="small">
+                    <a href="#" class="text-muted text-decoration-none me-3">
+                        <i class="bi bi-file-text"></i> Documentation
+                    </a>
+                    <a href="#" class="text-muted text-decoration-none me-3">
+                        <i class="bi bi-question-circle"></i> Support
+                    </a>
+                    <a href="#" class="text-muted text-decoration-none">
+                        <i class="bi bi-shield-lock"></i> Privacy
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</footer>
+
+<!-- Footer JavaScript -->
+<script>
+    // Update current time every second
+    function updateTime() {
+        const now = new Date();
+        const timeString = now.toLocaleTimeString('en-US', { 
+            hour: '2-digit', 
+            minute: '2-digit', 
+            second: '2-digit',
+            hour12: false 
+        });
+        const timeElement = document.getElementById('currentTime');
+        if (timeElement) {
+            timeElement.textContent = timeString;
+        }
+    }
+    
+    // Update time immediately and then every second
+    updateTime();
+    setInterval(updateTime, 1000);
+</script>

@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+
+{% block title %}Currencies - Trade Management{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="alert alert-success">
+        <h4><i class="bi bi-currency-exchange"></i> Currency Reference Data</h4>
+        <p>Currency master data with exchange rates and symbols.</p>
+        <p class="mb-0"><strong>Status:</strong> To be fully implemented.</p>
+    </div>
+    <a href="{% url 'dashboard' %}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Back to Dashboard
+    </a>
+</div>
+{% endblock %}

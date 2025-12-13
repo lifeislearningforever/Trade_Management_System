@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+
+{% block title %}UDF Configuration - Trade Management{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="alert alert-warning">
+        <h4><i class="bi bi-sliders"></i> UDF Configuration (Admin Only)</h4>
+        <p>User Defined Fields for dynamic dropdowns and data categorization.</p>
+        <p class="mb-0"><strong>Status:</strong> To be fully implemented.</p>
+    </div>
+    <a href="{% url 'dashboard' %}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Back to Dashboard
+    </a>
+</div>
+{% endblock %}

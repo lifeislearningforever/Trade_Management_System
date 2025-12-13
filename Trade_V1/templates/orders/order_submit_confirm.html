@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+
+{% block title %}Submit Order {{ order.order_id }} - Trade Management{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="card border-primary">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0"><i class="bi bi-send"></i> Submit Order for Approval</h4>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-info">
+                        <p><strong>Are you sure you want to submit this order for approval?</strong></p>
+                        <p class="mb-0">Once submitted, you cannot edit it until it is approved or rejected.</p>
+                    </div>
+
+                    <p><strong>Order Details:</strong></p>
+                    <ul>
+                        <li><strong>Order ID:</strong> {{ order.order_id }}</li>
+                        <li><strong>Stock:</strong> {{ order.stock.symbol }}</li>
+                        <li><strong>Side:</strong> {{ order.get_side_display }}</li>
+                        <li><strong>Quantity:</strong> {{ order.quantity }}</li>
+                        <li><strong>Price:</strong> {{ order.price|default:"Market" }}</li>
+                    </ul>
+
+                    <form method="post">
+                        {% csrf_token %}
+                        <div class="d-flex justify-content-between">
+                            <a href="{% url 'order_detail' order.pk %}" class="btn btn-secondary">
+                                <i class="bi bi-arrow-left"></i> Cancel
+                            </a>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-send"></i> Confirm Submit
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

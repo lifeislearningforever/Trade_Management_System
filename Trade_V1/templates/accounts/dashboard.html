@@ -1,0 +1,373 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Dashboard - Trade Management System{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4">
+    <!-- Welcome Header with Gradient -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card border-0 shadow-lg" style="background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%); border-radius: 1rem;">
+                <div class="card-body p-4">
+                    <div class="d-flex justify-content-between align-items-center text-white">
+                        <div>
+                            <h1 class="h2 mb-2 fw-bold">
+                                <i class="bi bi-grid-fill me-2"></i>Welcome back, {{ user.get_display_name }}!
+                            </h1>
+                            <p class="mb-0 opacity-75">
+                                <i class="bi bi-calendar-check me-2"></i>{{ user.last_login|date:"l, F d, Y at H:i" }}
+                            </p>
+                        </div>
+                        <div class="d-none d-md-block">
+                            <i class="bi bi-person-circle" style="font-size: 4rem; opacity: 0.3;"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- User Information -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">
+                        <i class="bi bi-person-badge"></i> User Information
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-borderless">
+                        <tr>
+                            <th width="40%">Username:</th>
+                            <td><strong>{{ user.username }}</strong></td>
+                        </tr>
+                        <tr>
+                            <th>Full Name:</th>
+                            <td>{{ user.full_name }}</td>
+                        </tr>
+                        <tr>
+                            <th>Email:</th>
+                            <td>{{ user.email }}</td>
+                        </tr>
+                        {% if user.employee_id %}
+                        <tr>
+                            <th>Employee ID:</th>
+                            <td><span class="badge bg-info">{{ user.employee_id }}</span></td>
+                        </tr>
+                        {% endif %}
+                        {% if user.department %}
+                        <tr>
+                            <th>Department:</th>
+                            <td>{{ user.department }}</td>
+                        </tr>
+                        {% endif %}
+                        {% if user.designation %}
+                        <tr>
+                            <th>Designation:</th>
+                            <td>{{ user.designation }}</td>
+                        </tr>
+                        {% endif %}
+                        <tr>
+                            <th>Status:</th>
+                            <td>
+                                {% if user.employment_status == 'ACTIVE' %}
+                                <span class="badge bg-success">Active</span>
+                                {% elif user.employment_status == 'ON_LEAVE' %}
+                                <span class="badge bg-warning">On Leave</span>
+                                {% else %}
+                                <span class="badge bg-secondary">{{ user.get_employment_status_display }}</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0">
+                        <i class="bi bi-shield-check"></i> Your Roles & Permissions
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if user_roles_data %}
+                    <div class="list-group">
+                        {% for role_data in user_roles_data %}
+                        <div class="list-group-item">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">
+                                    <i class="bi bi-tag"></i> {{ role_data.role.name }}
+                                    {% if role_data.role.code %}
+                                    <small class="text-muted">({{ role_data.role.code }})</small>
+                                    {% endif %}
+                                </h6>
+                                {% if role_data.is_primary %}
+                                <span class="badge bg-warning">Primary</span>
+                                {% endif %}
+                            </div>
+                            {% if role_data.role.description %}
+                            <p class="mb-1 small text-muted">{{ role_data.role.description }}</p>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle"></i> No roles assigned yet. Contact your administrator.
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Maker Dashboard Section -->
+    {% if is_maker %}
+    <div class="row mb-4">
+        <div class="col-12 mb-3">
+            <h3 class="fw-bold">
+                <i class="bi bi-pencil-square text-primary"></i> Maker Dashboard
+            </h3>
+        </div>
+
+        <!-- Draft Orders -->
+        <div class="col-md-3 mb-3">
+            <div class="stats-card">
+                <div class="stats-card-icon bg-light">
+                    <i class="bi bi-file-earmark text-secondary"></i>
+                </div>
+                <div class="stats-card-title">Draft Orders</div>
+                <div class="stats-card-value">{{ my_draft_orders }}</div>
+                <a href="{% url 'order_list' %}?status=DRAFT" class="btn btn-sm btn-outline-secondary mt-3 w-100">
+                    <i class="bi bi-eye"></i> View Drafts
+                </a>
+            </div>
+        </div>
+
+        <!-- Draft Portfolios -->
+        <div class="col-md-3 mb-3">
+            <div class="stats-card">
+                <div class="stats-card-icon" style="background: #f1f5f9;">
+                    <i class="bi bi-briefcase text-secondary"></i>
+                </div>
+                <div class="stats-card-title">Draft Portfolios</div>
+                <div class="stats-card-value">{{ my_draft_portfolios }}</div>
+                <a href="{% url 'portfolio_list' %}?status=DRAFT" class="btn btn-sm btn-outline-secondary mt-3 w-100">
+                    <i class="bi bi-eye"></i> View Drafts
+                </a>
+            </div>
+        </div>
+
+        <!-- Pending Orders -->
+        <div class="col-md-3 mb-3">
+            <div class="stats-card" style="border-color: #f59e0b;">
+                <div class="stats-card-icon" style="background: #fef3c7;">
+                    <i class="bi bi-clock text-warning"></i>
+                </div>
+                <div class="stats-card-title">Pending Orders</div>
+                <div class="stats-card-value text-warning">{{ my_pending_orders }}</div>
+                <a href="{% url 'order_list' %}?status=PENDING_APPROVAL" class="btn btn-sm btn-warning mt-3 w-100">
+                    <i class="bi bi-eye-fill"></i> View Pending
+                </a>
+            </div>
+        </div>
+
+        <!-- Pending Portfolios -->
+        <div class="col-md-3 mb-3">
+            <div class="stats-card" style="border-color: #f59e0b;">
+                <div class="stats-card-icon" style="background: #fef3c7;">
+                    <i class="bi bi-hourglass text-warning"></i>
+                </div>
+                <div class="stats-card-title">Pending Portfolios</div>
+                <div class="stats-card-value text-warning">{{ my_pending_portfolios }}</div>
+                <a href="{% url 'portfolio_list' %}?status=PENDING_APPROVAL" class="btn btn-sm btn-warning mt-3 w-100">
+                    <i class="bi bi-eye-fill"></i> View Pending
+                </a>
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="col-12 mt-3">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h6 class="mb-0"><i class="bi bi-plus-circle"></i> Quick Actions</h6>
+                </div>
+                <div class="card-body">
+                    <a href="{% url 'order_create' %}" class="btn btn-primary me-2">
+                        <i class="bi bi-plus-lg"></i> Create Order
+                    </a>
+                    <a href="{% url 'portfolio_create' %}" class="btn btn-success">
+                        <i class="bi bi-plus-lg"></i> Create Portfolio
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Checker Dashboard Section -->
+    {% if is_checker %}
+    <div class="row mb-4">
+        <div class="col-12">
+            <h4 class="mb-3">
+                <i class="bi bi-check-circle"></i> Checker Dashboard
+            </h4>
+        </div>
+
+        <!-- Pending Approvals -->
+        <div class="col-md-6 mb-3">
+            <div class="card h-100 border-warning">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-muted mb-0">Pending Order Approvals</h6>
+                            <h2 class="mb-0">{{ pending_approval_orders }}</h2>
+                        </div>
+                        <i class="bi bi-file-earmark-check text-warning" style="font-size: 2.5rem;"></i>
+                    </div>
+                    <a href="{% url 'order_list' %}?status=PENDING_APPROVAL" class="btn btn-sm btn-warning mt-3 w-100">
+                        Review Orders
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 mb-3">
+            <div class="card h-100 border-warning">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-muted mb-0">Pending Portfolio Approvals</h6>
+                            <h2 class="mb-0">{{ pending_approval_portfolios }}</h2>
+                        </div>
+                        <i class="bi bi-briefcase-fill text-warning" style="font-size: 2.5rem;"></i>
+                    </div>
+                    <a href="{% url 'portfolio_list' %}?status=PENDING_APPROVAL" class="btn btn-sm btn-warning mt-3 w-100">
+                        Review Portfolios
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Approval History -->
+        <div class="col-12 mt-3">
+            <div class="card">
+                <div class="card-header bg-success text-white">
+                    <h6 class="mb-0"><i class="bi bi-check-all"></i> Recent Approvals</h6>
+                </div>
+                <div class="card-body">
+                    <small class="text-muted">Recently approved orders: {{ recently_approved_orders.count }}</small>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Admin Dashboard Section -->
+    {% if is_admin %}
+    <div class="row mb-4">
+        <div class="col-12">
+            <h4 class="mb-3">
+                <i class="bi bi-gear"></i> Administrator Dashboard
+            </h4>
+        </div>
+
+        <!-- System Overview -->
+        <div class="col-md-3 mb-3">
+            <div class="card h-100 border-primary">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-muted mb-0">Total Orders</h6>
+                            <h2 class="mb-0">{{ total_orders }}</h2>
+                        </div>
+                        <i class="bi bi-file-earmark-text text-primary" style="font-size: 2.5rem;"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3 mb-3">
+            <div class="card h-100 border-success">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-muted mb-0">Total Portfolios</h6>
+                            <h2 class="mb-0">{{ total_portfolios }}</h2>
+                        </div>
+                        <i class="bi bi-briefcase text-success" style="font-size: 2.5rem;"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3 mb-3">
+            <div class="card h-100 border-info">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-muted mb-0">Active Users</h6>
+                            <h2 class="mb-0">{{ total_users }}</h2>
+                        </div>
+                        <i class="bi bi-people text-info" style="font-size: 2.5rem;"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3 mb-3">
+            <div class="card h-100 border-warning">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-muted mb-0">Pending Approvals</h6>
+                            <h2 class="mb-0">{{ pending_approvals_all }}</h2>
+                        </div>
+                        <i class="bi bi-clock text-warning" style="font-size: 2.5rem;"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Admin Quick Links -->
+        <div class="col-12 mt-3">
+            <div class="card">
+                <div class="card-header bg-dark text-white">
+                    <h6 class="mb-0"><i class="bi bi-sliders"></i> Admin Tools</h6>
+                </div>
+                <div class="card-body">
+                    <a href="{% url 'admin:index' %}" class="btn btn-dark me-2">
+                        <i class="bi bi-gear"></i> Django Admin
+                    </a>
+                    <a href="{% url 'udf_type_list' %}" class="btn btn-secondary me-2">
+                        <i class="bi bi-sliders"></i> UDF Config
+                    </a>
+                    <a href="{% url 'currency_list' %}" class="btn btn-secondary">
+                        <i class="bi bi-database"></i> Reference Data
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .bg-gradient-primary {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    
+    .hover-card {
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    
+    .hover-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+    }
+</style>
+{% endblock %}
