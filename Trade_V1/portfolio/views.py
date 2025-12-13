@@ -61,15 +61,11 @@ def portfolio_list(request):
     # Log the view action
     AuditLog.log_action(
         user=request.user,
-        action='VIEW_PORTFOLIO_LIST',
-        target_model='Portfolio',
-        target_id=None,
-        status='SUCCESS',
-        ip_address=request.META.get('REMOTE_ADDR'),
-        details={
-            'filters': {'status': status_filter, 'search': search_query},
-            'total_count': total_portfolios
-        }
+        action='VIEW',
+        description='Viewed portfolio list',
+        category='portfolio',
+        object_type='Portfolio',
+        ip_address=request.META.get('REMOTE_ADDR')
     )
 
     context = {
@@ -94,11 +90,12 @@ def portfolio_create(request):
         messages.error(request, 'You do not have permission to create portfolios.')
         AuditLog.log_action(
             user=request.user,
-            action='CREATE_PORTFOLIO',
-            target_model='Portfolio',
-            target_id=None,
-            status='PERMISSION_DENIED',
-            ip_address=request.META.get('REMOTE_ADDR')
+            action='CREATE',
+            description='Portfolio creation denied - insufficient permissions',
+            category='portfolio',
+            object_type='Portfolio',
+            ip_address=request.META.get('REMOTE_ADDR'),
+            status='PERMISSION_DENIED'
         )
         return redirect('portfolio_list')
 
