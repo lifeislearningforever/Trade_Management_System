@@ -1,7 +1,354 @@
 {% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ portfolio.portfolio_id }} - Trade Management{% endblock %}
+
 {% block content %}
-<div class="container mt-4">
-    <div class="alert alert-info">Portfolio Detail - To be implemented</div>
-    <a href="{% url 'portfolio_list' %}" class="btn btn-secondary">Back</a>
+<div class="container-fluid mt-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>
+            <i class="bi bi-briefcase-fill"></i> Portfolio: {{ portfolio.name }}
+        </h2>
+        <a href="{% url 'portfolio_list' %}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Back to List
+        </a>
+    </div>
+
+    <!-- Status Banner -->
+    <div class="alert 
+        {% if portfolio.status == 'DRAFT' %}alert-secondary
+        {% elif portfolio.status == 'PENDING_APPROVAL' %}alert-warning
+        {% elif portfolio.status == 'ACTIVE' %}alert-success
+        {% elif portfolio.status == 'REJECTED' %}alert-danger
+        {% else %}alert-secondary{% endif %} mb-4">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <strong>Status:</strong> {{ portfolio.get_status_display }}
+                {% if portfolio.status == 'REJECTED' %}
+                <br><strong>Rejection Reason:</strong> {{ portfolio.rejection_reason }}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- Left Column: Portfolio Details -->
+        <div class="col-md-8">
+            <!-- Basic Information -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-info-circle"></i> Portfolio Information
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="text-muted small">Portfolio ID</label>
+                            <div class="fw-bold">{{ portfolio.portfolio_id }}</div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="text-muted small">Portfolio Name</label>
+                            <div class="fw-bold">{{ portfolio.name }}</div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-12 mb-3">
+                            <label class="text-muted small">Description</label>
+                            <div>{{ portfolio.description|default:"No description" }}</div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="text-muted small">Owner</label>
+                            <div>{{ portfolio.owner.get_display_name }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="text-muted small">Client</label>
+                            <div>{{ portfolio.client.name|default:"No client" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="text-muted small">Base Currency</label>
+                            <div>{{ portfolio.base_currency }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Financial Summary -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-graph-up"></i> Financial Summary
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="text-muted small">Initial Capital</div>
+                            <div class="fs-5 fw-bold">{{ portfolio.base_currency }} {{ portfolio.initial_capital|floatformat:2 }}</div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-muted small">Current Cash</div>
+                            <div class="fs-5 fw-bold">{{ portfolio.base_currency }} {{ portfolio.current_cash|floatformat:2 }}</div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-muted small">Holdings Value</div>
+                            <div class="fs-5 fw-bold">{{ portfolio.base_currency }} {{ total_holdings_value|floatformat:2 }}</div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-muted small">Current Value</div>
+                            <div class="fs-5 fw-bold text-primary">{{ portfolio.base_currency }} {{ portfolio.current_value|floatformat:2 }}</div>
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="text-muted small">Total P&L</div>
+                            <div class="fs-5 fw-bold {% if portfolio.total_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                {{ portfolio.base_currency }} {{ portfolio.total_pnl|floatformat:2 }}
+                                ({{ portfolio.total_pnl_percentage|floatformat:2 }}%)
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="text-muted small">Unrealized P&L</div>
+                            <div class="fs-5 fw-bold {% if total_unrealized_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                {{ portfolio.base_currency }} {{ total_unrealized_pnl|floatformat:2 }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Holdings -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-pie-chart"></i> Holdings ({{ holdings|length }})
+                </div>
+                <div class="card-body p-0">
+                    {% if holdings %}
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Stock</th>
+                                    <th class="text-end">Quantity</th>
+                                    <th class="text-end">Avg Price</th>
+                                    <th class="text-end">Current Price</th>
+                                    <th class="text-end">Total Cost</th>
+                                    <th class="text-end">Market Value</th>
+                                    <th class="text-end">P&L</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for holding in holdings %}
+                                <tr>
+                                    <td><strong>{{ holding.stock.symbol }}</strong></td>
+                                    <td class="text-end">{{ holding.quantity }}</td>
+                                    <td class="text-end">{{ portfolio.base_currency }} {{ holding.average_buy_price|floatformat:2 }}</td>
+                                    <td class="text-end">{{ portfolio.base_currency }} {{ holding.last_price|floatformat:2 }}</td>
+                                    <td class="text-end">{{ portfolio.base_currency }} {{ holding.total_cost|floatformat:2 }}</td>
+                                    <td class="text-end">{{ portfolio.base_currency }} {{ holding.current_value|floatformat:2 }}</td>
+                                    <td class="text-end {% if holding.unrealized_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                        {{ portfolio.base_currency }} {{ holding.unrealized_pnl|floatformat:2 }}
+                                        ({{ holding.unrealized_pnl_percentage|floatformat:2 }}%)
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="p-3 text-muted text-center">
+                        <i class="bi bi-inbox"></i> No holdings yet
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Recent Transactions -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-clock-history"></i> Recent Transactions
+                </div>
+                <div class="card-body p-0">
+                    {% if transactions %}
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Transaction ID</th>
+                                    <th>Type</th>
+                                    <th>Stock</th>
+                                    <th class="text-end">Amount</th>
+                                    <th>Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for txn in transactions %}
+                                <tr>
+                                    <td><small>{{ txn.transaction_id }}</small></td>
+                                    <td><span class="badge bg-info">{{ txn.get_transaction_type_display }}</span></td>
+                                    <td>{{ txn.stock.symbol|default:"-" }}</td>
+                                    <td class="text-end">{{ portfolio.base_currency }} {{ txn.amount|floatformat:2 }}</td>
+                                    <td><small>{{ txn.transaction_date|date:"Y-m-d H:i" }}</small></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="p-3 text-muted text-center">
+                        <i class="bi bi-inbox"></i> No transactions yet
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Classification -->
+            {% if portfolio.portfolio_group or portfolio.portfolio_subgroup or portfolio.portfolio_manager or portfolio.strategy %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-grid"></i> Classification
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-2">
+                            <label class="text-muted small">Portfolio Group</label>
+                            <div>{{ portfolio.portfolio_group|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-6 mb-2">
+                            <label class="text-muted small">Portfolio Subgroup</label>
+                            <div>{{ portfolio.portfolio_subgroup|default:"-" }}</div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-2">
+                            <label class="text-muted small">Portfolio Manager</label>
+                            <div>{{ portfolio.portfolio_manager|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-6 mb-2">
+                            <label class="text-muted small">Strategy</label>
+                            <div>{{ portfolio.strategy|default:"-" }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Right Column: Actions & Audit -->
+        <div class="col-md-4">
+            <!-- Action Buttons -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-lightning-fill"></i> Actions
+                </div>
+                <div class="card-body">
+                    <!-- Edit -->
+                    {% if can_edit %}
+                    <a href="{% url 'portfolio_edit' portfolio.id %}" class="btn btn-outline-primary w-100 mb-2">
+                        <i class="bi bi-pencil"></i> Edit Portfolio
+                    </a>
+                    {% endif %}
+
+                    <!-- Submit -->
+                    {% if can_submit %}
+                    <form method="post" action="{% url 'portfolio_submit' portfolio.id %}" class="mb-2">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-warning w-100">
+                            <i class="bi bi-send"></i> Submit for Approval
+                        </button>
+                    </form>
+                    {% endif %}
+
+                    <!-- Approve -->
+                    {% if can_approve %}
+                    <form method="post" action="{% url 'portfolio_approve' portfolio.id %}" class="mb-2">
+                        {% csrf_token %}
+                        <div class="mb-2">
+                            <label class="form-label small">Approval Notes (Optional)</label>
+                            <textarea name="notes" class="form-control" rows="2"></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-success w-100">
+                            <i class="bi bi-check-circle"></i> Approve
+                        </button>
+                    </form>
+                    {% endif %}
+
+                    <!-- Reject -->
+                    {% if can_reject %}
+                    <form method="post" action="{% url 'portfolio_reject' portfolio.id %}" class="mb-2">
+                        {% csrf_token %}
+                        <div class="mb-2">
+                            <label class="form-label small">Rejection Reason *</label>
+                            <textarea name="rejection_reason" class="form-control" rows="2" required></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-danger w-100">
+                            <i class="bi bi-x-circle"></i> Reject
+                        </button>
+                    </form>
+                    {% endif %}
+
+                    <!-- Delete -->
+                    {% if portfolio.status == 'DRAFT' or portfolio.status == 'REJECTED' %}
+                    {% if portfolio.created_by == user %}
+                    <form method="post" action="{% url 'portfolio_delete' portfolio.id %}" 
+                          onsubmit="return confirm('Are you sure you want to delete this portfolio?');">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-outline-danger w-100">
+                            <i class="bi bi-trash"></i> Delete
+                        </button>
+                    </form>
+                    {% endif %}
+                    {% endif %}
+
+                    {% if not can_edit and not can_submit and not can_approve and not can_reject %}
+                    <div class="text-muted text-center">
+                        <i class="bi bi-lock"></i> No actions available
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Audit Trail -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-clock-history"></i> Audit Trail
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="text-muted small">Created By</label>
+                        <div class="fw-bold">{{ portfolio.created_by_name }}</div>
+                        <small class="text-muted">{{ portfolio.created_at|date:"Y-m-d H:i" }}</small>
+                    </div>
+
+                    {% if portfolio.approved_by %}
+                    <div class="mb-3">
+                        <label class="text-muted small">
+                            {% if portfolio.status == 'REJECTED' %}Rejected By{% else %}Approved By{% endif %}
+                        </label>
+                        <div class="fw-bold">{{ portfolio.approved_by_name }}</div>
+                        <small class="text-muted">{{ portfolio.approved_at|date:"Y-m-d H:i" }}</small>
+                    </div>
+                    {% endif %}
+
+                    <div class="mb-3">
+                        <label class="text-muted small">Last Updated</label>
+                        <div>{{ portfolio.updated_at|date:"Y-m-d H:i" }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Notes -->
+            {% if portfolio.notes %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-sticky"></i> Notes
+                </div>
+                <div class="card-body">
+                    <div style="white-space: pre-wrap;">{{ portfolio.notes }}</div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
 </div>
 {% endblock %}
