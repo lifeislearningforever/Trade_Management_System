@@ -128,16 +128,12 @@ def portfolio_create(request):
             # Log success
             AuditLog.log_action(
                 user=request.user,
-                action='CREATE_PORTFOLIO',
-                target_model='Portfolio',
-                target_id=str(portfolio.id),
-                status='SUCCESS',
-                ip_address=request.META.get('REMOTE_ADDR'),
-                details={
-                    'portfolio_id': portfolio.portfolio_id,
-                    'name': portfolio.name,
-                    'initial_capital': str(portfolio.initial_capital)
-                }
+                action='CREATE',
+                description=f'Created portfolio {portfolio.portfolio_id}',
+                category='portfolio',
+                object_type='Portfolio',
+                object_id=str(portfolio.id),
+                ip_address=request.META.get('REMOTE_ADDR')
             )
 
             messages.success(request, f'Portfolio "{portfolio.name}" created successfully.')
@@ -147,12 +143,12 @@ def portfolio_create(request):
             # Log failure
             AuditLog.log_action(
                 user=request.user,
-                action='CREATE_PORTFOLIO',
-                target_model='Portfolio',
-                target_id=None,
-                status='FAILED',
+                action='CREATE',
+                description=f'Failed to create portfolio: {str(e)}',
+                category='portfolio',
+                object_type='Portfolio',
                 ip_address=request.META.get('REMOTE_ADDR'),
-                details={'error': str(e)}
+                status='FAILED'
             )
             messages.error(request, f'Error creating portfolio: {str(e)}')
 
@@ -206,12 +202,12 @@ def portfolio_detail(request, pk):
     # Log the view action
     AuditLog.log_action(
         user=request.user,
-        action='VIEW_PORTFOLIO_DETAIL',
-        target_model='Portfolio',
-        target_id=str(portfolio.id),
-        status='SUCCESS',
-        ip_address=request.META.get('REMOTE_ADDR'),
-        details={'portfolio_id': portfolio.portfolio_id}
+        action='VIEW',
+        description=f'Viewed portfolio {portfolio.portfolio_id}',
+        category='portfolio',
+        object_type='Portfolio',
+        object_id=str(portfolio.id),
+        ip_address=request.META.get('REMOTE_ADDR')
     )
 
     context = {
@@ -269,17 +265,14 @@ def portfolio_edit(request, pk):
 
             # Log success
             AuditLog.log_action(
-                user=request.user,
-                action='UPDATE_PORTFOLIO',
-                target_model='Portfolio',
-                target_id=str(portfolio.id),
-                status='SUCCESS',
-                ip_address=request.META.get('REMOTE_ADDR'),
-                details={
-                    'portfolio_id': portfolio.portfolio_id,
-                    'name': portfolio.name
-                }
-            )
+            user=request.user,
+            action='UPDATE',
+            description=f'Updated portfolio {portfolio.portfolio_id}',
+            category='portfolio',
+            object_type='Portfolio',
+            object_id=str(portfolio.id),
+            ip_address=request.META.get('REMOTE_ADDR')
+        )
 
             messages.success(request, f'Portfolio "{portfolio.name}" updated successfully.')
             return redirect('portfolio_detail', pk=pk)
@@ -287,14 +280,15 @@ def portfolio_edit(request, pk):
         except Exception as e:
             # Log failure
             AuditLog.log_action(
-                user=request.user,
-                action='UPDATE_PORTFOLIO',
-                target_model='Portfolio',
-                target_id=str(portfolio.id),
-                status='FAILED',
-                ip_address=request.META.get('REMOTE_ADDR'),
-                details={'error': str(e)}
-            )
+            user=request.user,
+            action='UPDATE',
+            description=f'Failed to update portfolio: {str(e)}',
+            category='portfolio',
+            object_type='Portfolio',
+            object_id=str(portfolio.id),
+            ip_address=request.META.get('REMOTE_ADDR'),
+            status='FAILED'
+        )
             messages.error(request, f'Error updating portfolio: {str(e)}')
 
     # Get clients for dropdown
@@ -331,17 +325,14 @@ def portfolio_submit(request, pk):
 
             # Log success
             AuditLog.log_action(
-                user=request.user,
-                action='SUBMIT_PORTFOLIO',
-                target_model='Portfolio',
-                target_id=str(portfolio.id),
-                status='SUCCESS',
-                ip_address=request.META.get('REMOTE_ADDR'),
-                details={
-                    'portfolio_id': portfolio.portfolio_id,
-                    'name': portfolio.name
-                }
-            )
+            user=request.user,
+            action='SUBMIT',
+            description=f'Submitted portfolio {portfolio.portfolio_id} for approval',
+            category='portfolio',
+            object_type='Portfolio',
+            object_id=str(portfolio.id),
+            ip_address=request.META.get('REMOTE_ADDR')
+        )
 
             messages.success(request, f'Portfolio "{portfolio.name}" submitted for approval.')
             return redirect('portfolio_detail', pk=pk)
@@ -349,14 +340,15 @@ def portfolio_submit(request, pk):
         except Exception as e:
             # Log failure
             AuditLog.log_action(
-                user=request.user,
-                action='SUBMIT_PORTFOLIO',
-                target_model='Portfolio',
-                target_id=str(portfolio.id),
-                status='FAILED',
-                ip_address=request.META.get('REMOTE_ADDR'),
-                details={'error': str(e)}
-            )
+            user=request.user,
+            action='SUBMIT',
+            description=f'Failed to submit portfolio: {str(e)}',
+            category='portfolio',
+            object_type='Portfolio',
+            object_id=str(portfolio.id),
+            ip_address=request.META.get('REMOTE_ADDR'),
+            status='FAILED'
+        )
             messages.error(request, f'Error submitting portfolio: {str(e)}')
 
     return redirect('portfolio_detail', pk=pk)
@@ -376,12 +368,13 @@ def portfolio_approve(request, pk):
         messages.error(request, 'You cannot approve this portfolio (self-approval not allowed or missing permission).')
         AuditLog.log_action(
             user=request.user,
-            action='APPROVE_PORTFOLIO',
-            target_model='Portfolio',
-            target_id=str(portfolio.id),
-            status='PERMISSION_DENIED',
+            action='APPROVE',
+            description='Portfolio approval denied - self-approval not allowed',
+            category='portfolio',
+            object_type='Portfolio',
+            object_id=str(portfolio.id),
             ip_address=request.META.get('REMOTE_ADDR'),
-            details={'portfolio_id': portfolio.portfolio_id, 'reason': 'Self-approval not allowed'}
+            status='PERMISSION_DENIED'
         )
         return redirect('portfolio_detail', pk=pk)
 
@@ -394,18 +387,14 @@ def portfolio_approve(request, pk):
 
             # Log success
             AuditLog.log_action(
-                user=request.user,
-                action='APPROVE_PORTFOLIO',
-                target_model='Portfolio',
-                target_id=str(portfolio.id),
-                status='SUCCESS',
-                ip_address=request.META.get('REMOTE_ADDR'),
-                details={
-                    'portfolio_id': portfolio.portfolio_id,
-                    'name': portfolio.name,
-                    'notes': approval_notes
-                }
-            )
+            user=request.user,
+            action='APPROVE',
+            description=f'Approved portfolio {portfolio.portfolio_id}',
+            category='portfolio',
+            object_type='Portfolio',
+            object_id=str(portfolio.id),
+            ip_address=request.META.get('REMOTE_ADDR')
+        )
 
             messages.success(request, f'Portfolio "{portfolio.name}" approved successfully.')
             return redirect('portfolio_detail', pk=pk)
@@ -413,14 +402,15 @@ def portfolio_approve(request, pk):
         except Exception as e:
             # Log failure
             AuditLog.log_action(
-                user=request.user,
-                action='APPROVE_PORTFOLIO',
-                target_model='Portfolio',
-                target_id=str(portfolio.id),
-                status='FAILED',
-                ip_address=request.META.get('REMOTE_ADDR'),
-                details={'error': str(e)}
-            )
+            user=request.user,
+            action='APPROVE',
+            description=f'Failed to approve portfolio: {str(e)}',
+            category='portfolio',
+            object_type='Portfolio',
+            object_id=str(portfolio.id),
+            ip_address=request.META.get('REMOTE_ADDR'),
+            status='FAILED'
+        )
             messages.error(request, f'Error approving portfolio: {str(e)}')
 
     return redirect('portfolio_detail', pk=pk)
@@ -440,12 +430,13 @@ def portfolio_reject(request, pk):
         messages.error(request, 'You cannot reject this portfolio (self-rejection not allowed or missing permission).')
         AuditLog.log_action(
             user=request.user,
-            action='REJECT_PORTFOLIO',
-            target_model='Portfolio',
-            target_id=str(portfolio.id),
-            status='PERMISSION_DENIED',
+            action='REJECT',
+            description='Portfolio rejection denied - self-rejection not allowed',
+            category='portfolio',
+            object_type='Portfolio',
+            object_id=str(portfolio.id),
             ip_address=request.META.get('REMOTE_ADDR'),
-            details={'portfolio_id': portfolio.portfolio_id, 'reason': 'Self-rejection not allowed'}
+            status='PERMISSION_DENIED'
         )
         return redirect('portfolio_detail', pk=pk)
 
@@ -462,18 +453,14 @@ def portfolio_reject(request, pk):
 
             # Log success
             AuditLog.log_action(
-                user=request.user,
-                action='REJECT_PORTFOLIO',
-                target_model='Portfolio',
-                target_id=str(portfolio.id),
-                status='SUCCESS',
-                ip_address=request.META.get('REMOTE_ADDR'),
-                details={
-                    'portfolio_id': portfolio.portfolio_id,
-                    'name': portfolio.name,
-                    'reason': rejection_reason
-                }
-            )
+            user=request.user,
+            action='REJECT',
+            description=f'Rejected portfolio {portfolio.portfolio_id}: {rejection_reason}',
+            category='portfolio',
+            object_type='Portfolio',
+            object_id=str(portfolio.id),
+            ip_address=request.META.get('REMOTE_ADDR')
+        )
 
             messages.success(request, f'Portfolio "{portfolio.name}" rejected.')
             return redirect('portfolio_detail', pk=pk)
@@ -481,14 +468,15 @@ def portfolio_reject(request, pk):
         except Exception as e:
             # Log failure
             AuditLog.log_action(
-                user=request.user,
-                action='REJECT_PORTFOLIO',
-                target_model='Portfolio',
-                target_id=str(portfolio.id),
-                status='FAILED',
-                ip_address=request.META.get('REMOTE_ADDR'),
-                details={'error': str(e)}
-            )
+            user=request.user,
+            action='REJECT',
+            description=f'Failed to reject portfolio: {str(e)}',
+            category='portfolio',
+            object_type='Portfolio',
+            object_id=str(portfolio.id),
+            ip_address=request.META.get('REMOTE_ADDR'),
+            status='FAILED'
+        )
             messages.error(request, f'Error rejecting portfolio: {str(e)}')
 
     return redirect('portfolio_detail', pk=pk)
@@ -515,17 +503,14 @@ def portfolio_delete(request, pk):
 
             # Log before deletion
             AuditLog.log_action(
-                user=request.user,
-                action='DELETE_PORTFOLIO',
-                target_model='Portfolio',
-                target_id=str(portfolio.id),
-                status='SUCCESS',
-                ip_address=request.META.get('REMOTE_ADDR'),
-                details={
-                    'portfolio_id': portfolio_id,
-                    'name': portfolio_name
-                }
-            )
+            user=request.user,
+            action='DELETE',
+            description=f'Deleted portfolio {portfolio_id}',
+            category='portfolio',
+            object_type='Portfolio',
+            object_id=str(portfolio.id),
+            ip_address=request.META.get('REMOTE_ADDR')
+        )
 
             # Delete portfolio
             portfolio.delete()
@@ -536,14 +521,15 @@ def portfolio_delete(request, pk):
         except Exception as e:
             # Log failure
             AuditLog.log_action(
-                user=request.user,
-                action='DELETE_PORTFOLIO',
-                target_model='Portfolio',
-                target_id=str(portfolio.id),
-                status='FAILED',
-                ip_address=request.META.get('REMOTE_ADDR'),
-                details={'error': str(e)}
-            )
+            user=request.user,
+            action='DELETE',
+            description=f'Failed to delete portfolio: {str(e)}',
+            category='portfolio',
+            object_type='Portfolio',
+            object_id=str(portfolio.id),
+            ip_address=request.META.get('REMOTE_ADDR'),
+            status='FAILED'
+        )
             messages.error(request, f'Error deleting portfolio: {str(e)}')
 
     return redirect('portfolio_detail', pk=pk)
