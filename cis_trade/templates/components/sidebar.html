@@ -1,0 +1,129 @@
+{% load static %}
+<aside class="sidebar" id="sidebar">
+    <!-- Sidebar Header -->
+    <div class="sidebar-header">
+        <a href="{% url 'dashboard' %}" class="sidebar-brand">
+            <i class="bi bi-graph-up-arrow"></i>
+            <span>CisTrade</span>
+        </a>
+    </div>
+
+    <!-- Sidebar Navigation -->
+    <nav class="sidebar-nav">
+        <!-- Dashboard -->
+        <ul class="nav flex-column">
+            <li class="nav-item">
+                <a class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'dashboard' %}">
+                    <i class="bi bi-speedometer2"></i>
+                    <span>Dashboard</span>
+                </a>
+            </li>
+        </ul>
+
+        <!-- Portfolio Section -->
+        <div class="nav-section-title">Portfolio Management</div>
+        <ul class="nav flex-column">
+            <li class="nav-item">
+                <a class="nav-link {% if 'portfolio' in request.path %}active{% endif %}" href="{% url 'portfolio:list' %}">
+                    <i class="bi bi-briefcase"></i>
+                    <span>Portfolios</span>
+                    {% if pending_portfolios_count %}
+                        <span class="nav-badge">{{ pending_portfolios_count }}</span>
+                    {% endif %}
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="{% url 'portfolio:create' %}">
+                    <i class="bi bi-plus-circle"></i>
+                    <span>New Portfolio</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="{% url 'portfolio:pending_approvals' %}">
+                    <i class="bi bi-clock-history"></i>
+                    <span>Pending Approvals</span>
+                    {% if pending_portfolios_count %}
+                        <span class="nav-badge">{{ pending_portfolios_count }}</span>
+                    {% endif %}
+                </a>
+            </li>
+        </ul>
+
+        <!-- Reference Data Section -->
+        <div class="nav-section-title">Reference Data</div>
+        <ul class="nav flex-column">
+            <li class="nav-item">
+                <a class="nav-link {% if 'currency' in request.path %}active{% endif %}" href="{% url 'reference_data:currency_list' %}">
+                    <i class="bi bi-currency-exchange"></i>
+                    <span>Currencies</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if 'country' in request.path %}active{% endif %}" href="{% url 'reference_data:country_list' %}">
+                    <i class="bi bi-globe"></i>
+                    <span>Countries</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if 'calendar' in request.path %}active{% endif %}" href="{% url 'reference_data:calendar_list' %}">
+                    <i class="bi bi-calendar3"></i>
+                    <span>Calendars</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if 'counterparty' in request.path %}active{% endif %}" href="{% url 'reference_data:counterparty_list' %}">
+                    <i class="bi bi-building"></i>
+                    <span>Counterparties</span>
+                </a>
+            </li>
+        </ul>
+
+        <!-- UDF Section -->
+        <div class="nav-section-title">Configuration</div>
+        <ul class="nav flex-column">
+            <li class="nav-item">
+                <a class="nav-link {% if 'udf' in request.path %}active{% endif %}" href="{% url 'udf:list' %}">
+                    <i class="bi bi-sliders"></i>
+                    <span>User Defined Fields</span>
+                </a>
+            </li>
+        </ul>
+
+        <!-- System Section -->
+        <div class="nav-section-title">System</div>
+        <ul class="nav flex-column">
+            <li class="nav-item">
+                <a class="nav-link {% if 'audit' in request.path %}active{% endif %}" href="{% url 'core:audit_log' %}">
+                    <i class="bi bi-file-text"></i>
+                    <span>Audit Logs</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="{% url 'admin:index' %}" target="_blank">
+                    <i class="bi bi-gear"></i>
+                    <span>Administration</span>
+                    <i class="bi bi-box-arrow-up-right ms-auto" style="font-size: 0.8rem;"></i>
+                </a>
+            </li>
+        </ul>
+
+        <!-- Divider -->
+        <hr style="margin: 1rem 1.5rem; border-color: rgba(255,255,255,0.1);">
+
+        <!-- User Section -->
+        <ul class="nav flex-column">
+            <li class="nav-item">
+                <a class="nav-link" href="{% url 'profile' %}">
+                    <i class="bi bi-person-circle"></i>
+                    <span>My Profile</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="{% url 'logout' %}">
+                    <i class="bi bi-box-arrow-right"></i>
+                    <span>Logout</span>
+                </a>
+            </li>
+        </ul>
+    </nav>
+</aside>

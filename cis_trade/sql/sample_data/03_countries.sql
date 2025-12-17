@@ -1,0 +1,35 @@
+-- =====================================================
+-- Sample Country Data for CisTrade
+-- =====================================================
+
+INSERT INTO reference_country (code, name, full_name, region, continent, currency_code, is_active, created_at) VALUES
+('US', 'United States', 'United States of America', 'North America', 'Americas', 'USD', TRUE, CURRENT_TIMESTAMP),
+('GB', 'United Kingdom', 'United Kingdom of Great Britain', 'Western Europe', 'Europe', 'GBP', TRUE, CURRENT_TIMESTAMP),
+('DE', 'Germany', 'Federal Republic of Germany', 'Western Europe', 'Europe', 'EUR', TRUE, CURRENT_TIMESTAMP),
+('FR', 'France', 'French Republic', 'Western Europe', 'Europe', 'EUR', TRUE, CURRENT_TIMESTAMP),
+('JP', 'Japan', 'Japan', 'East Asia', 'Asia', 'JPY', TRUE, CURRENT_TIMESTAMP),
+('SG', 'Singapore', 'Republic of Singapore', 'Southeast Asia', 'Asia', 'SGD', TRUE, CURRENT_TIMESTAMP),
+('AU', 'Australia', 'Commonwealth of Australia', 'Oceania', 'Oceania', 'AUD', TRUE, CURRENT_TIMESTAMP),
+('CA', 'Canada', 'Canada', 'North America', 'Americas', 'CAD', TRUE, CURRENT_TIMESTAMP),
+('CH', 'Switzerland', 'Swiss Confederation', 'Western Europe', 'Europe', 'CHF', TRUE, CURRENT_TIMESTAMP),
+('CN', 'China', 'People''s Republic of China', 'East Asia', 'Asia', 'CNY', TRUE, CURRENT_TIMESTAMP),
+('HK', 'Hong Kong', 'Hong Kong Special Administrative Region', 'East Asia', 'Asia', 'HKD', TRUE, CURRENT_TIMESTAMP),
+('NZ', 'New Zealand', 'New Zealand', 'Oceania', 'Oceania', 'NZD', TRUE, CURRENT_TIMESTAMP),
+('SE', 'Sweden', 'Kingdom of Sweden', 'Northern Europe', 'Europe', 'SEK', TRUE, CURRENT_TIMESTAMP),
+('NO', 'Norway', 'Kingdom of Norway', 'Northern Europe', 'Europe', 'NOK', TRUE, CURRENT_TIMESTAMP),
+('DK', 'Denmark', 'Kingdom of Denmark', 'Northern Europe', 'Europe', 'DKK', TRUE, CURRENT_TIMESTAMP),
+('IN', 'India', 'Republic of India', 'South Asia', 'Asia', 'INR', TRUE, CURRENT_TIMESTAMP),
+('MY', 'Malaysia', 'Malaysia', 'Southeast Asia', 'Asia', 'MYR', TRUE, CURRENT_TIMESTAMP),
+('TH', 'Thailand', 'Kingdom of Thailand', 'Southeast Asia', 'Asia', 'THB', TRUE, CURRENT_TIMESTAMP),
+('KR', 'South Korea', 'Republic of Korea', 'East Asia', 'Asia', 'KRW', TRUE, CURRENT_TIMESTAMP),
+('PH', 'Philippines', 'Republic of the Philippines', 'Southeast Asia', 'Asia', 'PHP', TRUE, CURRENT_TIMESTAMP),
+('ID', 'Indonesia', 'Republic of Indonesia', 'Southeast Asia', 'Asia', 'IDR', TRUE, CURRENT_TIMESTAMP),
+('ZA', 'South Africa', 'Republic of South Africa', 'Southern Africa', 'Africa', 'ZAR', TRUE, CURRENT_TIMESTAMP),
+('BR', 'Brazil', 'Federative Republic of Brazil', 'South America', 'Americas', 'BRL', TRUE, CURRENT_TIMESTAMP),
+('MX', 'Mexico', 'United Mexican States', 'North America', 'Americas', 'MXN', TRUE, CURRENT_TIMESTAMP),
+('IT', 'Italy', 'Italian Republic', 'Southern Europe', 'Europe', 'EUR', TRUE, CURRENT_TIMESTAMP),
+('ES', 'Spain', 'Kingdom of Spain', 'Southern Europe', 'Europe', 'EUR', TRUE, CURRENT_TIMESTAMP),
+('NL', 'Netherlands', 'Kingdom of the Netherlands', 'Western Europe', 'Europe', 'EUR', TRUE, CURRENT_TIMESTAMP),
+('BE', 'Belgium', 'Kingdom of Belgium', 'Western Europe', 'Europe', 'EUR', TRUE, CURRENT_TIMESTAMP),
+('AT', 'Austria', 'Republic of Austria', 'Western Europe', 'Europe', 'EUR', TRUE, CURRENT_TIMESTAMP),
+('IE', 'Ireland', 'Republic of Ireland', 'Western Europe', 'Europe', 'EUR', TRUE, CURRENT_TIMESTAMP);

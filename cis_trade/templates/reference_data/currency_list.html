@@ -1,0 +1,151 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Currencies - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="#">Reference Data</a></li>
+    <li class="breadcrumb-item active">Currencies</li>
+{% endblock %}
+
+{% block content %}
+<div class="currency-list-container">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            <i class="bi bi-currency-exchange text-primary"></i> Currencies
+        </h1>
+        <p class="content-subtitle">Manage currency reference data from Kudu</p>
+    </div>
+
+    <!-- Search & Filter Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-funnel"></i> Search & Filter
+            </h5>
+        </div>
+        <div class="card-body">
+            <form method="get" action="{% url 'reference_data:currency_list' %}" class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Search</label>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" name="search" value="{{ search_query }}"
+                               placeholder="Search by code, name, or symbol...">
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Status</label>
+                    <select class="form-select" name="status">
+                        <option value="">All Statuses</option>
+                        <option value="ACTIVE" {% if status_filter == 'ACTIVE' %}selected{% endif %}>Active</option>
+                        <option value="INACTIVE" {% if status_filter == 'INACTIVE' %}selected{% endif %}>Inactive</option>
+                    </select>
+                </div>
+                <div class="col-md-3 d-flex align-items-end gap-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i> Search
+                    </button>
+                    <a href="{% url 'reference_data:currency_list' %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-x-circle"></i> Clear
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Currencies Table -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                Currency List
+                <span class="badge badge-primary ms-2">{{ currencies|length }} currencies</span>
+            </h5>
+            <a href="?export=csv&{{ request.GET.urlencode }}" class="btn btn-sm btn-success">
+                <i class="bi bi-download"></i> Download CSV
+            </a>
+        </div>
+        <div class="card-body p-0">
+            {% if currencies %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width: 8%;">Code</th>
+                                <th style="width: 15%;">Name</th>
+                                <th style="width: 8%;">Symbol</th>
+                                <th style="width: 10%;">Country</th>
+                                <th style="width: 8%;">Type</th>
+                                <th style="width: 10%;">Decimal Places</th>
+                                <th style="width: 8%;">Status</th>
+                                <th style="width: 8%;">Is Base</th>
+                                <th style="width: 10%;">Exchange Rate</th>
+                                <th style="width: 15%;">Last Updated</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for currency in currencies %}
+                            <tr>
+                                <td>
+                                    <strong class="text-primary">{{ currency.code }}</strong>
+                                </td>
+                                <td>{{ currency.name }}</td>
+                                <td>
+                                    <span style="font-size: 1.25rem;">{{ currency.symbol|default:"-" }}</span>
+                                </td>
+                                <td>{{ currency.country|default:"-" }}</td>
+                                <td>
+                                    <span class="badge badge-info">{{ currency.currency_type|default:"FIAT" }}</span>
+                                </td>
+                                <td>{{ currency.decimal_places|default:"2" }}</td>
+                                <td>
+                                    {% if currency.is_active %}
+                                        <span class="badge badge-success">Active</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">Inactive</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if currency.is_base_currency %}
+                                        <i class="bi bi-check-circle-fill text-success" title="Base Currency"></i>
+                                    {% else %}
+                                        <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if currency.exchange_rate %}
+                                        {{ currency.exchange_rate|floatformat:6 }}
+                                    {% else %}
+                                        <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
+                                <td style="font-size: var(--font-size-sm);">
+                                    {{ currency.last_updated|date:"Y-m-d H:i"|default:"-" }}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="text-center py-5" style="color: var(--gray-500);">
+                    <i class="bi bi-currency-exchange" style="font-size: 3rem; opacity: 0.3;"></i>
+                    <p class="mt-3 mb-0">No currencies found</p>
+                    {% if search_query or status_filter %}
+                        <p class="text-muted">Try adjusting your filters</p>
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-info-circle"></i>
+        <strong>Note:</strong> Currency data is fetched from Kudu/Impala in real-time.
+        Exchange rates are updated daily at midnight UTC.
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,151 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Countries - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="#">Reference Data</a></li>
+    <li class="breadcrumb-item active">Countries</li>
+{% endblock %}
+
+{% block content %}
+<div class="country-list-container">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            <i class="bi bi-globe text-primary"></i> Countries
+        </h1>
+        <p class="content-subtitle">Manage country reference data from Kudu</p>
+    </div>
+
+    <!-- Search & Filter Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-funnel"></i> Search & Filter
+            </h5>
+        </div>
+        <div class="card-body">
+            <form method="get" action="{% url 'reference_data:country_list' %}" class="row g-3">
+                <div class="col-md-5">
+                    <label class="form-label">Search</label>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" name="search" value="{{ search_query }}"
+                               placeholder="Search by code, name, or region...">
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Region</label>
+                    <select class="form-select" name="region">
+                        <option value="">All Regions</option>
+                        <option value="Asia" {% if region_filter == 'Asia' %}selected{% endif %}>Asia</option>
+                        <option value="Europe" {% if region_filter == 'Europe' %}selected{% endif %}>Europe</option>
+                        <option value="North America" {% if region_filter == 'North America' %}selected{% endif %}>North America</option>
+                        <option value="South America" {% if region_filter == 'South America' %}selected{% endif %}>South America</option>
+                        <option value="Africa" {% if region_filter == 'Africa' %}selected{% endif %}>Africa</option>
+                        <option value="Oceania" {% if region_filter == 'Oceania' %}selected{% endif %}>Oceania</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Status</label>
+                    <select class="form-select" name="status">
+                        <option value="">All</option>
+                        <option value="ACTIVE" {% if status_filter == 'ACTIVE' %}selected{% endif %}>Active</option>
+                        <option value="INACTIVE" {% if status_filter == 'INACTIVE' %}selected{% endif %}>Inactive</option>
+                    </select>
+                </div>
+                <div class="col-md-2 d-flex align-items-end gap-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i>
+                    </button>
+                    <a href="{% url 'reference_data:country_list' %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-x-circle"></i>
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Countries Table -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                Country List
+                <span class="badge badge-primary ms-2">{{ countries|length }} countries</span>
+            </h5>
+            <a href="?export=csv&{{ request.GET.urlencode }}" class="btn btn-sm btn-success">
+                <i class="bi bi-download"></i> Download CSV
+            </a>
+        </div>
+        <div class="card-body p-0">
+            {% if countries %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width: 8%;">Code</th>
+                                <th style="width: 20%;">Name</th>
+                                <th style="width: 15%;">Region</th>
+                                <th style="width: 12%;">Continent</th>
+                                <th style="width: 10%;">Currency</th>
+                                <th style="width: 10%;">Capital</th>
+                                <th style="width: 10%;">Phone Code</th>
+                                <th style="width: 8%;">ISO3</th>
+                                <th style="width: 7%;">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for country in countries %}
+                            <tr>
+                                <td>
+                                    <strong class="text-primary">{{ country.code }}</strong>
+                                </td>
+                                <td>
+                                    <strong>{{ country.name }}</strong>
+                                </td>
+                                <td>
+                                    <span class="badge badge-info">{{ country.region|default:"-" }}</span>
+                                </td>
+                                <td>{{ country.continent|default:"-" }}</td>
+                                <td>
+                                    <code>{{ country.currency_code|default:"-" }}</code>
+                                </td>
+                                <td>{{ country.capital|default:"-" }}</td>
+                                <td>{{ country.phone_code|default:"-" }}</td>
+                                <td>
+                                    <code>{{ country.iso3_code|default:"-" }}</code>
+                                </td>
+                                <td>
+                                    {% if country.is_active %}
+                                        <span class="badge badge-success">Active</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">Inactive</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="text-center py-5" style="color: var(--gray-500);">
+                    <i class="bi bi-globe" style="font-size: 3rem; opacity: 0.3;"></i>
+                    <p class="mt-3 mb-0">No countries found</p>
+                    {% if search_query or region_filter or status_filter %}
+                        <p class="text-muted">Try adjusting your filters</p>
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-info-circle"></i>
+        <strong>Note:</strong> Country data is fetched from Kudu/Impala in real-time.
+        This data is synchronized daily from external sources.
+    </div>
+</div>
+{% endblock %}

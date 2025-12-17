@@ -1,0 +1,221 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Portfolios - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item active">Portfolios</li>
+{% endblock %}
+
+{% block content %}
+<div class="portfolio-list-container">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            <i class="bi bi-briefcase text-primary"></i> Portfolios
+        </h1>
+        <p class="content-subtitle">Manage portfolios with Four-Eyes principle (Maker-Checker)</p>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="mb-4">
+        <a href="{% url 'portfolio:create' %}" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Create New Portfolio
+        </a>
+        <a href="{% url 'portfolio:pending_approvals' %}" class="btn btn-warning">
+            <i class="bi bi-clock-history"></i> Pending Approvals
+            {% if pending_count %}
+                <span class="badge bg-danger">{{ pending_count }}</span>
+            {% endif %}
+        </a>
+    </div>
+
+    <!-- Search & Filter Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-funnel"></i> Search & Filter
+            </h5>
+        </div>
+        <div class="card-body">
+            <form method="get" action="{% url 'portfolio:list' %}" class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Search</label>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" name="search" value="{{ search }}"
+                               placeholder="Search by code, name, or manager...">
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Status</label>
+                    <select class="form-select" name="status">
+                        <option value="">All Statuses</option>
+                        <option value="DRAFT" {% if status == 'DRAFT' %}selected{% endif %}>Draft</option>
+                        <option value="PENDING_APPROVAL" {% if status == 'PENDING_APPROVAL' %}selected{% endif %}>Pending Approval</option>
+                        <option value="APPROVED" {% if status == 'APPROVED' %}selected{% endif %}>Approved</option>
+                        <option value="REJECTED" {% if status == 'REJECTED' %}selected{% endif %}>Rejected</option>
+                        <option value="CLOSED" {% if status == 'CLOSED' %}selected{% endif %}>Closed</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Currency</label>
+                    <input type="text" class="form-control" name="currency" value="{{ currency }}"
+                           placeholder="e.g., USD, EUR">
+                </div>
+                <div class="col-md-2 d-flex align-items-end gap-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i> Search
+                    </button>
+                    <a href="{% url 'portfolio:list' %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-x-circle"></i> Clear
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Portfolios Table -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                Portfolio List
+                <span class="badge badge-primary ms-2">{{ total_count }} portfolio{{ total_count|pluralize }}</span>
+            </h5>
+            <a href="?export=csv{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if currency %}&currency={{ currency }}{% endif %}" class="btn btn-sm btn-success">
+                <i class="bi bi-download"></i> Download CSV
+            </a>
+        </div>
+        <div class="card-body p-0">
+            {% if page_obj %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width: 10%;">Code</th>
+                                <th style="width: 20%;">Name</th>
+                                <th style="width: 12%;">Manager</th>
+                                <th style="width: 8%;">Currency</th>
+                                <th style="width: 12%;">Cash Balance</th>
+                                <th style="width: 10%;">Status</th>
+                                <th style="width: 12%;">Created By</th>
+                                <th style="width: 10%;">Created At</th>
+                                <th style="width: 8%;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for portfolio in page_obj %}
+                            <tr>
+                                <td>
+                                    <strong class="text-primary">{{ portfolio.code }}</strong>
+                                </td>
+                                <td>
+                                    <a href="{% url 'portfolio:detail' portfolio.id %}" class="text-decoration-none">
+                                        {{ portfolio.name }}
+                                    </a>
+                                </td>
+                                <td>{{ portfolio.manager }}</td>
+                                <td>
+                                    <span class="badge badge-info">{{ portfolio.currency }}</span>
+                                </td>
+                                <td class="text-end">
+                                    {{ portfolio.cash_balance|floatformat:2 }}
+                                </td>
+                                <td>
+                                    {% if portfolio.status == 'DRAFT' %}
+                                        <span class="badge badge-secondary">Draft</span>
+                                    {% elif portfolio.status == 'PENDING_APPROVAL' %}
+                                        <span class="badge badge-warning">Pending</span>
+                                    {% elif portfolio.status == 'APPROVED' %}
+                                        <span class="badge badge-success">Approved</span>
+                                    {% elif portfolio.status == 'REJECTED' %}
+                                        <span class="badge badge-danger">Rejected</span>
+                                    {% elif portfolio.status == 'CLOSED' %}
+                                        <span class="badge badge-dark">Closed</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <i class="bi bi-person-circle"></i> {{ portfolio.created_by.username|default:"-" }}
+                                </td>
+                                <td style="font-size: var(--font-size-sm);">
+                                    {{ portfolio.created_at|date:"Y-m-d H:i" }}
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm">
+                                        <a href="{% url 'portfolio:detail' portfolio.id %}" class="btn btn-outline-primary" title="View">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                        {% if portfolio.status == 'DRAFT' or portfolio.status == 'REJECTED' %}
+                                            {% if portfolio.created_by == request.user %}
+                                                <a href="{% url 'portfolio:edit' portfolio.id %}" class="btn btn-outline-warning" title="Edit">
+                                                    <i class="bi bi-pencil"></i>
+                                                </a>
+                                            {% endif %}
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                {% if page_obj.has_other_pages %}
+                <div class="card-footer">
+                    <nav aria-label="Portfolio pagination">
+                        <ul class="pagination justify-content-center mb-0">
+                            {% if page_obj.has_previous %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if currency %}&currency={{ currency }}{% endif %}">First</a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if currency %}&currency={{ currency }}{% endif %}">Previous</a>
+                                </li>
+                            {% endif %}
+
+                            <li class="page-item active">
+                                <span class="page-link">
+                                    Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+                                </span>
+                            </li>
+
+                            {% if page_obj.has_next %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if currency %}&currency={{ currency }}{% endif %}">Next</a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if currency %}&currency={{ currency }}{% endif %}">Last</a>
+                                </li>
+                            {% endif %}
+                        </ul>
+                    </nav>
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="text-center py-5" style="color: var(--gray-500);">
+                    <i class="bi bi-briefcase" style="font-size: 3rem; opacity: 0.3;"></i>
+                    <p class="mt-3 mb-0">No portfolios found</p>
+                    {% if search or status or currency %}
+                        <p class="text-muted">Try adjusting your filters</p>
+                    {% else %}
+                        <p class="text-muted mt-2">
+                            <a href="{% url 'portfolio:create' %}" class="btn btn-primary">
+                                <i class="bi bi-plus-circle"></i> Create your first portfolio
+                            </a>
+                        </p>
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-info-circle"></i>
+        <strong>Four-Eyes Principle:</strong> All portfolio changes require maker-checker approval.
+        Makers can create/edit, Checkers can approve/reject. No user can approve their own work.
+    </div>
+</div>
+{% endblock %}
