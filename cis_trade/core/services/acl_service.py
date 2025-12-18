@@ -7,7 +7,7 @@ Follows Single Responsibility and Dependency Inversion principles.
 
 import logging
 from typing import Optional, Dict, List
-from django.contrib.auth.models.User import User
+from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.conf import settings
 from core.repositories.impala_connection import impala_manager

@@ -1,0 +1,162 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}UDF Values for {{ entity_type|title }} - CIS Trade{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Home</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'udf:list' %}">User Defined Fields</a></li>
+                    <li class="breadcrumb-item active">{{ entity_type|title }} Values</li>
+                </ol>
+            </nav>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0">
+                        <i class="bi bi-pencil-square"></i>
+                        UDF Values for {{ entity_type|title }} #{{ entity_id }}
+                    </h4>
+                </div>
+                <div class="card-body">
+                    {% if messages %}
+                        {% for message in messages %}
+                        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                        {% endfor %}
+                    {% endif %}
+
+                    {% if udfs %}
+                    <form method="post">
+                        {% csrf_token %}
+
+                        <div class="row">
+                            {% for udf_data in udfs %}
+                            <div class="col-md-6 mb-3">
+                                <label for="udf_{{ udf_data.udf.id }}" class="form-label">
+                                    {{ udf_data.udf.display_name }}
+                                    {% if udf_data.udf.is_required %}
+                                        <span class="text-danger">*</span>
+                                    {% endif %}
+                                </label>
+
+                                {% if udf_data.udf.field_type == 'TEXT' %}
+                                    <input type="text"
+                                           class="form-control"
+                                           id="udf_{{ udf_data.udf.id }}"
+                                           name="udf_{{ udf_data.udf.id }}"
+                                           value="{{ udf_data.value|default:'' }}"
+                                           {% if udf_data.udf.is_required %}required{% endif %}>
+
+                                {% elif udf_data.udf.field_type == 'NUMBER' or udf_data.udf.field_type == 'CURRENCY' or udf_data.udf.field_type == 'PERCENTAGE' %}
+                                    <input type="number"
+                                           step="0.000001"
+                                           class="form-control"
+                                           id="udf_{{ udf_data.udf.id }}"
+                                           name="udf_{{ udf_data.udf.id }}"
+                                           value="{{ udf_data.value|default:'' }}"
+                                           {% if udf_data.udf.min_value %}min="{{ udf_data.udf.min_value }}"{% endif %}
+                                           {% if udf_data.udf.max_value %}max="{{ udf_data.udf.max_value }}"{% endif %}
+                                           {% if udf_data.udf.is_required %}required{% endif %}>
+
+                                {% elif udf_data.udf.field_type == 'DATE' %}
+                                    <input type="date"
+                                           class="form-control"
+                                           id="udf_{{ udf_data.udf.id }}"
+                                           name="udf_{{ udf_data.udf.id }}"
+                                           value="{{ udf_data.value|date:'Y-m-d'|default:'' }}"
+                                           {% if udf_data.udf.is_required %}required{% endif %}>
+
+                                {% elif udf_data.udf.field_type == 'DATETIME' %}
+                                    <input type="datetime-local"
+                                           class="form-control"
+                                           id="udf_{{ udf_data.udf.id }}"
+                                           name="udf_{{ udf_data.udf.id }}"
+                                           value="{{ udf_data.value|date:'Y-m-d\TH:i'|default:'' }}"
+                                           {% if udf_data.udf.is_required %}required{% endif %}>
+
+                                {% elif udf_data.udf.field_type == 'BOOLEAN' %}
+                                    <div class="form-check">
+                                        <input type="checkbox"
+                                               class="form-check-input"
+                                               id="udf_{{ udf_data.udf.id }}"
+                                               name="udf_{{ udf_data.udf.id }}"
+                                               value="true"
+                                               {% if udf_data.value %}checked{% endif %}>
+                                        <label class="form-check-label" for="udf_{{ udf_data.udf.id }}">
+                                            Enable
+                                        </label>
+                                    </div>
+
+                                {% elif udf_data.udf.field_type == 'DROPDOWN' %}
+                                    <select class="form-select"
+                                            id="udf_{{ udf_data.udf.id }}"
+                                            name="udf_{{ udf_data.udf.id }}"
+                                            {% if udf_data.udf.is_required %}required{% endif %}>
+                                        <option value="">-- Select --</option>
+                                        {% for option in udf_data.udf.dropdown_options %}
+                                        <option value="{{ option }}" {% if udf_data.value == option %}selected{% endif %}>
+                                            {{ option }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+
+                                {% elif udf_data.udf.field_type == 'MULTI_SELECT' %}
+                                    <select class="form-select"
+                                            id="udf_{{ udf_data.udf.id }}"
+                                            name="udf_{{ udf_data.udf.id }}"
+                                            multiple
+                                            {% if udf_data.udf.is_required %}required{% endif %}>
+                                        {% for option in udf_data.udf.dropdown_options %}
+                                        <option value="{{ option }}" {% if option in udf_data.value %}selected{% endif %}>
+                                            {{ option }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                    <small class="form-text text-muted">Hold Ctrl/Cmd to select multiple</small>
+                                {% endif %}
+
+                                {% if udf_data.udf.description %}
+                                    <small class="form-text text-muted">{{ udf_data.udf.description }}</small>
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+
+                        <div class="border-top pt-3 mt-3">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-check-circle"></i>
+                                Save Values
+                            </button>
+                            <a href="javascript:history.back()" class="btn btn-secondary">
+                                <i class="bi bi-x-circle"></i>
+                                Cancel
+                            </a>
+                        </div>
+                    </form>
+                    {% else %}
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i>
+                        No UDF fields are configured for this entity type.
+                    </div>
+                    <a href="{% url 'udf:create' %}" class="btn btn-primary">
+                        <i class="bi bi-plus-circle"></i>
+                        Create New UDF
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
