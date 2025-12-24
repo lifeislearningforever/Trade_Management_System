@@ -2,8 +2,8 @@
 Database Router for dual database support.
 
 Routes queries between:
-- Primary DB (SQLite/MySQL): Django models, audit logs, etc.
-- Kudu/Impala: Reference data accessed via services
+- Primary DB (SQLite/MySQL): Django models (if needed)
+- Hive: Reference data and analytics accessed via services
 
 Following Open/Closed Principle - easily extendable for new routing rules.
 """
@@ -18,7 +18,7 @@ class DatabaseRouter:
     Database router to control database operations on models.
 
     All Django ORM operations go to the 'default' database (SQLite/MySQL).
-    Kudu/Impala access is handled through services, not Django ORM.
+    Hive access is handled through services, not Django ORM.
     """
 
     def db_for_read(self, model, **hints):
