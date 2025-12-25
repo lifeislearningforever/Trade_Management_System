@@ -15,12 +15,45 @@ from .models import Portfolio
 from .services import PortfolioService
 from core.models import AuditLog
 from core.views.auth_views import require_login, require_permission
+from core.audit.audit_hive_repository import audit_log_repository
+from portfolio.repositories import portfolio_hive_repository
+
+
+class PortfolioWrapper:
+    """Wrapper to convert Hive dict data to object with attributes for template compatibility."""
+    def __init__(self, data, index=0):
+        self.data = data
+        # Map all Hive fields to attributes
+        self.code = data.get('name', '')[:20]  # Use name as code (truncated)
+        self.name = data.get('name', '')
+        self.description = data.get('description', '')
+        self.currency = data.get('currency', '')
+        self.manager = data.get('manager', '')
+        self.portfolio_client = data.get('portfolio_client', '')
+        self.cash_balance = data.get('cash_balance', 0)
+        self.status = data.get('status', 'Active')
+        self.cost_centre_code = data.get('cost_centre_code', '')
+        self.corp_code = data.get('corp_code', '')
+        self.account_group = data.get('account_group', '')
+        self.portfolio_group = data.get('portfolio_group', '')
+        self.report_group = data.get('report_group', '')
+        self.entity_group = data.get('entity_group', '')
+        self.revaluation_status = data.get('revaluation_status', '')
+        self.created_at = data.get('created_at', '')
+        self.updated_at = data.get('updated_at', '')
+        # Generate a simple numeric ID from hash of name (for URLs)
+        self.id = abs(hash(data.get('name', '') + str(index))) % 1000000
+
+        # Create mock created_by object
+        class MockUser:
+            username = '-'
+        self.created_by = MockUser()
 
 # PRODUCTION NOTE: Uncomment this decorator for production deployment
 #@require_permission('cis-portfolio', 'READ')
 def portfolio_list(request):
     """
-    List all portfolios with search, filter, and CSV export.
+    List all portfolios with search, filter, and CSV export - FROM HIVE.
     Requires: cis-portfolio READ permission
     """
     # Get filters
@@ -29,43 +62,55 @@ def portfolio_list(request):
     currency_filter = request.GET.get('currency', '').strip()
     export = request.GET.get('export', '').strip()
 
-    # Build queryset
-    queryset = PortfolioService.list_portfolios(
+    # Get portfolios from Hive
+    portfolios_data = portfolio_hive_repository.get_all_portfolios(
+        limit=1000,
         status=status_filter if status_filter else None,
         search=search_query if search_query else None,
         currency=currency_filter if currency_filter else None
     )
 
+    # Wrap dictionaries in objects for template compatibility
+    wrapped_portfolios = [PortfolioWrapper(p, idx) for idx, p in enumerate(portfolios_data)]
+
     # CSV Export
     if export == 'csv':
         response = HttpResponse(content_type='text/csv')
-        response['Content-Disposition'] = 'attachment; filename="portfolios.csv"'
+        response['Content-Disposition'] = 'attachment; filename="portfolios_hive.csv"'
 
         writer = csv.writer(response)
         writer.writerow([
-            'Code', 'Name', 'Currency', 'Manager', 'Cash Balance',
-            'Status', 'Created By', 'Created At', 'Approved By'
+            'Name', 'Description', 'Currency', 'Manager', 'Cash Balance',
+            'Status', 'Account Group', 'Portfolio Group', 'Created At'
         ])
 
-        for portfolio in queryset:
+        for portfolio in portfolios_data:
             writer.writerow([
-                portfolio.code,
-                portfolio.name,
-                portfolio.currency,
-                portfolio.manager,
-                portfolio.cash_balance,
-                portfolio.status,
-                portfolio.created_by.username if portfolio.created_by else '',
-                portfolio.created_at.strftime('%Y-%m-%d %H:%M'),
-                portfolio.approved_by.username if portfolio.approved_by else ''
+                portfolio.get('name', ''),
+                portfolio.get('description', ''),
+                portfolio.get('currency', ''),
+                portfolio.get('manager', ''),
+                portfolio.get('cash_balance', ''),
+                portfolio.get('status', ''),
+                portfolio.get('account_group', ''),
+                portfolio.get('portfolio_group', ''),
+                portfolio.get('created_at', '')
             ])
 
-        # Log export
-        AuditLog.log_action(
-            action='EXPORT',
-            user=request.user,
-            object_type='Portfolio',
-            description=f'Exported {queryset.count()} portfolios to CSV',
+        # Log export to Hive
+        user = getattr(request, 'user', None)
+        user_id = str(user.id) if user and hasattr(user, 'id') else 'anonymous'
+        username = user.username if user and hasattr(user, 'username') else 'anonymous'
+
+        audit_log_repository.log_action(
+            user_id=user_id,
+            username=username,
+            action_type='EXPORT',
+            entity_type='PORTFOLIO',
+            action_description=f'Exported {len(portfolios_data)} portfolios to CSV from Hive',
+            status='SUCCESS',
+            request_method='GET',
+            request_path=request.path,
             ip_address=request.META.get('REMOTE_ADDR'),
             user_agent=request.META.get('HTTP_USER_AGENT', '')
         )
@@ -73,7 +118,7 @@ def portfolio_list(request):
         return response
 
     # Pagination
-    paginator = Paginator(queryset, 25)
+    paginator = Paginator(wrapped_portfolios, 25)
     page = request.GET.get('page', 1)
 
     try:
@@ -81,17 +126,37 @@ def portfolio_list(request):
     except PageNotAnInteger:
         portfolios = paginator.page(1)
     except EmptyPage:
-        portfolios = paginator.page(paginator.num_pages)
+        portfolios = paginator.page(paginator.num_pages if paginator.num_pages > 0 else 1)
 
-    # Get unique currencies for filter
-    currencies = Portfolio.objects.values_list('currency', flat=True).distinct()
+    # Get unique currencies from Hive
+    currencies = portfolio_hive_repository.get_currencies()
+
+    # Log view to Hive
+    user = getattr(request, 'user', None)
+    user_id = str(user.id) if user and hasattr(user, 'id') else 'anonymous'
+    username = user.username if user and hasattr(user, 'username') else 'anonymous'
+
+    audit_log_repository.log_action(
+        user_id=user_id,
+        username=username,
+        action_type='VIEW',
+        entity_type='PORTFOLIO',
+        action_description=f'Viewed portfolio list from Hive ({len(portfolios_data)} portfolios)',
+        status='SUCCESS',
+        request_method='GET',
+        request_path=request.path,
+        ip_address=request.META.get('REMOTE_ADDR'),
+        user_agent=request.META.get('HTTP_USER_AGENT', '')
+    )
 
     context = {
-        'portfolios': portfolios,
+        'page_obj': portfolios,  # Template expects 'page_obj'
         'search_query': search_query,
         'status_filter': status_filter,
         'currency_filter': currency_filter,
-        'currencies': sorted(set(currencies)),
+        'currencies': currencies,
+        'total_count': len(portfolios_data),
+        'using_hive': True,  # Flag to indicate Hive data source
     }
 
     return render(request, 'portfolio/portfolio_list.html', context)

@@ -79,7 +79,6 @@ class PortfolioService:
 
         # Log creation to Hive
         audit_log_repository.log_action(
-            
             user_id=str(user.id),
             username=user.username,
             action_type='CREATE',
@@ -140,13 +139,10 @@ class PortfolioService:
         # Log update
         if changes:
             audit_log_repository.log_action(
-            
                 action_type='UPDATE',
-                user_id=str(user.id),
-            username=user.username,
+                user=user,
                 entity_type='PORTFOLIO',
                 entity_id=str(portfolio.id),
-                entity_name=portfolio.code,
                 action_description=f"Updated portfolio {portfolio.code}: {'; '.join(changes)}"
             )
 
@@ -179,10 +175,8 @@ class PortfolioService:
 
         # Log submission
         audit_log_repository.log_action(
-            
             action_type='SUBMIT',
-            user_id=str(user.id),
-            username=user.username,
+            user=user,
             entity_type='PORTFOLIO',
             entity_id=str(portfolio.id),
             action_description=f"Submitted portfolio {portfolio.code} for approval"
@@ -219,10 +213,8 @@ class PortfolioService:
         # Log approval
         comment_text = f" - {comments}" if comments else ""
         audit_log_repository.log_action(
-            
             action_type='APPROVE',
-            user_id=str(user.id),
-            username=user.username,
+            user=user,
             entity_type='PORTFOLIO',
             entity_id=str(portfolio.id),
             action_description=f"Approved portfolio {portfolio.code}{comment_text}"
@@ -262,10 +254,8 @@ class PortfolioService:
 
         # Log rejection
         audit_log_repository.log_action(
-            
             action_type='REJECT',
-            user_id=str(user.id),
-            username=user.username,
+            user=user,
             entity_type='PORTFOLIO',
             entity_id=str(portfolio.id),
             action_description=f"Rejected portfolio {portfolio.code} - Reason: {comments}"
@@ -301,10 +291,8 @@ class PortfolioService:
 
         # Log closure
         audit_log_repository.log_action(
-            
             action_type='UPDATE',
-            user_id=str(user.id),
-            username=user.username,
+            user=user,
             entity_type='PORTFOLIO',
             entity_id=str(portfolio.id),
             action_description=f"Closed portfolio {portfolio.code}" + (f" - {reason}" if reason else "")

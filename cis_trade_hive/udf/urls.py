@@ -22,4 +22,5 @@ urlpatterns = [
     # AJAX URLs
     path('ajax/values/<str:entity_type>/<int:entity_id>/', views.ajax_get_entity_udf_values, name='ajax_get_values'),
     path('ajax/validate/', views.ajax_validate_udf_values, name='ajax_validate'),
+    path('ajax/dropdown-options/<str:field_name>/', views.ajax_get_dropdown_options, name='ajax_dropdown_options'),
 ]

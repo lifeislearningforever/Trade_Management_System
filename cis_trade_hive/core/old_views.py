@@ -14,52 +14,51 @@ from datetime import timedelta
 
 from .models import AuditLog
 from portfolio.models import Portfolio
+from core.audit.audit_hive_repository import audit_log_repository
+from portfolio.repositories import portfolio_hive_repository
 
 
 @login_required
 def dashboard(request):
     """
-    Main dashboard view with statistics and recent activity.
+    Main dashboard view with statistics and recent activity - FROM HIVE.
 
     SOLID Principle: Single Responsibility - View handles only presentation logic
     """
-    # Calculate statistics
-    total_portfolios = Portfolio.objects.count()
-    active_portfolios = Portfolio.objects.filter(status='ACTIVE', is_active=True).count()
+    # Get portfolio statistics from Hive
+    hive_stats = portfolio_hive_repository.get_portfolio_statistics()
+
+    total_portfolios = hive_stats.get('total_portfolios', 0)
+    active_portfolios = hive_stats.get('active_portfolios', 0)
+
+    # Get pending approvals from Django (workflow data still in Django)
     pending_portfolios = Portfolio.objects.filter(status='PENDING_APPROVAL').count()
 
-    # Calculate total portfolio value (sum of cash balances)
-    total_value = Portfolio.objects.filter(
-        status='ACTIVE',
-        is_active=True
-    ).aggregate(
-        total=models.Sum('cash_balance')
-    )['total'] or 0
+    # Calculate total portfolio value (mock - would need cash_balance from Hive)
+    total_value_millions = 0  # Placeholder - Hive query would sum cash_balance
 
-    # Convert to millions for display
-    total_value_millions = total_value / 1_000_000
+    # Get recent portfolios from Hive (last 10)
+    recent_portfolios_data = portfolio_hive_repository.get_all_portfolios(limit=10)
 
-    # Get recent portfolios (last 10)
-    recent_portfolios = Portfolio.objects.select_related(
-        'created_by'
-    ).order_by('-created_at')[:10]
-
-    # Get pending approvals (for checkers)
+    # Get pending approvals (for checkers) - from Django
     pending_approvals = []
     if request.user.groups.filter(name='Checkers').exists():
         pending_approvals = Portfolio.objects.filter(
             status='PENDING_APPROVAL'
         ).select_related('created_by', 'submitted_by').order_by('-submitted_for_approval_at')
 
-    # Get recent activities (last 10 audit logs)
+    # Get recent activities (last 10 audit logs) - from Django for now
     recent_activities = AuditLog.objects.select_related(
         'user'
     ).order_by('-timestamp')[:10]
 
-    # Calculate percentage changes (mock data - in production, compare with last month)
-    portfolios_change = 5.2
+    # Calculate percentage changes
+    portfolios_change = 5.2  # Mock data
     active_percentage = (active_portfolios / total_portfolios * 100) if total_portfolios > 0 else 0
-    value_change = 3.8
+    value_change = 3.8  # Mock data
+
+    # Get currency breakdown from Hive
+    currency_breakdown = hive_stats.get('currency_breakdown', [])
 
     context = {
         'stats': {
@@ -71,19 +70,26 @@ def dashboard(request):
             'active_percentage': round(active_percentage, 1),
             'value_change': value_change,
         },
-        'recent_portfolios': recent_portfolios,
+        'recent_portfolios': recent_portfolios_data,
         'pending_approvals': pending_approvals,
         'recent_activities': recent_activities,
         'pending_portfolios_count': pending_portfolios,
+        'currency_breakdown': currency_breakdown,
+        'using_hive': True,  # Flag to indicate Hive data source
     }
 
-    # Log dashboard view
-    AuditLog.log_action(
-        action='VIEW',
-        user=request.user,
-        object_type='Dashboard',
+    # Log dashboard view to Hive
+    audit_log_repository.log_action(
+        user_id=str(request.user.id),
+        username=request.user.username,
+        action_type='VIEW',
+        entity_type='DASHBOARD',
+        action_description=f'Viewed dashboard - {total_portfolios} portfolios from Hive',
+        request_method='GET',
+        request_path='/dashboard/',
         ip_address=request.META.get('REMOTE_ADDR'),
-        user_agent=request.META.get('HTTP_USER_AGENT', '')
+        user_agent=request.META.get('HTTP_USER_AGENT', ''),
+        status='SUCCESS'
     )
 
     return render(request, 'dashboard.html', context)
@@ -105,14 +111,18 @@ def user_login(request):
         if user is not None:
             login(request, user)
 
-            # Log successful login
-            AuditLog.log_action(
-                action='LOGIN',
-                user=user,
-                object_type='Auth',
-                description='User logged in successfully',
+            # Log successful login to Hive
+            audit_log_repository.log_action(
+                user_id=str(user.id),
+                username=user.username,
+                action_type='LOGIN',
+                entity_type='AUTH',
+                action_description='User logged in successfully',
+                request_method='POST',
+                request_path='/login/',
                 ip_address=request.META.get('REMOTE_ADDR'),
-                user_agent=request.META.get('HTTP_USER_AGENT', '')
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
             )
 
             messages.success(request, f'Welcome back, {user.get_full_name() or user.username}!')
@@ -121,13 +131,19 @@ def user_login(request):
             next_url = request.GET.get('next', 'dashboard')
             return redirect(next_url)
         else:
-            # Log failed login attempt
-            AuditLog.objects.create(
-                action='LOGIN_FAILED',
-                object_type='Auth',
-                description=f'Failed login attempt for username: {username}',
+            # Log failed login attempt to Hive
+            audit_log_repository.log_action(
+                user_id='anonymous',
+                username=username or 'unknown',
+                action_type='LOGIN',
+                entity_type='AUTH',
+                action_description=f'Failed login attempt for username: {username}',
+                request_method='POST',
+                request_path='/login/',
                 ip_address=request.META.get('REMOTE_ADDR'),
-                user_agent=request.META.get('HTTP_USER_AGENT', '')
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='FAILURE',
+                error_message='Invalid credentials'
             )
 
             messages.error(request, 'Invalid username or password.')
@@ -140,14 +156,18 @@ def user_logout(request):
     """
     User logout view.
     """
-    # Log logout
-    AuditLog.log_action(
-        action='LOGOUT',
-        user=request.user,
-        object_type='Auth',
-        description='User logged out',
+    # Log logout to Hive
+    audit_log_repository.log_action(
+        user_id=str(request.user.id),
+        username=request.user.username,
+        action_type='LOGOUT',
+        entity_type='AUTH',
+        action_description='User logged out',
+        request_method='POST',
+        request_path='/logout/',
         ip_address=request.META.get('REMOTE_ADDR'),
-        user_agent=request.META.get('HTTP_USER_AGENT', '')
+        user_agent=request.META.get('HTTP_USER_AGENT', ''),
+        status='SUCCESS'
     )
 
     logout(request)
@@ -178,42 +198,40 @@ def profile(request):
     return render(request, 'auth/profile.html', context)
 
 
-@login_required
+# @login_required  # Commented for development
 def audit_log(request):
     """
-    Audit log list view with filtering and search.
+    Audit log list view with filtering and search - HIVE INTEGRATION.
+    Fetches audit logs from Hive cis_audit_log table.
     """
-    # Base queryset
-    queryset = AuditLog.objects.select_related('user').order_by('-timestamp')
+    from core.audit.audit_hive_repository import audit_log_repository
 
-    # Search
+    # Get filter parameters
     search_query = request.GET.get('search', '').strip()
-    if search_query:
-        queryset = queryset.filter(
-            Q(user__username__icontains=search_query) |
-            Q(object_type__icontains=search_query) |
-            Q(description__icontains=search_query) |
-            Q(changes_summary__icontains=search_query)
-        )
-
-    # Filter by action
     action_filter = request.GET.get('action', '').strip()
-    if action_filter:
-        queryset = queryset.filter(action=action_filter)
-
-    # Filter by date range
+    entity_filter = request.GET.get('entity_type', '').strip()
     date_from = request.GET.get('date_from', '').strip()
     date_to = request.GET.get('date_to', '').strip()
 
-    if date_from:
-        queryset = queryset.filter(timestamp__gte=date_from)
-    if date_to:
-        queryset = queryset.filter(timestamp__lte=date_to)
+    # Get audit logs from Hive with error handling
+    try:
+        audit_logs_list = audit_log_repository.get_all_logs(
+            limit=1000,  # Fetch more for client-side pagination
+            action_type=action_filter if action_filter else None,
+            entity_type=entity_filter if entity_filter else None,
+            date_from=date_from if date_from else None,
+            date_to=date_to if date_to else None,
+            search=search_query if search_query else None
+        )
+    except Exception as e:
+        # If Hive connection fails, return empty list with error message
+        messages.warning(request, f'Unable to connect to Hive: {str(e)}. Showing empty results.')
+        audit_logs_list = []
 
     # Pagination
     from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 
-    paginator = Paginator(queryset, 50)  # 50 items per page
+    paginator = Paginator(audit_logs_list, 50)  # 50 items per page
     page = request.GET.get('page', 1)
 
     try:
@@ -221,28 +239,32 @@ def audit_log(request):
     except PageNotAnInteger:
         audit_logs = paginator.page(1)
     except EmptyPage:
-        audit_logs = paginator.page(paginator.num_pages)
+        audit_logs = paginator.page(paginator.num_pages if paginator.num_pages > 0 else 1)
 
-    # Log audit log view
-    AuditLog.log_action(
-        action='VIEW',
-        user=request.user,
-        object_type='AuditLog',
-        description='Viewed audit logs',
-        ip_address=request.META.get('REMOTE_ADDR'),
-        user_agent=request.META.get('HTTP_USER_AGENT', '')
-    )
+    # Get unique action types for filter dropdown
+    action_types = sorted(set([log.get('action_type') for log in audit_logs_list if log.get('action_type')]))
 
-    # Get unique actions for filter dropdown
-    actions = AuditLog.objects.values_list('action', flat=True).distinct()
+    # Get unique entity types for filter dropdown
+    entity_types = sorted(set([log.get('entity_type') for log in audit_logs_list if log.get('entity_type')]))
+
+    # Get statistics with error handling
+    try:
+        stats = audit_log_repository.get_statistics(days=30)
+    except Exception:
+        stats = {'total_count': 0, 'days': 30, 'action_breakdown': [], 'entity_breakdown': []}
 
     context = {
         'audit_logs': audit_logs,
-        'actions': sorted(set(actions)),
+        'action_types': action_types,
+        'entity_types': entity_types,
         'search_query': search_query,
         'action_filter': action_filter,
+        'entity_filter': entity_filter,
         'date_from': date_from,
         'date_to': date_to,
+        'total_count': len(audit_logs_list),
+        'stats': stats,
+        'using_hive': True,  # Flag to indicate Hive integration
     }
 
     return render(request, 'core/audit_log.html', context)

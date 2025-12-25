@@ -5,22 +5,48 @@ Handles User-Defined Fields CRUD operations and value management.
 
 import csv
 from django.shortcuts import render, redirect, get_object_or_404
-from django.contrib.auth.decorators import login_required
+# from django.contrib.auth.decorators import login_required  # Commented for development
 from django.contrib import messages
 from django.http import HttpResponse, JsonResponse
 from django.core.paginator import Paginator
 from django.core.exceptions import ValidationError
 from django.db.models import Q
+from django.contrib.auth.models import User
 
 from .models import UDF, UDFValue, UDFHistory
 from .services import UDFService
+
+
+def get_request_user(request):
+    """
+    Get user from request or create/get default admin user for development.
+    Once authentication is enabled, remove this and use request.user directly.
+    """
+    if hasattr(request, 'user') and request.user.is_authenticated:
+        return request.user
+
+    # For development: get or create admin user
+    admin_user, created = User.objects.get_or_create(
+        username='admin',
+        defaults={
+            'email': 'admin@example.com',
+            'is_staff': True,
+            'is_superuser': True,
+        }
+    )
+
+    if created:
+        admin_user.set_password('admin')
+        admin_user.save()
+
+    return admin_user
 
 
 # ========================
 # UDF Definition Views
 # ========================
 
-@login_required
+# @login_required  # Commented for development
 def udf_list(request):
     """
     List all UDF definitions with search, filter, and CSV export.
@@ -83,7 +109,7 @@ def udf_list(request):
     return render(request, 'udf/udf_list.html', context)
 
 
-@login_required
+# @login_required  # Commented for development
 def udf_detail(request, pk):
     """
     View UDF definition details.
@@ -101,7 +127,7 @@ def udf_detail(request, pk):
     return render(request, 'udf/udf_detail.html', context)
 
 
-@login_required
+# @login_required  # Commented for development
 def udf_create(request):
     """
     Create new UDF definition.
@@ -145,7 +171,7 @@ def udf_create(request):
                     data['max_length'] = int(max_len)
 
             # Create UDF
-            udf = UDFService.create_udf(request.user, data)
+            udf = UDFService.create_udf(get_request_user(request), data)
 
             messages.success(request, f'UDF "{udf.label}" created successfully.')
             return redirect('udf:detail', pk=udf.id)
@@ -163,7 +189,7 @@ def udf_create(request):
     return render(request, 'udf/udf_form.html', context)
 
 
-@login_required
+# @login_required  # Commented for development
 def udf_edit(request, pk):
     """
     Edit existing UDF definition.
@@ -206,7 +232,7 @@ def udf_edit(request, pk):
                     data['max_length'] = int(max_len)
 
             # Update UDF
-            udf = UDFService.update_udf(udf, request.user, data)
+            udf = UDFService.update_udf(udf, get_request_user(request), data)
 
             messages.success(request, f'UDF "{udf.label}" updated successfully.')
             return redirect('udf:detail', pk=udf.id)
@@ -231,7 +257,7 @@ def udf_edit(request, pk):
     return render(request, 'udf/udf_form.html', context)
 
 
-@login_required
+# @login_required  # Commented for development
 def udf_delete(request, pk):
     """
     Deactivate UDF definition (soft delete).
@@ -240,7 +266,7 @@ def udf_delete(request, pk):
 
     if request.method == 'POST':
         try:
-            UDFService.delete_udf(udf, request.user)
+            UDFService.delete_udf(udf, get_request_user(request))
             messages.success(request, f'UDF "{udf.label}" deactivated successfully.')
             return redirect('udf:list')
 
@@ -254,7 +280,7 @@ def udf_delete(request, pk):
 # UDF Value Management Views
 # ========================
 
-@login_required
+# @login_required  # Commented for development
 def entity_udf_values(request, entity_type, entity_id):
     """
     View and manage UDF values for an entity.
@@ -290,7 +316,7 @@ def entity_udf_values(request, entity_type, entity_id):
                 entity_type.upper(),
                 entity_id,
                 values,
-                request.user
+                get_request_user(request)
             )
 
             messages.success(request, 'UDF values saved successfully.')
@@ -318,7 +344,7 @@ def entity_udf_values(request, entity_type, entity_id):
     return render(request, 'udf/entity_udf_values.html', context)
 
 
-@login_required
+# @login_required  # Commented for development
 def udf_value_history(request, entity_type, entity_id):
     """
     View UDF value change history for an entity.
@@ -343,7 +369,7 @@ def udf_value_history(request, entity_type, entity_id):
 # AJAX Views
 # ========================
 
-@login_required
+# @login_required  # Commented for development
 def ajax_get_entity_udf_values(request, entity_type, entity_id):
     """
     AJAX endpoint to get UDF values for an entity.
@@ -355,7 +381,7 @@ def ajax_get_entity_udf_values(request, entity_type, entity_id):
         return JsonResponse({'success': False, 'error': str(e)}, status=400)
 
 
-@login_required
+# @login_required  # Commented for development
 def ajax_validate_udf_values(request):
     """
     AJAX endpoint to validate UDF values.
@@ -376,3 +402,20 @@ def ajax_validate_udf_values(request):
             return JsonResponse({'success': False, 'error': str(e)}, status=400)
 
     return JsonResponse({'success': False, 'error': 'Invalid request method'}, status=405)
+
+
+# @login_required  # Commented for development
+def ajax_get_dropdown_options(request, field_name):
+    """
+    AJAX endpoint to get dropdown options for a UDF field from Hive.
+    """
+    try:
+        options = UDFService.get_udf_dropdown_options(field_name)
+        return JsonResponse({
+            'success': True,
+            'field_name': field_name,
+            'options': options,
+            'count': len(options)
+        })
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=400)

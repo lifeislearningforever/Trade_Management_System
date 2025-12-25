@@ -18,7 +18,13 @@ from decimal import Decimal
 from datetime import date, datetime
 
 from udf.models import UDF, UDFValue, UDFHistory
-from core.models import AuditLog
+from core.audit.audit_hive_repository import audit_log_repository
+from udf.repositories import (
+    udf_definition_repository,
+    udf_option_repository,
+    udf_value_repository,
+    reference_data_repository
+)
 
 
 class UDFService:
@@ -67,7 +73,7 @@ class UDFService:
         if data['entity_type'] not in valid_entities:
             raise ValidationError(f"Invalid entity_type. Must be one of: {', '.join(valid_entities)}")
 
-        # Create UDF
+        # Create UDF in Django
         udf = UDF.objects.create(
             field_name=data['field_name'],
             label=data['label'],
@@ -88,13 +94,44 @@ class UDFService:
             updated_by=user
         )
 
-        # Log creation
-        AuditLog.log_action(
-            action='CREATE',
-            user=user,
-            object_type='UDF',
-            object_id=str(udf.id),
-            description=f"Created UDF {udf.field_name} ({udf.label}) for {udf.entity_type}"
+        # Also save to Hive
+        try:
+            from datetime import datetime
+            udf_definition_repository.insert_definition({
+                'udf_id': udf.id,
+                'field_name': udf.field_name,
+                'label': udf.label,
+                'description': udf.description,
+                'field_type': udf.field_type,
+                'entity_type': udf.entity_type,
+                'is_required': udf.is_required,
+                'is_unique': udf.is_unique,
+                'default_value': udf.default_value,
+                'dropdown_options': udf.dropdown_options,
+                'min_value': float(udf.min_value) if udf.min_value else None,
+                'max_value': float(udf.max_value) if udf.max_value else None,
+                'max_length': udf.max_length,
+                'display_order': udf.display_order,
+                'group_name': udf.group_name,
+                'is_active': udf.is_active,
+                'created_by': user.username,
+                'created_at': udf.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                'updated_by': user.username,
+                'updated_at': udf.updated_at.strftime('%Y-%m-%d %H:%M:%S')
+            })
+        except Exception as e:
+            print(f"Warning: Failed to save UDF to Hive: {e}")
+
+        # Log creation to Hive
+        audit_log_repository.log_action(
+            user_id=str(user.id),
+            username=user.username,
+            action_type='CREATE',
+            entity_type='UDF',
+            entity_id=str(udf.id),
+            entity_name=udf.field_name,
+            action_description=f"Created UDF {udf.field_name} ({udf.label}) for {udf.entity_type}",
+            status='SUCCESS'
         )
 
         return udf
@@ -137,14 +174,17 @@ class UDFService:
         udf.full_clean()  # Validate
         udf.save()
 
-        # Log update
+        # Log update to Hive
         if changes:
-            AuditLog.log_action(
-                action='UPDATE',
-                user=user,
-                object_type='UDF',
-                object_id=str(udf.id),
-                description=f"Updated UDF {udf.field_name}: {'; '.join(changes)}"
+            audit_log_repository.log_action(
+                user_id=str(user.id),
+                username=user.username,
+                action_type='UPDATE',
+                entity_type='UDF',
+                entity_id=str(udf.id),
+                entity_name=udf.field_name,
+                action_description=f"Updated UDF {udf.field_name}: {'; '.join(changes)}",
+                status='SUCCESS'
             )
 
         return udf
@@ -162,13 +202,16 @@ class UDFService:
         udf.updated_by = user
         udf.save()
 
-        # Log deletion
-        AuditLog.log_action(
-            action='DELETE',
-            user=user,
-            object_type='UDF',
-            object_id=str(udf.id),
-            description=f"Deactivated UDF {udf.field_name} ({udf.label})"
+        # Log deletion to Hive
+        audit_log_repository.log_action(
+            user_id=str(user.id),
+            username=user.username,
+            action_type='DELETE',
+            entity_type='UDF',
+            entity_id=str(udf.id),
+            entity_name=udf.field_name,
+            action_description=f"Deactivated UDF {udf.field_name} ({udf.label})",
+            status='SUCCESS'
         )
 
     @staticmethod
@@ -221,6 +264,29 @@ class UDFService:
         udf_value.full_clean()  # Validate
         udf_value.save()
 
+        # Also save to Hive
+        try:
+            udf_value_repository.insert_value({
+                'value_id': udf_value.id,
+                'udf_id': udf.id,
+                'field_name': udf.field_name,
+                'entity_type': entity_type,
+                'entity_id': entity_id,
+                'value_string': udf_value.value_text,
+                'value_int': int(udf_value.value_number) if udf_value.value_number else None,
+                'value_decimal': float(udf_value.value_number) if udf_value.value_number else None,
+                'value_date': udf_value.value_date.strftime('%Y-%m-%d') if udf_value.value_date else None,
+                'value_bool': udf_value.value_boolean,
+                'value_json': udf_value.value_json,
+                'is_active': True,
+                'created_by': user.username,
+                'created_at': udf_value.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                'updated_by': user.username,
+                'updated_at': udf_value.updated_at.strftime('%Y-%m-%d %H:%M:%S')
+            })
+        except Exception as e:
+            print(f"Warning: Failed to save UDF value to Hive: {e}")
+
         # Create history record
         UDFHistory.objects.create(
             udf_value=udf_value,
@@ -230,14 +296,19 @@ class UDFService:
             changed_by=user
         )
 
-        # Log action
+        # Log action to Hive
         action_type = 'CREATE' if created else 'UPDATE'
-        AuditLog.log_action(
-            action=action_type,
-            user=user,
-            object_type='UDFValue',
-            object_id=str(udf_value.id),
-            description=f"{action_type} UDF value: {udf.field_name} = {value} for {entity_type}#{entity_id}"
+        audit_log_repository.log_action(
+            user_id=str(user.id),
+            username=user.username,
+            action_type=action_type,
+            entity_type='UDF_VALUE',
+            entity_id=str(udf_value.id),
+            entity_name=udf.field_name,
+            action_description=f"{action_type} UDF value: {udf.field_name} = {value} for {entity_type}#{entity_id}",
+            old_value=old_value,
+            new_value=str(value),
+            status='SUCCESS'
         )
 
         return udf_value
@@ -372,13 +443,17 @@ class UDFService:
             changed_by=user
         )
 
-        # Log deletion
-        AuditLog.log_action(
-            action='DELETE',
-            user=user,
-            object_type='UDFValue',
-            object_id=str(udf_value.id),
-            description=f"Deleted UDF value: {udf_value.udf.field_name} for {udf_value.entity_type}#{udf_value.entity_id}"
+        # Log deletion to Hive
+        audit_log_repository.log_action(
+            user_id=str(user.id),
+            username=user.username,
+            action_type='DELETE',
+            entity_type='UDF_VALUE',
+            entity_id=str(udf_value.id),
+            entity_name=udf_value.udf.field_name,
+            action_description=f"Deleted UDF value: {udf_value.udf.field_name} for {udf_value.entity_type}#{udf_value.entity_id}",
+            old_value=old_value,
+            status='SUCCESS'
         )
 
         # Delete
@@ -511,3 +586,208 @@ class UDFService:
             udf_value__entity_type=entity_type,
             udf_value__entity_id=entity_id
         ).select_related('udf_value__udf', 'changed_by').order_by('-changed_at')
+
+    # ========================
+    # Hive Integration Methods
+    # ========================
+
+    @staticmethod
+    def get_dropdown_options_from_hive(field_name: str) -> List[Dict[str, str]]:
+        """
+        Get dropdown options for a UDF field from Hive.
+
+        Args:
+            field_name: The UDF field name (e.g., 'account_group', 'entity_group')
+
+        Returns:
+            List of dictionaries with 'value' and 'label' keys
+        """
+        try:
+            options = udf_option_repository.get_options_by_field_name(field_name)
+            return [
+                {'value': opt['option_value'], 'label': opt['option_value']}
+                for opt in options if opt.get('is_active', True)
+            ]
+        except Exception as e:
+            # If Hive fetch fails, return empty list
+            return []
+
+    @staticmethod
+    def get_currency_options() -> List[Dict[str, str]]:
+        """
+        Get currency options from Hive reference data.
+
+        Returns:
+            List of dictionaries with 'value' (iso_code) and 'label' (name + symbol)
+        """
+        try:
+            currencies = reference_data_repository.get_currencies()
+            return [
+                {
+                    'value': c['iso_code'],
+                    'label': f"{c['name']} ({c['iso_code']}) - {c.get('symbol', '')}"
+                }
+                for c in currencies if c.get('iso_code')
+            ]
+        except Exception as e:
+            return []
+
+    @staticmethod
+    def get_country_options() -> List[Dict[str, str]]:
+        """
+        Get country options from Hive reference data.
+
+        Returns:
+            List of dictionaries with 'value' (label) and 'label' (full_name)
+        """
+        try:
+            countries = reference_data_repository.get_countries()
+            return [
+                {
+                    'value': c['label'],
+                    'label': f"{c['full_name']} ({c['label']})"
+                }
+                for c in countries if c.get('label')
+            ]
+        except Exception as e:
+            return []
+
+    @staticmethod
+    def get_calendar_options() -> List[Dict[str, str]]:
+        """
+        Get calendar options from Hive reference data.
+
+        Returns:
+            List of dictionaries with 'value' and 'label'
+        """
+        try:
+            calendars = reference_data_repository.get_calendars()
+            return [
+                {
+                    'value': c['calendar_label'],
+                    'label': f"{c['calendar_label']} - {c.get('calendar_description', '')}"
+                }
+                for c in calendars if c.get('calendar_label')
+            ]
+        except Exception as e:
+            return []
+
+    @staticmethod
+    def get_counterparty_options(counterparty_type: Optional[str] = None) -> List[Dict[str, str]]:
+        """
+        Get counterparty options from Hive reference data.
+
+        Args:
+            counterparty_type: Optional filter - 'broker', 'custodian', 'issuer', or None for all
+
+        Returns:
+            List of dictionaries with 'value' (counterparty_name) and 'label'
+        """
+        try:
+            if counterparty_type == 'broker':
+                counterparties = reference_data_repository.get_brokers()
+            elif counterparty_type == 'custodian':
+                counterparties = reference_data_repository.get_custodians()
+            elif counterparty_type == 'issuer':
+                counterparties = reference_data_repository.get_issuers()
+            else:
+                counterparties = reference_data_repository.get_counterparties()
+
+            return [
+                {
+                    'value': cp['counterparty_name'],
+                    'label': f"{cp['counterparty_name']} - {cp.get('city', '')}, {cp.get('country', '')}"
+                }
+                for cp in counterparties if cp.get('counterparty_name')
+            ]
+        except Exception as e:
+            return []
+
+    @staticmethod
+    def get_account_group_options() -> List[Dict[str, str]]:
+        """
+        Get account group options for Portfolio UDF dropdown.
+
+        Returns:
+            List of dictionaries with 'value' and 'label'
+        """
+        try:
+            return reference_data_repository.get_account_groups()
+        except Exception as e:
+            # Fallback to default options
+            return [
+                {'value': 'TRADING', 'label': 'Trading'},
+                {'value': 'INVESTMENT', 'label': 'Investment'},
+                {'value': 'HEDGING', 'label': 'Hedging'},
+                {'value': 'TREASURY', 'label': 'Treasury'},
+                {'value': 'OPERATIONS', 'label': 'Operations'},
+            ]
+
+    @staticmethod
+    def get_entity_group_options() -> List[Dict[str, str]]:
+        """
+        Get entity group options for Portfolio UDF dropdown.
+
+        Returns:
+            List of dictionaries with 'value' and 'label'
+        """
+        try:
+            return reference_data_repository.get_entity_groups()
+        except Exception as e:
+            # Fallback to default options
+            return [
+                {'value': 'CORPORATE', 'label': 'Corporate'},
+                {'value': 'INSTITUTIONAL', 'label': 'Institutional'},
+                {'value': 'RETAIL', 'label': 'Retail'},
+                {'value': 'GOVERNMENT', 'label': 'Government'},
+                {'value': 'FUND', 'label': 'Fund'},
+            ]
+
+    @staticmethod
+    def get_udf_dropdown_options(field_name: str, field_type: str = 'DROPDOWN') -> List[Dict[str, str]]:
+        """
+        Get dropdown options for any UDF field, checking both Hive and local definitions.
+
+        This method intelligently routes to the appropriate data source:
+        - For 'account_group': fetches from Hive UDF options or returns defaults
+        - For 'entity_group': fetches from Hive UDF options or returns defaults
+        - For currency-related fields: fetches from currency reference data
+        - For country-related fields: fetches from country reference data
+        - For calendar-related fields: fetches from calendar reference data
+        - For counterparty fields: fetches from counterparty reference data
+        - For other fields: fetches from UDF options table
+
+        Args:
+            field_name: The UDF field name
+            field_type: The field type (default: 'DROPDOWN')
+
+        Returns:
+            List of option dictionaries
+        """
+        # Portfolio-specific fields
+        if field_name == 'account_group':
+            return UDFService.get_account_group_options()
+        elif field_name == 'entity_group':
+            return UDFService.get_entity_group_options()
+
+        # Reference data fields
+        elif 'currency' in field_name.lower():
+            return UDFService.get_currency_options()
+        elif 'country' in field_name.lower():
+            return UDFService.get_country_options()
+        elif 'calendar' in field_name.lower():
+            return UDFService.get_calendar_options()
+        elif 'counterparty' in field_name.lower() or 'broker' in field_name.lower() or 'custodian' in field_name.lower():
+            # Determine counterparty type from field name
+            cp_type = None
+            if 'broker' in field_name.lower():
+                cp_type = 'broker'
+            elif 'custodian' in field_name.lower():
+                cp_type = 'custodian'
+            elif 'issuer' in field_name.lower():
+                cp_type = 'issuer'
+            return UDFService.get_counterparty_options(cp_type)
+
+        # Generic UDF options from Hive
+        else:
+            return UDFService.get_dropdown_options_from_hive(field_name)

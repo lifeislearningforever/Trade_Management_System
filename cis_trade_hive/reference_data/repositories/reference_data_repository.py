@@ -176,14 +176,7 @@ class CalendarRepository(HiveReferenceRepository):
         Returns:
             List of calendar dictionaries
         """
-        query = f"""
-            SELECT
-                calendar_label,
-                calendar_description,
-                holiday_date
-            FROM {self.TABLE_NAME}
-            WHERE 1=1
-        """
+        query = f"SELECT * FROM {self.TABLE_NAME} WHERE 1=1"
 
         if calendar_label:
             query += f" AND calendar_label = '{calendar_label}'"
@@ -191,20 +184,17 @@ class CalendarRepository(HiveReferenceRepository):
         if search:
             query += f" AND LOWER(calendar_description) LIKE '%{search.lower()}%'"
 
-        query += " ORDER BY calendar_label, holiday_date DESC"
-
+        # NOTE: ORDER BY causes issues with PyHive - skip sorting for large dataset (100k records)
+        # Django pagination will handle sorting display
         return self._execute_query(query)
 
     def get_distinct_calendars(self) -> List[str]:
         """Get list of distinct calendar labels"""
-        query = f"""
-            SELECT DISTINCT calendar_label
-            FROM {self.TABLE_NAME}
-            ORDER BY calendar_label
-        """
+        query = f"SELECT DISTINCT calendar_label FROM {self.TABLE_NAME}"
 
         results = self._execute_query(query)
-        return [r.get('calendar_label') for r in results if r.get('calendar_label')]
+        calendars = [r.get('calendar_label') for r in results if r.get('calendar_label')]
+        return sorted(calendars)
 
     def get_holidays_for_calendar(self, calendar_label: str) -> List[Dict]:
         """Get all holidays for a specific calendar"""
@@ -226,66 +216,18 @@ class CounterpartyRepository(HiveReferenceRepository):
         Returns:
             List of counterparty dictionaries
         """
-        query = f"""
-            SELECT
-                counterparty_name,
-                description,
-                salutation,
-                address,
-                city,
-                country,
-                postal_code,
-                fax,
-                telex,
-                industry,
-                is_counterparty_broker,
-                is_counterparty_custodian,
-                is_counterparty_issuer,
-                primary_contact,
-                primary_number,
-                other_contact,
-                other_number,
-                custodian_group,
-                broker_group,
-                resident_y_n
-            FROM {self.TABLE_NAME}
-        """
+        query = f"SELECT * FROM {self.TABLE_NAME}"
 
         if search:
             query += f" WHERE LOWER(counterparty_name) LIKE '%{search.lower()}%' OR LOWER(description) LIKE '%{search.lower()}%'"
 
-        query += " ORDER BY counterparty_name"
-
-        return self._execute_query(query)
+        # NOTE: ORDER BY causes issues with PyHive - sort in Python instead
+        results = self._execute_query(query)
+        return sorted(results, key=lambda x: x.get('counterparty_name') or '')
 
     def get_by_name(self, name: str) -> Optional[Dict]:
         """Get specific counterparty by name"""
-        query = f"""
-            SELECT
-                counterparty_name,
-                description,
-                salutation,
-                address,
-                city,
-                country,
-                postal_code,
-                fax,
-                telex,
-                industry,
-                is_counterparty_broker,
-                is_counterparty_custodian,
-                is_counterparty_issuer,
-                primary_contact,
-                primary_number,
-                other_contact,
-                other_number,
-                custodian_group,
-                broker_group,
-                resident_y_n
-            FROM {self.TABLE_NAME}
-            WHERE counterparty_name = '{name}'
-            LIMIT 1
-        """
+        query = f"SELECT * FROM {self.TABLE_NAME} WHERE counterparty_name = '{name}' LIMIT 1"
 
         results = self._execute_query(query)
         return results[0] if results else None

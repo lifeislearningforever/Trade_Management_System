@@ -73,16 +73,14 @@
                     <table class="table table-hover mb-0">
                         <thead>
                             <tr>
-                                <th style="width: 8%;">Code</th>
+                                <th style="width: 12%;">ISO Code</th>
                                 <th style="width: 15%;">Name</th>
-                                <th style="width: 8%;">Symbol</th>
-                                <th style="width: 10%;">Country</th>
-                                <th style="width: 8%;">Type</th>
-                                <th style="width: 10%;">Decimal Places</th>
-                                <th style="width: 8%;">Status</th>
-                                <th style="width: 8%;">Is Base</th>
-                                <th style="width: 10%;">Exchange Rate</th>
-                                <th style="width: 15%;">Last Updated</th>
+                                <th style="width: 20%;">Full Name</th>
+                                <th style="width: 10%;">Symbol</th>
+                                <th style="width: 10%;">Precision</th>
+                                <th style="width: 13%;">Rate Precision</th>
+                                <th style="width: 10%;">Calendar</th>
+                                <th style="width: 10%;">Spot Schedule</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -91,39 +89,15 @@
                                 <td>
                                     <strong class="text-primary">{{ currency.code }}</strong>
                                 </td>
-                                <td>{{ currency.name }}</td>
+                                <td>{{ currency.name|default:"-" }}</td>
+                                <td>{{ currency.full_name|default:"-" }}</td>
                                 <td>
-                                    <span style="font-size: 1.25rem;">{{ currency.symbol|default:"-" }}</span>
+                                    <span style="font-size: 1.1rem;">{{ currency.symbol|default:"-" }}</span>
                                 </td>
-                                <td>{{ currency.country|default:"-" }}</td>
-                                <td>
-                                    <span class="badge badge-info">{{ currency.currency_type|default:"FIAT" }}</span>
-                                </td>
-                                <td>{{ currency.decimal_places|default:"2" }}</td>
-                                <td>
-                                    {% if currency.is_active %}
-                                        <span class="badge badge-success">Active</span>
-                                    {% else %}
-                                        <span class="badge badge-secondary">Inactive</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if currency.is_base_currency %}
-                                        <i class="bi bi-check-circle-fill text-success" title="Base Currency"></i>
-                                    {% else %}
-                                        <span class="text-muted">-</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if currency.exchange_rate %}
-                                        {{ currency.exchange_rate|floatformat:6 }}
-                                    {% else %}
-                                        <span class="text-muted">-</span>
-                                    {% endif %}
-                                </td>
-                                <td style="font-size: var(--font-size-sm);">
-                                    {{ currency.last_updated|date:"Y-m-d H:i"|default:"-" }}
-                                </td>
+                                <td>{{ currency.decimal_places|default:"-" }}</td>
+                                <td>{{ currency.rate_precision|default:"-" }}</td>
+                                <td>{{ currency.calendar|default:"-" }}</td>
+                                <td>{{ currency.spot_schedule|default:"-" }}</td>
                             </tr>
                             {% endfor %}
                         </tbody>
