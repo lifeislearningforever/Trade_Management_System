@@ -20,22 +20,22 @@ TYPE_MAPPING = {
     'date': 'STRING',  # Kudu doesn't have DATE, use STRING
 }
 
-# Primary key definitions for each table (based on business logic)
+# Primary key definitions for each table (based on actual Hive column names)
 PRIMARY_KEYS = {
-    'cis_audit_log': ['log_id'],
-    'cis_group_permissions': ['group_name', 'permission_id'],
-    'cis_permission': ['permission_id'],
+    'cis_audit_log': ['audit_id'],
+    'cis_group_permissions': ['cis_group_permissions_id'],
+    'cis_permission': ['cis_permission_id'],
     'cis_portfolio': ['name'],
     'cis_udf_definition': ['entity_type', 'field_name'],
-    'cis_udf_option': ['entity_type', 'field_name', 'option_value'],
+    'cis_udf_option': ['udf_id', 'option_value'],
     'cis_udf_value': ['entity_id', 'entity_type', 'field_name'],
-    'cis_udf_value_multi': ['entity_id', 'entity_type', 'field_name', 'value'],
-    'cis_user': ['username'],
-    'cis_user_group': ['username', 'group_name'],
-    'gmp_cis_sta_dly_calendar': ['event_date', 'event_name'],
-    'gmp_cis_sta_dly_counterparty': ['counterparty_code'],
-    'gmp_cis_sta_dly_country': ['country_code'],
-    'gmp_cis_sta_dly_currency': ['currency_code'],
+    'cis_udf_value_multi': ['entity_id', 'entity_type', 'field_name', 'option_value'],
+    'cis_user': ['cis_user_id'],
+    'cis_user_group': ['cis_user_group_id'],
+    'gmp_cis_sta_dly_calendar': ['calendar_label', 'holiday_date'],
+    'gmp_cis_sta_dly_counterparty': ['counterparty_name'],
+    'gmp_cis_sta_dly_country': ['label'],
+    'gmp_cis_sta_dly_currency': ['iso_code'],
     'test_insert_simple': ['id'],
 }
 

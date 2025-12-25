@@ -1,5 +1,5 @@
 -- Kudu Table Definitions for CIS Database
--- Generated from Hive tables on 2025-12-25 23:20:53
+-- Generated from Hive tables on 2025-12-25 23:27:04
 --
 -- This file contains Kudu table equivalents for all Hive tables in the cis database.
 -- Kudu tables are optimized for fast random access and updates.
@@ -17,7 +17,7 @@ USE cis;
 
 -- Kudu table for cis_audit_log
 CREATE TABLE IF NOT EXISTS cis_audit_log_kudu (
-  audit_id INT64,
+  audit_id INT64 NOT NULL,
   audit_timestamp STRING,
   user_id STRING,
   username STRING,
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS cis_audit_log_kudu (
   tags STRING,
   metadata STRING,
   audit_date STRING,
-  PRIMARY KEY (log_id)
+  PRIMARY KEY (audit_id)
 )
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
@@ -59,14 +59,14 @@ TBLPROPERTIES (
 
 -- Kudu table for cis_group_permissions
 CREATE TABLE IF NOT EXISTS cis_group_permissions_kudu (
-  cis_group_permissions_id INT32,
+  cis_group_permissions_id INT32 NOT NULL,
   cis_user_group_id INT32,
   permission STRING,
   read_write STRING,
   is_deleted BOOL,
   updated_on UNIXTIME_MICROS,
   updated_by STRING,
-  PRIMARY KEY (group_name, permission_id)
+  PRIMARY KEY (cis_group_permissions_id)
 )
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
@@ -78,13 +78,13 @@ TBLPROPERTIES (
 
 -- Kudu table for cis_permission
 CREATE TABLE IF NOT EXISTS cis_permission_kudu (
-  cis_permission_id INT32,
+  cis_permission_id INT32 NOT NULL,
   permission STRING,
   description STRING,
   is_deleted BOOL,
   updated_on UNIXTIME_MICROS,
   updated_by STRING,
-  PRIMARY KEY (permission_id)
+  PRIMARY KEY (cis_permission_id)
 )
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
@@ -160,7 +160,7 @@ TBLPROPERTIES (
 
 -- Kudu table for cis_udf_option
 CREATE TABLE IF NOT EXISTS cis_udf_option_kudu (
-  udf_id INT64,
+  udf_id INT64 NOT NULL,
   option_value STRING NOT NULL,
   display_order INT32,
   is_active BOOL,
@@ -168,7 +168,7 @@ CREATE TABLE IF NOT EXISTS cis_udf_option_kudu (
   created_at UNIXTIME_MICROS,
   updated_by STRING,
   updated_at UNIXTIME_MICROS,
-  PRIMARY KEY (entity_type, field_name, option_value)
+  PRIMARY KEY (udf_id, option_value)
 )
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
@@ -209,14 +209,14 @@ CREATE TABLE IF NOT EXISTS cis_udf_value_multi_kudu (
   entity_type STRING NOT NULL,
   entity_id INT64 NOT NULL,
   field_name STRING NOT NULL,
-  option_value STRING,
+  option_value STRING NOT NULL,
   udf_id INT64,
   is_active BOOL,
   created_by STRING,
   created_at UNIXTIME_MICROS,
   updated_by STRING,
   updated_at UNIXTIME_MICROS,
-  PRIMARY KEY (entity_id, entity_type, field_name, value)
+  PRIMARY KEY (entity_id, entity_type, field_name, option_value)
 )
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
@@ -228,7 +228,7 @@ TBLPROPERTIES (
 
 -- Kudu table for cis_user
 CREATE TABLE IF NOT EXISTS cis_user_kudu (
-  cis_user_id INT32,
+  cis_user_id INT32 NOT NULL,
   login STRING,
   name STRING,
   entity STRING,
@@ -242,7 +242,7 @@ CREATE TABLE IF NOT EXISTS cis_user_kudu (
   created_by STRING,
   updated_on UNIXTIME_MICROS,
   updated_by STRING,
-  PRIMARY KEY (username)
+  PRIMARY KEY (cis_user_id)
 )
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
@@ -254,14 +254,14 @@ TBLPROPERTIES (
 
 -- Kudu table for cis_user_group
 CREATE TABLE IF NOT EXISTS cis_user_group_kudu (
-  cis_user_group_id INT32,
+  cis_user_group_id INT32 NOT NULL,
   name STRING,
   entity STRING,
   description STRING,
   is_deleted BOOL,
   updated_on UNIXTIME_MICROS,
   updated_by STRING,
-  PRIMARY KEY (username, group_name)
+  PRIMARY KEY (cis_user_group_id)
 )
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
@@ -273,10 +273,10 @@ TBLPROPERTIES (
 
 -- Kudu table for gmp_cis_sta_dly_calendar
 CREATE TABLE IF NOT EXISTS gmp_cis_sta_dly_calendar_kudu (
-  calendar_label STRING,
+  calendar_label STRING NOT NULL,
   calendar_description STRING,
-  holiday_date INT32,
-  PRIMARY KEY (event_date, event_name)
+  holiday_date INT32 NOT NULL,
+  PRIMARY KEY (calendar_label, holiday_date)
 )
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
@@ -288,7 +288,7 @@ TBLPROPERTIES (
 
 -- Kudu table for gmp_cis_sta_dly_counterparty
 CREATE TABLE IF NOT EXISTS gmp_cis_sta_dly_counterparty_kudu (
-  counterparty_name STRING,
+  counterparty_name STRING NOT NULL,
   description STRING,
   salutation STRING,
   address STRING,
@@ -308,7 +308,7 @@ CREATE TABLE IF NOT EXISTS gmp_cis_sta_dly_counterparty_kudu (
   custodian_group DOUBLE,
   broker_group DOUBLE,
   resident_y_n DOUBLE,
-  PRIMARY KEY (counterparty_code)
+  PRIMARY KEY (counterparty_name)
 )
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
@@ -320,9 +320,9 @@ TBLPROPERTIES (
 
 -- Kudu table for gmp_cis_sta_dly_country
 CREATE TABLE IF NOT EXISTS gmp_cis_sta_dly_country_kudu (
-  label STRING,
+  label STRING NOT NULL,
   full_name STRING,
-  PRIMARY KEY (country_code)
+  PRIMARY KEY (label)
 )
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
@@ -337,12 +337,12 @@ CREATE TABLE IF NOT EXISTS gmp_cis_sta_dly_currency_kudu (
   name STRING,
   full_name STRING,
   symbol STRING,
-  iso_code STRING,
+  iso_code STRING NOT NULL,
   precision STRING,
   calendar STRING,
   spot_schedule STRING,
   rate_precision STRING,
-  PRIMARY KEY (currency_code)
+  PRIMARY KEY (iso_code)
 )
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU

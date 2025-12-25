@@ -161,4 +161,26 @@ python3 generate_kudu_from_hive.py
 
 ---
 
+## Recent Updates
+
+**2025-12-25 (Latest)**: Fixed PRIMARY KEY column mismatches
+- Corrected 11 tables where PRIMARY KEY columns didn't match actual Hive schema
+- All PRIMARY KEYs now reference existing columns from Hive tables
+- Regenerated DDL file with verified column names
+
+**Key Fixes**:
+- `cis_audit_log`: `log_id` → `audit_id`
+- `cis_user`: `username` → `cis_user_id`
+- `cis_permission`: `permission_id` → `cis_permission_id`
+- `cis_group_permissions`: Simplified to `cis_group_permissions_id`
+- `cis_udf_option`: Fixed to `udf_id, option_value`
+- `cis_udf_value_multi`: Fixed `value` → `option_value`
+- `cis_user_group`: Simplified to `cis_user_group_id`
+- `gmp_cis_sta_dly_calendar`: `event_date, event_name` → `calendar_label, holiday_date`
+- `gmp_cis_sta_dly_counterparty`: `counterparty_code` → `counterparty_name`
+- `gmp_cis_sta_dly_country`: `country_code` → `label`
+- `gmp_cis_sta_dly_currency`: `currency_code` → `iso_code`
+
+---
+
 Generated: 2025-12-25 23:20:53
