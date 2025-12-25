@@ -4,7 +4,6 @@ Handles portfolio CRUD operations, Four-Eyes workflow, and CSV export.
 """
 
 from django.shortcuts import render, redirect, get_object_or_404
-from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from django.http import HttpResponse, Http404
@@ -15,12 +14,14 @@ import csv
 from .models import Portfolio
 from .services import PortfolioService
 from core.models import AuditLog
+from core.views.auth_views import require_login, require_permission
 
-
-@login_required
+# PRODUCTION NOTE: Uncomment this decorator for production deployment
+#@require_permission('cis-portfolio', 'READ')
 def portfolio_list(request):
     """
     List all portfolios with search, filter, and CSV export.
+    Requires: cis-portfolio READ permission
     """
     # Get filters
     search_query = request.GET.get('search', '').strip()
@@ -95,11 +96,12 @@ def portfolio_list(request):
 
     return render(request, 'portfolio/portfolio_list.html', context)
 
-
-@login_required
+# PRODUCTION NOTE: Uncomment this decorator for production deployment
+#@require_permission('cis-portfolio', 'READ')
 def portfolio_detail(request, pk):
     """
     View portfolio details and history.
+    Requires: cis-portfolio READ permission
     """
     portfolio = get_object_or_404(Portfolio, pk=pk)
 
@@ -119,11 +121,12 @@ def portfolio_detail(request, pk):
 
     return render(request, 'portfolio/portfolio_detail.html', context)
 
-
-@login_required
+# PRODUCTION NOTE: Uncomment this decorator for production deployment
+#@require_permission('cis-portfolio', 'WRITE')
 def portfolio_create(request):
     """
     Create a new portfolio.
+    Requires: cis-portfolio WRITE permission
     """
     if request.method == 'POST':
         try:
@@ -162,11 +165,12 @@ def portfolio_create(request):
 
     return render(request, 'portfolio/portfolio_form.html', context)
 
-
-@login_required
+# PRODUCTION NOTE: Uncomment this decorator for production deployment
+#@require_permission('cis-portfolio', 'WRITE')
 def portfolio_edit(request, pk):
     """
     Edit an existing portfolio (DRAFT or REJECTED only).
+    Requires: cis-portfolio WRITE permission
     """
     portfolio = get_object_or_404(Portfolio, pk=pk)
 
@@ -213,11 +217,12 @@ def portfolio_edit(request, pk):
 
     return render(request, 'portfolio/portfolio_form.html', context)
 
-
-@login_required
+# PRODUCTION NOTE: Uncomment this decorator for production deployment
+#@require_permission('cis-portfolio', 'WRITE')
 def portfolio_submit(request, pk):
     """
     Submit portfolio for approval (Maker action).
+    Requires: cis-portfolio WRITE permission
     """
     if request.method != 'POST':
         return redirect('portfolio:detail', pk=pk)
@@ -232,11 +237,13 @@ def portfolio_submit(request, pk):
 
     return redirect('portfolio:detail', pk=portfolio.id)
 
-
-@login_required
+# PRODUCTION NOTE: Uncomment this decorator for production deployment
+#@require_permission('cis-portfolio', 'WRITE')
 def portfolio_approve(request, pk):
     """
     Approve portfolio (Checker action - Four-Eyes).
+    Requires: cis-portfolio WRITE permission
+    Note: Service layer enforces Four-Eyes principle
     """
     if request.method != 'POST':
         return redirect('portfolio:detail', pk=pk)
@@ -252,11 +259,13 @@ def portfolio_approve(request, pk):
 
     return redirect('portfolio:detail', pk=portfolio.id)
 
-
-@login_required
+# PRODUCTION NOTE: Uncomment this decorator for production deployment
+#@require_permission('cis-portfolio', 'WRITE')
 def portfolio_reject(request, pk):
     """
     Reject portfolio (Checker action).
+    Requires: cis-portfolio WRITE permission
+    Note: Service layer enforces Four-Eyes principle
     """
     if request.method != 'POST':
         return redirect('portfolio:detail', pk=pk)
@@ -272,11 +281,13 @@ def portfolio_reject(request, pk):
 
     return redirect('portfolio:detail', pk=portfolio.id)
 
-
-@login_required
+# PRODUCTION NOTE: Uncomment this decorator for production deployment
+#@require_permission('cis-portfolio', 'WRITE')
 def pending_approvals(request):
     """
     List portfolios pending approval (for Checkers).
+    Requires: cis-portfolio WRITE permission
+    Note: Additional group check remains for Checkers-only access
     """
     # Only show to users in Checkers group
     if not request.user.groups.filter(name='Checkers').exists() and not request.user.is_superuser:

@@ -41,7 +41,7 @@ class ImpalaConnectionManager:
         Get or create Impala connection.
 
         Args:
-            database: Optional database name, defaults to IMPALA_CONFIG['DATABASE']
+            database: Optional database name, defaults to HIVE_CONFIG['DATABASE']
 
         Returns:
             Connection object or None if not available
@@ -51,7 +51,7 @@ class ImpalaConnectionManager:
             return None
 
         try:
-            config = settings.IMPALA_CONFIG
+            config = settings.HIVE_CONFIG
             db_name = database or config['DATABASE']
 
             # Create new connection (connection pooling can be added here)

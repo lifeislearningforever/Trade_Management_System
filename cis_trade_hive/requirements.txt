@@ -5,7 +5,7 @@ django-extensions==4.1
 # Database - Hive Connection
 PyMySQL==1.1.1
 PyHive==0.7.0
-sasl==0.3.1
+#sasl==0.3.1
 thrift==0.16.0
 thrift-sasl==0.4.3
 

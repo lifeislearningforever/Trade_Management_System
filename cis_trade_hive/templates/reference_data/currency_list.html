@@ -61,7 +61,7 @@
         <div class="card-header">
             <h5 class="card-title mb-0">
                 Currency List
-                <span class="badge badge-primary ms-2">{{ currencies|length }} currencies</span>
+                <span class="badge badge-primary ms-2">{{ total_count }} currencies</span>
             </h5>
             <a href="?export=csv&{{ request.GET.urlencode }}" class="btn btn-sm btn-success">
                 <i class="bi bi-download"></i> Download CSV
@@ -129,6 +129,70 @@
                         </tbody>
                     </table>
                 </div>
+
+                <!-- Pagination -->
+                {% if currencies.has_other_pages %}
+                <div class="card-footer">
+                    <nav aria-label="Currency pagination">
+                        <ul class="pagination justify-content-center mb-0">
+                            {% if currencies.has_previous %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}" aria-label="First">
+                                        <span aria-hidden="true">&laquo;&laquo;</span>
+                                    </a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ currencies.previous_page_number }}{% if search %}&search={{ search }}{% endif %}" aria-label="Previous">
+                                        <span aria-hidden="true">&laquo;</span>
+                                    </a>
+                                </li>
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">&laquo;&laquo;</span>
+                                </li>
+                                <li class="page-item disabled">
+                                    <span class="page-link">&laquo;</span>
+                                </li>
+                            {% endif %}
+
+                            {% for num in currencies.paginator.page_range %}
+                                {% if currencies.number == num %}
+                                    <li class="page-item active">
+                                        <span class="page-link">{{ num }}</span>
+                                    </li>
+                                {% elif num > currencies.number|add:'-3' and num < currencies.number|add:'3' %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="?page={{ num }}{% if search %}&search={{ search }}{% endif %}">{{ num }}</a>
+                                    </li>
+                                {% endif %}
+                            {% endfor %}
+
+                            {% if currencies.has_next %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ currencies.next_page_number }}{% if search %}&search={{ search }}{% endif %}" aria-label="Next">
+                                        <span aria-hidden="true">&raquo;</span>
+                                    </a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ currencies.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}" aria-label="Last">
+                                        <span aria-hidden="true">&raquo;&raquo;</span>
+                                    </a>
+                                </li>
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">&raquo;</span>
+                                </li>
+                                <li class="page-item disabled">
+                                    <span class="page-link">&raquo;&raquo;</span>
+                                </li>
+                            {% endif %}
+                        </ul>
+                        <div class="text-center mt-2" style="font-size: var(--font-size-sm); color: var(--gray-600);">
+                            Page {{ currencies.number }} of {{ currencies.paginator.num_pages }} ({{ total_count }} total currencies)
+                        </div>
+                    </nav>
+                </div>
+                {% endif %}
             {% else %}
                 <div class="text-center py-5" style="color: var(--gray-500);">
                     <i class="bi bi-currency-exchange" style="font-size: 3rem; opacity: 0.3;"></i>

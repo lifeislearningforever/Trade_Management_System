@@ -24,8 +24,11 @@ ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').sp
 
 # Application definition
 INSTALLED_APPS = [
-    # Django Core Apps (minimal - no admin, no auth)
+    # Django Core Apps (minimal - with sessions for ACL)
+    'django.contrib.auth',  # Required for User model in audit logs
     'django.contrib.contenttypes',
+    'django.contrib.sessions',  # Required for session-based ACL auth
+    'django.contrib.messages',  # Required for flash messages
     'django.contrib.staticfiles',
 
     # Third Party Apps
@@ -45,8 +48,10 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',  # Required for session-based auth
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',  # Required for flash messages
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
@@ -61,6 +66,7 @@ TEMPLATES = [
             'context_processors': [
                 'django.template.context_processors.debug',
                 'django.template.context_processors.request',
+                'django.contrib.messages.context_processors.messages',  # Required for flash messages
                 # Custom context processors
                 'core.utils.context_processors.app_context',
             ],
@@ -92,7 +98,7 @@ HIVE_CONFIG = {
     'HOST': os.environ.get('HIVE_HOST', 'localhost'),
     'PORT': int(os.environ.get('HIVE_PORT', '10000')),
     'DATABASE': os.environ.get('HIVE_DB', 'cis'),
-    'AUTH': os.environ.get('HIVE_AUTH', 'NOSASL'),
+    'AUTH': os.environ.get('HIVE_AUTH', 'NONE'),
     'USERNAME': os.environ.get('HIVE_USERNAME', ''),
     'PASSWORD': os.environ.get('HIVE_PASSWORD', ''),
     'TIMEOUT': int(os.environ.get('HIVE_TIMEOUT', '60')),
@@ -253,3 +259,6 @@ DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'noreply@cistrade.com'
 APP_NAME = 'CisTrade'
 APP_VERSION = '1.0.0'
 APP_DESCRIPTION = 'Enterprise Trade Management System'
+
+# Four-Eyes Principle (Maker-Checker)
+MAKER_CHECKER_ENABLED = os.environ.get('MAKER_CHECKER_ENABLED', 'true').lower() == 'true'

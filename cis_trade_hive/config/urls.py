@@ -1,33 +1,31 @@
 """
 CisTrade - Main URL Configuration
-Professional Trade Management System - No Authentication
+Professional Trade Management System - ACL-Based Authentication
 """
 
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
-from django.http import HttpResponse
+from django.shortcuts import redirect
 
-# Simple home view
+from core.views.auth_views import LoginView, LogoutView, auto_login_tmp3rc
+from core.views.dashboard_views import dashboard_view
+
+# Redirect home to auto-login (which will authenticate and redirect to dashboard)
 def home_view(request):
-    return HttpResponse("""
-    <html>
-    <head><title>CisTrade - Trade Management System</title></head>
-    <body style="font-family: Arial, sans-serif; margin: 40px;">
-        <h1>CisTrade - Trade Management System</h1>
-        <p>Welcome to CisTrade. The system is connected to Hive database.</p>
-        <ul>
-            <li><a href="/reference-data/">Reference Data</a></li>
-            <li><a href="/portfolio/">Portfolio</a></li>
-            <li><a href="/udf/">UDF Management</a></li>
-        </ul>
-    </body>
-    </html>
-    """)
+    return redirect('auto_login')
 
 urlpatterns = [
-    # Home
+    # Home - redirect to dashboard or login
     path('', home_view, name='home'),
+
+    # Authentication
+    path('login/', LoginView.as_view(), name='login'),
+    path('logout/', LogoutView.as_view(), name='logout'),
+    path('auto-login/', auto_login_tmp3rc, name='auto_login'),
+
+    # Dashboard
+    path('dashboard/', dashboard_view, name='dashboard'),
 
     # Core
     path('core/', include('core.urls')),

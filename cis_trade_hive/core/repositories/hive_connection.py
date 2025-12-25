@@ -54,17 +54,23 @@ class HiveConnectionManager:
         try:
             config = settings.HIVE_CONFIG
             db_name = database or config['DATABASE']
+            auth_mode = config.get('AUTH', 'NOSASL')
+
+            # Build connection parameters based on auth mode
+            conn_params = {
+                'host': config['HOST'],
+                'port': config['PORT'],
+                'database': db_name,
+                'auth': auth_mode,
+            }
+
+            # Only add username/password for auth modes that require them
+            if auth_mode in ['LDAP', 'CUSTOM']:
+                conn_params['username'] = config.get('USERNAME', '')
+                conn_params['password'] = config.get('PASSWORD', '')
 
             # Create new connection
-            connection = hive.Connection(
-                host=config['HOST'],
-                port=config['PORT'],
-                database=db_name,
-                auth=config.get('AUTH', 'NOSASL'),
-                username=config.get('USERNAME', ''),
-                password=config.get('PASSWORD', ''),
-                timeout=config.get('TIMEOUT', 60)
-            )
+            connection = hive.Connection(**conn_params)
 
             logger.info(f"Successfully connected to Hive database: {db_name}")
             return connection

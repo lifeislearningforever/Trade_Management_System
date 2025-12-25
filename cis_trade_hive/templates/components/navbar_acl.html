@@ -1,4 +1,5 @@
 {% load static %}
+{% load core_filters %}
 <nav class="top-navbar">
     <!-- Left Side -->
     <div class="navbar-left">
@@ -25,7 +26,7 @@
         <!-- Search -->
         <div class="navbar-search d-none d-lg-block">
             <i class="bi bi-search"></i>
-            <input type="text" placeholder="Search portfolios, currencies..." id="global-search">
+            <input type="text" placeholder="Search portfolios, trades..." id="global-search">
         </div>
 
         <!-- Icons -->
@@ -33,20 +34,7 @@
             <!-- Notifications -->
             <button class="navbar-icon" id="notifications-btn" title="Notifications">
                 <i class="bi bi-bell"></i>
-                {% if notification_count %}
-                    <span class="badge">{{ notification_count }}</span>
-                {% endif %}
             </button>
-
-            <!-- Pending Approvals -->
-            {% if user.groups.all|length > 0 and 'Checkers' in user.groups.all.0.name %}
-                <a href="{% url 'portfolio:pending_approvals' %}" class="navbar-icon" title="Pending Approvals">
-                    <i class="bi bi-clock-history"></i>
-                    {% if pending_portfolios_count %}
-                        <span class="badge">{{ pending_portfolios_count }}</span>
-                    {% endif %}
-                </a>
-            {% endif %}
 
             <!-- Help -->
             <button class="navbar-icon" title="Help & Documentation">
@@ -57,19 +45,13 @@
         <!-- User Menu -->
         <div class="user-menu" id="user-menu">
             <div class="user-avatar">
-                {{ user.first_name|first|upper }}{{ user.last_name|first|upper }}
+                {% with user_name=request.session.user_name|default:"U" %}
+                    {{ user_name|slice:":1"|upper }}{% if user_name|wordcount > 1 %}{{ user_name|split:" "|last|slice:":1"|upper }}{% endif %}
+                {% endwith %}
             </div>
             <div class="user-info d-none d-md-block">
-                <div class="user-name">{{ user.get_full_name|default:user.username }}</div>
-                <div class="user-role">
-                    {% if user.is_superuser %}
-                        Administrator
-                    {% elif user.groups.all %}
-                        {{ user.groups.all.0.name }}
-                    {% else %}
-                        User
-                    {% endif %}
-                </div>
+                <div class="user-name">{{ request.session.user_name|default:"User" }}</div>
+                <div class="user-role">{{ request.session.user_group_name|default:"User" }}</div>
             </div>
             <i class="bi bi-chevron-down d-none d-md-block"></i>
         </div>
@@ -78,6 +60,11 @@
 
 <!-- User Dropdown Menu (Hidden by default) -->
 <div class="dropdown-menu dropdown-menu-end" id="user-dropdown" style="display: none;">
+    <div class="dropdown-header">
+        <strong>{{ request.session.user_name|default:"User" }}</strong>
+        <small class="d-block text-muted">{{ request.session.user_email|default:"" }}</small>
+    </div>
+    <div class="dropdown-divider"></div>
     <a class="dropdown-item" href="{% url 'logout' %}">
         <i class="bi bi-box-arrow-right"></i> Logout
     </a>

@@ -27,7 +27,7 @@ class ACLService:
 
     def __init__(self):
         self.cache_timeout = getattr(settings, 'ACL_CACHE_TIMEOUT', 300)
-        self.database = settings.IMPALA_CONFIG['DATABASE']
+        self.database = settings.HIVE_CONFIG['DATABASE']
 
     def get_user_permissions(self, user: User) -> Dict[str, bool]:
         """

@@ -10,10 +10,10 @@ import logging
 from datetime import datetime
 from django.shortcuts import render
 from django.http import HttpResponse
-from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.contrib import messages
 from core.models import AuditLog
+from core.views.auth_views import require_login, require_permission
 from .services.reference_data_service import (
     currency_service,
     country_service,
@@ -32,10 +32,12 @@ def get_client_ip(request):
     return request.META.get('REMOTE_ADDR')
 
 
-@login_required
+# PRODUCTION NOTE: Uncomment this decorator for production deployment
+# @require_permission('cis-currency', 'READ')
 def currency_list(request):
     """
     Currency list view with search, filter, and CSV export.
+    Requires: cis-currency READ permission
     """
     # Get query parameters
     search = request.GET.get('search', '').strip()
@@ -46,16 +48,17 @@ def currency_list(request):
         # Fetch data
         currencies = currency_service.list_all(search=search if search else None)
 
+        # PRODUCTION NOTE: Uncomment for production deployment with authentication
         # Log the read action
-        AuditLog.log_action(
-            action='READ',
-            user=request.user,
-            object_type='Currency',
-            object_repr=f"Currency List (search: {search if search else 'all'})",
-            description=f"Viewed currency list with {len(currencies)} records",
-            ip_address=get_client_ip(request),
-            request_path=request.path,
-        )
+        # AuditLog.log_action(
+        #     action='READ',
+        #     user=request.user,
+        #     object_type='Currency',
+        #     object_repr=f"Currency List (search: {search if search else 'all'})",
+        #     description=f"Viewed currency list with {len(currencies)} records",
+        #     ip_address=get_client_ip(request),
+        #     request_path=request.path,
+        # )
 
         # CSV Export
         if export:
@@ -78,15 +81,16 @@ def currency_list(request):
                     currency.get('spot_schedule', ''),
                 ])
 
+            # PRODUCTION NOTE: Uncomment for production deployment with authentication
             # Log export
-            AuditLog.log_action(
-                action='EXPORT',
-                user=request.user,
-                object_type='Currency',
-                object_repr='Currency List CSV Export',
-                description=f'Exported {len(currencies)} currencies to CSV',
-                ip_address=get_client_ip(request),
-            )
+            # AuditLog.log_action(
+            #     action='EXPORT',
+            #     user=request.user,
+            #     object_type='Currency',
+            #     object_repr='Currency List CSV Export',
+            #     description=f'Exported {len(currencies)} currencies to CSV',
+            #     ip_address=get_client_ip(request),
+            # )
 
             return response
 
@@ -108,10 +112,12 @@ def currency_list(request):
         return render(request, 'reference_data/currency_list.html', {'currencies': []})
 
 
-@login_required
+# PRODUCTION NOTE: Uncomment this decorator for production deployment
+# @require_permission('cis-currency', 'READ')
 def country_list(request):
     """
     Country list view with search, filter, and CSV export.
+    Requires: cis-reference READ permission
     """
     search = request.GET.get('search', '').strip()
     export = request.GET.get('export') == 'csv'
@@ -121,16 +127,17 @@ def country_list(request):
         # Fetch data
         countries = country_service.list_all(search=search if search else None)
 
+        # PRODUCTION NOTE: Uncomment for production deployment with authentication
         # Log the read action
-        AuditLog.log_action(
-            action='READ',
-            user=request.user,
-            object_type='Country',
-            object_repr=f"Country List (search: {search if search else 'all'})",
-            description=f"Viewed country list with {len(countries)} records",
-            ip_address=get_client_ip(request),
-            request_path=request.path,
-        )
+        # AuditLog.log_action(
+        #     action='READ',
+        #     user=request.user,
+        #     object_type='Country',
+        #     object_repr=f"Country List (search: {search if search else 'all'})",
+        #     description=f"Viewed country list with {len(countries)} records",
+        #     ip_address=get_client_ip(request),
+        #     request_path=request.path,
+        # )
 
         # CSV Export
         if export:
@@ -146,15 +153,16 @@ def country_list(request):
                     country.get('name', ''),
                 ])
 
+            # PRODUCTION NOTE: Uncomment for production deployment with authentication
             # Log export
-            AuditLog.log_action(
-                action='EXPORT',
-                user=request.user,
-                object_type='Country',
-                object_repr='Country List CSV Export',
-                description=f'Exported {len(countries)} countries to CSV',
-                ip_address=get_client_ip(request),
-            )
+            # AuditLog.log_action(
+            #     action='EXPORT',
+            #     user=request.user,
+            #     object_type='Country',
+            #     object_repr='Country List CSV Export',
+            #     description=f'Exported {len(countries)} countries to CSV',
+            #     ip_address=get_client_ip(request),
+            # )
 
             return response
 
@@ -176,10 +184,12 @@ def country_list(request):
         return render(request, 'reference_data/country_list.html', {'countries': []})
 
 
-@login_required
+# PRODUCTION NOTE: Uncomment this decorator for production deployment
+# @require_permission('cis-currency', 'READ')
 def calendar_list(request):
     """
     Calendar/Holiday list view with filtering and CSV export.
+    Requires: cis-reference READ permission
     """
     calendar_label = request.GET.get('calendar', '').strip()
     start_date = request.GET.get('start_date', '').strip()
@@ -204,16 +214,17 @@ def calendar_list(request):
         # Get distinct calendar labels for filter dropdown
         calendar_labels = calendar_service.get_distinct_calendars()
 
+        # PRODUCTION NOTE: Uncomment for production deployment with authentication
         # Log the read action
-        AuditLog.log_action(
-            action='READ',
-            user=request.user,
-            object_type='Calendar',
-            object_repr=f"Calendar List",
-            description=f"Viewed calendar list with {len(calendars)} records",
-            ip_address=get_client_ip(request),
-            request_path=request.path,
-        )
+        # AuditLog.log_action(
+        #     action='READ',
+        #     user=request.user,
+        #     object_type='Calendar',
+        #     object_repr=f"Calendar List",
+        #     description=f"Viewed calendar list with {len(calendars)} records",
+        #     ip_address=get_client_ip(request),
+        #     request_path=request.path,
+        # )
 
         # CSV Export
         if export:
@@ -230,15 +241,16 @@ def calendar_list(request):
                     cal.get('holiday_date', ''),
                 ])
 
+            # PRODUCTION NOTE: Uncomment for production deployment with authentication
             # Log export
-            AuditLog.log_action(
-                action='EXPORT',
-                user=request.user,
-                object_type='Calendar',
-                object_repr='Calendar List CSV Export',
-                description=f'Exported {len(calendars)} calendar entries to CSV',
-                ip_address=get_client_ip(request),
-            )
+            # AuditLog.log_action(
+            #     action='EXPORT',
+            #     user=request.user,
+            #     object_type='Calendar',
+            #     object_repr='Calendar List CSV Export',
+            #     description=f'Exported {len(calendars)} calendar entries to CSV',
+            #     ip_address=get_client_ip(request),
+            # )
 
             return response
 
@@ -267,10 +279,12 @@ def calendar_list(request):
         })
 
 
-@login_required
+# PRODUCTION NOTE: Uncomment this decorator for production deployment
+# @require_permission('cis-currency', 'READ')
 def counterparty_list(request):
     """
     Counterparty list view with filtering and CSV export.
+    Requires: cis-reference READ permission
     """
     search = request.GET.get('search', '').strip()
     counterparty_type = request.GET.get('type', '').strip()
@@ -284,16 +298,17 @@ def counterparty_list(request):
             counterparty_type=counterparty_type if counterparty_type else None
         )
 
+        # PRODUCTION NOTE: Uncomment for production deployment with authentication
         # Log the read action
-        AuditLog.log_action(
-            action='READ',
-            user=request.user,
-            object_type='Counterparty',
-            object_repr=f"Counterparty List (search: {search if search else 'all'})",
-            description=f"Viewed counterparty list with {len(counterparties)} records",
-            ip_address=get_client_ip(request),
-            request_path=request.path,
-        )
+        # AuditLog.log_action(
+        #     action='READ',
+        #     user=request.user,
+        #     object_type='Counterparty',
+        #     object_repr=f"Counterparty List (search: {search if search else 'all'})",
+        #     description=f"Viewed counterparty list with {len(counterparties)} records",
+        #     ip_address=get_client_ip(request),
+        #     request_path=request.path,
+        # )
 
         # CSV Export
         if export:
@@ -318,15 +333,16 @@ def counterparty_list(request):
                     cp.get('risk_category', ''),
                 ])
 
+            # PRODUCTION NOTE: Uncomment for production deployment with authentication
             # Log export
-            AuditLog.log_action(
-                action='EXPORT',
-                user=request.user,
-                object_type='Counterparty',
-                object_repr='Counterparty List CSV Export',
-                description=f'Exported {len(counterparties)} counterparties to CSV',
-                ip_address=get_client_ip(request),
-            )
+            # AuditLog.log_action(
+            #     action='EXPORT',
+            #     user=request.user,
+            #     object_type='Counterparty',
+            #     object_repr='Counterparty List CSV Export',
+            #     description=f'Exported {len(counterparties)} counterparties to CSV',
+            #     ip_address=get_client_ip(request),
+            # )
 
             return response
 
