@@ -27,66 +27,84 @@
                 {% csrf_token %}
 
                 <!-- Basic Information -->
-                <div class="row mb-4">
+                <div class="row mb-5">
                     <div class="col-12">
-                        <h5 class="border-bottom pb-2 mb-3">Basic Information</h5>
+                        <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
+                            <i class="bi bi-info-circle"></i> Basic Information
+                        </h5>
                     </div>
-                    <div class="col-md-6 mb-3">
-                        <label for="code" class="form-label">Portfolio Code *</label>
+                    <div class="col-md-6 mb-4">
+                        <label for="code" class="form-label required">Portfolio Code</label>
                         <input type="text" class="form-control" id="code" name="code"
                                value="{{ portfolio.code|default:'' }}"
                                {% if portfolio %}readonly{% endif %}
-                               required maxlength="20">
-                        <div class="form-text">Unique identifier for the portfolio</div>
+                               required maxlength="20"
+                               placeholder="e.g., PF001">
+                        <div class="form-text">
+                            <i class="bi bi-info-circle"></i> Unique identifier for the portfolio
+                        </div>
                     </div>
-                    <div class="col-md-6 mb-3">
-                        <label for="name" class="form-label">Portfolio Name *</label>
+                    <div class="col-md-6 mb-4">
+                        <label for="name" class="form-label required">Portfolio Name</label>
                         <input type="text" class="form-control" id="name" name="name"
                                value="{{ portfolio.name|default:'' }}"
-                               required maxlength="200">
+                               required maxlength="200"
+                               placeholder="Enter portfolio name">
                     </div>
-                    <div class="col-12 mb-3">
+                    <div class="col-12 mb-4">
                         <label for="description" class="form-label">Description</label>
-                        <textarea class="form-control" id="description" name="description" rows="3">{{ portfolio.description|default:'' }}</textarea>
+                        <textarea class="form-control" id="description" name="description" rows="4"
+                                  placeholder="Enter a detailed description of the portfolio">{{ portfolio.description|default:'' }}</textarea>
                     </div>
                 </div>
 
                 <!-- Financial Information -->
-                <div class="row mb-4">
+                <div class="row mb-5">
                     <div class="col-12">
-                        <h5 class="border-bottom pb-2 mb-3">Financial Information</h5>
+                        <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
+                            <i class="bi bi-cash-stack"></i> Financial Information
+                        </h5>
                     </div>
-                    <div class="col-md-4 mb-3">
-                        <label for="currency" class="form-label">Currency *</label>
+                    <div class="col-md-4 mb-4">
+                        <label for="currency" class="form-label required">Currency</label>
                         <input type="text" class="form-control" id="currency" name="currency"
                                value="{{ portfolio.currency|default:'' }}"
-                               required maxlength="3" placeholder="USD">
-                        <div class="form-text">3-letter currency code (e.g., USD, EUR)</div>
+                               required maxlength="3" placeholder="USD" style="text-transform: uppercase;">
+                        <div class="form-text">
+                            <i class="bi bi-info-circle"></i> 3-letter currency code (e.g., USD, EUR)
+                        </div>
                     </div>
-                    <div class="col-md-4 mb-3">
-                        <label for="manager" class="form-label">Portfolio Manager *</label>
+                    <div class="col-md-4 mb-4">
+                        <label for="manager" class="form-label required">Portfolio Manager</label>
                         <input type="text" class="form-control" id="manager" name="manager"
                                value="{{ portfolio.manager|default:'' }}"
-                               required maxlength="100">
+                               required maxlength="100"
+                               placeholder="Manager name">
                     </div>
-                    <div class="col-md-4 mb-3">
+                    <div class="col-md-4 mb-4">
                         <label for="portfolio_client" class="form-label">Client</label>
                         <input type="text" class="form-control" id="portfolio_client" name="portfolio_client"
                                value="{{ portfolio.portfolio_client|default:'' }}"
-                               maxlength="100">
+                               maxlength="100"
+                               placeholder="Client name">
                     </div>
-                    <div class="col-md-6 mb-3">
+                    <div class="col-md-6 mb-4">
                         <label for="cash_balance" class="form-label">Cash Balance</label>
-                        <input type="number" class="form-control" id="cash_balance" name="cash_balance"
-                               value="{{ portfolio.cash_balance|default:'0' }}"
-                               step="0.01">
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="bi bi-currency-dollar"></i></span>
+                            <input type="number" class="form-control" id="cash_balance" name="cash_balance"
+                                   value="{{ portfolio.cash_balance|default:'0' }}"
+                                   step="0.01" placeholder="0.00">
+                        </div>
                     </div>
                 </div>
 
                 <!-- Classification -->
-                <div class="row mb-4">
+                <div class="row mb-5">
                     <div class="col-12">
-                        <h5 class="border-bottom pb-2 mb-3">Classification & Grouping</h5>
+                        <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
+                            <i class="bi bi-diagram-3"></i> Classification & Grouping
+                        </h5>
                     </div>
                     <div class="col-md-6 mb-3">
                         <label for="cost_centre_code" class="form-label">Cost Centre Code</label>
@@ -127,11 +145,11 @@
                 </div>
 
                 <!-- Form Actions -->
-                <div class="d-flex gap-2 justify-content-end">
-                    <a href="{% url 'portfolio:list' %}" class="btn btn-outline-secondary">
+                <div class="d-flex gap-3 justify-content-end pt-4 border-top">
+                    <a href="{% url 'portfolio:list' %}" class="btn btn-outline-secondary btn-lg">
                         <i class="bi bi-x-circle"></i> Cancel
                     </a>
-                    <button type="submit" class="btn btn-primary">
+                    <button type="submit" class="btn btn-primary btn-lg">
                         <i class="bi bi-save"></i> {% if portfolio %}Update{% else %}Create{% endif %} Portfolio
                     </button>
                 </div>

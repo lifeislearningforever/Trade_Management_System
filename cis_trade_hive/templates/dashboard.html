@@ -23,7 +23,7 @@
                 <div class="stat-icon">
                     <i class="bi bi-briefcase-fill"></i>
                 </div>
-                <div class="stat-value">{{ stats.total_portfolios|default:0 }}</div>
+                <div class="stat-value" data-count="{{ stats.total_portfolios|default:0 }}">{{ stats.total_portfolios|default:0 }}</div>
                 <div class="stat-label">Total Portfolios</div>
                 <div class="stat-change">
                     <i class="bi bi-arrow-up"></i>
@@ -38,7 +38,7 @@
                 <div class="stat-icon">
                     <i class="bi bi-check-circle-fill"></i>
                 </div>
-                <div class="stat-value">{{ stats.active_portfolios|default:0 }}</div>
+                <div class="stat-value" data-count="{{ stats.active_portfolios|default:0 }}">{{ stats.active_portfolios|default:0 }}</div>
                 <div class="stat-label">Active Portfolios</div>
                 <div class="stat-change">
                     <i class="bi bi-check"></i>
@@ -53,7 +53,7 @@
                 <div class="stat-icon">
                     <i class="bi bi-clock-history"></i>
                 </div>
-                <div class="stat-value">{{ stats.pending_portfolios|default:0 }}</div>
+                <div class="stat-value" data-count="{{ stats.pending_portfolios|default:0 }}">{{ stats.pending_portfolios|default:0 }}</div>
                 <div class="stat-label">Pending Approvals</div>
                 <div class="stat-change">
                     {% if stats.pending_portfolios > 0 %}
