@@ -1,0 +1,207 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}FX Rates - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'market_data:fx_dashboard' %}">Market Data</a></li>
+    <li class="breadcrumb-item active">FX Rates</li>
+{% endblock %}
+
+{% block content %}
+<div class="fx-rate-list-container">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            <i class="bi bi-currency-exchange text-primary"></i> FX Rates
+        </h1>
+        <p class="content-subtitle">Foreign Exchange Rates from Hive Data Warehouse</p>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="mb-4">
+        <a href="{% url 'market_data:fx_dashboard' %}" class="btn btn-primary">
+            <i class="bi bi-speedometer2"></i> Dashboard
+        </a>
+        <a href="?export=csv{% if currency_pair %}&currency_pair={{ currency_pair }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if source_filter %}&source={{ source_filter }}{% endif %}" class="btn btn-success">
+            <i class="bi bi-download"></i> Export CSV
+        </a>
+    </div>
+
+    <!-- Search & Filter Card -->
+    <div class="card glass-card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-funnel"></i> Search & Filter
+            </h5>
+        </div>
+        <div class="card-body">
+            <form method="get" action="{% url 'market_data:fx_rate_list' %}" class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">Currency Pair</label>
+                    <select class="form-select" name="currency_pair">
+                        <option value="">All Pairs</option>
+                        {% for pair in currency_pairs %}
+                            <option value="{{ pair }}" {% if currency_pair == pair %}selected{% endif %}>{{ pair }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">From Date</label>
+                    <input type="date" class="form-control" name="date_from" value="{{ date_from }}">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">To Date</label>
+                    <input type="date" class="form-control" name="date_to" value="{{ date_to }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Source</label>
+                    <select class="form-select" name="source">
+                        <option value="">All Sources</option>
+                        {% for src in sources %}
+                            <option value="{{ src }}" {% if source_filter == src %}selected{% endif %}>{{ src }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2 d-flex align-items-end gap-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i> Search
+                    </button>
+                    <a href="{% url 'market_data:fx_rate_list' %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-x-circle"></i> Clear
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- FX Rates Table -->
+    <div class="card glass-card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-table"></i> FX Rates
+                <span class="badge badge-primary ms-2">{{ total_count }} rate{{ total_count|pluralize }}</span>
+            </h5>
+        </div>
+        <div class="card-body p-0">
+            {% if page_obj %}
+                <div class="table-responsive" style="max-height: 600px; overflow-x: auto; overflow-y: auto;">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light" style="position: sticky; top: 0; z-index: 10;">
+                            <tr>
+                                <th style="min-width: 120px;">Currency Pair</th>
+                                <th style="min-width: 140px;">Rate</th>
+                                <th style="min-width: 140px;">Bid</th>
+                                <th style="min-width: 140px;">Ask</th>
+                                <th style="min-width: 140px;">Mid</th>
+                                <th style="min-width: 120px;">Spread</th>
+                                <th style="min-width: 100px;">Spread %</th>
+                                <th style="min-width: 120px;">Date</th>
+                                <th style="min-width: 140px;">Time</th>
+                                <th style="min-width: 100px;">Source</th>
+                                <th style="min-width: 100px;">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for rate in page_obj %}
+                            <tr>
+                                <td>
+                                    <a href="{% url 'market_data:fx_rate_detail' rate.currency_pair %}" class="text-primary fw-bold">
+                                        {{ rate.currency_pair }}
+                                    </a>
+                                </td>
+                                <td class="text-end">
+                                    <strong>{{ rate.rate|floatformat:6 }}</strong>
+                                </td>
+                                <td class="text-end">{{ rate.bid_rate|floatformat:6|default:"-" }}</td>
+                                <td class="text-end">{{ rate.ask_rate|floatformat:6|default:"-" }}</td>
+                                <td class="text-end">{{ rate.mid_rate|floatformat:6|default:"-" }}</td>
+                                <td class="text-end">
+                                    {% if rate.spread %}
+                                        {{ rate.spread|floatformat:6 }}
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">
+                                    {% if rate.spread_percentage %}
+                                        {{ rate.spread_percentage|floatformat:4 }}%
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                                <td>{{ rate.rate_date }}</td>
+                                <td style="font-size: 0.85rem;">{{ rate.rate_time }}</td>
+                                <td>
+                                    <span class="badge badge-info">{{ rate.source }}</span>
+                                </td>
+                                <td>
+                                    <span class="status-pill status-{{ rate.freshness }} badge-{{ rate|get_freshness_color }}">
+                                        {% if rate.freshness == 'fresh' %}
+                                            <i class="bi bi-check-circle"></i> Fresh
+                                        {% elif rate.freshness == 'stale' %}
+                                            <i class="bi bi-exclamation-triangle"></i> Stale
+                                        {% else %}
+                                            <i class="bi bi-info-circle"></i> Normal
+                                        {% endif %}
+                                    </span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                {% if page_obj.has_other_pages %}
+                <div class="card-footer">
+                    <nav aria-label="FX Rate pagination">
+                        <ul class="pagination justify-content-center mb-0">
+                            {% if page_obj.has_previous %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page=1{% if currency_pair %}&currency_pair={{ currency_pair }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if source_filter %}&source={{ source_filter }}{% endif %}">First</a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if currency_pair %}&currency_pair={{ currency_pair }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if source_filter %}&source={{ source_filter }}{% endif %}">Previous</a>
+                                </li>
+                            {% endif %}
+
+                            <li class="page-item active">
+                                <span class="page-link">
+                                    Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+                                </span>
+                            </li>
+
+                            {% if page_obj.has_next %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if currency_pair %}&currency_pair={{ currency_pair }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if source_filter %}&source={{ source_filter }}{% endif %}">Next</a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if currency_pair %}&currency_pair={{ currency_pair }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if source_filter %}&source={{ source_filter }}{% endif %}">Last</a>
+                                </li>
+                            {% endif %}
+                        </ul>
+                    </nav>
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="empty-state py-5">
+                    <i class="bi bi-currency-exchange"></i>
+                    <h3>No FX rates found</h3>
+                    <p>Try adjusting your filters or check back later</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    {% if using_hive %}
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-database"></i>
+        <strong>Hive Data View:</strong> You are viewing FX rate data from Apache Hive. This is a read-only view with horizontal scroll enabled.
+        <br><small>Status indicators: Fresh (&lt;1 hour) | Normal (1-24 hours) | Stale (&gt;24 hours)</small>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

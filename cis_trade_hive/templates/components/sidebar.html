@@ -49,6 +49,23 @@
             </li>
         </ul>
 
+        <!-- Market Data Section -->
+        <div class="nav-section-title">Market Data</div>
+        <ul class="nav flex-column">
+            <li class="nav-item">
+                <a class="nav-link {% if 'market-data/fx-rates/dashboard' in request.path %}active{% endif %}" href="{% url 'market_data:fx_dashboard' %}">
+                    <i class="bi bi-graph-up"></i>
+                    <span>FX Dashboard</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if 'market-data/fx-rates' in request.path and 'dashboard' not in request.path %}active{% endif %}" href="{% url 'market_data:fx_rate_list' %}">
+                    <i class="bi bi-cash-coin"></i>
+                    <span>FX Rates</span>
+                </a>
+            </li>
+        </ul>
+
         <!-- Reference Data Section -->
         <div class="nav-section-title">Reference Data</div>
         <ul class="nav flex-column">

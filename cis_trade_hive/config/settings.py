@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     # Custom Apps
     'core.apps.CoreConfig',
     'portfolio.apps.PortfolioConfig',
+    'market_data.apps.MarketDataConfig',
     'udf.apps.UdfConfig',
     'reference_data.apps.ReferenceDataConfig',
 ]

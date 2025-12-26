@@ -36,6 +36,9 @@ urlpatterns = [
     # Portfolio
     path('portfolio/', include('portfolio.urls')),
 
+    # Market Data
+    path('market-data/', include('market_data.urls')),
+
     # UDF (User Defined Fields)
     path('udf/', include('udf.urls')),
 ]

@@ -1,0 +1,219 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}FX Rate Dashboard - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item active">FX Rate Dashboard</li>
+{% endblock %}
+
+{% block content %}
+<div class="fx-dashboard-container">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            <i class="bi bi-speedometer2 text-primary"></i> FX Rate Dashboard
+        </h1>
+        <p class="content-subtitle">Real-time foreign exchange market overview</p>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="mb-4">
+        <a href="{% url 'market_data:fx_rate_list' %}" class="btn btn-primary">
+            <i class="bi bi-list-ul"></i> View All Rates
+        </a>
+        <a href="{% url 'market_data:fx_rate_list' %}?export=csv" class="btn btn-success">
+            <i class="bi bi-download"></i> Export CSV
+        </a>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="row g-4 mb-4">
+        <div class="col-md-3">
+            <div class="metric-card glass-card">
+                <div class="metric-label">Total Rates</div>
+                <div class="metric-value">{{ stats.total_rates|default:0 }}</div>
+                <div class="metric-trend trend-up">
+                    <i class="bi bi-arrow-up"></i> Active
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card glass-card">
+                <div class="metric-label">Currency Pairs</div>
+                <div class="metric-value">{{ stats.unique_pairs|default:0 }}</div>
+                <div class="metric-trend trend-up">
+                    <i class="bi bi-bar-chart"></i> Tracked
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card glass-card">
+                <div class="metric-label">Data Sources</div>
+                <div class="metric-value">{{ stats.data_sources|default:0 }}</div>
+                <div class="metric-trend">
+                    <i class="bi bi-database"></i> Connected
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card glass-card">
+                <div class="metric-label">Latest Update</div>
+                <div class="metric-value" style="font-size: 1.5rem;">{{ stats.latest_update|default:"N/A" }}</div>
+                <div class="metric-trend">
+                    <i class="bi bi-clock-history"></i> Last Sync
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- Latest Rates Card -->
+        <div class="col-lg-8">
+            <div class="card glass-card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-graph-up"></i> Latest Rates
+                    </h5>
+                </div>
+                <div class="card-body p-0">
+                    {% if latest_rates %}
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Pair</th>
+                                        <th class="text-end">Rate</th>
+                                        <th class="text-end">Bid</th>
+                                        <th class="text-end">Ask</th>
+                                        <th class="text-end">Spread</th>
+                                        <th>Source</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for rate in latest_rates %}
+                                    <tr>
+                                        <td>
+                                            <a href="{% url 'market_data:fx_rate_detail' rate.currency_pair %}" class="text-primary fw-bold">
+                                                {{ rate.currency_pair }}
+                                            </a>
+                                        </td>
+                                        <td class="text-end"><strong>{{ rate.rate|floatformat:6 }}</strong></td>
+                                        <td class="text-end">{{ rate.bid_rate|floatformat:6|default:"-" }}</td>
+                                        <td class="text-end">{{ rate.ask_rate|floatformat:6|default:"-" }}</td>
+                                        <td class="text-end">
+                                            {% if rate.spread %}
+                                                {{ rate.spread|floatformat:6 }}
+                                            {% else %}
+                                                -
+                                            {% endif %}
+                                        </td>
+                                        <td><span class="badge badge-info">{{ rate.source }}</span></td>
+                                        <td>
+                                            <span class="badge badge-{{ rate.get_freshness_color }}">
+                                                {{ rate.freshness|capfirst }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="empty-state py-4">
+                            <i class="bi bi-currency-exchange"></i>
+                            <p>No latest rates available</p>
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="card-footer text-center">
+                    <a href="{% url 'market_data:fx_rate_list' %}" class="btn btn-sm btn-outline-primary">
+                        View All Rates <i class="bi bi-arrow-right"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Data Sources Card -->
+        <div class="col-lg-4">
+            <div class="card glass-card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-database"></i> Data Sources
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if stats.source_breakdown %}
+                        <div class="list-group list-group-flush">
+                            {% for source in stats.source_breakdown %}
+                            <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                                <div>
+                                    <i class="bi bi-circle-fill text-primary me-2" style="font-size: 0.5rem;"></i>
+                                    <strong>{{ source.source }}</strong>
+                                </div>
+                                <span class="badge badge-primary rounded-pill">{{ source.count }}</span>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="text-muted text-center py-3">No source data available</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Quick Stats Card -->
+            <div class="card glass-card mt-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-info-circle"></i> Quick Stats
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <span class="text-muted">Currencies Tracked</span>
+                        <strong>{{ currencies|length|default:0 }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <span class="text-muted">Active Pairs</span>
+                        <strong>{{ stats.unique_pairs|default:0 }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="text-muted">Coverage</span>
+                        <span class="badge badge-success">Global</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Currency Matrix -->
+    {% if currencies %}
+    <div class="card glass-card mt-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-grid"></i> Currency Coverage
+            </h5>
+        </div>
+        <div class="card-body">
+            <div class="d-flex flex-wrap gap-2">
+                {% for currency in currencies %}
+                    <span class="badge badge-secondary" style="font-size: 0.9rem; padding: 0.5rem 1rem;">
+                        {{ currency }}
+                    </span>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Info Alert -->
+    {% if using_hive %}
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-database"></i>
+        <strong>Hive Data View:</strong> All data is sourced from Apache Hive data warehouse. Rates are refreshed periodically from upstream data providers.
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
