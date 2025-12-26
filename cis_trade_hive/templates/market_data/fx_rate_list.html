@@ -137,7 +137,7 @@
                                     <span class="badge badge-info">{{ rate.source }}</span>
                                 </td>
                                 <td>
-                                    <span class="status-pill status-{{ rate.freshness }} badge-{{ rate|get_freshness_color }}">
+                                    <span class="status-pill status-{{ rate.freshness }} badge-{{ rate.get_freshness_color }}">
                                         {% if rate.freshness == 'fresh' %}
                                             <i class="bi bi-check-circle"></i> Fresh
                                         {% elif rate.freshness == 'stale' %}

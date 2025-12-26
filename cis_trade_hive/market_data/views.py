@@ -73,6 +73,18 @@ class FXRateWrapper:
         except:
             return 'unknown'
 
+    def get_spread(self):
+        """Calculate bid-ask spread"""
+        return self.spread
+
+    def get_spread_percentage(self):
+        """Calculate bid-ask spread as percentage"""
+        return self.spread_percentage
+
+    def get_freshness_status(self):
+        """Get freshness status for display"""
+        return self.freshness
+
     def get_freshness_color(self):
         """Get Bootstrap color class for freshness"""
         colors = {
