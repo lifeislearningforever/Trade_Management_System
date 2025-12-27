@@ -151,7 +151,7 @@
                                             <i class="bi bi-eye"></i>
                                         </a>
                                         {% if portfolio.status == 'DRAFT' or portfolio.status == 'REJECTED' %}
-                                            <a href="{% url 'portfolio:edit' portfolio.id %}" class="btn btn-sm btn-outline-warning" title="Edit">
+                                            <a href="{% url 'portfolio:edit' portfolio.name %}" class="btn btn-sm btn-outline-warning" title="Edit">
                                                 <i class="bi bi-pencil"></i>
                                             </a>
                                         {% endif %}

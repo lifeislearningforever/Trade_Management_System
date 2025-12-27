@@ -324,45 +324,91 @@ def portfolio_create(request):
 
 # PRODUCTION NOTE: Uncomment this decorator for production deployment
 #@require_permission('cis-portfolio', 'WRITE')
-def portfolio_edit(request, pk):
+def portfolio_edit(request, portfolio_name):
     """
-    Edit an existing portfolio (DRAFT or REJECTED only).
+    Edit an existing portfolio (DRAFT or REJECTED only) - Uses Kudu/Impala.
     Requires: cis-portfolio WRITE permission
     """
     from portfolio.services.portfolio_dropdown_service import portfolio_dropdown_service
 
-    portfolio = get_object_or_404(Portfolio, pk=pk)
+    # Get portfolio from Kudu
+    portfolio = portfolio_hive_repository.get_portfolio_by_code(portfolio_name)
+    if not portfolio:
+        messages.error(request, f'Portfolio "{portfolio_name}" not found')
+        return redirect('portfolio:list')
 
-    # Check permissions
-    if not PortfolioService.can_user_edit(portfolio, request.user):
-        messages.error(request, 'You do not have permission to edit this portfolio.')
-        return redirect('portfolio:detail', pk=portfolio.id)
+    # Get user info from session (ACL authentication)
+    username = request.session.get('user_login', 'anonymous')
+    user_id = str(request.session.get('user_id', ''))
+    user_email = request.session.get('user_email', '')
+
+    # Check if portfolio can be edited (only DRAFT or REJECTED)
+    current_status = portfolio.get('status', '')
+    if current_status not in ['DRAFT', 'REJECTED']:
+        messages.error(request, f'Cannot edit portfolio with status "{current_status}". Only DRAFT or REJECTED portfolios can be edited.')
+        return redirect('portfolio:detail', portfolio_name=portfolio_name)
 
     if request.method == 'POST':
         try:
-            data = {
-                'name': request.POST.get('name'),
-                'description': request.POST.get('description', ''),
-                'currency': request.POST.get('currency'),
-                'manager': request.POST.get('manager'),
-                'portfolio_client': request.POST.get('portfolio_client', ''),
-                'cash_balance': float(request.POST.get('cash_balance', 0)),
-                'cost_centre_code': request.POST.get('cost_centre_code', ''),
-                'corp_code': request.POST.get('corp_code', ''),
-                'account_group': request.POST.get('account_group', ''),
-                'portfolio_group': request.POST.get('portfolio_group', ''),
-                'report_group': request.POST.get('report_group', ''),
-                'entity_group': request.POST.get('entity_group', ''),
-                'status': request.POST.get('status', 'Active'),
-                'revaluation_status': request.POST.get('revaluation_status', ''),
-            }
+            # Build UPDATE query for Kudu
+            from datetime import datetime
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            portfolio = PortfolioService.update_portfolio(portfolio, request.user, data)
-            messages.success(request, f'Portfolio {portfolio.code} updated successfully!')
-            return redirect('portfolio:detail', pk=portfolio.id)
+            # Escape single quotes
+            def escape_value(val):
+                if val is None:
+                    return 'NULL'
+                if isinstance(val, str):
+                    return f"'{val.replace(chr(39), chr(39)+chr(39))}'"
+                return str(val)
 
-        except (ValidationError, PermissionDenied) as e:
-            messages.error(request, str(e))
+            cash_balance_str = str(request.POST.get('cash_balance', '0'))
+
+            update_query = f"""
+            UPDATE gmp_cis.cis_portfolio
+            SET description = {escape_value(request.POST.get('description', ''))},
+                currency = {escape_value(request.POST.get('currency'))},
+                manager = {escape_value(request.POST.get('manager'))},
+                portfolio_client = {escape_value(request.POST.get('portfolio_client', ''))},
+                cash_balance = {escape_value(cash_balance_str)},
+                cost_centre_code = {escape_value(request.POST.get('cost_centre_code', ''))},
+                corp_code = {escape_value(request.POST.get('corp_code', ''))},
+                account_group = {escape_value(request.POST.get('account_group', ''))},
+                portfolio_group = {escape_value(request.POST.get('portfolio_group', ''))},
+                report_group = {escape_value(request.POST.get('report_group', ''))},
+                entity_group = {escape_value(request.POST.get('entity_group', ''))},
+                revaluation_status = {escape_value(request.POST.get('revaluation_status', ''))},
+                updated_by = {escape_value(username)},
+                updated_at = '{timestamp}'
+            WHERE name = {escape_value(portfolio_name)}
+            """
+
+            from core.repositories.impala_connection import impala_manager
+            success = impala_manager.execute_write(update_query, database='gmp_cis')
+
+            if not success:
+                raise Exception('Failed to update portfolio in Kudu')
+
+            # Log to audit
+            audit_log_kudu_repository.log_action(
+                user_id=user_id,
+                username=username,
+                user_email=user_email,
+                action_type='UPDATE',
+                entity_type='PORTFOLIO',
+                entity_id=portfolio_name,
+                entity_name=portfolio_name,
+                action_description=f'Updated portfolio: {portfolio_name}',
+                request_method='POST',
+                request_path=request.path,
+                ip_address=request.META.get('REMOTE_ADDR'),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
+            )
+
+            messages.success(request, f'Portfolio "{portfolio_name}" updated successfully!')
+            return redirect('portfolio:detail', portfolio_name=portfolio_name)
+
         except Exception as e:
             messages.error(request, f'Error updating portfolio: {str(e)}')
 
@@ -373,7 +419,7 @@ def portfolio_edit(request, pk):
         'portfolio': portfolio,
         'dropdown_options': dropdown_options,
         'is_edit': True,
-        'can_close': PortfolioService.can_user_close(portfolio.status, request.user),
+        'can_close': current_status == 'APPROVED',  # Can only close APPROVED portfolios
     }
 
     return render(request, 'portfolio/portfolio_form.html', context)

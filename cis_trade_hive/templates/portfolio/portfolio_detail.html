@@ -22,11 +22,11 @@
         <div>
             <!-- DEV MODE: All buttons visible based on status only -->
             {% if portfolio.status == 'DRAFT' or portfolio.status == 'REJECTED' %}
-                <a href="{% url 'portfolio:edit' portfolio.id %}" class="btn btn-warning">
+                <a href="{% url 'portfolio:edit' portfolio.name %}" class="btn btn-warning">
                     <i class="bi bi-pencil"></i> Edit
                 </a>
-                {% if portfolio.status == 'DRAFT' %}
-                    <form method="post" action="{% url 'portfolio:submit' portfolio.id %}" class="d-inline">
+                {% if portfolio.status == 'DRAFT' or portfolio.status == 'REJECTED' %}
+                    <form method="post" action="{% url 'portfolio:submit' portfolio.name %}" class="d-inline">
                         {% csrf_token %}
                         <button type="submit" class="btn btn-primary" onclick="return confirm('Submit for approval?')">
                             <i class="bi bi-send"></i> Submit for Approval
@@ -34,12 +34,15 @@
                     </form>
                 {% endif %}
             {% elif portfolio.status == 'PENDING_APPROVAL' %}
-                <a href="{% url 'portfolio:approve' portfolio.id %}" class="btn btn-success">
-                    <i class="bi bi-check-circle"></i> Approve
-                </a>
-                <a href="{% url 'portfolio:reject' portfolio.id %}" class="btn btn-danger">
+                <form method="post" action="{% url 'portfolio:approve' portfolio.name %}" class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-success" onclick="return confirm('Approve this portfolio?')">
+                        <i class="bi bi-check-circle"></i> Approve
+                    </button>
+                </form>
+                <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#rejectModal">
                     <i class="bi bi-x-circle"></i> Reject
-                </a>
+                </button>
             {% elif portfolio.status == 'Active' %}
                 <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#closeModal">
                     <i class="bi bi-x-circle"></i> Close Portfolio
@@ -276,6 +279,44 @@
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="submit" class="btn btn-success">
                         <i class="bi bi-arrow-clockwise"></i> Reactivate Portfolio
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Reject Portfolio Modal -->
+<div class="modal fade" id="rejectModal" tabindex="-1" aria-labelledby="rejectModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title" id="rejectModalLabel">
+                    <i class="bi bi-x-circle"></i> Reject Portfolio
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="post" action="{% url 'portfolio:reject' portfolio.name %}">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <strong>Warning:</strong> This will reject portfolio <strong>{{ portfolio.name }}</strong>.
+                        The portfolio can be edited and resubmitted by the Maker.
+                    </div>
+                    <div class="mb-3">
+                        <label for="reject_comments" class="form-label">Reason for Rejection <span class="text-danger">*</span></label>
+                        <textarea class="form-control" id="reject_comments" name="comments" rows="3"
+                                  required placeholder="Enter reason for rejecting this portfolio..."></textarea>
+                        <div class="form-text">
+                            Providing a clear reason helps the Maker understand what needs to be fixed
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-x-circle"></i> Reject Portfolio
                     </button>
                 </div>
             </form>
