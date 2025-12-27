@@ -305,7 +305,7 @@ def portfolio_create(request):
                 status='SUCCESS'
             )
 
-            messages.success(request, f'Portfolio "{portfolio_name}" created successfully in Active status!')
+            messages.success(request, f'Portfolio "{portfolio_name}" created in DRAFT status. Submit for approval to activate.')
             return redirect('portfolio:detail', portfolio_name=portfolio_name)
 
         except ValidationError as e:

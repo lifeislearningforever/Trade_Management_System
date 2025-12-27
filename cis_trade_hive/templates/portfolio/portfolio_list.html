@@ -216,13 +216,15 @@
     <!-- Info Alert -->
     <div class="alert alert-info mt-4">
         <i class="bi bi-info-circle"></i>
-        <strong>Portfolio Lifecycle:</strong>
+        <strong>Four-Eyes Workflow:</strong>
         <ul class="mb-0 mt-2">
-            <li>New portfolios are created in <strong>Active</strong> status and immediately available</li>
-            <li>Active portfolios can be <strong>closed</strong> (soft delete - sets status to Inactive)</li>
-            <li>Inactive portfolios can be <strong>reactivated</strong> (sets status back to Active)</li>
-            <li>All lifecycle changes are tracked in portfolio history and audit logs</li>
-            <li>Portfolio names are unique and cannot be changed after creation</li>
+            <li><strong>Makers</strong> create portfolios in <strong>DRAFT</strong> status (not active)</li>
+            <li>Makers submit for approval → status becomes <strong>PENDING_APPROVAL</strong></li>
+            <li><strong>Checkers</strong> approve → status becomes <strong>APPROVED/ACTIVE</strong> (portfolio is active)</li>
+            <li>Checkers reject → status becomes <strong>REJECTED</strong> (can be edited and resubmitted)</li>
+            <li>Active portfolios can be <strong>closed</strong> (soft delete → Inactive)</li>
+            <li>Inactive portfolios can be <strong>reactivated</strong> by authorized users</li>
+            <li><strong>Important:</strong> Makers cannot approve their own portfolios (Four-Eyes principle)</li>
         </ul>
     </div>
 </div>

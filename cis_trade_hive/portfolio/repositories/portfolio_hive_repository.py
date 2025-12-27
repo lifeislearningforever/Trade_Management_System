@@ -215,7 +215,7 @@ class PortfolioHiveRepository:
                     return str(val).lower()
                 return str(val)
 
-            # Build INSERT query
+            # Build INSERT query - Four-Eyes workflow: Create in DRAFT status
             query = f"""
             INSERT INTO {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
             (`name`, `description`, `currency`, `manager`, `portfolio_client`,
@@ -236,8 +236,8 @@ class PortfolioHiveRepository:
                 {escape_value(portfolio_data.get('portfolio_group', ''))},
                 {escape_value(portfolio_data.get('report_group', ''))},
                 {escape_value(portfolio_data.get('entity_group', ''))},
-                'Active',
-                true,
+                'DRAFT',
+                false,
                 {escape_value(portfolio_data.get('revaluation_status', ''))},
                 {escape_value(created_by)},
                 '{timestamp}',

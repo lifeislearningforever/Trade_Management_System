@@ -225,11 +225,11 @@
     <div class="alert alert-info mt-4">
         <i class="bi bi-info-circle"></i>
         {% if portfolio %}
-            <strong>Note:</strong> You are viewing portfolio "{{ portfolio.name }}".
-            Portfolios can be closed (soft delete) or reactivated from the detail page.
+            <strong>Four-Eyes Workflow:</strong> After updating, you can submit the portfolio for approval.
+            Only DRAFT and REJECTED portfolios can be edited. A different user (Checker) must approve changes.
         {% else %}
-            <strong>Important:</strong> New portfolios are created in <strong>Active</strong> status and immediately available.
-            The portfolio name cannot be changed after creation. Use close/reactivate to manage lifecycle.
+            <strong>Four-Eyes Workflow:</strong> New portfolios are created in <strong>DRAFT</strong> status.
+            After creation, submit for approval. Only a different user (Checker) can approve it to make it ACTIVE.
         {% endif %}
     </div>
 </div>
