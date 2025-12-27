@@ -33,23 +33,16 @@
                             <i class="bi bi-info-circle"></i> Basic Information
                         </h5>
                     </div>
-                    <div class="col-md-6 mb-4">
-                        <label for="code" class="form-label required">Portfolio Code</label>
-                        <input type="text" class="form-control" id="code" name="code"
-                               value="{{ portfolio.code|default:'' }}"
-                               {% if portfolio %}readonly{% endif %}
-                               required maxlength="20"
-                               placeholder="e.g., PF001">
-                        <div class="form-text">
-                            <i class="bi bi-info-circle"></i> Unique identifier for the portfolio
-                        </div>
-                    </div>
-                    <div class="col-md-6 mb-4">
+                    <div class="col-md-12 mb-4">
                         <label for="name" class="form-label required">Portfolio Name</label>
                         <input type="text" class="form-control" id="name" name="name"
                                value="{{ portfolio.name|default:'' }}"
+                               {% if portfolio %}readonly{% endif %}
                                required maxlength="200"
-                               placeholder="Enter portfolio name">
+                               placeholder="Enter unique portfolio name (e.g., 'UOB SINGAPORE TRADING')">
+                        <div class="form-text">
+                            <i class="bi bi-info-circle"></i> Unique identifier for the portfolio. Cannot be changed after creation.
+                        </div>
                     </div>
                     <div class="col-12 mb-4">
                         <label for="description" class="form-label">Description</label>
@@ -232,11 +225,11 @@
     <div class="alert alert-info mt-4">
         <i class="bi bi-info-circle"></i>
         {% if portfolio %}
-            <strong>Four-Eyes Workflow:</strong> After updating, you can submit the portfolio for approval.
-            Only DRAFT and REJECTED portfolios can be edited. A different user (Checker) must approve changes.
+            <strong>Note:</strong> You are viewing portfolio "{{ portfolio.name }}".
+            Portfolios can be closed (soft delete) or reactivated from the detail page.
         {% else %}
-            <strong>Four-Eyes Workflow:</strong> New portfolios are created in DRAFT status.
-            After creation, submit for approval. Only a different user (Checker) can approve it to make it ACTIVE.
+            <strong>Important:</strong> New portfolios are created in <strong>Active</strong> status and immediately available.
+            The portfolio name cannot be changed after creation. Use close/reactivate to manage lifecycle.
         {% endif %}
     </div>
 </div>

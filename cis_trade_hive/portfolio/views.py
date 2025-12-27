@@ -237,34 +237,76 @@ def portfolio_detail(request, portfolio_name):
 #@require_permission('cis-portfolio', 'WRITE')
 def portfolio_create(request):
     """
-    Create a new portfolio.
+    Create a new portfolio - Inserts directly into Kudu/Impala.
     Requires: cis-portfolio WRITE permission
     """
     from portfolio.services.portfolio_dropdown_service import portfolio_dropdown_service
 
     if request.method == 'POST':
         try:
+            # Get user info from session (ACL authentication)
+            username = request.session.get('user_login', 'anonymous')
+            user_id = str(request.session.get('user_id', ''))
+            user_email = request.session.get('user_email', '')
+
+            # Prepare portfolio data
+            portfolio_name = request.POST.get('name', '').strip()
+
+            if not portfolio_name:
+                raise ValidationError("Portfolio name is required")
+
+            # Check if portfolio already exists
+            existing = portfolio_hive_repository.get_portfolio_by_code(portfolio_name)
+            if existing:
+                raise ValidationError(f"Portfolio '{portfolio_name}' already exists")
+
             data = {
-                'code': request.POST.get('code'),
-                'name': request.POST.get('name'),
+                'name': portfolio_name,
                 'description': request.POST.get('description', ''),
                 'currency': request.POST.get('currency'),
                 'manager': request.POST.get('manager'),
                 'portfolio_client': request.POST.get('portfolio_client', ''),
-                'cash_balance': float(request.POST.get('cash_balance', 0)),
+                'cash_balance': float(request.POST.get('cash_balance', 0)) if request.POST.get('cash_balance') else 0,
                 'cost_centre_code': request.POST.get('cost_centre_code', ''),
                 'corp_code': request.POST.get('corp_code', ''),
                 'account_group': request.POST.get('account_group', ''),
                 'portfolio_group': request.POST.get('portfolio_group', ''),
                 'report_group': request.POST.get('report_group', ''),
                 'entity_group': request.POST.get('entity_group', ''),
-                'status': request.POST.get('status', 'Active'),
                 'revaluation_status': request.POST.get('revaluation_status', ''),
             }
 
-            portfolio = PortfolioService.create_portfolio(request.user, data)
-            messages.success(request, f'Portfolio {portfolio.code} created successfully!')
-            return redirect('portfolio:detail', pk=portfolio.id)
+            # Validate required fields
+            if not data.get('currency'):
+                raise ValidationError("Currency is required")
+            if not data.get('manager'):
+                raise ValidationError("Manager is required")
+
+            # Insert into Kudu
+            success = portfolio_hive_repository.insert_portfolio(data, created_by=username)
+
+            if not success:
+                raise Exception("Failed to create portfolio in Kudu")
+
+            # Log to audit
+            audit_log_kudu_repository.log_action(
+                user_id=user_id,
+                username=username,
+                user_email=user_email,
+                action_type='CREATE',
+                entity_type='PORTFOLIO',
+                entity_id=portfolio_name,
+                entity_name=portfolio_name,
+                action_description=f"Created portfolio: {portfolio_name}",
+                request_method='POST',
+                request_path=request.path,
+                ip_address=request.META.get('REMOTE_ADDR'),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
+            )
+
+            messages.success(request, f'Portfolio "{portfolio_name}" created successfully in Active status!')
+            return redirect('portfolio:detail', portfolio_name=portfolio_name)
 
         except ValidationError as e:
             messages.error(request, str(e))

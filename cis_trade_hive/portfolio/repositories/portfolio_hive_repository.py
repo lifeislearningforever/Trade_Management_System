@@ -190,6 +190,76 @@ class PortfolioHiveRepository:
             return False
 
     @staticmethod
+    def insert_portfolio(portfolio_data: dict, created_by: str) -> bool:
+        """
+        Insert a new portfolio into Kudu.
+
+        Args:
+            portfolio_data: Dictionary with portfolio fields
+            created_by: Username of user creating the portfolio
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            from datetime import datetime
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            # Escape single quotes in string fields
+            def escape_value(val):
+                if val is None:
+                    return 'NULL'
+                if isinstance(val, str):
+                    return f"'{val.replace(chr(39), chr(39)+chr(39))}'"
+                if isinstance(val, bool):
+                    return str(val).lower()
+                return str(val)
+
+            # Build INSERT query
+            query = f"""
+            INSERT INTO {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
+            (`name`, `description`, `currency`, `manager`, `portfolio_client`,
+             `cash_balance`, `cost_centre_code`, `corp_code`, `account_group`,
+             `portfolio_group`, `report_group`, `entity_group`, `status`,
+             `is_active`, `revaluation_status`, `created_by`, `created_at`,
+             `updated_by`, `updated_at`)
+            VALUES (
+                {escape_value(portfolio_data.get('name'))},
+                {escape_value(portfolio_data.get('description', ''))},
+                {escape_value(portfolio_data.get('currency'))},
+                {escape_value(portfolio_data.get('manager'))},
+                {escape_value(portfolio_data.get('portfolio_client', ''))},
+                {portfolio_data.get('cash_balance', 0)},
+                {escape_value(portfolio_data.get('cost_centre_code', ''))},
+                {escape_value(portfolio_data.get('corp_code', ''))},
+                {escape_value(portfolio_data.get('account_group', ''))},
+                {escape_value(portfolio_data.get('portfolio_group', ''))},
+                {escape_value(portfolio_data.get('report_group', ''))},
+                {escape_value(portfolio_data.get('entity_group', ''))},
+                'Active',
+                true,
+                {escape_value(portfolio_data.get('revaluation_status', ''))},
+                {escape_value(created_by)},
+                '{timestamp}',
+                {escape_value(created_by)},
+                '{timestamp}'
+            )
+            """
+
+            success = impala_manager.execute_write(query, database=PortfolioHiveRepository.DATABASE)
+
+            if success:
+                logger.info(f"Successfully inserted portfolio {portfolio_data.get('name')} into Kudu")
+            else:
+                logger.error(f"Failed to insert portfolio {portfolio_data.get('name')} into Kudu")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Error inserting portfolio into Kudu: {str(e)}")
+            return False
+
+    @staticmethod
     def insert_portfolio_history(
         portfolio_code: str,
         action: str,
