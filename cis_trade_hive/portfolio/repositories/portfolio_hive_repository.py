@@ -216,20 +216,22 @@ class PortfolioHiveRepository:
                 return str(val)
 
             # Build INSERT query - Four-Eyes workflow: Create in DRAFT status
+            # Note: cash_balance is STRING in Kudu, no created_by column
+            cash_balance_str = str(portfolio_data.get('cash_balance', '0'))
+
             query = f"""
             INSERT INTO {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
             (`name`, `description`, `currency`, `manager`, `portfolio_client`,
              `cash_balance`, `cost_centre_code`, `corp_code`, `account_group`,
              `portfolio_group`, `report_group`, `entity_group`, `status`,
-             `is_active`, `revaluation_status`, `created_by`, `created_at`,
-             `updated_by`, `updated_at`)
+             `is_active`, `revaluation_status`, `created_at`, `updated_by`, `updated_at`)
             VALUES (
                 {escape_value(portfolio_data.get('name'))},
                 {escape_value(portfolio_data.get('description', ''))},
                 {escape_value(portfolio_data.get('currency'))},
                 {escape_value(portfolio_data.get('manager'))},
                 {escape_value(portfolio_data.get('portfolio_client', ''))},
-                {portfolio_data.get('cash_balance', 0)},
+                {escape_value(cash_balance_str)},
                 {escape_value(portfolio_data.get('cost_centre_code', ''))},
                 {escape_value(portfolio_data.get('corp_code', ''))},
                 {escape_value(portfolio_data.get('account_group', ''))},
@@ -239,7 +241,6 @@ class PortfolioHiveRepository:
                 'DRAFT',
                 false,
                 {escape_value(portfolio_data.get('revaluation_status', ''))},
-                {escape_value(created_by)},
                 '{timestamp}',
                 {escape_value(created_by)},
                 '{timestamp}'
