@@ -380,67 +380,193 @@ def portfolio_edit(request, pk):
 
 # PRODUCTION NOTE: Uncomment this decorator for production deployment
 #@require_permission('cis-portfolio', 'WRITE')
-def portfolio_submit(request, pk):
+def portfolio_submit(request, portfolio_name):
     """
-    Submit portfolio for approval (Maker action).
+    Submit portfolio for approval (Maker action) - Uses Kudu/Impala.
     Requires: cis-portfolio WRITE permission
     """
     if request.method != 'POST':
-        return redirect('portfolio:detail', pk=pk)
+        return redirect('portfolio:detail', portfolio_name=portfolio_name)
 
-    portfolio = get_object_or_404(Portfolio, pk=pk)
+    # Get portfolio from Kudu
+    portfolio = portfolio_hive_repository.get_portfolio_by_code(portfolio_name)
+    if not portfolio:
+        messages.error(request, f'Portfolio "{portfolio_name}" not found')
+        return redirect('portfolio:list')
+
+    # Get user info from session (ACL authentication)
+    username = request.session.get('user_login', 'anonymous')
+    user_id = str(request.session.get('user_id', ''))
+    user_email = request.session.get('user_email', '')
+
+    # Validate portfolio status
+    current_status = portfolio.get('status', '')
+    if current_status not in ['DRAFT', 'REJECTED']:
+        messages.error(request, f'Cannot submit portfolio with status "{current_status}". Only DRAFT or REJECTED portfolios can be submitted.')
+        return redirect('portfolio:detail', portfolio_name=portfolio_name)
 
     try:
-        portfolio = PortfolioService.submit_for_approval(portfolio, request.user)
-        messages.success(request, f'Portfolio {portfolio.code} submitted for approval!')
-    except (ValidationError, PermissionDenied) as e:
-        messages.error(request, str(e))
+        # Update status to PENDING_APPROVAL in Kudu
+        success = portfolio_hive_repository.update_portfolio_status(
+            portfolio_code=portfolio_name,
+            status='PENDING_APPROVAL',
+            is_active=False,  # Still not active until approved
+            updated_by=username
+        )
 
-    return redirect('portfolio:detail', pk=portfolio.id)
+        if not success:
+            raise Exception('Failed to update portfolio status in Kudu')
+
+        # Log to audit
+        audit_log_kudu_repository.log_action(
+            user_id=user_id,
+            username=username,
+            user_email=user_email,
+            action_type='SUBMIT',
+            entity_type='PORTFOLIO',
+            entity_id=portfolio_name,
+            entity_name=portfolio_name,
+            action_description=f'Submitted portfolio for approval: {portfolio_name}',
+            request_method='POST',
+            request_path=request.path,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            status='SUCCESS'
+        )
+
+        messages.success(request, f'Portfolio "{portfolio_name}" submitted for approval!')
+    except Exception as e:
+        messages.error(request, f'Error submitting portfolio: {str(e)}')
+
+    return redirect('portfolio:detail', portfolio_name=portfolio_name)
 
 # PRODUCTION NOTE: Uncomment this decorator for production deployment
 #@require_permission('cis-portfolio', 'WRITE')
-def portfolio_approve(request, pk):
+def portfolio_approve(request, portfolio_name):
     """
-    Approve portfolio (Checker action - Four-Eyes).
+    Approve portfolio (Checker action - Four-Eyes) - Uses Kudu/Impala.
     Requires: cis-portfolio WRITE permission
-    Note: Service layer enforces Four-Eyes principle
+    Note: Should enforce Four-Eyes principle (different user than creator)
     """
     if request.method != 'POST':
-        return redirect('portfolio:detail', pk=pk)
+        return redirect('portfolio:detail', portfolio_name=portfolio_name)
 
-    portfolio = get_object_or_404(Portfolio, pk=pk)
+    # Get portfolio from Kudu
+    portfolio = portfolio_hive_repository.get_portfolio_by_code(portfolio_name)
+    if not portfolio:
+        messages.error(request, f'Portfolio "{portfolio_name}" not found')
+        return redirect('portfolio:list')
+
+    # Get user info from session (ACL authentication)
+    username = request.session.get('user_login', 'anonymous')
+    user_id = str(request.session.get('user_id', ''))
+    user_email = request.session.get('user_email', '')
     comments = request.POST.get('comments', '').strip()
 
-    try:
-        portfolio = PortfolioService.approve_portfolio(portfolio, request.user, comments)
-        messages.success(request, f'Portfolio {portfolio.code} approved successfully!')
-    except (ValidationError, PermissionDenied) as e:
-        messages.error(request, str(e))
+    # Validate portfolio status
+    current_status = portfolio.get('status', '')
+    if current_status != 'PENDING_APPROVAL':
+        messages.error(request, f'Cannot approve portfolio with status "{current_status}". Only PENDING_APPROVAL portfolios can be approved.')
+        return redirect('portfolio:detail', portfolio_name=portfolio_name)
 
-    return redirect('portfolio:detail', pk=portfolio.id)
+    try:
+        # Update status to APPROVED (ACTIVE) in Kudu
+        success = portfolio_hive_repository.update_portfolio_status(
+            portfolio_code=portfolio_name,
+            status='APPROVED',
+            is_active=True,  # Now active!
+            updated_by=username
+        )
+
+        if not success:
+            raise Exception('Failed to approve portfolio in Kudu')
+
+        # Log to audit
+        audit_log_kudu_repository.log_action(
+            user_id=user_id,
+            username=username,
+            user_email=user_email,
+            action_type='APPROVE',
+            entity_type='PORTFOLIO',
+            entity_id=portfolio_name,
+            entity_name=portfolio_name,
+            action_description=f'Approved portfolio: {portfolio_name}. Comments: {comments}' if comments else f'Approved portfolio: {portfolio_name}',
+            request_method='POST',
+            request_path=request.path,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            status='SUCCESS'
+        )
+
+        messages.success(request, f'Portfolio "{portfolio_name}" approved successfully and is now ACTIVE!')
+    except Exception as e:
+        messages.error(request, f'Error approving portfolio: {str(e)}')
+
+    return redirect('portfolio:detail', portfolio_name=portfolio_name)
 
 # PRODUCTION NOTE: Uncomment this decorator for production deployment
 #@require_permission('cis-portfolio', 'WRITE')
-def portfolio_reject(request, pk):
+def portfolio_reject(request, portfolio_name):
     """
-    Reject portfolio (Checker action).
+    Reject portfolio (Checker action) - Uses Kudu/Impala.
     Requires: cis-portfolio WRITE permission
-    Note: Service layer enforces Four-Eyes principle
+    Note: Should enforce Four-Eyes principle (different user than creator)
     """
     if request.method != 'POST':
-        return redirect('portfolio:detail', pk=pk)
+        return redirect('portfolio:detail', portfolio_name=portfolio_name)
 
-    portfolio = get_object_or_404(Portfolio, pk=pk)
+    # Get portfolio from Kudu
+    portfolio = portfolio_hive_repository.get_portfolio_by_code(portfolio_name)
+    if not portfolio:
+        messages.error(request, f'Portfolio "{portfolio_name}" not found')
+        return redirect('portfolio:list')
+
+    # Get user info from session (ACL authentication)
+    username = request.session.get('user_login', 'anonymous')
+    user_id = str(request.session.get('user_id', ''))
+    user_email = request.session.get('user_email', '')
     comments = request.POST.get('comments', '').strip()
 
-    try:
-        portfolio = PortfolioService.reject_portfolio(portfolio, request.user, comments)
-        messages.warning(request, f'Portfolio {portfolio.code} rejected.')
-    except (ValidationError, PermissionDenied) as e:
-        messages.error(request, str(e))
+    # Validate portfolio status
+    current_status = portfolio.get('status', '')
+    if current_status != 'PENDING_APPROVAL':
+        messages.error(request, f'Cannot reject portfolio with status "{current_status}". Only PENDING_APPROVAL portfolios can be rejected.')
+        return redirect('portfolio:detail', portfolio_name=portfolio_name)
 
-    return redirect('portfolio:detail', pk=portfolio.id)
+    try:
+        # Update status to REJECTED in Kudu
+        success = portfolio_hive_repository.update_portfolio_status(
+            portfolio_code=portfolio_name,
+            status='REJECTED',
+            is_active=False,  # Not active
+            updated_by=username
+        )
+
+        if not success:
+            raise Exception('Failed to reject portfolio in Kudu')
+
+        # Log to audit
+        audit_log_kudu_repository.log_action(
+            user_id=user_id,
+            username=username,
+            user_email=user_email,
+            action_type='REJECT',
+            entity_type='PORTFOLIO',
+            entity_id=portfolio_name,
+            entity_name=portfolio_name,
+            action_description=f'Rejected portfolio: {portfolio_name}. Comments: {comments}' if comments else f'Rejected portfolio: {portfolio_name}',
+            request_method='POST',
+            request_path=request.path,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            status='SUCCESS'
+        )
+
+        messages.warning(request, f'Portfolio "{portfolio_name}" rejected. It can be edited and resubmitted.')
+    except Exception as e:
+        messages.error(request, f'Error rejecting portfolio: {str(e)}')
+
+    return redirect('portfolio:detail', portfolio_name=portfolio_name)
 
 # PRODUCTION NOTE: Uncomment this decorator for production deployment
 #@require_permission('cis-portfolio', 'WRITE')

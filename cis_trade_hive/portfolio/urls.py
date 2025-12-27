@@ -15,13 +15,13 @@ urlpatterns = [
     # Pending Approvals - MUST come before <str:portfolio_name>/ pattern
     path('pending/', views.pending_approvals, name='pending_approvals'),
 
-    # Edit - uses Django ORM pk for now
-    path('edit/<int:pk>/', views.portfolio_edit, name='edit'),
+    # Edit - uses portfolio name from Kudu
+    path('<str:portfolio_name>/edit/', views.portfolio_edit, name='edit'),
 
-    # Workflow Actions - use Django ORM pk
-    path('<int:pk>/submit/', views.portfolio_submit, name='submit'),
-    path('<int:pk>/approve/', views.portfolio_approve, name='approve'),
-    path('<int:pk>/reject/', views.portfolio_reject, name='reject'),
+    # Workflow Actions - use portfolio name from Kudu
+    path('<str:portfolio_name>/submit/', views.portfolio_submit, name='submit'),
+    path('<str:portfolio_name>/approve/', views.portfolio_approve, name='approve'),
+    path('<str:portfolio_name>/reject/', views.portfolio_reject, name='reject'),
 
     # Close/Reactivate - use portfolio name from Kudu
     path('<str:portfolio_name>/close/', views.portfolio_close, name='close'),
