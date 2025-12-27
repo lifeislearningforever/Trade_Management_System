@@ -167,37 +167,27 @@
     <!-- Workflow Information -->
     <div class="card mb-4">
         <div class="card-header">
-            <h5 class="card-title mb-0">Workflow Information (Four-Eyes)</h5>
+            <h5 class="card-title mb-0">Audit Information</h5>
         </div>
         <div class="card-body">
             <div class="row">
-                <div class="col-md-3">
-                    <h6 class="text-muted mb-2">Created By</h6>
-                    <p><i class="bi bi-person-circle"></i> {{ portfolio.created_by.username|default:"-" }}</p>
-                    <small class="text-muted">{{ portfolio.created_at|date:"Y-m-d H:i" }}</small>
+                <div class="col-md-4">
+                    <h6 class="text-muted mb-2">Created At</h6>
+                    <p><i class="bi bi-clock-history"></i> {{ portfolio.created_at|default:"-" }}</p>
                 </div>
-                <div class="col-md-3">
-                    <h6 class="text-muted mb-2">Updated By</h6>
-                    <p><i class="bi bi-person-circle"></i> {{ portfolio.updated_by.username|default:"-" }}</p>
-                    <small class="text-muted">{{ portfolio.updated_at|date:"Y-m-d H:i" }}</small>
+                <div class="col-md-4">
+                    <h6 class="text-muted mb-2">Last Updated By</h6>
+                    <p><i class="bi bi-person-circle"></i> {{ portfolio.updated_by|default:"-" }}</p>
                 </div>
-                {% if portfolio.submitted_by %}
-                <div class="col-md-3">
-                    <h6 class="text-muted mb-2">Submitted By</h6>
-                    <p><i class="bi bi-person-circle"></i> {{ portfolio.submitted_by.username }}</p>
-                    <small class="text-muted">{{ portfolio.submitted_for_approval_at|date:"Y-m-d H:i" }}</small>
+                <div class="col-md-4">
+                    <h6 class="text-muted mb-2">Last Updated At</h6>
+                    <p><i class="bi bi-clock-history"></i> {{ portfolio.updated_at|default:"-" }}</p>
                 </div>
-                {% endif %}
-                {% if portfolio.reviewed_by %}
-                <div class="col-md-3">
-                    <h6 class="text-muted mb-2">Reviewed By</h6>
-                    <p><i class="bi bi-person-circle"></i> {{ portfolio.reviewed_by.username }}</p>
-                    <small class="text-muted">{{ portfolio.reviewed_at|date:"Y-m-d H:i" }}</small>
-                    {% if portfolio.review_comments %}
-                        <p class="mt-2"><strong>Comments:</strong><br>{{ portfolio.review_comments }}</p>
-                    {% endif %}
-                </div>
-                {% endif %}
+            </div>
+            <div class="alert alert-info mt-3">
+                <i class="bi bi-info-circle"></i>
+                <strong>Note:</strong> For detailed audit history including created_by, submitted_by, and reviewed_by information,
+                check the Audit Log page. The Kudu table only stores the latest update information.
             </div>
         </div>
     </div>

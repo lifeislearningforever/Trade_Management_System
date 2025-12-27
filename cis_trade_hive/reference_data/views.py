@@ -48,11 +48,11 @@ def currency_list(request):
         # Fetch data
         currencies = currency_service.list_all(search=search if search else None)
 
-        # Get authenticated user details (guaranteed to exist due to @require_login)
-        user_id = str(request.user.id)
-        username = request.user.username
-        user_email = request.user.email or ''
-        user_full_name = request.user.get_full_name() or username
+        # Get user info from session (ACL authentication)
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+        user_full_name = username  # ACL doesn't have full name
 
         audit_log_kudu_repository.log_action(
             user_id=user_id,
@@ -142,11 +142,11 @@ def country_list(request):
         # Fetch data
         countries = country_service.list_all(search=search if search else None)
 
-        # Get authenticated user details
-        user_id = str(request.user.id)
-        username = request.user.username
-        user_email = request.user.email or ''
-        user_full_name = request.user.get_full_name() or username
+        # Get user info from session (ACL authentication)
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+        user_full_name = username  # ACL doesn't have full name
 
         audit_log_kudu_repository.log_action(
             user_id=user_id,
@@ -244,11 +244,11 @@ def calendar_list(request):
         # Get distinct calendar labels for filter dropdown
         calendar_labels = calendar_service.get_distinct_calendars()
 
-        # Get authenticated user details
-        user_id = str(request.user.id)
-        username = request.user.username
-        user_email = request.user.email or ''
-        user_full_name = request.user.get_full_name() or username
+        # Get user info from session (ACL authentication)
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+        user_full_name = username  # ACL doesn't have full name
 
         # Log VIEW/SEARCH action to Kudu
         audit_log_kudu_repository.log_action(
@@ -344,11 +344,11 @@ def counterparty_list(request):
             counterparty_type=counterparty_type if counterparty_type else None
         )
 
-        # Get authenticated user details
-        user_id = str(request.user.id)
-        username = request.user.username
-        user_email = request.user.email or ''
-        user_full_name = request.user.get_full_name() or username
+        # Get user info from session (ACL authentication)
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+        user_full_name = username  # ACL doesn't have full name
 
         # Log VIEW/SEARCH action to Kudu
         audit_log_kudu_repository.log_action(

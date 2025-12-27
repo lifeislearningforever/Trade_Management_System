@@ -145,10 +145,9 @@ def fx_rate_list(request):
                 rate.is_active
             ])
 
-        # Log export to Hive
-        user = getattr(request, 'user', None)
-        user_id = str(user.id) if user and hasattr(user, 'id') else 'anonymous'
-        username = user.username if user and hasattr(user, 'username') else 'anonymous'
+        # Log export to Hive - Get user info from session (ACL authentication)
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
 
         audit_log_repository.log_action(
             user_id=user_id,
@@ -183,10 +182,9 @@ def fx_rate_list(request):
     currency_pairs = fx_rate_hive_repository.get_currency_pairs()
     sources = ['BLOOMBERG', 'REUTERS', 'MANUAL', 'API', 'HIVE']
 
-    # Log view to Hive
-    user = getattr(request, 'user', None)
-    user_id = str(user.id) if user and hasattr(user, 'id') else 'anonymous'
-    username = user.username if user and hasattr(user, 'username') else 'anonymous'
+    # Log view to Hive - Get user info from session (ACL authentication)
+    username = request.session.get('user_login', 'anonymous')
+    user_id = str(request.session.get('user_id', ''))
 
     audit_log_repository.log_action(
         user_id=user_id,
@@ -230,10 +228,9 @@ def fx_rate_dashboard(request):
     # Get unique currencies for matrix
     currencies = fx_rate_hive_repository.get_currencies()
 
-    # Log view to Hive
-    user = getattr(request, 'user', None)
-    user_id = str(user.id) if user and hasattr(user, 'id') else 'anonymous'
-    username = user.username if user and hasattr(user, 'username') else 'anonymous'
+    # Log view to Hive - Get user info from session (ACL authentication)
+    username = request.session.get('user_login', 'anonymous')
+    user_id = str(request.session.get('user_id', ''))
 
     audit_log_repository.log_action(
         user_id=user_id,
@@ -290,10 +287,9 @@ def fx_rate_detail(request, currency_pair):
         'ask_rates': [float(r.ask_rate) if r.ask_rate else 0 for r in wrapped_history],
     }
 
-    # Log view to Hive
-    user = getattr(request, 'user', None)
-    user_id = str(user.id) if user and hasattr(user, 'id') else 'anonymous'
-    username = user.username if user and hasattr(user, 'username') else 'anonymous'
+    # Log view to Hive - Get user info from session (ACL authentication)
+    username = request.session.get('user_login', 'anonymous')
+    user_id = str(request.session.get('user_id', ''))
 
     audit_log_repository.log_action(
         user_id=user_id,

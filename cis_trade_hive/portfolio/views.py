@@ -48,13 +48,9 @@ class PortfolioWrapper:
         self.revaluation_status = data.get('revaluation_status', '')
         self.created_at = data.get('created_at', '')
         self.updated_at = data.get('updated_at', '')
+        self.updated_by = data.get('updated_by', '-')  # Username from Kudu
         # Generate a simple numeric ID from hash of name (for URLs)
         self.id = abs(hash(data.get('name', '') + str(index))) % 1000000
-
-        # Create mock created_by object
-        class MockUser:
-            username = '-'
-        self.created_by = MockUser()
 
 # PRODUCTION NOTE: Uncomment this decorator for production deployment
 #@require_permission('cis-portfolio', 'READ')
@@ -104,11 +100,10 @@ def portfolio_list(request):
                 portfolio.get('created_at', '')
             ])
 
-        # Log export to Kudu
-        user = getattr(request, 'user', None)
-        user_id = str(user.id) if user and hasattr(user, 'id') else 'anonymous'
-        username = user.username if user and hasattr(user, 'username') else 'anonymous'
-        user_email = user.email if user and hasattr(user, 'email') else ''
+        # Log export to Kudu - Get user info from session (ACL authentication)
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
 
         audit_log_kudu_repository.log_action(
             user_id=user_id,
@@ -141,11 +136,10 @@ def portfolio_list(request):
     # Get unique currencies from Hive
     currencies = portfolio_hive_repository.get_currencies()
 
-    # Log view to Kudu
-    user = getattr(request, 'user', None)
-    user_id = str(user.id) if user and hasattr(user, 'id') else 'anonymous'
-    username = user.username if user and hasattr(user, 'username') else 'anonymous'
-    user_email = user.email if user and hasattr(user, 'email') else ''
+    # Log view to Kudu - Get user info from session (ACL authentication)
+    username = request.session.get('user_login', 'anonymous')
+    user_id = str(request.session.get('user_id', ''))
+    user_email = request.session.get('user_email', '')
 
     audit_log_kudu_repository.log_action(
         user_id=user_id,
@@ -193,19 +187,17 @@ def portfolio_detail(request, portfolio_name):
     # For now, history is not available from Kudu (would need to query cis_portfolio_history)
     history = []
 
-    # Get user for permission checks
-    user = getattr(request, 'user', None)
+    # Get user info from session (ACL authentication)
+    username = request.session.get('user_login', 'anonymous')
+    user_id = str(request.session.get('user_id', ''))
+    user_email = request.session.get('user_email', '')
 
     # Check permissions based on status
     can_edit = portfolio.status in ['DRAFT', 'REJECTED']
     can_approve = portfolio.status == 'PENDING_APPROVAL'
-    can_close = PortfolioService.can_user_close(portfolio.status, user) if user else False
-    can_reactivate = PortfolioService.can_user_reactivate(portfolio.status, user) if user else False
-
-    # Log view to Kudu
-    user_id = str(user.id) if user and hasattr(user, 'id') else 'anonymous'
-    username = user.username if user and hasattr(user, 'username') else 'anonymous'
-    user_email = user.email if user and hasattr(user, 'email') else ''
+    # DEV MODE: Permission checks bypassed for close/reactivate
+    can_close = portfolio.status == 'Active'  # Simple status check
+    can_reactivate = portfolio.status == 'Inactive'  # Simple status check
 
     audit_log_kudu_repository.log_action(
         user_id=user_id,
@@ -633,6 +625,11 @@ def portfolio_close(request, portfolio_name):
     reason = request.POST.get('reason', '').strip()
 
     try:
+        # Get user info from session (ACL authentication)
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+
         # DEV MODE: Permission check bypassed
         # PRODUCTION: Uncomment below to enforce permissions
         # portfolio_status = portfolio_data.get('status', '')
@@ -642,9 +639,9 @@ def portfolio_close(request, portfolio_name):
         # Close portfolio in Kudu
         PortfolioService.close_portfolio(
             portfolio_code=portfolio_name,
-            user_id=str(request.user.id),
-            username=request.user.username,
-            user_email=request.user.email or '',
+            user_id=user_id,
+            username=username,
+            user_email=user_email,
             reason=reason
         )
 
@@ -673,6 +670,11 @@ def portfolio_reactivate(request, portfolio_name):
     comments = request.POST.get('comments', '').strip()
 
     try:
+        # Get user info from session (ACL authentication)
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+
         # DEV MODE: Permission check bypassed
         # PRODUCTION: Uncomment below to enforce permissions
         # portfolio_status = portfolio_data.get('status', '')
@@ -682,9 +684,9 @@ def portfolio_reactivate(request, portfolio_name):
         # Reactivate portfolio in Kudu
         PortfolioService.reactivate_portfolio(
             portfolio_code=portfolio_name,
-            user_id=str(request.user.id),
-            username=request.user.username,
-            user_email=request.user.email or '',
+            user_id=user_id,
+            username=username,
+            user_email=user_email,
             comments=comments
         )
 
@@ -698,7 +700,7 @@ def portfolio_reactivate(request, portfolio_name):
 #@require_permission('cis-portfolio', 'WRITE')
 def pending_approvals(request):
     """
-    List portfolios pending approval (for Checkers).
+    List portfolios pending approval (for Checkers) - Uses Kudu/Impala.
     Requires: cis-portfolio WRITE permission
     Note: Additional group check remains for Checkers-only access
     """
@@ -710,10 +712,39 @@ def pending_approvals(request):
     #         messages.error(request, 'Access denied. Only Checkers can view pending approvals.')
     #         return redirect('dashboard')
 
-    portfolios = PortfolioService.get_pending_approvals()
+    # Get portfolios with PENDING_APPROVAL status from Kudu
+    portfolios_data = portfolio_hive_repository.get_all_portfolios(
+        limit=1000,
+        status='PENDING_APPROVAL'
+    )
+
+    # Wrap dictionaries in objects for template compatibility
+    wrapped_portfolios = [PortfolioWrapper(p, idx) for idx, p in enumerate(portfolios_data)]
+
+    # Log view to audit
+    username = request.session.get('user_login', 'anonymous')
+    user_id = str(request.session.get('user_id', ''))
+    user_email = request.session.get('user_email', '')
+
+    audit_log_kudu_repository.log_action(
+        user_id=user_id,
+        username=username,
+        user_email=user_email,
+        action_type='VIEW',
+        entity_type='PORTFOLIO',
+        entity_id='PENDING_APPROVALS',
+        entity_name='Pending Approvals List',
+        action_description=f'Viewed pending approvals list from Kudu ({len(portfolios_data)} portfolios)',
+        request_method='GET',
+        request_path=request.path,
+        ip_address=request.META.get('REMOTE_ADDR'),
+        user_agent=request.META.get('HTTP_USER_AGENT', ''),
+        status='SUCCESS'
+    )
 
     context = {
-        'portfolios': portfolios,
+        'portfolios': wrapped_portfolios,
+        'pending_count': len(portfolios_data),
     }
 
     return render(request, 'portfolio/pending_approvals.html', context)

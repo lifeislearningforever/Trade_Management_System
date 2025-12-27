@@ -9,6 +9,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views import View
 
 from ..repositories.acl_repository import get_acl_repository
+from ..audit.audit_kudu_repository import audit_log_kudu_repository
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,23 @@ class LoginView(View):
         auth_data = acl_repo.authenticate_user(login)
 
         if not auth_data:
+            # Log failed login attempt to Kudu audit
+            audit_log_kudu_repository.log_action(
+                user_id='0',
+                username=login,
+                user_email='',
+                action_type='LOGIN',
+                entity_type='AUTH',
+                entity_name='Login',
+                entity_id='FAILED_LOGIN',
+                action_description=f'Failed login attempt for user: {login}',
+                request_method=request.method,
+                request_path=request.path,
+                ip_address=request.META.get('REMOTE_ADDR'),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='FAILURE'
+            )
+
             return render(request, 'core/login.html', {
                 'error': f'User {login} not found or not enabled'
             })
@@ -61,6 +79,23 @@ class LoginView(View):
         # Update last login (logged only, not persisted to Hive)
         acl_repo.update_last_login(login)
 
+        # Log successful login to Kudu audit
+        audit_log_kudu_repository.log_action(
+            user_id=str(user['cis_user_id']),
+            username=user['login'],
+            user_email=user['email'] or '',
+            action_type='LOGIN',
+            entity_type='AUTH',
+            entity_name='Login',
+            entity_id='SUCCESSFUL_LOGIN',
+            action_description=f"User {user['name']} ({user['login']}) logged in successfully",
+            request_method=request.method,
+            request_path=request.path,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            status='SUCCESS'
+        )
+
         logger.info(f"User {user['name']} ({login}) logged in successfully")
 
         return redirect('dashboard')
@@ -71,7 +106,28 @@ class LogoutView(View):
 
     def get(self, request: HttpRequest) -> HttpResponse:
         """Process logout."""
+        # Get session data BEFORE flushing
         user_name = request.session.get('user_name', 'Unknown')
+        user_login = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', '0'))
+        user_email = request.session.get('user_email', '')
+
+        # Log logout to Kudu audit BEFORE clearing session
+        audit_log_kudu_repository.log_action(
+            user_id=user_id,
+            username=user_login,
+            user_email=user_email,
+            action_type='LOGOUT',
+            entity_type='AUTH',
+            entity_name='Logout',
+            entity_id='USER_LOGOUT',
+            action_description=f'User {user_name} ({user_login}) logged out',
+            request_method=request.method,
+            request_path=request.path,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            status='SUCCESS'
+        )
 
         # Clear session
         request.session.flush()
@@ -162,6 +218,23 @@ def require_permission(permission: str, access_level: str = 'READ'):
                 has_access = user_access == 'READ_WRITE'
 
             if not has_access:
+                # Log permission denial to Kudu audit
+                audit_log_kudu_repository.log_action(
+                    user_id=str(request.session.get('user_id', '0')),
+                    username=request.session.get('user_login', 'anonymous'),
+                    user_email=request.session.get('user_email', ''),
+                    action_type='ACCESS_DENIED',
+                    entity_type='AUTH',
+                    entity_name='Permission Check',
+                    entity_id=permission,
+                    action_description=f"Access denied: User lacks {access_level} permission for {permission}",
+                    request_method=request.method,
+                    request_path=request.path,
+                    ip_address=request.META.get('REMOTE_ADDR'),
+                    user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                    status='FAILURE'
+                )
+
                 return HttpResponse(
                     f"Access denied: You don't have {access_level} permission for {permission}",
                     status=403
@@ -197,6 +270,23 @@ def auto_login_tmp3rc(request: HttpRequest) -> HttpResponse:
             request.session['user_group_id'] = user['cis_user_group_id']
             request.session['user_group_name'] = group['name'] if group else 'Unknown'
             request.session['user_permissions'] = permission_map
+
+            # Log auto-login to Kudu audit
+            audit_log_kudu_repository.log_action(
+                user_id=str(user['cis_user_id']),
+                username=user['login'],
+                user_email=user['email'] or '',
+                action_type='LOGIN',
+                entity_type='AUTH',
+                entity_name='Auto-Login',
+                entity_id='AUTO_LOGIN',
+                action_description=f"Auto-login successful for {user['name']} ({user['login']})",
+                request_method=request.method,
+                request_path=request.path,
+                ip_address=request.META.get('REMOTE_ADDR'),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
+            )
 
             logger.info(f"Auto-login successful for {user['name']}")
             return redirect('dashboard')

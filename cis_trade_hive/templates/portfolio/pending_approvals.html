@@ -24,7 +24,7 @@
         <div class="card-header">
             <h5 class="card-title mb-0">
                 Portfolios Awaiting Approval
-                <span class="badge badge-warning ms-2">{{ portfolios.count }} pending</span>
+                <span class="badge badge-warning ms-2">{{ pending_count }} pending</span>
             </h5>
         </div>
         <div class="card-body p-0">
@@ -33,55 +33,46 @@
                     <table class="table table-hover mb-0">
                         <thead>
                             <tr>
-                                <th style="width: 10%;">Code</th>
-                                <th style="width: 20%;">Name</th>
+                                <th style="width: 25%;">Portfolio Name</th>
                                 <th style="width: 12%;">Manager</th>
                                 <th style="width: 8%;">Currency</th>
-                                <th style="width: 12%;">Submitted By</th>
-                                <th style="width: 12%;">Submitted At</th>
-                                <th style="width: 15%;">Actions</th>
+                                <th style="width: 12%;">Updated By</th>
+                                <th style="width: 12%;">Updated At</th>
+                                <th style="width: 20%;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for portfolio in portfolios %}
                             <tr>
                                 <td>
-                                    <strong class="text-primary">{{ portfolio.code }}</strong>
-                                </td>
-                                <td>
-                                    <a href="{% url 'portfolio:detail' portfolio.id %}" class="text-decoration-none">
-                                        {{ portfolio.name }}
+                                    <a href="{% url 'portfolio:detail' portfolio.name %}" class="text-decoration-none">
+                                        <strong class="text-primary">{{ portfolio.name }}</strong>
                                     </a>
                                 </td>
-                                <td>{{ portfolio.manager }}</td>
+                                <td>{{ portfolio.manager|default:"-" }}</td>
                                 <td>
                                     <span class="badge badge-info">{{ portfolio.currency }}</span>
                                 </td>
                                 <td>
-                                    <i class="bi bi-person-circle"></i> {{ portfolio.submitted_by.username|default:portfolio.created_by.username }}
+                                    <i class="bi bi-person-circle"></i> {{ portfolio.updated_by|default:"-" }}
                                 </td>
                                 <td style="font-size: var(--font-size-sm);">
-                                    {{ portfolio.submitted_for_approval_at|date:"Y-m-d H:i"|default:"-" }}
+                                    {{ portfolio.updated_at|default:"-" }}
                                 </td>
                                 <td>
-                                    {% if portfolio.created_by == request.user %}
-                                        <span class="badge badge-secondary">Your submission</span>
-                                        <small class="text-muted d-block">Cannot approve own work</small>
-                                    {% else %}
-                                        <div class="btn-group btn-group-sm">
-                                            <a href="{% url 'portfolio:detail' portfolio.id %}" class="btn btn-outline-primary" title="View Details">
-                                                <i class="bi bi-eye"></i> View
-                                            </a>
-                                            <button type="button" class="btn btn-outline-success" 
-                                                    onclick="approvePortfolio({{ portfolio.id }}, '{{ portfolio.name }}')" title="Approve">
-                                                <i class="bi bi-check-circle"></i> Approve
-                                            </button>
-                                            <button type="button" class="btn btn-outline-danger"
-                                                    onclick="rejectPortfolio({{ portfolio.id }}, '{{ portfolio.name }}')" title="Reject">
-                                                <i class="bi bi-x-circle"></i> Reject
-                                            </button>
-                                        </div>
-                                    {% endif %}
+                                    <div class="btn-group btn-group-sm">
+                                        <a href="{% url 'portfolio:detail' portfolio.name %}" class="btn btn-outline-primary" title="View Details">
+                                            <i class="bi bi-eye"></i> View
+                                        </a>
+                                        <button type="button" class="btn btn-outline-success"
+                                                onclick="approvePortfolio('{{ portfolio.name }}')" title="Approve">
+                                            <i class="bi bi-check-circle"></i> Approve
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger"
+                                                onclick="rejectPortfolio('{{ portfolio.name }}')" title="Reject">
+                                            <i class="bi bi-x-circle"></i> Reject
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                             {% endfor %}
@@ -164,15 +155,15 @@
 </div>
 
 <script>
-function approvePortfolio(id, name) {
-    document.getElementById('approvePortfolioName').textContent = name;
-    document.getElementById('approveForm').action = "{% url 'portfolio:list' %}".replace('/portfolio/', '/portfolio/' + id + '/approve/');
+function approvePortfolio(portfolioName) {
+    document.getElementById('approvePortfolioName').textContent = portfolioName;
+    document.getElementById('approveForm').action = '/portfolio/' + encodeURIComponent(portfolioName) + '/approve/';
     new bootstrap.Modal(document.getElementById('approveModal')).show();
 }
 
-function rejectPortfolio(id, name) {
-    document.getElementById('rejectPortfolioName').textContent = name;
-    document.getElementById('rejectForm').action = "{% url 'portfolio:list' %}".replace('/portfolio/', '/portfolio/' + id + '/reject/');
+function rejectPortfolio(portfolioName) {
+    document.getElementById('rejectPortfolioName').textContent = portfolioName;
+    document.getElementById('rejectForm').action = '/portfolio/' + encodeURIComponent(portfolioName) + '/reject/';
     new bootstrap.Modal(document.getElementById('rejectModal')).show();
 }
 </script>
