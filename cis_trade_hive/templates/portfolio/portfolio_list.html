@@ -213,18 +213,18 @@
         </div>
     </div>
 
-    <!-- Info Alerts -->
-    {% if using_hive %}
-    <div class="alert alert-warning mt-4">
-        <i class="bi bi-database"></i>
-        <strong>Hive Data View:</strong> You are viewing portfolio data from Apache Hive. This is a read-only view showing all portfolio columns with horizontal scroll. Detail and edit functions are not available for Hive data.
-    </div>
-    {% else %}
+    <!-- Info Alert -->
     <div class="alert alert-info mt-4">
         <i class="bi bi-info-circle"></i>
-        <strong>Four-Eyes Principle:</strong> All portfolio changes require maker-checker approval.
-        Makers can create/edit, Checkers can approve/reject. No user can approve their own work.
+        <strong>Four-Eyes Workflow:</strong>
+        <ul class="mb-0 mt-2">
+            <li>New portfolios start in <strong>DRAFT</strong> status (not active)</li>
+            <li>Makers submit for approval → status becomes <strong>PENDING_APPROVAL</strong></li>
+            <li>Checkers approve → status becomes <strong>APPROVED/ACTIVE</strong> (portfolio is active)</li>
+            <li>Checkers reject → status becomes <strong>REJECTED</strong> (can be edited and resubmitted)</li>
+            <li>Active portfolios can be <strong>closed</strong> (soft delete, reversible)</li>
+            <li>Inactive portfolios can be <strong>reactivated</strong> by authorized users</li>
+        </ul>
     </div>
-    {% endif %}
 </div>
 {% endblock %}

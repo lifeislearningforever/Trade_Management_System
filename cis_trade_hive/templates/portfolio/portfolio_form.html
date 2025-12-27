@@ -171,17 +171,27 @@
                             {% endfor %}
                         </select>
                     </div>
+                    {% if portfolio %}
+                    {# Status field only visible when editing (read-only, managed by workflow) #}
                     <div class="col-md-6 mb-3">
                         <label for="status" class="form-label">Status</label>
-                        <select class="form-select" id="status" name="status">
-                            <option value="">Select Status</option>
-                            {% for st in dropdown_options.statuses %}
-                                <option value="{{ st }}" {% if portfolio.status == st %}selected{% elif not portfolio and st == 'Active' %}selected{% endif %}>
-                                    {{ st }}
-                                </option>
-                            {% endfor %}
-                        </select>
+                        <input type="text" class="form-control" id="status" name="status"
+                               value="{{ portfolio.status }}" readonly>
+                        <div class="form-text">
+                            <i class="bi bi-info-circle"></i> Status is managed by the Four-Eyes workflow
+                        </div>
                     </div>
+                    {% else %}
+                    {# Hidden for create - will be set to DRAFT automatically by service layer #}
+                    <input type="hidden" name="status" value="DRAFT">
+                    <div class="col-md-6 mb-3">
+                        <div class="alert alert-info mb-0">
+                            <i class="bi bi-info-circle"></i>
+                            <strong>Workflow:</strong> New portfolios start in DRAFT status.
+                            Submit for approval to activate the Four-Eyes workflow.
+                        </div>
+                    </div>
+                    {% endif %}
                     <div class="col-md-6 mb-3">
                         <label for="revaluation_status" class="form-label">Revaluation Status</label>
                         <select class="form-select" id="revaluation_status" name="revaluation_status">
@@ -221,8 +231,13 @@
     <!-- Info Alert -->
     <div class="alert alert-info mt-4">
         <i class="bi bi-info-circle"></i>
-        <strong>Note:</strong> After creating/updating, the portfolio will be saved in DRAFT status.
-        You'll need to submit it for approval (Four-Eyes principle). Only a different user (Checker) can approve it.
+        {% if portfolio %}
+            <strong>Four-Eyes Workflow:</strong> After updating, you can submit the portfolio for approval.
+            Only DRAFT and REJECTED portfolios can be edited. A different user (Checker) must approve changes.
+        {% else %}
+            <strong>Four-Eyes Workflow:</strong> New portfolios are created in DRAFT status.
+            After creation, submit for approval. Only a different user (Checker) can approve it to make it ACTIVE.
+        {% endif %}
     </div>
 </div>
 
