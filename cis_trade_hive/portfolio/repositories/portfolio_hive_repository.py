@@ -61,7 +61,7 @@ class PortfolioHiveRepository:
             SELECT `name`, `description`, `currency`, `manager`, `portfolio_client`,
                    `cash_balance`, `status`, `cost_centre_code`, `corp_code`,
                    `account_group`, `portfolio_group`, `report_group`, `entity_group`,
-                   `revaluation_status`, `created_at`, `updated_at`
+                   `revaluation_status`, `is_active`, `created_at`, `updated_at`, `updated_by`
             FROM {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
             WHERE {where_clause}
             LIMIT {limit}
