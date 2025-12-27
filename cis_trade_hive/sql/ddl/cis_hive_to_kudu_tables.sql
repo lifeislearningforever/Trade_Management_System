@@ -17,7 +17,7 @@ USE cis;
 
 -- Kudu table for cis_audit_log
 CREATE TABLE IF NOT EXISTS cis_audit_log_kudu (
-  audit_id INT64 NOT NULL,
+  audit_id BIGINT NOT NULL,
   audit_timestamp STRING,
   user_id STRING,
   username STRING,
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS cis_audit_log_kudu (
   request_path STRING,
   request_params STRING,
   status STRING,
-  status_code INT32,
+  status_code INT,
   error_message STRING,
   error_traceback STRING,
   session_id STRING,
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS cis_audit_log_kudu (
   user_agent STRING,
   module_name STRING,
   function_name STRING,
-  duration_ms INT64,
+  duration_ms BIGINT,
   tags STRING,
   metadata STRING,
   audit_date STRING,
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS cis_audit_log_kudu (
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES (
-  'kudu.master_addresses' = 'localhost:7051',
+  'kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251',
   'kudu.table_name' = 'cis_audit_log_kudu'
 );
 
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS cis_group_permissions_kudu (
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES (
-  'kudu.master_addresses' = 'localhost:7051',
+  'kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251',
   'kudu.table_name' = 'cis_group_permissions_kudu'
 );
 
@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS cis_permission_kudu (
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES (
-  'kudu.master_addresses' = 'localhost:7051',
+  'kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251',
   'kudu.table_name' = 'cis_permission_kudu'
 );
 
@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS cis_portfolio_kudu (
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES (
-  'kudu.master_addresses' = 'localhost:7051',
+  'kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251',
   'kudu.table_name' = 'cis_portfolio_kudu'
 );
 
@@ -153,7 +153,7 @@ CREATE TABLE IF NOT EXISTS cis_udf_definition_kudu (
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES (
-  'kudu.master_addresses' = 'localhost:7051',
+  'kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251',
   'kudu.table_name' = 'cis_udf_definition_kudu'
 );
 
@@ -173,7 +173,7 @@ CREATE TABLE IF NOT EXISTS cis_udf_option_kudu (
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES (
-  'kudu.master_addresses' = 'localhost:7051',
+  'kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251',
   'kudu.table_name' = 'cis_udf_option_kudu'
 );
 
@@ -199,7 +199,7 @@ CREATE TABLE IF NOT EXISTS cis_udf_value_kudu (
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES (
-  'kudu.master_addresses' = 'localhost:7051',
+  'kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251',
   'kudu.table_name' = 'cis_udf_value_kudu'
 );
 
@@ -221,7 +221,7 @@ CREATE TABLE IF NOT EXISTS cis_udf_value_multi_kudu (
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES (
-  'kudu.master_addresses' = 'localhost:7051',
+  'kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251',
   'kudu.table_name' = 'cis_udf_value_multi_kudu'
 );
 
@@ -247,7 +247,7 @@ CREATE TABLE IF NOT EXISTS cis_user_kudu (
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES (
-  'kudu.master_addresses' = 'localhost:7051',
+  'kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251',
   'kudu.table_name' = 'cis_user_kudu'
 );
 
@@ -266,7 +266,7 @@ CREATE TABLE IF NOT EXISTS cis_user_group_kudu (
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES (
-  'kudu.master_addresses' = 'localhost:7051',
+  'kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251',
   'kudu.table_name' = 'cis_user_group_kudu'
 );
 
@@ -281,7 +281,7 @@ CREATE TABLE IF NOT EXISTS gmp_cis_sta_dly_calendar_kudu (
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES (
-  'kudu.master_addresses' = 'localhost:7051',
+  'kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251',
   'kudu.table_name' = 'gmp_cis_sta_dly_calendar_kudu'
 );
 
@@ -313,7 +313,7 @@ CREATE TABLE IF NOT EXISTS gmp_cis_sta_dly_counterparty_kudu (
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES (
-  'kudu.master_addresses' = 'localhost:7051',
+  'kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251',
   'kudu.table_name' = 'gmp_cis_sta_dly_counterparty_kudu'
 );
 
@@ -327,7 +327,7 @@ CREATE TABLE IF NOT EXISTS gmp_cis_sta_dly_country_kudu (
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES (
-  'kudu.master_addresses' = 'localhost:7051',
+  'kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251',
   'kudu.table_name' = 'gmp_cis_sta_dly_country_kudu'
 );
 
@@ -347,7 +347,7 @@ CREATE TABLE IF NOT EXISTS gmp_cis_sta_dly_currency_kudu (
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES (
-  'kudu.master_addresses' = 'localhost:7051',
+  'kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251',
   'kudu.table_name' = 'gmp_cis_sta_dly_currency_kudu'
 );
 
@@ -361,7 +361,7 @@ CREATE TABLE IF NOT EXISTS test_insert_simple_kudu (
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES (
-  'kudu.master_addresses' = 'localhost:7051',
+  'kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251',
   'kudu.table_name' = 'test_insert_simple_kudu'
 );
 

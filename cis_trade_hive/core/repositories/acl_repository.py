@@ -1,11 +1,11 @@
 """
 ACL Repository for user and permission management.
-Handles queries to Hive ACL tables.
+Handles queries to Kudu/Impala ACL tables.
 """
 
 import logging
 from typing import Optional, List, Dict, Any
-from .hive_connection import HiveConnectionManager
+from .impala_connection import impala_manager
 
 logger = logging.getLogger(__name__)
 
@@ -18,49 +18,35 @@ class ACLRepository:
 
     def __init__(self):
         """Initialize ACL repository."""
-        self.connection_manager = HiveConnectionManager()
+        self.connection_manager = impala_manager
 
     def get_user_by_login(self, login: str) -> Optional[Dict[str, Any]]:
         """
         Get user by login ID.
 
         Args:
-            login: User login ID (e.g., 'TMP3RC')
+            login: User login ID (e.g., 'TMP4UG')
 
         Returns:
             Dictionary with user data or None if not found
         """
         try:
-            conn = self.connection_manager.get_connection()
-            if not conn:
-                logger.error("Failed to get Hive connection")
-                return None
-
-            cursor = conn.cursor()
-
-            query = """
+            query = f"""
                 SELECT cis_user_id, login, name, entity, email, domain,
                        cis_user_group_id, is_deleted, enabled,
                        last_login, created_on, created_by, updated_on, updated_by
                 FROM cis_user
-                WHERE UPPER(login) = UPPER(%s)
+                WHERE UPPER(login) = UPPER('{login}')
                   AND is_deleted = false
                   AND enabled = true
             """
 
-            cursor.execute(query, (login,))
-            row = cursor.fetchone()
+            result = self.connection_manager.execute_query(query, database='gmp_cis')
 
-            if not row:
-                cursor.close()
+            if not result or len(result) == 0:
                 return None
 
-            # Convert to dictionary
-            columns = [desc[0].split('.')[-1] for desc in cursor.description]
-            user_data = dict(zip(columns, row))
-
-            cursor.close()
-            return user_data
+            return result[0]
 
         except Exception as e:
             logger.error(f"Error getting user by login: {str(e)}")
@@ -78,31 +64,17 @@ class ACLRepository:
             List of permission dictionaries
         """
         try:
-            conn = self.connection_manager.get_connection()
-            if not conn:
-                logger.error("Failed to get Hive connection")
-                return []
-
-            cursor = conn.cursor()
-
-            query = """
+            query = f"""
                 SELECT cis_group_permissions_id, cis_user_group_id,
                        permission, read_write, is_deleted,
                        updated_on, updated_by
                 FROM cis_group_permissions
-                WHERE cis_user_group_id = %s
-                  AND is_deleted = 'false'
+                WHERE cis_user_group_id = {cis_user_group_id}
+                  AND is_deleted = false
             """
 
-            cursor.execute(query, (cis_user_group_id,))
-            rows = cursor.fetchall()
-
-            # Convert to list of dictionaries
-            columns = [desc[0].split('.')[-1] for desc in cursor.description]
-            permissions = [dict(zip(columns, row)) for row in rows]
-
-            cursor.close()
-            return permissions
+            result = self.connection_manager.execute_query(query, database='gmp_cis')
+            return result if result else []
 
         except Exception as e:
             logger.error(f"Error getting user permissions: {str(e)}")
@@ -120,33 +92,20 @@ class ACLRepository:
             Dictionary with group data or None if not found
         """
         try:
-            conn = self.connection_manager.get_connection()
-            if not conn:
-                logger.error("Failed to get Hive connection")
-                return None
-
-            cursor = conn.cursor()
-
-            query = """
+            query = f"""
                 SELECT cis_user_group_id, name, entity, description,
                        is_deleted, updated_on, updated_by
                 FROM cis_user_group
-                WHERE cis_user_group_id = %s
-                  AND is_deleted = 'false'
+                WHERE cis_user_group_id = {cis_user_group_id}
+                  AND is_deleted = false
             """
 
-            cursor.execute(query, (cis_user_group_id,))
-            row = cursor.fetchone()
+            result = self.connection_manager.execute_query(query, database='gmp_cis')
 
-            if not row:
-                cursor.close()
+            if not result or len(result) == 0:
                 return None
 
-            columns = [desc[0].split('.')[-1] for desc in cursor.description]
-            group_data = dict(zip(columns, row))
-
-            cursor.close()
-            return group_data
+            return result[0]
 
         except Exception as e:
             logger.error(f"Error getting user group: {str(e)}")
@@ -225,27 +184,15 @@ class ACLRepository:
             List of user dictionaries
         """
         try:
-            conn = self.connection_manager.get_connection()
-            if not conn:
-                return []
-
-            cursor = conn.cursor()
-
             query = """
                 SELECT cis_user_id, login, name, entity, email,
                        cis_user_group_id, enabled
                 FROM cis_user
-                WHERE is_deleted = 'false'
+                WHERE is_deleted = false
             """
 
-            cursor.execute(query)
-            rows = cursor.fetchall()
-
-            columns = [desc[0].split('.')[-1] for desc in cursor.description]
-            users = [dict(zip(columns, row)) for row in rows]
-
-            cursor.close()
-            return users
+            result = self.connection_manager.execute_query(query, database='gmp_cis')
+            return result if result else []
 
         except Exception as e:
             logger.error(f"Error getting all users: {str(e)}")

@@ -18,7 +18,7 @@ from decimal import Decimal
 from datetime import date, datetime
 
 from udf.models import UDF, UDFValue, UDFHistory
-from core.audit.audit_hive_repository import audit_log_repository
+from core.audit.audit_kudu_repository import audit_log_kudu_repository
 from udf.repositories import (
     udf_definition_repository,
     udf_option_repository,
@@ -94,43 +94,85 @@ class UDFService:
             updated_by=user
         )
 
-        # Also save to Hive
+        # Save to Kudu table
         try:
-            from datetime import datetime
-            udf_definition_repository.insert_definition({
+            import time
+            # Prepare data for Kudu (timestamps as BIGINT milliseconds)
+            kudu_data = {
                 'udf_id': udf.id,
                 'field_name': udf.field_name,
                 'label': udf.label,
-                'description': udf.description,
+                'description': udf.description or '',
                 'field_type': udf.field_type,
                 'entity_type': udf.entity_type,
                 'is_required': udf.is_required,
                 'is_unique': udf.is_unique,
-                'default_value': udf.default_value,
-                'dropdown_options': udf.dropdown_options,
-                'min_value': float(udf.min_value) if udf.min_value else None,
-                'max_value': float(udf.max_value) if udf.max_value else None,
                 'max_length': udf.max_length,
-                'display_order': udf.display_order,
-                'group_name': udf.group_name,
+                'display_order': udf.display_order or 0,
+                'group_name': udf.group_name or '',
                 'is_active': udf.is_active,
                 'created_by': user.username,
-                'created_at': udf.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                'created_at': int(udf.created_at.timestamp() * 1000),  # BIGINT milliseconds
                 'updated_by': user.username,
-                'updated_at': udf.updated_at.strftime('%Y-%m-%d %H:%M:%S')
-            })
-        except Exception as e:
-            print(f"Warning: Failed to save UDF to Hive: {e}")
+                'updated_at': int(udf.updated_at.timestamp() * 1000)   # BIGINT milliseconds
+            }
 
-        # Log creation to Hive
-        audit_log_repository.log_action(
+            # Add default values based on type
+            if udf.field_type == 'TEXT':
+                kudu_data['default_string'] = udf.default_value or ''
+            elif udf.field_type == 'NUMBER':
+                kudu_data['default_decimal'] = str(udf.default_value) if udf.default_value else None
+            elif udf.field_type == 'DATE':
+                kudu_data['default_datetime'] = int(time.time() * 1000) if udf.default_value else None
+            elif udf.field_type == 'BOOLEAN':
+                kudu_data['default_bool'] = bool(udf.default_value) if udf.default_value is not None else None
+            elif udf.field_type == 'INTEGER':
+                kudu_data['default_int'] = int(udf.default_value) if udf.default_value else None
+
+            # Add min/max values if present
+            if udf.min_value:
+                kudu_data['min_value_decimal'] = str(udf.min_value)
+            if udf.max_value:
+                kudu_data['max_value_decimal'] = str(udf.max_value)
+
+            # Insert into Kudu
+            success = udf_definition_repository.insert_definition(kudu_data)
+            if not success:
+                logger.warning(f"Failed to save UDF {udf.field_name} to Kudu")
+        except Exception as e:
+            logger.error(f"Error saving UDF to Kudu: {e}")
+            import traceback
+            traceback.print_exc()
+
+        # Log creation to Kudu - General audit log
+        audit_log_kudu_repository.log_action(
             user_id=str(user.id),
             username=user.username,
+            user_email=user.email or '',
             action_type='CREATE',
             entity_type='UDF',
             entity_id=str(udf.id),
             entity_name=udf.field_name,
+            field_name='created_by',
+            old_value=None,
+            new_value=user.get_full_name() or user.username,
             action_description=f"Created UDF {udf.field_name} ({udf.label}) for {udf.entity_type}",
+            module_name='udf.services.udf_service',
+            function_name='create_udf',
+            status='SUCCESS'
+        )
+
+        # Log UDF-specific audit
+        audit_log_kudu_repository.log_udf_action(
+            user_id=str(user.id),
+            username=user.username,
+            action_type='CREATE',
+            udf_id=udf.id,
+            field_name=udf.field_name,
+            label=udf.label,
+            entity_type=udf.entity_type,
+            changes=f"field_type={udf.field_type}, is_required={udf.is_required}, created_by={user.get_full_name() or user.username}",
+            action_description=f"Created UDF definition for {udf.entity_type}",
             status='SUCCESS'
         )
 
@@ -174,9 +216,10 @@ class UDFService:
         udf.full_clean()  # Validate
         udf.save()
 
-        # Log update to Hive
+        # Log update to Kudu
         if changes:
-            audit_log_repository.log_action(
+            # General audit log
+            audit_log_kudu_repository.log_action(
                 user_id=str(user.id),
                 username=user.username,
                 action_type='UPDATE',
@@ -184,6 +227,22 @@ class UDFService:
                 entity_id=str(udf.id),
                 entity_name=udf.field_name,
                 action_description=f"Updated UDF {udf.field_name}: {'; '.join(changes)}",
+                module_name='udf.services.udf_service',
+                function_name='update_udf',
+                status='SUCCESS'
+            )
+
+            # UDF-specific audit log
+            audit_log_kudu_repository.log_udf_action(
+                user_id=str(user.id),
+                username=user.username,
+                action_type='UPDATE',
+                udf_id=udf.id,
+                field_name=udf.field_name,
+                label=udf.label,
+                entity_type=udf.entity_type,
+                changes='; '.join(changes),
+                action_description=f"Updated {len(changes)} field(s)",
                 status='SUCCESS'
             )
 
@@ -202,8 +261,9 @@ class UDFService:
         udf.updated_by = user
         udf.save()
 
-        # Log deletion to Hive
-        audit_log_repository.log_action(
+        # Log deletion to Kudu
+        # General audit log
+        audit_log_kudu_repository.log_action(
             user_id=str(user.id),
             username=user.username,
             action_type='DELETE',
@@ -211,6 +271,22 @@ class UDFService:
             entity_id=str(udf.id),
             entity_name=udf.field_name,
             action_description=f"Deactivated UDF {udf.field_name} ({udf.label})",
+            module_name='udf.services.udf_service',
+            function_name='delete_udf',
+            status='SUCCESS'
+        )
+
+        # UDF-specific audit log
+        audit_log_kudu_repository.log_udf_action(
+            user_id=str(user.id),
+            username=user.username,
+            action_type='DELETE',
+            udf_id=udf.id,
+            field_name=udf.field_name,
+            label=udf.label,
+            entity_type=udf.entity_type,
+            changes='is_active=False',
+            action_description='Deactivated UDF definition',
             status='SUCCESS'
         )
 
@@ -296,9 +372,11 @@ class UDFService:
             changed_by=user
         )
 
-        # Log action to Hive
+        # Log action to Kudu
         action_type = 'CREATE' if created else 'UPDATE'
-        audit_log_repository.log_action(
+
+        # General audit log
+        audit_log_kudu_repository.log_action(
             user_id=str(user.id),
             username=user.username,
             action_type=action_type,
@@ -308,6 +386,25 @@ class UDFService:
             action_description=f"{action_type} UDF value: {udf.field_name} = {value} for {entity_type}#{entity_id}",
             old_value=old_value,
             new_value=str(value),
+            field_name=udf.field_name,
+            module_name='udf.services.udf_service',
+            function_name='set_udf_value',
+            status='SUCCESS'
+        )
+
+        # UDF value-specific audit log
+        audit_log_kudu_repository.log_udf_value_action(
+            user_id=str(user.id),
+            username=user.username,
+            action_type=action_type,
+            udf_id=udf.id,
+            field_name=udf.field_name,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            old_value=old_value,
+            new_value=str(value),
+            value_type=udf.field_type,
+            action_description=f"{'Created' if created else 'Updated'} {udf.label}",
             status='SUCCESS'
         )
 
@@ -443,8 +540,9 @@ class UDFService:
             changed_by=user
         )
 
-        # Log deletion to Hive
-        audit_log_repository.log_action(
+        # Log deletion to Kudu
+        # General audit log
+        audit_log_kudu_repository.log_action(
             user_id=str(user.id),
             username=user.username,
             action_type='DELETE',
@@ -453,6 +551,25 @@ class UDFService:
             entity_name=udf_value.udf.field_name,
             action_description=f"Deleted UDF value: {udf_value.udf.field_name} for {udf_value.entity_type}#{udf_value.entity_id}",
             old_value=old_value,
+            field_name=udf_value.udf.field_name,
+            module_name='udf.services.udf_service',
+            function_name='delete_udf_value',
+            status='SUCCESS'
+        )
+
+        # UDF value-specific audit log
+        audit_log_kudu_repository.log_udf_value_action(
+            user_id=str(user.id),
+            username=user.username,
+            action_type='DELETE',
+            udf_id=udf_value.udf.id,
+            field_name=udf_value.udf.field_name,
+            entity_type=udf_value.entity_type,
+            entity_id=udf_value.entity_id,
+            old_value=old_value,
+            new_value=None,
+            value_type=udf_value.udf.field_type,
+            action_description=f"Deleted {udf_value.udf.label}",
             status='SUCCESS'
         )
 

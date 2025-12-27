@@ -55,6 +55,84 @@
         </div>
     </div>
 
+    <!-- Portfolio Analytics Section -->
+    {% if portfolio_stats and portfolio_stats.total_portfolios > 0 %}
+    <div class="row g-4 mb-4">
+        <div class="col-12">
+            <h5 class="mb-3">
+                <i class="bi bi-graph-up"></i> Portfolio Analytics
+            </h5>
+        </div>
+
+        <!-- Total Portfolios Card -->
+        <div class="col-xl-3 col-lg-4 col-md-6">
+            <div class="card stats-card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="stats-icon bg-primary">
+                            <i class="bi bi-briefcase-fill"></i>
+                        </div>
+                        <div class="ms-3">
+                            <h6 class="text-muted mb-1">Total Portfolios</h6>
+                            <h3 class="mb-0">{{ portfolio_stats.total_portfolios }}</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Active Portfolios Card -->
+        <div class="col-xl-3 col-lg-4 col-md-6">
+            <div class="card stats-card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="stats-icon bg-success">
+                            <i class="bi bi-check-circle-fill"></i>
+                        </div>
+                        <div class="ms-3">
+                            <h6 class="text-muted mb-1">Active Portfolios</h6>
+                            <h3 class="mb-0">{{ portfolio_stats.active_portfolios }}</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Currency Breakdown Card -->
+        <div class="col-xl-6 col-lg-12">
+            <div class="card stats-card h-100">
+                <div class="card-body">
+                    <h6 class="text-muted mb-3">
+                        <i class="bi bi-currency-exchange"></i> Active Portfolios by Currency
+                    </h6>
+                    {% if portfolio_stats.currency_breakdown %}
+                    <div class="row g-2">
+                        {% for curr in portfolio_stats.currency_breakdown|slice:":6" %}
+                        <div class="col-6 col-md-4">
+                            <div class="currency-stat">
+                                <span class="badge bg-info">{{ curr.currency }}</span>
+                                <span class="ms-2 fw-bold">{{ curr.count }}</span>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% if portfolio_stats.currency_breakdown|length > 6 %}
+                    <div class="mt-2">
+                        <small class="text-muted">
+                            <i class="bi bi-info-circle"></i>
+                            Showing top 6 currencies. <a href="{% url 'portfolio:list' %}">View all</a>
+                        </small>
+                    </div>
+                    {% endif %}
+                    {% else %}
+                    <p class="text-muted mb-0">No active portfolios</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Module Cards -->
     <div class="row g-4">
         <div class="col-12">
@@ -163,6 +241,43 @@
         justify-content: center;
         font-size: 36px;
         color: white;
+    }
+
+    /* Portfolio Analytics Styles */
+    .stats-card {
+        border: none;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        transition: all 0.3s;
+    }
+
+    .stats-card:hover {
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+        transform: translateY(-2px);
+    }
+
+    .stats-icon {
+        width: 60px;
+        height: 60px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+        color: white;
+    }
+
+    .currency-stat {
+        padding: 8px 12px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .currency-stat .badge {
+        font-size: 11px;
+        padding: 4px 8px;
     }
 </style>
 {% endblock %}

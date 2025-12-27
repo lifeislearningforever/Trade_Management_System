@@ -84,6 +84,7 @@ class LogoutView(View):
 def require_login(view_func):
     """
     Decorator to require login for a view.
+    Creates a mock user object from session data for compatibility.
 
     Usage:
         @require_login
@@ -93,6 +94,20 @@ def require_login(view_func):
     def wrapper(request: HttpRequest, *args, **kwargs):
         if not request.session.get('user_login'):
             return redirect('login')
+
+        # Create a mock user object from session for compatibility
+        class MockUser:
+            def __init__(self, session_data):
+                self.id = session_data.get('user_id')
+                self.username = session_data.get('user_login')
+                self.email = session_data.get('user_email', '')
+                self.is_authenticated = True
+                self._full_name = session_data.get('user_name', '')
+
+            def get_full_name(self):
+                return self._full_name or self.username
+
+        request.user = MockUser(request.session)
         return view_func(request, *args, **kwargs)
 
     return wrapper
@@ -101,6 +116,7 @@ def require_login(view_func):
 def require_permission(permission: str, access_level: str = 'READ'):
     """
     Decorator to require specific permission for a view.
+    For development, set SKIP_PERMISSION_CHECKS = True in settings.
 
     Usage:
         @require_permission('cis-portfolio', 'WRITE')
@@ -112,6 +128,26 @@ def require_permission(permission: str, access_level: str = 'READ'):
             # First check login
             if not request.session.get('user_login'):
                 return redirect('login')
+
+            # Create mock user object for compatibility
+            class MockUser:
+                def __init__(self, session_data):
+                    self.id = session_data.get('user_id')
+                    self.username = session_data.get('user_login')
+                    self.email = session_data.get('user_email', '')
+                    self.is_authenticated = True
+                    self._full_name = session_data.get('user_name', '')
+
+                def get_full_name(self):
+                    return self._full_name or self.username
+
+            request.user = MockUser(request.session)
+
+            # Skip permission checks for development (set SKIP_PERMISSION_CHECKS = True in settings)
+            from django.conf import settings
+            if getattr(settings, 'SKIP_PERMISSION_CHECKS', False):
+                logger.info(f"DEV MODE: Skipping permission check for {permission}")
+                return view_func(request, *args, **kwargs)
 
             # Check permission
             permission_map = request.session.get('user_permissions', {})

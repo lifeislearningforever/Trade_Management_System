@@ -9,7 +9,7 @@ from django.conf.urls.static import static
 from django.shortcuts import redirect
 
 from core.views.auth_views import LoginView, LogoutView, auto_login_tmp3rc
-from core.views.dashboard_views import dashboard_view
+from core.views.dashboard_views import dashboard_view, global_search_view
 
 # Redirect home to auto-login (which will authenticate and redirect to dashboard)
 def home_view(request):
@@ -26,6 +26,9 @@ urlpatterns = [
 
     # Dashboard
     path('dashboard/', dashboard_view, name='dashboard'),
+
+    # Global Search
+    path('search/', global_search_view, name='global_search'),
 
     # Core
     path('core/', include('core.urls')),

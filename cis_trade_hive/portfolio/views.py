@@ -15,7 +15,7 @@ from .models import Portfolio
 from .services import PortfolioService
 from core.models import AuditLog
 from core.views.auth_views import require_login, require_permission
-from core.audit.audit_hive_repository import audit_log_repository
+from core.audit.audit_kudu_repository import audit_log_kudu_repository
 from portfolio.repositories import portfolio_hive_repository
 
 
@@ -32,6 +32,13 @@ class PortfolioWrapper:
         self.portfolio_client = data.get('portfolio_client', '')
         self.cash_balance = data.get('cash_balance', 0)
         self.status = data.get('status', 'Active')
+        # Handle is_active: if NULL and status is 'Active', default to True
+        raw_is_active = data.get('is_active')
+        if raw_is_active is None:
+            # NULL value - infer from status
+            self.is_active = (self.status == 'Active')
+        else:
+            self.is_active = bool(raw_is_active)
         self.cost_centre_code = data.get('cost_centre_code', '')
         self.corp_code = data.get('corp_code', '')
         self.account_group = data.get('account_group', '')
@@ -97,17 +104,20 @@ def portfolio_list(request):
                 portfolio.get('created_at', '')
             ])
 
-        # Log export to Hive
+        # Log export to Kudu
         user = getattr(request, 'user', None)
         user_id = str(user.id) if user and hasattr(user, 'id') else 'anonymous'
         username = user.username if user and hasattr(user, 'username') else 'anonymous'
+        user_email = user.email if user and hasattr(user, 'email') else ''
 
-        audit_log_repository.log_action(
+        audit_log_kudu_repository.log_action(
             user_id=user_id,
             username=username,
+            user_email=user_email,
             action_type='EXPORT',
             entity_type='PORTFOLIO',
-            action_description=f'Exported {len(portfolios_data)} portfolios to CSV from Hive',
+            entity_name='Portfolio List',
+            action_description=f'Exported {len(portfolios_data)} portfolios to CSV from Kudu',
             status='SUCCESS',
             request_method='GET',
             request_path=request.path,
@@ -131,17 +141,20 @@ def portfolio_list(request):
     # Get unique currencies from Hive
     currencies = portfolio_hive_repository.get_currencies()
 
-    # Log view to Hive
+    # Log view to Kudu
     user = getattr(request, 'user', None)
     user_id = str(user.id) if user and hasattr(user, 'id') else 'anonymous'
     username = user.username if user and hasattr(user, 'username') else 'anonymous'
+    user_email = user.email if user and hasattr(user, 'email') else ''
 
-    audit_log_repository.log_action(
+    audit_log_kudu_repository.log_action(
         user_id=user_id,
         username=username,
-        action_type='VIEW',
+        user_email=user_email,
+        action_type='VIEW' if not search_query else 'SEARCH',
         entity_type='PORTFOLIO',
-        action_description=f'Viewed portfolio list from Hive ({len(portfolios_data)} portfolios)',
+        entity_name='Portfolio List',
+        action_description=f'Viewed portfolio list from Kudu ({len(portfolios_data)} portfolios)' + (f' - Search: {search_query}' if search_query else ''),
         status='SUCCESS',
         request_method='GET',
         request_path=request.path,
@@ -163,25 +176,59 @@ def portfolio_list(request):
 
 # PRODUCTION NOTE: Uncomment this decorator for production deployment
 #@require_permission('cis-portfolio', 'READ')
-def portfolio_detail(request, pk):
+def portfolio_detail(request, portfolio_name):
     """
-    View portfolio details and history.
+    View portfolio details and history - fetches from Kudu.
     Requires: cis-portfolio READ permission
     """
-    portfolio = get_object_or_404(Portfolio, pk=pk)
+    # Get portfolio from Kudu by name
+    portfolio_data = portfolio_hive_repository.get_portfolio_by_code(portfolio_name)
 
-    # Get change history
-    history = PortfolioService.get_portfolio_history(portfolio)
+    if not portfolio_data:
+        raise Http404(f"Portfolio '{portfolio_name}' not found in Kudu")
 
-    # Check permissions
-    can_edit = PortfolioService.can_user_edit(portfolio, request.user)
-    can_approve = PortfolioService.can_user_approve(portfolio, request.user)
+    # Wrap the Kudu data for template compatibility
+    portfolio = PortfolioWrapper(portfolio_data)
+
+    # For now, history is not available from Kudu (would need to query cis_portfolio_history)
+    history = []
+
+    # Get user for permission checks
+    user = getattr(request, 'user', None)
+
+    # Check permissions based on status
+    can_edit = portfolio.status in ['DRAFT', 'REJECTED']
+    can_approve = portfolio.status == 'PENDING_APPROVAL'
+    can_close = PortfolioService.can_user_close(portfolio.status, user) if user else False
+    can_reactivate = PortfolioService.can_user_reactivate(portfolio.status, user) if user else False
+
+    # Log view to Kudu
+    user_id = str(user.id) if user and hasattr(user, 'id') else 'anonymous'
+    username = user.username if user and hasattr(user, 'username') else 'anonymous'
+    user_email = user.email if user and hasattr(user, 'email') else ''
+
+    audit_log_kudu_repository.log_action(
+        user_id=user_id,
+        username=username,
+        user_email=user_email,
+        action_type='VIEW',
+        entity_type='PORTFOLIO',
+        entity_name=portfolio_name,
+        action_description=f'Viewed portfolio detail from Kudu: {portfolio_name}',
+        status='SUCCESS',
+        request_method='GET',
+        request_path=request.path,
+        ip_address=request.META.get('REMOTE_ADDR'),
+        user_agent=request.META.get('HTTP_USER_AGENT', '')
+    )
 
     context = {
         'portfolio': portfolio,
         'history': history,
         'can_edit': can_edit,
         'can_approve': can_approve,
+        'can_close': can_close,
+        'can_reactivate': can_reactivate,
     }
 
     return render(request, 'portfolio/portfolio_detail.html', context)
@@ -193,6 +240,8 @@ def portfolio_create(request):
     Create a new portfolio.
     Requires: cis-portfolio WRITE permission
     """
+    from portfolio.services.portfolio_dropdown_service import portfolio_dropdown_service
+
     if request.method == 'POST':
         try:
             data = {
@@ -209,6 +258,8 @@ def portfolio_create(request):
                 'portfolio_group': request.POST.get('portfolio_group', ''),
                 'report_group': request.POST.get('report_group', ''),
                 'entity_group': request.POST.get('entity_group', ''),
+                'status': request.POST.get('status', 'Active'),
+                'revaluation_status': request.POST.get('revaluation_status', ''),
             }
 
             portfolio = PortfolioService.create_portfolio(request.user, data)
@@ -220,12 +271,11 @@ def portfolio_create(request):
         except Exception as e:
             messages.error(request, f'Error creating portfolio: {str(e)}')
 
-    # Get currencies for dropdown
-    from reference_data.models import Currency
-    currencies = Currency.objects.filter(is_active=True).order_by('code')
+    # Get all dropdown options from Kudu tables
+    dropdown_options = portfolio_dropdown_service.get_all_dropdown_options()
 
     context = {
-        'currencies': currencies,
+        'dropdown_options': dropdown_options,
     }
 
     return render(request, 'portfolio/portfolio_form.html', context)
@@ -237,6 +287,8 @@ def portfolio_edit(request, pk):
     Edit an existing portfolio (DRAFT or REJECTED only).
     Requires: cis-portfolio WRITE permission
     """
+    from portfolio.services.portfolio_dropdown_service import portfolio_dropdown_service
+
     portfolio = get_object_or_404(Portfolio, pk=pk)
 
     # Check permissions
@@ -259,6 +311,8 @@ def portfolio_edit(request, pk):
                 'portfolio_group': request.POST.get('portfolio_group', ''),
                 'report_group': request.POST.get('report_group', ''),
                 'entity_group': request.POST.get('entity_group', ''),
+                'status': request.POST.get('status', 'Active'),
+                'revaluation_status': request.POST.get('revaluation_status', ''),
             }
 
             portfolio = PortfolioService.update_portfolio(portfolio, request.user, data)
@@ -270,14 +324,14 @@ def portfolio_edit(request, pk):
         except Exception as e:
             messages.error(request, f'Error updating portfolio: {str(e)}')
 
-    # Get currencies for dropdown
-    from reference_data.models import Currency
-    currencies = Currency.objects.filter(is_active=True).order_by('code')
+    # Get all dropdown options from Kudu tables
+    dropdown_options = portfolio_dropdown_service.get_all_dropdown_options()
 
     context = {
         'portfolio': portfolio,
-        'currencies': currencies,
+        'dropdown_options': dropdown_options,
         'is_edit': True,
+        'can_close': PortfolioService.can_user_close(portfolio.status, request.user),
     }
 
     return render(request, 'portfolio/portfolio_form.html', context)
@@ -348,16 +402,99 @@ def portfolio_reject(request, pk):
 
 # PRODUCTION NOTE: Uncomment this decorator for production deployment
 #@require_permission('cis-portfolio', 'WRITE')
+def portfolio_close(request, portfolio_name):
+    """
+    Close portfolio (soft delete) - Uses Kudu/Impala.
+    Requires: cis-portfolio WRITE permission
+    """
+    if request.method != 'POST':
+        return redirect('portfolio:detail', portfolio_name=portfolio_name)
+
+    # Get portfolio from Kudu to validate status
+    portfolio_data = portfolio_hive_repository.get_portfolio_by_code(portfolio_name)
+    if not portfolio_data:
+        messages.error(request, f'Portfolio {portfolio_name} not found.')
+        return redirect('portfolio:list')
+
+    reason = request.POST.get('reason', '').strip()
+
+    try:
+        # DEV MODE: Permission check bypassed
+        # PRODUCTION: Uncomment below to enforce permissions
+        # portfolio_status = portfolio_data.get('status', '')
+        # if not PortfolioService.can_user_close(portfolio_status, request.user):
+        #     raise PermissionDenied('You do not have permission to close this portfolio.')
+
+        # Close portfolio in Kudu
+        PortfolioService.close_portfolio(
+            portfolio_code=portfolio_name,
+            user_id=str(request.user.id),
+            username=request.user.username,
+            user_email=request.user.email or '',
+            reason=reason
+        )
+
+        messages.success(request, f'Portfolio {portfolio_name} has been closed successfully.')
+    except (ValidationError, PermissionDenied) as e:
+        messages.error(request, str(e))
+
+    return redirect('portfolio:detail', portfolio_name=portfolio_name)
+
+# PRODUCTION NOTE: Uncomment this decorator for production deployment
+#@require_permission('cis-portfolio', 'WRITE')
+def portfolio_reactivate(request, portfolio_name):
+    """
+    Reactivate closed portfolio - Uses Kudu/Impala.
+    Requires: cis-portfolio WRITE permission
+    """
+    if request.method != 'POST':
+        return redirect('portfolio:detail', portfolio_name=portfolio_name)
+
+    # Get portfolio from Kudu to validate status
+    portfolio_data = portfolio_hive_repository.get_portfolio_by_code(portfolio_name)
+    if not portfolio_data:
+        messages.error(request, f'Portfolio {portfolio_name} not found.')
+        return redirect('portfolio:list')
+
+    comments = request.POST.get('comments', '').strip()
+
+    try:
+        # DEV MODE: Permission check bypassed
+        # PRODUCTION: Uncomment below to enforce permissions
+        # portfolio_status = portfolio_data.get('status', '')
+        # if not PortfolioService.can_user_reactivate(portfolio_status, request.user):
+        #     raise PermissionDenied('You do not have permission to reactivate this portfolio.')
+
+        # Reactivate portfolio in Kudu
+        PortfolioService.reactivate_portfolio(
+            portfolio_code=portfolio_name,
+            user_id=str(request.user.id),
+            username=request.user.username,
+            user_email=request.user.email or '',
+            comments=comments
+        )
+
+        messages.success(request, f'Portfolio {portfolio_name} has been reactivated successfully.')
+    except (ValidationError, PermissionDenied) as e:
+        messages.error(request, str(e))
+
+    return redirect('portfolio:detail', portfolio_name=portfolio_name)
+
+# PRODUCTION NOTE: Uncomment this decorator for production deployment
+#@require_permission('cis-portfolio', 'WRITE')
 def pending_approvals(request):
     """
     List portfolios pending approval (for Checkers).
     Requires: cis-portfolio WRITE permission
     Note: Additional group check remains for Checkers-only access
     """
-    # Only show to users in Checkers group
-    if not request.user.groups.filter(name='Checkers').exists() and not request.user.is_superuser:
-        messages.error(request, 'Access denied. Only Checkers can view pending approvals.')
-        return redirect('dashboard')
+    # DEV MODE: Permission check bypassed
+    # PRODUCTION: Uncomment below to enforce Checker group access
+    # user = getattr(request, 'user', None)
+    # if user and hasattr(user, 'groups'):
+    #     if not user.groups.filter(name='Checkers').exists() and not user.is_superuser:
+    #         messages.error(request, 'Access denied. Only Checkers can view pending approvals.')
+    #         return redirect('dashboard')
 
     portfolios = PortfolioService.get_pending_approvals()
 

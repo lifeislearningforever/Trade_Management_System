@@ -13,6 +13,7 @@ from django.http import HttpResponse
 from django.core.paginator import Paginator
 from django.contrib import messages
 from core.models import AuditLog
+from core.audit.audit_kudu_repository import audit_log_kudu_repository
 from core.views.auth_views import require_login, require_permission
 from .services.reference_data_service import (
     currency_service,
@@ -32,12 +33,11 @@ def get_client_ip(request):
     return request.META.get('REMOTE_ADDR')
 
 
-# PRODUCTION NOTE: Uncomment this decorator for production deployment
-# @require_permission('cis-currency', 'READ')
+@require_login
 def currency_list(request):
     """
     Currency list view with search, filter, and CSV export.
-    Requires: cis-currency READ permission
+    Requires: Authentication
     """
     # Get query parameters
     search = request.GET.get('search', '').strip()
@@ -48,17 +48,27 @@ def currency_list(request):
         # Fetch data
         currencies = currency_service.list_all(search=search if search else None)
 
-        # PRODUCTION NOTE: Uncomment for production deployment with authentication
-        # Log the read action
-        # AuditLog.log_action(
-        #     action='READ',
-        #     user=request.user,
-        #     object_type='Currency',
-        #     object_repr=f"Currency List (search: {search if search else 'all'})",
-        #     description=f"Viewed currency list with {len(currencies)} records",
-        #     ip_address=get_client_ip(request),
-        #     request_path=request.path,
-        # )
+        # Get authenticated user details (guaranteed to exist due to @require_login)
+        user_id = str(request.user.id)
+        username = request.user.username
+        user_email = request.user.email or ''
+        user_full_name = request.user.get_full_name() or username
+
+        audit_log_kudu_repository.log_action(
+            user_id=user_id,
+            username=username,
+            user_email=user_email,
+            action_type='VIEW' if not search else 'SEARCH',
+            entity_type='REFERENCE_DATA',
+            entity_name='Currency',
+            entity_id='CURRENCY_LIST',
+            action_description=f"Viewed currency list ({len(currencies)} records)" + (f" - Search: {search}" if search else ""),
+            request_method=request.method,
+            request_path=request.path,
+            ip_address=get_client_ip(request),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            status='SUCCESS'
+        )
 
         # CSV Export
         if export:
@@ -81,16 +91,22 @@ def currency_list(request):
                     currency.get('spot_schedule', ''),
                 ])
 
-            # PRODUCTION NOTE: Uncomment for production deployment with authentication
-            # Log export
-            # AuditLog.log_action(
-            #     action='EXPORT',
-            #     user=request.user,
-            #     object_type='Currency',
-            #     object_repr='Currency List CSV Export',
-            #     description=f'Exported {len(currencies)} currencies to CSV',
-            #     ip_address=get_client_ip(request),
-            # )
+            # Log EXPORT action to Kudu
+            audit_log_kudu_repository.log_action(
+                user_id=user_id,
+                username=username,
+                user_email=user_email,
+                action_type='EXPORT',
+                entity_type='REFERENCE_DATA',
+                entity_name='Currency',
+                entity_id='CURRENCY_EXPORT',
+                action_description=f'Exported {len(currencies)} currencies to CSV',
+                request_method=request.method,
+                request_path=request.path,
+                ip_address=get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
+            )
 
             return response
 
@@ -112,12 +128,11 @@ def currency_list(request):
         return render(request, 'reference_data/currency_list.html', {'currencies': []})
 
 
-# PRODUCTION NOTE: Uncomment this decorator for production deployment
-# @require_permission('cis-currency', 'READ')
+@require_login
 def country_list(request):
     """
     Country list view with search, filter, and CSV export.
-    Requires: cis-reference READ permission
+    Requires: Authentication
     """
     search = request.GET.get('search', '').strip()
     export = request.GET.get('export') == 'csv'
@@ -127,17 +142,27 @@ def country_list(request):
         # Fetch data
         countries = country_service.list_all(search=search if search else None)
 
-        # PRODUCTION NOTE: Uncomment for production deployment with authentication
-        # Log the read action
-        # AuditLog.log_action(
-        #     action='READ',
-        #     user=request.user,
-        #     object_type='Country',
-        #     object_repr=f"Country List (search: {search if search else 'all'})",
-        #     description=f"Viewed country list with {len(countries)} records",
-        #     ip_address=get_client_ip(request),
-        #     request_path=request.path,
-        # )
+        # Get authenticated user details
+        user_id = str(request.user.id)
+        username = request.user.username
+        user_email = request.user.email or ''
+        user_full_name = request.user.get_full_name() or username
+
+        audit_log_kudu_repository.log_action(
+            user_id=user_id,
+            username=username,
+            user_email=user_email,
+            action_type='VIEW' if not search else 'SEARCH',
+            entity_type='REFERENCE_DATA',
+            entity_name='Country',
+            entity_id='COUNTRY_LIST',
+            action_description=f"Viewed country list ({len(countries)} records)" + (f" - Search: {search}" if search else ""),
+            request_method=request.method,
+            request_path=request.path,
+            ip_address=get_client_ip(request),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            status='SUCCESS'
+        )
 
         # CSV Export
         if export:
@@ -153,16 +178,22 @@ def country_list(request):
                     country.get('name', ''),
                 ])
 
-            # PRODUCTION NOTE: Uncomment for production deployment with authentication
-            # Log export
-            # AuditLog.log_action(
-            #     action='EXPORT',
-            #     user=request.user,
-            #     object_type='Country',
-            #     object_repr='Country List CSV Export',
-            #     description=f'Exported {len(countries)} countries to CSV',
-            #     ip_address=get_client_ip(request),
-            # )
+            # Log EXPORT action to Kudu
+            audit_log_kudu_repository.log_action(
+                user_id=user_id,
+                username=username,
+                user_email=user_email,
+                action_type='EXPORT',
+                entity_type='REFERENCE_DATA',
+                entity_name='Country',
+                entity_id='COUNTRY_EXPORT',
+                action_description=f'Exported {len(countries)} countries to CSV',
+                request_method=request.method,
+                request_path=request.path,
+                ip_address=get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
+            )
 
             return response
 
@@ -184,12 +215,11 @@ def country_list(request):
         return render(request, 'reference_data/country_list.html', {'countries': []})
 
 
-# PRODUCTION NOTE: Uncomment this decorator for production deployment
-# @require_permission('cis-currency', 'READ')
+@require_login
 def calendar_list(request):
     """
     Calendar/Holiday list view with filtering and CSV export.
-    Requires: cis-reference READ permission
+    Requires: Authentication
     """
     calendar_label = request.GET.get('calendar', '').strip()
     start_date = request.GET.get('start_date', '').strip()
@@ -214,17 +244,28 @@ def calendar_list(request):
         # Get distinct calendar labels for filter dropdown
         calendar_labels = calendar_service.get_distinct_calendars()
 
-        # PRODUCTION NOTE: Uncomment for production deployment with authentication
-        # Log the read action
-        # AuditLog.log_action(
-        #     action='READ',
-        #     user=request.user,
-        #     object_type='Calendar',
-        #     object_repr=f"Calendar List",
-        #     description=f"Viewed calendar list with {len(calendars)} records",
-        #     ip_address=get_client_ip(request),
-        #     request_path=request.path,
-        # )
+        # Get authenticated user details
+        user_id = str(request.user.id)
+        username = request.user.username
+        user_email = request.user.email or ''
+        user_full_name = request.user.get_full_name() or username
+
+        # Log VIEW/SEARCH action to Kudu
+        audit_log_kudu_repository.log_action(
+            user_id=user_id,
+            username=username,
+            user_email=user_email,
+            action_type='VIEW' if not search else 'SEARCH',
+            entity_type='REFERENCE_DATA',
+            entity_name='Calendar',
+            entity_id='CALENDAR_LIST',
+            action_description=f"Viewed calendar list ({len(calendars)} records)" + (f" - Search: {search}" if search else ""),
+            request_method=request.method,
+            request_path=request.path,
+            ip_address=get_client_ip(request),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            status='SUCCESS'
+        )
 
         # CSV Export
         if export:
@@ -241,16 +282,22 @@ def calendar_list(request):
                     cal.get('holiday_date', ''),
                 ])
 
-            # PRODUCTION NOTE: Uncomment for production deployment with authentication
-            # Log export
-            # AuditLog.log_action(
-            #     action='EXPORT',
-            #     user=request.user,
-            #     object_type='Calendar',
-            #     object_repr='Calendar List CSV Export',
-            #     description=f'Exported {len(calendars)} calendar entries to CSV',
-            #     ip_address=get_client_ip(request),
-            # )
+            # Log EXPORT action to Kudu
+            audit_log_kudu_repository.log_action(
+                user_id=user_id,
+                username=username,
+                user_email=user_email,
+                action_type='EXPORT',
+                entity_type='REFERENCE_DATA',
+                entity_name='Calendar',
+                entity_id='CALENDAR_EXPORT',
+                action_description=f'Exported {len(calendars)} calendar entries to CSV',
+                request_method=request.method,
+                request_path=request.path,
+                ip_address=get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
+            )
 
             return response
 
@@ -279,12 +326,11 @@ def calendar_list(request):
         })
 
 
-# PRODUCTION NOTE: Uncomment this decorator for production deployment
-# @require_permission('cis-currency', 'READ')
+@require_login
 def counterparty_list(request):
     """
     Counterparty list view with filtering and CSV export.
-    Requires: cis-reference READ permission
+    Requires: Authentication
     """
     search = request.GET.get('search', '').strip()
     counterparty_type = request.GET.get('type', '').strip()
@@ -298,17 +344,28 @@ def counterparty_list(request):
             counterparty_type=counterparty_type if counterparty_type else None
         )
 
-        # PRODUCTION NOTE: Uncomment for production deployment with authentication
-        # Log the read action
-        # AuditLog.log_action(
-        #     action='READ',
-        #     user=request.user,
-        #     object_type='Counterparty',
-        #     object_repr=f"Counterparty List (search: {search if search else 'all'})",
-        #     description=f"Viewed counterparty list with {len(counterparties)} records",
-        #     ip_address=get_client_ip(request),
-        #     request_path=request.path,
-        # )
+        # Get authenticated user details
+        user_id = str(request.user.id)
+        username = request.user.username
+        user_email = request.user.email or ''
+        user_full_name = request.user.get_full_name() or username
+
+        # Log VIEW/SEARCH action to Kudu
+        audit_log_kudu_repository.log_action(
+            user_id=user_id,
+            username=username,
+            user_email=user_email,
+            action_type='VIEW' if not search else 'SEARCH',
+            entity_type='REFERENCE_DATA',
+            entity_name='Counterparty',
+            entity_id='COUNTERPARTY_LIST',
+            action_description=f"Viewed counterparty list ({len(counterparties)} records)" + (f" - Search: {search}" if search else ""),
+            request_method=request.method,
+            request_path=request.path,
+            ip_address=get_client_ip(request),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            status='SUCCESS'
+        )
 
         # CSV Export
         if export:
@@ -333,16 +390,22 @@ def counterparty_list(request):
                     cp.get('risk_category', ''),
                 ])
 
-            # PRODUCTION NOTE: Uncomment for production deployment with authentication
-            # Log export
-            # AuditLog.log_action(
-            #     action='EXPORT',
-            #     user=request.user,
-            #     object_type='Counterparty',
-            #     object_repr='Counterparty List CSV Export',
-            #     description=f'Exported {len(counterparties)} counterparties to CSV',
-            #     ip_address=get_client_ip(request),
-            # )
+            # Log EXPORT action to Kudu
+            audit_log_kudu_repository.log_action(
+                user_id=user_id,
+                username=username,
+                user_email=user_email,
+                action_type='EXPORT',
+                entity_type='REFERENCE_DATA',
+                entity_name='Counterparty',
+                entity_id='COUNTERPARTY_EXPORT',
+                action_description=f'Exported {len(counterparties)} counterparties to CSV',
+                request_method=request.method,
+                request_path=request.path,
+                ip_address=get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
+            )
 
             return response
 

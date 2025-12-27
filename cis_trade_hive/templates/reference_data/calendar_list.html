@@ -12,11 +12,16 @@
 {% block content %}
 <div class="calendar-list-container">
     <!-- Page Header -->
-    <div class="content-header">
-        <h1 class="content-title">
-            <i class="bi bi-calendar3 text-primary"></i> Trading Calendars
-        </h1>
-        <p class="content-subtitle">View holidays and non-trading days from Kudu</p>
+    <div class="content-header d-flex justify-content-between align-items-start">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-calendar3 text-primary"></i> Trading Calendars
+            </h1>
+            <p class="content-subtitle">View holidays and non-trading days from Kudu</p>
+        </div>
+        <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Dashboard
+        </a>
     </div>
 
     <!-- Search & Filter Card -->
@@ -88,8 +93,8 @@
         </div>
         <div class="card-body p-0">
             {% if calendars %}
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0">
+                <div class="table-responsive" style="overflow-x: auto;">
+                    <table class="table table-hover mb-0" style="min-width: 800px;">
                         <thead>
                             <tr>
                                 <th style="width: 20%;">Calendar</th>

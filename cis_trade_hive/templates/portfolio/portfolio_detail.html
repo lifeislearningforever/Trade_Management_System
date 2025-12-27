@@ -20,13 +20,12 @@
             <p class="content-subtitle">Portfolio Code: {{ portfolio.code }}</p>
         </div>
         <div>
+            <!-- DEV MODE: All buttons visible based on status only -->
             {% if portfolio.status == 'DRAFT' or portfolio.status == 'REJECTED' %}
-                {% if portfolio.created_by == request.user %}
-                    <a href="{% url 'portfolio:edit' portfolio.id %}" class="btn btn-warning">
-                        <i class="bi bi-pencil"></i> Edit
-                    </a>
-                {% endif %}
-                {% if portfolio.status == 'DRAFT' and portfolio.created_by == request.user %}
+                <a href="{% url 'portfolio:edit' portfolio.id %}" class="btn btn-warning">
+                    <i class="bi bi-pencil"></i> Edit
+                </a>
+                {% if portfolio.status == 'DRAFT' %}
                     <form method="post" action="{% url 'portfolio:submit' portfolio.id %}" class="d-inline">
                         {% csrf_token %}
                         <button type="submit" class="btn btn-primary" onclick="return confirm('Submit for approval?')">
@@ -35,14 +34,20 @@
                     </form>
                 {% endif %}
             {% elif portfolio.status == 'PENDING_APPROVAL' %}
-                {% if portfolio.created_by != request.user and perms.portfolio.can_approve %}
-                    <a href="{% url 'portfolio:approve' portfolio.id %}" class="btn btn-success">
-                        <i class="bi bi-check-circle"></i> Approve
-                    </a>
-                    <a href="{% url 'portfolio:reject' portfolio.id %}" class="btn btn-danger">
-                        <i class="bi bi-x-circle"></i> Reject
-                    </a>
-                {% endif %}
+                <a href="{% url 'portfolio:approve' portfolio.id %}" class="btn btn-success">
+                    <i class="bi bi-check-circle"></i> Approve
+                </a>
+                <a href="{% url 'portfolio:reject' portfolio.id %}" class="btn btn-danger">
+                    <i class="bi bi-x-circle"></i> Reject
+                </a>
+            {% elif portfolio.status == 'Active' %}
+                <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#closeModal">
+                    <i class="bi bi-x-circle"></i> Close Portfolio
+                </button>
+            {% elif portfolio.status == 'Inactive' %}
+                <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#reactivateModal">
+                    <i class="bi bi-arrow-clockwise"></i> Reactivate Portfolio
+                </button>
             {% endif %}
         </div>
     </div>
@@ -61,8 +66,8 @@
                         <span class="badge badge-success fs-6">Approved</span>
                     {% elif portfolio.status == 'REJECTED' %}
                         <span class="badge badge-danger fs-6">Rejected</span>
-                    {% elif portfolio.status == 'CLOSED' %}
-                        <span class="badge badge-dark fs-6">Closed</span>
+                    {% elif portfolio.status == 'Inactive' %}
+                        <span class="badge badge-dark fs-6">Inactive</span>
                     {% endif %}
                 </div>
                 <div class="col-md-3">
@@ -199,6 +204,82 @@
         <a href="{% url 'portfolio:list' %}" class="btn btn-outline-secondary">
             <i class="bi bi-arrow-left"></i> Back to List
         </a>
+    </div>
+</div>
+
+<!-- Close Portfolio Modal -->
+<div class="modal fade" id="closeModal" tabindex="-1" aria-labelledby="closeModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title" id="closeModalLabel">
+                    <i class="bi bi-x-circle"></i> Close Portfolio
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="post" action="{% url 'portfolio:close' portfolio.name %}">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <strong>Warning:</strong> This will close portfolio <strong>{{ portfolio.code }}</strong>
+                        and mark it as inactive. You can reactivate it later if needed.
+                    </div>
+                    <div class="mb-3">
+                        <label for="reason" class="form-label">Reason for Closure (Optional)</label>
+                        <textarea class="form-control" id="reason" name="reason" rows="3"
+                                  placeholder="Enter reason for closing this portfolio..."></textarea>
+                        <div class="form-text">
+                            Providing a reason helps maintain audit trail
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-x-circle"></i> Close Portfolio
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Reactivate Portfolio Modal -->
+<div class="modal fade" id="reactivateModal" tabindex="-1" aria-labelledby="reactivateModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title" id="reactivateModalLabel">
+                    <i class="bi bi-arrow-clockwise"></i> Reactivate Portfolio
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="post" action="{% url 'portfolio:reactivate' portfolio.name %}">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i>
+                        <strong>Info:</strong> This will reactivate portfolio <strong>{{ portfolio.code }}</strong>
+                        and mark it as active again.
+                    </div>
+                    <div class="mb-3">
+                        <label for="comments" class="form-label">Justification for Reactivation <span class="text-danger">*</span></label>
+                        <textarea class="form-control" id="comments" name="comments" rows="3"
+                                  required placeholder="Enter justification for reactivating this portfolio..."></textarea>
+                        <div class="form-text">
+                            Justification is required for audit purposes
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-arrow-clockwise"></i> Reactivate Portfolio
+                    </button>
+                </div>
+            </form>
+        </div>
     </div>
 </div>
 {% endblock %}

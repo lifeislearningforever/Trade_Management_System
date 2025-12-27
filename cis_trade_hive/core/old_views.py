@@ -201,10 +201,10 @@ def profile(request):
 # @login_required  # Commented for development
 def audit_log(request):
     """
-    Audit log list view with filtering and search - HIVE INTEGRATION.
-    Fetches audit logs from Hive cis_audit_log table.
+    Audit log list view with filtering and search - KUDU/IMPALA INTEGRATION.
+    Fetches audit logs from Kudu cis_audit_log table via Impala.
     """
-    from core.audit.audit_hive_repository import audit_log_repository
+    from core.audit.audit_kudu_repository import audit_log_kudu_repository
 
     # Get filter parameters
     search_query = request.GET.get('search', '').strip()
@@ -213,9 +213,9 @@ def audit_log(request):
     date_from = request.GET.get('date_from', '').strip()
     date_to = request.GET.get('date_to', '').strip()
 
-    # Get audit logs from Hive with error handling
+    # Get audit logs from Kudu/Impala with error handling
     try:
-        audit_logs_list = audit_log_repository.get_all_logs(
+        audit_logs_list = audit_log_kudu_repository.get_all_logs(
             limit=1000,  # Fetch more for client-side pagination
             action_type=action_filter if action_filter else None,
             entity_type=entity_filter if entity_filter else None,
@@ -224,8 +224,8 @@ def audit_log(request):
             search=search_query if search_query else None
         )
     except Exception as e:
-        # If Hive connection fails, return empty list with error message
-        messages.warning(request, f'Unable to connect to Hive: {str(e)}. Showing empty results.')
+        # If Kudu connection fails, return empty list with error message
+        messages.warning(request, f'Unable to connect to Kudu: {str(e)}. Showing empty results.')
         audit_logs_list = []
 
     # Pagination
@@ -247,15 +247,10 @@ def audit_log(request):
     # Get unique entity types for filter dropdown
     entity_types = sorted(set([log.get('entity_type') for log in audit_logs_list if log.get('entity_type')]))
 
-    # Get statistics with error handling
-    try:
-        stats = audit_log_repository.get_statistics(days=30)
-    except Exception:
-        stats = {'total_count': 0, 'days': 30, 'action_breakdown': [], 'entity_breakdown': []}
-
+    # Prepare context for template
     context = {
         'audit_logs': audit_logs,
-        'action_types': action_types,
+        'actions': action_types,  # For filter dropdown
         'entity_types': entity_types,
         'search_query': search_query,
         'action_filter': action_filter,
@@ -263,8 +258,7 @@ def audit_log(request):
         'date_from': date_from,
         'date_to': date_to,
         'total_count': len(audit_logs_list),
-        'stats': stats,
-        'using_hive': True,  # Flag to indicate Hive integration
+        'using_kudu': True,  # Flag to indicate Kudu integration
     }
 
     return render(request, 'core/audit_log.html', context)

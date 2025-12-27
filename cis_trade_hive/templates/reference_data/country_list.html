@@ -12,11 +12,16 @@
 {% block content %}
 <div class="country-list-container">
     <!-- Page Header -->
-    <div class="content-header">
-        <h1 class="content-title">
-            <i class="bi bi-globe text-primary"></i> Countries
-        </h1>
-        <p class="content-subtitle">Manage country reference data from Kudu</p>
+    <div class="content-header d-flex justify-content-between align-items-start">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-globe text-primary"></i> Countries
+            </h1>
+            <p class="content-subtitle">Manage country reference data from Kudu</p>
+        </div>
+        <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Dashboard
+        </a>
     </div>
 
     <!-- Search & Filter Card -->
@@ -81,8 +86,8 @@
         </div>
         <div class="card-body p-0">
             {% if countries %}
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0">
+                <div class="table-responsive" style="overflow-x: auto;">
+                    <table class="table table-hover mb-0" style="min-width: 600px;">
                         <thead>
                             <tr>
                                 <th style="width: 20%;">Code</th>

@@ -24,10 +24,10 @@
     <!-- Right Side -->
     <div class="navbar-right">
         <!-- Search -->
-        <div class="navbar-search d-none d-lg-block">
+        <form action="{% url 'global_search' %}" method="get" class="navbar-search d-none d-lg-block">
             <i class="bi bi-search"></i>
-            <input type="text" placeholder="Search portfolios, trades..." id="global-search">
-        </div>
+            <input type="text" placeholder="Search portfolios, trades..." id="global-search" name="q">
+        </form>
 
         <!-- Icons -->
         <div class="navbar-icons">
@@ -37,9 +37,9 @@
             </button>
 
             <!-- Help -->
-            <button class="navbar-icon" title="Help & Documentation">
+            <a href="/static/docs/index.html" target="_blank" class="navbar-icon" title="Help & Documentation">
                 <i class="bi bi-question-circle"></i>
-            </button>
+            </a>
         </div>
 
         <!-- User Menu -->

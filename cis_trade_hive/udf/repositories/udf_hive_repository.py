@@ -1,137 +1,52 @@
 """
-UDF Hive Repository
-Fetches UDF definitions and dropdown options from Hive tables.
+UDF Repository - Kudu/Impala Backend
+Fetches UDF definitions and dropdown options from Kudu/Impala tables.
 """
 
 from typing import List, Dict, Any, Optional
-from pyhive import hive
 from django.conf import settings
-import subprocess
-import tempfile
-import os
+from core.repositories.impala_connection import impala_manager
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-class HiveConnection:
-    """Manages Hive database connections."""
+class ImpalaConnection:
+    """Manages Impala database connections for UDF module."""
 
-    @staticmethod
-    def get_connection():
-        """Create and return a Hive connection."""
-        return hive.Connection(
-            host='localhost',
-            port=10000,
-            database='cis',
-            auth='NOSASL',
-            configuration={'hive.server2.thrift.client.connect.timeout': '10000',
-                          'hive.server2.thrift.client.socketTimeout': '60000'}
-        )
+    DATABASE = 'gmp_cis'
 
     @staticmethod
     def execute_query(query: str) -> List[Dict[str, Any]]:
         """
-        Execute a Hive query and return results as list of dictionaries.
-
-        PyHive Limitations Handled:
-        - Uses SELECT * to avoid column name issues
-        - Avoids ORDER BY in SQL (sort in Python instead)
-        - Handles qualified column names (table.column)
-        """
-        conn = HiveConnection.get_connection()
-        cursor = conn.cursor()
-
-        try:
-            cursor.execute(query)
-            columns = [desc[0] for desc in cursor.description]
-            results = []
-
-            for row in cursor.fetchall():
-                # Handle qualified column names (table.column -> column)
-                row_dict = {}
-                for col, val in zip(columns, row):
-                    # Remove table prefix if present
-                    clean_col = col.split('.')[-1] if '.' in col else col
-                    row_dict[clean_col] = val
-                results.append(row_dict)
-
-            return results
-        finally:
-            cursor.close()
-            conn.close()
-
-    @staticmethod
-    def load_data_to_table(table_name: str, data_line: str) -> bool:
-        """
-        Load data into Hive table using beeline and LOAD DATA LOCAL INPATH.
-        This works around PyHive connection issues with Hive 4.x.
+        Execute an Impala query and return results as list of dictionaries.
 
         Args:
-            table_name: Name of the table to load data into
-            data_line: Pipe-delimited data line to load
+            query: SQL query string
 
         Returns:
-            True if successful, False otherwise
+            List of dictionaries representing rows
         """
-        temp_file = None
-
         try:
-            # Create temporary file with data
-            temp_file = tempfile.NamedTemporaryFile(
-                mode='w',
-                suffix='.txt',
-                delete=False
-            )
-            temp_file.write(data_line)
-            temp_file.close()
+            results = impala_manager.execute_query(query, database=ImpalaConnection.DATABASE)
+            logger.info(f"Query returned {len(results) if results else 0} rows")
+            return results if results else []
 
-            # Use beeline to execute LOAD DATA command
-            load_query = f"LOAD DATA LOCAL INPATH '{temp_file.name}' INTO TABLE {table_name};"
-
-            # Execute via beeline subprocess (use full path to avoid Anaconda's beeline)
-            result = subprocess.run(
-                [
-                    '/usr/local/bin/beeline',
-                    '-u', 'jdbc:hive2://localhost:10000/cis',
-                    '-e', load_query,
-                    '--silent=true'
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-
-            if result.returncode == 0:
-                logger.info(f"Data loaded successfully into {table_name}")
-                return True
-            else:
-                logger.error(f"Beeline error loading data: {result.stderr}")
-                return False
-
-        except subprocess.TimeoutExpired:
-            logger.error(f"Beeline timeout loading data into {table_name}")
-            return False
         except Exception as e:
-            logger.error(f"Error loading data into {table_name}: {str(e)}")
-            return False
-
-        finally:
-            # Clean up temporary file
-            if temp_file and os.path.exists(temp_file.name):
-                try:
-                    os.unlink(temp_file.name)
-                except:
-                    pass
+            logger.error(f"Error executing query: {str(e)}")
+            logger.error(f"Query: {query}")
+            raise
 
 
 class UDFDefinitionRepository:
-    """Repository for UDF definition metadata from Hive."""
+    """Repository for UDF definition metadata from Kudu/Impala."""
+
+    TABLE_NAME = 'cis_udf_definition'
 
     @staticmethod
     def get_all_definitions(entity_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        Fetch all UDF definitions from Hive.
+        Fetch all UDF definitions from Kudu/Impala.
 
         Args:
             entity_type: Optional filter by entity type (PORTFOLIO, TRADE, etc.)
@@ -139,28 +54,28 @@ class UDFDefinitionRepository:
         Returns:
             List of UDF definition dictionaries
         """
-        query = "SELECT * FROM cis.cis_udf_definition"
+        query = f"SELECT * FROM {UDFDefinitionRepository.TABLE_NAME}"
 
         if entity_type:
             query += f" WHERE entity_type = '{entity_type.upper()}'"
 
-        results = HiveConnection.execute_query(query)
+        query += " ORDER BY display_order, field_name"
 
-        # Sort in Python (avoid ORDER BY in Hive due to PyHive issues)
-        return sorted(results, key=lambda x: (x.get('display_order', 0), x.get('field_name', '')))
+        results = ImpalaConnection.execute_query(query)
+        return results
 
     @staticmethod
     def get_definition_by_id(udf_id: int) -> Optional[Dict[str, Any]]:
         """Fetch a specific UDF definition by ID."""
-        query = f"SELECT * FROM cis.cis_udf_definition WHERE udf_id = {udf_id}"
-        results = HiveConnection.execute_query(query)
+        query = f"SELECT * FROM {UDFDefinitionRepository.TABLE_NAME} WHERE udf_id = {udf_id} LIMIT 1"
+        results = ImpalaConnection.execute_query(query)
         return results[0] if results else None
 
     @staticmethod
     def get_definition_by_name(field_name: str) -> Optional[Dict[str, Any]]:
         """Fetch a UDF definition by field name."""
-        query = f"SELECT * FROM cis.cis_udf_definition WHERE field_name = '{field_name}'"
-        results = HiveConnection.execute_query(query)
+        query = f"SELECT * FROM {UDFDefinitionRepository.TABLE_NAME} WHERE field_name = '{field_name}' LIMIT 1"
+        results = ImpalaConnection.execute_query(query)
         return results[0] if results else None
 
     @staticmethod
@@ -171,69 +86,116 @@ class UDFDefinitionRepository:
     @staticmethod
     def get_active_definitions(entity_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """Fetch only active UDF definitions."""
-        query = "SELECT * FROM cis.cis_udf_definition WHERE is_active = true"
+        query = f"SELECT * FROM {UDFDefinitionRepository.TABLE_NAME} WHERE is_active = true"
 
         if entity_type:
             query += f" AND entity_type = '{entity_type.upper()}'"
 
-        results = HiveConnection.execute_query(query)
-        return sorted(results, key=lambda x: (x.get('display_order', 0), x.get('field_name', '')))
+        query += " ORDER BY display_order, field_name"
+
+        results = ImpalaConnection.execute_query(query)
+        return results
 
     @staticmethod
     def insert_definition(udf_data: Dict[str, Any]) -> bool:
         """
-        Insert UDF definition into Hive using LOAD DATA.
+        Insert UDF definition into Kudu table using UPSERT.
 
         Args:
             udf_data: Dictionary with UDF definition data
+                Required keys: udf_id, field_name, label, field_type, entity_type
 
         Returns:
-            True if successful
+            True if successful, False otherwise
         """
         try:
-            # Helper to format values for pipe-delimited file
-            def format_val(v):
-                if v is None:
-                    return ''
-                # Replace pipes with escaped version to avoid delimiter conflict
-                return str(v).replace('|', '\\|')
+            # Build column names and values
+            columns = []
+            values = []
 
-            # Build pipe-delimited data line (23 columns in correct order)
-            data_line = '|'.join([
-                str(udf_data.get('udf_id', '')),
-                format_val(udf_data.get('field_name')),
-                format_val(udf_data.get('label')),
-                format_val(udf_data.get('description')),
-                format_val(udf_data.get('field_type')),
-                format_val(udf_data.get('entity_type')),
-                str(udf_data.get('is_required', False)).lower(),
-                str(udf_data.get('is_unique', False)).lower(),
-                str(udf_data.get('max_length') or ''),
-                str(udf_data.get('min_value_decimal') or ''),
-                str(udf_data.get('max_value_decimal') or ''),
-                str(udf_data.get('display_order', 0)),
-                format_val(udf_data.get('group_name')),
-                format_val(udf_data.get('default_string')),
-                str(udf_data.get('default_int') or ''),
-                str(udf_data.get('default_decimal') or ''),
-                str(udf_data.get('default_bool', '')).lower() if udf_data.get('default_bool') is not None else '',
-                format_val(udf_data.get('default_datetime')),
-                str(udf_data.get('is_active', True)).lower(),
-                format_val(udf_data.get('created_by')),
-                format_val(udf_data.get('created_at')),
-                format_val(udf_data.get('updated_by')),
-                format_val(udf_data.get('updated_at'))
-            ])
+            for key, value in udf_data.items():
+                if value is not None:
+                    columns.append(f"`{key}`")
+                    if isinstance(value, str):
+                        escaped_value = value.replace("'", "''")
+                        values.append(f"'{escaped_value}'")
+                    elif isinstance(value, bool):
+                        values.append('true' if value else 'false')
+                    elif isinstance(value, (int, float)):
+                        values.append(str(value))
+                    else:
+                        values.append(f"'{str(value)}'")
 
-            return HiveConnection.load_data_to_table('cis_udf_definition', data_line)
+            # Build UPSERT query
+            upsert_query = f"""
+            UPSERT INTO {ImpalaConnection.DATABASE}.{UDFDefinitionRepository.TABLE_NAME}
+            ({', '.join(columns)})
+            VALUES ({', '.join(values)})
+            """
+
+            # Execute via Impala
+            success = impala_manager.execute_write(upsert_query, database=ImpalaConnection.DATABASE)
+
+            if success:
+                logger.info(f"Successfully inserted UDF definition: {udf_data.get('field_name')}")
+
+            return success
 
         except Exception as e:
-            logger.error(f"Error creating UDF definition data: {str(e)}")
+            logger.error(f"Error inserting UDF definition: {str(e)}")
+            logger.error(f"UDF data: {udf_data}")
+            return False
+
+    @staticmethod
+    def update_definition(udf_id: int, udf_data: Dict[str, Any]) -> bool:
+        """
+        Update UDF definition in Kudu table using UPSERT.
+
+        Args:
+            udf_id: UDF ID
+            udf_data: Dictionary with updated UDF data
+
+        Returns:
+            True if successful, False otherwise
+        """
+        # Ensure udf_id is in the data
+        udf_data['udf_id'] = udf_id
+        return UDFDefinitionRepository.insert_definition(udf_data)
+
+    @staticmethod
+    def delete_definition(udf_id: int) -> bool:
+        """
+        Soft delete UDF definition by setting is_active = false.
+
+        Args:
+            udf_id: UDF ID to delete
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            delete_query = f"""
+            UPDATE {ImpalaConnection.DATABASE}.{UDFDefinitionRepository.TABLE_NAME}
+            SET `is_active` = false
+            WHERE `udf_id` = {udf_id}
+            """
+
+            success = impala_manager.execute_write(delete_query, database=ImpalaConnection.DATABASE)
+
+            if success:
+                logger.info(f"Successfully deleted UDF definition ID: {udf_id}")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Error deleting UDF definition: {str(e)}")
             return False
 
 
 class UDFOptionRepository:
-    """Repository for UDF dropdown options from Hive."""
+    """Repository for UDF dropdown options from Kudu/Impala."""
+
+    TABLE_NAME = 'cis_udf_option'
 
     @staticmethod
     def get_options_by_udf_id(udf_id: int) -> List[Dict[str, Any]]:
@@ -246,18 +208,16 @@ class UDFOptionRepository:
         Returns:
             List of option dictionaries with option_value, display_order, is_active
         """
-        query = f"SELECT * FROM cis.cis_udf_option WHERE udf_id = {udf_id}"
-        results = HiveConnection.execute_query(query)
-
-        # Sort by display_order in Python
-        return sorted(results, key=lambda x: x.get('display_order', 0))
+        query = f"SELECT * FROM {UDFOptionRepository.TABLE_NAME} WHERE udf_id = {udf_id} ORDER BY display_order"
+        results = ImpalaConnection.execute_query(query)
+        return results
 
     @staticmethod
     def get_active_options_by_udf_id(udf_id: int) -> List[Dict[str, Any]]:
         """Fetch only active dropdown options for a UDF."""
-        query = f"SELECT * FROM cis.cis_udf_option WHERE udf_id = {udf_id} AND is_active = true"
-        results = HiveConnection.execute_query(query)
-        return sorted(results, key=lambda x: x.get('display_order', 0))
+        query = f"SELECT * FROM {UDFOptionRepository.TABLE_NAME} WHERE udf_id = {udf_id} AND is_active = true ORDER BY display_order"
+        results = ImpalaConnection.execute_query(query)
+        return results
 
     @staticmethod
     def get_options_by_field_name(field_name: str) -> List[Dict[str, Any]]:
@@ -280,55 +240,29 @@ class UDFOptionRepository:
 
 
 class UDFValueRepository:
-    """Repository for UDF values in Hive."""
+    """Repository for UDF values in Kudu/Impala."""
+
+    TABLE_NAME = 'cis_udf_value'
 
     @staticmethod
     def insert_value(value_data: Dict[str, Any]) -> bool:
         """
-        Insert UDF value into Hive using LOAD DATA.
+        Insert UDF value into Kudu/Impala.
+        Note: Kudu write operations are not yet implemented.
 
         Args:
             value_data: Dictionary with UDF value data
 
         Returns:
-            True if successful
+            False - Kudu write operations not yet implemented
         """
-        try:
-            # Helper to format values for pipe-delimited file
-            def format_val(v):
-                if v is None:
-                    return ''
-                # Replace pipes with escaped version to avoid delimiter conflict
-                return str(v).replace('|', '\\|')
-
-            # Build pipe-delimited data line (14 columns in correct order)
-            data_line = '|'.join([
-                format_val(value_data.get('entity_type')),
-                str(value_data.get('entity_id', '')),
-                format_val(value_data.get('field_name')),
-                str(value_data.get('udf_id', '')),
-                format_val(value_data.get('value_string')),
-                str(value_data.get('value_int') or ''),
-                str(value_data.get('value_decimal') or ''),
-                str(value_data.get('value_bool', '')).lower() if value_data.get('value_bool') is not None else '',
-                format_val(value_data.get('value_datetime')),
-                str(value_data.get('is_active', True)).lower(),
-                format_val(value_data.get('created_by')),
-                format_val(value_data.get('created_at')),
-                format_val(value_data.get('updated_by')),
-                format_val(value_data.get('updated_at'))
-            ])
-
-            return HiveConnection.load_data_to_table('cis_udf_value', data_line)
-
-        except Exception as e:
-            logger.error(f"Error creating UDF value data: {str(e)}")
-            return False
+        logger.warning("UDF value insert not yet implemented for Kudu/Impala")
+        return False
 
 
 class ReferenceDataRepository:
     """
-    Repository for fetching reference data from Hive tables.
+    Repository for fetching reference data from Kudu/Impala tables.
     Used to populate UDF dropdown options from Currency, Country, Calendar, Counterparty tables.
     """
 
@@ -340,11 +274,9 @@ class ReferenceDataRepository:
         Returns:
             List of currency dictionaries with iso_code, name, symbol
         """
-        query = "SELECT * FROM cis.gmp_cis_sta_dly_currency"
-        results = HiveConnection.execute_query(query)
-
-        # Sort by ISO code in Python
-        return sorted(results, key=lambda x: x.get('iso_code', ''))
+        query = "SELECT * FROM gmp_cis_sta_dly_currency ORDER BY iso_code"
+        results = ImpalaConnection.execute_query(query)
+        return results
 
     @staticmethod
     def get_countries() -> List[Dict[str, Any]]:
@@ -354,11 +286,9 @@ class ReferenceDataRepository:
         Returns:
             List of country dictionaries with label, full_name
         """
-        query = "SELECT * FROM cis.gmp_cis_sta_dly_country"
-        results = HiveConnection.execute_query(query)
-
-        # Sort by label in Python
-        return sorted(results, key=lambda x: x.get('label', ''))
+        query = "SELECT * FROM gmp_cis_sta_dly_country ORDER BY label"
+        results = ImpalaConnection.execute_query(query)
+        return results
 
     @staticmethod
     def get_calendars() -> List[Dict[str, Any]]:
@@ -368,11 +298,9 @@ class ReferenceDataRepository:
         Returns:
             List of calendar dictionaries with calendar_label, calendar_description
         """
-        query = "SELECT DISTINCT calendar_label, calendar_description FROM cis.gmp_cis_sta_dly_calendar"
-        results = HiveConnection.execute_query(query)
-
-        # Sort by calendar_label in Python
-        return sorted(results, key=lambda x: x.get('calendar_label', ''))
+        query = "SELECT DISTINCT calendar_label, calendar_description FROM gmp_cis_sta_dly_calendar ORDER BY calendar_label"
+        results = ImpalaConnection.execute_query(query)
+        return results
 
     @staticmethod
     def get_counterparties() -> List[Dict[str, Any]]:
@@ -382,11 +310,9 @@ class ReferenceDataRepository:
         Returns:
             List of counterparty dictionaries
         """
-        query = "SELECT * FROM cis.gmp_cis_sta_dly_counterparty"
-        results = HiveConnection.execute_query(query)
-
-        # Sort by counterparty_name in Python
-        return sorted(results, key=lambda x: x.get('counterparty_name', ''))
+        query = "SELECT * FROM gmp_cis_sta_dly_counterparty ORDER BY counterparty_name"
+        results = ImpalaConnection.execute_query(query)
+        return results
 
     @staticmethod
     def get_brokers() -> List[Dict[str, Any]]:
@@ -396,9 +322,9 @@ class ReferenceDataRepository:
         Returns:
             List of broker counterparties
         """
-        query = "SELECT * FROM cis.gmp_cis_sta_dly_counterparty WHERE is_counterparty_broker = 'Y'"
-        results = HiveConnection.execute_query(query)
-        return sorted(results, key=lambda x: x.get('counterparty_name', ''))
+        query = "SELECT * FROM gmp_cis_sta_dly_counterparty WHERE is_counterparty_broker = 'Y' ORDER BY counterparty_name"
+        results = ImpalaConnection.execute_query(query)
+        return results
 
     @staticmethod
     def get_custodians() -> List[Dict[str, Any]]:
@@ -408,9 +334,9 @@ class ReferenceDataRepository:
         Returns:
             List of custodian counterparties
         """
-        query = "SELECT * FROM cis.gmp_cis_sta_dly_counterparty WHERE is_counterparty_custodian = 'Y'"
-        results = HiveConnection.execute_query(query)
-        return sorted(results, key=lambda x: x.get('counterparty_name', ''))
+        query = "SELECT * FROM gmp_cis_sta_dly_counterparty WHERE is_counterparty_custodian = 'Y' ORDER BY counterparty_name"
+        results = ImpalaConnection.execute_query(query)
+        return results
 
     @staticmethod
     def get_issuers() -> List[Dict[str, Any]]:
@@ -420,9 +346,9 @@ class ReferenceDataRepository:
         Returns:
             List of issuer counterparties
         """
-        query = "SELECT * FROM cis.gmp_cis_sta_dly_counterparty WHERE is_counterparty_issuer = 'Y'"
-        results = HiveConnection.execute_query(query)
-        return sorted(results, key=lambda x: x.get('counterparty_name', ''))
+        query = "SELECT * FROM gmp_cis_sta_dly_counterparty WHERE is_counterparty_issuer = 'Y' ORDER BY counterparty_name"
+        results = ImpalaConnection.execute_query(query)
+        return results
 
     @staticmethod
     def get_account_groups() -> List[Dict[str, Any]]:

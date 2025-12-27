@@ -91,6 +91,17 @@
         </div>
     </div>
 
+    <!-- Info Alert -->
+    {% if using_kudu %}
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle"></i>
+        <strong>Note:</strong> Audit logs are being collected from Kudu/Impala tables.
+        Currently, Kudu write operations are logged to the application logs.
+        Check application console for real-time audit events.
+        <br><small>UDF actions (CREATE, UPDATE, DELETE) are logged with full details including user, timestamp, and changes.</small>
+    </div>
+    {% endif %}
+
     <!-- Audit Logs Table -->
     <div class="card">
         <div class="card-header">
@@ -104,9 +115,9 @@
         </div>
         <div class="card-body p-0">
             {% if audit_logs %}
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0">
-                        <thead>
+                <div style="max-height: 600px; overflow-x: auto; overflow-y: auto; position: relative;">
+                    <table class="table table-hover mb-0" style="min-width: 1200px; width: 100%;">
+                        <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
                             <tr>
                                 <th style="width: 10%;">Timestamp</th>
                                 <th style="width: 10%;">User</th>
@@ -122,63 +133,64 @@
                             {% for log in audit_logs %}
                             <tr>
                                 <td style="white-space: nowrap; font-size: var(--font-size-sm);">
-                                    {{ log.timestamp|date:"Y-m-d" }}<br>
-                                    <small class="text-muted">{{ log.timestamp|date:"H:i:s" }}</small>
+                                    {{ log.audit_timestamp|slice:":10" }}<br>
+                                    <small class="text-muted">{{ log.audit_timestamp|slice:"11:19" }}</small>
                                 </td>
                                 <td>
-                                    {% if log.user %}
-                                        <div>{{ log.user.username }}</div>
-                                        <small class="text-muted">{{ log.user.get_full_name|truncatewords:2 }}</small>
-                                    {% else %}
-                                        <span class="text-muted">System</span>
+                                    <div class="fw-semibold">{{ log.username|default:"System" }}</div>
+                                    {% if log.user_email %}
+                                        <small class="text-muted d-block">{{ log.user_email }}</small>
+                                    {% endif %}
+                                    {% if log.new_value and log.field_name == 'created_by' %}
+                                        <small class="text-muted d-block">{{ log.new_value }}</small>
                                     {% endif %}
                                 </td>
                                 <td>
-                                    {% if log.action == 'CREATE' %}
-                                        <span class="badge badge-success">{{ log.action }}</span>
-                                    {% elif log.action == 'UPDATE' or log.action == 'EDIT' %}
-                                        <span class="badge badge-info">{{ log.action }}</span>
-                                    {% elif log.action == 'DELETE' %}
-                                        <span class="badge badge-danger">{{ log.action }}</span>
-                                    {% elif log.action == 'APPROVE' %}
-                                        <span class="badge badge-success">{{ log.action }}</span>
-                                    {% elif log.action == 'REJECT' %}
-                                        <span class="badge badge-danger">{{ log.action }}</span>
-                                    {% elif log.action == 'SUBMIT' %}
-                                        <span class="badge badge-warning">{{ log.action }}</span>
-                                    {% elif log.action == 'VIEW' or log.action == 'READ' %}
-                                        <span class="badge badge-secondary">{{ log.action }}</span>
-                                    {% elif log.action == 'EXPORT' %}
-                                        <span class="badge badge-info">{{ log.action }}</span>
-                                    {% elif log.action == 'LOGIN' %}
-                                        <span class="badge badge-success">{{ log.action }}</span>
-                                    {% elif log.action == 'LOGOUT' %}
-                                        <span class="badge badge-secondary">{{ log.action }}</span>
-                                    {% elif log.action == 'LOGIN_FAILED' %}
-                                        <span class="badge badge-danger">{{ log.action }}</span>
+                                    {% if log.action_type == 'CREATE' %}
+                                        <span class="badge badge-success">{{ log.action_type }}</span>
+                                    {% elif log.action_type == 'UPDATE' or log.action_type == 'EDIT' %}
+                                        <span class="badge badge-info">{{ log.action_type }}</span>
+                                    {% elif log.action_type == 'DELETE' %}
+                                        <span class="badge badge-danger">{{ log.action_type }}</span>
+                                    {% elif log.action_type == 'APPROVE' %}
+                                        <span class="badge badge-success">{{ log.action_type }}</span>
+                                    {% elif log.action_type == 'REJECT' %}
+                                        <span class="badge badge-danger">{{ log.action_type }}</span>
+                                    {% elif log.action_type == 'SUBMIT' %}
+                                        <span class="badge badge-warning">{{ log.action_type }}</span>
+                                    {% elif log.action_type == 'VIEW' or log.action_type == 'READ' %}
+                                        <span class="badge badge-secondary">{{ log.action_type }}</span>
+                                    {% elif log.action_type == 'EXPORT' %}
+                                        <span class="badge badge-info">{{ log.action_type }}</span>
+                                    {% elif log.action_type == 'LOGIN' %}
+                                        <span class="badge badge-success">{{ log.action_type }}</span>
+                                    {% elif log.action_type == 'LOGOUT' %}
+                                        <span class="badge badge-secondary">{{ log.action_type }}</span>
+                                    {% elif log.action_type == 'LOGIN_FAILED' %}
+                                        <span class="badge badge-danger">{{ log.action_type }}</span>
                                     {% else %}
-                                        <span class="badge badge-secondary">{{ log.action }}</span>
+                                        <span class="badge badge-secondary">{{ log.action_type|default:"UNKNOWN" }}</span>
                                     {% endif %}
                                 </td>
-                                <td>{{ log.object_type|default:"-" }}</td>
+                                <td>{{ log.entity_type|default:"-" }}</td>
                                 <td>
-                                    {% if log.object_id %}
-                                        <code>{{ log.object_id }}</code>
+                                    {% if log.entity_id %}
+                                        <code>{{ log.entity_id }}</code>
                                     {% else %}
                                         <span class="text-muted">-</span>
                                     {% endif %}
                                 </td>
                                 <td>
                                     <div style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-                                         title="{{ log.description }}">
-                                        {{ log.description|default:"-" }}
+                                         title="{{ log.action_description }}">
+                                        {{ log.action_description|default:"-" }}
                                     </div>
                                 </td>
                                 <td>
-                                    {% if log.changes_summary %}
+                                    {% if log.old_value or log.new_value %}
                                         <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-                                             title="{{ log.changes_summary }}">
-                                            <small>{{ log.changes_summary|truncatewords:10 }}</small>
+                                             title="{{ log.old_value }} → {{ log.new_value }}">
+                                            <small>{{ log.old_value|default:"-" }} → {{ log.new_value|default:"-" }}</small>
                                         </div>
                                     {% else %}
                                         <span class="text-muted">-</span>

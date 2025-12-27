@@ -3,7 +3,7 @@ Django settings for CisTrade project.
 
 Enterprise-grade Trade Management System with:
 - SOLID Architecture principles
-- Hive database connectivity
+- Impala/Kudu database connectivity
 - Direct data access without authentication
 """
 
@@ -20,6 +20,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Security Settings
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-CHANGE-ME-IN-PRODUCTION')
 DEBUG = os.environ.get('DJANGO_DEBUG', 'true').lower() == 'true'
+
+# Development mode settings
+SKIP_PERMISSION_CHECKS = DEBUG  # Skip permission checks in dev mode
+
 ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 # Application definition
@@ -94,16 +98,19 @@ DATABASES = {
     },
 }
 
-# Hive Configuration (Local Environment)
-HIVE_CONFIG = {
-    'HOST': os.environ.get('HIVE_HOST', 'localhost'),
-    'PORT': int(os.environ.get('HIVE_PORT', '10000')),
-    'DATABASE': os.environ.get('HIVE_DB', 'cis'),
-    'AUTH': os.environ.get('HIVE_AUTH', 'NONE'),
-    'USERNAME': os.environ.get('HIVE_USERNAME', ''),
-    'PASSWORD': os.environ.get('HIVE_PASSWORD', ''),
-    'TIMEOUT': int(os.environ.get('HIVE_TIMEOUT', '60')),
+# Impala Configuration (Local Environment - Docker with Kudu)
+IMPALA_CONFIG = {
+    'HOST': os.environ.get('IMPALA_HOST', 'localhost'),
+    'PORT': int(os.environ.get('IMPALA_PORT', '21050')),
+    'DATABASE': os.environ.get('IMPALA_DB', 'gmp_cis'),
+    'AUTH': os.environ.get('IMPALA_AUTH', 'NOSASL'),
+    'USERNAME': os.environ.get('IMPALA_USERNAME', ''),
+    'PASSWORD': os.environ.get('IMPALA_PASSWORD', ''),
+    'TIMEOUT': int(os.environ.get('IMPALA_TIMEOUT', '60')),
 }
+
+# Backward compatibility - keep HIVE_CONFIG pointing to IMPALA_CONFIG
+HIVE_CONFIG = IMPALA_CONFIG
 
 # Database Router
 DATABASE_ROUTERS = ['core.repositories.db_router.DatabaseRouter']

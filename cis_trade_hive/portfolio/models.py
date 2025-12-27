@@ -116,6 +116,8 @@ class Portfolio(BaseModel):
         permissions = [
             ('approve_portfolio', 'Can approve portfolio'),
             ('reject_portfolio', 'Can reject portfolio'),
+            ('close_portfolio', 'Can close portfolio'),
+            ('reactivate_portfolio', 'Can reactivate portfolio'),
         ]
 
     def __str__(self):
@@ -201,6 +203,8 @@ class PortfolioHistory(BaseModel):
             ('REJECT', 'Rejected'),
             ('ACTIVATE', 'Activated'),
             ('DEACTIVATE', 'Deactivated'),
+            ('CLOSE', 'Closed'),
+            ('REACTIVATE', 'Reactivated'),
         ]
     )
     status = models.CharField(max_length=20)

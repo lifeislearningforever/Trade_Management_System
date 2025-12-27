@@ -37,18 +37,8 @@ class CurrencyService:
             List of currency dictionaries
         """
         results = self.repository.list_all(search=search)
-
-        # Transform column names to match expected format
-        return [{
-            'code': r.get('iso_code'),
-            'name': r.get('name'),
-            'full_name': r.get('full_name'),
-            'symbol': r.get('symbol'),
-            'decimal_places': r.get('precision'),
-            'rate_precision': r.get('rate_precision'),
-            'calendar': r.get('calendar'),
-            'spot_schedule': r.get('spot_schedule'),
-        } for r in results]
+        # Repository already returns properly mapped columns
+        return results
 
     def get_by_code(self, code: str) -> Optional[Dict]:
         """Get specific currency by ISO code"""
@@ -91,14 +81,8 @@ class CountryService:
             List of country dictionaries
         """
         results = self.repository.list_all(search=search)
-
-        # Transform column names to match expected format
-        # Handle both qualified (table.column) and unqualified (column) names
-        prefix = 'gmp_cis_sta_dly_country.'
-        return [{
-            'code': r.get(f'{prefix}label') or r.get('label'),
-            'name': r.get(f'{prefix}full_name') or r.get('full_name'),
-        } for r in results]
+        # Repository already returns properly mapped columns
+        return results
 
     def get_by_code(self, code: str) -> Optional[Dict]:
         """Get specific country by code"""
@@ -173,38 +157,14 @@ class CounterpartyService:
 
         Args:
             search: Optional search term for name or description
-            counterparty_type: Filter by counterparty type (not implemented yet)
+            counterparty_type: Filter by counterparty type
 
         Returns:
             List of counterparty dictionaries
         """
-        results = self.repository.list_all(search=search)
-
-        # Transform column names to match expected format
-        # Handle both qualified (table.column) and unqualified (column) names
-        prefix = 'gmp_cis_sta_dly_counterparty.'
-        return [{
-            'counterparty_name': r.get(f'{prefix}counterparty_name') or r.get('counterparty_name'),
-            'description': r.get(f'{prefix}description') or r.get('description'),
-            'salutation': r.get(f'{prefix}salutation') or r.get('salutation'),
-            'address': r.get(f'{prefix}address') or r.get('address'),
-            'city': r.get(f'{prefix}city') or r.get('city'),
-            'country': r.get(f'{prefix}country') or r.get('country'),
-            'postal_code': r.get(f'{prefix}postal_code') or r.get('postal_code'),
-            'fax': r.get(f'{prefix}fax') or r.get('fax'),
-            'telex': r.get(f'{prefix}telex') or r.get('telex'),
-            'industry': r.get(f'{prefix}industry') or r.get('industry'),
-            'is_counterparty_broker': r.get(f'{prefix}is_counterparty_broker') or r.get('is_counterparty_broker'),
-            'is_counterparty_custodian': r.get(f'{prefix}is_counterparty_custodian') or r.get('is_counterparty_custodian'),
-            'is_counterparty_issuer': r.get(f'{prefix}is_counterparty_issuer') or r.get('is_counterparty_issuer'),
-            'primary_contact': r.get(f'{prefix}primary_contact') or r.get('primary_contact'),
-            'primary_number': r.get(f'{prefix}primary_number') or r.get('primary_number'),
-            'other_contact': r.get(f'{prefix}other_contact') or r.get('other_contact'),
-            'other_number': r.get(f'{prefix}other_number') or r.get('other_number'),
-            'custodian_group': r.get(f'{prefix}custodian_group') or r.get('custodian_group'),
-            'broker_group': r.get(f'{prefix}broker_group') or r.get('broker_group'),
-            'resident_y_n': r.get(f'{prefix}resident_y_n') or r.get('resident_y_n'),
-        } for r in results]
+        results = self.repository.list_all(search=search, counterparty_type=counterparty_type)
+        # Repository already returns properly mapped columns
+        return results
 
     def get_by_name(self, name: str) -> Optional[Dict]:
         """Get specific counterparty by name"""

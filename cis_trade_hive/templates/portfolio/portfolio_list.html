@@ -56,7 +56,7 @@
                         <option value="PENDING_APPROVAL" {% if status == 'PENDING_APPROVAL' %}selected{% endif %}>Pending Approval</option>
                         <option value="APPROVED" {% if status == 'APPROVED' %}selected{% endif %}>Approved</option>
                         <option value="REJECTED" {% if status == 'REJECTED' %}selected{% endif %}>Rejected</option>
-                        <option value="CLOSED" {% if status == 'CLOSED' %}selected{% endif %}>Closed</option>
+                        <option value="Inactive" {% if status == 'Inactive' %}selected{% endif %}>Inactive</option>
                     </select>
                 </div>
                 <div class="col-md-3">
@@ -89,9 +89,9 @@
         </div>
         <div class="card-body p-0">
             {% if page_obj %}
-                <div class="table-responsive" style="max-height: 600px; overflow-x: auto; overflow-y: auto;">
-                    <table class="table table-hover table-sm mb-0" style="min-width: 2000px; table-layout: auto;">
-                        <thead class="table-light" style="position: sticky; top: 0; z-index: 10;">
+                <div style="max-height: 600px; overflow-x: auto; overflow-y: auto; position: relative;">
+                    <table class="table table-hover table-sm mb-0" style="min-width: 2000px; width: 100%;">
+                        <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
                             <tr>
                                 <th style="min-width: 180px;">Name</th>
                                 <th style="min-width: 200px;">Description</th>
@@ -109,11 +109,12 @@
                                 <th style="min-width: 130px;">Revaluation</th>
                                 <th style="min-width: 140px;">Created At</th>
                                 <th style="min-width: 140px;">Updated At</th>
+                                <th style="min-width: 180px; position: sticky; right: 0; background-color: #f8f9fa; z-index: 5;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for portfolio in page_obj %}
-                            <tr>
+                            <tr {% if portfolio.status == 'Inactive' %}style="opacity: 0.6; background-color: #f8f9fa;"{% endif %}>
                                 <td>
                                     <strong class="text-primary">{{ portfolio.name }}</strong>
                                 </td>
@@ -127,7 +128,13 @@
                                 <td>{{ portfolio.portfolio_client|default:"-" }}</td>
                                 <td class="text-end">{{ portfolio.cash_balance|floatformat:2|default:"0.00" }}</td>
                                 <td>
-                                    <span class="badge badge-success">{{ portfolio.status|default:"Active" }}</span>
+                                    {% if portfolio.status == 'Inactive' %}
+                                        <span class="badge badge-dark">Inactive</span>
+                                    {% elif portfolio.status == 'Active' %}
+                                        <span class="badge badge-success">Active</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">{{ portfolio.status|default:"Active" }}</span>
+                                    {% endif %}
                                 </td>
                                 <td>{{ portfolio.cost_centre_code|default:"-" }}</td>
                                 <td>{{ portfolio.corp_code|default:"-" }}</td>
@@ -138,6 +145,18 @@
                                 <td>{{ portfolio.revaluation_status|default:"-" }}</td>
                                 <td style="font-size: 0.85rem;">{{ portfolio.created_at|default:"-" }}</td>
                                 <td style="font-size: 0.85rem;">{{ portfolio.updated_at|default:"-" }}</td>
+                                <td style="position: sticky; right: 0; background-color: {% if portfolio.status == 'Inactive' %}#f8f9fa{% else %}white{% endif %}; z-index: 4;">
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <a href="{% url 'portfolio:detail' portfolio.name %}" class="btn btn-sm btn-outline-primary" title="View Details">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                        {% if portfolio.status == 'DRAFT' or portfolio.status == 'REJECTED' %}
+                                            <a href="{% url 'portfolio:edit' portfolio.id %}" class="btn btn-sm btn-outline-warning" title="Edit">
+                                                <i class="bi bi-pencil"></i>
+                                            </a>
+                                        {% endif %}
+                                    </div>
+                                </td>
                             </tr>
                             {% endfor %}
                         </tbody>
