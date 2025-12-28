@@ -98,12 +98,16 @@
                     </div>
                     <div class="card-body">
                         <div class="mb-3">
-                            <label class="text-muted d-block mb-1">Rate Date</label>
+                            <label class="text-muted d-block mb-1">Trade Date</label>
                             <strong>{{ rate.rate_date }}</strong>
+                            <small class="text-muted d-block">Business date of the FX rate</small>
                         </div>
                         <div class="mb-3">
-                            <label class="text-muted d-block mb-1">Rate Time</label>
-                            <strong>{{ rate.rate_time }}</strong>
+                            <label class="text-muted d-block mb-1">ETL Processing Date</label>
+                            <strong>
+                                <span class="badge bg-primary">{{ rate.processing_date_display|default:"-" }}</span>
+                            </strong>
+                            <small class="text-muted d-block">Date when file was loaded</small>
                         </div>
                         <div class="mb-3">
                             <label class="text-muted d-block mb-1">Source</label>
@@ -130,28 +134,27 @@
 
         <!-- Rate History Chart -->
         <div class="card glass-card mt-4">
-            <div class="card-header">
+            <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="card-title mb-0">
-                    <i class="bi bi-graph-up"></i> Rate History (30 Days)
+                    <i class="bi bi-graph-up"></i> Rate History Chart
                 </h5>
+                <div class="btn-group btn-group-sm" role="group">
+                    <button type="button" class="btn btn-outline-primary active" onclick="showAllRates()">All Rates</button>
+                    <button type="button" class="btn btn-outline-primary" onclick="showMidRate()">Mid Rate Only</button>
+                </div>
             </div>
             <div class="card-body">
-                <div class="alert alert-info">
-                    <i class="bi bi-info-circle"></i>
-                    <strong>Chart Ready:</strong> The following data is prepared for Chart.js visualization. Integrate Chart.js to display interactive charts.
+                <!-- Chart Canvas -->
+                <div style="position: relative; height: 400px;">
+                    <canvas id="fxRateChart"></canvas>
                 </div>
 
-                <!-- Chart Data (Ready for Chart.js) -->
-                <div class="bg-light p-3 rounded mb-3">
-                    <h6>Chart Data (JSON):</h6>
-                    <pre style="font-size: 0.8rem; max-height: 200px; overflow-y: auto;">{{ chart_data|safe }}</pre>
-                </div>
-
-                <!-- Placeholder for Chart -->
-                <div class="text-center py-5" style="background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); border-radius: 12px;">
-                    <i class="bi bi-bar-chart-line" style="font-size: 3rem; opacity: 0.3;"></i>
-                    <p class="mt-3 mb-0 text-muted">Chart visualization area</p>
-                    <small class="text-muted">Integrate Chart.js to display rate trends</small>
+                <!-- Chart Legend Info -->
+                <div class="mt-3 text-center">
+                    <small class="text-muted">
+                        <i class="bi bi-info-circle"></i>
+                        Hover over the chart to see detailed rate information for each date
+                    </small>
                 </div>
             </div>
         </div>
@@ -223,8 +226,155 @@
     {% if using_hive %}
     <div class="alert alert-info mt-4">
         <i class="bi bi-database"></i>
-        <strong>Hive Data View:</strong> Historical data is sourced from Apache Hive. Chart visualization requires Chart.js integration.
+        <strong>Hive Data View:</strong> Historical data is sourced from Apache Hive. Interactive chart powered by Chart.js.
     </div>
     {% endif %}
 </div>
+
+<!-- Chart.js Library -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<script>
+// Chart data from Django context
+const chartData = {{ chart_data|safe }};
+
+// Chart instance
+let fxChart = null;
+
+// Initialize chart on page load
+document.addEventListener('DOMContentLoaded', function() {
+    initializeChart();
+});
+
+function initializeChart() {
+    const ctx = document.getElementById('fxRateChart');
+    if (!ctx) return;
+
+    // Destroy existing chart if any
+    if (fxChart) {
+        fxChart.destroy();
+    }
+
+    // Create new chart with all rates
+    fxChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: chartData.dates,
+            datasets: [
+                {
+                    label: 'Bid Rate',
+                    data: chartData.bid_rates,
+                    borderColor: 'rgb(54, 162, 235)',
+                    backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                    borderWidth: 2,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    tension: 0.1
+                },
+                {
+                    label: 'Mid Rate',
+                    data: chartData.rates,
+                    borderColor: 'rgb(75, 192, 192)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                    borderWidth: 3,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    tension: 0.1
+                },
+                {
+                    label: 'Ask Rate',
+                    data: chartData.ask_rates,
+                    borderColor: 'rgb(255, 99, 132)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                    borderWidth: 2,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    tension: 0.1
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: '{{ currency_pair }} - Rate History',
+                    font: {
+                        size: 16,
+                        weight: 'bold'
+                    }
+                },
+                legend: {
+                    display: true,
+                    position: 'top',
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    titleFont: {
+                        size: 14
+                    },
+                    bodyFont: {
+                        size: 13
+                    },
+                    padding: 12,
+                    callbacks: {
+                        label: function(context) {
+                            return context.dataset.label + ': ' + context.parsed.y.toFixed(6);
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: false,
+                    ticks: {
+                        callback: function(value) {
+                            return value.toFixed(6);
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: 'Exchange Rate'
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Trade Date'
+                    }
+                }
+            }
+        }
+    });
+}
+
+function showAllRates() {
+    // Update button states
+    document.querySelectorAll('.btn-group button').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+
+    // Show all datasets
+    fxChart.data.datasets[0].hidden = false; // Bid
+    fxChart.data.datasets[1].hidden = false; // Mid
+    fxChart.data.datasets[2].hidden = false; // Ask
+    fxChart.update();
+}
+
+function showMidRate() {
+    // Update button states
+    document.querySelectorAll('.btn-group button').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+
+    // Show only mid rate
+    fxChart.data.datasets[0].hidden = true;  // Hide Bid
+    fxChart.data.datasets[1].hidden = false; // Show Mid
+    fxChart.data.datasets[2].hidden = true;  // Hide Ask
+    fxChart.update();
+}
+</script>
 {% endblock %}

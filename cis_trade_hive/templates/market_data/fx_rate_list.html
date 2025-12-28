@@ -48,12 +48,14 @@
                     </select>
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label">From Date</label>
+                    <label class="form-label">Trade Date From</label>
                     <input type="date" class="form-control" name="date_from" value="{{ date_from }}">
+                    <small class="text-muted">Filter by business date</small>
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label">To Date</label>
+                    <label class="form-label">Trade Date To</label>
                     <input type="date" class="form-control" name="date_to" value="{{ date_to }}">
+                    <small class="text-muted">Filter by business date</small>
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">Source</label>
@@ -97,8 +99,8 @@
                                 <th style="min-width: 140px;">Mid</th>
                                 <th style="min-width: 120px;">Spread</th>
                                 <th style="min-width: 100px;">Spread %</th>
-                                <th style="min-width: 120px;">Date</th>
-                                <th style="min-width: 140px;">Time</th>
+                                <th style="min-width: 120px;">Trade Date</th>
+                                <th style="min-width: 120px;">ETL Date</th>
                                 <th style="min-width: 100px;">Source</th>
                                 <th style="min-width: 100px;">Status</th>
                             </tr>
@@ -132,7 +134,9 @@
                                     {% endif %}
                                 </td>
                                 <td>{{ rate.rate_date }}</td>
-                                <td style="font-size: 0.85rem;">{{ rate.rate_time }}</td>
+                                <td>
+                                    <span class="badge bg-primary">{{ rate.processing_date_display|default:"-" }}</span>
+                                </td>
                                 <td>
                                     <span class="badge badge-info">{{ rate.source }}</span>
                                 </td>
@@ -201,6 +205,12 @@
         <i class="bi bi-database"></i>
         <strong>Hive Data View:</strong> You are viewing FX rate data from Apache Hive. This is a read-only view with horizontal scroll enabled.
         <br><small>Status indicators: Fresh (&lt;1 hour) | Normal (1-24 hours) | Stale (&gt;24 hours)</small>
+        <br><br>
+        <strong><i class="bi bi-info-circle"></i> Date Filter Info:</strong>
+        <ul class="mb-0 mt-2" style="font-size: 0.9rem;">
+            <li><strong>Trade Date From/To:</strong> Filters by business date when the FX rate was valid in the market (shown in "Trade Date" column)</li>
+            <li><strong>ETL Date:</strong> The processing date (shown as badge in "ETL Date" column) indicates when the file was loaded into the system. This is <strong>not filterable</strong> - it's for tracking ETL batches only.</li>
+        </ul>
     </div>
     {% endif %}
 </div>

@@ -1,84 +1,128 @@
 """
 Market Data Views
 Handles FX Rate operations with Hive integration and CSV export.
+
+Updated to use gmp_cis.gmp_cis_sta_dly_fx_rates external table.
 """
 
 from django.shortcuts import render
 from django.http import HttpResponse
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+from django.core.exceptions import ValidationError
 from datetime import datetime, timedelta
 import csv
 
-from market_data.repositories import fx_rate_hive_repository
-from core.audit.audit_hive_repository import audit_log_repository
+from market_data.services import fx_rate_service
+from core.audit.audit_kudu_repository import audit_log_kudu_repository
 
 
 class FXRateWrapper:
-    """Wrapper to convert Hive dict data to object with attributes for template compatibility."""
+    """
+    Wrapper to convert Hive dict data to object with attributes for template compatibility.
+
+    Updated for gmp_cis_sta_dly_fx_rates external table structure.
+    """
     def __init__(self, data, index=0):
         self.data = data
-        # Map all Hive fields to attributes
+
+        # Map fields from external table structure
         self.currency_pair = data.get('currency_pair', '')
         self.base_currency = data.get('base_currency', '')
         self.quote_currency = data.get('quote_currency', '')
-        self.rate = data.get('rate', 0)
         self.bid_rate = data.get('bid_rate', 0)
         self.ask_rate = data.get('ask_rate', 0)
         self.mid_rate = data.get('mid_rate', 0)
-        self.rate_date = data.get('rate_date', '')
-        self.rate_time = data.get('rate_time', '')
-        self.source = data.get('source', '')
-        self.is_active = data.get('is_active', 'true')
-        self.created_at = data.get('created_at', '')
-        self.updated_at = data.get('updated_at', '')
 
-        # Calculate spread
+        # Use mid_rate as the primary rate
+        self.rate = self.mid_rate
+
+        # Trade date fields (YYYYMMDD from table, YYYY-MM-DD display from repository)
+        self.trade_date = data.get('trade_date', '')
+        self.trade_date_display = data.get('trade_date_display', '')
+        self.rate_date = self.trade_date_display or self.trade_date  # For backward compatibility
+
+        # ETL processing date (YYYYMMDD - date when file was loaded)
+        self.processing_date = data.get('processing_date', '')
+        self.processing_date_display = self._format_date(self.processing_date) if self.processing_date else ''
+
+        # Source and reference
+        self.source = data.get('source', '')
+        self.reference_id = data.get('reference_id', '')
+
+        # Spread (calculated by repository)
+        self.spread = data.get('spread', 0)
+        self.spread_bps = data.get('spread_bps', 0)  # Basis points
+
+        # Legacy fields for compatibility
+        self.is_active = 'true'  # All records in external table are active
+        self.rate_time = ''  # No time field in external table
+
+        # Calculate spread percentage for display
         try:
-            bid = float(self.bid_rate) if self.bid_rate else 0
-            ask = float(self.ask_rate) if self.ask_rate else 0
             mid = float(self.mid_rate) if self.mid_rate else 0
-            self.spread = ask - bid if (bid and ask) else 0
-            self.spread_percentage = (self.spread / mid * 100) if (mid and self.spread) else 0
+            spread_val = float(self.spread) if self.spread else 0
+            self.spread_percentage = (spread_val / mid * 100) if mid > 0 else 0
         except (ValueError, TypeError):
-            self.spread = 0
             self.spread_percentage = 0
 
-        # Determine freshness
+        # Determine freshness based on trade_date
         self.freshness = self._calculate_freshness()
 
-        # Generate a simple numeric ID from hash
-        self.id = abs(hash(data.get('currency_pair', '') + str(data.get('rate_date', '')) + str(index))) % 1000000
+        # Generate ID from hash
+        self.id = abs(hash(self.currency_pair + str(self.trade_date) + str(index))) % 1000000
+
+    def _format_date(self, date_str: str) -> str:
+        """Format YYYYMMDD to YYYY-MM-DD"""
+        if len(date_str) == 8:
+            return f"{date_str[0:4]}-{date_str[4:6]}-{date_str[6:8]}"
+        return date_str
 
     def _calculate_freshness(self):
-        """Calculate freshness status based on rate_time"""
+        """
+        Calculate freshness status based on trade_date.
+
+        Since we only have date (not time), we determine freshness by:
+        - Same date as today = fresh
+        - 1-2 days old = normal
+        - >2 days old = stale
+        """
         try:
-            if not self.rate_time:
-                return 'stale'
+            if not self.trade_date:
+                return 'unknown'
 
-            # Parse rate_time
-            if isinstance(self.rate_time, str):
-                rate_dt = datetime.strptime(self.rate_time, '%Y-%m-%d %H:%M:%S')
+            # Parse trade_date (YYYYMMDD format)
+            trade_date_str = str(self.trade_date)
+            if len(trade_date_str) == 8:
+                year = int(trade_date_str[0:4])
+                month = int(trade_date_str[4:6])
+                day = int(trade_date_str[6:8])
+                rate_date = datetime(year, month, day)
             else:
-                rate_dt = self.rate_time
+                return 'unknown'
 
-            age = datetime.now() - rate_dt
-            hours = age.total_seconds() / 3600
+            # Calculate age in days
+            today = datetime.now().date()
+            age_days = (today - rate_date.date()).days
 
-            if hours < 1:
+            if age_days == 0:
                 return 'fresh'
-            elif hours > 24:
-                return 'stale'
-            else:
+            elif age_days <= 2:
                 return 'normal'
-        except:
+            else:
+                return 'stale'
+        except Exception:
             return 'unknown'
 
     def get_spread(self):
-        """Calculate bid-ask spread"""
+        """Get bid-ask spread"""
         return self.spread
 
+    def get_spread_bps(self):
+        """Get bid-ask spread in basis points"""
+        return self.spread_bps
+
     def get_spread_percentage(self):
-        """Calculate bid-ask spread as percentage"""
+        """Get bid-ask spread as percentage"""
         return self.spread_percentage
 
     def get_freshness_status(self):
@@ -98,23 +142,35 @@ class FXRateWrapper:
 
 def fx_rate_list(request):
     """
-    List all FX rates with search, filter, and CSV export - FROM HIVE.
+    List all FX rates with search, filter, and CSV export.
+
+    Uses gmp_cis_sta_dly_fx_rates external table via service layer.
     """
     # Get filters
     currency_pair = request.GET.get('currency_pair', '').strip()
     date_from = request.GET.get('date_from', '').strip()
     date_to = request.GET.get('date_to', '').strip()
+    base_currency = request.GET.get('base_currency', '').strip()
     source_filter = request.GET.get('source', '').strip()
     export = request.GET.get('export', '').strip()
 
-    # Get FX rates from Hive
-    fx_rates_data = fx_rate_hive_repository.get_all_fx_rates(
-        limit=1000,
-        currency_pair=currency_pair if currency_pair else None,
-        date_from=date_from if date_from else None,
-        date_to=date_to if date_to else None,
-        source=source_filter if source_filter else None
-    )
+    # Convert date formats from YYYY-MM-DD to YYYYMMDD if provided
+    date_from_fmt = date_from.replace('-', '') if date_from else None
+    date_to_fmt = date_to.replace('-', '') if date_to else None
+
+    # Get FX rates from service layer
+    try:
+        fx_rates_data = fx_rate_service.get_fx_rates(
+            limit=1000,
+            currency_pair=currency_pair if currency_pair else None,
+            date_from=date_from_fmt,
+            date_to=date_to_fmt,
+            base_currency=base_currency if base_currency else None,
+            source=source_filter if source_filter else None
+        )
+    except ValidationError as e:
+        fx_rates_data = []
+        # TODO: Show error message to user
 
     # CSV Export
     if export == 'csv':
@@ -148,10 +204,12 @@ def fx_rate_list(request):
         # Log export to Hive - Get user info from session (ACL authentication)
         username = request.session.get('user_login', 'anonymous')
         user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
 
-        audit_log_repository.log_action(
+        audit_log_kudu_repository.log_action(
             user_id=user_id,
             username=username,
+            user_email=user_email,
             action_type='EXPORT',
             entity_type='FX_RATE',
             action_description=f'Exported {len(fx_rates_data)} FX rates to CSV from Hive',
@@ -178,17 +236,20 @@ def fx_rate_list(request):
     except EmptyPage:
         fx_rates = paginator.page(paginator.num_pages if paginator.num_pages > 0 else 1)
 
-    # Get unique currency pairs and sources for filters
-    currency_pairs = fx_rate_hive_repository.get_currency_pairs()
-    sources = ['BLOOMBERG', 'REUTERS', 'MANUAL', 'API', 'HIVE']
+    # Get unique currency pairs, base currencies, and sources for filters
+    currency_pairs = fx_rate_service.get_currency_pairs()
+    base_currencies = fx_rate_service.get_base_currencies()
+    sources = fx_rate_service.get_sources()
 
     # Log view to Hive - Get user info from session (ACL authentication)
     username = request.session.get('user_login', 'anonymous')
     user_id = str(request.session.get('user_id', ''))
+    user_email = request.session.get('user_email', '')
 
-    audit_log_repository.log_action(
+    audit_log_kudu_repository.log_action(
         user_id=user_id,
         username=username,
+        user_email=user_email,
         action_type='VIEW',
         entity_type='FX_RATE',
         action_description=f'Viewed FX rate list from Hive ({len(fx_rates_data)} rates)',
@@ -204,8 +265,10 @@ def fx_rate_list(request):
         'currency_pair': currency_pair,
         'date_from': date_from,
         'date_to': date_to,
+        'base_currency': base_currency,
         'source_filter': source_filter,
         'currency_pairs': currency_pairs,
+        'base_currencies': base_currencies,
         'sources': sources,
         'total_count': len(fx_rates_data),
         'using_hive': True,
@@ -217,24 +280,28 @@ def fx_rate_list(request):
 def fx_rate_dashboard(request):
     """
     FX Rate dashboard with statistics and latest rates.
+
+    Uses service layer to get statistics and latest rates.
     """
-    # Get statistics
-    stats = fx_rate_hive_repository.get_statistics()
+    # Get statistics from service
+    stats = fx_rate_service.get_statistics()
 
     # Get latest rates for each currency pair
-    latest_rates = fx_rate_hive_repository.get_latest_rates()
+    latest_rates = fx_rate_service.get_latest_rates(limit=100)
     wrapped_latest = [FXRateWrapper(r, idx) for idx, r in enumerate(latest_rates)]
 
-    # Get unique currencies for matrix
-    currencies = fx_rate_hive_repository.get_currencies()
+    # Get unique base currencies
+    base_currencies = fx_rate_service.get_base_currencies()
 
     # Log view to Hive - Get user info from session (ACL authentication)
     username = request.session.get('user_login', 'anonymous')
     user_id = str(request.session.get('user_id', ''))
+    user_email = request.session.get('user_email', '')
 
-    audit_log_repository.log_action(
+    audit_log_kudu_repository.log_action(
         user_id=user_id,
         username=username,
+        user_email=user_email,
         action_type='VIEW',
         entity_type='FX_RATE',
         action_description='Viewed FX rate dashboard',
@@ -248,7 +315,7 @@ def fx_rate_dashboard(request):
     context = {
         'stats': stats,
         'latest_rates': wrapped_latest[:10],  # Show top 10
-        'currencies': currencies,
+        'base_currencies': base_currencies,
         'using_hive': True,
     }
 
@@ -258,9 +325,14 @@ def fx_rate_dashboard(request):
 def fx_rate_detail(request, currency_pair):
     """
     View FX rate details and history for a specific currency pair.
+
+    Uses service layer to get historical rates and trend analysis.
     """
-    # Get rate history (last 30 days)
-    history = fx_rate_hive_repository.get_rate_history(currency_pair, days=30)
+    # Get rate history (last 30 days) from service
+    try:
+        history = fx_rate_service.get_rate_history(currency_pair, days=30)
+    except ValidationError:
+        history = []
 
     if not history:
         # No data found
@@ -290,10 +362,12 @@ def fx_rate_detail(request, currency_pair):
     # Log view to Hive - Get user info from session (ACL authentication)
     username = request.session.get('user_login', 'anonymous')
     user_id = str(request.session.get('user_id', ''))
+    user_email = request.session.get('user_email', '')
 
-    audit_log_repository.log_action(
+    audit_log_kudu_repository.log_action(
         user_id=user_id,
         username=username,
+        user_email=user_email,
         action_type='VIEW',
         entity_type='FX_RATE',
         entity_id=currency_pair,
@@ -305,11 +379,15 @@ def fx_rate_detail(request, currency_pair):
         user_agent=request.META.get('HTTP_USER_AGENT', '')
     )
 
+    # Convert chart data to JSON for JavaScript
+    import json
+    chart_data_json = json.dumps(chart_data)
+
     context = {
         'currency_pair': currency_pair,
         'rate': latest_rate,
         'history': wrapped_history[-10:],  # Show last 10 records
-        'chart_data': chart_data,
+        'chart_data': chart_data_json,
         'using_hive': True,
     }
 

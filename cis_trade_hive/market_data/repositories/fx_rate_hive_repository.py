@@ -1,107 +1,28 @@
 """
-FX Rate Hive Repository
-Fetches FX rate data from Hive fx_rates table.
+FX Rate Repository for Market Data Module
+
+Fetches daily FX spot rates from gmp_cis.gmp_cis_sta_dly_fx_rates external table.
+Data source: BOSET and other market data providers.
+Update frequency: Daily
+
+Author: CisTrade Team
+Last Updated: 2025-12-27
 """
 
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 import logging
-import subprocess
+from decimal import Decimal
+
+from core.repositories.impala_connection import impala_manager
 
 logger = logging.getLogger(__name__)
 
 
-class HiveConnection:
-    """Manages Hive database connections for FX rate data using beeline."""
-
-    @staticmethod
-    def execute_query(query: str) -> List[Dict[str, Any]]:
-        """
-        Execute Hive query using beeline and return results.
-        Works around PyHive connection issues with Hive 4.x.
-
-        Args:
-            query: SQL query to execute
-
-        Returns:
-            List of dictionaries with query results
-        """
-        try:
-            # Execute via beeline - output format flags are ignored, returns table format
-            result = subprocess.run(
-                [
-                    '/usr/local/bin/beeline',
-                    '-u', 'jdbc:hive2://localhost:10000/cis',
-                    '-e', query,
-                    '--silent=true'
-                ],
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-
-            if result.returncode != 0:
-                logger.error(f"Beeline query error: {result.stderr}")
-                return []
-
-            # Parse table format output
-            lines = result.stdout.strip().split('\n')
-            if not lines:
-                return []
-
-            # Filter out non-data lines and find table rows
-            table_lines = []
-            for line in lines:
-                # Skip log messages, separators, and metadata
-                if (line.startswith('SLF4J') or line.startswith('2025-') or
-                    line.startswith('WARN') or line.startswith('INFO') or
-                    line.startswith('Connecting') or line.startswith('Connected') or
-                    line.startswith('Driver') or line.startswith('Transaction') or
-                    line.startswith('Beeline') or line.startswith('Closing') or
-                    line.strip().startswith('Please remove') or
-                    line.strip().startswith('See http') or
-                    'rows selected' in line or
-                    not line.strip()):
-                    continue
-                # Skip separator lines like +----+----+
-                if line.strip().startswith('+') and line.strip().endswith('+'):
-                    continue
-                # Keep lines with | delimiters (header and data rows)
-                if '|' in line:
-                    table_lines.append(line)
-
-            if len(table_lines) < 2:  # Need at least header and one data row
-                return []
-
-            # Parse header (first line with |)
-            header_line = table_lines[0]
-            headers = [col.strip() for col in header_line.split('|')[1:-1]]  # Skip first and last empty strings
-
-            # Parse data rows
-            results = []
-            for data_line in table_lines[1:]:
-                values = [val.strip() for val in data_line.split('|')[1:-1]]
-                if len(values) == len(headers):
-                    row_dict = {}
-                    for i, header in enumerate(headers):
-                        # Clean column names (remove table prefixes)
-                        clean_key = header.split('.')[-1] if '.' in header else header
-                        row_dict[clean_key] = values[i]
-                    results.append(row_dict)
-
-            logger.info(f"FX Rate query executed successfully: {len(results)} records")
-            return results
-
-        except subprocess.TimeoutExpired:
-            logger.error(f"Beeline query timeout")
-            return []
-        except Exception as e:
-            logger.error(f"Error executing FX rate query: {str(e)}")
-            return []
-
-
 class FXRateHiveRepository:
-    """Repository for FX rate operations with Hive."""
+    """Repository for FX rate operations with Impala/Kudu."""
+
+    TABLE_NAME = "gmp_cis.gmp_cis_sta_dly_fx_rates"
 
     @staticmethod
     def get_all_fx_rates(
@@ -109,56 +30,87 @@ class FXRateHiveRepository:
         currency_pair: Optional[str] = None,
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
+        base_currency: Optional[str] = None,
         source: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        Retrieve FX rates from Hive with filters.
+        Retrieve FX rates from external table with filters.
 
         Args:
             limit: Maximum number of records
-            currency_pair: Filter by currency pair (e.g., "USD/EUR")
-            date_from: Filter by start date (YYYY-MM-DD)
-            date_to: Filter by end date (YYYY-MM-DD)
-            source: Filter by source
+            currency_pair: Filter by currency pair (e.g., "USD-AED")
+            date_from: Filter by start date (YYYYMMDD format)
+            date_to: Filter by end date (YYYYMMDD format)
+            base_currency: Filter by base currency (e.g., "USD")
+            source: Filter by source/alias (e.g., "BOSET")
 
         Returns:
             List of FX rate records
         """
         try:
             # Build WHERE clause
-            where_clauses = []
+            where_clauses = ["record_type = 'D'"]  # Only detail records
 
             if currency_pair:
-                where_clauses.append(f"currency_pair = '{currency_pair}'")
+                where_clauses.append(f"spot_ff0 = '{currency_pair}'")
+
+            if base_currency:
+                where_clauses.append(f"base = '{base_currency}'")
 
             if date_from:
-                where_clauses.append(f"rate_date >= '{date_from}'")
+                where_clauses.append(f"trade_date >= '{date_from}'")
 
             if date_to:
-                where_clauses.append(f"rate_date <= '{date_to}'")
+                where_clauses.append(f"trade_date <= '{date_to}'")
 
             if source:
-                where_clauses.append(f"source = '{source}'")
+                where_clauses.append(f"alias = '{source}'")
 
-            where_clause = " AND ".join(where_clauses) if where_clauses else "1=1"
+            where_clause = " AND ".join(where_clauses)
 
             # Build query
             query = f"""
-            SELECT currency_pair, base_currency, quote_currency,
-                   rate, bid_rate, ask_rate, mid_rate,
-                   rate_date, rate_time, source, is_active,
-                   created_at, updated_at
-            FROM fx_rates
+            SELECT
+                spot_ff0 as currency_pair,
+                base as base_currency,
+                underlng as quote_currency,
+                trade_date,
+                spot_rf_a as bid_rate,
+                spot_rf_b as ask_rate,
+                mid_rate,
+                alias as source,
+                ref_quot as reference_id,
+                processing_date
+            FROM {FXRateHiveRepository.TABLE_NAME}
             WHERE {where_clause}
+            ORDER BY processing_date DESC, trade_date DESC, spot_ff0
             LIMIT {limit}
             """
 
-            results = HiveConnection.execute_query(query)
+            logger.info(f"Executing FX rate query with filters: {where_clause}")
+            results = impala_manager.execute_query(query)
 
-            # Sort in Python (avoid ORDER BY due to Hive limitations)
-            if results:
-                results.sort(key=lambda x: (x.get('rate_date', ''), x.get('rate_time', '')), reverse=True)
+            # Transform trade_date from YYYYMMDD to YYYY-MM-DD for display
+            for row in results:
+                if row.get('trade_date'):
+                    trade_date = str(row['trade_date'])
+                    if len(trade_date) == 8:
+                        row['trade_date_display'] = f"{trade_date[0:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+                    else:
+                        row['trade_date_display'] = trade_date
 
+                # Calculate spread (ask - bid)
+                if row.get('bid_rate') and row.get('ask_rate'):
+                    try:
+                        bid = Decimal(str(row['bid_rate']))
+                        ask = Decimal(str(row['ask_rate']))
+                        row['spread'] = float(ask - bid)
+                        row['spread_bps'] = float((ask - bid) / bid * 10000) if bid > 0 else 0
+                    except (ValueError, TypeError):
+                        row['spread'] = None
+                        row['spread_bps'] = None
+
+            logger.info(f"Retrieved {len(results)} FX rates")
             return results
 
         except Exception as e:
@@ -166,43 +118,75 @@ class FXRateHiveRepository:
             return []
 
     @staticmethod
-    def get_latest_rates() -> List[Dict[str, Any]]:
+    def get_latest_rates(limit: int = 100) -> List[Dict[str, Any]]:
         """
         Get the most recent rate for each currency pair.
+
+        Args:
+            limit: Maximum number of currency pairs to return
 
         Returns:
             List of latest FX rate records by currency pair
         """
         try:
-            # Get all rates and deduplicate in Python
-            query = """
-            SELECT currency_pair, base_currency, quote_currency,
-                   rate, bid_rate, ask_rate, mid_rate,
-                   rate_date, rate_time, source, is_active,
-                   created_at, updated_at
-            FROM fx_rates
-            WHERE is_active = 'true'
+            # Get the most recent trade date first
+            date_query = f"""
+            SELECT MAX(trade_date) as max_date
+            FROM {FXRateHiveRepository.TABLE_NAME}
+            WHERE record_type = 'D'
             """
 
-            all_results = HiveConnection.execute_query(query)
+            date_results = impala_manager.execute_query(date_query)
+            if not date_results or not date_results[0].get('max_date'):
+                logger.warning("No trade dates found in FX rates table")
+                return []
 
-            # Group by currency_pair and keep only latest
-            latest_rates = {}
-            for row in all_results:
-                pair = row.get('currency_pair')
-                rate_datetime = f"{row.get('rate_date', '')} {row.get('rate_time', '')}"
+            latest_date = date_results[0]['max_date']
 
-                if pair not in latest_rates:
-                    latest_rates[pair] = row
-                else:
-                    existing_datetime = f"{latest_rates[pair].get('rate_date', '')} {latest_rates[pair].get('rate_time', '')}"
-                    if rate_datetime > existing_datetime:
-                        latest_rates[pair] = row
+            # Get all rates for the latest date
+            query = f"""
+            SELECT
+                spot_ff0 as currency_pair,
+                base as base_currency,
+                underlng as quote_currency,
+                trade_date,
+                spot_rf_a as bid_rate,
+                spot_rf_b as ask_rate,
+                mid_rate,
+                alias as source,
+                ref_quot as reference_id,
+                processing_date
+            FROM {FXRateHiveRepository.TABLE_NAME}
+            WHERE record_type = 'D'
+              AND trade_date = '{latest_date}'
+            ORDER BY spot_ff0
+            LIMIT {limit}
+            """
 
-            results = list(latest_rates.values())
-            results.sort(key=lambda x: x.get('currency_pair', ''))
+            logger.info(f"Retrieving latest FX rates for date: {latest_date}")
+            results = impala_manager.execute_query(query)
 
-            logger.info(f"Retrieved {len(results)} latest FX rates")
+            # Add formatted date and spread calculations
+            for row in results:
+                if row.get('trade_date'):
+                    trade_date = str(row['trade_date'])
+                    if len(trade_date) == 8:
+                        row['trade_date_display'] = f"{trade_date[0:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+                    else:
+                        row['trade_date_display'] = trade_date
+
+                # Calculate spread
+                if row.get('bid_rate') and row.get('ask_rate'):
+                    try:
+                        bid = Decimal(str(row['bid_rate']))
+                        ask = Decimal(str(row['ask_rate']))
+                        row['spread'] = float(ask - bid)
+                        row['spread_bps'] = float((ask - bid) / bid * 10000) if bid > 0 else 0
+                    except (ValueError, TypeError):
+                        row['spread'] = None
+                        row['spread_bps'] = None
+
+            logger.info(f"Retrieved {len(results)} latest FX rates for {latest_date}")
             return results
 
         except Exception as e:
@@ -215,33 +199,57 @@ class FXRateHiveRepository:
         Get rate history for a specific currency pair.
 
         Args:
-            currency_pair: Currency pair (e.g., "USD/EUR")
-            days: Number of days of history to retrieve
+            currency_pair: Currency pair (e.g., "USD-AED")
+            days: Number of days of history to retrieve (limits result count, not date range)
 
         Returns:
-            List of historical FX rates
+            List of historical FX rates sorted by date descending (most recent first)
         """
         try:
-            # Calculate date range
-            end_date = datetime.now().date()
-            start_date = end_date - timedelta(days=days)
-
+            # Get latest records for the currency pair
+            # Note: 'days' parameter limits the number of records, not the date range
+            # This allows viewing historical data regardless of when it was loaded
             query = f"""
-            SELECT currency_pair, base_currency, quote_currency,
-                   rate, bid_rate, ask_rate, mid_rate,
-                   rate_date, rate_time, source, is_active,
-                   created_at, updated_at
-            FROM fx_rates
-            WHERE currency_pair = '{currency_pair}'
-              AND rate_date >= '{start_date}'
-              AND rate_date <= '{end_date}'
+            SELECT
+                spot_ff0 as currency_pair,
+                base as base_currency,
+                underlng as quote_currency,
+                trade_date,
+                spot_rf_a as bid_rate,
+                spot_rf_b as ask_rate,
+                mid_rate,
+                alias as source,
+                ref_quot as reference_id,
+                processing_date
+            FROM {FXRateHiveRepository.TABLE_NAME}
+            WHERE record_type = 'D'
+              AND spot_ff0 = '{currency_pair}'
+            ORDER BY processing_date DESC, trade_date DESC
+            LIMIT {days}
             """
 
-            results = HiveConnection.execute_query(query)
+            logger.info(f"Retrieving latest {days} records for {currency_pair}")
+            results = impala_manager.execute_query(query)
 
-            # Sort by date ascending
-            if results:
-                results.sort(key=lambda x: (x.get('rate_date', ''), x.get('rate_time', '')))
+            # Add formatted date and spread calculations
+            for row in results:
+                if row.get('trade_date'):
+                    trade_date = str(row['trade_date'])
+                    if len(trade_date) == 8:
+                        row['trade_date_display'] = f"{trade_date[0:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+                    else:
+                        row['trade_date_display'] = trade_date
+
+                # Calculate spread
+                if row.get('bid_rate') and row.get('ask_rate'):
+                    try:
+                        bid = Decimal(str(row['bid_rate']))
+                        ask = Decimal(str(row['ask_rate']))
+                        row['spread'] = float(ask - bid)
+                        row['spread_bps'] = float((ask - bid) / bid * 10000) if bid > 0 else 0
+                    except (ValueError, TypeError):
+                        row['spread'] = None
+                        row['spread_bps'] = None
 
             logger.info(f"Retrieved {len(results)} historical rates for {currency_pair}")
             return results
@@ -251,103 +259,266 @@ class FXRateHiveRepository:
             return []
 
     @staticmethod
-    def get_currencies() -> List[str]:
-        """
-        Get list of unique currencies from FX rates.
-
-        Returns:
-            List of unique currency codes
-        """
-        try:
-            # Get all base and quote currencies
-            query = """
-            SELECT base_currency, quote_currency
-            FROM fx_rates
-            """
-
-            results = HiveConnection.execute_query(query)
-
-            # Collect unique currencies
-            currencies = set()
-            for row in results:
-                if row.get('base_currency'):
-                    currencies.add(row['base_currency'])
-                if row.get('quote_currency'):
-                    currencies.add(row['quote_currency'])
-
-            return sorted(list(currencies))
-
-        except Exception as e:
-            logger.error(f"Error getting currencies: {str(e)}")
-            return []
-
-    @staticmethod
     def get_currency_pairs() -> List[str]:
         """
         Get list of unique currency pairs.
 
         Returns:
-            List of unique currency pairs
+            List of unique currency pairs sorted alphabetically
         """
         try:
-            query = "SELECT currency_pair FROM fx_rates"
-            results = HiveConnection.execute_query(query)
+            query = f"""
+            SELECT DISTINCT spot_ff0 as currency_pair
+            FROM {FXRateHiveRepository.TABLE_NAME}
+            WHERE record_type = 'D'
+              AND spot_ff0 IS NOT NULL
+            ORDER BY spot_ff0
+            """
 
-            pairs = set([row['currency_pair'] for row in results if row.get('currency_pair')])
-            return sorted(list(pairs))
+            logger.info("Retrieving unique currency pairs")
+            results = impala_manager.execute_query(query)
+
+            pairs = [row['currency_pair'] for row in results if row.get('currency_pair')]
+
+            logger.info(f"Found {len(pairs)} unique currency pairs")
+            return pairs
 
         except Exception as e:
             logger.error(f"Error getting currency pairs: {str(e)}")
             return []
 
     @staticmethod
+    def get_base_currencies() -> List[str]:
+        """
+        Get list of unique base currencies.
+
+        Returns:
+            List of unique base currency codes sorted alphabetically
+        """
+        try:
+            query = f"""
+            SELECT DISTINCT base as base_currency
+            FROM {FXRateHiveRepository.TABLE_NAME}
+            WHERE record_type = 'D'
+              AND base IS NOT NULL
+            ORDER BY base
+            """
+
+            logger.info("Retrieving unique base currencies")
+            results = impala_manager.execute_query(query)
+
+            currencies = [row['base_currency'] for row in results if row.get('base_currency')]
+
+            logger.info(f"Found {len(currencies)} unique base currencies")
+            return currencies
+
+        except Exception as e:
+            logger.error(f"Error getting base currencies: {str(e)}")
+            return []
+
+    @staticmethod
+    def get_sources() -> List[str]:
+        """
+        Get list of unique data sources.
+
+        Returns:
+            List of unique source/alias values
+        """
+        try:
+            query = f"""
+            SELECT DISTINCT alias as source
+            FROM {FXRateHiveRepository.TABLE_NAME}
+            WHERE record_type = 'D'
+              AND alias IS NOT NULL
+            ORDER BY alias
+            """
+
+            logger.info("Retrieving unique data sources")
+            results = impala_manager.execute_query(query)
+
+            sources = [row['source'] for row in results if row.get('source')]
+
+            logger.info(f"Found {len(sources)} unique data sources")
+            return sources
+
+        except Exception as e:
+            logger.error(f"Error getting data sources: {str(e)}")
+            return []
+
+    @staticmethod
     def get_statistics() -> Dict[str, Any]:
         """
-        Get FX rate statistics from Hive.
+        Get FX rate statistics from external table.
 
         Returns:
             Dictionary with FX rate statistics
         """
         try:
-            # Fetch all rates and calculate statistics in Python
-            all_query = "SELECT currency_pair, source, rate_date FROM fx_rates"
-            all_results = HiveConnection.execute_query(all_query)
+            # Get overall statistics
+            stats_query = f"""
+            SELECT
+                COUNT(*) as total_records,
+                COUNT(DISTINCT spot_ff0) as unique_pairs,
+                COUNT(DISTINCT alias) as unique_sources,
+                MAX(trade_date) as latest_date,
+                MIN(trade_date) as earliest_date,
+                MAX(processing_date) as latest_processing_date,
+                MIN(processing_date) as earliest_processing_date,
+                COUNT(DISTINCT processing_date) as processing_date_count
+            FROM {FXRateHiveRepository.TABLE_NAME}
+            WHERE record_type = 'D'
+            """
 
-            # Calculate statistics
-            total_rates = len(all_results)
-            unique_pairs = len(set([r.get('currency_pair') for r in all_results if r.get('currency_pair')]))
-            unique_sources = len(set([r.get('source') for r in all_results if r.get('source')]))
+            logger.info("Retrieving FX rate statistics")
+            stats_results = impala_manager.execute_query(stats_query)
 
-            # Latest update
-            dates = [r.get('rate_date', '') for r in all_results if r.get('rate_date')]
-            latest_update = max(dates) if dates else 'N/A'
+            if not stats_results:
+                return {
+                    'total_records': 0,
+                    'unique_pairs': 0,
+                    'unique_sources': 0,
+                    'latest_date': 'N/A',
+                    'earliest_date': 'N/A',
+                    'source_breakdown': []
+                }
 
-            # Source breakdown
-            source_counts = {}
-            for row in all_results:
-                src = row.get('source', 'Unknown')
-                source_counts[src] = source_counts.get(src, 0) + 1
+            stats = stats_results[0]
+
+            # Format dates
+            latest_date = str(stats.get('latest_date', 'N/A'))
+            if len(latest_date) == 8:
+                latest_date = f"{latest_date[0:4]}-{latest_date[4:6]}-{latest_date[6:8]}"
+
+            earliest_date = str(stats.get('earliest_date', 'N/A'))
+            if len(earliest_date) == 8:
+                earliest_date = f"{earliest_date[0:4]}-{earliest_date[4:6]}-{earliest_date[6:8]}"
+
+            # Format processing dates
+            latest_proc_date = str(stats.get('latest_processing_date', 'N/A'))
+            if len(latest_proc_date) == 8:
+                latest_proc_date = f"{latest_proc_date[0:4]}-{latest_proc_date[4:6]}-{latest_proc_date[6:8]}"
+
+            earliest_proc_date = str(stats.get('earliest_processing_date', 'N/A'))
+            if len(earliest_proc_date) == 8:
+                earliest_proc_date = f"{earliest_proc_date[0:4]}-{earliest_proc_date[4:6]}-{earliest_proc_date[6:8]}"
+
+            # Get source breakdown
+            source_query = f"""
+            SELECT
+                alias as source,
+                COUNT(*) as record_count
+            FROM {FXRateHiveRepository.TABLE_NAME}
+            WHERE record_type = 'D'
+            GROUP BY alias
+            ORDER BY record_count DESC
+            """
+
+            source_results = impala_manager.execute_query(source_query)
+
+            # Get processing date breakdown
+            proc_date_query = f"""
+            SELECT
+                processing_date,
+                COUNT(*) as record_count,
+                COUNT(DISTINCT spot_ff0) as pair_count
+            FROM {FXRateHiveRepository.TABLE_NAME}
+            WHERE record_type = 'D'
+            GROUP BY processing_date
+            ORDER BY processing_date DESC
+            """
+
+            proc_date_results = impala_manager.execute_query(proc_date_query)
 
             return {
-                'total_rates': total_rates,
-                'unique_pairs': unique_pairs,
-                'data_sources': unique_sources,
-                'latest_update': latest_update,
-                'source_breakdown': [
-                    {'source': k, 'count': v}
-                    for k, v in sorted(source_counts.items())
-                ]
+                'total_records': stats.get('total_records', 0),
+                'unique_pairs': stats.get('unique_pairs', 0),
+                'unique_sources': stats.get('unique_sources', 0),
+                'latest_date': latest_date,
+                'earliest_date': earliest_date,
+                'latest_processing_date': latest_proc_date,
+                'earliest_processing_date': earliest_proc_date,
+                'processing_date_count': stats.get('processing_date_count', 0),
+                'source_breakdown': source_results if source_results else [],
+                'processing_date_breakdown': proc_date_results if proc_date_results else []
             }
 
         except Exception as e:
             logger.error(f"Error getting FX rate statistics: {str(e)}")
             return {
-                'total_rates': 0,
+                'total_records': 0,
                 'unique_pairs': 0,
-                'data_sources': 0,
-                'latest_update': 'N/A',
+                'unique_sources': 0,
+                'latest_date': 'N/A',
+                'earliest_date': 'N/A',
                 'source_breakdown': []
             }
+
+    @staticmethod
+    def get_rate_by_date_and_pair(trade_date: str, currency_pair: str) -> Optional[Dict[str, Any]]:
+        """
+        Get specific FX rate for a date and currency pair.
+
+        Args:
+            trade_date: Trade date in YYYYMMDD format
+            currency_pair: Currency pair (e.g., "USD-AED")
+
+        Returns:
+            FX rate record or None if not found
+        """
+        try:
+            query = f"""
+            SELECT
+                spot_ff0 as currency_pair,
+                base as base_currency,
+                underlng as quote_currency,
+                trade_date,
+                spot_rf_a as bid_rate,
+                spot_rf_b as ask_rate,
+                mid_rate,
+                alias as source,
+                ref_quot as reference_id,
+                processing_date
+            FROM {FXRateHiveRepository.TABLE_NAME}
+            WHERE record_type = 'D'
+              AND trade_date = '{trade_date}'
+              AND spot_ff0 = '{currency_pair}'
+            ORDER BY processing_date DESC
+            LIMIT 1
+            """
+
+            logger.info(f"Retrieving FX rate for {currency_pair} on {trade_date}")
+            results = impala_manager.execute_query(query)
+
+            if not results:
+                logger.warning(f"No FX rate found for {currency_pair} on {trade_date}")
+                return None
+
+            row = results[0]
+
+            # Add formatted date
+            if row.get('trade_date'):
+                trade_date = str(row['trade_date'])
+                if len(trade_date) == 8:
+                    row['trade_date_display'] = f"{trade_date[0:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+                else:
+                    row['trade_date_display'] = trade_date
+
+            # Calculate spread
+            if row.get('bid_rate') and row.get('ask_rate'):
+                try:
+                    bid = Decimal(str(row['bid_rate']))
+                    ask = Decimal(str(row['ask_rate']))
+                    row['spread'] = float(ask - bid)
+                    row['spread_bps'] = float((ask - bid) / bid * 10000) if bid > 0 else 0
+                except (ValueError, TypeError):
+                    row['spread'] = None
+                    row['spread_bps'] = None
+
+            return row
+
+        except Exception as e:
+            logger.error(f"Error getting FX rate for {currency_pair} on {trade_date}: {str(e)}")
+            return None
 
 
 # Singleton instance

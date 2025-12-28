@@ -205,6 +205,7 @@ def portfolio_detail(request, portfolio_name):
         user_email=user_email,
         action_type='VIEW',
         entity_type='PORTFOLIO',
+        entity_id=portfolio_name,
         entity_name=portfolio_name,
         action_description=f'Viewed portfolio detail from Kudu: {portfolio_name}',
         status='SUCCESS',

@@ -133,6 +133,111 @@
     </div>
     {% endif %}
 
+    <!-- Market Data Analytics Section -->
+    {% if fx_stats and fx_stats.total_records > 0 %}
+    <div class="row g-4 mb-4">
+        <div class="col-12">
+            <h5 class="mb-3">
+                <i class="bi bi-graph-up-arrow"></i> Market Data Analytics (FX Rates)
+            </h5>
+        </div>
+
+        <!-- Total FX Records Card -->
+        <div class="col-xl-3 col-lg-4 col-md-6">
+            <div class="card stats-card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="stats-icon bg-info">
+                            <i class="bi bi-database-fill"></i>
+                        </div>
+                        <div class="ms-3">
+                            <h6 class="text-muted mb-1">Total FX Records</h6>
+                            <h3 class="mb-0">{{ fx_stats.total_records }}</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Unique Currency Pairs Card -->
+        <div class="col-xl-3 col-lg-4 col-md-6">
+            <div class="card stats-card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="stats-icon bg-warning">
+                            <i class="bi bi-currency-exchange"></i>
+                        </div>
+                        <div class="ms-3">
+                            <h6 class="text-muted mb-1">Currency Pairs</h6>
+                            <h3 class="mb-0">{{ fx_stats.unique_pairs }}</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Latest Processing Date Card -->
+        <div class="col-xl-3 col-lg-4 col-md-6">
+            <div class="card stats-card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="stats-icon bg-success">
+                            <i class="bi bi-clock-history"></i>
+                        </div>
+                        <div class="ms-3">
+                            <h6 class="text-muted mb-1">Latest ETL Date</h6>
+                            <h3 class="mb-0" style="font-size: 1.3rem;">{{ fx_stats.latest_processing_date }}</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ETL Batches Card -->
+        <div class="col-xl-3 col-lg-12 col-md-6">
+            <div class="card stats-card h-100">
+                <div class="card-body">
+                    <h6 class="text-muted mb-3">
+                        <i class="bi bi-file-earmark-arrow-down"></i> ETL Processing Batches
+                    </h6>
+                    {% if fx_stats.processing_date_breakdown %}
+                    <div class="row g-2">
+                        {% for batch in fx_stats.processing_date_breakdown|slice:":2" %}
+                        <div class="col-12">
+                            <div class="etl-batch-stat">
+                                <div>
+                                    <span class="badge bg-primary">
+                                        {% if batch.processing_date|length == 8 %}
+                                            {{ batch.processing_date|slice:":4" }}-{{ batch.processing_date|slice:"4:6" }}-{{ batch.processing_date|slice:"6:8" }}
+                                        {% else %}
+                                            {{ batch.processing_date }}
+                                        {% endif %}
+                                    </span>
+                                </div>
+                                <div class="text-end">
+                                    <small class="text-muted">{{ batch.record_count }} records</small>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% if fx_stats.processing_date_breakdown|length > 2 %}
+                    <div class="mt-2">
+                        <small class="text-muted">
+                            <i class="bi bi-info-circle"></i>
+                            Showing latest 2 batches. <a href="/market-data/fx-rates/">View all</a>
+                        </small>
+                    </div>
+                    {% endif %}
+                    {% else %}
+                    <p class="text-muted mb-0">No FX data loaded</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Module Cards -->
     <div class="row g-4">
         <div class="col-12">
@@ -276,6 +381,21 @@
     }
 
     .currency-stat .badge {
+        font-size: 11px;
+        padding: 4px 8px;
+    }
+
+    .etl-batch-stat {
+        padding: 10px 12px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-left: 3px solid #667eea;
+    }
+
+    .etl-batch-stat .badge {
         font-size: 11px;
         padding: 4px 8px;
     }

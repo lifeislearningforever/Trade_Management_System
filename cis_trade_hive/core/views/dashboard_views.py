@@ -15,6 +15,7 @@ from reference_data.repositories.reference_data_repository import (
     CounterpartyRepository,
 )
 from core.audit.audit_kudu_repository import AuditLogKuduRepository
+from market_data.repositories.fx_rate_hive_repository import fx_rate_hive_repository
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,12 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
             'access': permissions.get('cis-portfolio', 'NONE'),
             'icon': 'briefcase',
             'url': '/portfolio/',
+        },
+        'market_data': {
+            'name': 'Market Data (FX Rates)',
+            'access': 'READ',  # Always show for now
+            'icon': 'graph-up-arrow',
+            'url': '/market-data/fx-rates/',
         },
         'trade': {
             'name': 'Trade Management',
@@ -96,11 +103,25 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
             'currency_breakdown': []
         }
 
+    # Get FX rate analytics
+    fx_stats = {}
+    try:
+        fx_stats = fx_rate_hive_repository.get_statistics()
+    except Exception as e:
+        logger.error(f"Error fetching FX rate statistics: {str(e)}")
+        fx_stats = {
+            'total_records': 0,
+            'unique_pairs': 0,
+            'latest_processing_date': 'N/A',
+            'processing_date_breakdown': []
+        }
+
     context = {
         'user': user_info,
         'permissions': permissions,
         'modules': permission_modules,
         'portfolio_stats': portfolio_stats,
+        'fx_stats': fx_stats,
         'page_title': 'Dashboard',
     }
 
@@ -121,7 +142,7 @@ def get_client_ip(request):
 def global_search_view(request: HttpRequest) -> HttpResponse:
     """
     Global search across all modules.
-    Searches portfolios, UDFs, currencies, countries, and counterparties.
+    Searches portfolios, UDFs, currencies, countries, counterparties, and FX rates.
     """
     query = request.GET.get('q', '').strip()
 
@@ -132,6 +153,7 @@ def global_search_view(request: HttpRequest) -> HttpResponse:
         'currencies': [],
         'countries': [],
         'counterparties': [],
+        'fx_rates': [],
     }
 
     total_results = 0
@@ -202,6 +224,21 @@ def global_search_view(request: HttpRequest) -> HttpResponse:
 
         except Exception as e:
             logger.error(f"Error searching counterparties: {str(e)}")
+
+        try:
+            # Search FX rates (filter by currency pair, source)
+            all_fx_rates = fx_rate_hive_repository.get_all_fx_rates(limit=1000)
+            results['fx_rates'] = [
+                fx for fx in all_fx_rates
+                if query.upper() in fx.get('currency_pair', '').upper() or
+                   query.upper() in fx.get('base_currency', '').upper() or
+                   query.upper() in fx.get('quote_currency', '').upper() or
+                   query.upper() in fx.get('source', '').upper()
+            ][:10]
+            total_results += len(results['fx_rates'])
+
+        except Exception as e:
+            logger.error(f"Error searching FX rates: {str(e)}")
 
         # Log search action to audit
         try:
