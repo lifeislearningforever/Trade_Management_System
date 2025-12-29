@@ -1,6 +1,9 @@
 """
 Portfolio Dropdown Service
-Fetches dropdown options for portfolio form fields from Kudu tables.
+Fetches dropdown options for portfolio form fields from UDF Options table in Kudu.
+
+This service retrieves dropdown values from cis_udf_option table,
+which acts as a centralized lookup table for all dropdown fields.
 """
 
 from typing import List, Dict, Any
@@ -11,162 +14,134 @@ logger = logging.getLogger(__name__)
 
 
 class PortfolioDropdownService:
-    """Service for fetching dropdown options for portfolio forms."""
+    """Service for fetching dropdown options for portfolio forms from UDF tables."""
 
     DATABASE = 'gmp_cis'
-    PORTFOLIO_TABLE = 'cis_portfolio'
+    UDF_OPTION_TABLE = 'cis_udf_option'
+    UDF_DEFINITION_TABLE = 'cis_udf_definition'
     CURRENCY_TABLE = 'gmp_cis_sta_dly_currency'
+
+    @staticmethod
+    def _get_udf_options(field_name: str) -> List[str]:
+        """
+        Get dropdown options for a UDF field from cis_udf_option table.
+
+        Args:
+            field_name: The UDF field name (e.g., 'manager', 'account_group')
+
+        Returns:
+            List of active option values
+        """
+        try:
+            # First get the UDF definition to find the udf_id
+            def_query = f"""
+            SELECT udf_id
+            FROM {PortfolioDropdownService.DATABASE}.{PortfolioDropdownService.UDF_DEFINITION_TABLE}
+            WHERE field_name = '{field_name}'
+              AND entity_type = 'PORTFOLIO'
+              AND is_active = true
+            LIMIT 1
+            """
+            def_results = impala_manager.execute_query(def_query, database=PortfolioDropdownService.DATABASE)
+
+            if not def_results:
+                logger.warning(f"No UDF definition found for field: {field_name}")
+                return []
+
+            udf_id = def_results[0].get('udf_id')
+
+            # Get active options for this UDF
+            opt_query = f"""
+            SELECT option_value
+            FROM {PortfolioDropdownService.DATABASE}.{PortfolioDropdownService.UDF_OPTION_TABLE}
+            WHERE udf_id = {udf_id}
+              AND is_active = true
+            ORDER BY display_order, option_value
+            """
+            results = impala_manager.execute_query(opt_query, database=PortfolioDropdownService.DATABASE)
+            return [r.get('option_value') for r in results if r.get('option_value')]
+
+        except Exception as e:
+            logger.error(f"Error fetching UDF options for {field_name}: {str(e)}")
+            return []
 
     @staticmethod
     def get_managers() -> List[str]:
         """
-        Get list of unique portfolio managers.
+        Get list of portfolio managers from UDF options.
 
         Returns:
             List of manager names
         """
-        try:
-            query = f"""
-            SELECT DISTINCT `manager`
-            FROM {PortfolioDropdownService.DATABASE}.{PortfolioDropdownService.PORTFOLIO_TABLE}
-            WHERE `manager` IS NOT NULL AND `manager` != ''
-            ORDER BY `manager`
-            """
-            results = impala_manager.execute_query(query, database=PortfolioDropdownService.DATABASE)
-            return [r.get('manager') for r in results if r.get('manager')]
-        except Exception as e:
-            logger.error(f"Error fetching managers: {str(e)}")
-            return []
+        return PortfolioDropdownService._get_udf_options('manager')
 
     @staticmethod
     def get_statuses() -> List[str]:
         """
-        Get list of unique portfolio statuses.
+        Get list of portfolio statuses from UDF options.
 
         Returns:
             List of status values
         """
-        try:
-            query = f"""
-            SELECT DISTINCT `status`
-            FROM {PortfolioDropdownService.DATABASE}.{PortfolioDropdownService.PORTFOLIO_TABLE}
-            WHERE `status` IS NOT NULL AND `status` != ''
-            ORDER BY `status`
-            """
-            results = impala_manager.execute_query(query, database=PortfolioDropdownService.DATABASE)
-            return [r.get('status') for r in results if r.get('status')]
-        except Exception as e:
-            logger.error(f"Error fetching statuses: {str(e)}")
-            return ['Active', 'Inactive']  # Default fallback
+        statuses = PortfolioDropdownService._get_udf_options('status')
+        # Add default statuses if none exist
+        if not statuses:
+            statuses = ['ACTIVE', 'PENDING', 'CLOSED']
+        return statuses
 
     @staticmethod
     def get_account_groups() -> List[str]:
         """
-        Get list of unique account groups.
+        Get list of account groups from UDF options.
 
         Returns:
             List of account group names
         """
-        try:
-            query = f"""
-            SELECT DISTINCT `account_group`
-            FROM {PortfolioDropdownService.DATABASE}.{PortfolioDropdownService.PORTFOLIO_TABLE}
-            WHERE `account_group` IS NOT NULL AND `account_group` != ''
-            ORDER BY `account_group`
-            """
-            results = impala_manager.execute_query(query, database=PortfolioDropdownService.DATABASE)
-            return [r.get('account_group') for r in results if r.get('account_group')]
-        except Exception as e:
-            logger.error(f"Error fetching account groups: {str(e)}")
-            return []
+        return PortfolioDropdownService._get_udf_options('account_group')
 
     @staticmethod
     def get_portfolio_groups() -> List[str]:
         """
-        Get list of unique portfolio groups.
+        Get list of portfolio groups from UDF options.
 
         Returns:
             List of portfolio group names
         """
-        try:
-            query = f"""
-            SELECT DISTINCT `portfolio_group`
-            FROM {PortfolioDropdownService.DATABASE}.{PortfolioDropdownService.PORTFOLIO_TABLE}
-            WHERE `portfolio_group` IS NOT NULL AND `portfolio_group` != ''
-            ORDER BY `portfolio_group`
-            """
-            results = impala_manager.execute_query(query, database=PortfolioDropdownService.DATABASE)
-            return [r.get('portfolio_group') for r in results if r.get('portfolio_group')]
-        except Exception as e:
-            logger.error(f"Error fetching portfolio groups: {str(e)}")
-            return []
+        return PortfolioDropdownService._get_udf_options('portfolio_group')
 
     @staticmethod
     def get_report_groups() -> List[str]:
         """
-        Get list of unique report groups.
+        Get list of report groups from UDF options.
 
         Returns:
             List of report group names
         """
-        try:
-            query = f"""
-            SELECT DISTINCT `report_group`
-            FROM {PortfolioDropdownService.DATABASE}.{PortfolioDropdownService.PORTFOLIO_TABLE}
-            WHERE `report_group` IS NOT NULL AND `report_group` != ''
-            ORDER BY `report_group`
-            """
-            results = impala_manager.execute_query(query, database=PortfolioDropdownService.DATABASE)
-            return [r.get('report_group') for r in results if r.get('report_group')]
-        except Exception as e:
-            logger.error(f"Error fetching report groups: {str(e)}")
-            return []
+        return PortfolioDropdownService._get_udf_options('report_group')
 
     @staticmethod
     def get_entity_groups() -> List[str]:
         """
-        Get list of unique entity groups.
+        Get list of entity groups from UDF options.
 
         Returns:
             List of entity group names
         """
-        try:
-            query = f"""
-            SELECT DISTINCT `entity_group`
-            FROM {PortfolioDropdownService.DATABASE}.{PortfolioDropdownService.PORTFOLIO_TABLE}
-            WHERE `entity_group` IS NOT NULL AND `entity_group` != ''
-            ORDER BY `entity_group`
-            """
-            results = impala_manager.execute_query(query, database=PortfolioDropdownService.DATABASE)
-            return [r.get('entity_group') for r in results if r.get('entity_group')]
-        except Exception as e:
-            logger.error(f"Error fetching entity groups: {str(e)}")
-            return []
+        return PortfolioDropdownService._get_udf_options('entity_group')
 
     @staticmethod
     def get_revaluation_statuses() -> List[str]:
         """
-        Get list of unique revaluation statuses.
+        Get list of revaluation statuses from UDF options.
 
         Returns:
             List of revaluation status values
         """
-        try:
-            query = f"""
-            SELECT DISTINCT `revaluation_status`
-            FROM {PortfolioDropdownService.DATABASE}.{PortfolioDropdownService.PORTFOLIO_TABLE}
-            WHERE `revaluation_status` IS NOT NULL AND `revaluation_status` != ''
-            ORDER BY `revaluation_status`
-            """
-            results = impala_manager.execute_query(query, database=PortfolioDropdownService.DATABASE)
-            statuses = [r.get('revaluation_status') for r in results if r.get('revaluation_status')]
-            # Add default options if none exist
-            if not statuses:
-                statuses = ['Pending', 'Completed', 'Not Required']
-            return statuses
-        except Exception as e:
-            logger.error(f"Error fetching revaluation statuses: {str(e)}")
-            return ['Pending', 'Completed', 'Not Required']
+        statuses = PortfolioDropdownService._get_udf_options('revaluation_status')
+        # Add default options if none exist
+        if not statuses:
+            statuses = ['Pending', 'Completed', 'Not Required']
+        return statuses
 
     @staticmethod
     def get_currencies() -> List[Dict[str, str]]:

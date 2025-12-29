@@ -250,7 +250,13 @@ def require_permission(permission: str, access_level: str = 'READ'):
 def auto_login_tmp3rc(request: HttpRequest) -> HttpResponse:
     """
     Auto-login helper for TMP3RC user (for testing/development).
+    Only creates audit log on ACTUAL login, not when session already exists.
     """
+    # If already logged in, just redirect to dashboard WITHOUT logging
+    if request.session.get('user_login'):
+        logger.debug(f"User {request.session.get('user_name')} already logged in, redirecting to dashboard")
+        return redirect('dashboard')
+
     try:
         acl_repo = get_acl_repository()
         logger.info("ACL Repository created successfully")
@@ -271,7 +277,7 @@ def auto_login_tmp3rc(request: HttpRequest) -> HttpResponse:
             request.session['user_group_name'] = group['name'] if group else 'Unknown'
             request.session['user_permissions'] = permission_map
 
-            # Log auto-login to Kudu audit
+            # Log auto-login to Kudu audit (ONLY on actual new login)
             audit_log_kudu_repository.log_action(
                 user_id=str(user['cis_user_id']),
                 username=user['login'],
