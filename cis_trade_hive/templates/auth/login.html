@@ -1,0 +1,208 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - CisTrade</title>
+
+    <!-- Bootstrap 5 CSS (Local) -->
+    <link rel="stylesheet" href="{% static 'bootstrap/css/bootstrap.min.css' %}">
+
+    <!-- Bootstrap Icons (Local) -->
+    <link rel="stylesheet" href="{% static 'bootstrap-icons/font/bootstrap-icons.min.css' %}">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{% static 'css/cistrade.css' %}">
+
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .login-container {
+            width: 100%;
+            max-width: 450px;
+            padding: 1rem;
+        }
+
+        .login-card {
+            background: white;
+            border-radius: 1rem;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .login-header {
+            background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary-color) 100%);
+            color: white;
+            padding: 2.5rem 2rem;
+            text-align: center;
+        }
+
+        .login-header i {
+            font-size: 3rem;
+            color: var(--accent-color);
+            margin-bottom: 1rem;
+        }
+
+        .login-header h1 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin: 0;
+        }
+
+        .login-header p {
+            margin: 0.5rem 0 0;
+            opacity: 0.9;
+            font-size: 0.95rem;
+        }
+
+        .login-body {
+            padding: 2.5rem 2rem;
+        }
+
+        .form-floating {
+            margin-bottom: 1.25rem;
+        }
+
+        .form-floating label {
+            color: var(--gray-600);
+        }
+
+        .form-control {
+            border: 2px solid var(--gray-300);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            height: calc(3.5rem + 2px);
+        }
+
+        .form-control:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 0.25rem rgba(30, 58, 138, 0.15);
+        }
+
+        .btn-login {
+            width: 100%;
+            padding: 0.875rem;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 0.5rem;
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-light) 100%);
+            border: none;
+            color: white;
+            transition: all 0.3s ease;
+        }
+
+        .btn-login:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(30, 58, 138, 0.3);
+        }
+
+        .login-footer {
+            text-align: center;
+            padding: 1.5rem 2rem;
+            background-color: var(--bg-secondary);
+            color: var(--gray-600);
+            font-size: 0.875rem;
+        }
+
+        .form-check-input:checked {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-card">
+            <!-- Login Header -->
+            <div class="login-header">
+                <!-- Original Bootstrap icon -->
+
+             <img src="/staticfiles/rest_framework/img/img.png" alt="Graph Up Arrow" width="24" height="24">
+
+                <h1>CisTrade</h1>
+                <p>Professional Trade Management System</p>
+            </div>
+
+            <!-- Login Form -->
+            <div class="login-body">
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+
+                <form method="post" action="{% url 'login' %}">
+                    {% csrf_token %}
+
+                    <!-- Username -->
+                    <div class="form-floating">
+                        <input type="text" class="form-control" id="username" name="username" placeholder="Username" required autofocus>
+                        <label for="username">
+                            <i class="bi bi-person"></i> Username
+                        </label>
+                    </div>
+
+                    <!-- Password -->
+                    <div class="form-floating">
+                        <input type="password" class="form-control" id="password" name="password" placeholder="Password" required>
+                        <label for="password">
+                            <i class="bi bi-lock"></i> Password
+                        </label>
+                    </div>
+
+                    <!-- Remember Me -->
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="remember" name="remember">
+                        <label class="form-check-label" for="remember">
+                            Remember me
+                        </label>
+                    </div>
+
+                    <!-- Login Button -->
+                    <button type="submit" class="btn btn-login">
+                        <i class="bi bi-box-arrow-in-right"></i> Sign In
+                    </button>
+
+                    <!-- Demo Credentials -->
+                    <div class="mt-4 p-3" style="background-color: var(--bg-tertiary); border-radius: 0.5rem; border-left: 4px solid var(--info-color);">
+                        <div style="font-weight: 600; color: var(--gray-800); margin-bottom: 0.5rem;">
+                            <i class="bi bi-info-circle text-info"></i> Demo Credentials
+                        </div>
+                        <div style="font-size: 0.875rem; color: var(--gray-700); line-height: 1.8;">
+                            <div><strong>Admin:</strong> admin / admin@2025</div>
+                            <div><strong>Maker:</strong> maker1 / maker@2025</div>
+                            <div><strong>Checker:</strong> checker1 / checker@2025</div>
+                            <div><strong>Viewer:</strong> viewer1 / viewer@2025</div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Login Footer -->
+            <div class="login-footer">
+                &copy; 2025 CisTrade. All rights reserved. | Version 1.0.0
+            </div>
+        </div>
+
+        <!-- Additional Info -->
+        <div class="text-center mt-4" style="color: white; font-size: 0.875rem;">
+            <p>
+                <i class="bi bi-shield-check"></i> Secure login with ACL and audit logging
+            </p>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS (Local) -->
+    <script src="{% static 'bootstrap/js/bootstrap.bundle.min.js' %}"></script>
+</body>
+</html>

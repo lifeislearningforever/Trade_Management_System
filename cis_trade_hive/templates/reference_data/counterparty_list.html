@@ -1,0 +1,227 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Counterparties - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="#">Reference Data</a></li>
+    <li class="breadcrumb-item active">Counterparties</li>
+{% endblock %}
+
+{% block content %}
+<div class="counterparty-list-container">
+    <!-- Page Header -->
+    <div class="content-header d-flex justify-content-between align-items-start">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-building text-primary"></i> Counterparties
+            </h1>
+            <p class="content-subtitle">Manage counterparty reference data from Kudu</p>
+        </div>
+        <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Dashboard
+        </a>
+    </div>
+
+    <!-- Search & Filter Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-funnel"></i> Search & Filter
+            </h5>
+        </div>
+        <div class="card-body">
+            <form method="get" action="{% url 'reference_data:counterparty_list' %}" class="row g-3">
+                <div class="col-md-10">
+                    <label class="form-label">Search</label>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" name="search" value="{{ search }}"
+                               placeholder="Search by name or description...">
+                    </div>
+                </div>
+                <div class="col-md-2 d-flex align-items-end gap-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i>
+                    </button>
+                    <a href="{% url 'reference_data:counterparty_list' %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-x-circle"></i>
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Counterparties Table -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                Counterparty List
+                <span class="badge badge-primary ms-2">{{ total_count }} counterparties</span>
+                <span class="badge badge-info ms-2">
+                    <i class="bi bi-arrows-expand"></i> Scroll horizontally to view all 20 columns
+                </span>
+            </h5>
+            <a href="?export=csv&{{ request.GET.urlencode }}" class="btn btn-sm btn-success">
+                <i class="bi bi-download"></i> Download CSV
+            </a>
+        </div>
+        <div class="card-body p-0">
+            {% if counterparties %}
+                <div class="table-responsive" style="overflow-x: auto; overflow-y: auto; max-height: 600px;">
+                    <table class="table table-hover table-sm mb-0" style="font-size: 0.875rem; white-space: nowrap; min-width: 2500px;">
+                        <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
+                            <tr>
+                                <th style="width: 150px; position: sticky; left: 0; background-color: #f8f9fa; z-index: 11; border-right: 2px solid #dee2e6;">Counterparty Name</th>
+                                <th style="width: 200px;">Description</th>
+                                <th style="width: 100px;">Salutation</th>
+                                <th style="width: 180px;">Address</th>
+                                <th style="width: 100px;">City</th>
+                                <th style="width: 100px;">Country</th>
+                                <th style="width: 100px;">Postal Code</th>
+                                <th style="width: 100px;">Fax</th>
+                                <th style="width: 100px;">Telex</th>
+                                <th style="width: 100px;">Industry</th>
+                                <th style="width: 80px;">Broker</th>
+                                <th style="width: 80px;">Custodian</th>
+                                <th style="width: 80px;">Issuer</th>
+                                <th style="width: 120px;">Primary Contact</th>
+                                <th style="width: 120px;">Primary Number</th>
+                                <th style="width: 120px;">Other Contact</th>
+                                <th style="width: 120px;">Other Number</th>
+                                <th style="width: 120px;">Custodian Group</th>
+                                <th style="width: 100px;">Broker Group</th>
+                                <th style="width: 100px;">Resident</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for cp in counterparties %}
+                            <tr>
+                                <td style="position: sticky; left: 0; background-color: white; z-index: 9; border-right: 2px solid #dee2e6;"><strong class="text-primary">{{ cp.counterparty_name|default:"-" }}</strong></td>
+                                <td>{{ cp.description|default:"-" }}</td>
+                                <td>{{ cp.salutation|default:"-" }}</td>
+                                <td>{{ cp.address|default:"-" }}</td>
+                                <td>{{ cp.city|default:"-" }}</td>
+                                <td>{{ cp.country|default:"-" }}</td>
+                                <td>{{ cp.postal_code|default:"-" }}</td>
+                                <td>{{ cp.fax|default:"-" }}</td>
+                                <td>{{ cp.telex|default:"-" }}</td>
+                                <td>{{ cp.industry|default:"-" }}</td>
+                                <td>
+                                    {% if cp.is_counterparty_broker == 'Y' %}
+                                        <span class="badge badge-success">Y</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">N</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if cp.is_counterparty_custodian == 'Y' %}
+                                        <span class="badge badge-success">Y</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">N</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if cp.is_counterparty_issuer == 'Y' %}
+                                        <span class="badge badge-success">Y</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">N</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ cp.primary_contact|default:"-" }}</td>
+                                <td>{{ cp.primary_number|default:"-" }}</td>
+                                <td>{{ cp.other_contact|default:"-" }}</td>
+                                <td>{{ cp.other_number|default:"-" }}</td>
+                                <td>{{ cp.custodian_group|default:"-" }}</td>
+                                <td>{{ cp.broker_group|default:"-" }}</td>
+                                <td>{{ cp.resident_y_n|default:"-" }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                {% if counterparties.has_other_pages %}
+                <div class="card-footer">
+                    <nav aria-label="Counterparty pagination">
+                        <ul class="pagination justify-content-center mb-0">
+                            {% if counterparties.has_previous %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}" aria-label="First">
+                                        <span aria-hidden="true">&laquo;&laquo;</span>
+                                    </a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ counterparties.previous_page_number }}{% if search %}&search={{ search }}{% endif %}" aria-label="Previous">
+                                        <span aria-hidden="true">&laquo;</span>
+                                    </a>
+                                </li>
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">&laquo;&laquo;</span>
+                                </li>
+                                <li class="page-item disabled">
+                                    <span class="page-link">&laquo;</span>
+                                </li>
+                            {% endif %}
+
+                            {% for num in counterparties.paginator.page_range %}
+                                {% if counterparties.number == num %}
+                                    <li class="page-item active">
+                                        <span class="page-link">{{ num }}</span>
+                                    </li>
+                                {% elif num > counterparties.number|add:'-3' and num < counterparties.number|add:'3' %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="?page={{ num }}{% if search %}&search={{ search }}{% endif %}">{{ num }}</a>
+                                    </li>
+                                {% endif %}
+                            {% endfor %}
+
+                            {% if counterparties.has_next %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ counterparties.next_page_number }}{% if search %}&search={{ search }}{% endif %}" aria-label="Next">
+                                        <span aria-hidden="true">&raquo;</span>
+                                    </a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ counterparties.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}" aria-label="Last">
+                                        <span aria-hidden="true">&raquo;&raquo;</span>
+                                    </a>
+                                </li>
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">&raquo;</span>
+                                </li>
+                                <li class="page-item disabled">
+                                    <span class="page-link">&raquo;&raquo;</span>
+                                </li>
+                            {% endif %}
+                        </ul>
+                        <div class="text-center mt-2" style="font-size: var(--font-size-sm); color: var(--gray-600);">
+                            Page {{ counterparties.number }} of {{ counterparties.paginator.num_pages }} ({{ total_count }} total counterparties)
+                        </div>
+                    </nav>
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="text-center py-5" style="color: var(--gray-500);">
+                    <i class="bi bi-building" style="font-size: 3rem; opacity: 0.3;"></i>
+                    <p class="mt-3 mb-0">No counterparties found</p>
+                    {% if search %}
+                        <p class="text-muted">Try adjusting your filters</p>
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-info-circle"></i>
+        <strong>Note:</strong> Counterparty data is fetched from Kudu/Impala in real-time.
+        Counterparty information includes broker, custodian, and issuer classification flags.
+    </div>
+</div>
+{% endblock %}

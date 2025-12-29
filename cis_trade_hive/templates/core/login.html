@@ -1,0 +1,176 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - CisTrade</title>
+
+    <!-- Bootstrap 5 CSS (Local) -->
+    <link rel="stylesheet" href="{% static 'bootstrap/css/bootstrap.min.css' %}">
+
+    <!-- Bootstrap Icons (Local) -->
+    <link rel="stylesheet" href="{% static 'bootstrap-icons/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css' %}">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{% static 'css/cistrade.css' %}">
+
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .login-container {
+            max-width: 400px;
+            width: 100%;
+            padding: 20px;
+        }
+
+        .login-card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            padding: 40px;
+        }
+
+        .login-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .login-logo {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+        }
+
+        .login-logo i {
+            font-size: 40px;
+            color: white;
+        }
+
+        .login-title {
+            font-size: 24px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .login-subtitle {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .form-control {
+            height: 45px;
+            border-radius: 5px;
+        }
+
+        .btn-login {
+            height: 45px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 5px;
+            color: white;
+            font-weight: 500;
+            width: 100%;
+            transition: transform 0.2s;
+        }
+
+        .btn-login:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .quick-login {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            text-align: center;
+        }
+
+        .quick-login-btn {
+            color: #667eea;
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        .quick-login-btn:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-card">
+            <div class="login-header">
+                <div class="login-logo">
+                    <i class="bi bi-shield-lock"></i>
+                </div>
+                <h1 class="login-title">CisTrade</h1>
+                <p class="login-subtitle">Trade Management System</p>
+            </div>
+
+            {% if error %}
+                <div class="alert alert-danger" role="alert">
+                    <i class="bi bi-exclamation-circle"></i> {{ error }}
+                </div>
+            {% endif %}
+
+            <form method="post">
+                {% csrf_token %}
+
+                <div class="form-group">
+                    <label for="login">Login ID</label>
+                    <input type="text"
+                           class="form-control"
+                           id="login"
+                           name="login"
+                           placeholder="Enter your login ID (e.g., TMP3RC)"
+                           required
+                           autofocus>
+                </div>
+
+                <button type="submit" class="btn btn-login">
+                    <i class="bi bi-box-arrow-in-right"></i> Login
+                </button>
+            </form>
+
+            <div class="quick-login">
+                <p class="text-muted mb-2" style="font-size: 12px;">Quick Access (Development)</p>
+                <a href="{% url 'auto_login' %}" class="quick-login-btn">
+                    <i class="bi bi-lightning"></i> Auto-login as PRAKASH HOSALLI (TMP3RC)
+                </a>
+            </div>
+        </div>
+
+        <div class="text-center mt-3">
+            <small class="text-white">
+                &copy; 2025 CisTrade. All rights reserved.
+            </small>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS (Local) -->
+    <script src="{% static 'bootstrap/js/bootstrap.bundle.min.js' %}"></script>
+</body>
+</html>

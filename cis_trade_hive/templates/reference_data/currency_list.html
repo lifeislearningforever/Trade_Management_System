@@ -1,0 +1,194 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Currencies - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="#">Reference Data</a></li>
+    <li class="breadcrumb-item active">Currencies</li>
+{% endblock %}
+
+{% block content %}
+<div class="currency-list-container">
+    <!-- Page Header -->
+    <div class="content-header d-flex justify-content-between align-items-start">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-currency-exchange text-primary"></i> Currencies
+            </h1>
+            <p class="content-subtitle">Manage currency reference data from Kudu</p>
+        </div>
+        <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Dashboard
+        </a>
+    </div>
+
+    <!-- Search & Filter Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-funnel"></i> Search & Filter
+            </h5>
+        </div>
+        <div class="card-body">
+            <form method="get" action="{% url 'reference_data:currency_list' %}" class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Search</label>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" name="search" value="{{ search_query }}"
+                               placeholder="Search by code, name, or symbol...">
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Status</label>
+                    <select class="form-select" name="status">
+                        <option value="">All Statuses</option>
+                        <option value="ACTIVE" {% if status_filter == 'ACTIVE' %}selected{% endif %}>Active</option>
+                        <option value="INACTIVE" {% if status_filter == 'INACTIVE' %}selected{% endif %}>Inactive</option>
+                    </select>
+                </div>
+                <div class="col-md-3 d-flex align-items-end gap-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i> Search
+                    </button>
+                    <a href="{% url 'reference_data:currency_list' %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-x-circle"></i> Clear
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Currencies Table -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                Currency List
+                <span class="badge badge-primary ms-2">{{ total_count }} currencies</span>
+            </h5>
+            <a href="?export=csv&{{ request.GET.urlencode }}" class="btn btn-sm btn-success">
+                <i class="bi bi-download"></i> Download CSV
+            </a>
+        </div>
+        <div class="card-body p-0">
+            {% if currencies %}
+                <div class="table-responsive" style="overflow-x: auto;">
+                    <table class="table table-hover mb-0" style="min-width: 1000px;">
+                        <thead>
+                            <tr>
+                                <th style="width: 12%;">ISO Code</th>
+                                <th style="width: 15%;">Name</th>
+                                <th style="width: 20%;">Full Name</th>
+                                <th style="width: 10%;">Symbol</th>
+                                <th style="width: 10%;">Precision</th>
+                                <th style="width: 13%;">Rate Precision</th>
+                                <th style="width: 10%;">Calendar</th>
+                                <th style="width: 10%;">Spot Schedule</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for currency in currencies %}
+                            <tr>
+                                <td>
+                                    <strong class="text-primary">{{ currency.code }}</strong>
+                                </td>
+                                <td>{{ currency.name|default:"-" }}</td>
+                                <td>{{ currency.full_name|default:"-" }}</td>
+                                <td>
+                                    <span style="font-size: 1.1rem;">{{ currency.symbol|default:"-" }}</span>
+                                </td>
+                                <td>{{ currency.decimal_places|default:"-" }}</td>
+                                <td>{{ currency.rate_precision|default:"-" }}</td>
+                                <td>{{ currency.calendar|default:"-" }}</td>
+                                <td>{{ currency.spot_schedule|default:"-" }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                {% if currencies.has_other_pages %}
+                <div class="card-footer">
+                    <nav aria-label="Currency pagination">
+                        <ul class="pagination justify-content-center mb-0">
+                            {% if currencies.has_previous %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}" aria-label="First">
+                                        <span aria-hidden="true">&laquo;&laquo;</span>
+                                    </a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ currencies.previous_page_number }}{% if search %}&search={{ search }}{% endif %}" aria-label="Previous">
+                                        <span aria-hidden="true">&laquo;</span>
+                                    </a>
+                                </li>
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">&laquo;&laquo;</span>
+                                </li>
+                                <li class="page-item disabled">
+                                    <span class="page-link">&laquo;</span>
+                                </li>
+                            {% endif %}
+
+                            {% for num in currencies.paginator.page_range %}
+                                {% if currencies.number == num %}
+                                    <li class="page-item active">
+                                        <span class="page-link">{{ num }}</span>
+                                    </li>
+                                {% elif num > currencies.number|add:'-3' and num < currencies.number|add:'3' %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="?page={{ num }}{% if search %}&search={{ search }}{% endif %}">{{ num }}</a>
+                                    </li>
+                                {% endif %}
+                            {% endfor %}
+
+                            {% if currencies.has_next %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ currencies.next_page_number }}{% if search %}&search={{ search }}{% endif %}" aria-label="Next">
+                                        <span aria-hidden="true">&raquo;</span>
+                                    </a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ currencies.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}" aria-label="Last">
+                                        <span aria-hidden="true">&raquo;&raquo;</span>
+                                    </a>
+                                </li>
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">&raquo;</span>
+                                </li>
+                                <li class="page-item disabled">
+                                    <span class="page-link">&raquo;&raquo;</span>
+                                </li>
+                            {% endif %}
+                        </ul>
+                        <div class="text-center mt-2" style="font-size: var(--font-size-sm); color: var(--gray-600);">
+                            Page {{ currencies.number }} of {{ currencies.paginator.num_pages }} ({{ total_count }} total currencies)
+                        </div>
+                    </nav>
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="text-center py-5" style="color: var(--gray-500);">
+                    <i class="bi bi-currency-exchange" style="font-size: 3rem; opacity: 0.3;"></i>
+                    <p class="mt-3 mb-0">No currencies found</p>
+                    {% if search_query or status_filter %}
+                        <p class="text-muted">Try adjusting your filters</p>
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-info-circle"></i>
+        <strong>Note:</strong> Currency data is fetched from Kudu/Impala in real-time.
+        Exchange rates are updated daily at midnight UTC.
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,338 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{% if udf %}Edit UDF{% else %}Create UDF{% endif %} - CIS Trade{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Home</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'udf:list' %}">User Defined Fields</a></li>
+                    <li class="breadcrumb-item active">{% if udf %}Edit{% else %}Create{% endif %}</li>
+                </ol>
+            </nav>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0">
+                        <i class="bi bi-plus-circle"></i>
+                        {% if udf %}Edit UDF{% else %}Create New UDF{% endif %}
+                    </h4>
+                </div>
+                <div class="card-body">
+                    {% if messages %}
+                        {% for message in messages %}
+                        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                        {% endfor %}
+                    {% endif %}
+
+                    <form method="post" id="udfForm">
+                        {% csrf_token %}
+
+                        <div class="row">
+                            <!-- Basic Information -->
+                            <div class="col-md-6">
+                                <h5 class="border-bottom pb-2 mb-3">Basic Information</h5>
+
+                                <div class="mb-3">
+                                    <label for="field_name" class="form-label">Field Name <span class="text-danger">*</span></label>
+                                    <input type="text" class="form-control" id="field_name" name="field_name"
+                                           value="{% if udf %}{{ udf.field_name }}{% endif %}" required>
+                                    <small class="form-text text-muted">Unique identifier for this field (e.g., customer_rating)</small>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="label" class="form-label">Display Label <span class="text-danger">*</span></label>
+                                    <input type="text" class="form-control" id="label" name="label"
+                                           value="{% if udf %}{{ udf.label }}{% endif %}" required>
+                                    <small class="form-text text-muted">User-friendly label (e.g., Customer Rating)</small>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="description" class="form-label">Description</label>
+                                    <textarea class="form-control" id="description" name="description" rows="3">{% if udf %}{{ udf.description }}{% endif %}</textarea>
+                                    <small class="form-text text-muted">Optional description</small>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="field_type" class="form-label">Field Type <span class="text-danger">*</span></label>
+                                    <select class="form-select" id="field_type" name="field_type" required>
+                                        <option value="">-- Select Field Type --</option>
+                                        {% for value, label in field_type_choices %}
+                                        <option value="{{ value }}" {% if udf and udf.field_type == value %}selected{% endif %}>
+                                            {{ label }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                    <small class="form-text text-muted">Data type for this field</small>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="entity_type" class="form-label">Entity Type <span class="text-danger">*</span></label>
+                                    <select class="form-select" id="entity_type" name="entity_type" required>
+                                        <option value="">-- Select Entity Type --</option>
+                                        {% for value, label in entity_type_choices %}
+                                        <option value="{{ value }}" {% if udf and udf.entity_type == value %}selected{% endif %}>
+                                            {{ label }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                    <small class="form-text text-muted">Which entity this field applies to</small>
+                                </div>
+                            </div>
+
+                            <!-- Validation and Options -->
+                            <div class="col-md-6">
+                                <h5 class="border-bottom pb-2 mb-3">Validation & Options</h5>
+
+                                <div class="mb-3">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="is_required" name="is_required"
+                                               {% if udf and udf.is_required %}checked{% endif %}>
+                                        <label class="form-check-label" for="is_required">
+                                            Required Field
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="is_unique" name="is_unique"
+                                               {% if udf and udf.is_unique %}checked{% endif %}>
+                                        <label class="form-check-label" for="is_unique">
+                                            Unique Value
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="is_active" name="is_active"
+                                               {% if not udf or udf.is_active %}checked{% endif %}>
+                                        <label class="form-check-label" for="is_active">
+                                            Active
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="mb-3" id="dropdown_options_div" style="display: none;">
+                                    <label class="form-label">Dropdown Options</label>
+
+                                    {% if udf and existing_options %}
+                                    <!-- Existing Options Management -->
+                                    <div class="border rounded p-3 mb-3" style="max-height: 300px; overflow-y: auto;">
+                                        <h6 class="mb-3">Manage Existing Options</h6>
+                                        <div id="options-list">
+                                            {% for option in existing_options %}
+                                            <div class="d-flex justify-content-between align-items-center mb-2 p-2 border-bottom">
+                                                <span class="{% if not option.is_active %}text-muted text-decoration-line-through{% endif %}">
+                                                    {{ option.option_value }}
+                                                </span>
+                                                <div>
+                                                    <span class="badge bg-{{ option.is_active|yesno:'success,secondary' }}">
+                                                        {{ option.is_active|yesno:'Active,Inactive' }}
+                                                    </span>
+                                                    <button type="button" class="btn btn-sm btn-{{ option.is_active|yesno:'warning,success' }}"
+                                                            onclick="toggleOption('{{ option.option_value }}', {{ option.is_active|yesno:'false,true' }})">
+                                                        <i class="bi bi-{{ option.is_active|yesno:'eye-slash,eye' }}"></i>
+                                                        {{ option.is_active|yesno:'Deactivate,Activate' }}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                    {% endif %}
+
+                                    <!-- Add New Option -->
+                                    <div class="input-group">
+                                        <input type="text" class="form-control" id="new_option_input" placeholder="Enter new option value">
+                                        <button type="button" class="btn btn-primary" onclick="addNewOption()">
+                                            <i class="bi bi-plus-circle"></i> Add Option
+                                        </button>
+                                    </div>
+                                    <small class="form-text text-muted">Add individual dropdown options one at a time</small>
+                                </div>
+
+                                <div class="mb-3" id="min_value_div" style="display: none;">
+                                    <label for="min_value" class="form-label">Minimum Value</label>
+                                    <input type="number" step="0.000001" class="form-control" id="min_value" name="min_value"
+                                           value="{% if udf %}{{ udf.min_value }}{% endif %}">
+                                </div>
+
+                                <div class="mb-3" id="max_value_div" style="display: none;">
+                                    <label for="max_value" class="form-label">Maximum Value</label>
+                                    <input type="number" step="0.000001" class="form-control" id="max_value" name="max_value"
+                                           value="{% if udf %}{{ udf.max_value }}{% endif %}">
+                                </div>
+
+                                <div class="mb-3" id="max_length_div" style="display: none;">
+                                    <label for="max_length" class="form-label">Maximum Length</label>
+                                    <input type="number" class="form-control" id="max_length" name="max_length"
+                                           value="{% if udf %}{{ udf.max_length }}{% endif %}">
+                                    <small class="form-text text-muted">Maximum characters for text field</small>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="default_value" class="form-label">Default Value</label>
+                                    <input type="text" class="form-control" id="default_value" name="default_value"
+                                           value="{% if udf %}{{ udf.default_value }}{% endif %}">
+                                    <small class="form-text text-muted">Optional default value</small>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="display_order" class="form-label">Display Order</label>
+                                    <input type="number" class="form-control" id="display_order" name="display_order"
+                                           value="{% if udf %}{{ udf.display_order }}{% else %}0{% endif %}">
+                                    <small class="form-text text-muted">Order in which this field appears</small>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="group_name" class="form-label">Group Name</label>
+                                    <input type="text" class="form-control" id="group_name" name="group_name"
+                                           value="{% if udf %}{{ udf.group_name }}{% endif %}">
+                                    <small class="form-text text-muted">Optional grouping for organization</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row mt-4">
+                            <div class="col-md-12">
+                                <div class="border-top pt-3">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="bi bi-check-circle"></i>
+                                        {% if udf %}Update UDF{% else %}Create UDF{% endif %}
+                                    </button>
+                                    <a href="{% url 'udf:list' %}" class="btn btn-secondary">
+                                        <i class="bi bi-x-circle"></i>
+                                        Cancel
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const fieldTypeSelect = document.getElementById('field_type');
+    const dropdownOptionsDiv = document.getElementById('dropdown_options_div');
+    const minValueDiv = document.getElementById('min_value_div');
+    const maxValueDiv = document.getElementById('max_value_div');
+    const maxLengthDiv = document.getElementById('max_length_div');
+
+    function updateFieldVisibility() {
+        const selectedType = fieldTypeSelect.value;
+
+        // Hide all conditional fields
+        dropdownOptionsDiv.style.display = 'none';
+        minValueDiv.style.display = 'none';
+        maxValueDiv.style.display = 'none';
+        maxLengthDiv.style.display = 'none';
+
+        // Show relevant fields based on type
+        if (selectedType === 'DROPDOWN' || selectedType === 'MULTI_SELECT') {
+            dropdownOptionsDiv.style.display = 'block';
+        }
+
+        if (selectedType === 'NUMBER' || selectedType === 'CURRENCY' || selectedType === 'PERCENTAGE') {
+            minValueDiv.style.display = 'block';
+            maxValueDiv.style.display = 'block';
+        }
+
+        if (selectedType === 'TEXT') {
+            maxLengthDiv.style.display = 'block';
+        }
+    }
+
+    // Initial state
+    updateFieldVisibility();
+
+    // Update on change
+    fieldTypeSelect.addEventListener('change', updateFieldVisibility);
+});
+
+// UDF Option Management Functions
+function toggleOption(optionValue, newActiveState) {
+    if (!confirm(`Are you sure you want to ${newActiveState ? 'activate' : 'deactivate'} this option?`)) {
+        return;
+    }
+
+    const fieldName = '{{ udf.field_name }}';
+
+    fetch(`/udf/${fieldName}/options/toggle/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({
+            option_value: optionValue,
+            is_active: newActiveState
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Option status updated successfully!');
+            location.reload();  // Reload to show updated status
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(error => {
+        alert('Error updating option: ' + error);
+    });
+}
+
+function addNewOption() {
+    const newOptionInput = document.getElementById('new_option_input');
+    const optionValue = newOptionInput.value.trim();
+
+    if (!optionValue) {
+        alert('Please enter an option value');
+        return;
+    }
+
+    const fieldName = '{{ udf.field_name }}';
+
+    fetch(`/udf/${fieldName}/options/add/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({
+            option_value: optionValue
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Option added successfully!');
+            newOptionInput.value = '';  // Clear input
+            location.reload();  // Reload to show new option
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(error => {
+        alert('Error adding option: ' + error);
+    });
+}
+</script>
+{% endblock %}

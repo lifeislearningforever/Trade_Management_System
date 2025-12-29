@@ -1,0 +1,47 @@
+# Development and Testing Dependencies
+# =====================================
+
+# Testing Framework
+pytest==8.3.4
+pytest-django==4.9.0
+pytest-cov==6.0.0
+pytest-xdist==3.6.1  # Parallel test execution
+coverage==7.6.9
+
+# Load Testing
+locust==2.32.4
+geventhttpclient==2.3.1  # For better Locust performance
+
+# Performance Monitoring
+django-debug-toolbar==4.4.6
+django-silk==5.3.0  # Request profiling
+memory-profiler==0.61.0
+psutil==6.1.1  # System monitoring
+
+# Code Quality
+black==24.10.0  # Code formatter
+flake8==7.1.1  # Linter
+pylint==3.3.2  # Advanced linter
+isort==5.13.2  # Import sorting
+mypy==1.13.0  # Type checking
+
+# Security
+bandit==1.8.0  # Security linter
+safety==3.2.11  # Dependency vulnerability scanner
+
+# Database Tools
+ipython==8.31.0  # Enhanced Python shell
+django-extensions==3.2.3  # Management command extensions
+
+# Documentation
+mkdocs==1.6.1
+mkdocs-material==9.5.49
+mkdocstrings==0.27.0
+mkdocstrings-python==1.12.2
+
+# API Testing
+httpie==3.2.4
+
+# Monitoring & Logging
+colorlog==6.9.0
+sentry-sdk==2.19.2  # Error tracking (optional)

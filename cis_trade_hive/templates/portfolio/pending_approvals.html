@@ -1,0 +1,170 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Pending Approvals - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'portfolio:list' %}">Portfolios</a></li>
+    <li class="breadcrumb-item active">Pending Approvals</li>
+{% endblock %}
+
+{% block content %}
+<div class="pending-approvals-container">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            <i class="bi bi-clock-history text-warning"></i> Pending Approvals
+        </h1>
+        <p class="content-subtitle">Four-Eyes Principle (Maker-Checker) - Review and approve portfolios</p>
+    </div>
+
+    <!-- Pending Portfolios Table -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                Portfolios Awaiting Approval
+                <span class="badge badge-warning ms-2">{{ pending_count }} pending</span>
+            </h5>
+        </div>
+        <div class="card-body p-0">
+            {% if portfolios %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width: 25%;">Portfolio Name</th>
+                                <th style="width: 12%;">Manager</th>
+                                <th style="width: 8%;">Currency</th>
+                                <th style="width: 12%;">Updated By</th>
+                                <th style="width: 12%;">Updated At</th>
+                                <th style="width: 20%;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for portfolio in portfolios %}
+                            <tr>
+                                <td>
+                                    <a href="{% url 'portfolio:detail' portfolio.name %}" class="text-decoration-none">
+                                        <strong class="text-primary">{{ portfolio.name }}</strong>
+                                    </a>
+                                </td>
+                                <td>{{ portfolio.manager|default:"-" }}</td>
+                                <td>
+                                    <span class="badge badge-info">{{ portfolio.currency }}</span>
+                                </td>
+                                <td>
+                                    <i class="bi bi-person-circle"></i> {{ portfolio.updated_by|default:"-" }}
+                                </td>
+                                <td style="font-size: var(--font-size-sm);">
+                                    {{ portfolio.updated_at|default:"-" }}
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm">
+                                        <a href="{% url 'portfolio:detail' portfolio.name %}" class="btn btn-outline-primary" title="View Details">
+                                            <i class="bi bi-eye"></i> View
+                                        </a>
+                                        <button type="button" class="btn btn-outline-success"
+                                                onclick="approvePortfolio('{{ portfolio.name }}')" title="Approve">
+                                            <i class="bi bi-check-circle"></i> Approve
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger"
+                                                onclick="rejectPortfolio('{{ portfolio.name }}')" title="Reject">
+                                            <i class="bi bi-x-circle"></i> Reject
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="text-center py-5" style="color: var(--gray-500);">
+                    <i class="bi bi-check-circle" style="font-size: 3rem; opacity: 0.3;"></i>
+                    <p class="mt-3 mb-0">No pending approvals</p>
+                    <p class="text-muted">All portfolios have been reviewed</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    <div class="alert alert-warning mt-4">
+        <i class="bi bi-shield-check"></i>
+        <strong>Four-Eyes Principle:</strong> 
+        You can only approve/reject portfolios created by other users. This ensures independent review of all changes.
+    </div>
+</div>
+
+<!-- Approve Modal -->
+<div class="modal fade" id="approveModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Approve Portfolio</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" id="approveForm">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <p>Are you sure you want to approve portfolio <strong id="approvePortfolioName"></strong>?</p>
+                    <div class="mb-3">
+                        <label for="approve_comments" class="form-label">Comments (optional)</label>
+                        <textarea class="form-control" id="approve_comments" name="comments" rows="3"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-check-circle"></i> Approve
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Reject Modal -->
+<div class="modal fade" id="rejectModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Reject Portfolio</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" id="rejectForm">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <p>Are you sure you want to reject portfolio <strong id="rejectPortfolioName"></strong>?</p>
+                    <div class="mb-3">
+                        <label for="reject_comments" class="form-label">Rejection Reason *</label>
+                        <textarea class="form-control" id="reject_comments" name="comments" rows="3" required></textarea>
+                        <div class="form-text">Please provide a reason for rejection</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-x-circle"></i> Reject
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function approvePortfolio(portfolioName) {
+    document.getElementById('approvePortfolioName').textContent = portfolioName;
+    document.getElementById('approveForm').action = '/portfolio/' + encodeURIComponent(portfolioName) + '/approve/';
+    new bootstrap.Modal(document.getElementById('approveModal')).show();
+}
+
+function rejectPortfolio(portfolioName) {
+    document.getElementById('rejectPortfolioName').textContent = portfolioName;
+    document.getElementById('rejectForm').action = '/portfolio/' + encodeURIComponent(portfolioName) + '/reject/';
+    new bootstrap.Modal(document.getElementById('rejectModal')).show();
+}
+</script>
+{% endblock %}

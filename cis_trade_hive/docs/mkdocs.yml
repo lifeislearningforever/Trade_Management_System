@@ -1,0 +1,170 @@
+site_name: CisTrade Documentation
+site_description: Comprehensive documentation for CisTrade - Trade Management System
+site_author: CisTrade Development Team
+site_url: https://cistrade.yourcompany.com/docs/
+
+# Repository
+repo_name: CisTrade
+repo_url: https://github.com/yourcompany/cistrade
+edit_uri: ""
+
+# Copyright
+copyright: Copyright &copy; 2025 Your Company
+
+# Build configuration
+use_directory_urls: false
+
+# Configuration
+theme:
+  name: material
+  language: en
+
+  # Color scheme
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+  # Font
+  font:
+    text: Roboto
+    code: Roboto Mono
+
+  # Features
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - search.share
+    - header.autohide
+    - content.code.copy
+    - content.code.annotate
+
+  # Icon
+  icon:
+    logo: material/bank
+    repo: fontawesome/brands/github
+
+# Plugins
+plugins:
+  - search:
+      lang: en
+      separator: '[\s\-,:!=\[\]()"/]+|(?!\b)(?=[A-Z][a-z])|\.(?!\d)|&[lg]t;'
+  - minify:
+      minify_html: true
+
+# Extensions
+markdown_extensions:
+  # Python Markdown
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - toc:
+      permalink: true
+      toc_depth: 3
+
+  # Python Markdown Extensions
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+# Page tree / Navigation
+nav:
+  - Home: index.md
+
+  - Business User Guides:
+    - Overview: business/index.md
+    - Portfolio Management: business/portfolio-management.md
+    - Four-Eyes Workflow: business/four-eyes-workflow.md
+    - Quick Reference: business/quick-reference.md
+    - UDF Management: business/udf-management.md
+    - Market Data: business/market-data.md
+    - Reports: business/reports.md
+    - FAQ: business/faq.md
+
+  - Technical Documentation:
+    - Overview: technical/index.md
+    - Architecture: technical/architecture.md
+    - Database Schema: technical/database-schema.md
+    - API Reference: technical/api-reference.md
+    - Code Structure: technical/code-structure.md
+    - Development Guide: technical/development-guide.md
+    - Deployment: technical/deployment.md
+    - Testing: technical/testing.md
+
+  - BA Documentation:
+    - Overview: integration/index.md
+    - Business Processes: integration/business-processes.md
+    - Data Flow: integration/data-flow.md
+    - Business Rules: integration/business-rules.md
+    - Integration Points: integration/integrations.md
+    - Workflow Diagrams: integration/workflow-diagrams.md
+
+  - Change Log: changelog.md
+
+# Extra
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/yourcompany
+    - icon: fontawesome/solid/envelope
+      link: mailto:cistrade-support@yourcompany.com
+
+  version:
+    provider: mike
+    default: latest
+
+# Additional CSS
+extra_css:
+  - stylesheets/extra.css
+
+# Additional JavaScript
+extra_javascript:
+  - javascripts/extra.js

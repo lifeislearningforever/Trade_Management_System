@@ -1,0 +1,145 @@
+version: '3.8'
+
+services:
+  kudu-master-1:
+    image: apache/kudu:latest
+    container_name: kudu-master-1
+    hostname: kudu-master-1
+    ports:
+      - "7051:7051"
+      - "8051:8051"
+    command: ["master"]
+    environment:
+      - KUDU_MASTERS=kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251
+      - MASTER_ARGS=--fs_wal_dir=/var/lib/kudu/master --rpc_bind_addresses=0.0.0.0:7051 --rpc_advertised_addresses=kudu-master-1:7051 --webserver_port=8051 --webserver_advertised_addresses=kudu-master-1:8051 --unlock_unsafe_flags --use_hybrid_clock=false
+    volumes:
+      - kudu-master-1:/var/lib/kudu
+    networks:
+      - kudu-network
+
+  kudu-master-2:
+    image: apache/kudu:latest
+    container_name: kudu-master-2
+    hostname: kudu-master-2
+    ports:
+      - "7151:7151"
+      - "8151:8151"
+    command: ["master"]
+    environment:
+      - KUDU_MASTERS=kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251
+      - MASTER_ARGS=--fs_wal_dir=/var/lib/kudu/master --rpc_bind_addresses=0.0.0.0:7151 --rpc_advertised_addresses=kudu-master-2:7151 --webserver_port=8151 --webserver_advertised_addresses=kudu-master-2:8151 --unlock_unsafe_flags --use_hybrid_clock=false
+    volumes:
+      - kudu-master-2:/var/lib/kudu
+    networks:
+      - kudu-network
+
+  kudu-master-3:
+    image: apache/kudu:latest
+    container_name: kudu-master-3
+    hostname: kudu-master-3
+    ports:
+      - "7251:7251"
+      - "8251:8251"
+    command: ["master"]
+    environment:
+      - KUDU_MASTERS=kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251
+      - MASTER_ARGS=--fs_wal_dir=/var/lib/kudu/master --rpc_bind_addresses=0.0.0.0:7251 --rpc_advertised_addresses=kudu-master-3:7251 --webserver_port=8251 --webserver_advertised_addresses=kudu-master-3:8251 --unlock_unsafe_flags --use_hybrid_clock=false
+    volumes:
+      - kudu-master-3:/var/lib/kudu
+    networks:
+      - kudu-network
+
+  kudu-tserver-1:
+    image: apache/kudu:latest
+    container_name: kudu-tserver-1
+    hostname: kudu-tserver-1
+    depends_on:
+      - kudu-master-1
+      - kudu-master-2
+      - kudu-master-3
+    ports:
+      - "7050:7050"
+      - "8050:8050"
+    command: ["tserver"]
+    environment:
+      - KUDU_MASTERS=kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251
+      - TSERVER_ARGS=--fs_wal_dir=/var/lib/kudu/tserver --rpc_bind_addresses=0.0.0.0:7050 --rpc_advertised_addresses=kudu-tserver-1:7050 --webserver_port=8050 --webserver_advertised_addresses=kudu-tserver-1:8050 --unlock_unsafe_flags --use_hybrid_clock=false
+    volumes:
+      - kudu-tserver-1:/var/lib/kudu
+    networks:
+      - kudu-network
+
+  kudu-tserver-2:
+    image: apache/kudu:latest
+    container_name: kudu-tserver-2
+    hostname: kudu-tserver-2
+    depends_on:
+      - kudu-master-1
+      - kudu-master-2
+      - kudu-master-3
+    ports:
+      - "7150:7150"
+      - "8150:8150"
+    command: ["tserver"]
+    environment:
+      - KUDU_MASTERS=kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251
+      - TSERVER_ARGS=--fs_wal_dir=/var/lib/kudu/tserver --rpc_bind_addresses=0.0.0.0:7150 --rpc_advertised_addresses=kudu-tserver-2:7150 --webserver_port=8150 --webserver_advertised_addresses=kudu-tserver-2:8150 --unlock_unsafe_flags --use_hybrid_clock=false
+    volumes:
+      - kudu-tserver-2:/var/lib/kudu
+    networks:
+      - kudu-network
+
+  kudu-tserver-3:
+    image: apache/kudu:latest
+    container_name: kudu-tserver-3
+    hostname: kudu-tserver-3
+    depends_on:
+      - kudu-master-1
+      - kudu-master-2
+      - kudu-master-3
+    ports:
+      - "7250:7250"
+      - "8250:8250"
+    command: ["tserver"]
+    environment:
+      - KUDU_MASTERS=kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251
+      - TSERVER_ARGS=--fs_wal_dir=/var/lib/kudu/tserver --rpc_bind_addresses=0.0.0.0:7250 --rpc_advertised_addresses=kudu-tserver-3:7250 --webserver_port=8250 --webserver_advertised_addresses=kudu-tserver-3:8250 --unlock_unsafe_flags --use_hybrid_clock=false
+    volumes:
+      - kudu-tserver-3:/var/lib/kudu
+    networks:
+      - kudu-network
+
+  impala:
+    image: apache/kudu:impala-latest
+    container_name: kudu-impala-new
+    hostname: impala
+    depends_on:
+      - kudu-master-1
+      - kudu-master-2
+      - kudu-master-3
+      - kudu-tserver-1
+      - kudu-tserver-2
+      - kudu-tserver-3
+    ports:
+      - "21000:21000"
+      - "21050:21050"
+      - "25000:25000"
+      - "25010:25010"
+      - "25020:25020"
+    command: ["impala"]
+    environment:
+      - KUDU_MASTERS=kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251
+    networks:
+      - kudu-network
+
+volumes:
+  kudu-master-1:
+  kudu-master-2:
+  kudu-master-3:
+  kudu-tserver-1:
+  kudu-tserver-2:
+  kudu-tserver-3:
+
+networks:
+  kudu-network:
+    driver: bridge

@@ -1,0 +1,33 @@
+# Core Django
+Django==5.2.9
+django-extensions==4.1
+
+# Database - Hive Connection
+PyMySQL==1.1.1
+PyHive==0.7.0
+#sasl==0.3.1
+thrift==0.16.0
+thrift-sasl==0.4.3
+
+# REST API
+djangorestframework==3.16.1
+django-filter==25.2
+
+# Forms
+django-crispy-forms==2.5
+crispy-bootstrap5==2025.6
+
+# Images
+Pillow==12.0.0
+
+# Testing
+pytest==9.0.1
+pytest-django==4.11.1
+pytest-cov==7.0.0
+
+# Environment
+python-dotenv==1.0.1
+
+# Additional utilities
+whitenoise==6.7.0
+gunicorn==22.0.0
