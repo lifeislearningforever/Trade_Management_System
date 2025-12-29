@@ -126,10 +126,42 @@
                                 </div>
 
                                 <div class="mb-3" id="dropdown_options_div" style="display: none;">
-                                    <label for="dropdown_options" class="form-label">Dropdown Options</label>
-                                    <input type="text" class="form-control" id="dropdown_options" name="dropdown_options"
-                                           value="{% if udf and udf.dropdown_options %}{{ udf.dropdown_options|join:',' }}{% endif %}">
-                                    <small class="form-text text-muted">Enter options separated by commas: Option1,Option2,Option3</small>
+                                    <label class="form-label">Dropdown Options</label>
+
+                                    {% if udf and existing_options %}
+                                    <!-- Existing Options Management -->
+                                    <div class="border rounded p-3 mb-3" style="max-height: 300px; overflow-y: auto;">
+                                        <h6 class="mb-3">Manage Existing Options</h6>
+                                        <div id="options-list">
+                                            {% for option in existing_options %}
+                                            <div class="d-flex justify-content-between align-items-center mb-2 p-2 border-bottom">
+                                                <span class="{% if not option.is_active %}text-muted text-decoration-line-through{% endif %}">
+                                                    {{ option.option_value }}
+                                                </span>
+                                                <div>
+                                                    <span class="badge bg-{{ option.is_active|yesno:'success,secondary' }}">
+                                                        {{ option.is_active|yesno:'Active,Inactive' }}
+                                                    </span>
+                                                    <button type="button" class="btn btn-sm btn-{{ option.is_active|yesno:'warning,success' }}"
+                                                            onclick="toggleOption('{{ option.option_value }}', {{ option.is_active|yesno:'false,true' }})">
+                                                        <i class="bi bi-{{ option.is_active|yesno:'eye-slash,eye' }}"></i>
+                                                        {{ option.is_active|yesno:'Deactivate,Activate' }}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                    {% endif %}
+
+                                    <!-- Add New Option -->
+                                    <div class="input-group">
+                                        <input type="text" class="form-control" id="new_option_input" placeholder="Enter new option value">
+                                        <button type="button" class="btn btn-primary" onclick="addNewOption()">
+                                            <i class="bi bi-plus-circle"></i> Add Option
+                                        </button>
+                                    </div>
+                                    <small class="form-text text-muted">Add individual dropdown options one at a time</small>
                                 </div>
 
                                 <div class="mb-3" id="min_value_div" style="display: none;">
@@ -233,5 +265,74 @@ document.addEventListener('DOMContentLoaded', function() {
     // Update on change
     fieldTypeSelect.addEventListener('change', updateFieldVisibility);
 });
+
+// UDF Option Management Functions
+function toggleOption(optionValue, newActiveState) {
+    if (!confirm(`Are you sure you want to ${newActiveState ? 'activate' : 'deactivate'} this option?`)) {
+        return;
+    }
+
+    const fieldName = '{{ udf.field_name }}';
+
+    fetch(`/udf/${fieldName}/options/toggle/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({
+            option_value: optionValue,
+            is_active: newActiveState
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Option status updated successfully!');
+            location.reload();  // Reload to show updated status
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(error => {
+        alert('Error updating option: ' + error);
+    });
+}
+
+function addNewOption() {
+    const newOptionInput = document.getElementById('new_option_input');
+    const optionValue = newOptionInput.value.trim();
+
+    if (!optionValue) {
+        alert('Please enter an option value');
+        return;
+    }
+
+    const fieldName = '{{ udf.field_name }}';
+
+    fetch(`/udf/${fieldName}/options/add/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({
+            option_value: optionValue
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Option added successfully!');
+            newOptionInput.value = '';  // Clear input
+            location.reload();  // Reload to show new option
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(error => {
+        alert('Error adding option: ' + error);
+    });
+}
 </script>
 {% endblock %}

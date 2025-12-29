@@ -19,6 +19,10 @@ urlpatterns = [
     path('values/<str:entity_type>/<int:entity_id>/', views.entity_udf_values, name='entity_values'),
     path('values/<str:entity_type>/<int:entity_id>/history/', views.udf_value_history, name='value_history'),
 
+    # UDF Option Management URLs
+    path('<str:field_name>/options/toggle/', views.udf_option_toggle, name='option_toggle'),
+    path('<str:field_name>/options/add/', views.udf_option_add, name='option_add'),
+
     # AJAX URLs
     path('ajax/values/<str:entity_type>/<int:entity_id>/', views.ajax_get_entity_udf_values, name='ajax_get_values'),
     path('ajax/validate/', views.ajax_validate_udf_values, name='ajax_validate'),

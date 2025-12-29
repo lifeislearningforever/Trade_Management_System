@@ -41,7 +41,7 @@ class ImpalaConnection:
 class UDFDefinitionRepository:
     """Repository for UDF definition metadata from Kudu/Impala."""
 
-    TABLE_NAME = 'cis_udf_definition'
+    TABLE_NAME = 'cis_udf_definition'  # Impala table pointing to cis_udf_definition_kudu
 
     @staticmethod
     def get_all_definitions(entity_type: Optional[str] = None) -> List[Dict[str, Any]]:

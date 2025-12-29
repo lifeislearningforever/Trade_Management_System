@@ -21,6 +21,10 @@ from .repositories.udf_hive_repository import (
     udf_option_repository
 )
 from core.audit.audit_kudu_repository import audit_log_kudu_repository
+from core.repositories.impala_connection import impala_manager
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class UDFWrapper:
@@ -373,6 +377,11 @@ def udf_edit(request, field_name):
     # Wrap in UDFWrapper
     udf = UDFWrapper(udf_data)
 
+    # Fetch all options for this UDF from cis_udf_option table
+    existing_options = []
+    if udf.field_type in ['DROPDOWN', 'MULTI_SELECT']:
+        existing_options = udf_option_repository.get_options_by_udf_id(udf.udf_id)
+
     if request.method == 'POST':
         try:
             from datetime import datetime
@@ -454,22 +463,9 @@ def udf_edit(request, field_name):
         except Exception as e:
             messages.error(request, f'Error updating UDF: {str(e)}')
 
-    # Prepare dropdown options as comma-separated string
-    dropdown_options_str = ''
-    if udf.dropdown_options:
-        import json
-        try:
-            if isinstance(udf.dropdown_options, str):
-                options = json.loads(udf.dropdown_options)
-            else:
-                options = udf.dropdown_options
-            dropdown_options_str = ', '.join(options)
-        except:
-            dropdown_options_str = str(udf.dropdown_options)
-
     context = {
         'udf': udf,
-        'dropdown_options_str': dropdown_options_str,
+        'existing_options': existing_options,  # Pass options list to template
         'field_type_choices': UDF.FIELD_TYPE_CHOICES,
         'entity_type_choices': UDF.ENTITY_TYPE_CHOICES,
     }
@@ -616,6 +612,155 @@ def udf_value_history(request, entity_type, entity_id):
     }
 
     return render(request, 'udf/udf_value_history.html', context)
+
+
+# ========================
+# UDF Option Management Views
+# ========================
+
+def udf_option_toggle(request, field_name):
+    """
+    Toggle active/inactive status for a UDF option.
+    """
+    if request.method == 'POST':
+        try:
+            import json
+            from datetime import datetime
+
+            data = json.loads(request.body)
+            option_value = data.get('option_value')
+            is_active = data.get('is_active', True)
+
+            # Get UDF definition
+            udf_data = udf_definition_repository.get_definition_by_name(field_name)
+            if not udf_data:
+                return JsonResponse({'success': False, 'error': 'UDF not found'}, status=404)
+
+            udf_id = udf_data['udf_id']
+
+            # Get user info
+            user_info = get_request_user_info(request)
+            timestamp = int(datetime.now().timestamp() * 1000)
+
+            # Escape single quotes
+            escaped_value = option_value.replace("'", "''")
+
+            # Update option status
+            query = f"""
+            UPDATE gmp_cis.cis_udf_option
+            SET is_active = {str(is_active).lower()},
+                updated_by = '{user_info['username']}',
+                updated_at = {timestamp}
+            WHERE udf_id = {udf_id} AND option_value = '{escaped_value}'
+            """
+
+            success = impala_manager.execute_write(query, database='gmp_cis')
+
+            if success:
+                # Log audit
+                audit_log_kudu_repository.log_action(
+                    user_id=user_info['user_id'],
+                    username=user_info['username'],
+                    user_email=user_info['user_email'],
+                    action_type='UPDATE',
+                    entity_type='UDF_OPTION',
+                    entity_id=f"{field_name}:{option_value}",
+                    action_description=f'{"Activated" if is_active else "Deactivated"} option: {option_value}',
+                    status='SUCCESS',
+                    request_method='POST',
+                    request_path=request.path,
+                    ip_address=request.META.get('REMOTE_ADDR'),
+                    user_agent=request.META.get('HTTP_USER_AGENT', '')
+                )
+
+                return JsonResponse({'success': True, 'message': 'Option status updated'})
+            else:
+                return JsonResponse({'success': False, 'error': 'Failed to update option'}, status=500)
+
+        except Exception as e:
+            logger.error(f"Error toggling option: {str(e)}")
+            return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+    return JsonResponse({'success': False, 'error': 'Invalid request method'}, status=405)
+
+
+def udf_option_add(request, field_name):
+    """
+    Add a new option to a UDF.
+    """
+    if request.method == 'POST':
+        try:
+            import json
+            from datetime import datetime
+
+            data = json.loads(request.body)
+            option_value = data.get('option_value', '').strip()
+
+            if not option_value:
+                return JsonResponse({'success': False, 'error': 'Option value is required'}, status=400)
+
+            # Get UDF definition
+            udf_data = udf_definition_repository.get_definition_by_name(field_name)
+            if not udf_data:
+                return JsonResponse({'success': False, 'error': 'UDF not found'}, status=404)
+
+            udf_id = udf_data['udf_id']
+
+            # Get user info
+            user_info = get_request_user_info(request)
+            timestamp = int(datetime.now().timestamp() * 1000)
+
+            # Get max display_order
+            existing_options = udf_option_repository.get_options_by_udf_id(udf_id)
+            max_order = max([opt.get('display_order', 0) for opt in existing_options], default=0)
+
+            # Escape single quotes
+            escaped_value = option_value.replace("'", "''")
+
+            # Insert new option
+            query = f"""
+            UPSERT INTO gmp_cis.cis_udf_option
+            (udf_id, option_value, display_order, is_active, created_by, created_at, updated_by, updated_at)
+            VALUES (
+                {udf_id},
+                '{escaped_value}',
+                {max_order + 1},
+                true,
+                '{user_info['username']}',
+                {timestamp},
+                '{user_info['username']}',
+                {timestamp}
+            )
+            """
+
+            success = impala_manager.execute_write(query, database='gmp_cis')
+
+            if success:
+                # Log audit
+                audit_log_kudu_repository.log_action(
+                    user_id=user_info['user_id'],
+                    username=user_info['username'],
+                    user_email=user_info['user_email'],
+                    action_type='CREATE',
+                    entity_type='UDF_OPTION',
+                    entity_id=f"{field_name}:{option_value}",
+                    action_description=f'Added new option: {option_value}',
+                    status='SUCCESS',
+                    request_method='POST',
+                    request_path=request.path,
+                    ip_address=request.META.get('REMOTE_ADDR'),
+                    user_agent=request.META.get('HTTP_USER_AGENT', '')
+                )
+
+                return JsonResponse({'success': True, 'message': 'Option added successfully'})
+            else:
+                return JsonResponse({'success': False, 'error': 'Failed to add option'}, status=500)
+
+        except Exception as e:
+            logger.error(f"Error adding option: {str(e)}")
+            return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+    return JsonResponse({'success': False, 'error': 'Invalid request method'}, status=405)
 
 
 # ========================
