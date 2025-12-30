@@ -12,6 +12,35 @@ This guide explains how to connect PyCharm on Windows to a Kerberos-secured Clou
 - **Database:** gmp_cis
 - **SSL:** Enabled
 
+## ⚠️ Important Constraint: No Windows Admin Access
+
+**Windows users do NOT have administrator privileges**, which means:
+- ❌ Cannot install MIT Kerberos for Windows (requires admin)
+- ❌ Cannot modify system Kerberos configuration files (requires admin)
+- ❌ Cannot install certain Python packages that require compilation
+
+**Therefore:**
+- ❌ **Option 1 (Windows Kerberos) is NOT viable**
+- ✅ **Option 2 (SSH Tunnel) is viable** - no admin needed
+- ⭐ **Option 3 (Remote Interpreter) is RECOMMENDED** - no admin needed
+- ✅ **Option 4 (Gateway) is viable** - no admin needed
+
+---
+
+## Quick Decision Guide
+
+**"I just want to start coding NOW (testing/prototyping):"**
+→ Use **Option 2: SSH Tunnel** (5 minutes setup)
+
+**"I want production-ready development environment:"**
+→ Use **Option 3: Remote Interpreter** (30 minutes setup, best long-term)
+
+**"I have PyCharm 2021.3+ and want the easiest setup:"**
+→ Use **Option 4: PyCharm Gateway** (10 minutes setup)
+
+**"I need to install Windows Kerberos:"**
+→ ❌ **NOT POSSIBLE** - you don't have admin rights
+
 ---
 
 ## Configuration Reference
@@ -29,9 +58,11 @@ IMPALA = {
 
 ---
 
-## Option 1: Windows Kerberos Client + Direct Connection
+## ~~Option 1: Windows Kerberos Client + Direct Connection~~ ❌ NOT AVAILABLE
 
-### ✅ Best For: Production-like setup on Windows
+### ⚠️ **CANNOT BE USED: Requires Windows Administrator Access**
+
+**This option is documented for reference only. It cannot be used in your environment.**
 
 ### Prerequisites
 
@@ -155,10 +186,13 @@ except Exception as e:
 ✅ Production-like setup
 ✅ Can run Django dev server locally
 
-### Disadvantages
-❌ Complex Windows Kerberos setup
-❌ Ticket renewal required (daily kinit)
-❌ May have Windows-specific SSL certificate issues
+### Why This Won't Work Without Admin Access
+❌ MIT Kerberos installation requires administrator rights
+❌ Creating/modifying `C:\ProgramData\MIT\Kerberos5\krb5.ini` requires admin
+❌ Some Python packages (kerberos-sspi) may require admin for installation
+❌ System-level configuration changes not allowed
+
+**🚫 DO NOT ATTEMPT THIS OPTION WITHOUT ADMIN RIGHTS**
 
 ---
 
@@ -474,30 +508,39 @@ echo "*/30 * * * * kinit -R" | crontab -
 
 ## Comparison Matrix
 
-| Feature | Option 1: Windows Kerberos | Option 2: SSH Tunnel | Option 3: Remote Interpreter | Option 4: Gateway |
+| Feature | ~~Option 1: Windows Kerberos~~ | Option 2: SSH Tunnel | Option 3: Remote Interpreter | Option 4: Gateway |
 |---------|---------------------------|---------------------|------------------------------|-------------------|
-| **Kerberos Setup** | Complex | None | None (uses edge node) | None (uses edge node) |
-| **PyCharm Version** | Any | Any | Professional only | 2021.3+ |
-| **Code Execution** | Windows | Windows | Linux (edge node) | Linux (edge node) |
-| **Debugging** | Full | Full | Full | Full |
-| **Network Stability** | Direct connection | Requires tunnel | Requires SSH | Requires SSH |
-| **Setup Difficulty** | ⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ | ⭐ |
-| **Production-like** | Yes | No | Yes | Yes |
-| **Team Consistency** | Hard to maintain | Easy | Easy | Easy |
+| **Admin Rights Required** | ❌ **YES - NOT VIABLE** | ✅ No | ✅ No | ✅ No |
+| **Kerberos Setup** | ❌ Not possible | None | None (uses edge node) | None (uses edge node) |
+| **PyCharm Version** | ❌ N/A | Any | Professional only | 2021.3+ |
+| **Code Execution** | ❌ N/A | Windows | Linux (edge node) | Linux (edge node) |
+| **Debugging** | ❌ N/A | Full | Full | Full |
+| **Network Stability** | ❌ N/A | Requires tunnel | Requires SSH | Requires SSH |
+| **Setup Difficulty** | ❌ N/A | ⭐⭐ | ⭐⭐⭐ | ⭐ |
+| **Production-like** | ❌ N/A | No | Yes | Yes |
+| **Team Consistency** | ❌ N/A | Easy | Easy | Easy |
 
 ---
 
 ## Recommended Solution
 
-### **For Your UOB Enterprise Setup: Option 3 (Remote Interpreter)**
+### **For Your UOB Enterprise Setup (No Admin Access): Option 3 (Remote Interpreter)**
+
+**This is the ONLY production-ready option without Windows admin rights.**
 
 **Reasons:**
-1. ✅ Edge node already has Kerberos configured
-2. ✅ No complex Windows setup needed
-3. ✅ Code runs in production-like Linux environment
-4. ✅ Easy debugging with PyCharm Professional
-5. ✅ Team can use same approach
-6. ✅ Works with corporate firewalls/security
+1. ✅ **No Windows admin rights required**
+2. ✅ Edge node already has Kerberos configured
+3. ✅ No complex Windows setup needed
+4. ✅ Code runs in production-like Linux environment
+5. ✅ Easy debugging with PyCharm Professional
+6. ✅ Team can use same approach
+7. ✅ Works with corporate firewalls/security
+
+**Alternative for Quick Testing: Option 2 (SSH Tunnel)**
+- Good for quick development/testing
+- Not production-like environment
+- No admin rights needed
 
 ### Quick Start Guide
 
