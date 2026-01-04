@@ -277,23 +277,30 @@ def fx_rate_list(request):
     return render(request, 'market_data/fx_rate_list.html', context)
 
 
-def fx_rate_dashboard(request):
+def market_data_dashboard(request):
     """
-    FX Rate dashboard with statistics and latest rates.
+    Market Data dashboard with statistics for FX Rates and Equity Prices.
 
-    Uses service layer to get statistics and latest rates.
+    Shows combined statistics and latest data for both modules.
     """
-    # Get statistics from service
-    stats = fx_rate_service.get_statistics()
+    # Get FX Rate statistics
+    fx_stats = fx_rate_service.get_statistics()
 
-    # Get latest rates for each currency pair
-    latest_rates = fx_rate_service.get_latest_rates(limit=100)
-    wrapped_latest = [FXRateWrapper(r, idx) for idx, r in enumerate(latest_rates)]
+    # Get latest FX rates
+    latest_fx_rates = fx_rate_service.get_latest_rates(limit=10)
+    wrapped_fx_rates = [FXRateWrapper(r, idx) for idx, r in enumerate(latest_fx_rates)]
 
     # Get unique base currencies
     base_currencies = fx_rate_service.get_base_currencies()
 
-    # Log view to Hive - Get user info from session (ACL authentication)
+    # Get Equity Price statistics
+    equity_price_stats = equity_price_service.get_statistics()
+
+    # Get latest equity prices
+    latest_equity_prices = equity_price_service.get_equity_prices(limit=10)
+    wrapped_equity_prices = [EquityPriceWrapper(r, idx) for idx, r in enumerate(latest_equity_prices)]
+
+    # Log view to audit - Get user info from session
     username = request.session.get('user_login', 'anonymous')
     user_id = str(request.session.get('user_id', ''))
     user_email = request.session.get('user_email', '')
@@ -303,8 +310,8 @@ def fx_rate_dashboard(request):
         username=username,
         user_email=user_email,
         action_type='VIEW',
-        entity_type='FX_RATE',
-        action_description='Viewed FX rate dashboard',
+        entity_type='MARKET_DATA',
+        action_description='Viewed Market Data dashboard',
         status='SUCCESS',
         request_method='GET',
         request_path=request.path,
@@ -313,13 +320,21 @@ def fx_rate_dashboard(request):
     )
 
     context = {
-        'stats': stats,
-        'latest_rates': wrapped_latest[:10],  # Show top 10
+        'fx_stats': fx_stats,
+        'latest_fx_rates': wrapped_fx_rates,
         'base_currencies': base_currencies,
+        'equity_price_stats': equity_price_stats,
+        'latest_equity_prices': wrapped_equity_prices,
         'using_hive': True,
     }
 
-    return render(request, 'market_data/fx_rate_dashboard.html', context)
+    return render(request, 'market_data/market_data_dashboard.html', context)
+
+
+# Keep old function name for backward compatibility
+def fx_rate_dashboard(request):
+    """Redirect to Market Data Dashboard for backward compatibility."""
+    return market_data_dashboard(request)
 
 
 def fx_rate_detail(request, currency_pair):
@@ -392,3 +407,351 @@ def fx_rate_detail(request, currency_pair):
     }
 
     return render(request, 'market_data/fx_rate_detail.html', context)
+
+
+# ============================================================================
+# EQUITY PRICE VIEWS
+# ============================================================================
+
+from market_data.services.equity_price_service import equity_price_service
+from market_data.services.equity_price_dropdown_service import equity_price_dropdown_service
+from django.shortcuts import redirect
+
+
+class EquityPriceWrapper:
+    """
+    Wrapper to convert Hive dict data to object with attributes for template compatibility.
+    """
+    def __init__(self, data, index=0):
+        self.data = data
+
+        # Map fields from Kudu table
+        self.equity_price_id = data.get('equity_price_id', '')
+        self.currency_code = data.get('currency_code', '')
+        self.security_label = data.get('security_label', '')
+        self.isin = data.get('isin', '')
+        self.price_date = data.get('price_date', '')
+        self.main_closing_price = data.get('main_closing_price', 0)
+        self.market = data.get('market', '')
+        self.price_timestamp = data.get('price_timestamp', '')
+        self.group_name = data.get('group_name', '')
+        self.price_datetime = data.get('price_datetime', '')
+
+        # Audit fields
+        self.is_active = data.get('is_active', True)
+        self.created_by = data.get('created_by', '')
+        self.created_at_display = data.get('created_at_display', '')
+        self.updated_by = data.get('updated_by', '')
+        self.updated_at_display = data.get('updated_at_display', '')
+
+        # Generate ID for template
+        self.id = self.equity_price_id if self.equity_price_id else abs(hash(str(data))) % 1000000
+
+
+def equity_price_list(request):
+    """
+    List all equity prices with search, filter, and CSV export.
+    """
+    # Get filters
+    currency_code = request.GET.get('currency_code', '').strip()
+    security_label = request.GET.get('security_label', '').strip()
+    isin = request.GET.get('isin', '').strip()
+    date_from = request.GET.get('date_from', '').strip()
+    date_to = request.GET.get('date_to', '').strip()
+    market = request.GET.get('market', '').strip()
+    export = request.GET.get('export', '').strip()
+
+    # Get equity prices from service layer
+    try:
+        equity_prices_data = equity_price_service.get_equity_prices(
+            limit=1000,
+            currency_code=currency_code if currency_code else None,
+            security_label=security_label if security_label else None,
+            isin=isin if isin else None,
+            date_from=date_from if date_from else None,
+            date_to=date_to if date_to else None,
+            market=market if market else None
+        )
+    except ValidationError as e:
+        equity_prices_data = []
+
+    # CSV Export
+    if export == 'csv':
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="equity_prices.csv"'
+
+        writer = csv.writer(response)
+        writer.writerow([
+            'Currency', 'Security', 'ISIN', 'Date', 'Price', 'Market',
+            'Timestamp', 'Group', 'Created By', 'Created At'
+        ])
+
+        for price_data in equity_prices_data:
+            price = EquityPriceWrapper(price_data)
+            writer.writerow([
+                price.currency_code,
+                price.security_label,
+                price.isin,
+                price.price_date,
+                price.main_closing_price,
+                price.market,
+                price.price_datetime,
+                price.group_name,
+                price.created_by,
+                price.created_at_display
+            ])
+
+        # Log export
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+
+        audit_log_kudu_repository.log_action(
+            user_id=user_id,
+            username=username,
+            user_email=user_email,
+            action_type='EXPORT',
+            entity_type='EQUITY_PRICE',
+            action_description=f'Exported {len(equity_prices_data)} equity prices to CSV',
+            status='SUCCESS',
+            request_method='GET',
+            request_path=request.path,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', '')
+        )
+
+        return response
+
+    # Wrap dictionaries in objects for template compatibility
+    wrapped_prices = [EquityPriceWrapper(p, idx) for idx, p in enumerate(equity_prices_data)]
+
+    # Pagination
+    paginator = Paginator(wrapped_prices, 25)
+    page = request.GET.get('page', 1)
+
+    try:
+        equity_prices = paginator.page(page)
+    except PageNotAnInteger:
+        equity_prices = paginator.page(1)
+    except EmptyPage:
+        equity_prices = paginator.page(paginator.num_pages if paginator.num_pages > 0 else 1)
+
+    # Get dropdown options for filters
+    dropdown_options = equity_price_dropdown_service.get_all_dropdown_options(
+        user=request.session.get('user_login', 'SYSTEM')
+    )
+
+    # Log view
+    username = request.session.get('user_login', 'anonymous')
+    user_id = str(request.session.get('user_id', ''))
+    user_email = request.session.get('user_email', '')
+
+    audit_log_kudu_repository.log_action(
+        user_id=user_id,
+        username=username,
+        user_email=user_email,
+        action_type='VIEW',
+        entity_type='EQUITY_PRICE',
+        action_description=f'Viewed equity price list ({len(equity_prices_data)} prices)',
+        status='SUCCESS',
+        request_method='GET',
+        request_path=request.path,
+        ip_address=request.META.get('REMOTE_ADDR'),
+        user_agent=request.META.get('HTTP_USER_AGENT', '')
+    )
+
+    context = {
+        'page_obj': equity_prices,
+        'currency_code': currency_code,
+        'security_label': security_label,
+        'isin': isin,
+        'date_from': date_from,
+        'date_to': date_to,
+        'market': market,
+        'currencies': dropdown_options.get('currencies', []),
+        'markets': dropdown_options.get('markets', []),
+        'securities': dropdown_options.get('securities', []),
+        'total_count': len(equity_prices_data),
+    }
+
+    return render(request, 'market_data/equity_price_list.html', context)
+
+
+def equity_price_create(request):
+    """
+    Create new equity price.
+    """
+    if request.method == 'POST':
+        # Get form data
+        equity_price_data = {
+            'currency_code': request.POST.get('currency_code', '').strip(),
+            'security_label': request.POST.get('security_label', '').strip(),
+            'isin': request.POST.get('isin', '').strip(),
+            'price_date': request.POST.get('price_date', '').strip(),
+            'main_closing_price': request.POST.get('main_closing_price', '').strip(),
+            'market': request.POST.get('market', '').strip(),
+            'group_name': request.POST.get('group_name', '').strip(),
+        }
+
+        # Get user info
+        username = request.session.get('user_login', 'SYSTEM')
+
+        try:
+            # Create equity price
+            success = equity_price_service.create_equity_price(
+                equity_price_data,
+                user=username
+            )
+
+            if success:
+                # Log to audit
+                user_id = str(request.session.get('user_id', ''))
+                user_email = request.session.get('user_email', '')
+
+                audit_log_kudu_repository.log_action(
+                    user_id=user_id,
+                    username=username,
+                    user_email=user_email,
+                    action_type='CREATE',
+                    entity_type='EQUITY_PRICE',
+                    entity_name=equity_price_data['security_label'],
+                    action_description=f"Created equity price for {equity_price_data['security_label']} on {equity_price_data['price_date']}",
+                    status='SUCCESS',
+                    request_method=request.method,
+                    request_path=request.path,
+                    ip_address=request.META.get('REMOTE_ADDR'),
+                    user_agent=request.META.get('HTTP_USER_AGENT', '')
+                )
+
+                # Redirect to list
+                return redirect('market_data:equity_price_list')
+            else:
+                error_message = "Failed to create equity price"
+        except ValidationError as e:
+            error_message = str(e)
+
+        # Re-render form with error
+        dropdown_options = equity_price_dropdown_service.get_all_dropdown_options(username)
+
+        context = {
+            'error': error_message,
+            'form_data': equity_price_data,
+            'currencies': dropdown_options.get('currencies', []),
+            'markets': dropdown_options.get('markets', []),
+            'securities': dropdown_options.get('securities', []),
+        }
+
+        return render(request, 'market_data/equity_price_form.html', context)
+
+    else:
+        # GET - show form
+        username = request.session.get('user_login', 'SYSTEM')
+        dropdown_options = equity_price_dropdown_service.get_all_dropdown_options(username)
+
+        # Default date to today
+        from datetime import date
+        today = date.today().strftime('%Y-%m-%d')
+
+        context = {
+            'currencies': dropdown_options.get('currencies', []),
+            'markets': dropdown_options.get('markets', []),
+            'securities': dropdown_options.get('securities', []),
+            'default_date': today,
+        }
+
+        return render(request, 'market_data/equity_price_form.html', context)
+
+
+def equity_price_edit(request, equity_price_id):
+    """
+    Edit existing equity price.
+    """
+    # Get existing price
+    try:
+        existing_price = equity_price_service.get_equity_price_by_id(equity_price_id)
+        if not existing_price:
+            return HttpResponse("Equity price not found", status=404)
+    except Exception as e:
+        return HttpResponse(f"Error: {str(e)}", status=500)
+
+    if request.method == 'POST':
+        # Get form data
+        equity_price_data = {
+            'currency_code': request.POST.get('currency_code', '').strip(),
+            'security_label': request.POST.get('security_label', '').strip(),
+            'isin': request.POST.get('isin', '').strip(),
+            'price_date': request.POST.get('price_date', '').strip(),
+            'main_closing_price': request.POST.get('main_closing_price', '').strip(),
+            'market': request.POST.get('market', '').strip(),
+            'group_name': request.POST.get('group_name', '').strip(),
+        }
+
+        # Get user info
+        username = request.session.get('user_login', 'SYSTEM')
+
+        try:
+            # Update equity price
+            success = equity_price_service.update_equity_price(
+                equity_price_id,
+                equity_price_data,
+                user=username
+            )
+
+            if success:
+                # Log to audit
+                user_id = str(request.session.get('user_id', ''))
+                user_email = request.session.get('user_email', '')
+
+                audit_log_kudu_repository.log_action(
+                    user_id=user_id,
+                    username=username,
+                    user_email=user_email,
+                    action_type='UPDATE',
+                    entity_type='EQUITY_PRICE',
+                    entity_id=str(equity_price_id),
+                    entity_name=equity_price_data['security_label'],
+                    action_description=f"Updated equity price for {equity_price_data['security_label']} on {equity_price_data['price_date']}",
+                    status='SUCCESS',
+                    request_method=request.method,
+                    request_path=request.path,
+                    ip_address=request.META.get('REMOTE_ADDR'),
+                    user_agent=request.META.get('HTTP_USER_AGENT', '')
+                )
+
+                # Redirect to list
+                return redirect('market_data:equity_price_list')
+            else:
+                error_message = "Failed to update equity price"
+        except ValidationError as e:
+            error_message = str(e)
+
+        # Re-render form with error
+        username = request.session.get('user_login', 'SYSTEM')
+        dropdown_options = equity_price_dropdown_service.get_all_dropdown_options(username)
+
+        context = {
+            'error': error_message,
+            'equity_price': existing_price,
+            'form_data': equity_price_data,
+            'currencies': dropdown_options.get('currencies', []),
+            'markets': dropdown_options.get('markets', []),
+            'securities': dropdown_options.get('securities', []),
+            'is_edit': True,
+        }
+
+        return render(request, 'market_data/equity_price_form.html', context)
+
+    else:
+        # GET - show form with existing data
+        username = request.session.get('user_login', 'SYSTEM')
+        dropdown_options = equity_price_dropdown_service.get_all_dropdown_options(username)
+
+        context = {
+            'equity_price': existing_price,
+            'currencies': dropdown_options.get('currencies', []),
+            'markets': dropdown_options.get('markets', []),
+            'securities': dropdown_options.get('securities', []),
+            'is_edit': True,
+        }
+
+        return render(request, 'market_data/equity_price_form.html', context)

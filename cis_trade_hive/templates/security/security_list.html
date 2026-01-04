@@ -1,0 +1,234 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Security Master Data - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item active">Securities</li>
+{% endblock %}
+
+{% block content %}
+<div class="security-list-container" style="max-width: 100%; overflow-x: hidden;">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            <i class="bi bi-shield-check text-primary"></i> Security Master Data
+        </h1>
+        <p class="content-subtitle">Manage securities with Four-Eyes principle (Maker-Checker)</p>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="mb-4">
+        <a href="{% url 'security:create' %}" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Create New Security
+        </a>
+        <a href="{% url 'security:pending_approvals' %}" class="btn btn-warning">
+            <i class="bi bi-clock-history"></i> Pending Approvals
+            {% if pending_count %}
+                <span class="badge bg-danger">{{ pending_count }}</span>
+            {% endif %}
+        </a>
+        <a href="{% url 'security:dashboard' %}" class="btn btn-info">
+            <i class="bi bi-graph-up"></i> Dashboard
+        </a>
+    </div>
+
+    <!-- Search & Filter Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-funnel"></i> Search & Filter
+            </h5>
+        </div>
+        <div class="card-body">
+            <form method="get" action="{% url 'security:list' %}" class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Search</label>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" name="search" value="{{ search }}"
+                               placeholder="Search by name, ISIN, ticker...">
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Status</label>
+                    <select class="form-select" name="status">
+                        <option value="">All Statuses</option>
+                        <option value="DRAFT" {% if status == 'DRAFT' %}selected{% endif %}>Draft</option>
+                        <option value="PENDING_APPROVAL" {% if status == 'PENDING_APPROVAL' %}selected{% endif %}>Pending Approval</option>
+                        <option value="ACTIVE" {% if status == 'ACTIVE' %}selected{% endif %}>Active</option>
+                        <option value="REJECTED" {% if status == 'REJECTED' %}selected{% endif %}>Rejected</option>
+                        <option value="INACTIVE" {% if status == 'INACTIVE' %}selected{% endif %}>Inactive</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Security Type</label>
+                    <input type="text" class="form-control" name="security_type" value="{{ security_type }}"
+                           placeholder="e.g., ETF, Common Stock">
+                </div>
+                <div class="col-md-2 d-flex align-items-end gap-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i> Search
+                    </button>
+                    <a href="{% url 'security:list' %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-x-circle"></i> Clear
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Securities Table -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                Security List
+                <span class="badge badge-primary ms-2">{{ total_count }} securit{{ total_count|pluralize:"y,ies" }}</span>
+            </h5>
+        </div>
+        <div class="card-body p-0">
+            {% if page_obj %}
+                <div class="table-responsive" style="display: block; width: 100%; max-height: 600px; overflow-x: auto; overflow-y: auto;">
+                    <table class="table table-hover table-sm mb-0" style="width: max-content;">
+                        <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
+                            <tr>
+                                <th style="min-width: 200px;">Security Name</th>
+                                <th style="min-width: 130px;">ISIN</th>
+                                <th style="min-width: 150px;">Security Type</th>
+                                <th style="min-width: 150px;">Investment Type</th>
+                                <th style="min-width: 150px;">Industry</th>
+                                <th style="min-width: 150px;">Issuer</th>
+                                <th style="min-width: 100px;">Currency</th>
+                                <th style="min-width: 100px;">Ticker</th>
+                                <th style="min-width: 120px;">Price</th>
+                                <th style="min-width: 120px;">Price Date</th>
+                                <th style="min-width: 150px;">Country of Inc.</th>
+                                <th style="min-width: 150px;">Exchange Code</th>
+                                <th style="min-width: 120px;">Status</th>
+                                <th style="min-width: 150px;">Created By</th>
+                                <th style="min-width: 140px;">Created At</th>
+                                <th style="min-width: 140px;">Updated At</th>
+                                <th style="min-width: 180px; position: sticky; right: 0; background-color: #f8f9fa; z-index: 5;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for security in page_obj %}
+                            <tr {% if not security.is_active %}style="opacity: 0.6; background-color: #f8f9fa;"{% endif %}>
+                                <td>
+                                    <strong class="text-primary">{{ security.security_name }}</strong>
+                                </td>
+                                <td>{{ security.isin|default:"-" }}</td>
+                                <td>{{ security.security_type|default:"-" }}</td>
+                                <td>{{ security.investment_type|default:"-" }}</td>
+                                <td>{{ security.industry|default:"-" }}</td>
+                                <td>{{ security.issuer|default:"-" }}</td>
+                                <td>
+                                    <span class="badge badge-info">{{ security.currency_code|default:"-" }}</span>
+                                </td>
+                                <td>{{ security.ticker|default:"-" }}</td>
+                                <td class="text-end">{{ security.price|floatformat:4|default:"-" }}</td>
+                                <td>{{ security.price_date|default:"-" }}</td>
+                                <td>{{ security.country_of_incorporation|default:"-" }}</td>
+                                <td>{{ security.exchange_code|default:"-" }}</td>
+                                <td>
+                                    {% if security.status == 'DRAFT' %}
+                                        <span class="badge badge-secondary">Draft</span>
+                                    {% elif security.status == 'PENDING_APPROVAL' %}
+                                        <span class="badge badge-warning">Pending Approval</span>
+                                    {% elif security.status == 'ACTIVE' %}
+                                        <span class="badge badge-success">Active</span>
+                                    {% elif security.status == 'REJECTED' %}
+                                        <span class="badge badge-danger">Rejected</span>
+                                    {% elif security.status == 'INACTIVE' %}
+                                        <span class="badge badge-dark">Inactive</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">{{ security.status|default:"Unknown" }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ security.created_by|default:"-" }}</td>
+                                <td style="font-size: 0.85rem;">{{ security.created_at|default:"-" }}</td>
+                                <td style="font-size: 0.85rem;">{{ security.updated_at|default:"-" }}</td>
+                                <td style="position: sticky; right: 0; background-color: {% if not security.is_active %}#f8f9fa{% else %}white{% endif %}; z-index: 4;">
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <a href="{% url 'security:detail' security.security_id %}" class="btn btn-sm btn-outline-primary" title="View Details">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                        {% if security.status == 'DRAFT' or security.status == 'REJECTED' %}
+                                            <a href="{% url 'security:edit' security.security_id %}" class="btn btn-sm btn-outline-warning" title="Edit">
+                                                <i class="bi bi-pencil"></i>
+                                            </a>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                {% if page_obj.has_other_pages %}
+                <div class="card-footer">
+                    <nav aria-label="Security pagination">
+                        <ul class="pagination justify-content-center mb-0">
+                            {% if page_obj.has_previous %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}">First</a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}">Previous</a>
+                                </li>
+                            {% endif %}
+
+                            <li class="page-item active">
+                                <span class="page-link">
+                                    Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+                                </span>
+                            </li>
+
+                            {% if page_obj.has_next %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}">Next</a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}">Last</a>
+                                </li>
+                            {% endif %}
+                        </ul>
+                    </nav>
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="text-center py-5" style="color: var(--gray-500);">
+                    <i class="bi bi-shield-check" style="font-size: 3rem; opacity: 0.3;"></i>
+                    <p class="mt-3 mb-0">No securities found</p>
+                    {% if search or status or security_type %}
+                        <p class="text-muted">Try adjusting your filters</p>
+                    {% else %}
+                        <p class="text-muted mt-2">
+                            <a href="{% url 'security:create' %}" class="btn btn-primary">
+                                <i class="bi bi-plus-circle"></i> Create your first security
+                            </a>
+                        </p>
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-info-circle"></i>
+        <strong>Four-Eyes Workflow:</strong>
+        <ul class="mb-0 mt-2">
+            <li><strong>Makers</strong> create securities in <strong>DRAFT</strong> status</li>
+            <li>Makers submit for approval → status becomes <strong>PENDING_APPROVAL</strong></li>
+            <li><strong>Checkers</strong> approve → status becomes <strong>ACTIVE</strong> (security is live)</li>
+            <li>Checkers reject → status becomes <strong>REJECTED</strong> (can be edited and resubmitted)</li>
+            <li>Securities can be marked <strong>INACTIVE</strong> (soft delete)</li>
+            <li><strong>Important:</strong> Makers cannot approve their own securities (Four-Eyes principle)</li>
+        </ul>
+    </div>
+</div>
+{% endblock %}

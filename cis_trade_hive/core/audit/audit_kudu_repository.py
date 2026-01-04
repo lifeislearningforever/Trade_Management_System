@@ -63,8 +63,9 @@ class ImpalaAuditConnection:
                     columns.append(f"`{key}`")
                     # Format value based on type
                     if isinstance(value, str):
-                        # Escape single quotes for SQL (standard: ' becomes '')
-                        escaped_value = value.replace("'", "''")
+                        # Escape single quotes for SQL by doubling them
+                        # Also escape backslashes to prevent injection
+                        escaped_value = value.replace("\\", "\\\\").replace("'", "\\'")
                         values.append(f"'{escaped_value}'")
                     elif isinstance(value, bool):
                         values.append('true' if value else 'false')

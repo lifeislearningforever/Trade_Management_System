@@ -1,0 +1,295 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{% if is_edit %}Edit{% else %}Add{% endif %} Equity Price - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'market_data:equity_price_list' %}">Equity Prices</a></li>
+    <li class="breadcrumb-item active">{% if is_edit %}Edit{% else %}Add New{% endif %}</li>
+{% endblock %}
+
+{% block content %}
+<div class="equity-price-form-container">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            <i class="bi bi-{% if is_edit %}pencil{% else %}plus-circle{% endif %} text-primary"></i>
+            {% if is_edit %}Edit Equity Price{% else %}Add New Equity Price{% endif %}
+        </h1>
+        <p class="content-subtitle">{% if is_edit %}Update{% else %}Enter{% endif %} daily closing price information</p>
+    </div>
+
+    <!-- Error Alert -->
+    {% if error %}
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        <i class="bi bi-exclamation-triangle"></i>
+        <strong>Error:</strong> {{ error }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endif %}
+
+    <!-- Form Card -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-file-earmark-text"></i> Price Information
+            </h5>
+        </div>
+        <div class="card-body">
+            <form method="POST" id="equityPriceForm">
+                {% csrf_token %}
+
+                <div class="row">
+                    <!-- Currency (Dropdown 1 - Triggers cascade) -->
+                    <div class="col-md-4 mb-3">
+                        <label for="currency_code" class="form-label">Currency <span class="text-danger">*</span></label>
+                        <select class="form-select" id="currency_code" name="currency_code" required>
+                            <option value="">-- Select Currency --</option>
+                            {% for curr in currencies %}
+                                <option value="{{ curr.curr_name }}"
+                                        data-curr-code="{{ curr.iso_code }}"
+                                        {% if equity_price.currency_code == curr.curr_name or form_data.currency_code == curr.curr_name %}selected{% endif %}>
+                                    {{ curr.curr_name }} ({{ curr.iso_code }})
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <small class="form-text text-muted">Select currency to filter securities</small>
+                    </div>
+
+                    <!-- Security Label (Dropdown 2 - Filtered by currency) -->
+                    <div class="col-md-4 mb-3">
+                        <label for="security_label" class="form-label">Security <span class="text-danger">*</span></label>
+                        <select class="form-select" id="security_label" name="security_label" required>
+                            <option value="">-- Select Security --</option>
+                            <!-- Options populated by JavaScript based on currency -->
+                        </select>
+                        <small class="form-text text-muted">Filtered by selected currency</small>
+                    </div>
+
+                    <!-- ISIN (Auto-populated from security) -->
+                    <div class="col-md-4 mb-3">
+                        <label for="isin" class="form-label">ISIN Code</label>
+                        <input type="text" class="form-control" id="isin" name="isin"
+                               value="{% if equity_price %}{{ equity_price.isin }}{% elif form_data %}{{ form_data.isin }}{% endif %}"
+                               readonly style="background-color: #e9ecef;">
+                        <small class="form-text text-muted">Auto-populated from security</small>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <!-- Price Date -->
+                    <div class="col-md-4 mb-3">
+                        <label for="price_date" class="form-label">Price Date <span class="text-danger">*</span></label>
+                        <input type="date" class="form-control" id="price_date" name="price_date"
+                               value="{% if equity_price %}{{ equity_price.price_date }}{% elif form_data %}{{ form_data.price_date }}{% else %}{{ default_date }}{% endif %}"
+                               required>
+                    </div>
+
+                    <!-- Main Closing Price -->
+                    <div class="col-md-4 mb-3">
+                        <label for="main_closing_price" class="form-label">Closing Price <span class="text-danger">*</span></label>
+                        <input type="number" step="0.0001" class="form-control" id="main_closing_price" name="main_closing_price"
+                               value="{% if equity_price %}{{ equity_price.main_closing_price }}{% elif form_data %}{{ form_data.main_closing_price }}{% endif %}"
+                               placeholder="0.0000" required>
+                    </div>
+
+                    <!-- Market -->
+                    <div class="col-md-4 mb-3">
+                        <label for="market" class="form-label">Market</label>
+                        <select class="form-select" id="market" name="market">
+                            <option value="">-- Select Market --</option>
+                            {% for mkt in markets %}
+                                <option value="{{ mkt }}"
+                                        {% if equity_price.market == mkt or form_data.market == mkt %}selected{% endif %}>
+                                    {{ mkt }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <!-- Group -->
+                    <div class="col-md-6 mb-3">
+                        <label for="group_name" class="form-label">Group</label>
+                        <input type="text" class="form-control" id="group_name" name="group_name"
+                               value="{% if equity_price %}{{ equity_price.group_name }}{% elif form_data %}{{ form_data.group_name }}{% endif %}"
+                               placeholder="e.g., Technology, Energy">
+                    </div>
+                </div>
+
+                <!-- Form Actions -->
+                <div class="mt-4">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-save"></i> {% if is_edit %}Update{% else %}Create{% endif %} Price
+                    </button>
+                    <a href="{% url 'market_data:equity_price_list' %}" class="btn btn-secondary">
+                        <i class="bi bi-x-circle"></i> Cancel
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Help Card -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-info-circle"></i>
+        <strong>Cascading Dropdowns:</strong>
+        <ul class="mb-0 mt-2">
+            <li><strong>Step 1:</strong> Select Currency - This will filter the securities available</li>
+            <li><strong>Step 2:</strong> Select Security - The ISIN code will be auto-populated</li>
+            <li><strong>Step 3:</strong> Enter closing price and other details</li>
+            <li>Required fields are marked with <span class="text-danger">*</span></li>
+        </ul>
+    </div>
+</div>
+
+<!-- JavaScript for Cascading Dropdowns -->
+<script>
+(function() {
+    'use strict';
+
+    // Store all securities data (passed from Django template)
+    const allSecurities = [
+        {% for sec in securities %}
+        {
+            security_id: {{ sec.security_id }},
+            security_name: "{{ sec.security_name|escapejs }}",
+            isin: "{{ sec.isin|escapejs }}",
+            currency_code: "{{ sec.currency_code|escapejs }}"
+        }{% if not forloop.last %},{% endif %}
+        {% endfor %}
+    ];
+
+    // Get form elements
+    const currencySelect = document.getElementById('currency_code');
+    const securitySelect = document.getElementById('security_label');
+    const isinInput = document.getElementById('isin');
+
+    // Store pre-selected values (for edit mode)
+    const preSelectedCurrency = "{% if equity_price %}{{ equity_price.currency_code }}{% elif form_data %}{{ form_data.currency_code }}{% endif %}";
+    const preSelectedSecurity = "{% if equity_price %}{{ equity_price.security_label }}{% elif form_data %}{{ form_data.security_label }}{% endif %}";
+    const preSelectedIsin = "{% if equity_price %}{{ equity_price.isin }}{% elif form_data %}{{ form_data.isin }}{% endif %}";
+
+    /**
+     * Filter securities based on selected currency
+     */
+    function filterSecuritiesByCurrency(selectedCurrency) {
+        // Clear current options
+        securitySelect.innerHTML = '<option value="">-- Select Security --</option>';
+
+        if (!selectedCurrency) {
+            // No currency selected - show all securities
+            allSecurities.forEach(sec => {
+                const option = document.createElement('option');
+                option.value = sec.security_name;
+                option.textContent = sec.security_name;
+                option.dataset.isin = sec.isin;
+                option.dataset.currencyCode = sec.currency_code;
+                securitySelect.appendChild(option);
+            });
+        } else {
+            // Filter securities by selected currency
+            const filteredSecurities = allSecurities.filter(sec => sec.currency_code === selectedCurrency);
+
+            if (filteredSecurities.length === 0) {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = '-- No securities found for this currency --';
+                option.disabled = true;
+                securitySelect.appendChild(option);
+            } else {
+                filteredSecurities.forEach(sec => {
+                    const option = document.createElement('option');
+                    option.value = sec.security_name;
+                    option.textContent = sec.security_name;
+                    option.dataset.isin = sec.isin;
+                    option.dataset.currencyCode = sec.currency_code;
+                    securitySelect.appendChild(option);
+                });
+            }
+        }
+
+        // Restore pre-selected security if in edit mode
+        if (preSelectedSecurity && securitySelect.querySelector(`option[value="${preSelectedSecurity}"]`)) {
+            securitySelect.value = preSelectedSecurity;
+            updateIsinFromSecurity();
+        }
+    }
+
+    /**
+     * Update ISIN field based on selected security
+     */
+    function updateIsinFromSecurity() {
+        const selectedOption = securitySelect.options[securitySelect.selectedIndex];
+
+        if (selectedOption && selectedOption.dataset.isin) {
+            isinInput.value = selectedOption.dataset.isin;
+        } else {
+            isinInput.value = '';
+        }
+    }
+
+    /**
+     * Event Listener: Currency change
+     */
+    currencySelect.addEventListener('change', function() {
+        const selectedCurrencyName = this.value;
+
+        // Get the actual currency code from the selected option
+        const selectedOption = this.options[this.selectedIndex];
+        const currencyCode = selectedOption ? selectedOption.dataset.currCode : '';
+
+        // Filter securities
+        filterSecuritiesByCurrency(currencyCode);
+
+        // Clear ISIN when currency changes
+        isinInput.value = '';
+    });
+
+    /**
+     * Event Listener: Security change
+     */
+    securitySelect.addEventListener('change', function() {
+        updateIsinFromSecurity();
+    });
+
+    /**
+     * Initialize on page load
+     */
+    document.addEventListener('DOMContentLoaded', function() {
+        // If editing, pre-populate dropdowns
+        if (preSelectedCurrency) {
+            // Get currency code from the selected currency
+            const currencyOption = currencySelect.querySelector(`option[value="${preSelectedCurrency}"]`);
+            const currencyCode = currencyOption ? currencyOption.dataset.currCode : '';
+
+            // Filter securities by pre-selected currency
+            filterSecuritiesByCurrency(currencyCode);
+
+            // Set pre-selected ISIN
+            if (preSelectedIsin) {
+                isinInput.value = preSelectedIsin;
+            }
+        } else {
+            // New form - show all securities initially
+            filterSecuritiesByCurrency('');
+        }
+    });
+
+    /**
+     * Form validation
+     */
+    document.getElementById('equityPriceForm').addEventListener('submit', function(e) {
+        const closingPrice = document.getElementById('main_closing_price').value;
+
+        if (parseFloat(closingPrice) <= 0) {
+            e.preventDefault();
+            alert('Closing price must be greater than zero.');
+            return false;
+        }
+    });
+})();
+</script>
+{% endblock %}

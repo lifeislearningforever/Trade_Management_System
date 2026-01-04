@@ -1,0 +1,238 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="h3 mb-1">{{ page_title }}</h1>
+                    <p class="text-muted mb-0">
+                        {% if form_action == 'create' %}
+                        Create a new user-defined field
+                        {% else %}
+                        Edit existing user-defined field
+                        {% endif %}
+                    </p>
+                </div>
+                <div>
+                    <a href="{% url 'udf:list' %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-arrow-left me-1"></i> Back to List
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Form -->
+    <div class="row">
+        <div class="col-12 col-lg-8">
+            <div class="card shadow-sm border-0">
+                <div class="card-body">
+                    {% if error %}
+                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                        <strong>Error:</strong> {{ error }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                    {% endif %}
+
+                    <form method="post" action="">
+                        {% csrf_token %}
+
+                        <!-- Field Name -->
+                        <div class="mb-4">
+                            <label for="field_name" class="form-label">
+                                Field Name <span class="text-danger">*</span>
+                            </label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="field_name"
+                                   name="field_name"
+                                   value="{{ field_data.field_name|default:'' }}"
+                                   placeholder="e.g., AAF, AFFIN-UOB HLDG, AIIF CP II"
+                                   required
+                                   {% if form_action == 'edit' %}readonly{% endif %}>
+                            <div class="form-text">
+                                Field name for identification. Can use uppercase, lowercase, numbers, spaces, hyphens, and underscores.
+                                {% if form_action == 'edit' %}
+                                <span class="text-warning"><i class="bi bi-lock-fill"></i> Field name cannot be changed after creation.</span>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- Label -->
+                        <div class="mb-4">
+                            <label for="label" class="form-label">
+                                Label <span class="text-danger">*</span>
+                            </label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="label"
+                                   name="label"
+                                   value="{{ field_data.label|default:'' }}"
+                                   placeholder="e.g., Trade Date, Broker Code"
+                                   required>
+                            <div class="form-text">
+                                Display label shown to users in the UI.
+                            </div>
+                        </div>
+
+                        <!-- Entity Type -->
+                        <div class="mb-4">
+                            <label for="entity_type" class="form-label">
+                                Entity Type <span class="text-danger">*</span>
+                            </label>
+                            <select class="form-select"
+                                    id="entity_type"
+                                    name="entity_type"
+                                    required
+                                    {% if form_action == 'edit' %}disabled{% endif %}>
+                                <option value="">Select Entity Type...</option>
+                                {% for entity_type in entity_types %}
+                                <option value="{{ entity_type }}"
+                                        {% if field_data.entity_type == entity_type %}selected{% endif %}>
+                                    {{ entity_type }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <div class="form-text">
+                                Module/Entity this UDF belongs to.
+                                {% if form_action == 'edit' %}
+                                <span class="text-warning"><i class="bi bi-lock-fill"></i> Entity type cannot be changed after creation.</span>
+                                {% endif %}
+                            </div>
+                            {% if form_action == 'edit' %}
+                            <!-- Hidden field to submit disabled value -->
+                            <input type="hidden" name="entity_type" value="{{ field_data.entity_type }}">
+                            {% endif %}
+                        </div>
+
+                        <!-- Required Checkbox -->
+                        <div class="mb-4">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="is_required"
+                                       name="is_required"
+                                       {% if field_data.is_required %}checked{% endif %}>
+                                <label class="form-check-label" for="is_required">
+                                    Required Field
+                                </label>
+                            </div>
+                            <div class="form-text">
+                                If enabled, this field must be filled out when creating/editing the entity.
+                            </div>
+                        </div>
+
+                        {% if form_action == 'edit' %}
+                        <!-- Active Checkbox (only for edit) -->
+                        <div class="mb-4">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="is_active"
+                                       name="is_active"
+                                       {% if field_data.is_active %}checked{% endif %}>
+                                <label class="form-check-label" for="is_active">
+                                    Active
+                                </label>
+                            </div>
+                            <div class="form-text">
+                                Inactive fields are hidden from users and cannot be used.
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <hr class="my-4">
+
+                        <!-- Action Buttons -->
+                        <div class="d-flex gap-2">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-check-circle me-1"></i>
+                                {% if form_action == 'create' %}Create Field{% else %}Save Changes{% endif %}
+                            </button>
+                            <a href="{% url 'udf:list' %}" class="btn btn-outline-secondary">
+                                <i class="bi bi-x-circle me-1"></i> Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Help Panel -->
+        <div class="col-12 col-lg-4 mt-4 mt-lg-0">
+            <div class="card shadow-sm border-0 bg-light">
+                <div class="card-body">
+                    <h6 class="card-title">
+                        <i class="bi bi-lightbulb text-warning me-2"></i>Tips
+                    </h6>
+
+                    <div class="mb-3">
+                        <strong>Field Name</strong>
+                        <ul class="small mb-0 ps-3">
+                            <li>Can use uppercase, lowercase, spaces, hyphens</li>
+                            <li>Examples: AAF, AFFIN-UOB HLDG, AIIF CP II</li>
+                            <li>Same field name can be used multiple times</li>
+                            <li>Cannot be changed after creation</li>
+                        </ul>
+                    </div>
+
+                    <div class="mb-3">
+                        <strong>Label</strong>
+                        <ul class="small mb-0 ps-3">
+                            <li>User-friendly display name</li>
+                            <li>Can contain spaces and special characters</li>
+                            <li>Can be updated anytime</li>
+                        </ul>
+                    </div>
+
+                    <div class="mb-3">
+                        <strong>Entity Type</strong>
+                        <ul class="small mb-0 ps-3">
+                            <li>Choose the module this field belongs to</li>
+                            <li>Cannot be changed after creation</li>
+                            <li>Each entity can have multiple UDF fields</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <strong>Free Text Approach</strong>
+                        <p class="small mb-0">
+                            All UDF fields are free-text inputs. Users can enter any text value when filling out the field.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            {% if form_action == 'edit' %}
+            <div class="card shadow-sm border-0 mt-3">
+                <div class="card-body">
+                    <h6 class="card-title">
+                        <i class="bi bi-info-circle text-info me-2"></i>Audit Info
+                    </h6>
+                    <dl class="row small mb-0">
+                        <dt class="col-5 text-muted">Created By:</dt>
+                        <dd class="col-7">{{ field_data.created_by }}</dd>
+
+                        <dt class="col-5 text-muted">Created At:</dt>
+                        <dd class="col-7">{{ field_data.created_at }}</dd>
+
+                        <dt class="col-5 text-muted">Updated By:</dt>
+                        <dd class="col-7">{{ field_data.updated_by }}</dd>
+
+                        <dt class="col-5 text-muted">Updated At:</dt>
+                        <dd class="col-7">{{ field_data.updated_at }}</dd>
+                    </dl>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

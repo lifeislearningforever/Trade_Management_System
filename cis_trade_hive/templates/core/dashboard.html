@@ -238,6 +238,104 @@
     </div>
     {% endif %}
 
+    <!-- Equity Price Analytics Section -->
+    {% if equity_price_stats and equity_price_stats.total_prices > 0 %}
+    <div class="row g-4 mb-4">
+        <div class="col-12">
+            <h5 class="mb-3">
+                <i class="bi bi-graph-up"></i> Equity Price Analytics
+            </h5>
+        </div>
+
+        <!-- Total Equity Prices Card -->
+        <div class="col-xl-3 col-lg-4 col-md-6">
+            <div class="card stats-card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="stats-icon bg-primary">
+                            <i class="bi bi-file-earmark-text-fill"></i>
+                        </div>
+                        <div class="ms-3">
+                            <h6 class="text-muted mb-1">Total Price Records</h6>
+                            <h3 class="mb-0">{{ equity_price_stats.total_prices }}</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Unique Securities Card -->
+        <div class="col-xl-3 col-lg-4 col-md-6">
+            <div class="card stats-card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="stats-icon bg-success">
+                            <i class="bi bi-briefcase-fill"></i>
+                        </div>
+                        <div class="ms-3">
+                            <h6 class="text-muted mb-1">Unique Securities</h6>
+                            <h3 class="mb-0">{{ equity_price_stats.unique_securities }}</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Unique Currencies Card -->
+        <div class="col-xl-3 col-lg-4 col-md-6">
+            <div class="card stats-card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="stats-icon bg-warning">
+                            <i class="bi bi-currency-exchange"></i>
+                        </div>
+                        <div class="ms-3">
+                            <h6 class="text-muted mb-1">Currencies</h6>
+                            <h3 class="mb-0">{{ equity_price_stats.unique_currencies }}</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Latest Price Date Card -->
+        <div class="col-xl-3 col-lg-4 col-md-6">
+            <div class="card stats-card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="stats-icon bg-info">
+                            <i class="bi bi-calendar-check"></i>
+                        </div>
+                        <div class="ms-3">
+                            <h6 class="text-muted mb-1">Latest Price Date</h6>
+                            <h3 class="mb-0" style="font-size: 1.3rem;">{{ equity_price_stats.latest_date }}</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Markets Card -->
+        {% if equity_price_stats.unique_markets > 0 %}
+        <div class="col-xl-3 col-lg-4 col-md-6">
+            <div class="card stats-card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="stats-icon bg-secondary">
+                            <i class="bi bi-building"></i>
+                        </div>
+                        <div class="ms-3">
+                            <h6 class="text-muted mb-1">Markets</h6>
+                            <h3 class="mb-0">{{ equity_price_stats.unique_markets }}</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
     <!-- Module Cards -->
     <div class="row g-4">
         <div class="col-12">

@@ -42,8 +42,11 @@ urlpatterns = [
     # Market Data
     path('market-data/', include('market_data.urls')),
 
-    # UDF (User Defined Fields)
-    path('udf/', include('udf.urls')),
+    # UDF (User Defined Fields) - Simplified Free Text Approach
+    path('udf/', include('udf.urls_simplified')),
+
+    # Security Master Data
+    path('security/', include('security.urls')),
 ]
 
 # Serve static files in development

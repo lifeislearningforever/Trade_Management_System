@@ -16,6 +16,8 @@ from reference_data.repositories.reference_data_repository import (
 )
 from core.audit.audit_kudu_repository import AuditLogKuduRepository
 from market_data.repositories.fx_rate_hive_repository import fx_rate_hive_repository
+from market_data.repositories.equity_price_hive_repository import EquityPriceHiveRepository
+from security.repositories.security_hive_repository import security_hive_repository
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,12 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
             'access': permissions.get('cis-portfolio', 'NONE'),
             'icon': 'briefcase',
             'url': '/portfolio/',
+        },
+        'security': {
+            'name': 'Security Master Data',
+            'access': permissions.get('cis-security', 'READ'),  # Default to READ for demo
+            'icon': 'shield-check',
+            'url': '/security/',
         },
         'market_data': {
             'name': 'Market Data (FX Rates)',
@@ -116,12 +124,40 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
             'processing_date_breakdown': []
         }
 
+    # Get security analytics
+    security_stats = {}
+    try:
+        security_stats = security_hive_repository.get_statistics()
+    except Exception as e:
+        logger.error(f"Error fetching security statistics: {str(e)}")
+        security_stats = {
+            'total_securities': 0,
+            'active_securities': 0,
+            'pending_approvals': 0,
+        }
+
+    # Get equity price analytics
+    equity_price_stats = {}
+    try:
+        equity_price_stats = EquityPriceHiveRepository.get_statistics()
+    except Exception as e:
+        logger.error(f"Error fetching equity price statistics: {str(e)}")
+        equity_price_stats = {
+            'total_prices': 0,
+            'unique_securities': 0,
+            'unique_currencies': 0,
+            'unique_markets': 0,
+            'latest_date': 'N/A',
+        }
+
     context = {
         'user': user_info,
         'permissions': permissions,
         'modules': permission_modules,
         'portfolio_stats': portfolio_stats,
         'fx_stats': fx_stats,
+        'security_stats': security_stats,
+        'equity_price_stats': equity_price_stats,
         'page_title': 'Dashboard',
     }
 

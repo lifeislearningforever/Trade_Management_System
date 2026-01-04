@@ -1,0 +1,514 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{% if security %}Edit{% else %}Create{% endif %} Security - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'security:list' %}">Securities</a></li>
+    <li class="breadcrumb-item active">{% if security %}Edit{% else %}Create{% endif %}</li>
+{% endblock %}
+
+{% block content %}
+<div class="security-form-container">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            <i class="bi bi-{% if security %}pencil{% else %}plus-circle{% endif %} text-primary"></i>
+            {% if security %}Edit Security{% else %}Create New Security{% endif %}
+        </h1>
+        <p class="content-subtitle">All fields marked with * are required</p>
+    </div>
+
+    <!-- Form Card -->
+    <div class="card">
+        <div class="card-body">
+            <form method="post" action="" id="securityForm">
+                {% csrf_token %}
+
+                <!-- Core Information (14 fields) -->
+                <div class="row mb-5">
+                    <div class="col-12">
+                        <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
+                            <i class="bi bi-info-circle"></i> Core Information
+                        </h5>
+                    </div>
+
+                    <div class="col-md-6 mb-4">
+                        <label for="security_name" class="form-label required">Security Name</label>
+                        <input type="text" class="form-control" id="security_name" name="security_name"
+                               value="{{ security.security_name|default:'' }}"
+                               required maxlength="200"
+                               placeholder="Enter security name">
+                        <div class="form-text">
+                            <i class="bi bi-info-circle"></i> Full name of the security
+                        </div>
+                    </div>
+
+                    <div class="col-md-6 mb-4">
+                        <label for="isin" class="form-label">ISIN</label>
+                        <input type="text" class="form-control" id="isin" name="isin"
+                               value="{{ security.isin|default:'' }}"
+                               maxlength="12"
+                               placeholder="e.g., US0378331005">
+                        <div class="form-text">
+                            <i class="bi bi-info-circle"></i> International Securities Identification Number
+                        </div>
+                    </div>
+
+                    <div class="col-12 mb-4">
+                        <label for="security_description" class="form-label">Security Description</label>
+                        <textarea class="form-control" id="security_description" name="security_description" rows="3"
+                                  placeholder="Enter a detailed description">{{ security.security_description|default:'' }}</textarea>
+                    </div>
+
+                    <div class="col-md-6 mb-3">
+                        <label for="issuer" class="form-label">Issuer</label>
+                        <select class="form-select" id="issuer" name="issuer">
+                            <option value="">Select Issuer</option>
+                            {% for iss in dropdown_options.issuers %}
+                                <option value="{{ iss.name }}" {% if security.issuer == iss.name %}selected{% endif %}>
+                                    {{ iss.name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-6 mb-3">
+                        <label for="industry" class="form-label">Industry</label>
+                        <select class="form-select" id="industry" name="industry">
+                            <option value="">Select Industry</option>
+                            {% for ind in dropdown_options.industries %}
+                                <option value="{{ ind.value }}" {% if security.industry == ind.value %}selected{% endif %}>
+                                    {{ ind.value }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-6 mb-3">
+                        <label for="country_of_incorporation" class="form-label">Country of Incorporation</label>
+                        <select class="form-select" id="country_of_incorporation" name="country_of_incorporation">
+                            <option value="">Select Country</option>
+                            {% for country in dropdown_options.country_of_incorporation_options %}
+                                <option value="{{ country.value }}" {% if security.country_of_incorporation == country.value %}selected{% endif %}>
+                                    {{ country.value }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-6 mb-3">
+                        <label for="shares_outstanding" class="form-label">Shares Outstanding</label>
+                        <input type="number" class="form-control" id="shares_outstanding" name="shares_outstanding"
+                               value="{{ security.shares_outstanding|default:'' }}"
+                               step="1"
+                               placeholder="Number of shares">
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="country_of_exchange" class="form-label">Country of Exchange</label>
+                        <select class="form-select" id="country_of_exchange" name="country_of_exchange">
+                            <option value="">Select Country</option>
+                            {% for country in dropdown_options.countries %}
+                                <option value="{{ country.name }}" {% if security.country_of_exchange == country.name %}selected{% endif %}>
+                                    {{ country.name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="exchange_code" class="form-label">Exchange Code</label>
+                        <input type="text" class="form-control" id="exchange_code" name="exchange_code"
+                               value="{{ security.exchange_code|default:'' }}"
+                               maxlength="10"
+                               placeholder="e.g., NYSE, NASDAQ">
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="currency_code" class="form-label">Currency Code</label>
+                        <select class="form-select" id="currency_code" name="currency_code">
+                            <option value="">Select Currency</option>
+                            {% for curr in dropdown_options.currencies %}
+                                <option value="{{ curr.code }}" {% if security.currency_code == curr.code %}selected{% endif %}>
+                                    {{ curr.code }} - {{ curr.name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="ticker" class="form-label">Ticker</label>
+                        <input type="text" class="form-control" id="ticker" name="ticker"
+                               value="{{ security.ticker|default:'' }}"
+                               maxlength="20"
+                               placeholder="e.g., AAPL">
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="quoted_unquoted" class="form-label">Quoted / Unquoted</label>
+                        <select class="form-select" id="quoted_unquoted" name="quoted_unquoted">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.quoted_unquoted_options %}
+                                <option value="{{ option.value }}" {% if security.quoted_unquoted == option.value %}selected{% endif %}>
+                                    {{ option.value }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="security_type" class="form-label">Security Type</label>
+                        <select class="form-select" id="security_type" name="security_type">
+                            <option value="">Select Type</option>
+                            {% for st in dropdown_options.security_types %}
+                                <option value="{{ st.value }}" {% if security.security_type == st.value %}selected{% endif %}>
+                                    {{ st.value }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="investment_type" class="form-label">Investment Type</label>
+                        <select class="form-select" id="investment_type" name="investment_type">
+                            <option value="">Select Type</option>
+                            {% for it in dropdown_options.investment_types %}
+                                <option value="{{ it.value }}" {% if security.investment_type == it.value %}selected{% endif %}>
+                                    {{ it.value }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Buttons to Open Modals -->
+                <div class="mb-4">
+                    <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
+                        <i class="bi bi-plus-square"></i> Additional Information
+                    </h5>
+                    <div class="d-flex gap-3">
+                        <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#tradingModal">
+                            <i class="bi bi-graph-up"></i> Add Trading & Pricing Info
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#regulatoryModal">
+                            <i class="bi bi-shield-fill-check"></i> Add Regulatory & Management Info
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Hidden fields to store modal data (JSON) -->
+                <input type="hidden" id="tradingData" name="trading_data" value="">
+                <input type="hidden" id="regulatoryData" name="regulatory_data" value="">
+
+                {% if security %}
+                {# Status field only visible when editing (read-only, managed by workflow) #}
+                <div class="mb-4">
+                    <label for="status" class="form-label">Status</label>
+                    <input type="text" class="form-control" id="status" name="status"
+                           value="{{ security.status }}" readonly>
+                    <div class="form-text">
+                        <i class="bi bi-info-circle"></i> Status is managed by the Four-Eyes workflow
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Form Actions -->
+                <div class="d-flex gap-3 justify-content-end pt-4 border-top">
+                    <a href="{% url 'security:list' %}" class="btn btn-outline-secondary btn-lg">
+                        <i class="bi bi-x-circle"></i> Cancel
+                    </a>
+                    <button type="submit" name="action" value="save_draft" class="btn btn-secondary btn-lg">
+                        <i class="bi bi-save"></i> Save as Draft
+                    </button>
+                    <button type="submit" name="action" value="submit" class="btn btn-success btn-lg">
+                        <i class="bi bi-check2-circle"></i> Save & Submit for Approval
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-info-circle"></i>
+        {% if security %}
+            <strong>Four-Eyes Workflow:</strong> After updating, you can submit the security for approval.
+            Only DRAFT and REJECTED securities can be edited. A different user (Checker) must approve changes.
+        {% else %}
+            <strong>Four-Eyes Workflow:</strong> New securities are created in <strong>DRAFT</strong> status.
+            After creation, submit for approval. Only a different user (Checker) can approve it to make it ACTIVE.
+        {% endif %}
+    </div>
+</div>
+
+<!-- Trading & Pricing Modal -->
+<div class="modal fade" id="tradingModal" tabindex="-1" aria-labelledby="tradingModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="tradingModalLabel">
+                    <i class="bi bi-graph-up"></i> Trading & Pricing Information
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_price_date" class="form-label">Price Date</label>
+                        <input type="date" class="form-control" id="modal_price_date">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_price" class="form-label">Price</label>
+                        <input type="number" class="form-control" id="modal_price" step="0.0001" placeholder="0.0000">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_price_source" class="form-label">Price Source</label>
+                        <select class="form-select" id="modal_price_source">
+                            <option value="">Select Source</option>
+                            {% for ps in dropdown_options.price_sources %}
+                                <option value="{{ ps.value }}">{{ ps.value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_beta" class="form-label">Beta</label>
+                        <input type="number" class="form-control" id="modal_beta" step="0.01" placeholder="0.00">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_par_value" class="form-label">PAR Value</label>
+                        <input type="number" class="form-control" id="modal_par_value" step="0.01" placeholder="0.00">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveTradingData()">
+                    <i class="bi bi-check2"></i> Save & Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Regulatory & Management Modal -->
+<div class="modal fade" id="regulatoryModal" tabindex="-1" aria-labelledby="regulatoryModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header bg-secondary text-white">
+                <h5 class="modal-title" id="regulatoryModalLabel">
+                    <i class="bi bi-shield-fill-check"></i> Regulatory & Management Information
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" style="max-height: 500px; overflow-y: auto;">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_country_of_issue" class="form-label">Country of Issue</label>
+                        <input type="text" class="form-control" id="modal_country_of_issue">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_country_of_primary_exchange" class="form-label">Country of Primary Exchange</label>
+                        <input type="text" class="form-control" id="modal_country_of_primary_exchange">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_bwciif" class="form-label">BWCIIF</label>
+                        <select class="form-select" id="modal_bwciif">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.bwciif_options %}
+                                <option value="{{ option.value }}">{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_bwciif_others" class="form-label">BWCIIF Others</label>
+                        <input type="text" class="form-control" id="modal_bwciif_others">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_issuer_type" class="form-label">Issuer Type</label>
+                        <select class="form-select" id="modal_issuer_type">
+                            <option value="">Select Type</option>
+                            {% for it in dropdown_options.issuer_types %}
+                                <option value="{{ it.value }}">{{ it.value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_approved_s32" class="form-label">Approved S32</label>
+                        <select class="form-select" id="modal_approved_s32">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.approved_s32_options %}
+                                <option value="{{ option.value }}">{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_basel_iv_fund" class="form-label">BASEL IV - FUND</label>
+                        <select class="form-select" id="modal_basel_iv_fund">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.basel_iv_fund_options %}
+                                <option value="{{ option.value }}">{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_business_unit_head" class="form-label">Business Unit Head</label>
+                        <input type="text" class="form-control" id="modal_business_unit_head">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_core_non_core" class="form-label">Core/Non-core</label>
+                        <select class="form-select" id="modal_core_non_core">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.core_non_core_options %}
+                                <option value="{{ option.value }}">{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_fund_index_fund" class="form-label">Fund / Index Fund</label>
+                        <select class="form-select" id="modal_fund_index_fund">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.fund_index_fund_options %}
+                                <option value="{{ option.value }}">{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_management_limit_classification" class="form-label">Management Limit Classification</label>
+                        <input type="text" class="form-control" id="modal_management_limit_classification">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_mas_643_entity_type" class="form-label">MAS 643 Entity Type</label>
+                        <input type="text" class="form-control" id="modal_mas_643_entity_type">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_person_in_charge" class="form-label">Person In Charge</label>
+                        <input type="text" class="form-control" id="modal_person_in_charge">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_substantial_gt_10_percent" class="form-label">Substantial >10%</label>
+                        <input type="text" class="form-control" id="modal_substantial_gt_10_percent">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_relative_index" class="form-label">Relative Index</label>
+                        <input type="text" class="form-control" id="modal_relative_index">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_fin_non_fin_ind" class="form-label">Fin/Non-fin IND</label>
+                        <select class="form-select" id="modal_fin_non_fin_ind">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.fin_non_fin_ind_options %}
+                                <option value="{{ option.value }}">{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveRegulatoryData()">
+                    <i class="bi bi-check2"></i> Save & Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// JavaScript to handle modal data
+function saveTradingData() {
+    const data = {
+        price_date: document.getElementById('modal_price_date').value || null,
+        price: document.getElementById('modal_price').value || null,
+        price_source: document.getElementById('modal_price_source').value || null,
+        beta: document.getElementById('modal_beta').value || null,
+        par_value: document.getElementById('modal_par_value').value || null
+    };
+    document.getElementById('tradingData').value = JSON.stringify(data);
+    bootstrap.Modal.getInstance(document.getElementById('tradingModal')).hide();
+
+    // Show feedback
+    showModalFeedback('Trading & Pricing data saved');
+}
+
+function saveRegulatoryData() {
+    const data = {
+        country_of_issue: document.getElementById('modal_country_of_issue').value || null,
+        country_of_primary_exchange: document.getElementById('modal_country_of_primary_exchange').value || null,
+        bwciif: document.getElementById('modal_bwciif').value || null,
+        bwciif_others: document.getElementById('modal_bwciif_others').value || null,
+        issuer_type: document.getElementById('modal_issuer_type').value || null,
+        approved_s32: document.getElementById('modal_approved_s32').value || null,
+        basel_iv_fund: document.getElementById('modal_basel_iv_fund').value || null,
+        business_unit_head: document.getElementById('modal_business_unit_head').value || null,
+        core_non_core: document.getElementById('modal_core_non_core').value || null,
+        fund_index_fund: document.getElementById('modal_fund_index_fund').value || null,
+        management_limit_classification: document.getElementById('modal_management_limit_classification').value || null,
+        mas_643_entity_type: document.getElementById('modal_mas_643_entity_type').value || null,
+        person_in_charge: document.getElementById('modal_person_in_charge').value || null,
+        substantial_gt_10_percent: document.getElementById('modal_substantial_gt_10_percent').value || null,
+        relative_index: document.getElementById('modal_relative_index').value || null,
+        fin_non_fin_ind: document.getElementById('modal_fin_non_fin_ind').value || null
+    };
+    document.getElementById('regulatoryData').value = JSON.stringify(data);
+    bootstrap.Modal.getInstance(document.getElementById('regulatoryModal')).hide();
+
+    // Show feedback
+    showModalFeedback('Regulatory & Management data saved');
+}
+
+function showModalFeedback(message) {
+    // Simple visual feedback
+    const feedback = document.createElement('div');
+    feedback.className = 'alert alert-success alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3';
+    feedback.style.zIndex = '9999';
+    feedback.innerHTML = `
+        <i class="bi bi-check-circle"></i> ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    document.body.appendChild(feedback);
+    setTimeout(() => feedback.remove(), 3000);
+}
+
+// Pre-populate modals when editing
+function loadExistingData() {
+    {% if security %}
+    // Trading & Pricing
+    document.getElementById('modal_price_date').value = '{{ security.price_date|default:"" }}';
+    document.getElementById('modal_price').value = '{{ security.price|default:"" }}';
+    document.getElementById('modal_price_source').value = '{{ security.price_source|default:"" }}';
+    document.getElementById('modal_beta').value = '{{ security.beta|default:"" }}';
+    document.getElementById('modal_par_value').value = '{{ security.par_value|default:"" }}';
+
+    // Regulatory & Management
+    document.getElementById('modal_country_of_issue').value = '{{ security.country_of_issue|default:"" }}';
+    document.getElementById('modal_country_of_primary_exchange').value = '{{ security.country_of_primary_exchange|default:"" }}';
+    document.getElementById('modal_bwciif').value = '{{ security.bwciif|default:"" }}';
+    document.getElementById('modal_bwciif_others').value = '{{ security.bwciif_others|default:"" }}';
+    document.getElementById('modal_issuer_type').value = '{{ security.issuer_type|default:"" }}';
+    document.getElementById('modal_approved_s32').value = '{{ security.approved_s32|default:"" }}';
+    document.getElementById('modal_basel_iv_fund').value = '{{ security.basel_iv_fund|default:"" }}';
+    document.getElementById('modal_business_unit_head').value = '{{ security.business_unit_head|default:"" }}';
+    document.getElementById('modal_core_non_core').value = '{{ security.core_non_core|default:"" }}';
+    document.getElementById('modal_fund_index_fund').value = '{{ security.fund_index_fund|default:"" }}';
+    document.getElementById('modal_management_limit_classification').value = '{{ security.management_limit_classification|default:"" }}';
+    document.getElementById('modal_mas_643_entity_type').value = '{{ security.mas_643_entity_type|default:"" }}';
+    document.getElementById('modal_person_in_charge').value = '{{ security.person_in_charge|default:"" }}';
+    document.getElementById('modal_substantial_gt_10_percent').value = '{{ security.substantial_gt_10_percent|default:"" }}';
+    document.getElementById('modal_relative_index').value = '{{ security.relative_index|default:"" }}';
+    document.getElementById('modal_fin_non_fin_ind').value = '{{ security.fin_non_fin_ind|default:"" }}';
+    {% endif %}
+}
+
+// Load data when page loads
+document.addEventListener('DOMContentLoaded', loadExistingData);
+</script>
+
+<style>
+.required::after {
+    content: " *";
+    color: red;
+}
+</style>
+{% endblock %}

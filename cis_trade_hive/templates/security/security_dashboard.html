@@ -1,0 +1,338 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Security Dashboard - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'security:list' %}">Securities</a></li>
+    <li class="breadcrumb-item active">Dashboard</li>
+{% endblock %}
+
+{% block content %}
+<div class="security-dashboard-container">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            <i class="bi bi-graph-up text-primary"></i> Security Master Data Dashboard
+        </h1>
+        <p class="content-subtitle">Overview of securities and workflow statistics</p>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="mb-4">
+        <a href="{% url 'security:create' %}" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Create New Security
+        </a>
+        <a href="{% url 'security:list' %}" class="btn btn-outline-primary">
+            <i class="bi bi-list"></i> View All Securities
+        </a>
+        <a href="{% url 'security:pending_approvals' %}" class="btn btn-warning">
+            <i class="bi bi-clock-history"></i> Pending Approvals
+            {% if stats.pending_approvals > 0 %}
+                <span class="badge bg-danger">{{ stats.pending_approvals }}</span>
+            {% endif %}
+        </a>
+    </div>
+
+    <!-- Overview Statistics -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card text-white bg-primary">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-grow-1">
+                            <h6 class="card-title text-white">Total Securities</h6>
+                            <h2 class="mb-0">{{ stats.total_securities|default:0 }}</h2>
+                        </div>
+                        <div class="flex-shrink-0">
+                            <i class="bi bi-shield-check" style="font-size: 3rem; opacity: 0.3;"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card text-white bg-success">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-grow-1">
+                            <h6 class="card-title text-white">Active Securities</h6>
+                            <h2 class="mb-0">{{ stats.active_securities|default:0 }}</h2>
+                        </div>
+                        <div class="flex-shrink-0">
+                            <i class="bi bi-check-circle" style="font-size: 3rem; opacity: 0.3;"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card text-white bg-warning">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-grow-1">
+                            <h6 class="card-title text-white">Pending Approvals</h6>
+                            <h2 class="mb-0">{{ stats.pending_approvals|default:0 }}</h2>
+                        </div>
+                        <div class="flex-shrink-0">
+                            <i class="bi bi-clock-history" style="font-size: 3rem; opacity: 0.3;"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card text-white bg-secondary">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-grow-1">
+                            <h6 class="card-title text-white">Draft Securities</h6>
+                            <h2 class="mb-0">{{ stats.draft_securities|default:0 }}</h2>
+                        </div>
+                        <div class="flex-shrink-0">
+                            <i class="bi bi-file-earmark-text" style="font-size: 3rem; opacity: 0.3;"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Breakdown by Type -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-pie-chart"></i> Securities by Type
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if stats.by_security_type %}
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Security Type</th>
+                                    <th class="text-end">Count</th>
+                                    <th style="width: 50%;">Distribution</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in stats.by_security_type %}
+                                <tr>
+                                    <td>{{ item.security_type|default:"N/A" }}</td>
+                                    <td class="text-end"><strong>{{ item.count }}</strong></td>
+                                    <td>
+                                        <div class="progress" style="height: 20px;">
+                                            <div class="progress-bar bg-primary" role="progressbar"
+                                                 style="width: {% widthratio item.count stats.total_securities 100 %}%"
+                                                 aria-valuenow="{{ item.count }}" aria-valuemin="0" aria-valuemax="{{ stats.total_securities }}">
+                                                {% widthratio item.count stats.total_securities 100 %}%
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    {% else %}
+                        <p class="text-muted text-center">No data available</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-currency-exchange"></i> Securities by Currency
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if stats.by_currency %}
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Currency</th>
+                                    <th class="text-end">Count</th>
+                                    <th style="width: 50%;">Distribution</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in stats.by_currency %}
+                                <tr>
+                                    <td>
+                                        <span class="badge badge-info">{{ item.currency_code|default:"N/A" }}</span>
+                                    </td>
+                                    <td class="text-end"><strong>{{ item.count }}</strong></td>
+                                    <td>
+                                        <div class="progress" style="height: 20px;">
+                                            <div class="progress-bar bg-info" role="progressbar"
+                                                 style="width: {% widthratio item.count stats.total_securities 100 %}%"
+                                                 aria-valuenow="{{ item.count }}" aria-valuemin="0" aria-valuemax="{{ stats.total_securities }}">
+                                                {% widthratio item.count stats.total_securities 100 %}%
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    {% else %}
+                        <p class="text-muted text-center">No data available</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Breakdown by Investment Type and Industry -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-graph-up-arrow"></i> Securities by Investment Type
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if stats.by_investment_type %}
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Investment Type</th>
+                                    <th class="text-end">Count</th>
+                                    <th style="width: 50%;">Distribution</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in stats.by_investment_type %}
+                                <tr>
+                                    <td>{{ item.investment_type|default:"N/A" }}</td>
+                                    <td class="text-end"><strong>{{ item.count }}</strong></td>
+                                    <td>
+                                        <div class="progress" style="height: 20px;">
+                                            <div class="progress-bar bg-success" role="progressbar"
+                                                 style="width: {% widthratio item.count stats.total_securities 100 %}%"
+                                                 aria-valuenow="{{ item.count }}" aria-valuemin="0" aria-valuemax="{{ stats.total_securities }}">
+                                                {% widthratio item.count stats.total_securities 100 %}%
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    {% else %}
+                        <p class="text-muted text-center">No data available</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-building"></i> Securities by Industry
+                    </h5>
+                </div>
+                <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                    {% if stats.by_industry %}
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Industry</th>
+                                    <th class="text-end">Count</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in stats.by_industry %}
+                                <tr>
+                                    <td>{{ item.industry|default:"N/A" }}</td>
+                                    <td class="text-end"><strong>{{ item.count }}</strong></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    {% else %}
+                        <p class="text-muted text-center">No data available</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Workflow Status Breakdown -->
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-diagram-3"></i> Workflow Status Distribution
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-md-2">
+                            <div class="mb-3">
+                                <span class="badge badge-secondary fs-5">{{ stats.draft_securities|default:0 }}</span>
+                                <p class="text-muted mt-2 mb-0">Draft</p>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="mb-3">
+                                <span class="badge badge-warning fs-5">{{ stats.pending_approvals|default:0 }}</span>
+                                <p class="text-muted mt-2 mb-0">Pending Approval</p>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="mb-3">
+                                <span class="badge badge-success fs-5">{{ stats.active_securities|default:0 }}</span>
+                                <p class="text-muted mt-2 mb-0">Active</p>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="mb-3">
+                                <span class="badge badge-danger fs-5">{{ stats.rejected_securities|default:0 }}</span>
+                                <p class="text-muted mt-2 mb-0">Rejected</p>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="mb-3">
+                                <span class="badge badge-dark fs-5">{{ stats.inactive_securities|default:0 }}</span>
+                                <p class="text-muted mt-2 mb-0">Inactive</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle"></i>
+        <strong>Four-Eyes Workflow:</strong>
+        <ul class="mb-0 mt-2">
+            <li><strong>Makers</strong> create securities in <strong>DRAFT</strong> status</li>
+            <li>Makers submit for approval → status becomes <strong>PENDING_APPROVAL</strong></li>
+            <li><strong>Checkers</strong> approve → status becomes <strong>ACTIVE</strong></li>
+            <li>Checkers reject → status becomes <strong>REJECTED</strong> (can be edited and resubmitted)</li>
+            <li><strong>Important:</strong> Makers cannot approve their own securities (Four-Eyes principle)</li>
+        </ul>
+    </div>
+
+    <!-- Back to List -->
+    <div class="mt-4">
+        <a href="{% url 'security:list' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Security List
+        </a>
+    </div>
+</div>
+{% endblock %}

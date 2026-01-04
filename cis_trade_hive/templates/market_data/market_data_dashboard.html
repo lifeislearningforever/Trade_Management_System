@@ -1,0 +1,265 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Market Data Dashboard - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item active">Market Data Dashboard</li>
+{% endblock %}
+
+{% block content %}
+<div class="market-data-dashboard-container">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            <i class="bi bi-speedometer2 text-primary"></i> Market Data Dashboard
+        </h1>
+        <p class="content-subtitle">Comprehensive market data overview - FX Rates & Equity Prices</p>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="mb-4">
+        <a href="{% url 'market_data:fx_rate_list' %}" class="btn btn-primary">
+            <i class="bi bi-cash-coin"></i> FX Rates
+        </a>
+        <a href="{% url 'market_data:equity_price_list' %}" class="btn btn-primary">
+            <i class="bi bi-graph-up-arrow"></i> Equity Prices
+        </a>
+        <a href="{% url 'market_data:fx_rate_list' %}?export=csv" class="btn btn-success">
+            <i class="bi bi-download"></i> Export FX CSV
+        </a>
+    </div>
+
+    <!-- FX Rate Statistics -->
+    <h3 class="mb-3"><i class="bi bi-cash-coin"></i> FX Rate Statistics</h3>
+    <div class="row g-4 mb-4">
+        <div class="col-md-3">
+            <div class="metric-card glass-card">
+                <div class="metric-label">Total FX Rates</div>
+                <div class="metric-value">{{ fx_stats.total_rates|default:0 }}</div>
+                <div class="metric-trend trend-up">
+                    <i class="bi bi-arrow-up"></i> Active
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card glass-card">
+                <div class="metric-label">Currency Pairs</div>
+                <div class="metric-value">{{ fx_stats.unique_pairs|default:0 }}</div>
+                <div class="metric-trend trend-up">
+                    <i class="bi bi-bar-chart"></i> Tracked
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card glass-card">
+                <div class="metric-label">FX Data Sources</div>
+                <div class="metric-value">{{ fx_stats.data_sources|default:0 }}</div>
+                <div class="metric-trend">
+                    <i class="bi bi-database"></i> Connected
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card glass-card">
+                <div class="metric-label">Latest FX Update</div>
+                <div class="metric-value" style="font-size: 1.5rem;">{{ fx_stats.latest_update|default:"N/A" }}</div>
+                <div class="metric-trend">
+                    <i class="bi bi-clock-history"></i> Last Sync
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Equity Price Statistics -->
+    <h3 class="mb-3"><i class="bi bi-graph-up-arrow"></i> Equity Price Statistics</h3>
+    <div class="row g-4 mb-4">
+        <div class="col-md-3">
+            <div class="metric-card glass-card">
+                <div class="metric-label">Total Equity Prices</div>
+                <div class="metric-value">{{ equity_price_stats.total_prices|default:0 }}</div>
+                <div class="metric-trend trend-up">
+                    <i class="bi bi-arrow-up"></i> Active
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card glass-card">
+                <div class="metric-label">Unique Securities</div>
+                <div class="metric-value">{{ equity_price_stats.unique_securities|default:0 }}</div>
+                <div class="metric-trend trend-up">
+                    <i class="bi bi-bar-chart"></i> Tracked
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card glass-card">
+                <div class="metric-label">Markets Covered</div>
+                <div class="metric-value">{{ equity_price_stats.unique_markets|default:0 }}</div>
+                <div class="metric-trend">
+                    <i class="bi bi-globe"></i> Global
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card glass-card">
+                <div class="metric-label">Latest Price Update</div>
+                <div class="metric-value" style="font-size: 1.5rem;">{{ equity_price_stats.latest_update|default:"N/A" }}</div>
+                <div class="metric-trend">
+                    <i class="bi bi-clock-history"></i> Last Sync
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- Latest FX Rates Card -->
+        <div class="col-lg-6">
+            <div class="card glass-card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-cash-coin"></i> Latest FX Rates
+                    </h5>
+                </div>
+                <div class="card-body p-0">
+                    {% if latest_fx_rates %}
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Pair</th>
+                                        <th class="text-end">Rate</th>
+                                        <th class="text-end">Bid</th>
+                                        <th class="text-end">Ask</th>
+                                        <th>Source</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for rate in latest_fx_rates %}
+                                    <tr>
+                                        <td>
+                                            <a href="{% url 'market_data:fx_rate_detail' rate.currency_pair %}" class="text-primary fw-bold">
+                                                {{ rate.currency_pair }}
+                                            </a>
+                                        </td>
+                                        <td class="text-end"><strong>{{ rate.rate|floatformat:6 }}</strong></td>
+                                        <td class="text-end">{{ rate.bid_rate|floatformat:6|default:"-" }}</td>
+                                        <td class="text-end">{{ rate.ask_rate|floatformat:6|default:"-" }}</td>
+                                        <td><span class="badge badge-info">{{ rate.source }}</span></td>
+                                        <td>
+                                            <span class="badge badge-{{ rate.get_freshness_color }}">
+                                                {{ rate.freshness|capfirst }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="empty-state py-4">
+                            <i class="bi bi-currency-exchange"></i>
+                            <p>No FX rates available</p>
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="card-footer text-center">
+                    <a href="{% url 'market_data:fx_rate_list' %}" class="btn btn-sm btn-outline-primary">
+                        View All FX Rates <i class="bi bi-arrow-right"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Latest Equity Prices Card -->
+        <div class="col-lg-6">
+            <div class="card glass-card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-graph-up-arrow"></i> Latest Equity Prices
+                    </h5>
+                </div>
+                <div class="card-body p-0">
+                    {% if latest_equity_prices %}
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Security</th>
+                                        <th>Currency</th>
+                                        <th class="text-end">Price</th>
+                                        <th>Market</th>
+                                        <th>Date</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for price in latest_equity_prices %}
+                                    <tr>
+                                        <td>
+                                            <strong>{{ price.security_label }}</strong>
+                                            {% if price.isin %}
+                                                <br><small class="text-muted">{{ price.isin }}</small>
+                                            {% endif %}
+                                        </td>
+                                        <td><span class="badge badge-secondary">{{ price.currency_code }}</span></td>
+                                        <td class="text-end"><strong>{{ price.main_closing_price|floatformat:2 }}</strong></td>
+                                        <td>
+                                            {% if price.market %}
+                                                <span class="badge badge-info">{{ price.market }}</span>
+                                            {% else %}
+                                                -
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ price.price_date }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="empty-state py-4">
+                            <i class="bi bi-graph-up-arrow"></i>
+                            <p>No equity prices available</p>
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="card-footer text-center">
+                    <a href="{% url 'market_data:equity_price_list' %}" class="btn btn-sm btn-outline-primary">
+                        View All Equity Prices <i class="bi bi-arrow-right"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Currency Coverage -->
+    {% if base_currencies %}
+    <div class="card glass-card mt-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-grid"></i> FX Currency Coverage
+            </h5>
+        </div>
+        <div class="card-body">
+            <div class="d-flex flex-wrap gap-2">
+                {% for currency in base_currencies %}
+                    <span class="badge badge-secondary" style="font-size: 0.9rem; padding: 0.5rem 1rem;">
+                        {{ currency }}
+                    </span>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Info Alert -->
+    {% if using_hive %}
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-database"></i>
+        <strong>Hive Data View:</strong> All market data is sourced from Apache Hive data warehouse. Data is refreshed periodically from upstream providers.
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

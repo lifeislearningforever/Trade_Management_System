@@ -79,24 +79,36 @@ class LoginView(View):
         # Update last login (logged only, not persisted to Hive)
         acl_repo.update_last_login(login)
 
-        # Log successful login to Kudu audit
-        audit_log_kudu_repository.log_action(
-            user_id=str(user['cis_user_id']),
-            username=user['login'],
-            user_email=user['email'] or '',
-            action_type='LOGIN',
-            entity_type='AUTH',
-            entity_name='Login',
-            entity_id='SUCCESSFUL_LOGIN',
-            action_description=f"User {user['name']} ({user['login']}) logged in successfully",
-            request_method=request.method,
-            request_path=request.path,
-            ip_address=request.META.get('REMOTE_ADDR'),
-            user_agent=request.META.get('HTTP_USER_AGENT', ''),
-            status='SUCCESS'
-        )
+        # Rate limiting: Check last login audit timestamp
+        import time
+        current_time = int(time.time())
+        last_login_audit = request.session.get('last_login_audit_time', 0)
+        time_since_last_audit = current_time - last_login_audit
 
-        logger.info(f"User {user['name']} ({login}) logged in successfully")
+        # Only log if more than 60 seconds since last LOGIN audit (prevents flooding)
+        if time_since_last_audit > 60:
+            # Log successful login to Kudu audit
+            audit_log_kudu_repository.log_action(
+                user_id=str(user['cis_user_id']),
+                username=user['login'],
+                user_email=user['email'] or '',
+                action_type='LOGIN',
+                entity_type='AUTH',
+                entity_name='Login',
+                entity_id='SUCCESSFUL_LOGIN',
+                action_description=f"User {user['name']} ({user['login']}) logged in successfully",
+                request_method=request.method,
+                request_path=request.path,
+                ip_address=request.META.get('REMOTE_ADDR'),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
+            )
+
+            # Update last login audit timestamp
+            request.session['last_login_audit_time'] = current_time
+            logger.info(f"User {user['name']} ({login}) logged in successfully - LOGIN audit logged")
+        else:
+            logger.info(f"User {user['name']} ({login}) logged in successfully - LOGIN audit skipped (last audit {time_since_last_audit}s ago)")
 
         return redirect('dashboard')
 
@@ -251,6 +263,8 @@ def auto_login_tmp3rc(request: HttpRequest) -> HttpResponse:
     """
     Auto-login helper for TMP3RC user (for testing/development).
     Only creates audit log on ACTUAL login, not when session already exists.
+
+    Rate limiting: Only logs LOGIN audit once per session to prevent flooding.
     """
     # If already logged in, just redirect to dashboard WITHOUT logging
     if request.session.get('user_login'):
@@ -258,6 +272,8 @@ def auto_login_tmp3rc(request: HttpRequest) -> HttpResponse:
         return redirect('dashboard')
 
     try:
+        import time
+
         acl_repo = get_acl_repository()
         logger.info("ACL Repository created successfully")
 
@@ -277,24 +293,36 @@ def auto_login_tmp3rc(request: HttpRequest) -> HttpResponse:
             request.session['user_group_name'] = group['name'] if group else 'Unknown'
             request.session['user_permissions'] = permission_map
 
-            # Log auto-login to Kudu audit (ONLY on actual new login)
-            audit_log_kudu_repository.log_action(
-                user_id=str(user['cis_user_id']),
-                username=user['login'],
-                user_email=user['email'] or '',
-                action_type='LOGIN',
-                entity_type='AUTH',
-                entity_name='Auto-Login',
-                entity_id='AUTO_LOGIN',
-                action_description=f"Auto-login successful for {user['name']} ({user['login']})",
-                request_method=request.method,
-                request_path=request.path,
-                ip_address=request.META.get('REMOTE_ADDR'),
-                user_agent=request.META.get('HTTP_USER_AGENT', ''),
-                status='SUCCESS'
-            )
+            # Rate limiting: Check last login audit timestamp
+            current_time = int(time.time())
+            last_login_audit = request.session.get('last_login_audit_time', 0)
+            time_since_last_audit = current_time - last_login_audit
 
-            logger.info(f"Auto-login successful for {user['name']}")
+            # Only log if more than 60 seconds since last LOGIN audit (prevents flooding)
+            if time_since_last_audit > 60:
+                # Log auto-login to Kudu audit (ONLY on actual new login)
+                audit_log_kudu_repository.log_action(
+                    user_id=str(user['cis_user_id']),
+                    username=user['login'],
+                    user_email=user['email'] or '',
+                    action_type='LOGIN',
+                    entity_type='AUTH',
+                    entity_name='Auto-Login',
+                    entity_id='AUTO_LOGIN',
+                    action_description=f"Auto-login successful for {user['name']} ({user['login']})",
+                    request_method=request.method,
+                    request_path=request.path,
+                    ip_address=request.META.get('REMOTE_ADDR'),
+                    user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                    status='SUCCESS'
+                )
+
+                # Update last login audit timestamp
+                request.session['last_login_audit_time'] = current_time
+                logger.info(f"Auto-login successful for {user['name']} - LOGIN audit logged")
+            else:
+                logger.info(f"Auto-login successful for {user['name']} - LOGIN audit skipped (last audit {time_since_last_audit}s ago)")
+
             return redirect('dashboard')
 
         logger.error("Auto-login failed: auth_data is None")

@@ -1,0 +1,243 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="h3 mb-1">UDF Fields</h1>
+                    <p class="text-muted mb-0">Manage user-defined fields</p>
+                </div>
+                <div>
+                    <a href="{% url 'udf:create' %}" class="btn btn-primary">
+                        <i class="bi bi-plus-circle me-1"></i> Add Field
+                    </a>
+                    <a href="{% url 'udf:dashboard' %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-grid me-1"></i> Dashboard
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm border-0">
+                <div class="card-body">
+                    <form method="get" action="{% url 'udf:list' %}" class="row g-3">
+                        <!-- Search -->
+                        <div class="col-12 col-md-4">
+                            <label for="search" class="form-label small text-muted">Search</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="search"
+                                   name="search"
+                                   placeholder="Field name or label..."
+                                   value="{{ search_query }}">
+                        </div>
+
+                        <!-- Entity Filter -->
+                        <div class="col-12 col-md-4">
+                            <label for="entity" class="form-label small text-muted">Entity Type</label>
+                            <select class="form-select" id="entity" name="entity">
+                                <option value="">All Entities</option>
+                                {% for entity_type in entity_types %}
+                                <option value="{{ entity_type }}"
+                                        {% if entity_filter == entity_type %}selected{% endif %}>
+                                    {{ entity_type }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <!-- Status Filter -->
+                        <div class="col-12 col-md-4">
+                            <label for="status" class="form-label small text-muted">Status</label>
+                            <div class="d-flex gap-2 align-items-end">
+                                <select class="form-select" id="status" name="status">
+                                    <option value="active" {% if status_filter == 'active' %}selected{% endif %}>
+                                        Active
+                                    </option>
+                                    <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>
+                                        Inactive
+                                    </option>
+                                    <option value="all" {% if status_filter == 'all' %}selected{% endif %}>
+                                        All
+                                    </option>
+                                </select>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="bi bi-search"></i>
+                                </button>
+                                <a href="{% url 'udf:list' %}" class="btn btn-outline-secondary">
+                                    <i class="bi bi-x-circle"></i>
+                                </a>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results Count -->
+    <div class="row mb-3">
+        <div class="col-12">
+            <p class="text-muted mb-0">
+                <strong>{{ fields|length }}</strong> field{{ fields|length|pluralize }} found
+            </p>
+        </div>
+    </div>
+
+    <!-- Table -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card shadow-sm border-0">
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="overflow-x: auto; overflow-y: auto; max-height: 600px;">
+                        <table class="table table-hover mb-0" style="min-width: 800px;">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Field Name</th>
+                                    <th>Label</th>
+                                    <th>Entity Type</th>
+                                    <th class="text-center">Required</th>
+                                    <th class="text-center">Status</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for field in fields %}
+                                <tr class="{% if not field.is_active %}table-secondary{% endif %}">
+                                    <td>
+                                        <code class="text-dark">{{ field.field_name }}</code>
+                                    </td>
+                                    <td>{{ field.label }}</td>
+                                    <td>
+                                        <span class="badge bg-info">{{ field.entity_type }}</span>
+                                    </td>
+                                    <td class="text-center">
+                                        {% if field.is_required %}
+                                        <span class="badge bg-warning">Required</span>
+                                        {% else %}
+                                        <span class="badge bg-light text-dark">Optional</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-center">
+                                        {% if field.is_active %}
+                                        <span class="badge bg-success">Active</span>
+                                        {% else %}
+                                        <span class="badge bg-secondary">Inactive</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        <div class="btn-group btn-group-sm" role="group">
+                                            <a href="{% url 'udf:edit' field.udf_id %}"
+                                               class="btn btn-outline-primary"
+                                               title="Edit">
+                                                <i class="bi bi-pencil"></i>
+                                            </a>
+
+                                            {% if field.is_active %}
+                                            <button type="button"
+                                                    class="btn btn-outline-danger"
+                                                    title="Delete"
+                                                    onclick="confirmDelete({{ field.udf_id }}, '{{ field.label }}')">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                            {% else %}
+                                            <button type="button"
+                                                    class="btn btn-outline-success"
+                                                    title="Restore"
+                                                    onclick="confirmRestore({{ field.udf_id }}, '{{ field.label }}')">
+                                                <i class="bi bi-arrow-counterclockwise"></i>
+                                            </button>
+                                            {% endif %}
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="6" class="text-center text-muted py-4">
+                                        <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                                        No fields found. Try adjusting your filters or
+                                        <a href="{% url 'udf:create' %}">create a new field</a>.
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Confirm Delete</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete the UDF field <strong id="deleteFieldName"></strong>?</p>
+                <p class="text-muted small mb-0">This is a soft delete - the field will be marked as inactive and can be restored later.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <form id="deleteForm" method="post" class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-danger">Delete</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Restore Confirmation Modal -->
+<div class="modal fade" id="restoreModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Confirm Restore</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to restore the UDF field <strong id="restoreFieldName"></strong>?</p>
+                <p class="text-muted small mb-0">The field will be reactivated and available for use.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <form id="restoreForm" method="post" class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-success">Restore</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function confirmDelete(udfId, fieldLabel) {
+    const modal = new bootstrap.Modal(document.getElementById('deleteModal'));
+    document.getElementById('deleteFieldName').textContent = fieldLabel;
+    document.getElementById('deleteForm').action = `/udf/${udfId}/delete/`;
+    modal.show();
+}
+
+function confirmRestore(udfId, fieldLabel) {
+    const modal = new bootstrap.Modal(document.getElementById('restoreModal'));
+    document.getElementById('restoreFieldName').textContent = fieldLabel;
+    document.getElementById('restoreForm').action = `/udf/${udfId}/restore/`;
+    modal.show();
+}
+</script>
+{% endblock %}
