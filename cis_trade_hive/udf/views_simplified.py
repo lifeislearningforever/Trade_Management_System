@@ -47,20 +47,20 @@ def udf_dashboard(request: HttpRequest) -> HttpResponse:
         # Get statistics from service
         stats = udf_field_service.get_dashboard_stats()
 
-        # Get all entity types (including those with 0 fields)
-        entity_types = udf_field_service.VALID_ENTITY_TYPES
+        # Get all entity types dynamically from database
+        object_types = udf_field_service.get_object_types()
 
         # Build stats map
-        stats_map = {stat['entity_type']: stat for stat in stats}
+        stats_map = {stat['object_type']: stat for stat in stats}
 
         # Ensure all entity types are present
         dashboard_stats = []
-        for entity_type in entity_types:
-            if entity_type in stats_map:
-                dashboard_stats.append(stats_map[entity_type])
+        for object_type in object_types:
+            if object_type in stats_map:
+                dashboard_stats.append(stats_map[object_type])
             else:
                 dashboard_stats.append({
-                    'entity_type': entity_type,
+                    'object_type': object_type,
                     'total_fields': 0,
                     'active_fields': 0,
                     'inactive_fields': 0,
@@ -108,7 +108,7 @@ def udf_list(request: HttpRequest) -> HttpResponse:
 
         # Get fields from service
         fields = udf_field_service.get_all_fields(
-            entity_type=entity_filter if entity_filter else None,
+            object_type=entity_filter if entity_filter else None,
             is_active=is_active
         )
 
@@ -117,15 +117,18 @@ def udf_list(request: HttpRequest) -> HttpResponse:
             search_lower = search_query.lower()
             fields = [
                 f for f in fields
-                if search_lower in f['field_name'].lower() or search_lower in f['label'].lower()
+                if search_lower in f['field_name'].lower() or search_lower in f.get('field_value', '').lower()
             ]
+
+        # Get entity types dynamically
+        object_types = udf_field_service.get_object_types()
 
         context = {
             'fields': fields,
             'search_query': search_query,
             'entity_filter': entity_filter,
             'status_filter': status_filter,
-            'entity_types': udf_field_service.VALID_ENTITY_TYPES,
+            'object_types': object_types,
             'page_title': 'UDF Fields',
         }
 
@@ -149,9 +152,12 @@ def udf_create(request: HttpRequest) -> HttpResponse:
     GET: Display form
     POST: Process form and create field
     """
+    # Get entity types dynamically
+    object_types = udf_field_service.get_object_types()
+
     if request.method == 'GET':
         context = {
-            'entity_types': udf_field_service.VALID_ENTITY_TYPES,
+            'object_types': object_types,
             'page_title': 'Create UDF Field',
             'form_action': 'create',
         }
@@ -163,9 +169,8 @@ def udf_create(request: HttpRequest) -> HttpResponse:
 
         field_data = {
             'field_name': request.POST.get('field_name', '').strip(),
-            'label': request.POST.get('label', '').strip(),
-            'entity_type': request.POST.get('entity_type', '').strip(),
-            'is_required': request.POST.get('is_required') == 'on',
+            'field_value': request.POST.get('field_value', '').strip(),
+            'object_type': request.POST.get('object_type', '').strip(),
         }
 
         # Create via service
@@ -177,7 +182,7 @@ def udf_create(request: HttpRequest) -> HttpResponse:
 
         # Show error
         context = {
-            'entity_types': udf_field_service.VALID_ENTITY_TYPES,
+            'object_types': object_types,
             'page_title': 'Create UDF Field',
             'form_action': 'create',
             'error': error_msg,
@@ -188,7 +193,7 @@ def udf_create(request: HttpRequest) -> HttpResponse:
     except Exception as e:
         logger.error(f"Error creating UDF field: {str(e)}")
         context = {
-            'entity_types': udf_field_service.VALID_ENTITY_TYPES,
+            'object_types': object_types,
             'page_title': 'Create UDF Field',
             'form_action': 'create',
             'error': f"System error: {str(e)}",
@@ -214,9 +219,12 @@ def udf_edit(request: HttpRequest, udf_id: int) -> HttpResponse:
     if not field:
         return HttpResponse(f"UDF field {udf_id} not found", status=404)
 
+    # Get entity types dynamically
+    object_types = udf_field_service.get_object_types()
+
     if request.method == 'GET':
         context = {
-            'entity_types': udf_field_service.VALID_ENTITY_TYPES,
+            'object_types': object_types,
             'page_title': 'Edit UDF Field',
             'form_action': 'edit',
             'udf_id': udf_id,
@@ -230,9 +238,8 @@ def udf_edit(request: HttpRequest, udf_id: int) -> HttpResponse:
 
         field_data = {
             'field_name': request.POST.get('field_name', '').strip(),
-            'label': request.POST.get('label', '').strip(),
-            'entity_type': request.POST.get('entity_type', '').strip(),
-            'is_required': request.POST.get('is_required') == 'on',
+            'field_value': request.POST.get('field_value', '').strip(),
+            'object_type': request.POST.get('object_type', '').strip(),
             'is_active': request.POST.get('is_active') == 'on',
         }
 
@@ -245,7 +252,7 @@ def udf_edit(request: HttpRequest, udf_id: int) -> HttpResponse:
 
         # Show error
         context = {
-            'entity_types': udf_field_service.VALID_ENTITY_TYPES,
+            'object_types': object_types,
             'page_title': 'Edit UDF Field',
             'form_action': 'edit',
             'udf_id': udf_id,
@@ -257,7 +264,7 @@ def udf_edit(request: HttpRequest, udf_id: int) -> HttpResponse:
     except Exception as e:
         logger.error(f"Error updating UDF field: {str(e)}")
         context = {
-            'entity_types': udf_field_service.VALID_ENTITY_TYPES,
+            'object_types': object_types,
             'page_title': 'Edit UDF Field',
             'form_action': 'edit',
             'udf_id': udf_id,
@@ -326,14 +333,60 @@ def udf_restore(request: HttpRequest, udf_id: int) -> HttpResponse:
 
 
 # ============================================================================
-# API ENDPOINTS (Optional - for AJAX operations)
+# API ENDPOINTS (For AJAX operations and cascading dropdowns)
 # ============================================================================
 
 @require_login
 @require_http_methods(["GET"])
-def udf_get_fields_by_entity(request: HttpRequest, entity_type: str) -> JsonResponse:
+def api_get_object_types(request: HttpRequest) -> JsonResponse:
     """
-    API endpoint to get all active fields for a specific entity type.
+    API endpoint to get all entity types for first dropdown.
+
+    Used for cascading dropdown: First level (Entity Type selection).
+
+    Returns:
+        JSON with success flag and object_types array
+    """
+    try:
+        object_types = udf_field_service.get_object_types()
+        return JsonResponse({'success': True, 'object_types': object_types})
+
+    except Exception as e:
+        logger.error(f"Error fetching entity types: {str(e)}")
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+@require_login
+@require_http_methods(["GET"])
+def api_get_fields_by_entity(request: HttpRequest, object_type: str) -> JsonResponse:
+    """
+    API endpoint to get all fields for a specific entity type.
+
+    Used for cascading dropdown: Second level (Field Name selection based on Entity Type).
+
+    Args:
+        object_type: Entity type to filter by (e.g., PORTFOLIO, EQUITY_PRICE, SECURITY)
+
+    Returns:
+        JSON with success flag and fields array (each field has field_name, field_value, udf_id, etc.)
+    """
+    try:
+        fields = udf_field_service.get_fields_by_entity(object_type.upper())
+        return JsonResponse({'success': True, 'fields': fields})
+
+    except Exception as e:
+        logger.error(f"Error fetching fields for entity {object_type}: {str(e)}")
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+@require_login
+@require_http_methods(["GET"])
+def udf_get_fields_by_entity(request: HttpRequest, object_type: str) -> JsonResponse:
+    """
+    Legacy API endpoint to get all active fields for a specific entity type.
+
+    DEPRECATED: Use api_get_fields_by_entity instead.
+    Kept for backward compatibility with existing modules.
 
     Used by other modules (Portfolio, Trade, etc.) to fetch UDF fields dynamically.
 
@@ -341,9 +394,9 @@ def udf_get_fields_by_entity(request: HttpRequest, entity_type: str) -> JsonResp
         JSON array of field objects
     """
     try:
-        fields = udf_field_service.get_all_fields(entity_type=entity_type.upper(), is_active=True)
+        fields = udf_field_service.get_all_fields(object_type=object_type.upper(), is_active=True)
         return JsonResponse({'success': True, 'fields': fields})
 
     except Exception as e:
-        logger.error(f"Error fetching fields for entity {entity_type}: {str(e)}")
+        logger.error(f"Error fetching fields for entity {object_type}: {str(e)}")
         return JsonResponse({'success': False, 'error': str(e)}, status=500)

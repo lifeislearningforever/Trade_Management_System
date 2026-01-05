@@ -20,6 +20,10 @@ urlpatterns = [
     path('<int:udf_id>/delete/', views.udf_delete, name='delete'),
     path('<int:udf_id>/restore/', views.udf_restore, name='restore'),
 
-    # API Endpoints
-    path('api/<str:entity_type>/fields/', views.udf_get_fields_by_entity, name='api_fields_by_entity'),
+    # API Endpoints for Cascading Dropdowns
+    path('api/object-types/', views.api_get_object_types, name='api_object_types'),
+    path('api/fields/<str:object_type>/', views.api_get_fields_by_entity, name='api_fields_by_object_new'),
+
+    # Legacy API Endpoint (for backward compatibility)
+    path('api/<str:object_type>/fields/', views.udf_get_fields_by_entity, name='api_fields_by_object'),
 ]

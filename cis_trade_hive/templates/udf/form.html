@@ -44,88 +44,74 @@
                     <form method="post" action="">
                         {% csrf_token %}
 
-                        <!-- Field Name -->
+                        <!-- Object Type (Dropdown 1 - Cascading) -->
                         <div class="mb-4">
-                            <label for="field_name" class="form-label">
-                                Field Name <span class="text-danger">*</span>
-                            </label>
-                            <input type="text"
-                                   class="form-control"
-                                   id="field_name"
-                                   name="field_name"
-                                   value="{{ field_data.field_name|default:'' }}"
-                                   placeholder="e.g., AAF, AFFIN-UOB HLDG, AIIF CP II"
-                                   required
-                                   {% if form_action == 'edit' %}readonly{% endif %}>
-                            <div class="form-text">
-                                Field name for identification. Can use uppercase, lowercase, numbers, spaces, hyphens, and underscores.
-                                {% if form_action == 'edit' %}
-                                <span class="text-warning"><i class="bi bi-lock-fill"></i> Field name cannot be changed after creation.</span>
-                                {% endif %}
-                            </div>
-                        </div>
-
-                        <!-- Label -->
-                        <div class="mb-4">
-                            <label for="label" class="form-label">
-                                Label <span class="text-danger">*</span>
-                            </label>
-                            <input type="text"
-                                   class="form-control"
-                                   id="label"
-                                   name="label"
-                                   value="{{ field_data.label|default:'' }}"
-                                   placeholder="e.g., Trade Date, Broker Code"
-                                   required>
-                            <div class="form-text">
-                                Display label shown to users in the UI.
-                            </div>
-                        </div>
-
-                        <!-- Entity Type -->
-                        <div class="mb-4">
-                            <label for="entity_type" class="form-label">
-                                Entity Type <span class="text-danger">*</span>
+                            <label for="object_type" class="form-label">
+                                Object Type <span class="text-danger">*</span>
                             </label>
                             <select class="form-select"
-                                    id="entity_type"
-                                    name="entity_type"
+                                    id="object_type"
+                                    name="object_type"
                                     required
                                     {% if form_action == 'edit' %}disabled{% endif %}>
-                                <option value="">Select Entity Type...</option>
-                                {% for entity_type in entity_types %}
-                                <option value="{{ entity_type }}"
-                                        {% if field_data.entity_type == entity_type %}selected{% endif %}>
-                                    {{ entity_type }}
+                                <option value="">-- Select Object Type --</option>
+                                {% for object_type in object_types %}
+                                <option value="{{ object_type }}"
+                                        {% if field_data.object_type == object_type %}selected{% endif %}>
+                                    {{ object_type }}
                                 </option>
                                 {% endfor %}
                             </select>
                             <div class="form-text">
-                                Module/Entity this UDF belongs to.
+                                Module/Object this UDF belongs to. Select to filter available fields.
                                 {% if form_action == 'edit' %}
-                                <span class="text-warning"><i class="bi bi-lock-fill"></i> Entity type cannot be changed after creation.</span>
+                                <span class="text-warning"><i class="bi bi-lock-fill"></i> Object type cannot be changed after creation.</span>
                                 {% endif %}
                             </div>
                             {% if form_action == 'edit' %}
                             <!-- Hidden field to submit disabled value -->
-                            <input type="hidden" name="entity_type" value="{{ field_data.entity_type }}">
+                            <input type="hidden" name="object_type" value="{{ field_data.object_type }}">
                             {% endif %}
                         </div>
 
-                        <!-- Required Checkbox -->
+                        <!-- Field Name (Dropdown 2 - Cascading, filtered by Object Type) -->
                         <div class="mb-4">
-                            <div class="form-check form-switch">
-                                <input class="form-check-input"
-                                       type="checkbox"
-                                       id="is_required"
-                                       name="is_required"
-                                       {% if field_data.is_required %}checked{% endif %}>
-                                <label class="form-check-label" for="is_required">
-                                    Required Field
-                                </label>
-                            </div>
+                            <label for="field_name" class="form-label">
+                                Field Name <span class="text-danger">*</span>
+                            </label>
+                            <select class="form-select"
+                                    id="field_name"
+                                    name="field_name"
+                                    required
+                                    {% if form_action == 'edit' %}disabled{% endif %}>
+                                <option value="">-- Select Object Type First --</option>
+                            </select>
                             <div class="form-text">
-                                If enabled, this field must be filled out when creating/editing the entity.
+                                Technical field name. Filtered by selected Object Type.
+                                {% if form_action == 'edit' %}
+                                <span class="text-warning"><i class="bi bi-lock-fill"></i> Field name cannot be changed after creation.</span>
+                                {% endif %}
+                            </div>
+                            {% if form_action == 'edit' %}
+                            <!-- Hidden field to submit disabled value -->
+                            <input type="hidden" name="field_name" value="{{ field_data.field_name }}">
+                            {% endif %}
+                        </div>
+
+                        <!-- Field Value (Display Label) -->
+                        <div class="mb-4">
+                            <label for="field_value" class="form-label">
+                                Field Value (Display Label) <span class="text-danger">*</span>
+                            </label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="field_value"
+                                   name="field_value"
+                                   value="{{ field_data.field_value|default:'' }}"
+                                   placeholder="e.g., Portfolio Type, Market, Security Type"
+                                   required>
+                            <div class="form-text">
+                                User-friendly display label shown in the UI.
                             </div>
                         </div>
 
@@ -193,11 +179,11 @@
                     </div>
 
                     <div class="mb-3">
-                        <strong>Entity Type</strong>
+                        <strong>Object Type</strong>
                         <ul class="small mb-0 ps-3">
                             <li>Choose the module this field belongs to</li>
                             <li>Cannot be changed after creation</li>
-                            <li>Each entity can have multiple UDF fields</li>
+                            <li>Each object can have multiple UDF fields</li>
                         </ul>
                     </div>
 
@@ -235,4 +221,98 @@
         </div>
     </div>
 </div>
+
+<!-- JavaScript for Cascading Dropdowns -->
+<script>
+(function() {
+    'use strict';
+
+    // Get form elements
+    const objectTypeSelect = document.getElementById('object_type');
+    const fieldNameSelect = document.getElementById('field_name');
+
+    // Store pre-selected values for edit mode
+    const preSelectedObjectType = "{{ field_data.object_type|default:'' }}";
+    const preSelectedFieldName = "{{ field_data.field_name|default:'' }}";
+
+    /**
+     * Fetch and populate field names based on selected object type
+     */
+    function loadFieldNamesByObjectType(objectType, callback) {
+        if (!objectType) {
+            fieldNameSelect.innerHTML = '<option value="">-- Select Object Type First --</option>';
+            fieldNameSelect.disabled = true;
+            return;
+        }
+
+        // Show loading state
+        fieldNameSelect.innerHTML = '<option value="">Loading fields...</option>';
+        fieldNameSelect.disabled = true;
+
+        // Fetch fields from API
+        fetch(`/udf/api/fields/${objectType}/`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.fields) {
+                    // Clear and enable dropdown
+                    fieldNameSelect.innerHTML = '<option value="">-- Select Field Name --</option>';
+
+                    if (data.fields.length === 0) {
+                        fieldNameSelect.innerHTML = '<option value="">-- No fields available for this object --</option>';
+                        fieldNameSelect.disabled = true;
+                    } else {
+                        // Populate options
+                        data.fields.forEach(field => {
+                            const option = document.createElement('option');
+                            option.value = field.field_name;
+                            option.textContent = `${field.field_name} - ${field.field_value}`;
+                            fieldNameSelect.appendChild(option);
+                        });
+
+                        fieldNameSelect.disabled = false;
+
+                        // Restore pre-selected value if in edit mode
+                        if (preSelectedFieldName && callback) {
+                            fieldNameSelect.value = preSelectedFieldName;
+                        }
+
+                        if (callback) callback();
+                    }
+                } else {
+                    fieldNameSelect.innerHTML = '<option value="">-- Error loading fields --</option>';
+                    fieldNameSelect.disabled = true;
+                    console.error('Error loading fields:', data.error);
+                }
+            })
+            .catch(error => {
+                fieldNameSelect.innerHTML = '<option value="">-- Error loading fields --</option>';
+                fieldNameSelect.disabled = true;
+                console.error('Error fetching fields:', error);
+            });
+    }
+
+    /**
+     * Event listener: Object Type change
+     */
+    {% if form_action != 'edit' %}
+    objectTypeSelect.addEventListener('change', function() {
+        const selectedObjectType = this.value;
+        loadFieldNamesByObjectType(selectedObjectType);
+    });
+    {% endif %}
+
+    /**
+     * Initialize on page load
+     */
+    document.addEventListener('DOMContentLoaded', function() {
+        {% if form_action == 'edit' and field_data.object_type %}
+        // In edit mode, load fields for pre-selected object type
+        loadFieldNamesByObjectType(preSelectedObjectType, function() {
+            // Callback after fields are loaded - select the pre-selected field
+            fieldNameSelect.value = preSelectedFieldName;
+        });
+        {% endif %}
+    });
+})();
+</script>
 {% endblock %}

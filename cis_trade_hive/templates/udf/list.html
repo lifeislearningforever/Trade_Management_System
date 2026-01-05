@@ -42,15 +42,15 @@
                                    value="{{ search_query }}">
                         </div>
 
-                        <!-- Entity Filter -->
+                        <!-- Object Type Filter -->
                         <div class="col-12 col-md-4">
-                            <label for="entity" class="form-label small text-muted">Entity Type</label>
+                            <label for="entity" class="form-label small text-muted">Object Type</label>
                             <select class="form-select" id="entity" name="entity">
-                                <option value="">All Entities</option>
-                                {% for entity_type in entity_types %}
-                                <option value="{{ entity_type }}"
-                                        {% if entity_filter == entity_type %}selected{% endif %}>
-                                    {{ entity_type }}
+                                <option value="">All Object Types</option>
+                                {% for object_type in object_types %}
+                                <option value="{{ object_type }}"
+                                        {% if entity_filter == object_type %}selected{% endif %}>
+                                    {{ object_type }}
                                 </option>
                                 {% endfor %}
                             </select>
@@ -103,10 +103,9 @@
                         <table class="table table-hover mb-0" style="min-width: 800px;">
                             <thead class="table-light">
                                 <tr>
+                                    <th>Object Type</th>
                                     <th>Field Name</th>
-                                    <th>Label</th>
-                                    <th>Entity Type</th>
-                                    <th class="text-center">Required</th>
+                                    <th>Field Value (Label)</th>
                                     <th class="text-center">Status</th>
                                     <th class="text-end">Actions</th>
                                 </tr>
@@ -115,19 +114,12 @@
                                 {% for field in fields %}
                                 <tr class="{% if not field.is_active %}table-secondary{% endif %}">
                                     <td>
+                                        <span class="badge bg-info">{{ field.object_type }}</span>
+                                    </td>
+                                    <td>
                                         <code class="text-dark">{{ field.field_name }}</code>
                                     </td>
-                                    <td>{{ field.label }}</td>
-                                    <td>
-                                        <span class="badge bg-info">{{ field.entity_type }}</span>
-                                    </td>
-                                    <td class="text-center">
-                                        {% if field.is_required %}
-                                        <span class="badge bg-warning">Required</span>
-                                        {% else %}
-                                        <span class="badge bg-light text-dark">Optional</span>
-                                        {% endif %}
-                                    </td>
+                                    <td>{{ field.field_value|default:'-' }}</td>
                                     <td class="text-center">
                                         {% if field.is_active %}
                                         <span class="badge bg-success">Active</span>
@@ -147,14 +139,14 @@
                                             <button type="button"
                                                     class="btn btn-outline-danger"
                                                     title="Delete"
-                                                    onclick="confirmDelete({{ field.udf_id }}, '{{ field.label }}')">
+                                                    onclick="confirmDelete({{ field.udf_id }}, '{{ field.field_value }}')">
                                                 <i class="bi bi-trash"></i>
                                             </button>
                                             {% else %}
                                             <button type="button"
                                                     class="btn btn-outline-success"
                                                     title="Restore"
-                                                    onclick="confirmRestore({{ field.udf_id }}, '{{ field.label }}')">
+                                                    onclick="confirmRestore({{ field.udf_id }}, '{{ field.field_value }}')">
                                                 <i class="bi bi-arrow-counterclockwise"></i>
                                             </button>
                                             {% endif %}
@@ -163,7 +155,7 @@
                                 </tr>
                                 {% empty %}
                                 <tr>
-                                    <td colspan="6" class="text-center text-muted py-4">
+                                    <td colspan="5" class="text-center text-muted py-4">
                                         <i class="bi bi-inbox fs-1 d-block mb-2"></i>
                                         No fields found. Try adjusting your filters or
                                         <a href="{% url 'udf:create' %}">create a new field</a>.

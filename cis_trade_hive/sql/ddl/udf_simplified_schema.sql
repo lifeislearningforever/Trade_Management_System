@@ -20,12 +20,12 @@ CREATE TABLE IF NOT EXISTS gmp_cis.cis_udf_field(
     udf_id BIGINT NOT NULL,
 
     -- Core Fields
-    field_name STRING NOT NULL,        -- Technical field name (e.g., 'trade_date', 'broker_code')
-    label STRING NOT NULL,              -- Display label (e.g., 'Trade Date', 'Broker Code')
     entity_type STRING NOT NULL,        -- Entity this UDF belongs to (PORTFOLIO, TRADE, COMMENTS, etc.)
+    field_name STRING NOT NULL,        -- Technical field name (e.g., 'trade_date', 'broker_code')
+    field_value STRING NOT NULL,              -- Display label (e.g., 'Trade Date', 'Broker Code')
+
 
     -- Metadata
-    is_required BOOLEAN DEFAULT false,  -- Whether field is required
     is_active BOOLEAN DEFAULT true,     -- Soft delete flag (true = active, false = deleted)
 
     -- Audit Fields

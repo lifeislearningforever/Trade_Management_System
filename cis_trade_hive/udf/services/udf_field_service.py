@@ -1,9 +1,16 @@
 """
-UDF Field Service - Business Logic Layer
-Follows SOLID Principles:
-- Single Responsibility: Business logic for UDF field operations
-- Open/Closed: Extensible through composition
-- Dependency Inversion: Depends on repository interface and audit interface
+UDF Field Service - Business Logic Layer (Simplified Schema)
+
+New Schema Support:
+- object_type: PORTFOLIO, EQUITY_PRICE, SECURITY, etc.
+- field_name: Technical name (e.g., 'portfolio_type', 'market')
+- field_value: Display label (e.g., 'Portfolio Type', 'Market')
+  - Empty ('') for entity type records
+  - Non-empty for field records
+
+Cascading Dropdown Logic:
+1. Get entity types: WHERE field_value = ''
+2. Get fields by entity: WHERE object_type = '<selected>' AND field_value != ''
 """
 
 from typing import List, Dict, Any, Optional
@@ -19,9 +26,6 @@ logger = logging.getLogger(__name__)
 class UDFFieldService:
     """Service for UDF field business logic operations with audit logging."""
 
-    # Valid entity types
-    VALID_ENTITY_TYPES = ['PORTFOLIO', 'TRADE', 'COMMENTS', 'POSITION', 'MARKETDATA', 'REFERENCE', 'SECURITY']
-
     def __init__(self, repository: UDFFieldRepositoryInterface):
         """
         Initialize service with dependency injection.
@@ -32,22 +36,55 @@ class UDFFieldService:
         self.repository = repository
 
     # ========================================================================
+    # CASCADING DROPDOWN OPERATIONS
+    # ========================================================================
+
+    def get_object_types(self) -> List[str]:
+        """
+        Get all available entity types for cascading dropdown.
+
+        Returns:
+            List of entity type strings
+        """
+        try:
+            return self.repository.get_object_types()
+        except Exception as e:
+            logger.error(f"Service error getting entity types: {str(e)}")
+            return []
+
+    def get_fields_by_entity(self, object_type: str) -> List[Dict[str, Any]]:
+        """
+        Get all fields for a specific entity type (for cascading dropdown).
+
+        Args:
+            object_type: Entity type to filter by
+
+        Returns:
+            List of field dictionaries
+        """
+        try:
+            return self.repository.get_fields_by_entity(object_type)
+        except Exception as e:
+            logger.error(f"Service error getting fields for entity {object_type}: {str(e)}")
+            return []
+
+    # ========================================================================
     # QUERY OPERATIONS
     # ========================================================================
 
-    def get_all_fields(self, entity_type: Optional[str] = None, is_active: Optional[bool] = None) -> List[Dict[str, Any]]:
+    def get_all_fields(self, object_type: Optional[str] = None, is_active: Optional[bool] = None) -> List[Dict[str, Any]]:
         """
         Get all UDF fields with optional filters.
 
         Args:
-            entity_type: Filter by entity type
+            object_type: Filter by entity type
             is_active: Filter by active status (True = active, False = deleted, None = all)
 
         Returns:
             List of UDF field dictionaries
         """
         try:
-            return self.repository.get_all(entity_type=entity_type, is_active=is_active)
+            return self.repository.get_all(object_type=object_type, is_active=is_active)
         except Exception as e:
             logger.error(f"Service error getting UDF fields: {str(e)}")
             return []
@@ -73,7 +110,7 @@ class UDFFieldService:
         Get dashboard statistics by entity type.
 
         Returns:
-            List of stats dictionaries with entity_type, total_fields, active_fields, inactive_fields
+            List of stats dictionaries with object_type, total_fields, active_fields, inactive_fields
         """
         try:
             return self.repository.get_stats_by_entity()
@@ -100,18 +137,13 @@ class UDFFieldService:
         if not field_data.get('field_name'):
             return False, "Field Name is required"
 
-        if not field_data.get('label'):
-            return False, "Label is required"
+        if not field_data.get('field_value'):
+            return False, "Field Value (Label) is required"
 
-        if not field_data.get('entity_type'):
+        if not field_data.get('object_type'):
             return False, "Entity Type is required"
 
-        # Validate entity type
-        entity_type = field_data['entity_type'].upper()
-        if entity_type not in self.VALID_ENTITY_TYPES:
-            return False, f"Invalid Entity Type. Must be one of: {', '.join(self.VALID_ENTITY_TYPES)}"
-
-        # Validate field name format (allow flexible naming like option_value pattern)
+        # Validate field name format
         field_name = field_data['field_name'].strip()
         if not field_name:
             return False, "Field Name cannot be empty"
@@ -119,23 +151,27 @@ class UDFFieldService:
         if len(field_name) > 200:
             return False, "Field Name must be 200 characters or less"
 
-        # Update field_data with stripped field_name
+        # Update field_data with stripped values
         field_data['field_name'] = field_name
+        field_data['field_value'] = field_data['field_value'].strip()
+        field_data['object_type'] = field_data['object_type'].upper()
 
-        # Check uniqueness of (field_name, label, entity_type) combination
-        # Get all active fields for this entity type
-        existing_fields = self.repository.get_all(entity_type=entity_type, is_active=True)
+        # Check uniqueness of (object_type, field_name) combination
+        existing_fields = self.repository.get_all(object_type=field_data['object_type'], is_active=True)
 
         for existing in existing_fields:
             # Skip self when updating
             if udf_id and existing.get('udf_id') == udf_id:
                 continue
 
+            # Skip entity type records (field_value is empty)
+            if not existing.get('field_value'):
+                continue
+
             # Check if combination already exists
-            if (existing.get('field_name') == field_name and
-                existing.get('label') == field_data['label'] and
-                existing.get('entity_type') == entity_type):
-                return False, f"Field Name '{field_name}', Label '{field_data['label']}', and Entity Type '{entity_type}' combination already exists"
+            if (existing.get('object_type') == field_data['object_type'] and
+                existing.get('field_name') == field_name):
+                return False, f"Field Name '{field_name}' already exists for entity type '{field_data['object_type']}'"
 
         return True, None
 
@@ -148,7 +184,7 @@ class UDFFieldService:
         Create a new UDF field with validation and audit logging.
 
         Args:
-            field_data: Dictionary with field_name, label, entity_type, is_required
+            field_data: Dictionary with object_type, field_name, field_value
             user_info: Dictionary with user_id, username, user_email
 
         Returns:
@@ -160,16 +196,15 @@ class UDFFieldService:
             if not is_valid:
                 return False, error_msg, None
 
-            # Generate UDF ID (timestamp-based)
-            udf_id = int(datetime.now().timestamp() * 1000)
+            # Get next UDF ID
+            udf_id = self.repository.get_next_id()
 
             # Prepare data
             create_data = {
                 'udf_id': udf_id,
+                'object_type': field_data['object_type'].upper(),
                 'field_name': field_data['field_name'],
-                'label': field_data['label'],
-                'entity_type': field_data['entity_type'].upper(),
-                'is_required': field_data.get('is_required', False),
+                'field_value': field_data['field_value'],
                 'is_active': True,
                 'created_by': user_info['username'],
             }
@@ -184,10 +219,10 @@ class UDFFieldService:
                     username=user_info['username'],
                     user_email=user_info.get('user_email', ''),
                     action_type='CREATE',
-                    entity_type='UDF',
-                    entity_name=create_data['label'],
+                    object_type='UDF',
+                    entity_name=create_data['field_value'],
                     entity_id=str(udf_id),
-                    action_description=f"Created UDF field '{create_data['label']}' ({create_data['field_name']}) for {create_data['entity_type']}",
+                    action_description=f"Created UDF field '{create_data['field_value']}' ({create_data['field_name']}) for {create_data['object_type']}",
                     request_method='POST',
                     request_path='/udf/create/',
                     ip_address=user_info.get('ip_address', ''),
@@ -215,7 +250,7 @@ class UDFFieldService:
 
         Args:
             udf_id: UDF field ID to update
-            field_data: Dictionary with field_name, label, entity_type, is_required, is_active
+            field_data: Dictionary with object_type, field_name, field_value, is_active
             user_info: Dictionary with user_id, username, user_email
 
         Returns:
@@ -235,10 +270,9 @@ class UDFFieldService:
             # Prepare update data (preserve created_by and created_at)
             update_data = {
                 'udf_id': udf_id,
+                'object_type': field_data['object_type'].upper(),
                 'field_name': field_data['field_name'],
-                'label': field_data['label'],
-                'entity_type': field_data['entity_type'].upper(),
-                'is_required': field_data.get('is_required', False),
+                'field_value': field_data['field_value'],
                 'is_active': field_data.get('is_active', True),
                 'created_by': existing['created_by'],
                 'created_at': existing['created_at'],
@@ -255,10 +289,10 @@ class UDFFieldService:
                     username=user_info['username'],
                     user_email=user_info.get('user_email', ''),
                     action_type='UPDATE',
-                    entity_type='UDF',
-                    entity_name=update_data['label'],
+                    object_type='UDF',
+                    entity_name=update_data['field_value'],
                     entity_id=str(udf_id),
-                    action_description=f"Updated UDF field '{update_data['label']}' ({update_data['field_name']}) for {update_data['entity_type']}",
+                    action_description=f"Updated UDF field '{update_data['field_value']}' ({update_data['field_name']}) for {update_data['object_type']}",
                     request_method='POST',
                     request_path=f'/udf/{udf_id}/edit/',
                     ip_address=user_info.get('ip_address', ''),
@@ -310,10 +344,10 @@ class UDFFieldService:
                     username=user_info['username'],
                     user_email=user_info.get('user_email', ''),
                     action_type='DELETE',
-                    entity_type='UDF',
-                    entity_name=existing['label'],
+                    object_type='UDF',
+                    entity_name=existing['field_value'],
                     entity_id=str(udf_id),
-                    action_description=f"Deleted UDF field '{existing['label']}' ({existing['field_name']}) for {existing['entity_type']}",
+                    action_description=f"Deleted UDF field '{existing['field_value']}' ({existing['field_name']}) for {existing['object_type']}",
                     request_method='POST',
                     request_path=f'/udf/{udf_id}/delete/',
                     ip_address=user_info.get('ip_address', ''),
@@ -365,10 +399,10 @@ class UDFFieldService:
                     username=user_info['username'],
                     user_email=user_info.get('user_email', ''),
                     action_type='RESTORE',
-                    entity_type='UDF',
-                    entity_name=existing['label'],
+                    object_type='UDF',
+                    entity_name=existing['field_value'],
                     entity_id=str(udf_id),
-                    action_description=f"Restored UDF field '{existing['label']}' ({existing['field_name']}) for {existing['entity_type']}",
+                    action_description=f"Restored UDF field '{existing['field_value']}' ({existing['field_name']}) for {existing['object_type']}",
                     request_method='POST',
                     request_path=f'/udf/{udf_id}/restore/',
                     ip_address=user_info.get('ip_address', ''),
