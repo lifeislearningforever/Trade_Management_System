@@ -50,35 +50,6 @@
             </li>
         </ul>
 
-        <!-- Security Master Data Section -->
-        <div class="nav-section-title">Security Master Data</div>
-        <ul class="nav flex-column">
-            <li class="nav-item">
-                <a class="nav-link {% if 'security' in request.path and 'dashboard' in request.path %}active{% endif %}" href="{% url 'security:dashboard' %}">
-                    <i class="bi bi-graph-up"></i>
-                    <span>Security Dashboard</span>
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link {% if 'security' in request.path and 'dashboard' not in request.path %}active{% endif %}" href="{% url 'security:list' %}">
-                    <i class="bi bi-shield-check"></i>
-                    <span>Securities</span>
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link" href="{% url 'security:create' %}">
-                    <i class="bi bi-plus-circle"></i>
-                    <span>New Security</span>
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link" href="{% url 'security:pending_approvals' %}">
-                    <i class="bi bi-clock-history"></i>
-                    <span>Pending Approvals</span>
-                </a>
-            </li>
-        </ul>
-
         <!-- Market Data Section -->
         <div class="nav-section-title">Market Data</div>
         <ul class="nav flex-column">
@@ -127,6 +98,12 @@
                 <a class="nav-link {% if 'counterparty' in request.path %}active{% endif %}" href="{% url 'reference_data:counterparty_list' %}">
                     <i class="bi bi-building"></i>
                     <span>Counterparties</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if 'security' in request.path %}active{% endif %}" href="{% url 'security:list' %}">
+                    <i class="bi bi-shield-check"></i>
+                    <span>Securities</span>
                 </a>
             </li>
         </ul>
