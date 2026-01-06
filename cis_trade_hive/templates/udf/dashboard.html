@@ -15,7 +15,7 @@
                 </div>
                 <div>
                     <a href="{% url 'udf:create' %}" class="btn btn-primary">
-                        <i class="bi bi-plus-circle me-1"></i> Add Field
+                        <i class="bi bi-plus-circle me-1"></i> Add Field Value
                     </a>
                     <a href="{% url 'udf:list' %}" class="btn btn-outline-secondary">
                         <i class="bi bi-list-ul me-1"></i> View All
@@ -33,8 +33,30 @@
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-start mb-3">
                         <div>
-                            <h5 class="card-title mb-1">{{ stat.entity_type }}</h5>
-                            <p class="text-muted small mb-0">Module</p>
+                            <h5 class="card-title mb-1">
+                                {% if stat.object_type == 'PORTFOLIO' %}
+                                    <i class="bi bi-briefcase text-primary me-2"></i>Portfolio
+                                {% elif stat.object_type == 'EQUITY_PRICE' %}
+                                    <i class="bi bi-graph-up text-success me-2"></i>Equity Price
+                                {% elif stat.object_type == 'SECURITY' %}
+                                    <i class="bi bi-shield-lock text-warning me-2"></i>Security
+                                {% elif stat.object_type == 'TRADE' %}
+                                    <i class="bi bi-arrow-left-right text-info me-2"></i>Trade
+                                {% elif stat.object_type == 'MARKETDATA' %}
+                                    <i class="bi bi-bar-chart text-danger me-2"></i>Market Data
+                                {% elif stat.object_type == 'REFERENCE' %}
+                                    <i class="bi bi-book text-secondary me-2"></i>Reference
+                                {% elif stat.object_type == 'COMMENTS' %}
+                                    <i class="bi bi-chat-left-text text-primary me-2"></i>Comments
+                                {% elif stat.object_type == 'POSITION' %}
+                                    <i class="bi bi-geo-alt text-success me-2"></i>Position
+                                {% else %}
+                                    <i class="bi bi-folder text-muted me-2"></i>{{ stat.object_type|title }}
+                                {% endif %}
+                            </h5>
+                            <p class="text-muted small mb-0">
+                                <code class="text-muted small">{{ stat.object_type }}</code>
+                            </p>
                         </div>
                         <div class="text-end">
                             <div class="badge bg-primary fs-6">
@@ -59,7 +81,7 @@
                     </div>
 
                     <div class="d-grid gap-2">
-                        <a href="{% url 'udf:list' %}?entity={{ stat.entity_type }}&status=active"
+                        <a href="{% url 'udf:list' %}?object_type={{ stat.object_type }}&status=active"
                            class="btn btn-sm btn-outline-primary">
                             View Fields
                         </a>
@@ -75,7 +97,7 @@
         <div class="col-12">
             <div class="alert alert-info">
                 <i class="bi bi-info-circle me-2"></i>
-                <strong>No UDF fields found.</strong> Click "Add Field" to create your first user-defined field.
+                <strong>No UDF fields found.</strong> Click "Add Field Value" to create your first user-defined field.
             </div>
         </div>
     </div>

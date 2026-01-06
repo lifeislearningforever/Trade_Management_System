@@ -231,9 +231,9 @@
     const objectTypeSelect = document.getElementById('object_type');
     const fieldNameSelect = document.getElementById('field_name');
 
-    // Store pre-selected values for edit mode
-    const preSelectedObjectType = "{{ field_data.object_type|default:'' }}";
-    const preSelectedFieldName = "{{ field_data.field_name|default:'' }}";
+    // Store pre-selected values (works for both create with URL params and edit mode)
+    const preSelectedObjectType = "{% if field_data %}{{ field_data.object_type|default:'' }}{% endif %}";
+    const preSelectedFieldName = "{% if field_data %}{{ field_data.field_name|default:'' }}{% endif %}";
 
     /**
      * Fetch and populate field names based on selected object type
@@ -305,11 +305,13 @@
      * Initialize on page load
      */
     document.addEventListener('DOMContentLoaded', function() {
-        {% if form_action == 'edit' and field_data.object_type %}
-        // In edit mode, load fields for pre-selected object type
+        {% if field_data.object_type %}
+        // Load fields for pre-selected object type (works for both create and edit mode)
         loadFieldNamesByObjectType(preSelectedObjectType, function() {
             // Callback after fields are loaded - select the pre-selected field
-            fieldNameSelect.value = preSelectedFieldName;
+            if (preSelectedFieldName) {
+                fieldNameSelect.value = preSelectedFieldName;
+            }
         });
         {% endif %}
     });

@@ -85,18 +85,18 @@ def udf_dashboard(request: HttpRequest) -> HttpResponse:
 @require_login
 def udf_list(request: HttpRequest) -> HttpResponse:
     """
-    UDF List view with search and filter capabilities.
+    UDF List view with cascading dropdown filters.
 
     Features:
-    - Search by field name or label
-    - Filter by entity type
-    - Filter by active/inactive status
+    - Filter by object type (dropdown 1)
+    - Filter by field name (dropdown 2 - cascades from object type)
+    - Filter by active/inactive status (dropdown 3)
     - Actions: Edit, Soft Delete, Restore
     """
     try:
         # Get query parameters
-        search_query = request.GET.get('search', '').strip()
-        entity_filter = request.GET.get('entity', '').strip()
+        object_type_filter = request.GET.get('object_type', '').strip()
+        field_name_filter = request.GET.get('field_name', '').strip()
         status_filter = request.GET.get('status', 'active')  # active, inactive, all
 
         # Determine is_active filter
@@ -108,16 +108,15 @@ def udf_list(request: HttpRequest) -> HttpResponse:
 
         # Get fields from service
         fields = udf_field_service.get_all_fields(
-            object_type=entity_filter if entity_filter else None,
+            object_type=object_type_filter if object_type_filter else None,
             is_active=is_active
         )
 
-        # Apply search filter (client-side for simplicity)
-        if search_query:
-            search_lower = search_query.lower()
+        # Apply field_name filter if provided
+        if field_name_filter:
             fields = [
                 f for f in fields
-                if search_lower in f['field_name'].lower() or search_lower in f.get('field_value', '').lower()
+                if f['field_name'] == field_name_filter
             ]
 
         # Get entity types dynamically
@@ -125,8 +124,8 @@ def udf_list(request: HttpRequest) -> HttpResponse:
 
         context = {
             'fields': fields,
-            'search_query': search_query,
-            'entity_filter': entity_filter,
+            'object_type_filter': object_type_filter,
+            'field_name_filter': field_name_filter,
             'status_filter': status_filter,
             'object_types': object_types,
             'page_title': 'UDF Fields',
@@ -149,17 +148,33 @@ def udf_create(request: HttpRequest) -> HttpResponse:
     """
     Create new UDF field.
 
-    GET: Display form
+    GET: Display form (with optional pre-population from URL parameters)
     POST: Process form and create field
+
+    URL Parameters (for pre-population from list page):
+    - object_type: Pre-select object type dropdown
+    - field_name: Pre-select field name dropdown
     """
     # Get entity types dynamically
     object_types = udf_field_service.get_object_types()
 
     if request.method == 'GET':
+        # Get URL parameters for pre-population
+        prepopulate_object_type = request.GET.get('object_type', '').strip()
+        prepopulate_field_name = request.GET.get('field_name', '').strip()
+
+        # Build field_data for pre-population
+        field_data = {}
+        if prepopulate_object_type:
+            field_data['object_type'] = prepopulate_object_type
+        if prepopulate_field_name:
+            field_data['field_name'] = prepopulate_field_name
+
         context = {
             'object_types': object_types,
             'page_title': 'Create UDF Field',
             'form_action': 'create',
+            'field_data': field_data if field_data else None,
         }
         return render(request, 'udf/form.html', context)
 
