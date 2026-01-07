@@ -7,8 +7,11 @@ Uses Impala Python library for connectivity (supports Kudu writes).
 """
 
 import logging
+import threading
+import time
 from typing import Optional, Any, List, Dict
 from contextlib import contextmanager
+from queue import Queue, Empty
 from django.conf import settings
 
 logger = logging.getLogger('core')
@@ -24,27 +27,44 @@ except ImportError:
 
 class ImpalaConnectionManager:
     """
-    Singleton connection manager for Impala/Kudu database.
-    Follows Single Responsibility Principle.
-    Uses PyHive to connect to Impala.
+    Connection pool manager for Impala/Kudu database (Production-ready).
+
+    Features:
+    - Connection pooling with configurable pool size
+    - Connection validation before use
+    - Thread-safe implementation
+    - Automatic connection recycling
+    - Graceful degradation
     """
     _instance = None
-    _connection = None
+    _lock = threading.Lock()
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
         return cls._instance
 
-    def get_connection(self, database: Optional[str] = None):
+    def __init__(self):
+        if not hasattr(self, '_initialized'):
+            self._pool = Queue(maxsize=10)  # Pool size: 10 connections
+            self._pool_lock = threading.Lock()
+            self._connection_count = 0
+            self._max_connections = 10
+            self._connection_timeout = 3600  # 1 hour in seconds
+            self._initialized = True
+            logger.info("Impala connection pool initialized (max: 10 connections)")
+
+    def _create_connection(self, database: Optional[str] = None):
         """
-        Get or create Impala connection.
+        Create a new Impala connection.
 
         Args:
-            database: Optional database name, defaults to IMPALA_CONFIG['DATABASE']
+            database: Optional database name
 
         Returns:
-            Connection object or None if not available
+            Connection object or None
         """
         if not IMPALA_AVAILABLE:
             logger.warning("Impala connection requested but Impala library not available")
@@ -55,7 +75,7 @@ class ImpalaConnectionManager:
             db_name = database or config['DATABASE']
             auth_mode = config.get('AUTH', 'NOSASL')
 
-            # Build connection parameters for Impala
+            # Build connection parameters
             conn_params = {
                 'host': config['HOST'],
                 'port': config['PORT'],
@@ -63,25 +83,149 @@ class ImpalaConnectionManager:
                 'auth_mechanism': auth_mode,
             }
 
-            # Only add username/password for auth modes that require them
+            # Add credentials for auth modes that require them
             if auth_mode in ['LDAP', 'CUSTOM']:
                 conn_params['user'] = config.get('USERNAME', '')
                 conn_params['password'] = config.get('PASSWORD', '')
 
-            # Create new connection using Impala
+            # Create connection
             connection = impala_connect(**conn_params)
 
-            logger.info(f"Successfully connected to Impala database: {db_name}")
+            # Store creation time for recycling
+            connection._created_at = time.time()
+            connection._database = db_name
+
+            logger.info(f"Created new Impala connection to database: {db_name}")
             return connection
 
         except Exception as e:
-            logger.error(f"Failed to connect to Impala: {str(e)}")
+            logger.error(f"Failed to create Impala connection: {str(e)}")
             return None
+
+    def _validate_connection(self, connection) -> bool:
+        """
+        Validate if connection is still alive and not expired.
+
+        Args:
+            connection: Connection to validate
+
+        Returns:
+            True if valid, False otherwise
+        """
+        try:
+            # Check if connection is too old (recycle after 1 hour)
+            if hasattr(connection, '_created_at'):
+                age = time.time() - connection._created_at
+                if age > self._connection_timeout:
+                    logger.debug("Connection expired (age: {:.0f}s), will recycle".format(age))
+                    return False
+
+            # Ping the connection
+            cursor = connection.cursor()
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+            cursor.close()
+            return True
+
+        except Exception as e:
+            logger.debug(f"Connection validation failed: {str(e)}")
+            return False
+
+    def get_connection(self, database: Optional[str] = None):
+        """
+        Get a connection from the pool.
+
+        Args:
+            database: Optional database name
+
+        Returns:
+            Connection object from pool
+        """
+        if not IMPALA_AVAILABLE:
+            return None
+
+        # Try to get connection from pool
+        try:
+            connection = self._pool.get(block=False)
+
+            # Validate connection
+            if self._validate_connection(connection):
+                return connection
+            else:
+                # Connection is stale, close it
+                try:
+                    connection.close()
+                except:
+                    pass
+                with self._pool_lock:
+                    self._connection_count -= 1
+
+        except Empty:
+            pass  # Pool is empty, create new connection
+
+        # Create new connection if under limit
+        with self._pool_lock:
+            if self._connection_count < self._max_connections:
+                connection = self._create_connection(database)
+                if connection:
+                    self._connection_count += 1
+                    logger.debug(f"Pool stats: {self._connection_count}/{self._max_connections} connections")
+                return connection
+            else:
+                # Wait for connection from pool
+                logger.warning("Connection pool exhausted, waiting for available connection")
+                try:
+                    connection = self._pool.get(timeout=30)
+                    if self._validate_connection(connection):
+                        return connection
+                    else:
+                        # Stale connection, create new one
+                        try:
+                            connection.close()
+                        except:
+                            pass
+                        self._connection_count -= 1
+                        return self._create_connection(database)
+                except Empty:
+                    logger.error("Timeout waiting for connection from pool")
+                    return None
+
+    def return_connection(self, connection):
+        """
+        Return a connection to the pool.
+
+        Args:
+            connection: Connection to return
+        """
+        if connection is None:
+            return
+
+        try:
+            # Validate before returning to pool
+            if self._validate_connection(connection):
+                self._pool.put(connection, block=False)
+            else:
+                # Connection is bad, close it
+                try:
+                    connection.close()
+                except:
+                    pass
+                with self._pool_lock:
+                    self._connection_count -= 1
+
+        except Exception as e:
+            logger.debug(f"Failed to return connection to pool: {str(e)}")
+            try:
+                connection.close()
+            except:
+                pass
+            with self._pool_lock:
+                self._connection_count -= 1
 
     @contextmanager
     def get_cursor(self, database: Optional[str] = None):
         """
-        Context manager for Impala cursor.
+        Context manager for Impala cursor (with connection pooling).
 
         Usage:
             with impala_manager.get_cursor() as cursor:
@@ -106,11 +250,9 @@ class ImpalaConnectionManager:
                     cursor.close()
                 except:
                     pass
+            # Return connection to pool instead of closing
             if connection:
-                try:
-                    connection.close()
-                except:
-                    pass
+                self.return_connection(connection)
 
     def execute_query(self, query: str, params: Optional[List] = None,
                      database: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -156,7 +298,7 @@ class ImpalaConnectionManager:
     def execute_write(self, query: str, params: Optional[List] = None,
                      database: Optional[str] = None) -> bool:
         """
-        Execute a write query (INSERT, UPDATE, DELETE).
+        Execute a write query (INSERT, UPDATE, DELETE) with connection pooling.
 
         Args:
             query: SQL query to execute
@@ -205,11 +347,9 @@ class ImpalaConnectionManager:
                     cursor.close()
                 except:
                     pass
+            # Return connection to pool instead of closing
             if connection:
-                try:
-                    connection.close()
-                except:
-                    pass
+                self.return_connection(connection)
 
     def test_connection(self) -> bool:
         """Test if Impala connection is available"""

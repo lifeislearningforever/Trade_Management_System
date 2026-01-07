@@ -146,57 +146,215 @@ class CalendarService:
 
 
 class CounterpartyService:
-    """Service for Counterparty reference data"""
+    """Service for Counterparty reference data - Now with full CRUD operations"""
 
     def __init__(self):
         self.repository = counterparty_repository
 
-    def list_all(self, search: Optional[str] = None, counterparty_type: Optional[str] = None) -> List[Dict]:
+    def list_all(
+        self,
+        search: Optional[str] = None,
+        country: Optional[str] = None,
+        is_active: Optional[bool] = None
+    ) -> List[Dict]:
         """
-        Fetch all counterparties from Hive
+        Fetch all counterparties from Kudu table
 
         Args:
             search: Optional search term for name or description
-            counterparty_type: Filter by counterparty type
+            country: Filter by country
+            is_active: Filter by active status
 
         Returns:
             List of counterparty dictionaries
         """
-        results = self.repository.list_all(search=search, counterparty_type=counterparty_type)
-        # Repository already returns properly mapped columns
-        return results
+        return self.repository.list_all(search=search, country=country, is_active=is_active)
 
-    def get_by_name(self, name: str) -> Optional[Dict]:
-        """Get specific counterparty by name"""
-        result = self.repository.get_by_name(name)
+    def get_by_short_name(self, short_name: str) -> Optional[Dict]:
+        """Get specific counterparty by short name (primary key)"""
+        return self.repository.get_by_short_name(short_name)
 
-        if not result:
-            return None
+    def get_distinct_countries(self) -> List[str]:
+        """Get list of distinct countries for dropdown filter"""
+        return self.repository.get_distinct_countries()
 
-        # Transform column names to match expected format
-        prefix = 'gmp_cis_sta_dly_counterparty.'
-        return {
-            'counterparty_name': result.get(f'{prefix}counterparty_name') or result.get('counterparty_name'),
-            'description': result.get(f'{prefix}description') or result.get('description'),
-            'salutation': result.get(f'{prefix}salutation') or result.get('salutation'),
-            'address': result.get(f'{prefix}address') or result.get('address'),
-            'city': result.get(f'{prefix}city') or result.get('city'),
-            'country': result.get(f'{prefix}country') or result.get('country'),
-            'postal_code': result.get(f'{prefix}postal_code') or result.get('postal_code'),
-            'fax': result.get(f'{prefix}fax') or result.get('fax'),
-            'telex': result.get(f'{prefix}telex') or result.get('telex'),
-            'industry': result.get(f'{prefix}industry') or result.get('industry'),
-            'is_counterparty_broker': result.get(f'{prefix}is_counterparty_broker') or result.get('is_counterparty_broker'),
-            'is_counterparty_custodian': result.get(f'{prefix}is_counterparty_custodian') or result.get('is_counterparty_custodian'),
-            'is_counterparty_issuer': result.get(f'{prefix}is_counterparty_issuer') or result.get('is_counterparty_issuer'),
-            'primary_contact': result.get(f'{prefix}primary_contact') or result.get('primary_contact'),
-            'primary_number': result.get(f'{prefix}primary_number') or result.get('primary_number'),
-            'other_contact': result.get(f'{prefix}other_contact') or result.get('other_contact'),
-            'other_number': result.get(f'{prefix}other_number') or result.get('other_number'),
-            'custodian_group': result.get(f'{prefix}custodian_group') or result.get('custodian_group'),
-            'broker_group': result.get(f'{prefix}broker_group') or result.get('broker_group'),
-            'resident_y_n': result.get(f'{prefix}resident_y_n') or result.get('resident_y_n'),
-        }
+    def validate_counterparty(
+        self,
+        counterparty_data: Dict[str, Any],
+        is_update: bool = False
+    ) -> tuple[bool, Optional[str]]:
+        """
+        Validate counterparty data
+
+        Args:
+            counterparty_data: Dictionary with counterparty fields
+            is_update: True if this is an update operation
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        # Required field validation
+        short_name = counterparty_data.get('counterparty_short_name', '').strip()
+        if not short_name:
+            return False, "Counterparty short name is required"
+
+        # Check for duplicate on create
+        if not is_update:
+            existing = self.repository.get_by_short_name(short_name)
+            if existing:
+                return False, f"Counterparty with short name '{short_name}' already exists"
+
+        # Validate short name length
+        if len(short_name) > 100:
+            return False, "Counterparty short name must be 100 characters or less"
+
+        # Full name validation
+        full_name = counterparty_data.get('counterparty_full_name', '').strip()
+        if full_name and len(full_name) > 255:
+            return False, "Counterparty full name must be 255 characters or less"
+
+        return True, None
+
+    def create_counterparty(
+        self,
+        counterparty_data: Dict[str, Any],
+        user_info: Dict[str, str]
+    ) -> tuple[bool, Optional[str]]:
+        """
+        Create new counterparty with validation and audit logging
+
+        Args:
+            counterparty_data: Dictionary with all counterparty fields
+            user_info: User information for audit logging
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        # Validate
+        is_valid, error_msg = self.validate_counterparty(counterparty_data, is_update=False)
+        if not is_valid:
+            return False, error_msg
+
+        # Set audit fields
+        username = user_info.get('username', 'system')
+        counterparty_data['created_by'] = username
+        counterparty_data['updated_by'] = username
+        counterparty_data['is_active'] = True
+        counterparty_data['is_deleted'] = False
+
+        # Create in repository
+        success = self.repository.create(counterparty_data)
+
+        if success:
+            return True, None
+        else:
+            return False, "Failed to create counterparty in database"
+
+    def update_counterparty(
+        self,
+        short_name: str,
+        counterparty_data: Dict[str, Any],
+        user_info: Dict[str, str]
+    ) -> tuple[bool, Optional[str]]:
+        """
+        Update existing counterparty with validation and audit logging
+
+        Args:
+            short_name: Counterparty short name (primary key)
+            counterparty_data: Dictionary with updated fields
+            user_info: User information for audit logging
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        # Check if exists
+        existing = self.repository.get_by_short_name(short_name)
+        if not existing:
+            return False, f"Counterparty '{short_name}' not found"
+
+        # Validate (skip duplicate check for updates)
+        counterparty_data['counterparty_short_name'] = short_name
+        is_valid, error_msg = self.validate_counterparty(counterparty_data, is_update=True)
+        if not is_valid:
+            return False, error_msg
+
+        # Set audit fields
+        username = user_info.get('username', 'system')
+        counterparty_data['updated_by'] = username
+
+        # Update in repository
+        success = self.repository.update(short_name, counterparty_data)
+
+        if success:
+            return True, None
+        else:
+            return False, "Failed to update counterparty in database"
+
+    def delete_counterparty(
+        self,
+        short_name: str,
+        user_info: Dict[str, str]
+    ) -> tuple[bool, Optional[str]]:
+        """
+        Soft delete counterparty
+
+        Args:
+            short_name: Counterparty short name
+            user_info: User information for audit logging
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        # Check if exists
+        existing = self.repository.get_by_short_name(short_name)
+        if not existing:
+            return False, f"Counterparty '{short_name}' not found"
+
+        # Check if already deleted
+        if existing.get('is_deleted'):
+            return False, f"Counterparty '{short_name}' is already deleted"
+
+        # Soft delete
+        username = user_info.get('username', 'system')
+        success = self.repository.soft_delete(short_name, username)
+
+        if success:
+            return True, None
+        else:
+            return False, "Failed to delete counterparty in database"
+
+    def restore_counterparty(
+        self,
+        short_name: str,
+        user_info: Dict[str, str]
+    ) -> tuple[bool, Optional[str]]:
+        """
+        Restore soft-deleted counterparty
+
+        Args:
+            short_name: Counterparty short name
+            user_info: User information for audit logging
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        # Check if exists
+        existing = self.repository.get_by_short_name(short_name)
+        if not existing:
+            return False, f"Counterparty '{short_name}' not found"
+
+        # Check if not deleted
+        if not existing.get('is_deleted'):
+            return False, f"Counterparty '{short_name}' is not deleted"
+
+        # Restore
+        username = user_info.get('username', 'system')
+        success = self.repository.restore(short_name, username)
+
+        if success:
+            return True, None
+        else:
+            return False, "Failed to restore counterparty in database"
 
 
 # Singleton instances

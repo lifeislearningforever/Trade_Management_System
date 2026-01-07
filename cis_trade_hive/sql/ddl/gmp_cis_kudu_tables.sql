@@ -15,6 +15,31 @@
 -- Switch to cis database
 USE gmp_cis;
 
+drop table cis_counterparty_cif_kudu;
+CREATE TABLE IF NOT EXISTS cis_counterparty_cif_kudu (
+  id BIGINT  PRIMARY KEY,
+    M_LABEL INT,
+    src_system STRING,
+    sub_system STRING,
+    data_cat STRING,
+    data_frq STRING,
+    src_id STRING,
+    processing_date STRING,
+    record_type STRING,
+
+  counterparty_name STRING,
+  country STRING,
+  isin INT
+)
+PARTITION BY HASH PARTITIONS 4
+STORED AS KUDU
+TBLPROPERTIES (
+  'kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251'
+);
+
+insert into  cis_counterparty_cif_kudu values (1,14330,'gmp','cis','sta','dly','gmp_cis_sta_dly_counterparty_cif','20251201','D','ABB INTL FINANCE LTD*','SG',0000000000100150125);
+insert into  cis_counterparty_cif_kudu values (2,14330,'gmp','cis','sta','dly','gmp_cis_sta_dly_counterparty_cif','20251201','D','ABB INTL FINANCE LTD*','HK',0000000000100150125);
+D|||SG|0000000000100150125
 -- Kudu table for cis_audit_log
 CREATE TABLE IF NOT EXISTS cis_audit_log_kudu (
   audit_id BIGINT NOT NULL,

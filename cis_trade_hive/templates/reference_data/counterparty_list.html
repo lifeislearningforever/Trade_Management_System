@@ -17,11 +17,16 @@
             <h1 class="content-title">
                 <i class="bi bi-building text-primary"></i> Counterparties
             </h1>
-            <p class="content-subtitle">Manage counterparty reference data from Kudu</p>
+            <p class="content-subtitle">Manage counterparty reference data from Kudu table: cis_counterparty_kudu</p>
         </div>
-        <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">
-            <i class="bi bi-arrow-left"></i> Back to Dashboard
-        </a>
+        <div class="d-flex gap-2">
+            <a href="{% url 'reference_data:counterparty_create' %}" class="btn btn-primary">
+                <i class="bi bi-plus-circle"></i> Create Counterparty
+            </a>
+            <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Back
+            </a>
+        </div>
     </div>
 
     <!-- Search & Filter Card -->
@@ -33,15 +38,50 @@
         </div>
         <div class="card-body">
             <form method="get" action="{% url 'reference_data:counterparty_list' %}" class="row g-3">
-                <div class="col-md-10">
+                <!-- Search -->
+                <div class="col-md-6">
                     <label class="form-label">Search</label>
                     <div class="input-group">
                         <span class="input-group-text"><i class="bi bi-search"></i></span>
                         <input type="text" class="form-control" name="search" value="{{ search }}"
-                               placeholder="Search by name or description...">
+                               placeholder="Search by short name or full name...">
                     </div>
                 </div>
-                <div class="col-md-2 d-flex align-items-end gap-2">
+
+                <!-- Country Filter -->
+                <div class="col-md-3">
+                    <label class="form-label">Country</label>
+                    <select class="form-select" name="country">
+                        <option value="">All Countries</option>
+                        {% for country in countries %}
+                            <option value="{{ country }}" {% if selected_country == country %}selected{% endif %}>
+                                {{ country }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Status Filter -->
+                <div class="col-md-2">
+                    <label class="form-label">Status</label>
+                    <select class="form-select" name="status">
+                        <option value="active" {% if selected_status == 'active' %}selected{% endif %}>Active</option>
+                        <option value="inactive" {% if selected_status == 'inactive' %}selected{% endif %}>Inactive</option>
+                        <option value="all" {% if selected_status == 'all' %}selected{% endif %}>All</option>
+                    </select>
+                </div>
+
+                <!-- CIF Filter -->
+                <div class="col-md-2">
+                    <label class="form-label">CIF Count</label>
+                    <select class="form-select" name="cif_filter">
+                        <option value="" {% if not cif_filter %}selected{% endif %}>All</option>
+                        <option value="multiple" {% if cif_filter == 'multiple' %}selected{% endif %}>Multiple CIFs Only</option>
+                    </select>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="col-md-1 d-flex align-items-end gap-2">
                     <button type="submit" class="btn btn-primary">
                         <i class="bi bi-search"></i>
                     </button>
@@ -55,16 +95,13 @@
 
     <!-- Counterparties Table -->
     <div class="card">
-        <div class="card-header">
+        <div class="card-header d-flex justify-content-between align-items-center">
             <h5 class="card-title mb-0">
                 Counterparty List
                 <span class="badge badge-primary ms-2">{{ total_count }} counterparties</span>
-                <span class="badge badge-info ms-2">
-                    <i class="bi bi-arrows-expand"></i> Scroll horizontally to view all 20 columns
-                </span>
             </h5>
-            <a href="?export=csv&{{ request.GET.urlencode }}" class="btn btn-sm btn-success">
-                <i class="bi bi-download"></i> Download CSV
+            <a href="?export=csv{% if search %}&search={{ search }}{% endif %}{% if selected_country %}&country={{ selected_country }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}" class="btn btn-sm btn-success">
+                <i class="bi bi-download"></i> Export CSV
             </a>
         </div>
         <div class="card-body p-0">
@@ -73,69 +110,111 @@
                     <table class="table table-hover table-sm mb-0" style="font-size: 0.875rem; white-space: nowrap; width: max-content;">
                         <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
                             <tr>
-                                <th style="width: 150px; position: sticky; left: 0; background-color: #f8f9fa; z-index: 11; border-right: 2px solid #dee2e6;">Counterparty Name</th>
-                                <th style="width: 200px;">Description</th>
-                                <th style="width: 100px;">Salutation</th>
-                                <th style="width: 180px;">Address</th>
-                                <th style="width: 100px;">City</th>
-                                <th style="width: 100px;">Country</th>
+                                <th style="width: 150px; position: sticky; left: 0; background-color: #f8f9fa; z-index: 11; border-right: 2px solid #dee2e6;">Short Name</th>
+                                <th style="width: 70px;">CIFs</th>
+                                <th style="width: 200px;">Full Name</th>
+                                <th style="width: 100px;">M-Label (CIF)</th>
+                                <th style="width: 120px;">City</th>
+                                <th style="width: 120px;">Country</th>
                                 <th style="width: 100px;">Postal Code</th>
-                                <th style="width: 100px;">Fax</th>
-                                <th style="width: 100px;">Telex</th>
+                                <th style="width: 120px;">Primary Contact</th>
+                                <th style="width: 120px;">Primary Number</th>
                                 <th style="width: 100px;">Industry</th>
+                                <th style="width: 80px;">Bank</th>
                                 <th style="width: 80px;">Broker</th>
                                 <th style="width: 80px;">Custodian</th>
                                 <th style="width: 80px;">Issuer</th>
-                                <th style="width: 120px;">Primary Contact</th>
-                                <th style="width: 120px;">Primary Number</th>
-                                <th style="width: 120px;">Other Contact</th>
-                                <th style="width: 120px;">Other Number</th>
-                                <th style="width: 120px;">Custodian Group</th>
-                                <th style="width: 100px;">Broker Group</th>
-                                <th style="width: 100px;">Resident</th>
+                                <th style="width: 80px;">Status</th>
+                                <th style="width: 180px; position: sticky; right: 0; background-color: #f8f9fa; z-index: 11; border-left: 2px solid #dee2e6;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for cp in counterparties %}
                             <tr>
-                                <td style="position: sticky; left: 0; background-color: white; z-index: 9; border-right: 2px solid #dee2e6;"><strong class="text-primary">{{ cp.counterparty_name|default:"-" }}</strong></td>
-                                <td>{{ cp.description|default:"-" }}</td>
-                                <td>{{ cp.salutation|default:"-" }}</td>
-                                <td>{{ cp.address|default:"-" }}</td>
+                                <td style="position: sticky; left: 0; background-color: white; z-index: 9; border-right: 2px solid #dee2e6;">
+                                    <strong class="text-primary">{{ cp.counterparty_short_name|default:"-" }}</strong>
+                                </td>
+                                <td>
+                                    <button type="button" class="btn btn-sm btn-outline-info"
+                                            onclick="viewCIFs('{{ cp.counterparty_short_name }}')"
+                                            title="View CIFs">
+                                        <i class="bi bi-file-earmark-text"></i>
+                                    </button>
+                                </td>
+                                <td>{{ cp.counterparty_full_name|default:"-" }}</td>
+                                <td>
+                                    {% if cp.m_label %}
+                                        <span class="badge badge-info">{{ cp.m_label }}</span>
+                                    {% else %}
+                                        <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
                                 <td>{{ cp.city|default:"-" }}</td>
                                 <td>{{ cp.country|default:"-" }}</td>
                                 <td>{{ cp.postal_code|default:"-" }}</td>
-                                <td>{{ cp.fax|default:"-" }}</td>
-                                <td>{{ cp.telex|default:"-" }}</td>
-                                <td>{{ cp.industry|default:"-" }}</td>
-                                <td>
-                                    {% if cp.is_counterparty_broker == 'Y' %}
-                                        <span class="badge badge-success">Y</span>
-                                    {% else %}
-                                        <span class="badge badge-secondary">N</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if cp.is_counterparty_custodian == 'Y' %}
-                                        <span class="badge badge-success">Y</span>
-                                    {% else %}
-                                        <span class="badge badge-secondary">N</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if cp.is_counterparty_issuer == 'Y' %}
-                                        <span class="badge badge-success">Y</span>
-                                    {% else %}
-                                        <span class="badge badge-secondary">N</span>
-                                    {% endif %}
-                                </td>
                                 <td>{{ cp.primary_contact|default:"-" }}</td>
                                 <td>{{ cp.primary_number|default:"-" }}</td>
-                                <td>{{ cp.other_contact|default:"-" }}</td>
-                                <td>{{ cp.other_number|default:"-" }}</td>
-                                <td>{{ cp.custodian_group|default:"-" }}</td>
-                                <td>{{ cp.broker_group|default:"-" }}</td>
-                                <td>{{ cp.resident_y_n|default:"-" }}</td>
+                                <td>{{ cp.industry|default:"-" }}</td>
+                                <td>
+                                    {% if cp.is_bank %}
+                                        <span class="badge badge-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">No</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if cp.is_broker %}
+                                        <span class="badge badge-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">No</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if cp.is_custodian %}
+                                        <span class="badge badge-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">No</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if cp.is_issuer %}
+                                        <span class="badge badge-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">No</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if cp.is_active %}
+                                        <span class="badge badge-success">Active</span>
+                                    {% else %}
+                                        <span class="badge badge-warning">Inactive</span>
+                                    {% endif %}
+                                </td>
+                                <td style="position: sticky; right: 0; background-color: white; z-index: 9; border-left: 2px solid #dee2e6;">
+                                    <div class="btn-group" role="group">
+                                        <a href="{% url 'reference_data:counterparty_edit' cp.counterparty_short_name %}"
+                                           class="btn btn-sm btn-outline-primary" title="Edit">
+                                            <i class="bi bi-pencil"></i>
+                                        </a>
+                                        {% if cp.is_deleted %}
+                                            <form method="post" action="{% url 'reference_data:counterparty_restore' cp.counterparty_short_name %}"
+                                                  style="display: inline;" onsubmit="return confirm('Restore this counterparty?');">
+                                                {% csrf_token %}
+                                                <button type="submit" class="btn btn-sm btn-outline-success" title="Restore">
+                                                    <i class="bi bi-arrow-counterclockwise"></i>
+                                                </button>
+                                            </form>
+                                        {% else %}
+                                            <form method="post" action="{% url 'reference_data:counterparty_delete' cp.counterparty_short_name %}"
+                                                  style="display: inline;" onsubmit="return confirm('Delete this counterparty?');">
+                                                {% csrf_token %}
+                                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </form>
+                                        {% endif %}
+                                    </div>
+                                </td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -149,12 +228,12 @@
                         <ul class="pagination justify-content-center mb-0">
                             {% if counterparties.has_previous %}
                                 <li class="page-item">
-                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}" aria-label="First">
+                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if selected_country %}&country={{ selected_country }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if cif_filter %}&cif_filter={{ cif_filter }}{% endif %}" aria-label="First">
                                         <span aria-hidden="true">&laquo;&laquo;</span>
                                     </a>
                                 </li>
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ counterparties.previous_page_number }}{% if search %}&search={{ search }}{% endif %}" aria-label="Previous">
+                                    <a class="page-link" href="?page={{ counterparties.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if selected_country %}&country={{ selected_country }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if cif_filter %}&cif_filter={{ cif_filter }}{% endif %}" aria-label="Previous">
                                         <span aria-hidden="true">&laquo;</span>
                                     </a>
                                 </li>
@@ -174,19 +253,19 @@
                                     </li>
                                 {% elif num > counterparties.number|add:'-3' and num < counterparties.number|add:'3' %}
                                     <li class="page-item">
-                                        <a class="page-link" href="?page={{ num }}{% if search %}&search={{ search }}{% endif %}">{{ num }}</a>
+                                        <a class="page-link" href="?page={{ num }}{% if search %}&search={{ search }}{% endif %}{% if selected_country %}&country={{ selected_country }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if cif_filter %}&cif_filter={{ cif_filter }}{% endif %}">{{ num }}</a>
                                     </li>
                                 {% endif %}
                             {% endfor %}
 
                             {% if counterparties.has_next %}
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ counterparties.next_page_number }}{% if search %}&search={{ search }}{% endif %}" aria-label="Next">
+                                    <a class="page-link" href="?page={{ counterparties.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if selected_country %}&country={{ selected_country }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if cif_filter %}&cif_filter={{ cif_filter }}{% endif %}" aria-label="Next">
                                         <span aria-hidden="true">&raquo;</span>
                                     </a>
                                 </li>
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ counterparties.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}" aria-label="Last">
+                                    <a class="page-link" href="?page={{ counterparties.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if selected_country %}&country={{ selected_country }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if cif_filter %}&cif_filter={{ cif_filter }}{% endif %}" aria-label="Last">
                                         <span aria-hidden="true">&raquo;&raquo;</span>
                                     </a>
                                 </li>
@@ -209,8 +288,13 @@
                 <div class="text-center py-5" style="color: var(--gray-500);">
                     <i class="bi bi-building" style="font-size: 3rem; opacity: 0.3;"></i>
                     <p class="mt-3 mb-0">No counterparties found</p>
-                    {% if search %}
+                    {% if search or selected_country or selected_status != 'active' %}
                         <p class="text-muted">Try adjusting your filters</p>
+                        <a href="{% url 'reference_data:counterparty_list' %}" class="btn btn-sm btn-primary mt-2">Clear Filters</a>
+                    {% else %}
+                        <a href="{% url 'reference_data:counterparty_create' %}" class="btn btn-sm btn-primary mt-2">
+                            <i class="bi bi-plus-circle"></i> Create First Counterparty
+                        </a>
                     {% endif %}
                 </div>
             {% endif %}
@@ -220,8 +304,234 @@
     <!-- Info Alert -->
     <div class="alert alert-info mt-4">
         <i class="bi bi-info-circle"></i>
-        <strong>Note:</strong> Counterparty data is fetched from Kudu/Impala in real-time.
-        Counterparty information includes broker, custodian, and issuer classification flags.
+        <strong>Note:</strong> Counterparty data is now stored in Kudu table <code>cis_counterparty_kudu</code> with a stable primary key (<code>counterparty_short_name</code>).
+        This allows full CRUD operations and ensures Django references never break when ETL runs.
+    </div>
+
+    <!-- CIF Details Modal -->
+    <div class="modal" id="cifModal" tabindex="-1" aria-labelledby="cifModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="cifModalLabel">
+                        <i class="bi bi-file-earmark-text"></i> CIF Details
+                    </h5>
+                    <button type="button" class="btn-close" onclick="closeCIFModal()" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="cifLoadingSpinner" class="text-center py-4" style="display: none;">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-muted">Loading CIFs...</p>
+                    </div>
+
+                    <div id="cifContent" style="display: none;">
+                        <h6 class="mb-3">
+                            Counterparty: <strong id="cifCounterpartyName" class="text-primary"></strong>
+                        </h6>
+
+                        <div id="cifList"></div>
+
+                        <div id="noCIFsMessage" class="text-center py-4" style="display: none;">
+                            <i class="bi bi-inbox" style="font-size: 3rem; opacity: 0.3;"></i>
+                            <p class="mt-3 mb-0 text-muted">No CIFs found for this counterparty</p>
+                        </div>
+                    </div>
+
+                    <div id="cifErrorMessage" class="alert alert-danger" style="display: none;">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <span id="cifErrorText"></span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeCIFModal()">Close</button>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
+
+<script>
+// CIF Modal Functionality with client-side caching - NO BOOTSTRAP JS, PURE DOM
+let cifCache = new Map(); // Cache CIF data to avoid redundant requests
+
+function viewCIFs(counterpartyShortName) {
+    console.log('viewCIFs called for:', counterpartyShortName);
+
+    const modal = document.getElementById('cifModal');
+
+    // CRITICAL: Remove ALL existing backdrops (there might be multiple)
+    const allBackdrops = document.querySelectorAll('.modal-backdrop');
+    allBackdrops.forEach(backdrop => backdrop.remove());
+
+    // Reset modal state - clear any previous content
+    document.getElementById('cifList').innerHTML = '';
+    document.getElementById('cifLoadingSpinner').style.display = 'block';
+    document.getElementById('cifContent').style.display = 'none';
+    document.getElementById('cifErrorMessage').style.display = 'none';
+    document.getElementById('noCIFsMessage').style.display = 'none';
+    document.getElementById('cifCounterpartyName').textContent = counterpartyShortName;
+
+    // Show modal using direct DOM manipulation (bypass Bootstrap JS)
+    modal.classList.add('show');
+    modal.style.display = 'block';
+    document.body.classList.add('modal-open');
+
+    // Remove any scroll lock styles that might interfere
+    document.body.style.overflow = '';
+    document.body.style.paddingRight = '';
+
+    // Add backdrop manually with click handler
+    const newBackdrop = document.createElement('div');
+    newBackdrop.className = 'modal-backdrop show';
+    newBackdrop.onclick = closeCIFModal;
+    document.body.appendChild(newBackdrop);
+
+    // Check cache first
+    if (cifCache.has(counterpartyShortName)) {
+        console.log('Using cached data for:', counterpartyShortName);
+        // Use cached data - instant display!
+        const cachedData = cifCache.get(counterpartyShortName);
+        document.getElementById('cifLoadingSpinner').style.display = 'none';
+        document.getElementById('cifContent').style.display = 'block';
+
+        if (cachedData.cifs && cachedData.cifs.length > 0) {
+            displayCIFs(cachedData.cifs);
+        } else {
+            document.getElementById('noCIFsMessage').style.display = 'block';
+        }
+        return; // Exit early - no network request needed!
+    }
+
+    // Fetch CIFs via AJAX
+    console.log('Fetching from server for:', counterpartyShortName);
+    fetchCIFsFromServer(counterpartyShortName);
+}
+
+// Close modal function
+function closeCIFModal() {
+    console.log('closeCIFModal called');
+
+    const modal = document.getElementById('cifModal');
+
+    // Remove ALL backdrops (in case multiple were created)
+    const allBackdrops = document.querySelectorAll('.modal-backdrop');
+    allBackdrops.forEach(backdrop => backdrop.remove());
+
+    // Hide modal
+    modal.classList.remove('show');
+    modal.style.display = 'none';
+    document.body.classList.remove('modal-open');
+
+    // Restore body scroll
+    document.body.style.overflow = '';
+    document.body.style.paddingRight = '';
+
+    console.log('Modal closed successfully');
+}
+
+// Global error handler to catch any JavaScript errors
+window.addEventListener('error', function(e) {
+    console.error('JavaScript Error:', e.message, 'at', e.filename, ':', e.lineno);
+});
+
+function fetchCIFsFromServer(counterpartyShortName) {
+
+    // Fetch CIFs via AJAX
+    const url = `/reference-data/counterparty/${encodeURIComponent(counterpartyShortName)}/cif/`;
+
+    fetch(url, {
+        method: 'GET',
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+        },
+        credentials: 'same-origin'
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Failed to fetch CIFs');
+        }
+        return response.json();
+    })
+    .then(data => {
+        // Cache the result for instant future access
+        cifCache.set(counterpartyShortName, data);
+
+        // Hide loading spinner
+        document.getElementById('cifLoadingSpinner').style.display = 'none';
+        document.getElementById('cifContent').style.display = 'block';
+
+        if (data.success && data.cifs && data.cifs.length > 0) {
+            // Display CIFs
+            displayCIFs(data.cifs);
+            document.getElementById('noCIFsMessage').style.display = 'none';
+        } else {
+            // No CIFs found
+            document.getElementById('cifList').innerHTML = '';
+            document.getElementById('noCIFsMessage').style.display = 'block';
+        }
+    })
+    .catch(error => {
+        // Hide loading spinner
+        document.getElementById('cifLoadingSpinner').style.display = 'none';
+
+        // Show error message
+        document.getElementById('cifErrorMessage').style.display = 'block';
+        document.getElementById('cifErrorText').textContent = 'Error loading CIFs: ' + error.message;
+    });
+}
+
+function displayCIFs(cifs) {
+    const cifListContainer = document.getElementById('cifList');
+
+    // Build all HTML as a string first - single DOM operation (much faster!)
+    const htmlContent = cifs.map(cif => `
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <p class="mb-2">
+                            <strong>CIF Number (M-Label):</strong>
+                            <span class="badge badge-info ms-2">${cif.m_label || '-'}</span>
+                        </p>
+                        <p class="mb-2">
+                            <strong>Country:</strong> ${cif.country || '-'}
+                        </p>
+                    </div>
+                    <div class="col-md-6">
+                        <p class="mb-2">
+                            <strong>ISIN:</strong> ${cif.isin || '-'}
+                        </p>
+                        <p class="mb-2">
+                            <strong>Status:</strong>
+                            ${cif.is_active ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-warning">Inactive</span>'}
+                        </p>
+                    </div>
+                </div>
+                ${cif.description ? `
+                <div class="row mt-2">
+                    <div class="col-12">
+                        <p class="mb-0">
+                            <strong>Description:</strong> ${cif.description}
+                        </p>
+                    </div>
+                </div>
+                ` : ''}
+                <div class="row mt-2">
+                    <div class="col-12">
+                        <small class="text-muted">
+                            Created by: ${cif.created_by || '-'} |
+                            Updated by: ${cif.updated_by || '-'}
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+
+    // Single innerHTML assignment - triggers only ONE reflow instead of N reflows
+    cifListContainer.innerHTML = htmlContent;
+}
+</script>
 {% endblock %}

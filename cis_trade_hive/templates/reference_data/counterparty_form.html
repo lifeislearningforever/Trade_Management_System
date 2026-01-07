@@ -1,0 +1,514 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{% if is_edit %}Edit{% else %}Create{% endif %} Counterparty - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="#">Reference Data</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'reference_data:counterparty_list' %}">Counterparties</a></li>
+    <li class="breadcrumb-item active">{% if is_edit %}Edit{% else %}Create{% endif %}</li>
+{% endblock %}
+
+{% block content %}
+<div class="counterparty-form-container" style="max-width: 1000px; margin: 0 auto;">
+    <!-- Page Header -->
+    <div class="content-header d-flex justify-content-between align-items-start mb-4">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-{% if is_edit %}pencil{% else %}plus-circle{% endif %} text-primary"></i>
+                {% if is_edit %}Edit Counterparty{% else %}Create New Counterparty{% endif %}
+            </h1>
+            <p class="content-subtitle">
+                {% if is_edit %}
+                    Update counterparty information for: <strong>{{ counterparty.counterparty_short_name }}</strong>
+                {% else %}
+                    Add a new counterparty to the system
+                {% endif %}
+            </p>
+        </div>
+        <a href="{% url 'reference_data:counterparty_list' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to List
+        </a>
+    </div>
+
+    <!-- Form Card -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-info-circle"></i> Counterparty Information
+            </h5>
+        </div>
+        <div class="card-body">
+            <form method="post" class="needs-validation" novalidate>
+                {% csrf_token %}
+
+                <!-- Basic Information Section -->
+                <div class="mb-4">
+                    <h6 class="text-muted mb-3">
+                        <i class="bi bi-person-badge"></i> Basic Information
+                    </h6>
+                    <div class="row g-3">
+                        <!-- Short Name (Primary Key) -->
+                        <div class="col-md-6">
+                            <label for="counterparty_short_name" class="form-label">
+                                Short Name <span class="text-danger">*</span>
+                            </label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="counterparty_short_name"
+                                   name="counterparty_short_name"
+                                   value="{{ counterparty.counterparty_short_name|default:'' }}"
+                                   required
+                                   {% if is_edit %}readonly{% endif %}
+                                   placeholder="e.g., AFFIN BK-KL">
+                            <div class="form-text">
+                                {% if is_edit %}
+                                    Primary key - cannot be changed
+                                {% else %}
+                                    Unique identifier for this counterparty
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- M-Label (CIF) -->
+                        <div class="col-md-6">
+                            <label for="m_label" class="form-label">M-Label (CIF)</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="m_label"
+                                   name="m_label"
+                                   value="{{ counterparty.m_label|default:'' }}"
+                                   placeholder="e.g., 1483">
+                            <div class="form-text">Customer Identification Number</div>
+                        </div>
+
+                        <!-- Full Name -->
+                        <div class="col-md-12">
+                            <label for="counterparty_full_name" class="form-label">Full Name</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="counterparty_full_name"
+                                   name="counterparty_full_name"
+                                   value="{{ counterparty.counterparty_full_name|default:'' }}"
+                                   placeholder="e.g., AFFIN BANK BERHAD">
+                        </div>
+
+                        <!-- Record Type -->
+                        <div class="col-md-6">
+                            <label for="record_type" class="form-label">Record Type</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="record_type"
+                                   name="record_type"
+                                   value="{{ counterparty.record_type|default:'' }}"
+                                   placeholder="e.g., D">
+                        </div>
+
+                        <!-- Industry -->
+                        <div class="col-md-6">
+                            <label for="industry" class="form-label">Industry</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="industry"
+                                   name="industry"
+                                   value="{{ counterparty.industry|default:'' }}"
+                                   placeholder="e.g., Banking">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Address Information Section -->
+                <div class="mb-4">
+                    <h6 class="text-muted mb-3">
+                        <i class="bi bi-geo-alt"></i> Address Information
+                    </h6>
+                    <div class="row g-3">
+                        <!-- City -->
+                        <div class="col-md-4">
+                            <label for="city" class="form-label">City</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="city"
+                                   name="city"
+                                   value="{{ counterparty.city|default:'' }}"
+                                   placeholder="e.g., Kuala Lumpur">
+                        </div>
+
+                        <!-- Country -->
+                        <div class="col-md-4">
+                            <label for="country" class="form-label">Country</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="country"
+                                   name="country"
+                                   value="{{ counterparty.country|default:'' }}"
+                                   placeholder="e.g., Malaysia">
+                        </div>
+
+                        <!-- Postal Code -->
+                        <div class="col-md-4">
+                            <label for="postal_code" class="form-label">Postal Code</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="postal_code"
+                                   name="postal_code"
+                                   value="{{ counterparty.postal_code|default:'' }}"
+                                   placeholder="e.g., 50100">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Contact Information Section -->
+                <div class="mb-4">
+                    <h6 class="text-muted mb-3">
+                        <i class="bi bi-telephone"></i> Contact Information
+                    </h6>
+                    <div class="row g-3">
+                        <!-- Primary Contact -->
+                        <div class="col-md-6">
+                            <label for="primary_contact" class="form-label">Primary Contact</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="primary_contact"
+                                   name="primary_contact"
+                                   value="{{ counterparty.primary_contact|default:'' }}"
+                                   placeholder="Contact person name">
+                        </div>
+
+                        <!-- Primary Number -->
+                        <div class="col-md-6">
+                            <label for="primary_number" class="form-label">Primary Number</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="primary_number"
+                                   name="primary_number"
+                                   value="{{ counterparty.primary_number|default:'' }}"
+                                   placeholder="e.g., +60-3-1234-5678">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Classification Flags Section -->
+                <div class="mb-4">
+                    <h6 class="text-muted mb-3">
+                        <i class="bi bi-tags"></i> Classification
+                    </h6>
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="is_bank"
+                                       name="is_bank"
+                                       {% if counterparty.is_bank %}checked{% endif %}>
+                                <label class="form-check-label" for="is_bank">
+                                    Is Bank
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="col-md-3">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="is_broker"
+                                       name="is_broker"
+                                       {% if counterparty.is_broker %}checked{% endif %}>
+                                <label class="form-check-label" for="is_broker">
+                                    Is Broker
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="col-md-3">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="is_custodian"
+                                       name="is_custodian"
+                                       {% if counterparty.is_custodian %}checked{% endif %}>
+                                <label class="form-check-label" for="is_custodian">
+                                    Is Custodian
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="col-md-3">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="is_issuer"
+                                       name="is_issuer"
+                                       {% if counterparty.is_issuer %}checked{% endif %}>
+                                <label class="form-check-label" for="is_issuer">
+                                    Is Issuer
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CIF Management Section -->
+                <div class="mt-4 pt-4 border-top">
+                    <h6 class="text-muted mb-3">
+                        <i class="bi bi-file-earmark-text"></i> CIF Management
+                        <small class="text-muted">(Customer Identification Numbers)</small>
+                    </h6>
+
+                    <!-- Existing CIFs (for edit mode) -->
+                    {% if is_edit and existing_cifs %}
+                    <div class="alert alert-info mb-3">
+                        <strong>Existing CIFs:</strong> {{ existing_cifs|length }} CIF(s) found
+                    </div>
+                    <div class="table-responsive mb-3">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>M-Label (CIF)</th>
+                                    <th>Country</th>
+                                    <th>ISIN</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for cif in existing_cifs %}
+                                <tr>
+                                    <td>{{ cif.m_label }}</td>
+                                    <td>{{ cif.country }}</td>
+                                    <td>{{ cif.isin|default:'-' }}</td>
+                                    <td>
+                                        {% if cif.is_active %}
+                                            <span class="badge bg-success">Active</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">Inactive</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% endif %}
+
+                    <!-- Add New CIFs -->
+                    <div class="card">
+                        <div class="card-header bg-light">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span><i class="bi bi-plus-circle"></i> Add CIF(s)</span>
+                                <button type="button" class="btn btn-sm btn-success" onclick="addCIFRow()">
+                                    <i class="bi bi-plus"></i> Add CIF
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="cif-rows-container">
+                                <!-- Initial CIF row (hidden template) -->
+                                <div class="cif-row-template" style="display: none;">
+                                    <div class="row g-3 mb-3 pb-3 border-bottom cif-row">
+                                        <div class="col-md-3">
+                                            <label class="form-label">M-Label (CIF) <span class="text-danger">*</span></label>
+                                            <input type="text"
+                                                   class="form-control cif-m-label"
+                                                   name="cif_m_label[]"
+                                                   placeholder="e.g., 1483"
+                                                   required>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label">Country <span class="text-danger">*</span></label>
+                                            <select class="form-select cif-country"
+                                                    name="cif_country[]"
+                                                    required>
+                                                <option value="">Select Country</option>
+                                                {% for country in countries %}
+                                                <option value="{{ country.code }}">{{ country.code }} - {{ country.name }}</option>
+                                                {% endfor %}
+                                            </select>
+                                            <div class="invalid-feedback country-duplicate-error" style="display: none;">
+                                                Duplicate country - Only one CIF allowed per country
+                                            </div>
+                                        </div>
+                                        <div class="col-md-5">
+                                            <label class="form-label">ISIN</label>
+                                            <input type="text"
+                                                   class="form-control cif-isin"
+                                                   name="cif_isin[]"
+                                                   placeholder="e.g., US1234567890">
+                                        </div>
+                                        <div class="col-md-1 d-flex align-items-end">
+                                            <button type="button"
+                                                    class="btn btn-outline-danger w-100"
+                                                    onclick="removeCIFRow(this)"
+                                                    title="Remove CIF">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- CIF rows will be added here -->
+                                <div id="no-cifs-message" class="text-muted text-center py-3">
+                                    <i class="bi bi-info-circle"></i> No CIFs added yet. Click "Add CIF" to begin.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-text mt-2">
+                        <i class="bi bi-info-circle"></i> <strong>Note:</strong>
+                        Each CIF must have a unique country. You can add the same M-Label for different countries.
+                    </div>
+                </div>
+
+                <!-- Form Actions -->
+                <div class="d-flex justify-content-end gap-2 mt-4 pt-3 border-top">
+                    <a href="{% url 'reference_data:counterparty_list' %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-x-circle"></i> Cancel
+                    </a>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-circle"></i>
+                        {% if is_edit %}Update Counterparty{% else %}Create Counterparty{% endif %}
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Help Info -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-info-circle"></i>
+        <strong>Note:</strong>
+        <ul class="mb-0 mt-2">
+            <li>Short Name is the primary key and must be unique</li>
+            <li>M-Label (CIF) is optional and used for linking with issuer data</li>
+            <li>Classification flags help categorize counterparty types</li>
+            <li>All changes are logged with audit trail (created_by, updated_by, timestamps)</li>
+        </ul>
+    </div>
+</div>
+
+<script>
+// Client-side form validation
+(function() {
+    'use strict';
+    var forms = document.querySelectorAll('.needs-validation');
+    Array.prototype.slice.call(forms).forEach(function(form) {
+        form.addEventListener('submit', function(event) {
+            if (!form.checkValidity()) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            form.classList.add('was-validated');
+        }, false);
+    });
+})();
+
+// CIF Management Functions
+let cifRowCounter = 0;
+
+function addCIFRow() {
+    cifRowCounter++;
+
+    // Clone the template
+    const template = document.querySelector('.cif-row-template');
+    const newRow = template.cloneNode(true);
+
+    // Show the cloned row
+    newRow.style.display = 'block';
+    newRow.classList.remove('cif-row-template');
+    newRow.classList.add('cif-row-active');
+
+    // Update IDs and names to be unique
+    const rowId = `cif-row-${cifRowCounter}`;
+    newRow.querySelector('.cif-row').id = rowId;
+
+    // Add change event to country dropdown for duplicate detection
+    const countrySelect = newRow.querySelector('.cif-country');
+    countrySelect.addEventListener('change', checkDuplicateCountries);
+
+    // Insert before the "no CIFs" message
+    const container = document.getElementById('cif-rows-container');
+    const noMessageDiv = document.getElementById('no-cifs-message');
+    container.insertBefore(newRow.firstElementChild, noMessageDiv);
+
+    // Hide the "no CIFs" message
+    noMessageDiv.style.display = 'none';
+
+    // Focus on the M-Label input
+    newRow.querySelector('.cif-m-label').focus();
+}
+
+function removeCIFRow(button) {
+    const row = button.closest('.cif-row');
+    row.remove();
+
+    // Check if there are any CIF rows left
+    const container = document.getElementById('cif-rows-container');
+    const rows = container.querySelectorAll('.cif-row');
+
+    if (rows.length === 0) {
+        document.getElementById('no-cifs-message').style.display = 'block';
+    }
+
+    // Recheck for duplicate countries
+    checkDuplicateCountries();
+}
+
+function checkDuplicateCountries() {
+    const container = document.getElementById('cif-rows-container');
+    const rows = container.querySelectorAll('.cif-row');
+    const countries = {};
+    let hasDuplicates = false;
+
+    // Reset all error states
+    rows.forEach(row => {
+        const select = row.querySelector('.cif-country');
+        const errorDiv = row.querySelector('.country-duplicate-error');
+        select.classList.remove('is-invalid');
+        errorDiv.style.display = 'none';
+    });
+
+    // Check for duplicates
+    rows.forEach(row => {
+        const select = row.querySelector('.cif-country');
+        const country = select.value;
+
+        if (country) {
+            if (countries[country]) {
+                // Duplicate found
+                const errorDiv = row.querySelector('.country-duplicate-error');
+                select.classList.add('is-invalid');
+                errorDiv.style.display = 'block';
+                hasDuplicates = true;
+
+                // Also mark the first occurrence
+                const firstRow = countries[country];
+                const firstSelect = firstRow.querySelector('.cif-country');
+                const firstErrorDiv = firstRow.querySelector('.country-duplicate-error');
+                firstSelect.classList.add('is-invalid');
+                firstErrorDiv.style.display = 'block';
+            } else {
+                countries[country] = row;
+            }
+        }
+    });
+
+    return !hasDuplicates;
+}
+
+// Add validation before form submission
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.querySelector('form');
+    if (form) {
+        form.addEventListener('submit', function(event) {
+            if (!checkDuplicateCountries()) {
+                event.preventDefault();
+                event.stopPropagation();
+                alert('Please fix duplicate country errors before submitting.');
+                return false;
+            }
+        });
+    }
+});
+</script>
+{% endblock %}
