@@ -6,7 +6,7 @@
 {% block breadcrumb %}
     <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
     <li class="breadcrumb-item"><a href="#">Reference Data</a></li>
-    <li class="breadcrumb-item"><a href="{% url 'reference_data:counterparty_list' %}">Counterparties</a></li>
+    <li class="breadcrumb-item"><a href="{% if next_url %}{{ next_url }}{% else %}{% url 'reference_data:counterparty_list' %}{% endif %}">Counterparties</a></li>
     <li class="breadcrumb-item active">{% if is_edit %}Edit{% else %}Create{% endif %}</li>
 {% endblock %}
 
@@ -27,7 +27,7 @@
                 {% endif %}
             </p>
         </div>
-        <a href="{% url 'reference_data:counterparty_list' %}" class="btn btn-outline-secondary">
+        <a href="{% if next_url %}{{ next_url }}{% else %}{% url 'reference_data:counterparty_list' %}{% endif %}" class="btn btn-outline-secondary">
             <i class="bi bi-arrow-left"></i> Back to List
         </a>
     </div>
@@ -42,6 +42,9 @@
         <div class="card-body">
             <form method="post" class="needs-validation" novalidate>
                 {% csrf_token %}
+                {% if next_url %}
+                    <input type="hidden" name="next" value="{{ next_url }}">
+                {% endif %}
 
                 <!-- Basic Information Section -->
                 <div class="mb-4">

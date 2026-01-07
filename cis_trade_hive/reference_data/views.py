@@ -645,6 +645,11 @@ def counterparty_edit(request, short_name):
                 )
 
                 messages.success(request, f"Counterparty '{short_name}' updated successfully" + (f" and added {cif_count} CIF(s)" if cif_count > 0 else ""))
+
+                # Redirect back to the page with filters preserved
+                next_url = request.GET.get('next') or request.POST.get('next')
+                if next_url:
+                    return redirect(next_url)
                 return redirect('reference_data:counterparty_list')
             else:
                 messages.error(request, error_msg)
@@ -657,6 +662,7 @@ def counterparty_edit(request, short_name):
             'counterparty': counterparty,
             'countries': countries,
             'existing_cifs': existing_cifs,
+            'next_url': request.GET.get('next', ''),
             'is_edit': True
         }
         return render(request, 'reference_data/counterparty_form.html', context)

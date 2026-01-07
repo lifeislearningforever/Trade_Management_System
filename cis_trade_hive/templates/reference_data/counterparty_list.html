@@ -192,7 +192,7 @@
                                 </td>
                                 <td style="position: sticky; right: 0; background-color: white; z-index: 9; border-left: 2px solid #dee2e6;">
                                     <div class="btn-group" role="group">
-                                        <a href="{% url 'reference_data:counterparty_edit' cp.counterparty_short_name %}"
+                                        <a href="{% url 'reference_data:counterparty_edit' cp.counterparty_short_name %}?next={{ request.get_full_path|urlencode }}"
                                            class="btn btn-sm btn-outline-primary" title="Edit">
                                             <i class="bi bi-pencil"></i>
                                         </a>
