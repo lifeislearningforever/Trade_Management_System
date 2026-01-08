@@ -74,18 +74,6 @@
                             </div>
                         </div>
 
-                        <!-- M-Label (CIF) -->
-                        <div class="col-md-6">
-                            <label for="m_label" class="form-label">M-Label (CIF)</label>
-                            <input type="text"
-                                   class="form-control"
-                                   id="m_label"
-                                   name="m_label"
-                                   value="{{ counterparty.m_label|default:'' }}"
-                                   placeholder="e.g., 1483">
-                            <div class="form-text">Customer Identification Number</div>
-                        </div>
-
                         <!-- Full Name -->
                         <div class="col-md-12">
                             <label for="counterparty_full_name" class="form-label">Full Name</label>
@@ -309,15 +297,7 @@
                                 <!-- Initial CIF row (hidden template) -->
                                 <div class="cif-row-template" style="display: none;">
                                     <div class="row g-3 mb-3 pb-3 border-bottom cif-row">
-                                        <div class="col-md-3">
-                                            <label class="form-label">M-Label (CIF) <span class="text-danger">*</span></label>
-                                            <input type="text"
-                                                   class="form-control cif-m-label"
-                                                   name="cif_m_label[]"
-                                                   placeholder="e.g., 1483"
-                                                   required>
-                                        </div>
-                                        <div class="col-md-3">
+                                        <div class="col-md-4">
                                             <label class="form-label">Country <span class="text-danger">*</span></label>
                                             <select class="form-select cif-country"
                                                     name="cif_country[]"
@@ -331,12 +311,19 @@
                                                 Duplicate country - Only one CIF allowed per country
                                             </div>
                                         </div>
-                                        <div class="col-md-5">
+                                        <div class="col-md-4">
                                             <label class="form-label">ISIN</label>
                                             <input type="text"
                                                    class="form-control cif-isin"
                                                    name="cif_isin[]"
                                                    placeholder="e.g., US1234567890">
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label">Description</label>
+                                            <input type="text"
+                                                   class="form-control cif-description"
+                                                   name="cif_description[]"
+                                                   placeholder="e.g., US Branch">
                                         </div>
                                         <div class="col-md-1 d-flex align-items-end">
                                             <button type="button"
@@ -359,7 +346,7 @@
 
                     <div class="form-text mt-2">
                         <i class="bi bi-info-circle"></i> <strong>Note:</strong>
-                        Each CIF must have a unique country. You can add the same M-Label for different countries.
+                        Each CIF must have a unique country. M-Label is auto-generated when you save.
                     </div>
                 </div>
 
@@ -383,8 +370,9 @@
         <strong>Note:</strong>
         <ul class="mb-0 mt-2">
             <li>Short Name is the primary key and must be unique</li>
-            <li>M-Label (CIF) is optional and used for linking with issuer data</li>
+            <li>M-Label is auto-generated from Short Name for matching with external systems</li>
             <li>Classification flags help categorize counterparty types</li>
+            <li>CIF M-Labels are auto-generated when you add CIFs (format: {counterparty}_{country}_{counter})</li>
             <li>All changes are logged with audit trail (created_by, updated_by, timestamps)</li>
         </ul>
     </div>
@@ -437,8 +425,8 @@ function addCIFRow() {
     // Hide the "no CIFs" message
     noMessageDiv.style.display = 'none';
 
-    // Focus on the M-Label input
-    newRow.querySelector('.cif-m-label').focus();
+    // Focus on the Country dropdown
+    newRow.querySelector('.cif-country').focus();
 }
 
 function removeCIFRow(button) {
