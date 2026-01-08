@@ -63,13 +63,12 @@
                                    name="counterparty_short_name"
                                    value="{{ counterparty.counterparty_short_name|default:'' }}"
                                    required
-                                   {% if is_edit %}readonly{% endif %}
-                                   placeholder="e.g., AFFIN BK-KL">
+                                   {% if is_edit %}readonly{% endif %}>
                             <div class="form-text">
                                 {% if is_edit %}
                                     Primary key - cannot be changed
                                 {% else %}
-                                    Unique identifier for this counterparty
+                                    Unique identifier for this counterparty (required)
                                 {% endif %}
                             </div>
                         </div>
@@ -81,8 +80,7 @@
                                    class="form-control"
                                    id="counterparty_full_name"
                                    name="counterparty_full_name"
-                                   value="{{ counterparty.counterparty_full_name|default:'' }}"
-                                   placeholder="e.g., AFFIN BANK BERHAD">
+                                   value="{{ counterparty.counterparty_full_name|default:'' }}">
                         </div>
 
                         <!-- Industry -->
@@ -92,8 +90,7 @@
                                    class="form-control"
                                    id="industry"
                                    name="industry"
-                                   value="{{ counterparty.industry|default:'' }}"
-                                   placeholder="e.g., Banking">
+                                   value="{{ counterparty.industry|default:'' }}">
                         </div>
                     </div>
                 </div>
@@ -111,8 +108,7 @@
                                    class="form-control"
                                    id="city"
                                    name="city"
-                                   value="{{ counterparty.city|default:'' }}"
-                                   placeholder="e.g., Kuala Lumpur">
+                                   value="{{ counterparty.city|default:'' }}">
                         </div>
 
                         <!-- Country -->
@@ -122,8 +118,7 @@
                                    class="form-control"
                                    id="country"
                                    name="country"
-                                   value="{{ counterparty.country|default:'' }}"
-                                   placeholder="e.g., Malaysia">
+                                   value="{{ counterparty.country|default:'' }}">
                         </div>
 
                         <!-- Postal Code -->
@@ -133,8 +128,7 @@
                                    class="form-control"
                                    id="postal_code"
                                    name="postal_code"
-                                   value="{{ counterparty.postal_code|default:'' }}"
-                                   placeholder="e.g., 50100">
+                                   value="{{ counterparty.postal_code|default:'' }}">
                         </div>
                     </div>
                 </div>
@@ -152,8 +146,7 @@
                                    class="form-control"
                                    id="primary_contact"
                                    name="primary_contact"
-                                   value="{{ counterparty.primary_contact|default:'' }}"
-                                   placeholder="Contact person name">
+                                   value="{{ counterparty.primary_contact|default:'' }}">
                         </div>
 
                         <!-- Primary Number -->
@@ -163,8 +156,7 @@
                                    class="form-control"
                                    id="primary_number"
                                    name="primary_number"
-                                   value="{{ counterparty.primary_number|default:'' }}"
-                                   placeholder="e.g., +60-3-1234-5678">
+                                   value="{{ counterparty.primary_number|default:'' }}">
                         </div>
                     </div>
                 </div>
@@ -287,10 +279,9 @@
                                 <div class="cif-row-template" style="display: none;">
                                     <div class="row g-3 mb-3 pb-3 border-bottom cif-row">
                                         <div class="col-md-4">
-                                            <label class="form-label">Country <span class="text-danger">*</span></label>
+                                            <label class="form-label">Country</label>
                                             <select class="form-select cif-country"
-                                                    name="cif_country[]"
-                                                    required>
+                                                    name="cif_country[]">
                                                 <option value="">Select Country</option>
                                                 {% for country in countries %}
                                                 <option value="{{ country.code }}">{{ country.code }} - {{ country.name }}</option>
@@ -304,15 +295,13 @@
                                             <label class="form-label">ISIN</label>
                                             <input type="text"
                                                    class="form-control cif-isin"
-                                                   name="cif_isin[]"
-                                                   placeholder="e.g., US1234567890">
+                                                   name="cif_isin[]">
                                         </div>
                                         <div class="col-md-3">
                                             <label class="form-label">Description</label>
                                             <input type="text"
                                                    class="form-control cif-description"
-                                                   name="cif_description[]"
-                                                   placeholder="e.g., US Branch">
+                                                   name="cif_description[]">
                                         </div>
                                         <div class="col-md-1 d-flex align-items-end">
                                             <button type="button"
