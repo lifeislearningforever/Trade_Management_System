@@ -192,26 +192,43 @@
                                 </td>
                                 <td style="position: sticky; right: 0; background-color: white; z-index: 9; border-left: 2px solid #dee2e6;">
                                     <div class="btn-group" role="group">
-                                        <a href="{% url 'reference_data:counterparty_edit' cp.counterparty_short_name %}?next={{ request.get_full_path|urlencode }}"
-                                           class="btn btn-sm btn-outline-primary" title="Edit">
-                                            <i class="bi bi-pencil"></i>
-                                        </a>
-                                        {% if cp.is_deleted %}
-                                            <form method="post" action="{% url 'reference_data:counterparty_restore' cp.counterparty_short_name %}"
-                                                  style="display: inline;" onsubmit="return confirm('Restore this counterparty?');">
-                                                {% csrf_token %}
-                                                <button type="submit" class="btn btn-sm btn-outline-success" title="Restore">
-                                                    <i class="bi bi-arrow-counterclockwise"></i>
-                                                </button>
-                                            </form>
+                                        {% if cp.src_system|lower == 'cis' %}
+                                            {# CIS records - fully editable #}
+                                            <a href="{% url 'reference_data:counterparty_edit' cp.counterparty_short_name %}?next={{ request.get_full_path|urlencode }}"
+                                               class="btn btn-sm btn-outline-primary" title="Edit">
+                                                <i class="bi bi-pencil"></i>
+                                            </a>
                                         {% else %}
-                                            <form method="post" action="{% url 'reference_data:counterparty_delete' cp.counterparty_short_name %}"
-                                                  style="display: inline;" onsubmit="return confirm('Delete this counterparty?');">
-                                                {% csrf_token %}
-                                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
-                                                    <i class="bi bi-trash"></i>
-                                                </button>
-                                            </form>
+                                            {# GMP records - read-only #}
+                                            <button class="btn btn-sm btn-outline-secondary" disabled title="Read-only: {{ cp.src_system|upper }} record">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                        {% endif %}
+
+                                        {% if cp.src_system|lower == 'cis' %}
+                                            {# Only allow delete/restore for CIS records #}
+                                            {% if cp.is_deleted %}
+                                                <form method="post" action="{% url 'reference_data:counterparty_restore' cp.counterparty_short_name %}"
+                                                      style="display: inline;" onsubmit="return confirm('Restore this counterparty?');">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-sm btn-outline-success" title="Restore">
+                                                        <i class="bi bi-arrow-counterclockwise"></i>
+                                                    </button>
+                                                </form>
+                                            {% else %}
+                                                <form method="post" action="{% url 'reference_data:counterparty_delete' cp.counterparty_short_name %}"
+                                                      style="display: inline;" onsubmit="return confirm('Delete this counterparty?');">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                                                        <i class="bi bi-trash"></i>
+                                                    </button>
+                                                </form>
+                                            {% endif %}
+                                        {% else %}
+                                            {# GMP records - no delete option #}
+                                            <button class="btn btn-sm btn-outline-secondary" disabled title="Read-only: {{ cp.src_system|upper }} record">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
                                         {% endif %}
                                     </div>
                                 </td>
