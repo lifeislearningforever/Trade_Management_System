@@ -85,17 +85,6 @@
                                    placeholder="e.g., AFFIN BANK BERHAD">
                         </div>
 
-                        <!-- Record Type -->
-                        <div class="col-md-6">
-                            <label for="record_type" class="form-label">Record Type</label>
-                            <input type="text"
-                                   class="form-control"
-                                   id="record_type"
-                                   name="record_type"
-                                   value="{{ counterparty.record_type|default:'' }}"
-                                   placeholder="e.g., D">
-                        </div>
-
                         <!-- Industry -->
                         <div class="col-md-6">
                             <label for="industry" class="form-label">Industry</label>
@@ -256,18 +245,18 @@
                         <table class="table table-sm">
                             <thead>
                                 <tr>
-                                    <th>M-Label (CIF)</th>
                                     <th>Country</th>
                                     <th>ISIN</th>
+                                    <th>Description</th>
                                     <th>Status</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for cif in existing_cifs %}
                                 <tr>
-                                    <td>{{ cif.m_label }}</td>
                                     <td>{{ cif.country }}</td>
                                     <td>{{ cif.isin|default:'-' }}</td>
+                                    <td>{{ cif.description|default:'-' }}</td>
                                     <td>
                                         {% if cif.is_active %}
                                             <span class="badge bg-success">Active</span>
