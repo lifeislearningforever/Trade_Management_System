@@ -235,6 +235,13 @@ class CounterpartyService:
         if not is_valid:
             return False, error_msg
 
+        # Auto-generate m_label from counterparty_short_name
+        # m_label is used for matching with external systems
+        counterparty_data['m_label'] = counterparty_data.get('counterparty_short_name', '')
+
+        # Set src_system to 'cis' for all records created via UI
+        counterparty_data['src_system'] = 'cis'
+
         # Set audit fields
         username = user_info.get('username', 'system')
         counterparty_data['created_by'] = username
@@ -249,6 +256,21 @@ class CounterpartyService:
             return True, None
         else:
             return False, "Failed to create counterparty in database"
+
+    def can_edit_counterparty(self, counterparty: Dict[str, Any]) -> bool:
+        """
+        Check if counterparty can be edited based on src_system.
+        Only counterparties created in CIS (src_system='cis') can be edited.
+        Records from GMP are read-only.
+
+        Args:
+            counterparty: Counterparty dictionary
+
+        Returns:
+            True if editable, False if read-only
+        """
+        src_system = counterparty.get('src_system', '').lower()
+        return src_system == 'cis'
 
     def update_counterparty(
         self,
@@ -272,11 +294,20 @@ class CounterpartyService:
         if not existing:
             return False, f"Counterparty '{short_name}' not found"
 
+        # Check if editable (only src_system='cis' can be edited)
+        if not self.can_edit_counterparty(existing):
+            src_system = existing.get('src_system', 'unknown')
+            return False, f"Cannot edit counterparty from source system '{src_system}'. Only CIS records are editable."
+
         # Validate (skip duplicate check for updates)
         counterparty_data['counterparty_short_name'] = short_name
         is_valid, error_msg = self.validate_counterparty(counterparty_data, is_update=True)
         if not is_valid:
             return False, error_msg
+
+        # Preserve m_label and src_system from existing record
+        counterparty_data['m_label'] = existing.get('m_label', short_name)
+        counterparty_data['src_system'] = existing.get('src_system', 'cis')
 
         # Set audit fields
         username = user_info.get('username', 'system')

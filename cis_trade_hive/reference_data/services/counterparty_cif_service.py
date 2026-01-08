@@ -42,6 +42,35 @@ class CounterpartyCIFService:
         """
         return self.repository.get_by_cif_key(counterparty_short_name, m_label)
 
+    def _generate_cif_m_label(self, counterparty_short_name: str, country: str) -> str:
+        """
+        Generate unique m_label for CIF.
+        Format: {counterparty_short_name}_{country}_{counter}
+
+        Args:
+            counterparty_short_name: Counterparty short name
+            country: Country code
+
+        Returns:
+            Generated m_label
+        """
+        import time
+        # Get existing CIFs for this counterparty
+        existing_cifs = self.repository.get_by_counterparty(counterparty_short_name)
+
+        # Count CIFs for this country
+        country_count = sum(1 for cif in existing_cifs if cif.get('country') == country)
+
+        # Generate unique m_label with timestamp to avoid collisions
+        timestamp_suffix = str(int(time.time() * 1000))[-6:]  # Last 6 digits of timestamp
+        m_label = f"{counterparty_short_name}_{country}_{country_count + 1}_{timestamp_suffix}"
+
+        # Ensure length is within limit (50 chars)
+        if len(m_label) > 50:
+            m_label = m_label[:50]
+
+        return m_label
+
     def validate_cif(
         self,
         cif_data: Dict[str, Any],
@@ -62,22 +91,22 @@ class CounterpartyCIFService:
         if not counterparty_short_name:
             return False, "Counterparty short name is required"
 
-        m_label = cif_data.get('m_label', '').strip()
-        if not m_label:
-            return False, "M-Label (CIF number) is required"
+        # Country is required
+        country = cif_data.get('country', '').strip()
+        if not country:
+            return False, "Country is required"
 
-        # Check for duplicate on create
-        if not is_update:
-            existing = self.repository.get_by_cif_key(counterparty_short_name, m_label)
-            if existing:
-                return False, f"CIF '{m_label}' already exists for counterparty '{counterparty_short_name}'"
+        # m_label validation only for updates (for creates, it's auto-generated)
+        if is_update:
+            m_label = cif_data.get('m_label', '').strip()
+            if not m_label:
+                return False, "M-Label (CIF number) is required"
 
-        # Validate m_label length
-        if len(m_label) > 50:
-            return False, "M-Label must be 50 characters or less"
+            # Validate m_label length
+            if len(m_label) > 50:
+                return False, "M-Label must be 50 characters or less"
 
         # Validate country length
-        country = cif_data.get('country', '').strip()
         if country and len(country) > 100:
             return False, "Country must be 100 characters or less"
 
@@ -94,7 +123,8 @@ class CounterpartyCIFService:
         user_info: Dict[str, str]
     ) -> Tuple[bool, Optional[str]]:
         """
-        Create new CIF with validation and audit logging
+        Create new CIF with validation and audit logging.
+        m_label is auto-generated from counterparty_short_name and country.
 
         Args:
             cif_data: Dictionary with all CIF fields
@@ -103,6 +133,13 @@ class CounterpartyCIFService:
         Returns:
             Tuple of (success, error_message)
         """
+        # Auto-generate m_label from counterparty and country
+        counterparty_short_name = cif_data.get('counterparty_short_name', '')
+        country = cif_data.get('country', '')
+
+        if counterparty_short_name and country:
+            cif_data['m_label'] = self._generate_cif_m_label(counterparty_short_name, country)
+
         # Validate
         is_valid, error_msg = self.validate_cif(cif_data, is_update=False)
         if not is_valid:

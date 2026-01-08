@@ -481,10 +481,11 @@ def counterparty_create(request):
             user_email = request.session.get('user_email', '')
 
             # Extract form data
+            # Note: m_label is auto-generated from counterparty_short_name in service
+            # Note: src_system is automatically set to 'cis' in service
             counterparty_data = {
                 'counterparty_short_name': request.POST.get('counterparty_short_name', '').strip(),
                 'counterparty_full_name': request.POST.get('counterparty_full_name', '').strip(),
-                'm_label': request.POST.get('m_label', '').strip(),
                 'record_type': request.POST.get('record_type', '').strip(),
                 'city': request.POST.get('city', '').strip(),
                 'country': request.POST.get('country', '').strip(),
@@ -505,20 +506,21 @@ def counterparty_create(request):
 
             if success:
                 # Handle CIF data
-                cif_m_labels = request.POST.getlist('cif_m_label[]')
+                # Note: m_label for CIFs is auto-generated in the service
                 cif_countries = request.POST.getlist('cif_country[]')
                 cif_isins = request.POST.getlist('cif_isin[]')
+                cif_descriptions = request.POST.getlist('cif_description[]')
 
                 # Create CIFs
                 counterparty_short_name = counterparty_data['counterparty_short_name']
                 cif_count = 0
-                for i in range(len(cif_m_labels)):
-                    if cif_m_labels[i] and cif_countries[i]:
+                for i in range(len(cif_countries)):
+                    if cif_countries[i]:  # Country is required
                         cif_data = {
                             'counterparty_short_name': counterparty_short_name,
-                            'm_label': cif_m_labels[i],
                             'country': cif_countries[i],
                             'isin': cif_isins[i] if i < len(cif_isins) else '',
+                            'description': cif_descriptions[i] if i < len(cif_descriptions) else '',
                             'created_by': username,
                             'updated_by': username,
                         }
@@ -575,6 +577,12 @@ def counterparty_edit(request, short_name):
             messages.error(request, f"Counterparty '{short_name}' not found")
             return redirect('reference_data:counterparty_list')
 
+        # Check if counterparty is editable (only src_system='cis')
+        if not counterparty_service.can_edit_counterparty(counterparty):
+            src_system = counterparty.get('src_system', 'unknown')
+            messages.warning(request, f"Cannot edit counterparty from source system '{src_system}'. Only CIS records are editable.")
+            return redirect('reference_data:counterparty_list')
+
         if request.method == 'POST':
             # Get user info from session
             username = request.session.get('user_login', 'anonymous')
@@ -582,9 +590,9 @@ def counterparty_edit(request, short_name):
             user_email = request.session.get('user_email', '')
 
             # Extract form data
+            # Note: m_label and src_system are preserved from existing record in service
             counterparty_data = {
                 'counterparty_full_name': request.POST.get('counterparty_full_name', '').strip(),
-                'm_label': request.POST.get('m_label', '').strip(),
                 'record_type': request.POST.get('record_type', '').strip(),
                 'city': request.POST.get('city', '').strip(),
                 'country': request.POST.get('country', '').strip(),
@@ -605,19 +613,20 @@ def counterparty_edit(request, short_name):
 
             if success:
                 # Handle CIF data
-                cif_m_labels = request.POST.getlist('cif_m_label[]')
+                # Note: m_label for CIFs is auto-generated in the service
                 cif_countries = request.POST.getlist('cif_country[]')
                 cif_isins = request.POST.getlist('cif_isin[]')
+                cif_descriptions = request.POST.getlist('cif_description[]')
 
                 # Create new CIFs
                 cif_count = 0
-                for i in range(len(cif_m_labels)):
-                    if cif_m_labels[i] and cif_countries[i]:
+                for i in range(len(cif_countries)):
+                    if cif_countries[i]:  # Country is required
                         cif_data = {
                             'counterparty_short_name': short_name,
-                            'm_label': cif_m_labels[i],
                             'country': cif_countries[i],
                             'isin': cif_isins[i] if i < len(cif_isins) else '',
+                            'description': cif_descriptions[i] if i < len(cif_descriptions) else '',
                             'created_by': username,
                             'updated_by': username,
                         }
