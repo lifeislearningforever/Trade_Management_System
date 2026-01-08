@@ -367,17 +367,6 @@
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 
 <script>
-// Initialize Select2 on page load for existing dropdowns
-$(document).ready(function() {
-    // Enable search on all select elements in the form
-    $('.cif-country').select2({
-        theme: 'bootstrap-5',
-        placeholder: 'Select Country',
-        allowClear: false,
-        width: '100%'
-    });
-});
-
 // Client-side form validation
 (function() {
     'use strict';
@@ -424,18 +413,23 @@ function addCIFRow() {
     // Hide the "no CIFs" message
     noMessageDiv.style.display = 'none';
 
-    // Initialize Select2 on the new dropdown
-    $('#cif-rows-container .cif-country').not('.select2-hidden-accessible').select2({
-        theme: 'bootstrap-5',
-        placeholder: 'Select Country',
-        allowClear: false,
-        width: '100%'
-    });
-
-    // Focus on the Country dropdown (Select2 opens automatically)
+    // Get the newly added country select element
     const newCountrySelect = container.querySelector(`#${rowId} .cif-country`);
+
+    // Initialize Select2 on the new dropdown
     if (newCountrySelect) {
-        $(newCountrySelect).select2('open');
+        $(newCountrySelect).select2({
+            theme: 'bootstrap-5',
+            placeholder: 'Select Country',
+            allowClear: false,
+            width: '100%',
+            dropdownParent: $(newCountrySelect).parent()
+        });
+
+        // Open the dropdown automatically
+        setTimeout(function() {
+            $(newCountrySelect).select2('open');
+        }, 100);
     }
 }
 
