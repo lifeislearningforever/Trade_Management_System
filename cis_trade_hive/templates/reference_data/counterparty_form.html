@@ -356,7 +356,28 @@
     </div>
 </div>
 
+<!-- jQuery (required for Select2) -->
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+
+<!-- Select2 CSS -->
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<link href="https://cdn.jsdelivr.net/npm/select2-bootstrap-5-theme@1.3.0/dist/select2-bootstrap-5-theme.min.css" rel="stylesheet" />
+
+<!-- Select2 JS -->
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
 <script>
+// Initialize Select2 on page load for existing dropdowns
+$(document).ready(function() {
+    // Enable search on all select elements in the form
+    $('.cif-country').select2({
+        theme: 'bootstrap-5',
+        placeholder: 'Select Country',
+        allowClear: false,
+        width: '100%'
+    });
+});
+
 // Client-side form validation
 (function() {
     'use strict';
@@ -403,12 +424,30 @@ function addCIFRow() {
     // Hide the "no CIFs" message
     noMessageDiv.style.display = 'none';
 
-    // Focus on the Country dropdown
-    newRow.querySelector('.cif-country').focus();
+    // Initialize Select2 on the new dropdown
+    $('#cif-rows-container .cif-country').not('.select2-hidden-accessible').select2({
+        theme: 'bootstrap-5',
+        placeholder: 'Select Country',
+        allowClear: false,
+        width: '100%'
+    });
+
+    // Focus on the Country dropdown (Select2 opens automatically)
+    const newCountrySelect = container.querySelector(`#${rowId} .cif-country`);
+    if (newCountrySelect) {
+        $(newCountrySelect).select2('open');
+    }
 }
 
 function removeCIFRow(button) {
     const row = button.closest('.cif-row');
+
+    // Destroy Select2 instance before removing the row
+    const countrySelect = row.querySelector('.cif-country');
+    if (countrySelect && $(countrySelect).hasClass('select2-hidden-accessible')) {
+        $(countrySelect).select2('destroy');
+    }
+
     row.remove();
 
     // Check if there are any CIF rows left
