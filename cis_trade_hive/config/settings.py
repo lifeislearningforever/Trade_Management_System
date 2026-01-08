@@ -113,6 +113,25 @@ IMPALA_CONFIG = {
 # Backward compatibility - keep HIVE_CONFIG pointing to IMPALA_CONFIG
 HIVE_CONFIG = IMPALA_CONFIG
 
+# Impala Connection Pool Configuration
+# Increased from 10 to 35 to support Gunicorn workers (4 workers x 4 threads + margin)
+IMPALA_POOL_SIZE = int(os.environ.get('IMPALA_POOL_SIZE', '35'))
+
+# Async Audit Queue Configuration
+# Enables non-blocking audit logging for production performance
+AUDIT_ASYNC_ENABLED = os.environ.get('AUDIT_ASYNC_ENABLED', 'True').lower() == 'true'
+AUDIT_ASYNC_WORKERS = int(os.environ.get('AUDIT_ASYNC_WORKERS', '4'))
+AUDIT_QUEUE_SIZE = int(os.environ.get('AUDIT_QUEUE_SIZE', '1000'))
+
+# Audit Filtering Configuration
+# When True, only audits write operations (POST/PUT/PATCH/DELETE) + authentication
+# Reduces audit volume by 80-90% compared to auditing all requests including GET
+AUDIT_ONLY_WRITES = os.environ.get('AUDIT_ONLY_WRITES', 'True').lower() == 'true'
+
+# Audit Logger Type
+# Options: 'impala' (production), 'console' (development)
+AUDIT_LOGGER_TYPE = os.environ.get('AUDIT_LOGGER_TYPE', 'impala')
+
 # Database Router
 DATABASE_ROUTERS = ['core.repositories.db_router.DatabaseRouter']
 

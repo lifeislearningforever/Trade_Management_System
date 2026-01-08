@@ -48,13 +48,17 @@ class ImpalaConnectionManager:
 
     def __init__(self):
         if not hasattr(self, '_initialized'):
-            self._pool = Queue(maxsize=10)  # Pool size: 10 connections
+            # Get pool size from settings, default to 35 for production (4 workers x 4 threads + margin)
+            from django.conf import settings
+            max_pool_size = getattr(settings, 'IMPALA_POOL_SIZE', 35)
+
+            self._pool = Queue(maxsize=max_pool_size)
             self._pool_lock = threading.Lock()
             self._connection_count = 0
-            self._max_connections = 10
+            self._max_connections = max_pool_size
             self._connection_timeout = 3600  # 1 hour in seconds
             self._initialized = True
-            logger.info("Impala connection pool initialized (max: 10 connections)")
+            logger.info(f"Impala connection pool initialized (max: {max_pool_size} connections)")
 
     def _create_connection(self, database: Optional[str] = None):
         """

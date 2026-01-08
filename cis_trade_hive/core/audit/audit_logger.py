@@ -11,12 +11,10 @@ Audit logger implementation following SOLID principles.
 from abc import ABC, abstractmethod
 from typing import List, Optional
 import logging
-import time
 
 from django.conf import settings
 
 from .audit_models import AuditEntry
-from ..repositories.hive_connection import HiveConnectionManager
 
 logger = logging.getLogger(__name__)
 
@@ -68,31 +66,24 @@ class AuditLogger(ABC):
         pass
 
 
-class HiveAuditLogger(AuditLogger):
+class ImpalaAuditLogger(AuditLogger):
     """
-    Concrete implementation of AuditLogger using Hive.
+    Concrete implementation of AuditLogger using Impala/Kudu.
+    Uses AuditLogKuduRepository with proper connection pooling.
     Follows Single Responsibility Principle.
     """
 
-    def __init__(self, table_name: str = 'cis_audit_log'):
+    def __init__(self):
         """
-        Initialize Hive audit logger.
-
-        Args:
-            table_name: Name of the Hive audit table
+        Initialize Impala audit logger.
+        Uses the existing AuditLogKuduRepository which handles connection pooling.
         """
-        self.table_name = table_name
-        self.connection_manager = HiveConnectionManager()
-        self._audit_id_counter = int(time.time() * 1000)  # Simple ID generation
-
-    def _get_next_audit_id(self) -> int:
-        """Generate next audit ID (simple increment)."""
-        self._audit_id_counter += 1
-        return self._audit_id_counter
+        from .audit_kudu_repository import audit_log_kudu_repository
+        self.repository = audit_log_kudu_repository
 
     def log(self, audit_entry: AuditEntry) -> bool:
         """
-        Log a single audit entry to Hive.
+        Log a single audit entry to Kudu using Impala.
 
         Args:
             audit_entry: AuditEntry object to log
@@ -101,33 +92,37 @@ class HiveAuditLogger(AuditLogger):
             bool: True if successful, False otherwise
         """
         try:
-            # Set audit ID if not provided
-            if audit_entry.audit_id is None:
-                audit_entry.audit_id = self._get_next_audit_id()
-
-            # Get connection
-            conn = self.connection_manager.get_connection()
-            if not conn:
-                logger.error("Failed to get Hive connection for audit logging")
-                return False
-
-            cursor = conn.cursor()
-
-            # Prepare INSERT statement
-            values = audit_entry.to_hive_values()
-            placeholders = ', '.join(['%s'] * len(values))
-
-            insert_sql = f"""
-                INSERT INTO TABLE {self.table_name}
-                VALUES ({placeholders})
-            """
-
-            # Execute insert
-            cursor.execute(insert_sql, values)
-            logger.info(f"Audit log entry created: {audit_entry.action_type.value} by {audit_entry.username}")
-
-            cursor.close()
-            return True
+            # Convert AuditEntry to repository method parameters
+            return self.repository.log_action(
+                user_id=audit_entry.user_id or '',
+                username=audit_entry.username,
+                action_type=audit_entry.action_type.value,
+                entity_type=audit_entry.entity_type.value if audit_entry.entity_type else '',
+                entity_id=audit_entry.entity_id,
+                entity_name=audit_entry.entity_name,
+                action_description=audit_entry.action_description,
+                old_value=audit_entry.old_value,
+                new_value=audit_entry.new_value,
+                field_name=audit_entry.field_name,
+                ip_address=audit_entry.ip_address,
+                user_agent=audit_entry.user_agent,
+                request_path=audit_entry.request_path,
+                request_method=audit_entry.request_method,
+                status=audit_entry.status.value,
+                error_message=audit_entry.error_message,
+                # Additional fields
+                user_email=audit_entry.user_email,
+                action_category=audit_entry.action_category.value,
+                request_params=str(audit_entry.request_params) if audit_entry.request_params else None,
+                status_code=audit_entry.status_code,
+                error_traceback=audit_entry.error_traceback,
+                session_id=audit_entry.session_id,
+                module_name=audit_entry.module_name,
+                function_name=audit_entry.function_name,
+                duration_ms=audit_entry.duration_ms,
+                tags=','.join(audit_entry.tags) if audit_entry.tags else None,
+                metadata=str(audit_entry.metadata) if audit_entry.metadata else None
+            )
 
         except Exception as e:
             logger.error(f"Failed to log audit entry: {str(e)}")
@@ -136,44 +131,25 @@ class HiveAuditLogger(AuditLogger):
 
     def log_batch(self, audit_entries: List[AuditEntry]) -> bool:
         """
-        Log multiple audit entries to Hive in batch.
+        Log multiple audit entries to Kudu in batch.
 
         Args:
             audit_entries: List of AuditEntry objects
 
         Returns:
-            bool: True if successful, False otherwise
+            bool: True if all successful, False otherwise
         """
         try:
             if not audit_entries:
                 return True
 
-            conn = self.connection_manager.get_connection()
-            if not conn:
-                logger.error("Failed to get Hive connection for batch audit logging")
-                return False
-
-            cursor = conn.cursor()
-
-            # Prepare batch insert
+            success_count = 0
             for entry in audit_entries:
-                if entry.audit_id is None:
-                    entry.audit_id = self._get_next_audit_id()
+                if self.log(entry):
+                    success_count += 1
 
-                values = entry.to_hive_values()
-                placeholders = ', '.join(['%s'] * len(values))
-
-                insert_sql = f"""
-                    INSERT INTO TABLE {self.table_name}
-                    VALUES ({placeholders})
-                """
-
-                cursor.execute(insert_sql, values)
-
-            logger.info(f"Batch audit log: {len(audit_entries)} entries created")
-
-            cursor.close()
-            return True
+            logger.info(f"Batch audit log: {success_count}/{len(audit_entries)} entries created")
+            return success_count == len(audit_entries)
 
         except Exception as e:
             logger.error(f"Failed to log batch audit entries: {str(e)}")
@@ -182,7 +158,7 @@ class HiveAuditLogger(AuditLogger):
 
     def query(self, filters: dict = None, limit: int = 100) -> List[dict]:
         """
-        Query audit logs from Hive with filters.
+        Query audit logs from Kudu with filters.
 
         Args:
             filters: Dictionary of filter criteria
@@ -193,24 +169,18 @@ class HiveAuditLogger(AuditLogger):
             List of audit log dictionaries
         """
         try:
-            conn = self.connection_manager.get_connection()
-            if not conn:
-                logger.error("Failed to get Hive connection for audit query")
-                return []
-
-            cursor = conn.cursor()
+            from .audit_kudu_repository import ImpalaAuditConnection, AuditLogKuduRepository
 
             # Build query
-            query = f"SELECT * FROM {self.table_name}"
+            query = f"SELECT * FROM {ImpalaAuditConnection.DATABASE}.{AuditLogKuduRepository.GENERAL_AUDIT_TABLE}"
 
             # Add filters
             where_clauses = []
-            params = []
-
             if filters:
                 for key, value in filters.items():
-                    where_clauses.append(f"{key} = %s")
-                    params.append(value)
+                    # Escape single quotes in values
+                    escaped_value = str(value).replace("'", "\\'")
+                    where_clauses.append(f"{key} = '{escaped_value}'")
 
             if where_clauses:
                 query += " WHERE " + " AND ".join(where_clauses)
@@ -219,20 +189,8 @@ class HiveAuditLogger(AuditLogger):
             query += " ORDER BY audit_timestamp DESC"
             query += f" LIMIT {limit}"
 
-            # Execute query
-            if params:
-                cursor.execute(query, params)
-            else:
-                cursor.execute(query)
-
-            # Fetch results
-            columns = [desc[0] for desc in cursor.description]
-            results = []
-
-            for row in cursor.fetchall():
-                results.append(dict(zip(columns, row)))
-
-            cursor.close()
+            # Execute query using repository
+            results = ImpalaAuditConnection.execute_query(query)
             return results
 
         except Exception as e:
@@ -253,31 +211,24 @@ class HiveAuditLogger(AuditLogger):
             List of audit log dictionaries
         """
         from datetime import datetime, timedelta
+        from .audit_kudu_repository import ImpalaAuditConnection, AuditLogKuduRepository
 
         cutoff_date = (datetime.utcnow() - timedelta(days=days)).strftime('%Y-%m-%d')
 
         try:
-            conn = self.connection_manager.get_connection()
-            if not conn:
-                return []
-
-            cursor = conn.cursor()
+            # Escape username
+            escaped_username = username.replace("'", "\\'")
 
             query = f"""
                 SELECT *
-                FROM {self.table_name}
-                WHERE username = %s
-                  AND audit_date >= %s
+                FROM {ImpalaAuditConnection.DATABASE}.{AuditLogKuduRepository.GENERAL_AUDIT_TABLE}
+                WHERE username = '{escaped_username}'
+                  AND audit_date >= '{cutoff_date}'
                 ORDER BY audit_timestamp DESC
                 LIMIT {limit}
             """
 
-            cursor.execute(query, (username, cutoff_date))
-
-            columns = [desc[0] for desc in cursor.description]
-            results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-
-            cursor.close()
+            results = ImpalaAuditConnection.execute_query(query)
             return results
 
         except Exception as e:
@@ -345,15 +296,15 @@ def get_audit_logger() -> AuditLogger:
 
     if _audit_logger_instance is None:
         # Determine which logger to use based on settings
-        logger_type = getattr(settings, 'AUDIT_LOGGER_TYPE', 'hive')
+        logger_type = getattr(settings, 'AUDIT_LOGGER_TYPE', 'impala')
 
-        if logger_type == 'hive':
-            _audit_logger_instance = HiveAuditLogger()
+        if logger_type == 'impala':
+            _audit_logger_instance = ImpalaAuditLogger()
         elif logger_type == 'console':
             _audit_logger_instance = ConsoleAuditLogger()
         else:
-            # Default to Hive
-            _audit_logger_instance = HiveAuditLogger()
+            # Default to Impala (recommended for production)
+            _audit_logger_instance = ImpalaAuditLogger()
 
         logger.info(f"Initialized audit logger: {logger_type}")
 

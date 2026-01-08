@@ -1,9 +1,24 @@
 """
 Hive Connection Manager
 
+**DEPRECATED**: This module is deprecated. Use Impala connection manager instead.
+The application now exclusively uses Impala/Kudu for all database operations.
+
+This file is kept for backwards compatibility but should not be used in production.
+All audit logging and data operations should use core.repositories.impala_connection.
+
 Handles connections to Hive database following the Repository pattern.
 Implements connection pooling and error handling.
 """
+
+import warnings
+
+# Issue deprecation warning when module is imported
+warnings.warn(
+    "hive_connection module is deprecated. Use impala_connection instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 import logging
 from typing import Optional, Any, List, Dict

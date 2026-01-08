@@ -1,8 +1,9 @@
 """
-Django middleware for automatic audit logging of HTTP requests to Hive.
+Django middleware for automatic audit logging of HTTP requests to Impala/Kudu.
 Follows SOLID principles.
 
-This middleware logs all significant HTTP requests to the Hive audit table.
+This middleware logs write operations (POST/PUT/PATCH/DELETE) and authentication
+requests to the Kudu audit table using async queue for non-blocking performance.
 """
 
 import time
@@ -11,19 +12,26 @@ from typing import Callable
 
 from django.http import HttpRequest, HttpResponse
 from django.utils.deprecation import MiddlewareMixin
+from django.conf import settings
 
 from ..audit.audit_models import (
     AuditEntry, ActionType, ActionCategory, AuditStatus
 )
 from ..audit.audit_logger import get_audit_logger
+from ..audit.async_audit_queue import async_audit_queue
 
 logger = logging.getLogger(__name__)
 
 
 class HiveAuditMiddleware(MiddlewareMixin):
     """
-    Middleware to automatically audit HTTP requests to Hive.
+    Middleware to automatically audit HTTP requests to Impala/Kudu.
     Follows Single Responsibility Principle.
+
+    Performance Optimizations:
+    - Only audits write operations (POST/PUT/PATCH/DELETE) + authentication
+    - Uses async queue for non-blocking audit logging
+    - Falls back to sync logging if queue is full
     """
 
     def __init__(self, get_response: Callable):
@@ -37,16 +45,33 @@ class HiveAuditMiddleware(MiddlewareMixin):
         self.get_response = get_response
         self.audit_logger = get_audit_logger()
 
+        # Check if async audit is enabled
+        self.async_enabled = getattr(settings, 'AUDIT_ASYNC_ENABLED', True)
+
+        # Check if should audit only writes
+        self.only_writes = getattr(settings, 'AUDIT_ONLY_WRITES', True)
+
         # Paths to exclude from auditing (to reduce noise)
         self.excluded_paths = [
             '/static/',
             '/media/',
             '/favicon.ico',
             '/__debug__/',
+            '/admin/jsi18n/',  # Django admin i18n endpoint
         ]
 
-        # Methods to audit (exclude OPTIONS, HEAD by default)
-        self.audited_methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+        # Methods to audit
+        if self.only_writes:
+            # Only audit write operations and authentication (reduces audit volume by 80-90%)
+            self.audited_methods = ['POST', 'PUT', 'PATCH', 'DELETE']
+        else:
+            # Audit all methods including GET (legacy behavior)
+            self.audited_methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+
+        logger.info(
+            f"Audit middleware initialized (async: {self.async_enabled}, "
+            f"only_writes: {self.only_writes}, methods: {self.audited_methods})"
+        )
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         """
@@ -62,8 +87,19 @@ class HiveAuditMiddleware(MiddlewareMixin):
         if self._should_exclude(request):
             return self.get_response(request)
 
-        # Check if method should be audited
-        if request.method not in self.audited_methods:
+        # Check if should audit this request
+        should_audit = False
+
+        # Always audit authentication endpoints (login/logout) regardless of method
+        auth_paths = ['/login/', '/logout/', '/accounts/login/', '/accounts/logout/']
+        is_auth_path = any(request.path.startswith(auth_path) for auth_path in auth_paths)
+
+        if is_auth_path:
+            should_audit = True
+        elif request.method in self.audited_methods:
+            should_audit = True
+
+        if not should_audit:
             return self.get_response(request)
 
         # Start timing
@@ -168,6 +204,8 @@ class HiveAuditMiddleware(MiddlewareMixin):
         """
         Create and log audit entry for the request.
 
+        Uses async queue for non-blocking audit logging with fallback to sync.
+
         Args:
             request: HttpRequest object
             response: HttpResponse object
@@ -193,8 +231,16 @@ class HiveAuditMiddleware(MiddlewareMixin):
         if response.status_code >= 400:
             audit_entry.error_message = f"HTTP {response.status_code}"
 
-        # Log the audit entry (async/non-blocking in production)
-        self.audit_logger.log(audit_entry)
+        # Log the audit entry
+        if self.async_enabled:
+            # Try async queue first (non-blocking)
+            if not async_audit_queue.enqueue(audit_entry):
+                # Queue full - fallback to sync logging
+                logger.warning(f"Async queue full, falling back to sync for {request.path}")
+                self.audit_logger.log(audit_entry)
+        else:
+            # Sync logging (legacy behavior)
+            self.audit_logger.log(audit_entry)
 
 
 class SelectiveAuditMiddleware(HiveAuditMiddleware):
