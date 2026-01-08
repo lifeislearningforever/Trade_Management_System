@@ -22,7 +22,7 @@ class SecurityDropdownRepository:
 
     DATABASE = 'gmp_cis'
     UDF_FIELD_TABLE = 'cis_udf_field'
-    COUNTERPARTY_TABLE = 'gmp_cis_sta_dly_counterparty'
+    COUNTERPARTY_TABLE = 'gmp_cis.cis_counterparty_kudu'
     COUNTRY_TABLE = 'gmp_cis_sta_dly_country'
     CURRENCY_TABLE = 'gmp_cis_sta_dly_currency'
 
@@ -65,17 +65,18 @@ class SecurityDropdownRepository:
     @staticmethod
     def get_issuers() -> List[Dict[str, str]]:
         """
-        Get issuers from counterparty table where is_counterparty_issuer='Y'.
+        Get issuers from cis_counterparty_kudu table where is_issuer=TRUE.
 
         Returns:
-            List of issuer dictionaries with 'name' key
+            List of issuer dictionaries with 'name' key (counterparty_short_name)
         """
         try:
             query = f"""
-            SELECT counterparty_name
-            FROM {SecurityDropdownRepository.DATABASE}.{SecurityDropdownRepository.COUNTERPARTY_TABLE}
-            WHERE is_counterparty_issuer = 'Y'
-            ORDER BY counterparty_name
+            SELECT counterparty_short_name
+            FROM {SecurityDropdownRepository.COUNTERPARTY_TABLE}
+            WHERE is_issuer = TRUE
+              AND is_active = TRUE
+            ORDER BY counterparty_short_name
             """
 
             result = impala_manager.execute_query(query, database=SecurityDropdownRepository.DATABASE)
@@ -83,7 +84,7 @@ class SecurityDropdownRepository:
             if not result:
                 return []
 
-            return [{'name': row.get('counterparty_name', '')} for row in result]
+            return [{'name': row.get('counterparty_short_name', '')} for row in result]
 
         except Exception as e:
             logger.error(f"Error fetching issuers: {str(e)}")
