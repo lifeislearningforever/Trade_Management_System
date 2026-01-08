@@ -41,7 +41,7 @@ class ImpalaConnection:
 class UDFDefinitionRepository:
     """Repository for UDF definition metadata from Kudu/Impala."""
 
-    TABLE_NAME = 'cis_udf_definition'  # Impala table pointing to cis_udf_definition_kudu
+    TABLE_NAME = 'gmp_cis.cis_udf_definition'  # Impala table pointing to cis_udf_definition_kudu
 
     @staticmethod
     def get_all_definitions(entity_type: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -195,7 +195,7 @@ class UDFDefinitionRepository:
 class UDFOptionRepository:
     """Repository for UDF dropdown options from Kudu/Impala."""
 
-    TABLE_NAME = 'cis_udf_option'
+    TABLE_NAME = 'gmp_cis.cis_udf_option'
 
     @staticmethod
     def get_options_by_udf_id(udf_id: int) -> List[Dict[str, Any]]:
@@ -242,7 +242,7 @@ class UDFOptionRepository:
 class UDFValueRepository:
     """Repository for UDF values in Kudu/Impala."""
 
-    TABLE_NAME = 'cis_udf_value'
+    TABLE_NAME = 'gmp_cis.cis_udf_value'
 
     @staticmethod
     def insert_value(value_data: Dict[str, Any]) -> bool:

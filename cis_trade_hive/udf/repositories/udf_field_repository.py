@@ -82,7 +82,7 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
     """Repository for UDF field data access operations."""
 
     DATABASE = 'gmp_cis'
-    TABLE_NAME = 'cis_udf_field'
+    TABLE_NAME = 'gmp_cis.cis_udf_field'
 
     def get_object_types(self) -> List[str]:
         """

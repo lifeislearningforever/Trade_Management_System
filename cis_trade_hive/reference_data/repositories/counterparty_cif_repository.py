@@ -9,7 +9,7 @@ from .reference_data_repository import ImpalaReferenceRepository
 class CounterpartyCIFRepository(ImpalaReferenceRepository):
     """Repository for managing Counterparty CIF data in Kudu"""
 
-    TABLE_NAME = 'cis_counterparty_cif_kudu'
+    TABLE_NAME = 'gmp_cis.cis_counterparty_cif_kudu'
 
     def get_by_counterparty(self, counterparty_short_name: str, is_active: Optional[bool] = None) -> List[Dict]:
         """

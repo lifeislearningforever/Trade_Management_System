@@ -14,7 +14,7 @@ class PortfolioHiveRepository:
     """Repository for portfolio operations with Kudu via Impala."""
 
     DATABASE = 'gmp_cis'
-    TABLE_NAME = 'cis_portfolio'
+    TABLE_NAME = 'gmp_cis.cis_portfolio'
 
     @staticmethod
     def get_all_portfolios(
