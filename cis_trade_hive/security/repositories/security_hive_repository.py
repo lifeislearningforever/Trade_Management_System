@@ -19,7 +19,7 @@ class SecurityHiveRepository:
     """Repository for security operations with Kudu via Impala"""
 
     DATABASE = 'gmp_cis'
-    TABLE_NAME = 'gmp_cis.cis_security'
+    TABLE_NAME = 'cis_security'
     HISTORY_TABLE = 'cis_security_history'
 
     @staticmethod
