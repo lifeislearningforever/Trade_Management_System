@@ -356,58 +356,6 @@
     </div>
 </div>
 
-<!-- jQuery (required for Select2) - Local -->
-<script src="{% static 'js/jquery-3.7.1.min.js' %}"></script>
-
-<!-- Select2 CSS - Local -->
-<link href="{% static 'css/select2.min.css' %}" rel="stylesheet" />
-<link href="{% static 'css/select2-bootstrap-5-theme.min.css' %}" rel="stylesheet" />
-
-<style>
-/* Custom Select2 styling for better appearance */
-.select2-container--bootstrap-5 .select2-selection {
-    min-height: 38px;
-    padding: 0.375rem 0.75rem;
-    font-size: 1rem;
-    border: 1px solid #ced4da;
-    border-radius: 0.375rem;
-}
-
-.select2-container--bootstrap-5 .select2-selection--single .select2-selection__rendered {
-    padding-left: 0;
-    line-height: 1.5;
-}
-
-.select2-container--bootstrap-5 .select2-dropdown {
-    border: 1px solid #ced4da;
-    border-radius: 0.375rem;
-    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
-}
-
-.select2-container--bootstrap-5 .select2-search--dropdown .select2-search__field {
-    border: 1px solid #ced4da;
-    border-radius: 0.375rem;
-    padding: 0.5rem;
-}
-
-.select2-container--bootstrap-5 .select2-results__option--highlighted {
-    background-color: #0d6efd;
-    color: white;
-}
-
-/* Ensure dropdown appears above modal/form elements */
-.select2-container {
-    z-index: 9999 !important;
-}
-
-.select2-dropdown {
-    z-index: 9999 !important;
-}
-</style>
-
-<!-- Select2 JS - Local -->
-<script src="{% static 'js/select2.min.js' %}"></script>
-
 <script>
 // Client-side form validation
 (function() {
@@ -458,33 +406,11 @@ function addCIFRow() {
     // Get the newly added country select element
     const newCountrySelect = container.querySelector(`#${rowId} .cif-country`);
 
-    // Initialize Select2 on the new dropdown
-    if (newCountrySelect) {
-        $(newCountrySelect).select2({
-            theme: 'bootstrap-5',
-            placeholder: 'Select Country',
-            allowClear: false,
-            width: '100%',
-            dropdownParent: $('.card-body'),
-            dropdownAutoWidth: true
-        });
-
-        // Focus on the dropdown (don't auto-open, user can click to open)
-        setTimeout(function() {
-            $(newCountrySelect).focus();
-        }, 100);
-    }
+    // No special initialization needed for country dropdown
 }
 
 function removeCIFRow(button) {
     const row = button.closest('.cif-row');
-
-    // Destroy Select2 instance before removing the row
-    const countrySelect = row.querySelector('.cif-country');
-    if (countrySelect && $(countrySelect).hasClass('select2-hidden-accessible')) {
-        $(countrySelect).select2('destroy');
-    }
-
     row.remove();
 
     // Check if there are any CIF rows left
