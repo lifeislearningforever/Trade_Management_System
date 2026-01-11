@@ -11,6 +11,7 @@ from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from django.core.exceptions import ValidationError
 from datetime import datetime, timedelta
 import csv
+import json
 
 from market_data.services import fx_rate_service
 from core.audit.audit_kudu_repository import audit_log_kudu_repository
@@ -241,24 +242,24 @@ def fx_rate_list(request):
     base_currencies = fx_rate_service.get_base_currencies()
     sources = fx_rate_service.get_sources()
 
-    # Log view to Hive - Get user info from session (ACL authentication)
-    username = request.session.get('user_login', 'anonymous')
-    user_id = str(request.session.get('user_id', ''))
-    user_email = request.session.get('user_email', '')
+    # Log view to Hive - Commented out for VIEW actions (only log CREATE, UPDATE, DELETE)
+    # username = request.session.get('user_login', 'anonymous')
+    # user_id = str(request.session.get('user_id', ''))
+    # user_email = request.session.get('user_email', '')
 
-    audit_log_kudu_repository.log_action(
-        user_id=user_id,
-        username=username,
-        user_email=user_email,
-        action_type='VIEW',
-        entity_type='FX_RATE',
-        action_description=f'Viewed FX rate list from Hive ({len(fx_rates_data)} rates)',
-        status='SUCCESS',
-        request_method='GET',
-        request_path=request.path,
-        ip_address=request.META.get('REMOTE_ADDR'),
-        user_agent=request.META.get('HTTP_USER_AGENT', '')
-    )
+    # audit_log_kudu_repository.log_action(
+    #     user_id=user_id,
+    #     username=username,
+    #     user_email=user_email,
+    #     action_type='VIEW',
+    #     entity_type='FX_RATE',
+    #     action_description=f'Viewed FX rate list from Hive ({len(fx_rates_data)} rates)',
+    #     status='SUCCESS',
+    #     request_method='GET',
+    #     request_path=request.path,
+    #     ip_address=request.META.get('REMOTE_ADDR'),
+    #     user_agent=request.META.get('HTTP_USER_AGENT', '')
+    # )
 
     context = {
         'page_obj': fx_rates,
@@ -300,24 +301,24 @@ def market_data_dashboard(request):
     latest_equity_prices = equity_price_service.get_equity_prices(limit=10)
     wrapped_equity_prices = [EquityPriceWrapper(r, idx) for idx, r in enumerate(latest_equity_prices)]
 
-    # Log view to audit - Get user info from session
-    username = request.session.get('user_login', 'anonymous')
-    user_id = str(request.session.get('user_id', ''))
-    user_email = request.session.get('user_email', '')
+    # Log view to audit - Commented out for VIEW actions (only log CREATE, UPDATE, DELETE)
+    # username = request.session.get('user_login', 'anonymous')
+    # user_id = str(request.session.get('user_id', ''))
+    # user_email = request.session.get('user_email', '')
 
-    audit_log_kudu_repository.log_action(
-        user_id=user_id,
-        username=username,
-        user_email=user_email,
-        action_type='VIEW',
-        entity_type='MARKET_DATA',
-        action_description='Viewed Market Data dashboard',
-        status='SUCCESS',
-        request_method='GET',
-        request_path=request.path,
-        ip_address=request.META.get('REMOTE_ADDR'),
-        user_agent=request.META.get('HTTP_USER_AGENT', '')
-    )
+    # audit_log_kudu_repository.log_action(
+    #     user_id=user_id,
+    #     username=username,
+    #     user_email=user_email,
+    #     action_type='VIEW',
+    #     entity_type='MARKET_DATA',
+    #     action_description='Viewed Market Data dashboard',
+    #     status='SUCCESS',
+    #     request_method='GET',
+    #     request_path=request.path,
+    #     ip_address=request.META.get('REMOTE_ADDR'),
+    #     user_agent=request.META.get('HTTP_USER_AGENT', '')
+    # )
 
     context = {
         'fx_stats': fx_stats,
@@ -374,25 +375,25 @@ def fx_rate_detail(request, currency_pair):
         'ask_rates': [float(r.ask_rate) if r.ask_rate else 0 for r in wrapped_history],
     }
 
-    # Log view to Hive - Get user info from session (ACL authentication)
-    username = request.session.get('user_login', 'anonymous')
-    user_id = str(request.session.get('user_id', ''))
-    user_email = request.session.get('user_email', '')
+    # Log view to Hive - Commented out (only log CREATE, UPDATE, DELETE)
+    # username = request.session.get('user_login', 'anonymous')
+    # user_id = str(request.session.get('user_id', ''))
+    # user_email = request.session.get('user_email', '')
 
-    audit_log_kudu_repository.log_action(
-        user_id=user_id,
-        username=username,
-        user_email=user_email,
-        action_type='VIEW',
-        entity_type='FX_RATE',
-        entity_id=currency_pair,
-        action_description=f'Viewed FX rate detail for {currency_pair}',
-        status='SUCCESS',
-        request_method='GET',
-        request_path=request.path,
-        ip_address=request.META.get('REMOTE_ADDR'),
-        user_agent=request.META.get('HTTP_USER_AGENT', '')
-    )
+    # audit_log_kudu_repository.log_action(
+    #     user_id=user_id,
+    #     username=username,
+    #     user_email=user_email,
+    #     action_type='VIEW',
+    #     entity_type='FX_RATE',
+    #     entity_id=currency_pair,
+    #     action_description=f'Viewed FX rate detail for {currency_pair}',
+    #     status='SUCCESS',
+    #     request_method='GET',
+    #     request_path=request.path,
+    #     ip_address=request.META.get('REMOTE_ADDR'),
+    #     user_agent=request.META.get('HTTP_USER_AGENT', '')
+    # )
 
     # Convert chart data to JSON for JavaScript
     import json
@@ -541,24 +542,24 @@ def equity_price_list(request):
         user=request.session.get('user_login', 'SYSTEM')
     )
 
-    # Log view
-    username = request.session.get('user_login', 'anonymous')
-    user_id = str(request.session.get('user_id', ''))
-    user_email = request.session.get('user_email', '')
+    # Log view - Commented out (only log CREATE, UPDATE, DELETE)
+    # username = request.session.get('user_login', 'anonymous')
+    # user_id = str(request.session.get('user_id', ''))
+    # user_email = request.session.get('user_email', '')
 
-    audit_log_kudu_repository.log_action(
-        user_id=user_id,
-        username=username,
-        user_email=user_email,
-        action_type='VIEW',
-        entity_type='EQUITY_PRICE',
-        action_description=f'Viewed equity price list ({len(equity_prices_data)} prices)',
-        status='SUCCESS',
-        request_method='GET',
-        request_path=request.path,
-        ip_address=request.META.get('REMOTE_ADDR'),
-        user_agent=request.META.get('HTTP_USER_AGENT', '')
-    )
+    # audit_log_kudu_repository.log_action(
+    #     user_id=user_id,
+    #     username=username,
+    #     user_email=user_email,
+    #     action_type='VIEW',
+    #     entity_type='EQUITY_PRICE',
+    #     action_description=f'Viewed equity price list ({len(equity_prices_data)} prices)',
+    #     status='SUCCESS',
+    #     request_method='GET',
+    #     request_path=request.path,
+    #     ip_address=request.META.get('REMOTE_ADDR'),
+    #     user_agent=request.META.get('HTTP_USER_AGENT', '')
+    # )
 
     context = {
         'page_obj': equity_prices,
@@ -698,7 +699,23 @@ def equity_price_edit(request, equity_price_id):
             )
 
             if success:
-                # Log to audit
+                # Track changes for audit
+                old_values = {}
+                new_values = {}
+                changed_fields = []
+
+                trackable_fields = ['currency_code', 'security_label', 'isin', 'price_date',
+                                   'main_closing_price', 'market', 'group_name']
+
+                for field in trackable_fields:
+                    old_val = existing_price.get(field, '')
+                    new_val = equity_price_data.get(field, '')
+                    if str(old_val) != str(new_val):
+                        old_values[field] = old_val
+                        new_values[field] = new_val
+                        changed_fields.append(field)
+
+                # Log to audit with old_value and new_value
                 user_id = str(request.session.get('user_id', ''))
                 user_email = request.session.get('user_email', '')
 
@@ -710,7 +727,10 @@ def equity_price_edit(request, equity_price_id):
                     entity_type='EQUITY_PRICE',
                     entity_id=str(equity_price_id),
                     entity_name=equity_price_data['security_label'],
-                    action_description=f"Updated equity price for {equity_price_data['security_label']} on {equity_price_data['price_date']}",
+                    action_description=f"Updated equity price for {equity_price_data['security_label']} on {equity_price_data['price_date']} - Changed fields: {', '.join(changed_fields) if changed_fields else 'No changes'}",
+                    old_value=json.dumps(old_values, default=str) if old_values else None,
+                    new_value=json.dumps(new_values, default=str) if new_values else None,
+                    field_name=', '.join(changed_fields) if changed_fields else None,
                     status='SUCCESS',
                     request_method=request.method,
                     request_path=request.path,

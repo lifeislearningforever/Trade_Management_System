@@ -191,22 +191,22 @@ def udf_list(request):
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
 
-    # Log view to Kudu
-    user_info = get_request_user_info(request)
-    audit_log_kudu_repository.log_action(
-        user_id=user_info['user_id'],
-        username=user_info['username'],
-        user_email=user_info['user_email'],
-        action_type='VIEW' if not search else 'SEARCH',
-        entity_type='UDF',
-        entity_name='UDF List',
-        action_description=f'Viewed UDF list from Kudu ({len(udfs_data)} definitions)' + (f' - Search: {search}' if search else ''),
-        status='SUCCESS',
-        request_method='GET',
-        request_path=request.path,
-        ip_address=request.META.get('REMOTE_ADDR'),
-        user_agent=request.META.get('HTTP_USER_AGENT', '')
-    )
+    # Log view to Kudu - Commented out for VIEW actions (only log CREATE, UPDATE, DELETE)
+    # user_info = get_request_user_info(request)
+    # audit_log_kudu_repository.log_action(
+    #     user_id=user_info['user_id'],
+    #     username=user_info['username'],
+    #     user_email=user_info['user_email'],
+    #     action_type='VIEW' if not search else 'SEARCH',
+    #     entity_type='UDF',
+    #     entity_name='UDF List',
+    #     action_description=f'Viewed UDF list from Kudu ({len(udfs_data)} definitions)' + (f' - Search: {search}' if search else ''),
+    #     status='SUCCESS',
+    #     request_method='GET',
+    #     request_path=request.path,
+    #     ip_address=request.META.get('REMOTE_ADDR'),
+    #     user_agent=request.META.get('HTTP_USER_AGENT', '')
+    # )
 
     context = {
         'page_obj': page_obj,
@@ -238,23 +238,23 @@ def udf_detail(request, field_name):
     # Get usage statistics (Note: UDF values not yet in Kudu)
     value_count = 0  # TODO: Implement when UDF values are in Kudu
 
-    # Log view to Kudu
-    user_info = get_request_user_info(request)
-    audit_log_kudu_repository.log_action(
-        user_id=user_info['user_id'],
-        username=user_info['username'],
-        user_email=user_info['user_email'],
-        action_type='VIEW',
-        entity_type='UDF',
-        entity_id=field_name,
-        entity_name=udf.label,
-        action_description=f'Viewed UDF detail: {field_name}',
-        status='SUCCESS',
-        request_method='GET',
-        request_path=request.path,
-        ip_address=request.META.get('REMOTE_ADDR'),
-        user_agent=request.META.get('HTTP_USER_AGENT', '')
-    )
+    # Log view to Kudu - Commented out for VIEW actions (only log CREATE, UPDATE, DELETE)
+    # user_info = get_request_user_info(request)
+    # audit_log_kudu_repository.log_action(
+    #     user_id=user_info['user_id'],
+    #     username=user_info['username'],
+    #     user_email=user_info['user_email'],
+    #     action_type='VIEW',
+    #     entity_type='UDF',
+    #     entity_id=field_name,
+    #     entity_name=udf.label,
+    #     action_description=f'Viewed UDF detail: {field_name}',
+    #     status='SUCCESS',
+    #     request_method='GET',
+    #     request_path=request.path,
+    #     ip_address=request.META.get('REMOTE_ADDR'),
+    #     user_agent=request.META.get('HTTP_USER_AGENT', '')
+    # )
 
     context = {
         'udf': udf,
@@ -432,11 +432,28 @@ def udf_edit(request, field_name):
                 if max_len:
                     data['max_length'] = int(max_len)
 
+            # Track changes for audit
+            old_values = {}
+            new_values = {}
+            changed_fields = []
+
+            # Fields to track
+            trackable_fields = ['label', 'description', 'is_required', 'is_unique',
+                               'default_value', 'display_order', 'group_name', 'is_active']
+
+            for field in trackable_fields:
+                old_val = getattr(udf, field, None)
+                new_val = data.get(field)
+                if old_val != new_val:
+                    old_values[field] = old_val
+                    new_values[field] = new_val
+                    changed_fields.append(field)
+
             # Update in Kudu
             success = udf_definition_repository.update_definition(udf.udf_id, data)
 
             if success:
-                # Log to Kudu audit
+                # Log to Kudu audit with old_value and new_value
                 audit_log_kudu_repository.log_action(
                     user_id=user_info['user_id'],
                     username=user_info['username'],
@@ -445,7 +462,10 @@ def udf_edit(request, field_name):
                     entity_type='UDF',
                     entity_id=field_name,
                     entity_name=data['label'],
-                    action_description=f'Updated UDF definition: {field_name}',
+                    action_description=f'Updated UDF definition: {field_name} - Changed fields: {", ".join(changed_fields) if changed_fields else "No changes"}',
+                    old_value=json.dumps(old_values, default=str) if old_values else None,
+                    new_value=json.dumps(new_values, default=str) if new_values else None,
+                    field_name=', '.join(changed_fields) if changed_fields else None,
                     status='SUCCESS',
                     request_method='POST',
                     request_path=request.path,
@@ -654,10 +674,13 @@ def udf_option_toggle(request, field_name):
             WHERE udf_id = {udf_id} AND option_value = '{escaped_value}'
             """
 
+            # Track old value (opposite of new)
+            old_is_active = not is_active
+
             success = impala_manager.execute_write(query, database='gmp_cis')
 
             if success:
-                # Log audit
+                # Log audit with old_value and new_value
                 audit_log_kudu_repository.log_action(
                     user_id=user_info['user_id'],
                     username=user_info['username'],
@@ -666,6 +689,9 @@ def udf_option_toggle(request, field_name):
                     entity_type='UDF_OPTION',
                     entity_id=f"{field_name}:{option_value}",
                     action_description=f'{"Activated" if is_active else "Deactivated"} option: {option_value}',
+                    old_value=json.dumps({'is_active': old_is_active}),
+                    new_value=json.dumps({'is_active': is_active}),
+                    field_name='is_active',
                     status='SUCCESS',
                     request_method='POST',
                     request_path=request.path,

@@ -64,20 +64,20 @@ def security_list(request: HttpRequest) -> HttpResponse:
     except EmptyPage:
         securities_page = paginator.page(paginator.num_pages if paginator.num_pages > 0 else 1)
 
-    # Log audit
-    AuditLogKuduRepository.log_action(
-        user_id=user_id,
-        username=username,
-        user_email=user_email,
-        action_type='VIEW',
-        entity_type='SECURITY',
-        action_description=f'Viewed security list ({len(securities)} securities)',
-        status='SUCCESS',
-        request_method='GET',
-        request_path=request.path,
-        ip_address=request.META.get('REMOTE_ADDR'),
-        user_agent=request.META.get('HTTP_USER_AGENT', '')
-    )
+    # Log audit - Commented out for VIEW actions (only log CREATE, UPDATE, DELETE)
+    # AuditLogKuduRepository.log_action(
+    #     user_id=user_id,
+    #     username=username,
+    #     user_email=user_email,
+    #     action_type='VIEW',
+    #     entity_type='SECURITY',
+    #     action_description=f'Viewed security list ({len(securities)} securities)',
+    #     status='SUCCESS',
+    #     request_method='GET',
+    #     request_path=request.path,
+    #     ip_address=request.META.get('REMOTE_ADDR'),
+    #     user_agent=request.META.get('HTTP_USER_AGENT', '')
+    # )
 
     context = {
         'securities': securities_page,
@@ -120,18 +120,18 @@ def security_detail(request: HttpRequest, security_id: int) -> HttpResponse:
     # Get status color
     security['status_color'] = security_service.get_status_display_color(security.get('status', ''))
 
-    # Log audit
-    AuditLogKuduRepository.log_action(
-        user_id=user_id,
-        username=username,
-        user_email=user_email,
-        action_type='VIEW',
-        entity_type='SECURITY',
-        entity_id=str(security_id),
-        entity_name=security.get('security_name', ''),
-        action_description=f'Viewed security detail: {security.get("security_name")}',
-        status='SUCCESS'
-    )
+    # Log audit - Commented out for VIEW actions (only log CREATE, UPDATE, DELETE)
+    # AuditLogKuduRepository.log_action(
+    #     user_id=user_id,
+    #     username=username,
+    #     user_email=user_email,
+    #     action_type='VIEW',
+    #     entity_type='SECURITY',
+    #     entity_id=str(security_id),
+    #     entity_name=security.get('security_name', ''),
+    #     action_description=f'Viewed security detail: {security.get("security_name")}',
+    #     status='SUCCESS'
+    # )
 
     context = {
         'security': security,
@@ -533,16 +533,16 @@ def pending_approvals(request: HttpRequest) -> HttpResponse:
     except EmptyPage:
         securities_page = paginator.page(paginator.num_pages if paginator.num_pages > 0 else 1)
 
-    # Log audit
-    AuditLogKuduRepository.log_action(
-        user_id=user_id,
-        username=username,
-        user_email=user_email,
-        action_type='VIEW',
-        entity_type='SECURITY',
-        action_description=f'Viewed pending approvals ({len(securities)} securities)',
-        status='SUCCESS'
-    )
+    # Log audit - Commented out for VIEW actions (only log CREATE, UPDATE, DELETE)
+    # AuditLogKuduRepository.log_action(
+    #     user_id=user_id,
+    #     username=username,
+    #     user_email=user_email,
+    #     action_type='VIEW',
+    #     entity_type='SECURITY',
+    #     action_description=f'Viewed pending approvals ({len(securities)} securities)',
+    #     status='SUCCESS'
+    # )
 
     context = {
         'securities': securities_page,
@@ -567,16 +567,16 @@ def security_dashboard(request: HttpRequest) -> HttpResponse:
     # Fetch statistics
     stats = security_hive_repository.get_statistics()
 
-    # Log audit
-    AuditLogKuduRepository.log_action(
-        user_id=user_id,
-        username=username,
-        user_email=user_email,
-        action_type='VIEW',
-        entity_type='SECURITY',
-        action_description='Viewed security dashboard',
-        status='SUCCESS'
-    )
+    # Log audit - Commented out for VIEW actions (only log CREATE, UPDATE, DELETE)
+    # AuditLogKuduRepository.log_action(
+    #     user_id=user_id,
+    #     username=username,
+    #     user_email=user_email,
+    #     action_type='VIEW',
+    #     entity_type='SECURITY',
+    #     action_description='Viewed security dashboard',
+    #     status='SUCCESS'
+    # )
 
     context = {
         'stats': stats,

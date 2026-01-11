@@ -10,6 +10,7 @@ SOLID Principles Applied:
 - Dependency Inversion: Depends on abstractions (models), not concrete implementations
 """
 
+import json
 from typing import List, Dict, Optional
 from django.db.models import Q, QuerySet
 from django.core.exceptions import ValidationError, PermissionDenied
@@ -117,8 +118,10 @@ class PortfolioService:
                 "Only DRAFT and REJECTED portfolios can be modified."
             )
 
-        # Track changes
-        changes = []
+        # Track changes with old and new values
+        changes = {}
+        old_values = {}
+        new_values = {}
 
         # Update fields
         editable_fields = [
@@ -132,14 +135,17 @@ class PortfolioService:
                 old_value = getattr(portfolio, field)
                 new_value = data[field]
                 if old_value != new_value:
-                    changes.append(f"{field}: {old_value} → {new_value}")
+                    changes[field] = {'old': old_value, 'new': new_value}
+                    old_values[field] = old_value
+                    new_values[field] = new_value
                     setattr(portfolio, field, new_value)
 
         portfolio.updated_by = user
         portfolio.save()
 
-        # Log update
+        # Log update with old_value and new_value
         if changes:
+            changed_fields = list(changes.keys())
             audit_log_kudu_repository.log_action(
                 user_id=str(user.id),
                 username=user.username,
@@ -148,7 +154,10 @@ class PortfolioService:
                 entity_type='PORTFOLIO',
                 entity_id=str(portfolio.id),
                 entity_name=portfolio.code,
-                action_description=f"Updated portfolio {portfolio.code}: {'; '.join(changes)}",
+                action_description=f"Updated portfolio {portfolio.code} - Changed fields: {', '.join(changed_fields)}",
+                old_value=json.dumps(old_values, default=str),
+                new_value=json.dumps(new_values, default=str),
+                field_name=', '.join(changed_fields),
                 request_method='POST',
                 status='SUCCESS'
             )

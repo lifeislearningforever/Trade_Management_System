@@ -39,29 +39,31 @@ class PortfolioDropdownRepository:
     CURRENCY_TABLE = 'gmp_cis_sta_dly_currency'
 
     @staticmethod
-    def get_active_udf_fields(entity_type: str = 'PORTFOLIO') -> List[Dict[str, Any]]:
+    def get_active_udf_fields(object_type: str = 'PORTFOLIO') -> List[Dict[str, Any]]:
         """
-        Get all active UDF fields for a given entity type.
+        Get all active UDF fields for a given object type.
 
         Args:
-            entity_type: Entity type to filter by (default: PORTFOLIO)
+            object_type: Object type to filter by (default: PORTFOLIO)
 
         Returns:
-            List of UDF field dictionaries with udf_id, field_name, label
+            List of UDF field dictionaries with udf_id, field_name, field_value
         """
         try:
             query = f"""
-            SELECT udf_id, field_name, label, is_required
+            SELECT udf_id, object_type, field_name, field_value, is_active
             FROM {PortfolioDropdownRepository.DATABASE}.{PortfolioDropdownRepository.UDF_FIELD_TABLE}
-            WHERE entity_type = '{entity_type}'
+            WHERE object_type = '{object_type}'
               AND is_active = true
+              AND field_value IS NOT NULL
+              AND field_value <> ''
             ORDER BY field_name
             """
             results = impala_manager.execute_query(query, database=PortfolioDropdownRepository.DATABASE)
             return results if results else []
 
         except Exception as e:
-            logger.error(f"Error fetching UDF fields for {entity_type}: {str(e)}")
+            logger.error(f"Error fetching UDF fields for {object_type}: {str(e)}")
             return []
 
     @staticmethod
@@ -91,29 +93,43 @@ class PortfolioDropdownRepository:
             return []
 
     @staticmethod
-    def get_dropdown_options_by_field_name(field_name: str, entity_type: str = 'PORTFOLIO') -> List[str]:
+    def get_dropdown_options_by_field_name(field_name: str, object_type: str = 'PORTFOLIO') -> List[Dict[str, Any]]:
         """
-        Get dropdown options for a field by its field_name.
+        Get dropdown options for a field by its field_name (definition).
 
-        Uses ONLY simplified UDF table: cis_udf_field -> cis_udf_option
-        Joins on udf_id to fetch dropdown values for active UDF fields.
+        Schema: cis_udf_field table where:
+        - field_name is the field definition (e.g., 'Portfolio Manager') - Admin creates this
+        - field_value contains the actual dropdown values (e.g., 'John Doe') - Users add these
+        - Records with empty field_value are DEFINITIONS, non-empty are VALUES
 
         Args:
-            field_name: UDF field name (e.g., 'manager', 'account_group')
-            entity_type: Entity type (default: PORTFOLIO)
+            field_name: UDF field definition name (e.g., 'Portfolio Manager', 'Account Group')
+            object_type: Object type (default: PORTFOLIO)
 
         Returns:
-            List of option values, ordered by display_order
+            List of dicts with field_value (the actual dropdown values, excluding definition record)
         """
         try:
-            # Two-table join: cis_udf_field -> cis_udf_option
-            query = f""" SELECT f.field_name, f.entity_type, f.label, f.is_active FROM {PortfolioDropdownRepository.DATABASE}.{PortfolioDropdownRepository.UDF_FIELD_TABLE} f WHERE f.entity_type = '{entity_type}' AND f.is_active = true ORDER BY f.field_name """
+            escaped_field = field_name.replace("'", "''")
+            # Only get VALUE records (where field_value is NOT empty)
+            query = f"""
+            SELECT udf_id, field_name, field_value, is_active
+            FROM {PortfolioDropdownRepository.DATABASE}.{PortfolioDropdownRepository.UDF_FIELD_TABLE}
+            WHERE object_type = '{object_type}'
+              AND field_name = '{escaped_field}'
+              AND field_value IS NOT NULL
+              AND field_value != ''
+              AND is_active = true
+            ORDER BY field_value
+            """
 
+            logger.info(f"Executing dropdown query for field_name={field_name}")
             results = impala_manager.execute_query(query, database=PortfolioDropdownRepository.DATABASE)
+            logger.info(f"Dropdown query returned {len(results) if results else 0} values for {field_name}")
             return results if results else []
 
         except Exception as e:
-            logger.error(f"Error fetching options for field {field_name}: {str(e)}")
+            logger.error(f"Error fetching options for field name {field_name}: {str(e)}")
             return []
 
     @staticmethod
@@ -174,25 +190,27 @@ class PortfolioDropdownService:
 
     def _log_dropdown_fetch(self, field_name: str, options_count: int, user: str = 'SYSTEM'):
         """
-        Log dropdown fetch to audit system.
+        Log dropdown fetch to audit system - Commented out (only log CREATE, UPDATE, DELETE)
 
         Args:
             field_name: Name of field being fetched
             options_count: Number of options returned
             user: Username (default: SYSTEM)
         """
-        try:
-            self.audit_repo.log_action(
-                user_id=user,
-                username=user,
-                action_type='READ',
-                entity_type='UDF_DROPDOWN',
-                entity_id=field_name,
-                action_detail=f'Fetched {options_count} dropdown options for field: {field_name}',
-                status='SUCCESS'
-            )
-        except Exception as e:
-            logger.warning(f"Failed to log dropdown fetch audit: {str(e)}")
+        # Commented out - no audit logging for dropdown/READ actions
+        # try:
+        #     self.audit_repo.log_action(
+        #         user_id=user,
+        #         username=user,
+        #         action_type='READ',
+        #         entity_type='UDF_DROPDOWN',
+        #         entity_id=field_name,
+        #         action_detail=f'Fetched {options_count} dropdown options for field: {field_name}',
+        #         status='SUCCESS'
+        #     )
+        # except Exception as e:
+        #     logger.warning(f"Failed to log dropdown fetch audit: {str(e)}")
+        pass
 
     # ========================================================================
     # INDIVIDUAL FIELD DROPDOWN METHODS
@@ -201,21 +219,20 @@ class PortfolioDropdownService:
 
     def get_managers(self, user: str = 'SYSTEM') -> List[str]:
         """
-        Get portfolio manager field labels from UDF system.
+        Get portfolio manager options from UDF system.
+
+        Fetches from cis_udf_field where field_name = 'Portfolio Manager'.
+        The actual manager names are stored in field_value column.
 
         Args:
             user: Username for audit logging
 
         Returns:
-            List of manager names (labels)
+            List of manager names
         """
         try:
-            results = self.repository.get_dropdown_options_by_field_name('PORTFOLIO')
-            managers = [
-                r.get('field_name')
-                for r in results
-                if r.get('label') and 'manager' in r.get('label').lower()
-            ]
+            results = PortfolioDropdownRepository.get_dropdown_options_by_field_name('Portfolio Manager', 'PORTFOLIO')
+            managers = [r.get('field_value') for r in results if r.get('field_value')]
             self._log_dropdown_fetch('manager', len(managers), user)
             return managers
         except Exception as e:
@@ -233,12 +250,8 @@ class PortfolioDropdownService:
             List of account group names
         """
         try:
-            results = self.repository.get_dropdown_options_by_field_name('PORTFOLIO')
-            account_groups = [
-                r.get('field_name')
-                for r in results
-                if r.get('label') and 'account group' in r.get('label').lower()
-            ]
+            results = PortfolioDropdownRepository.get_dropdown_options_by_field_name('Account Group', 'PORTFOLIO')
+            account_groups = [r.get('field_value') for r in results if r.get('field_value')]
             self._log_dropdown_fetch('account_groups', len(account_groups), user)
             return account_groups
         except Exception as e:
@@ -256,12 +269,8 @@ class PortfolioDropdownService:
             List of portfolio group names
         """
         try:
-            results = self.repository.get_dropdown_options_by_field_name('PORTFOLIO')
-            portfolio_groups = [
-                r.get('field_name')
-                for r in results
-                if r.get('label') and 'portfolio group' in r.get('label').lower()
-            ]
+            results = PortfolioDropdownRepository.get_dropdown_options_by_field_name('Portfolio Group', 'PORTFOLIO')
+            portfolio_groups = [r.get('field_value') for r in results if r.get('field_value')]
             self._log_dropdown_fetch('portfolio_groups', len(portfolio_groups), user)
             return portfolio_groups
         except Exception as e:
@@ -279,12 +288,8 @@ class PortfolioDropdownService:
             List of report group names
         """
         try:
-            results = self.repository.get_dropdown_options_by_field_name('PORTFOLIO')
-            report_groups = [
-                r.get('field_name')
-                for r in results
-                if r.get('label') and 'report group' in r.get('label').lower()
-            ]
+            results = PortfolioDropdownRepository.get_dropdown_options_by_field_name('Report Group', 'PORTFOLIO')
+            report_groups = [r.get('field_value') for r in results if r.get('field_value')]
             self._log_dropdown_fetch('report_groups', len(report_groups), user)
             return report_groups
         except Exception as e:
@@ -302,12 +307,8 @@ class PortfolioDropdownService:
             List of entity group names
         """
         try:
-            results = self.repository.get_dropdown_options_by_field_name('PORTFOLIO')
-            entity_groups = [
-                r.get('field_name')
-                for r in results
-                if r.get('label') and 'entity group' in r.get('label').lower()
-            ]
+            results = PortfolioDropdownRepository.get_dropdown_options_by_field_name('Entity Group', 'PORTFOLIO')
+            entity_groups = [r.get('field_value') for r in results if r.get('field_value')]
             self._log_dropdown_fetch('entity_groups', len(entity_groups), user)
             return entity_groups
         except Exception as e:
@@ -325,12 +326,8 @@ class PortfolioDropdownService:
             List of revaluation status values
         """
         try:
-            results = self.repository.get_dropdown_options_by_field_name('PORTFOLIO')
-            revaluation_status = [
-                r.get('field_name')
-                for r in results
-                if r.get('label') and 'revaluation status' in r.get('label').lower()
-            ]
+            results = PortfolioDropdownRepository.get_dropdown_options_by_field_name('Revaluation Status', 'PORTFOLIO')
+            revaluation_status = [r.get('field_value') for r in results if r.get('field_value')]
             self._log_dropdown_fetch('revaluation_status', len(revaluation_status), user)
             return revaluation_status
         except Exception as e:

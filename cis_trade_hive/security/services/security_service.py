@@ -6,6 +6,7 @@ All data operations use Kudu tables via repository layer.
 """
 
 import logging
+import json
 from typing import Dict, Optional, Any
 from datetime import datetime
 
@@ -173,7 +174,12 @@ class SecurityService:
                 performed_by=username
             )
 
-            # Log to audit
+            # Prepare old and new values for audit
+            old_values = {field: change['old'] for field, change in changes.items()}
+            new_values = {field: change['new'] for field, change in changes.items()}
+            changed_fields = list(changes.keys())
+
+            # Log to audit with old_value and new_value
             AuditLogKuduRepository.log_action(
                 user_id=user_id,
                 username=username,
@@ -182,8 +188,10 @@ class SecurityService:
                 entity_type='SECURITY',
                 entity_id=str(security_id),
                 entity_name=security.get('security_name', ''),
-                action_description=f'Updated security: {security.get("security_name")}',
-                old_value=str(changes),
+                action_description=f'Updated security: {security.get("security_name")} - Changed fields: {", ".join(changed_fields)}',
+                old_value=json.dumps(old_values, default=str),
+                new_value=json.dumps(new_values, default=str),
+                field_name=', '.join(changed_fields),
                 status='SUCCESS'
             )
 

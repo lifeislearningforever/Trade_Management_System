@@ -57,21 +57,22 @@ def currency_list(request):
         user_email = request.session.get('user_email', '')
         user_full_name = username  # ACL doesn't have full name
 
-        audit_log_kudu_repository.log_action(
-            user_id=user_id,
-            username=username,
-            user_email=user_email,
-            action_type='VIEW' if not search else 'SEARCH',
-            entity_type='REFERENCE_DATA',
-            entity_name='Currency',
-            entity_id='CURRENCY_LIST',
-            action_description=f"Viewed currency list ({len(currencies)} records)" + (f" - Search: {search}" if search else ""),
-            request_method=request.method,
-            request_path=request.path,
-            ip_address=get_client_ip(request),
-            user_agent=request.META.get('HTTP_USER_AGENT', ''),
-            status='SUCCESS'
-        )
+        # Commented out VIEW/SEARCH audit logging (only log CREATE, UPDATE, DELETE)
+        # audit_log_kudu_repository.log_action(
+        #     user_id=user_id,
+        #     username=username,
+        #     user_email=user_email,
+        #     action_type='VIEW' if not search else 'SEARCH',
+        #     entity_type='REFERENCE_DATA',
+        #     entity_name='Currency',
+        #     entity_id='CURRENCY_LIST',
+        #     action_description=f"Viewed currency list ({len(currencies)} records)" + (f" - Search: {search}" if search else ""),
+        #     request_method=request.method,
+        #     request_path=request.path,
+        #     ip_address=get_client_ip(request),
+        #     user_agent=request.META.get('HTTP_USER_AGENT', ''),
+        #     status='SUCCESS'
+        # )
 
         # CSV Export
         if export:
@@ -151,21 +152,22 @@ def country_list(request):
         user_email = request.session.get('user_email', '')
         user_full_name = username  # ACL doesn't have full name
 
-        audit_log_kudu_repository.log_action(
-            user_id=user_id,
-            username=username,
-            user_email=user_email,
-            action_type='VIEW' if not search else 'SEARCH',
-            entity_type='REFERENCE_DATA',
-            entity_name='Country',
-            entity_id='COUNTRY_LIST',
-            action_description=f"Viewed country list ({len(countries)} records)" + (f" - Search: {search}" if search else ""),
-            request_method=request.method,
-            request_path=request.path,
-            ip_address=get_client_ip(request),
-            user_agent=request.META.get('HTTP_USER_AGENT', ''),
-            status='SUCCESS'
-        )
+        # Commented out VIEW/SEARCH audit logging (only log CREATE, UPDATE, DELETE)
+        # audit_log_kudu_repository.log_action(
+        #     user_id=user_id,
+        #     username=username,
+        #     user_email=user_email,
+        #     action_type='VIEW' if not search else 'SEARCH',
+        #     entity_type='REFERENCE_DATA',
+        #     entity_name='Country',
+        #     entity_id='COUNTRY_LIST',
+        #     action_description=f"Viewed country list ({len(countries)} records)" + (f" - Search: {search}" if search else ""),
+        #     request_method=request.method,
+        #     request_path=request.path,
+        #     ip_address=get_client_ip(request),
+        #     user_agent=request.META.get('HTTP_USER_AGENT', ''),
+        #     status='SUCCESS'
+        # )
 
         # CSV Export
         if export:
@@ -253,22 +255,22 @@ def calendar_list(request):
         user_email = request.session.get('user_email', '')
         user_full_name = username  # ACL doesn't have full name
 
-        # Log VIEW/SEARCH action to Kudu
-        audit_log_kudu_repository.log_action(
-            user_id=user_id,
-            username=username,
-            user_email=user_email,
-            action_type='VIEW' if not search else 'SEARCH',
-            entity_type='REFERENCE_DATA',
-            entity_name='Calendar',
-            entity_id='CALENDAR_LIST',
-            action_description=f"Viewed calendar list ({len(calendars)} records)" + (f" - Search: {search}" if search else ""),
-            request_method=request.method,
-            request_path=request.path,
-            ip_address=get_client_ip(request),
-            user_agent=request.META.get('HTTP_USER_AGENT', ''),
-            status='SUCCESS'
-        )
+        # Commented out VIEW/SEARCH audit logging (only log CREATE, UPDATE, DELETE)
+        # audit_log_kudu_repository.log_action(
+        #     user_id=user_id,
+        #     username=username,
+        #     user_email=user_email,
+        #     action_type='VIEW' if not search else 'SEARCH',
+        #     entity_type='REFERENCE_DATA',
+        #     entity_name='Calendar',
+        #     entity_id='CALENDAR_LIST',
+        #     action_description=f"Viewed calendar list ({len(calendars)} records)" + (f" - Search: {search}" if search else ""),
+        #     request_method=request.method,
+        #     request_path=request.path,
+        #     ip_address=get_client_ip(request),
+        #     user_agent=request.META.get('HTTP_USER_AGENT', ''),
+        #     status='SUCCESS'
+        # )
 
         # CSV Export
         if export:
@@ -378,22 +380,22 @@ def counterparty_list(request):
         user_id = str(request.session.get('user_id', ''))
         user_email = request.session.get('user_email', '')
 
-        # Log VIEW/SEARCH action to Kudu
-        audit_log_kudu_repository.log_action(
-            user_id=user_id,
-            username=username,
-            user_email=user_email,
-            action_type='VIEW' if not search else 'SEARCH',
-            entity_type='REFERENCE_DATA',
-            entity_name='Counterparty',
-            entity_id='COUNTERPARTY_LIST',
-            action_description=f"Viewed counterparty list ({len(counterparties)} records)" + (f" - Search: {search}" if search else ""),
-            request_method=request.method,
-            request_path=request.path,
-            ip_address=get_client_ip(request),
-            user_agent=request.META.get('HTTP_USER_AGENT', ''),
-            status='SUCCESS'
-        )
+        # Log VIEW/SEARCH action to Kudu - Commented out (only log CREATE, UPDATE, DELETE)
+        # audit_log_kudu_repository.log_action(
+        #     user_id=user_id,
+        #     username=username,
+        #     user_email=user_email,
+        #     action_type='VIEW' if not search else 'SEARCH',
+        #     entity_type='REFERENCE_DATA',
+        #     entity_name='Counterparty',
+        #     entity_id='COUNTERPARTY_LIST',
+        #     action_description=f"Viewed counterparty list ({len(counterparties)} records)" + (f" - Search: {search}" if search else ""),
+        #     request_method=request.method,
+        #     request_path=request.path,
+        #     ip_address=get_client_ip(request),
+        #     user_agent=request.META.get('HTTP_USER_AGENT', ''),
+        #     status='SUCCESS'
+        # )
 
         # CSV Export
         if export:
@@ -465,6 +467,59 @@ def counterparty_list(request):
             'counterparties': [],
             'countries': []
         })
+
+
+@require_login
+def counterparty_detail(request, short_name):
+    """
+    View counterparty details including all fields and CIFs
+    Requires: Authentication
+    """
+    try:
+        # Get counterparty from Kudu by short name
+        counterparty = counterparty_service.get_by_short_name(short_name)
+
+        if not counterparty:
+            messages.error(request, f"Counterparty '{short_name}' not found")
+            return redirect('reference_data:counterparty_list')
+
+        # Get all CIFs for this counterparty
+        cifs = counterparty_cif_service.list_cifs_for_counterparty(short_name, is_active=None)
+
+        # Get user info from session
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+
+        # Log VIEW action to Kudu - Commented out (only log CREATE, UPDATE, DELETE)
+        # audit_log_kudu_repository.log_action(
+        #     user_id=user_id,
+        #     username=username,
+        #     user_email=user_email,
+        #     action_type='VIEW',
+        #     entity_type='REFERENCE_DATA',
+        #     entity_name='Counterparty Detail',
+        #     entity_id=short_name,
+        #     action_description=f"Viewed counterparty details: {short_name}",
+        #     request_method=request.method,
+        #     request_path=request.path,
+        #     ip_address=get_client_ip(request),
+        #     user_agent=request.META.get('HTTP_USER_AGENT', ''),
+        #     status='SUCCESS'
+        # )
+
+        context = {
+            'counterparty': counterparty,
+            'cifs': cifs,
+            'cif_count': len(cifs),
+        }
+
+        return render(request, 'reference_data/counterparty_details.html', context)
+
+    except Exception as e:
+        logger.error(f"Error in counterparty_detail: {str(e)}")
+        messages.error(request, f"Error loading counterparty details: {str(e)}")
+        return redirect('reference_data:counterparty_list')
 
 
 @require_login
@@ -636,7 +691,24 @@ def counterparty_edit(request, short_name):
                         except Exception as cif_error:
                             logger.error(f"Error creating CIF: {str(cif_error)}")
 
-                # Log UPDATE action to Kudu
+                # Track changes for audit
+                old_values = {}
+                new_values = {}
+                changed_fields = []
+
+                trackable_fields = ['counterparty_full_name', 'record_type', 'city', 'country',
+                                   'postal_code', 'primary_contact', 'primary_number', 'industry',
+                                   'is_bank', 'is_broker', 'is_custodian', 'is_issuer']
+
+                for field in trackable_fields:
+                    old_val = counterparty.get(field, '')
+                    new_val = counterparty_data.get(field, '')
+                    if str(old_val) != str(new_val):
+                        old_values[field] = old_val
+                        new_values[field] = new_val
+                        changed_fields.append(field)
+
+                # Log UPDATE action to Kudu with old_value and new_value
                 audit_log_kudu_repository.log_action(
                     user_id=user_id,
                     username=username,
@@ -645,7 +717,10 @@ def counterparty_edit(request, short_name):
                     entity_type='REFERENCE_DATA',
                     entity_name='Counterparty',
                     entity_id=short_name,
-                    action_description=f"Updated counterparty: {short_name}" + (f" and added {cif_count} CIF(s)" if cif_count > 0 else ""),
+                    action_description=f"Updated counterparty: {short_name} - Changed fields: {', '.join(changed_fields) if changed_fields else 'No changes'}" + (f" and added {cif_count} CIF(s)" if cif_count > 0 else ""),
+                    old_value=json.dumps(old_values, default=str) if old_values else None,
+                    new_value=json.dumps(new_values, default=str) if new_values else None,
+                    field_name=', '.join(changed_fields) if changed_fields else None,
                     request_method=request.method,
                     request_path=request.path,
                     ip_address=get_client_ip(request),
@@ -892,6 +967,9 @@ def counterparty_cif_update(request, short_name, m_label):
         user_id = str(request.session.get('user_id', ''))
         user_email = request.session.get('user_email', '')
 
+        # Get existing CIF for change tracking
+        existing_cif = counterparty_cif_service.get_cif(short_name, m_label)
+
         # Parse JSON body
         data = json.loads(request.body)
 
@@ -908,7 +986,22 @@ def counterparty_cif_update(request, short_name, m_label):
         success, error_msg = counterparty_cif_service.update_cif(short_name, m_label, cif_data, user_info)
 
         if success:
-            # Log UPDATE action to Kudu
+            # Track changes for audit
+            old_values = {}
+            new_values = {}
+            changed_fields = []
+
+            if existing_cif:
+                trackable_fields = ['country', 'isin', 'description']
+                for field in trackable_fields:
+                    old_val = existing_cif.get(field, '')
+                    new_val = cif_data.get(field, '')
+                    if str(old_val) != str(new_val):
+                        old_values[field] = old_val
+                        new_values[field] = new_val
+                        changed_fields.append(field)
+
+            # Log UPDATE action to Kudu with old_value and new_value
             audit_log_kudu_repository.log_action(
                 user_id=user_id,
                 username=username,
@@ -917,7 +1010,10 @@ def counterparty_cif_update(request, short_name, m_label):
                 entity_type='COUNTERPARTY_CIF',
                 entity_name='Counterparty CIF',
                 entity_id=f"{short_name}:{m_label}",
-                action_description=f"Updated CIF {m_label} for counterparty {short_name}",
+                action_description=f"Updated CIF {m_label} for counterparty {short_name} - Changed fields: {', '.join(changed_fields) if changed_fields else 'No changes'}",
+                old_value=json.dumps(old_values, default=str) if old_values else None,
+                new_value=json.dumps(new_values, default=str) if new_values else None,
+                field_name=', '.join(changed_fields) if changed_fields else None,
                 request_method=request.method,
                 request_path=request.path,
                 ip_address=get_client_ip(request),
