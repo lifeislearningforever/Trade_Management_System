@@ -23,9 +23,11 @@
         <a href="{% url 'market_data:fx_rate_list' %}" class="btn btn-primary">
             <i class="bi bi-cash-coin"></i> FX Rates
         </a>
+        {% comment "Equity Prices button - DISABLED" %}
         <a href="{% url 'market_data:equity_price_list' %}" class="btn btn-primary">
             <i class="bi bi-graph-up-arrow"></i> Equity Prices
         </a>
+        {% endcomment %}
         <a href="{% url 'market_data:fx_rate_list' %}?export=csv" class="btn btn-success">
             <i class="bi bi-download"></i> Export FX CSV
         </a>
@@ -72,7 +74,7 @@
         </div>
     </div>
 
-    <!-- Equity Price Statistics -->
+    <!-- Equity Price Statistics - DISABLED
     <h3 class="mb-3"><i class="bi bi-graph-up-arrow"></i> Equity Price Statistics</h3>
     <div class="row g-4 mb-4">
         <div class="col-md-3">
@@ -112,10 +114,11 @@
             </div>
         </div>
     </div>
+    -->
 
     <div class="row g-4">
         <!-- Latest FX Rates Card -->
-        <div class="col-lg-6">
+        <div class="col-lg-12">
             <div class="card glass-card">
                 <div class="card-header">
                     <h5 class="card-title mb-0">
@@ -173,7 +176,7 @@
             </div>
         </div>
 
-        <!-- Latest Equity Prices Card -->
+        {% comment "Latest Equity Prices Card - DISABLED" %}
         <div class="col-lg-6">
             <div class="card glass-card">
                 <div class="card-header">
@@ -232,6 +235,7 @@
                 </div>
             </div>
         </div>
+        {% endcomment %}
     </div>
 
     <!-- Currency Coverage -->

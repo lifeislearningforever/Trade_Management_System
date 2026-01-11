@@ -87,7 +87,7 @@
                                 <option value="">-- Select Object Type First --</option>
                             </select>
                             <div class="form-text">
-                                Technical field name. Filtered by selected Object Type.
+                                Select the field to add a value to (e.g., Portfolio Manager, Account Group).
                                 {% if form_action == 'edit' %}
                                 <span class="text-warning"><i class="bi bi-lock-fill"></i> Field name cannot be changed after creation.</span>
                                 {% endif %}
@@ -98,20 +98,20 @@
                             {% endif %}
                         </div>
 
-                        <!-- Field Value (Display Label) -->
+                        <!-- Field Value (The actual dropdown option value) -->
                         <div class="mb-4">
                             <label for="field_value" class="form-label">
-                                Field Value (Display Label) <span class="text-danger">*</span>
+                                Value <span class="text-danger">*</span>
                             </label>
                             <input type="text"
                                    class="form-control"
                                    id="field_value"
                                    name="field_value"
                                    value="{{ field_data.field_value|default:'' }}"
-                                   placeholder="e.g., Portfolio Type, Market, Security Type"
+                                   placeholder="e.g., John Doe, Trading Desk A, Growth Fund"
                                    required>
                             <div class="form-text">
-                                User-friendly display label shown in the UI.
+                                The dropdown option value that users will select (e.g., "John Doe" for Portfolio Manager).
                             </div>
                         </div>
 
@@ -160,37 +160,36 @@
                     </h6>
 
                     <div class="mb-3">
-                        <strong>Field Name</strong>
-                        <ul class="small mb-0 ps-3">
-                            <li>Can use uppercase, lowercase, spaces, hyphens</li>
-                            <li>Examples: AAF, AFFIN-UOB HLDG, AIIF CP II</li>
-                            <li>Same field name can be used multiple times</li>
-                            <li>Cannot be changed after creation</li>
-                        </ul>
-                    </div>
-
-                    <div class="mb-3">
-                        <strong>Label</strong>
-                        <ul class="small mb-0 ps-3">
-                            <li>User-friendly display name</li>
-                            <li>Can contain spaces and special characters</li>
-                            <li>Can be updated anytime</li>
-                        </ul>
-                    </div>
-
-                    <div class="mb-3">
                         <strong>Object Type</strong>
                         <ul class="small mb-0 ps-3">
-                            <li>Choose the module this field belongs to</li>
+                            <li>The module this field belongs to (e.g., PORTFOLIO)</li>
                             <li>Cannot be changed after creation</li>
-                            <li>Each object can have multiple UDF fields</li>
+                        </ul>
+                    </div>
+
+                    <div class="mb-3">
+                        <strong>Field Name</strong>
+                        <ul class="small mb-0 ps-3">
+                            <li>The field definition (e.g., Portfolio Manager, Account Group)</li>
+                            <li>Admin creates field definitions first</li>
+                            <li>Cannot be changed after creation</li>
+                        </ul>
+                    </div>
+
+                    <div class="mb-3">
+                        <strong>Value</strong>
+                        <ul class="small mb-0 ps-3">
+                            <li>The dropdown option value users will see</li>
+                            <li>Examples: John Doe, Trading Desk A, Growth Fund</li>
+                            <li>Multiple values can be added per field</li>
                         </ul>
                     </div>
 
                     <div>
-                        <strong>Free Text Approach</strong>
+                        <strong>How it Works</strong>
                         <p class="small mb-0">
-                            All UDF fields are free-text inputs. Users can enter any text value when filling out the field.
+                            1. Admin creates field definitions (Object Type + Field Name)<br>
+                            2. Users add values for each field (the dropdown options)
                         </p>
                     </div>
                 </div>

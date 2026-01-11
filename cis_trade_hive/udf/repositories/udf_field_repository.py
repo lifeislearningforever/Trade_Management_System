@@ -1,19 +1,20 @@
 """
 UDF Field Repository - Simplified Schema with Cascading Dropdowns
 
-New Schema:
+Schema:
 - udf_id: Primary key
 - object_type: Entity this UDF belongs to (PORTFOLIO, EQUITY_PRICE, SECURITY, etc.)
-- field_name: Technical field name (e.g., 'portfolio_type', 'market')
-- field_value: Display value/label (e.g., 'Portfolio Type', 'Market')
-  - Empty ('') for entity type records
-  - Non-empty for field records
+- field_name: Field definition name (e.g., 'Portfolio Manager', 'Account Group') - ADMIN CREATES THIS
+- field_value: Dropdown option value (e.g., 'John Doe', 'Jane Smith') - USER ADDS THESE
+  - Empty ('') for field definition records (admin-created)
+  - Non-empty for dropdown option records (user-added values)
 - is_active: Soft delete flag
 - Audit fields: created_by, created_at, updated_by, updated_at
 
 Cascading Logic:
-1. Entity Types: WHERE field_value IS NULL OR field_value = ''
-2. Fields by Entity: WHERE object_type = '<selected>' AND field_value IS NOT NULL AND field_value != ''
+1. Object Types: Get distinct object_type values
+2. Field Definitions by Object: WHERE object_type = '<selected>' AND (field_value IS NULL OR field_value = '')
+3. Dropdown Values by Field: WHERE object_type = '<selected>' AND field_name = '<selected>' AND field_value IS NOT NULL AND field_value != ''
 """
 
 from typing import List, Dict, Any, Optional
@@ -82,7 +83,7 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
     """Repository for UDF field data access operations."""
 
     DATABASE = 'gmp_cis'
-    TABLE_NAME = 'gmp_cis.cis_udf_field'
+    TABLE_NAME = 'cis_udf_field'
 
     def get_object_types(self) -> List[str]:
         """
@@ -112,17 +113,66 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
 
     def get_fields_by_entity(self, object_type: str) -> List[Dict[str, Any]]:
         """
-        Get all fields for a specific entity type (where field_value is not empty).
+        Get all FIELD DEFINITIONS for a specific entity type.
+        Field definitions are records where field_value IS empty (admin-created).
+        Examples: 'Portfolio Manager', 'Account Group', 'Report Group'
 
         Args:
             object_type: Entity type to filter by (e.g., 'PORTFOLIO', 'EQUITY_PRICE')
 
         Returns:
-            List of field dictionaries with field_name and field_value
+            List of field definition dictionaries with field_name
         """
         try:
             escaped_entity = object_type.replace("'", "\\'")
 
+            # Get field definitions (records where field_value is empty)
+            query = f"""
+            SELECT DISTINCT
+                field_name
+            FROM {self.TABLE_NAME}
+            WHERE object_type = '{escaped_entity}'
+              AND (field_value IS NULL OR field_value = '')
+              AND is_active = true
+            ORDER BY field_name
+            """
+
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+
+            # Return unique field names as field definitions
+            unique_fields = []
+            seen = set()
+            for row in (results or []):
+                field_name = row.get('field_name')
+                if field_name and field_name not in seen:
+                    seen.add(field_name)
+                    unique_fields.append({'field_name': field_name})
+
+            logger.info(f"Retrieved {len(unique_fields)} field definitions for entity type: {object_type}")
+            return unique_fields
+
+        except Exception as e:
+            logger.error(f"Error retrieving field definitions for entity {object_type}: {str(e)}")
+            return []
+
+    def get_field_values(self, object_type: str, field_name: str) -> List[Dict[str, Any]]:
+        """
+        Get all VALUES (dropdown options) for a specific field.
+        Values are records where field_value IS NOT empty (user-added).
+        Examples: 'John Doe', 'Jane Smith' for 'Portfolio Manager' field.
+
+        Args:
+            object_type: Entity type (e.g., 'PORTFOLIO')
+            field_name: Field definition name (e.g., 'Portfolio Manager')
+
+        Returns:
+            List of value dictionaries with field_value
+        """
+        try:
+            escaped_entity = object_type.replace("'", "\\'")
+            escaped_field = field_name.replace("'", "\\'")
+
+            # Get only value records (where field_value is NOT empty)
             query = f"""
             SELECT
                 udf_id,
@@ -136,18 +186,19 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
                 updated_at
             FROM {self.TABLE_NAME}
             WHERE object_type = '{escaped_entity}'
+              AND field_name = '{escaped_field}'
               AND field_value IS NOT NULL
               AND field_value != ''
               AND is_active = true
-            ORDER BY field_name
+            ORDER BY field_value
             """
 
             results = impala_manager.execute_query(query, database=self.DATABASE)
-            logger.info(f"Retrieved {len(results) if results else 0} fields for entity type: {object_type}")
+            logger.info(f"Retrieved {len(results) if results else 0} values for {object_type}.{field_name}")
             return results if results else []
 
         except Exception as e:
-            logger.error(f"Error retrieving fields for entity {object_type}: {str(e)}")
+            logger.error(f"Error retrieving values for {object_type}.{field_name}: {str(e)}")
             return []
 
     def get_all(self, object_type: Optional[str] = None, is_active: Optional[bool] = None) -> List[Dict[str, Any]]:

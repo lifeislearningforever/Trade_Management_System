@@ -111,9 +111,9 @@
                         <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
                             <tr>
                                 <th style="width: 150px; position: sticky; left: 0; background-color: #f8f9fa; z-index: 11; border-right: 2px solid #dee2e6;">Short Name</th>
+                                <th style="width: 80px;">Source</th>
                                 <th style="width: 70px;">CIFs</th>
                                 <th style="width: 200px;">Full Name</th>
-                                <th style="width: 100px;">M-Label (CIF)</th>
                                 <th style="width: 120px;">City</th>
                                 <th style="width: 120px;">Country</th>
                                 <th style="width: 100px;">Postal Code</th>
@@ -125,7 +125,7 @@
                                 <th style="width: 80px;">Custodian</th>
                                 <th style="width: 80px;">Issuer</th>
                                 <th style="width: 80px;">Status</th>
-                                <th style="width: 180px; position: sticky; right: 0; background-color: #f8f9fa; z-index: 11; border-left: 2px solid #dee2e6;">Actions</th>
+                                <th style="width: 220px; position: sticky; right: 0; background-color: #f8f9fa; z-index: 11; border-left: 2px solid #dee2e6;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -135,6 +135,13 @@
                                     <strong class="text-primary">{{ cp.counterparty_short_name|default:"-" }}</strong>
                                 </td>
                                 <td>
+                                    {% if cp.src_system|upper == 'CIS' %}
+                                        <span class="badge badge-success">CIS</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">{{ cp.src_system|upper|default:"GMP" }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
                                     <button type="button" class="btn btn-sm btn-outline-info"
                                             onclick="viewCIFs('{{ cp.counterparty_short_name }}')"
                                             title="View CIFs">
@@ -142,13 +149,6 @@
                                     </button>
                                 </td>
                                 <td>{{ cp.counterparty_full_name|default:"-" }}</td>
-                                <td>
-                                    {% if cp.m_label %}
-                                        <span class="badge badge-info">{{ cp.m_label }}</span>
-                                    {% else %}
-                                        <span class="text-muted">-</span>
-                                    {% endif %}
-                                </td>
                                 <td>{{ cp.city|default:"-" }}</td>
                                 <td>{{ cp.country|default:"-" }}</td>
                                 <td>{{ cp.postal_code|default:"-" }}</td>
@@ -192,6 +192,11 @@
                                 </td>
                                 <td style="position: sticky; right: 0; background-color: white; z-index: 9; border-left: 2px solid #dee2e6;">
                                     <div class="btn-group" role="group">
+                                        {# View button - available for all records #}
+                                        <a href="{% url 'reference_data:counterparty_detail' cp.counterparty_short_name %}"
+                                           class="btn btn-sm btn-outline-info" title="View Details">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
                                         {% if cp.src_system|lower == 'cis' %}
                                             {# CIS records - fully editable #}
                                             <a href="{% url 'reference_data:counterparty_edit' cp.counterparty_short_name %}?next={{ request.get_full_path|urlencode }}"
@@ -509,11 +514,11 @@ function displayCIFs(cifs) {
                 <div class="row">
                     <div class="col-md-6">
                         <p class="mb-2">
-                            <strong>CIF Number (M-Label):</strong>
-                            <span class="badge badge-info ms-2">${cif.m_label || '-'}</span>
+                            <strong>Country:</strong> ${cif.country || '-'}
                         </p>
                         <p class="mb-2">
-                            <strong>Country:</strong> ${cif.country || '-'}
+                            <strong>Source:</strong>
+                            ${(cif.src_system || '').toUpperCase() === 'CIS' ? '<span class="badge badge-success">CIS</span>' : '<span class="badge badge-secondary">' + ((cif.src_system || 'GMP').toUpperCase()) + '</span>'}
                         </p>
                     </div>
                     <div class="col-md-6">

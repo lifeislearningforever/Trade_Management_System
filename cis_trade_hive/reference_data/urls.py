@@ -20,6 +20,7 @@ urlpatterns = [
     # Counterparty URLs
     path('counterparty/', views.counterparty_list, name='counterparty_list'),
     path('counterparty/create/', views.counterparty_create, name='counterparty_create'),
+    path('counterparty/<str:short_name>/', views.counterparty_detail, name='counterparty_detail'),
     path('counterparty/<str:short_name>/edit/', views.counterparty_edit, name='counterparty_edit'),
     path('counterparty/<str:short_name>/delete/', views.counterparty_delete, name='counterparty_delete'),
     path('counterparty/<str:short_name>/restore/', views.counterparty_restore, name='counterparty_restore'),

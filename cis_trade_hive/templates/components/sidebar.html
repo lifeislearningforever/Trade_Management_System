@@ -65,12 +65,14 @@
                     <span>FX Rates</span>
                 </a>
             </li>
+            {% comment "Equity Prices - DISABLED (keeping backend logic intact)" %}
             <li class="nav-item">
                 <a class="nav-link {% if 'market-data/equity-prices' in request.path %}active{% endif %}" href="{% url 'market_data:equity_price_list' %}">
                     <i class="bi bi-graph-up-arrow"></i>
                     <span>Equity Prices</span>
                 </a>
             </li>
+            {% endcomment %}
         </ul>
 
         <!-- Reference Data Section -->

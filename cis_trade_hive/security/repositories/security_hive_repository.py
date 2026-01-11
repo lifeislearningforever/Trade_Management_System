@@ -81,8 +81,8 @@ class SecurityHiveRepository:
             if security_type:
                 query += f" AND security_type = {SecurityHiveRepository.escape_value(security_type)}"
 
-            # Order by most recent first
-            query += " ORDER BY created_at DESC"
+            # Order by src_system='CIS' first, then by most recent
+            query += " ORDER BY CASE WHEN UPPER(src_system) = 'CIS' THEN 0 ELSE 1 END, created_at DESC"
 
             # Apply limit
             query += f" LIMIT {limit}"
@@ -226,6 +226,10 @@ class SecurityHiveRepository:
                 'NULL',
                 'NULL'
             ])
+
+            # Add src_system - 'CIS' for records created via UI
+            columns.append('src_system')
+            values.append("'CIS'")
 
             # Add audit fields
             columns.extend(['is_active', 'created_by', 'created_at', 'updated_by', 'updated_at'])

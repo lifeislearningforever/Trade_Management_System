@@ -168,20 +168,19 @@
                     {# Status field only visible when editing (read-only, managed by workflow) #}
                     <div class="col-md-6 mb-3">
                         <label for="status" class="form-label">Status</label>
-                        <input type="text" class="form-control" id="status" name="status"
-                               value="{{ portfolio.status }}" readonly>
+                        <input type="text" class="form-control" id="status"
+                               value="{% if portfolio.status == 'INITIAL' %}Initial{% elif portfolio.status == 'MODIFIED' %}Modified{% elif portfolio.status == 'PENDING_VALIDATION' %}Pending Validation{% elif portfolio.status == 'VALIDATED' %}Validated{% elif portfolio.status == 'SETTLED' %}Settled{% elif portfolio.status == 'CANCELLED' %}Cancelled{% else %}{{ portfolio.status }}{% endif %}" readonly>
                         <div class="form-text">
                             <i class="bi bi-info-circle"></i> Status is managed by the Four-Eyes workflow
                         </div>
                     </div>
                     {% else %}
-                    {# Hidden for create - will be set to DRAFT automatically by service layer #}
-                    <input type="hidden" name="status" value="DRAFT">
+                    {# Hidden for create - will be set to INITIAL automatically by service layer #}
                     <div class="col-md-6 mb-3">
                         <div class="alert alert-info mb-0">
                             <i class="bi bi-info-circle"></i>
-                            <strong>Workflow:</strong> New portfolios start in DRAFT status.
-                            Submit for approval to activate the Four-Eyes workflow.
+                            <strong>Workflow:</strong> New portfolios start in <span class="badge badge-secondary">INITIAL</span> status.
+                            Submit for validation to activate the Four-Eyes workflow.
                         </div>
                     </div>
                     {% endif %}
@@ -201,10 +200,9 @@
                 <!-- Form Actions -->
                 <div class="d-flex gap-3 justify-content-between pt-4 border-top">
                     <div>
-                        <!-- DEV MODE: Show close button for Active portfolios -->
-                        {% if portfolio and portfolio.status == 'Active' %}
-                            <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#closeModal">
-                                <i class="bi bi-x-circle"></i> Close Portfolio
+                        {% if portfolio and portfolio.status == 'INITIAL' or portfolio and portfolio.status == 'MODIFIED' %}
+                            <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#cancelModal">
+                                <i class="bi bi-x-circle"></i> Cancel Portfolio
                             </button>
                         {% endif %}
                     </div>
@@ -225,43 +223,50 @@
     <div class="alert alert-info mt-4">
         <i class="bi bi-info-circle"></i>
         {% if portfolio %}
-            <strong>Four-Eyes Workflow:</strong> After updating, you can submit the portfolio for approval.
-            Only DRAFT and REJECTED portfolios can be edited. A different user (Checker) must approve changes.
+            <strong>Four-Eyes Workflow:</strong> After updating, you can submit the portfolio for validation.
+            Only <span class="badge badge-secondary">INITIAL</span> and <span class="badge badge-info">MODIFIED</span> portfolios can be edited.
+            A different user (Checker) must validate and settle changes.
         {% else %}
-            <strong>Four-Eyes Workflow:</strong> New portfolios are created in <strong>DRAFT</strong> status.
-            After creation, submit for approval. Only a different user (Checker) can approve it to make it ACTIVE.
+            <strong>Four-Eyes Workflow:</strong> New portfolios are created in <span class="badge badge-secondary">INITIAL</span> status.
+            After creation, submit for validation. The workflow is:
+            <ol class="mb-0 mt-2">
+                <li>Create → <span class="badge badge-secondary">INITIAL</span></li>
+                <li>Submit → <span class="badge badge-warning">PENDING_VALIDATION</span></li>
+                <li>Checker Validates → <span class="badge badge-primary">VALIDATED</span></li>
+                <li>Checker Settles → <span class="badge badge-success">SETTLED</span> (Active)</li>
+            </ol>
         {% endif %}
     </div>
 </div>
 
-<!-- Close Portfolio Modal -->
-{% if portfolio and portfolio.status == 'Active' %}
-<div class="modal fade" id="closeModal" tabindex="-1" aria-labelledby="closeModalLabel" aria-hidden="true">
+<!-- Cancel Portfolio Modal -->
+{% if portfolio and portfolio.status == 'INITIAL' or portfolio and portfolio.status == 'MODIFIED' %}
+<div class="modal fade" id="cancelModal" tabindex="-1" aria-labelledby="cancelModalLabel" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header bg-danger text-white">
-                <h5 class="modal-title" id="closeModalLabel">
-                    <i class="bi bi-x-circle"></i> Close Portfolio
+                <h5 class="modal-title" id="cancelModalLabel">
+                    <i class="bi bi-x-circle"></i> Cancel Portfolio
                 </h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            <form method="post" action="{% url 'portfolio:close' portfolio.name %}">
+            <form method="post" action="{% url 'portfolio:cancel' portfolio.name %}">
                 {% csrf_token %}
                 <div class="modal-body">
                     <div class="alert alert-warning">
                         <i class="bi bi-exclamation-triangle"></i>
-                        <strong>Warning:</strong> This will close portfolio <strong>{{ portfolio.code }}</strong>.
+                        <strong>Warning:</strong> This will cancel portfolio <strong>{{ portfolio.name }}</strong>.
                     </div>
                     <div class="mb-3">
-                        <label for="reason" class="form-label">Reason for Closure (Optional)</label>
+                        <label for="reason" class="form-label">Reason for Cancellation <span class="text-danger">*</span></label>
                         <textarea class="form-control" id="reason" name="reason" rows="3"
-                                  placeholder="Enter reason for closing this portfolio..."></textarea>
+                                  required placeholder="Enter reason for cancelling this portfolio..."></textarea>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                     <button type="submit" class="btn btn-danger">
-                        <i class="bi bi-x-circle"></i> Close Portfolio
+                        <i class="bi bi-x-circle"></i> Cancel Portfolio
                     </button>
                 </div>
             </form>

@@ -238,6 +238,7 @@
                             <thead>
                                 <tr>
                                     <th>Country</th>
+                                    <th>Source</th>
                                     <th>ISIN</th>
                                     <th>Description</th>
                                     <th>Status</th>
@@ -247,6 +248,13 @@
                                 {% for cif in existing_cifs %}
                                 <tr>
                                     <td>{{ cif.country }}</td>
+                                    <td>
+                                        {% if cif.src_system|upper == 'CIS' %}
+                                            <span class="badge bg-success">CIS</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">{{ cif.src_system|upper|default:"GMP" }}</span>
+                                        {% endif %}
+                                    </td>
                                     <td>{{ cif.isin|default:'-' }}</td>
                                     <td>{{ cif.description|default:'-' }}</td>
                                     <td>

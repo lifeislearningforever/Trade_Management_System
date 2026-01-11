@@ -110,6 +110,15 @@ class Command(BaseCommand):
             (301, 'SECURITY', 'industry', 'Industry', 'true', 'SYSTEM', timestamp, 'SYSTEM', timestamp),
         ]
 
+        upsert
+        INTO
+        gmp_cis.cis_udf_field
+        VALUES(
+            4, 'PORTFOLIO', 'Portfolio Manager', '', true,
+            'admin', UNIX_TIMESTAMP(now()) * 1000, 'admin', UNIX_TIMESTAMP(now()) * 1000
+
+        );
+
         for data in sample_data:
             query = f"""
             UPSERT INTO gmp_cis.cis_udf_field_kudu VALUES

@@ -23,10 +23,16 @@
         <a href="{% url 'portfolio:create' %}" class="btn btn-primary">
             <i class="bi bi-plus-circle"></i> Create New Portfolio
         </a>
-        <a href="{% url 'portfolio:pending_approvals' %}" class="btn btn-warning">
-            <i class="bi bi-clock-history"></i> Pending Approvals
-            {% if pending_count %}
-                <span class="badge bg-danger">{{ pending_count }}</span>
+        <a href="{% url 'portfolio:pending_validation' %}" class="btn btn-warning">
+            <i class="bi bi-clock-history"></i> Pending Validation
+            {% if pending_validation_count %}
+                <span class="badge bg-danger">{{ pending_validation_count }}</span>
+            {% endif %}
+        </a>
+        <a href="{% url 'portfolio:pending_settlement' %}" class="btn btn-info">
+            <i class="bi bi-check2-circle"></i> Pending Settlement
+            {% if pending_settlement_count %}
+                <span class="badge bg-danger">{{ pending_settlement_count }}</span>
             {% endif %}
         </a>
     </div>
@@ -52,11 +58,12 @@
                     <label class="form-label">Status</label>
                     <select class="form-select" name="status">
                         <option value="">All Statuses</option>
-                        <option value="DRAFT" {% if status == 'DRAFT' %}selected{% endif %}>Draft</option>
-                        <option value="PENDING_APPROVAL" {% if status == 'PENDING_APPROVAL' %}selected{% endif %}>Pending Approval</option>
-                        <option value="APPROVED" {% if status == 'APPROVED' %}selected{% endif %}>Approved</option>
-                        <option value="REJECTED" {% if status == 'REJECTED' %}selected{% endif %}>Rejected</option>
-                        <option value="Inactive" {% if status == 'Inactive' %}selected{% endif %}>Inactive</option>
+                        <option value="INITIAL" {% if status == 'INITIAL' %}selected{% endif %}>Initial (Draft)</option>
+                        <option value="MODIFIED" {% if status == 'MODIFIED' %}selected{% endif %}>Modified</option>
+                        <option value="PENDING_VALIDATION" {% if status == 'PENDING_VALIDATION' %}selected{% endif %}>Pending Validation</option>
+                        <option value="VALIDATED" {% if status == 'VALIDATED' %}selected{% endif %}>Validated</option>
+                        <option value="SETTLED" {% if status == 'SETTLED' %}selected{% endif %}>Settled (Active)</option>
+                        <option value="CANCELLED" {% if status == 'CANCELLED' %}selected{% endif %}>Cancelled</option>
                     </select>
                 </div>
                 <div class="col-md-3">
@@ -93,13 +100,14 @@
                     <table class="table table-hover table-sm mb-0" style="width: max-content;">
                         <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
                             <tr>
+                                <th style="min-width: 80px;">Source</th>
                                 <th style="min-width: 180px;">Name</th>
                                 <th style="min-width: 200px;">Description</th>
                                 <th style="min-width: 100px;">Currency</th>
                                 <th style="min-width: 150px;">Manager</th>
                                 <th style="min-width: 150px;">Client</th>
                                 <th style="min-width: 120px;">Cash Balance</th>
-                                <th style="min-width: 100px;">Status</th>
+                                <th style="min-width: 130px;">Status</th>
                                 <th style="min-width: 120px;">Cost Centre</th>
                                 <th style="min-width: 100px;">Corp Code</th>
                                 <th style="min-width: 130px;">Account Group</th>
@@ -109,12 +117,19 @@
                                 <th style="min-width: 130px;">Revaluation</th>
                                 <th style="min-width: 140px;">Created At</th>
                                 <th style="min-width: 140px;">Updated At</th>
-                                <th style="min-width: 180px; position: sticky; right: 0; background-color: #f8f9fa; z-index: 5;">Actions</th>
+                                <th style="min-width: 200px; position: sticky; right: 0; background-color: #f8f9fa; z-index: 5;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for portfolio in page_obj %}
-                            <tr {% if portfolio.status == 'Inactive' %}style="opacity: 0.6; background-color: #f8f9fa;"{% endif %}>
+                            <tr {% if portfolio.status == 'CANCELLED' %}style="opacity: 0.6; background-color: #f8f9fa;"{% endif %}>
+                                <td>
+                                    {% if portfolio.src_system|upper == 'CIS' %}
+                                        <span class="badge badge-success">CIS</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">{{ portfolio.src_system|upper|default:"GMP" }}</span>
+                                    {% endif %}
+                                </td>
                                 <td>
                                     <strong class="text-primary">{{ portfolio.name }}</strong>
                                 </td>
@@ -128,12 +143,20 @@
                                 <td>{{ portfolio.portfolio_client|default:"-" }}</td>
                                 <td class="text-end">{{ portfolio.cash_balance|floatformat:2|default:"0.00" }}</td>
                                 <td>
-                                    {% if portfolio.status == 'Inactive' %}
-                                        <span class="badge badge-dark">Inactive</span>
-                                    {% elif portfolio.status == 'Active' %}
-                                        <span class="badge badge-success">Active</span>
+                                    {% if portfolio.status == 'INITIAL' %}
+                                        <span class="badge badge-secondary">Initial</span>
+                                    {% elif portfolio.status == 'MODIFIED' %}
+                                        <span class="badge badge-info">Modified</span>
+                                    {% elif portfolio.status == 'PENDING_VALIDATION' %}
+                                        <span class="badge badge-warning">Pending Validation</span>
+                                    {% elif portfolio.status == 'VALIDATED' %}
+                                        <span class="badge badge-primary">Validated</span>
+                                    {% elif portfolio.status == 'SETTLED' %}
+                                        <span class="badge badge-success">Settled</span>
+                                    {% elif portfolio.status == 'CANCELLED' %}
+                                        <span class="badge badge-dark">Cancelled</span>
                                     {% else %}
-                                        <span class="badge badge-secondary">{{ portfolio.status|default:"Active" }}</span>
+                                        <span class="badge badge-secondary">{{ portfolio.status|default:"-" }}</span>
                                     {% endif %}
                                 </td>
                                 <td>{{ portfolio.cost_centre_code|default:"-" }}</td>
@@ -145,15 +168,29 @@
                                 <td>{{ portfolio.revaluation_status|default:"-" }}</td>
                                 <td style="font-size: 0.85rem;">{{ portfolio.created_at|default:"-" }}</td>
                                 <td style="font-size: 0.85rem;">{{ portfolio.updated_at|default:"-" }}</td>
-                                <td style="position: sticky; right: 0; background-color: {% if portfolio.status == 'Inactive' %}#f8f9fa{% else %}white{% endif %}; z-index: 4;">
+                                <td style="position: sticky; right: 0; background-color: {% if portfolio.status == 'CANCELLED' %}#f8f9fa{% else %}white{% endif %}; z-index: 4;">
                                     <div class="btn-group btn-group-sm" role="group">
                                         <a href="{% url 'portfolio:detail' portfolio.name %}" class="btn btn-sm btn-outline-primary" title="View Details">
                                             <i class="bi bi-eye"></i>
                                         </a>
-                                        {% if portfolio.status == 'DRAFT' or portfolio.status == 'REJECTED' %}
+                                        {% if portfolio.status == 'INITIAL' or portfolio.status == 'MODIFIED' %}
                                             <a href="{% url 'portfolio:edit' portfolio.name %}" class="btn btn-sm btn-outline-warning" title="Edit">
                                                 <i class="bi bi-pencil"></i>
                                             </a>
+                                            <form method="post" action="{% url 'portfolio:submit' portfolio.name %}" class="d-inline">
+                                                {% csrf_token %}
+                                                <button type="submit" class="btn btn-sm btn-outline-info" title="Submit for Validation" onclick="return confirm('Submit for validation?')">
+                                                    <i class="bi bi-send"></i>
+                                                </button>
+                                            </form>
+                                        {% endif %}
+                                        {% if portfolio.status == 'CANCELLED' %}
+                                            <form method="post" action="{% url 'portfolio:reactivate' portfolio.name %}" class="d-inline">
+                                                {% csrf_token %}
+                                                <button type="submit" class="btn btn-sm btn-outline-success" title="Reactivate" onclick="return confirm('Reactivate this portfolio?')">
+                                                    <i class="bi bi-arrow-clockwise"></i>
+                                                </button>
+                                            </form>
                                         {% endif %}
                                     </div>
                                 </td>
@@ -218,13 +255,21 @@
         <i class="bi bi-info-circle"></i>
         <strong>Four-Eyes Workflow:</strong>
         <ul class="mb-0 mt-2">
-            <li><strong>Makers</strong> create portfolios in <strong>DRAFT</strong> status (not active)</li>
-            <li>Makers submit for approval → status becomes <strong>PENDING_APPROVAL</strong></li>
-            <li><strong>Checkers</strong> approve → status becomes <strong>APPROVED/ACTIVE</strong> (portfolio is active)</li>
-            <li>Checkers reject → status becomes <strong>REJECTED</strong> (can be edited and resubmitted)</li>
-            <li>Active portfolios can be <strong>closed</strong> (soft delete → Inactive)</li>
-            <li>Inactive portfolios can be <strong>reactivated</strong> by authorized users</li>
-            <li><strong>Important:</strong> Makers cannot approve their own portfolios (Four-Eyes principle)</li>
+            <li><strong>MAKER Actions:</strong>
+                <ul>
+                    <li>Create portfolio → <span class="badge badge-secondary">INITIAL</span></li>
+                    <li>Edit portfolio → <span class="badge badge-info">MODIFIED</span></li>
+                    <li>Submit for validation → <span class="badge badge-warning">PENDING_VALIDATION</span></li>
+                    <li>Cancel portfolio → <span class="badge badge-dark">CANCELLED</span></li>
+                </ul>
+            </li>
+            <li><strong>CHECKER Actions:</strong>
+                <ul>
+                    <li>Validate → <span class="badge badge-primary">VALIDATED</span> (or <span class="badge badge-dark">CANCELLED</span> if rejected)</li>
+                    <li>Settle → <span class="badge badge-success">SETTLED</span> (portfolio becomes active)</li>
+                </ul>
+            </li>
+            <li><strong>Important:</strong> Makers cannot validate/settle their own portfolios (Four-Eyes principle)</li>
         </ul>
     </div>
 </div>

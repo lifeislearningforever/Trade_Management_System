@@ -71,7 +71,7 @@ class ImpalaReferenceRepository:
 class CurrencyRepository(ImpalaReferenceRepository):
     """Repository for Currency data"""
 
-    TABLE_NAME = 'gmp_cis.gmp_cis_sta_dly_currency'
+    TABLE_NAME = 'gmp_cis_sta_dly_currency'
 
     def _remap_columns(self, row: Dict) -> Dict:
         """Remap column names to match expected API"""
@@ -123,7 +123,7 @@ class CurrencyRepository(ImpalaReferenceRepository):
 class CountryRepository(ImpalaReferenceRepository):
     """Repository for Country data"""
 
-    TABLE_NAME = 'gmp_cis.gmp_cis_sta_dly_country'
+    TABLE_NAME = 'gmp_cis_sta_dly_country'
 
     def list_all(self, search: Optional[str] = None) -> List[Dict]:
         """
@@ -157,7 +157,7 @@ class CountryRepository(ImpalaReferenceRepository):
 class CalendarRepository(ImpalaReferenceRepository):
     """Repository for Calendar/Holiday data"""
 
-    TABLE_NAME = 'gmp_cis.gmp_cis_sta_dly_calendar'
+    TABLE_NAME = 'gmp_cis_sta_dly_calendar'
 
     def list_all(
         self,
@@ -202,7 +202,7 @@ class CalendarRepository(ImpalaReferenceRepository):
 class CounterpartyRepository(ImpalaReferenceRepository):
     """Repository for Counterparty data - Now using Kudu table with stable primary key"""
 
-    TABLE_NAME = 'gmp_cis.cis_counterparty_kudu'
+    TABLE_NAME = 'cis_counterparty_kudu'
 
     def list_all(
         self,
@@ -234,7 +234,8 @@ class CounterpartyRepository(ImpalaReferenceRepository):
         if is_active is not None:
             query += f" AND is_active = {str(is_active).upper()}"
 
-        query += " ORDER BY counterparty_short_name"
+        # Order by src_system='CIS' first, then by counterparty_short_name
+        query += " ORDER BY CASE WHEN UPPER(src_system) = 'CIS' THEN 0 ELSE 1 END, counterparty_short_name"
 
         results = self._execute_query(query)
         return results

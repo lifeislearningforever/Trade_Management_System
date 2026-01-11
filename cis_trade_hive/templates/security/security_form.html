@@ -168,10 +168,14 @@
 
                     <div class="col-md-4 mb-3">
                         <label for="exchange_code" class="form-label">Exchange Code</label>
-                        <input type="text" class="form-control" id="exchange_code" name="exchange_code"
-                               value="{{ security.exchange_code|default:'' }}"
-                               maxlength="10"
-                               placeholder="e.g., NYSE, NASDAQ">
+                        <select class="form-select" id="exchange_code" name="exchange_code">
+                            <option value="">Select Exchange Code</option>
+                            {% for ec in dropdown_options.exchange_codes %}
+                                <option value="{{ ec.value }}" {% if security.exchange_code == ec.value %}selected{% endif %}>
+                                    {{ ec.value }}
+                                </option>
+                            {% endfor %}
+                        </select>
                     </div>
 
                     <div class="col-md-4 mb-3">
@@ -354,14 +358,24 @@
                 <div class="row">
                     <div class="col-md-6 mb-3">
                         <label for="modal_country_of_issue" class="form-label">Country of Issue</label>
-                        <input type="text" class="form-control" id="modal_country_of_issue">
+                        <select class="form-select" id="modal_country_of_issue">
+                            <option value="">Select Country</option>
+                            {% for option in dropdown_options.country_of_issue_options %}
+                                <option value="{{ option.value }}">{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                     <div class="col-md-6 mb-3">
                         <label for="modal_country_of_primary_exchange" class="form-label">Country of Primary Exchange</label>
-                        <input type="text" class="form-control" id="modal_country_of_primary_exchange">
+                        <select class="form-select" id="modal_country_of_primary_exchange">
+                            <option value="">Select Country</option>
+                            {% for option in dropdown_options.country_of_primary_exchange_options %}
+                                <option value="{{ option.value }}">{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                     <div class="col-md-6 mb-3">
-                        <label for="modal_bwciif" class="form-label">BWCIIF</label>
+                        <label for="modal_bwciif" class="form-label">BWCIF</label>
                         <select class="form-select" id="modal_bwciif">
                             <option value="">Select Option</option>
                             {% for option in dropdown_options.bwciif_options %}
@@ -370,8 +384,13 @@
                         </select>
                     </div>
                     <div class="col-md-6 mb-3">
-                        <label for="modal_bwciif_others" class="form-label">BWCIIF Others</label>
-                        <input type="text" class="form-control" id="modal_bwciif_others">
+                        <label for="modal_bwciif_others" class="form-label">BWCIF Others</label>
+                        <select class="form-select" id="modal_bwciif_others">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.bwciif_others_options %}
+                                <option value="{{ option.value }}">{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                     <div class="col-md-6 mb-3">
                         <label for="modal_issuer_type" class="form-label">Issuer Type</label>
@@ -401,8 +420,13 @@
                         </select>
                     </div>
                     <div class="col-md-6 mb-3">
-                        <label for="modal_business_unit_head" class="form-label">Business Unit Head</label>
-                        <input type="text" class="form-control" id="modal_business_unit_head">
+                        <label for="modal_business_unit_head" class="form-label">Business Unit Head (BSU)</label>
+                        <select class="form-select" id="modal_business_unit_head">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.business_unit_head_options %}
+                                <option value="{{ option.value }}">{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                     <div class="col-md-6 mb-3">
                         <label for="modal_core_non_core" class="form-label">Core/Non-core</label>
@@ -423,24 +447,76 @@
                         </select>
                     </div>
                     <div class="col-md-6 mb-3">
+                        <label for="modal_investment_type_mas610" class="form-label">Investment type (MAS610)</label>
+                        <select class="form-select" id="modal_investment_type_mas610">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.investment_type_mas610_options %}
+                                <option value="{{ option.value }}">{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
                         <label for="modal_management_limit_classification" class="form-label">Management Limit Classification</label>
-                        <input type="text" class="form-control" id="modal_management_limit_classification">
+                        <select class="form-select" id="modal_management_limit_classification">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.management_limit_classification_options %}
+                                <option value="{{ option.value }}">{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                     <div class="col-md-6 mb-3">
                         <label for="modal_mas_643_entity_type" class="form-label">MAS 643 Entity Type</label>
-                        <input type="text" class="form-control" id="modal_mas_643_entity_type">
+                        <select class="form-select" id="modal_mas_643_entity_type">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.mas_643_entity_type_options %}
+                                <option value="{{ option.value }}">{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                     <div class="col-md-6 mb-3">
-                        <label for="modal_person_in_charge" class="form-label">Person In Charge</label>
-                        <input type="text" class="form-control" id="modal_person_in_charge">
+                        <label for="modal_person_in_charge" class="form-label">Person In Charge (PIC)</label>
+                        <select class="form-select" id="modal_person_in_charge">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.person_in_charge_options %}
+                                <option value="{{ option.value }}">{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_pevc" class="form-label">PEVC</label>
+                        <select class="form-select" id="modal_pevc">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.pevc_options %}
+                                <option value="{{ option.value }}">{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_s32_representative" class="form-label">S32 Representative</label>
+                        <select class="form-select" id="modal_s32_representative">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.s32_representative_options %}
+                                <option value="{{ option.value }}">{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                     <div class="col-md-6 mb-3">
                         <label for="modal_substantial_gt_10_percent" class="form-label">Substantial >10%</label>
-                        <input type="text" class="form-control" id="modal_substantial_gt_10_percent">
+                        <select class="form-select" id="modal_substantial_gt_10_percent">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.substantial_gt_10_percent_options %}
+                                <option value="{{ option.value }}">{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                     <div class="col-md-6 mb-3">
                         <label for="modal_relative_index" class="form-label">Relative Index</label>
-                        <input type="text" class="form-control" id="modal_relative_index">
+                        <select class="form-select" id="modal_relative_index">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.relative_index_options %}
+                                <option value="{{ option.value }}">{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                     <div class="col-md-6 mb-3">
                         <label for="modal_fin_non_fin_ind" class="form-label">Fin/Non-fin IND</label>
@@ -492,9 +568,12 @@ function saveRegulatoryData() {
         business_unit_head: document.getElementById('modal_business_unit_head').value || null,
         core_non_core: document.getElementById('modal_core_non_core').value || null,
         fund_index_fund: document.getElementById('modal_fund_index_fund').value || null,
+        investment_type_mas610: document.getElementById('modal_investment_type_mas610').value || null,
         management_limit_classification: document.getElementById('modal_management_limit_classification').value || null,
         mas_643_entity_type: document.getElementById('modal_mas_643_entity_type').value || null,
         person_in_charge: document.getElementById('modal_person_in_charge').value || null,
+        pevc: document.getElementById('modal_pevc').value || null,
+        s32_representative: document.getElementById('modal_s32_representative').value || null,
         substantial_gt_10_percent: document.getElementById('modal_substantial_gt_10_percent').value || null,
         relative_index: document.getElementById('modal_relative_index').value || null,
         fin_non_fin_ind: document.getElementById('modal_fin_non_fin_ind').value || null
@@ -540,9 +619,12 @@ function loadExistingData() {
     document.getElementById('modal_business_unit_head').value = '{{ security.business_unit_head|default:"" }}';
     document.getElementById('modal_core_non_core').value = '{{ security.core_non_core|default:"" }}';
     document.getElementById('modal_fund_index_fund').value = '{{ security.fund_index_fund|default:"" }}';
+    document.getElementById('modal_investment_type_mas610').value = '{{ security.investment_type_mas610|default:"" }}';
     document.getElementById('modal_management_limit_classification').value = '{{ security.management_limit_classification|default:"" }}';
     document.getElementById('modal_mas_643_entity_type').value = '{{ security.mas_643_entity_type|default:"" }}';
     document.getElementById('modal_person_in_charge').value = '{{ security.person_in_charge|default:"" }}';
+    document.getElementById('modal_pevc').value = '{{ security.pevc|default:"" }}';
+    document.getElementById('modal_s32_representative').value = '{{ security.s32_representative|default:"" }}';
     document.getElementById('modal_substantial_gt_10_percent').value = '{{ security.substantial_gt_10_percent|default:"" }}';
     document.getElementById('modal_relative_index').value = '{{ security.relative_index|default:"" }}';
     document.getElementById('modal_fin_non_fin_ind').value = '{{ security.fin_non_fin_ind|default:"" }}';

@@ -107,7 +107,7 @@
                                 <tr>
                                     <th>Object Type</th>
                                     <th>Field Name</th>
-                                    <th>Field Value (Label)</th>
+                                    <th>Value</th>
                                     <th class="text-center">Status</th>
                                     <th class="text-end">Actions</th>
                                 </tr>
@@ -119,9 +119,9 @@
                                         <span class="badge bg-info">{{ field.object_type }}</span>
                                     </td>
                                     <td>
-                                        <code class="text-dark">{{ field.field_name }}</code>
+                                        <span class="badge bg-primary">{{ field.field_name }}</span>
                                     </td>
-                                    <td>{{ field.field_value|default:'-' }}</td>
+                                    <td><code class="text-dark">{{ field.field_value|default:'-' }}</code></td>
                                     <td class="text-center">
                                         {% if field.is_active %}
                                         <span class="badge bg-success">Active</span>
