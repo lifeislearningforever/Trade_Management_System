@@ -1,0 +1,889 @@
+"""
+Trade Views
+
+Implements Maker-Checker workflow for trade management.
+Validates Portfolio, Security, and Counterparty before trade creation.
+
+Workflow:
+  MAKER Side:
+    - Create Trade -> INITIAL
+    - Update Trade -> MODIFIED
+    - Cancel Trade -> CANCELLED
+    - Submit for Validation -> PENDING_VALIDATION
+
+  CHECKER Side:
+    - Validate -> VALIDATED (or CANCELLED if rejected)
+    - Settle -> SETTLED (final active state)
+"""
+
+import json
+from django.shortcuts import render, redirect
+from django.contrib import messages
+from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+from django.http import HttpResponse, Http404, JsonResponse
+from django.views.decorators.http import require_http_methods
+import csv
+
+from core.audit.audit_kudu_repository import audit_log_kudu_repository
+from trade.repositories.trade_kudu_repository import trade_kudu_repository, TradeKuduRepository
+from trade.repositories.trade_validation_repository import trade_validation_repository
+from trade.services.trade_dropdown_service import trade_dropdown_service
+
+
+class TradeWrapper:
+    """Wrapper to convert Kudu dict data to object with attributes for template compatibility."""
+
+    def __init__(self, data, index=0):
+        self.data = data
+        self.trade_id = data.get('trade_id', 0)
+        self.deal_number = data.get('deal_number', '')
+        self.trade_type = data.get('trade_type', '')
+
+        # Portfolio & Security
+        self.portfolio_short_name = data.get('portfolio_short_name', '')
+        self.portfolio_full_name = data.get('portfolio_full_name', '')
+        self.security_label = data.get('security_label', '')
+        self.security_full_name = data.get('security_full_name', '')
+        self.security_type = data.get('security_type', '')
+
+        # Dates & Quantities
+        self.trade_status = data.get('trade_status', '')
+        self.trade_date = data.get('trade_date', '')
+        self.settle_date = data.get('settle_date', '')
+        self.quantity = data.get('quantity', 0)
+        self.face_value = data.get('face_value', 0)
+        self.lot = data.get('lot', 0)
+        self.price = data.get('price', 0)
+
+        # Costs
+        self.commission = data.get('commission', 0)
+        self.accrued_interest = data.get('accrued_interest', 0)
+        self.sec_fee = data.get('sec_fee', 0)
+        self.other_charges = data.get('other_charges', 0)
+        self.total_amount = data.get('total_amount', 0)
+
+        # GL & Broker
+        self.open_close_position = data.get('open_close_position', '')
+        self.extension = data.get('extension', '')
+        self.brokers = data.get('brokers', '')
+        self.broker_name = data.get('broker_name', '')
+        self.gl_fund_type = data.get('gl_fund_type', '')
+        self.gl_cost_centre = data.get('gl_cost_centre', '')
+        self.gl_account_code = data.get('gl_account_code', '')
+        self.contract_ref = data.get('contract_ref', '')
+        self.fd_receipt = data.get('fd_receipt', '')
+        self.org_pur_date = data.get('org_pur_date', '')
+
+        # FX & Dealing
+        self.open_fx_rate = data.get('open_fx_rate', 0)
+        self.curr_dealing = data.get('curr_dealing', 0)
+        self.open_dealing = data.get('open_dealing', 0)
+        self.input_tax_oth = data.get('input_tax_oth', 0)
+        self.qty_entitled = data.get('qty_entitled', 0)
+
+        # Post-trade
+        self.selling_rule = data.get('selling_rule', '')
+        self.cash_balance = data.get('cash_balance', 0)
+        self.custodian = data.get('custodian', '')
+        self.amor_accr_method = data.get('amor_accr_method', '')
+        self.lots_held = data.get('lots_held', 0)
+        self.quantity_held = data.get('quantity_held', 0)
+        self.remarks = data.get('remarks', '')
+        self.counterparty = data.get('counterparty', '')
+
+        # UDF fields
+        self.udf_fund_type = data.get('udf_fund_type', '')
+        self.udf_section_31_26 = data.get('udf_section_31_26', '')
+        self.udf_sub_custodian = data.get('udf_sub_custodian', '')
+        self.udf_disclosure_req = data.get('udf_disclosure_req', False)
+        self.udf_counter_pledged = data.get('udf_counter_pledged', False)
+        self.udf_revision_code = data.get('udf_revision_code', '')
+        self.udf_uobn_uobn_hk = data.get('udf_uobn_uobn_hk', '')
+        self.udf_income_exp_type = data.get('udf_income_exp_type', '')
+        self.udf_currency_hedge = data.get('udf_currency_hedge', False)
+
+        # Workflow status
+        self.status = data.get('status', 'INITIAL')
+        self.is_active = data.get('is_active', False)
+        self.is_deleted = data.get('is_deleted', False)
+        self.src_system = data.get('src_system', 'CIS')
+
+        # Audit fields
+        self.created_by = data.get('created_by', '')
+        self.created_at = data.get('created_at', '')
+        self.updated_by = data.get('updated_by', '')
+        self.updated_at = data.get('updated_at', '')
+
+        # Workflow fields
+        self.submitted_by = data.get('submitted_by', '')
+        self.submitted_at = data.get('submitted_at', '')
+        self.validated_by = data.get('validated_by', '')
+        self.validated_at = data.get('validated_at', '')
+        self.validation_comments = data.get('validation_comments', '')
+        self.settled_by = data.get('settled_by', '')
+        self.settled_at = data.get('settled_at', '')
+        self.settlement_comments = data.get('settlement_comments', '')
+        self.cancelled_by = data.get('cancelled_by', '')
+        self.cancelled_at = data.get('cancelled_at', '')
+        self.cancel_reason = data.get('cancel_reason', '')
+
+
+def get_user_info(request):
+    """Get user info from session."""
+    return {
+        'username': request.session.get('user_login', 'anonymous'),
+        'user_id': str(request.session.get('user_id', '')),
+        'user_email': request.session.get('user_email', '')
+    }
+
+
+# =============================================================================
+# TRADE LIST
+# =============================================================================
+
+def trade_list(request):
+    """List all trades with search, filter, and CSV export."""
+    search_query = request.GET.get('search', '').strip()
+    status_filter = request.GET.get('status', '').strip()
+    trade_type_filter = request.GET.get('trade_type', '').strip()
+    portfolio_filter = request.GET.get('portfolio', '').strip()
+    trade_date_from = request.GET.get('trade_date_from', '').strip()
+    trade_date_to = request.GET.get('trade_date_to', '').strip()
+    export = request.GET.get('export', '').strip()
+
+    trades_data = trade_kudu_repository.get_all_trades(
+        limit=1000,
+        trade_type=trade_type_filter if trade_type_filter else None,
+        status=status_filter if status_filter else None,
+        portfolio=portfolio_filter if portfolio_filter else None,
+        search=search_query if search_query else None,
+        trade_date_from=trade_date_from if trade_date_from else None,
+        trade_date_to=trade_date_to if trade_date_to else None
+    )
+
+    wrapped_trades = [TradeWrapper(t, idx) for idx, t in enumerate(trades_data)]
+
+    # CSV Export
+    if export == 'csv':
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="trades.csv"'
+
+        writer = csv.writer(response)
+        writer.writerow([
+            'Deal Number', 'Type', 'Portfolio', 'Security', 'Trade Date',
+            'Settle Date', 'Quantity', 'Price', 'Total Amount', 'Status'
+        ])
+
+        for trade in trades_data:
+            writer.writerow([
+                trade.get('deal_number', ''),
+                trade.get('trade_type', ''),
+                trade.get('portfolio_short_name', ''),
+                trade.get('security_label', ''),
+                trade.get('trade_date', ''),
+                trade.get('settle_date', ''),
+                trade.get('quantity', ''),
+                trade.get('price', ''),
+                trade.get('total_amount', ''),
+                trade.get('status', '')
+            ])
+
+        user_info = get_user_info(request)
+        audit_log_kudu_repository.log_action(
+            user_id=user_info['user_id'],
+            username=user_info['username'],
+            user_email=user_info['user_email'],
+            action_type='EXPORT',
+            entity_type='TRADE',
+            entity_name='Trade List',
+            action_description=f'Exported {len(trades_data)} trades to CSV',
+            status='SUCCESS',
+            request_method='GET',
+            request_path=request.path,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', '')
+        )
+
+        return response
+
+    # Pagination
+    paginator = Paginator(wrapped_trades, 25)
+    page = request.GET.get('page', 1)
+
+    try:
+        trades = paginator.page(page)
+    except PageNotAnInteger:
+        trades = paginator.page(1)
+    except EmptyPage:
+        trades = paginator.page(paginator.num_pages if paginator.num_pages > 0 else 1)
+
+    # Get statistics and dropdown options
+    stats = trade_kudu_repository.get_trade_statistics()
+    dropdown_options = trade_dropdown_service.get_all_dropdown_options()
+
+    # Status options for filter dropdown
+    status_options = [
+        ('', 'All Statuses'),
+        (TradeKuduRepository.STATUS_INITIAL, 'Initial'),
+        (TradeKuduRepository.STATUS_MODIFIED, 'Modified'),
+        (TradeKuduRepository.STATUS_PENDING_VALIDATION, 'Pending Validation'),
+        (TradeKuduRepository.STATUS_VALIDATED, 'Validated'),
+        (TradeKuduRepository.STATUS_SETTLED, 'Settled'),
+        (TradeKuduRepository.STATUS_CANCELLED, 'Cancelled'),
+    ]
+
+    context = {
+        'page_obj': trades,
+        'search_query': search_query,
+        'status_filter': status_filter,
+        'trade_type_filter': trade_type_filter,
+        'portfolio_filter': portfolio_filter,
+        'trade_date_from': trade_date_from,
+        'trade_date_to': trade_date_to,
+        'total_count': len(trades_data),
+        'status_options': status_options,
+        'trade_types': dropdown_options.get('trade_types', []),
+        'portfolios': dropdown_options.get('portfolios', []),
+        'stats': stats,
+        'pending_validation_count': stats.get('pending_validation', 0),
+        'pending_settlement_count': stats.get('pending_settlement', 0),
+    }
+
+    return render(request, 'trade/trade_list.html', context)
+
+
+# =============================================================================
+# TRADE DETAIL
+# =============================================================================
+
+def trade_detail(request, trade_id):
+    """View trade details."""
+    trade_data = trade_kudu_repository.get_trade_by_id(trade_id)
+
+    if not trade_data:
+        raise Http404(f"Trade '{trade_id}' not found")
+
+    trade = TradeWrapper(trade_data)
+    status = trade.status
+    src_system = trade.src_system
+
+    # Determine allowed actions based on status and source system
+    is_cis_record = src_system and src_system.upper() == 'CIS'
+
+    # Maker actions (only for CIS records)
+    can_edit = is_cis_record and status in TradeKuduRepository.MAKER_EDITABLE_STATUSES
+    can_submit = is_cis_record and status in [TradeKuduRepository.STATUS_INITIAL, TradeKuduRepository.STATUS_MODIFIED]
+    can_cancel = is_cis_record and status in [
+        TradeKuduRepository.STATUS_INITIAL,
+        TradeKuduRepository.STATUS_MODIFIED,
+        TradeKuduRepository.STATUS_PENDING_VALIDATION
+    ]
+    can_reactivate = is_cis_record and status == TradeKuduRepository.STATUS_CANCELLED
+
+    # Checker actions (only for CIS records)
+    can_validate = is_cis_record and status == TradeKuduRepository.STATUS_PENDING_VALIDATION
+    can_reject = is_cis_record and status == TradeKuduRepository.STATUS_PENDING_VALIDATION
+    can_settle = is_cis_record and status == TradeKuduRepository.STATUS_VALIDATED
+
+    # Get trade history
+    history = trade_kudu_repository.get_trade_history(trade_id)
+
+    context = {
+        'trade': trade,
+        'history': history,
+        'can_edit': can_edit,
+        'can_submit': can_submit,
+        'can_cancel': can_cancel,
+        'can_reactivate': can_reactivate,
+        'can_validate': can_validate,
+        'can_reject': can_reject,
+        'can_settle': can_settle,
+        'is_cis_record': is_cis_record,
+    }
+
+    return render(request, 'trade/trade_detail.html', context)
+
+
+# =============================================================================
+# TRADE CREATE
+# =============================================================================
+
+def trade_create(request, trade_type=None):
+    """Create a new trade (Maker action: Create -> INITIAL)."""
+    dropdown_options = trade_dropdown_service.get_all_dropdown_options()
+
+    if request.method == 'POST':
+        try:
+            user_info = get_user_info(request)
+
+            # Collect form data
+            trade_data = {
+                'trade_type': request.POST.get('trade_type', trade_type or 'BUY'),
+                'portfolio_short_name': request.POST.get('portfolio_short_name', '').strip(),
+                'security_label': request.POST.get('security_label', '').strip(),
+                'trade_status': request.POST.get('trade_status', ''),
+                'trade_date': request.POST.get('trade_date', ''),
+                'settle_date': request.POST.get('settle_date', ''),
+                'quantity': request.POST.get('quantity', 0),
+                'face_value': request.POST.get('face_value', 0),
+                'lot': request.POST.get('lot', 0),
+                'price': request.POST.get('price', 0),
+                'commission': request.POST.get('commission', 0),
+                'sec_fee': request.POST.get('sec_fee', 0),
+                'other_charges': request.POST.get('other_charges', 0),
+                'total_amount': request.POST.get('total_amount', 0),
+                'open_close_position': request.POST.get('open_close_position', ''),
+                'extension': request.POST.get('extension', ''),
+                'brokers': request.POST.get('brokers', ''),
+                'broker_name': request.POST.get('broker_name', ''),
+                'gl_fund_type': request.POST.get('gl_fund_type', ''),
+                'gl_cost_centre': request.POST.get('gl_cost_centre', ''),
+                'gl_account_code': request.POST.get('gl_account_code', ''),
+                'contract_ref': request.POST.get('contract_ref', ''),
+                'fd_receipt': request.POST.get('fd_receipt', ''),
+                'org_pur_date': request.POST.get('org_pur_date', ''),
+                'open_fx_rate': request.POST.get('open_fx_rate', 0),
+                'curr_dealing': request.POST.get('curr_dealing', 0),
+                'open_dealing': request.POST.get('open_dealing', 0),
+                'input_tax_oth': request.POST.get('input_tax_oth', 0),
+                'qty_entitled': request.POST.get('qty_entitled', 0),
+                'selling_rule': request.POST.get('selling_rule', ''),
+                'cash_balance': request.POST.get('cash_balance', 0),
+                'custodian': request.POST.get('custodian', ''),
+                'amor_accr_method': request.POST.get('amor_accr_method', ''),
+                'remarks': request.POST.get('remarks', ''),
+                'counterparty': request.POST.get('counterparty', ''),
+                # UDF fields
+                'udf_fund_type': request.POST.get('udf_fund_type', ''),
+                'udf_section_31_26': request.POST.get('udf_section_31_26', ''),
+                'udf_sub_custodian': request.POST.get('udf_sub_custodian', ''),
+                'udf_disclosure_req': request.POST.get('udf_disclosure_req', '') == 'on',
+                'udf_counter_pledged': request.POST.get('udf_counter_pledged', '') == 'on',
+                'udf_revision_code': request.POST.get('udf_revision_code', ''),
+                'udf_uobn_uobn_hk': request.POST.get('udf_uobn_uobn_hk', ''),
+                'udf_income_exp_type': request.POST.get('udf_income_exp_type', ''),
+                'udf_currency_hedge': request.POST.get('udf_currency_hedge', '') == 'on',
+            }
+
+            # Validate trade data (includes Portfolio, Security, Counterparty validation)
+            is_valid, errors = trade_kudu_repository.validate_trade_data(trade_data)
+
+            if not is_valid:
+                for error in errors:
+                    messages.error(request, error)
+                context = {
+                    'dropdown_options': dropdown_options,
+                    'trade': trade_data,
+                    'trade_type': trade_type or trade_data.get('trade_type'),
+                }
+                return render(request, 'trade/trade_form.html', context)
+
+            # Insert trade
+            trade_id = trade_kudu_repository.insert_trade(trade_data, created_by=user_info['username'])
+
+            if not trade_id:
+                raise Exception("Failed to create trade")
+
+            audit_log_kudu_repository.log_action(
+                user_id=user_info['user_id'],
+                username=user_info['username'],
+                user_email=user_info['user_email'],
+                action_type='CREATE',
+                entity_type='TRADE',
+                entity_id=str(trade_id),
+                entity_name=f"{trade_data['trade_type']} - {trade_data['security_label']}",
+                action_description=f"Created {trade_data['trade_type']} trade for {trade_data['security_label']} (INITIAL status)",
+                request_method='POST',
+                request_path=request.path,
+                ip_address=request.META.get('REMOTE_ADDR'),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
+            )
+
+            messages.success(request, f'Trade created with INITIAL status. Submit for validation when ready.')
+            return redirect('trade:detail', trade_id=trade_id)
+
+        except ValueError as e:
+            messages.error(request, str(e))
+        except Exception as e:
+            messages.error(request, f'Error creating trade: {str(e)}')
+
+    context = {
+        'dropdown_options': dropdown_options,
+        'trade_type': trade_type,
+    }
+
+    return render(request, 'trade/trade_form.html', context)
+
+
+# =============================================================================
+# TRADE EDIT
+# =============================================================================
+
+def trade_edit(request, trade_id):
+    """Edit trade (Maker action: Update -> MODIFIED)."""
+    trade_data = trade_kudu_repository.get_trade_by_id(trade_id)
+
+    if not trade_data:
+        messages.error(request, f'Trade {trade_id} not found')
+        return redirect('trade:list')
+
+    user_info = get_user_info(request)
+    current_status = trade_data.get('status', '')
+    src_system = trade_data.get('src_system', '')
+
+    # Only CIS records in editable status can be edited
+    if src_system and src_system.upper() != 'CIS':
+        messages.error(request, 'Cannot edit GMP records. Only CIS records can be edited.')
+        return redirect('trade:detail', trade_id=trade_id)
+
+    if current_status not in TradeKuduRepository.MAKER_EDITABLE_STATUSES:
+        messages.error(request, f'Cannot edit trade with status "{current_status}".')
+        return redirect('trade:detail', trade_id=trade_id)
+
+    dropdown_options = trade_dropdown_service.get_all_dropdown_options()
+
+    if request.method == 'POST':
+        try:
+            # Collect form data (same as create)
+            updated_data = {
+                'trade_status': request.POST.get('trade_status', ''),
+                'trade_date': request.POST.get('trade_date', ''),
+                'settle_date': request.POST.get('settle_date', ''),
+                'quantity': request.POST.get('quantity', 0),
+                'face_value': request.POST.get('face_value', 0),
+                'lot': request.POST.get('lot', 0),
+                'price': request.POST.get('price', 0),
+                'commission': request.POST.get('commission', 0),
+                'sec_fee': request.POST.get('sec_fee', 0),
+                'other_charges': request.POST.get('other_charges', 0),
+                'total_amount': request.POST.get('total_amount', 0),
+                'open_close_position': request.POST.get('open_close_position', ''),
+                'extension': request.POST.get('extension', ''),
+                'brokers': request.POST.get('brokers', ''),
+                'broker_name': request.POST.get('broker_name', ''),
+                'gl_fund_type': request.POST.get('gl_fund_type', ''),
+                'gl_cost_centre': request.POST.get('gl_cost_centre', ''),
+                'gl_account_code': request.POST.get('gl_account_code', ''),
+                'contract_ref': request.POST.get('contract_ref', ''),
+                'fd_receipt': request.POST.get('fd_receipt', ''),
+                'org_pur_date': request.POST.get('org_pur_date', ''),
+                'open_fx_rate': request.POST.get('open_fx_rate', 0),
+                'curr_dealing': request.POST.get('curr_dealing', 0),
+                'open_dealing': request.POST.get('open_dealing', 0),
+                'input_tax_oth': request.POST.get('input_tax_oth', 0),
+                'qty_entitled': request.POST.get('qty_entitled', 0),
+                'selling_rule': request.POST.get('selling_rule', ''),
+                'cash_balance': request.POST.get('cash_balance', 0),
+                'custodian': request.POST.get('custodian', ''),
+                'amor_accr_method': request.POST.get('amor_accr_method', ''),
+                'remarks': request.POST.get('remarks', ''),
+                'counterparty': request.POST.get('counterparty', ''),
+                # UDF fields
+                'udf_fund_type': request.POST.get('udf_fund_type', ''),
+                'udf_section_31_26': request.POST.get('udf_section_31_26', ''),
+                'udf_sub_custodian': request.POST.get('udf_sub_custodian', ''),
+                'udf_disclosure_req': request.POST.get('udf_disclosure_req', '') == 'on',
+                'udf_counter_pledged': request.POST.get('udf_counter_pledged', '') == 'on',
+                'udf_revision_code': request.POST.get('udf_revision_code', ''),
+                'udf_uobn_uobn_hk': request.POST.get('udf_uobn_uobn_hk', ''),
+                'udf_income_exp_type': request.POST.get('udf_income_exp_type', ''),
+                'udf_currency_hedge': request.POST.get('udf_currency_hedge', '') == 'on',
+            }
+
+            # Keep portfolio and security from original (can't change)
+            updated_data['portfolio_short_name'] = trade_data.get('portfolio_short_name', '')
+            updated_data['security_label'] = trade_data.get('security_label', '')
+            updated_data['trade_type'] = trade_data.get('trade_type', '')
+
+            success = trade_kudu_repository.update_trade(trade_id, updated_data, user_info['username'])
+
+            if not success:
+                raise Exception('Failed to update trade')
+
+            audit_log_kudu_repository.log_action(
+                user_id=user_info['user_id'],
+                username=user_info['username'],
+                user_email=user_info['user_email'],
+                action_type='UPDATE',
+                entity_type='TRADE',
+                entity_id=str(trade_id),
+                entity_name=trade_data.get('deal_number', ''),
+                action_description=f'Updated trade {trade_id} (status set to MODIFIED)',
+                request_method='POST',
+                request_path=request.path,
+                ip_address=request.META.get('REMOTE_ADDR'),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
+            )
+
+            messages.success(request, f'Trade updated. Status set to MODIFIED.')
+            return redirect('trade:detail', trade_id=trade_id)
+
+        except Exception as e:
+            messages.error(request, f'Error updating trade: {str(e)}')
+
+    context = {
+        'trade': trade_data,
+        'dropdown_options': dropdown_options,
+        'is_edit': True,
+    }
+
+    return render(request, 'trade/trade_form.html', context)
+
+
+# =============================================================================
+# WORKFLOW ACTIONS
+# =============================================================================
+
+def trade_submit(request, trade_id):
+    """Submit trade for validation (Maker action: Submit -> PENDING_VALIDATION)."""
+    if request.method != 'POST':
+        return redirect('trade:detail', trade_id=trade_id)
+
+    trade_data = trade_kudu_repository.get_trade_by_id(trade_id)
+    if not trade_data:
+        messages.error(request, f'Trade {trade_id} not found')
+        return redirect('trade:list')
+
+    user_info = get_user_info(request)
+
+    try:
+        success = trade_kudu_repository.submit_for_validation(trade_id, user_info['username'])
+
+        if not success:
+            raise Exception('Failed to submit trade for validation')
+
+        audit_log_kudu_repository.log_action(
+            user_id=user_info['user_id'],
+            username=user_info['username'],
+            user_email=user_info['user_email'],
+            action_type='SUBMIT',
+            entity_type='TRADE',
+            entity_id=str(trade_id),
+            entity_name=trade_data.get('deal_number', ''),
+            action_description=f'Submitted trade for validation: {trade_data.get("deal_number", "")}',
+            request_method='POST',
+            request_path=request.path,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            status='SUCCESS'
+        )
+
+        messages.success(request, 'Trade submitted for validation.')
+    except Exception as e:
+        messages.error(request, f'Error submitting trade: {str(e)}')
+
+    return redirect('trade:detail', trade_id=trade_id)
+
+
+def trade_validate(request, trade_id):
+    """Validate or reject trade (Checker action)."""
+    if request.method != 'POST':
+        return redirect('trade:detail', trade_id=trade_id)
+
+    trade_data = trade_kudu_repository.get_trade_by_id(trade_id)
+    if not trade_data:
+        messages.error(request, f'Trade {trade_id} not found')
+        return redirect('trade:list')
+
+    user_info = get_user_info(request)
+    comments = request.POST.get('comments', '').strip()
+    action = request.POST.get('action', 'approve')
+
+    # Four-eyes check
+    submitted_by = trade_data.get('submitted_by', '')
+    if submitted_by and submitted_by == user_info['username']:
+        messages.error(request, 'Four-eyes principle: You cannot validate your own submission.')
+        return redirect('trade:detail', trade_id=trade_id)
+
+    try:
+        if action == 'reject':
+            success = trade_kudu_repository.reject_trade(trade_id, user_info['username'], comments)
+            action_type = 'REJECT'
+            success_msg = 'Trade has been rejected.'
+        else:
+            success = trade_kudu_repository.validate_trade(trade_id, user_info['username'], comments)
+            action_type = 'VALIDATE'
+            success_msg = 'Trade validated. Ready for settlement.'
+
+        if not success:
+            raise Exception(f'Failed to {action} trade')
+
+        audit_log_kudu_repository.log_action(
+            user_id=user_info['user_id'],
+            username=user_info['username'],
+            user_email=user_info['user_email'],
+            action_type=action_type,
+            entity_type='TRADE',
+            entity_id=str(trade_id),
+            entity_name=trade_data.get('deal_number', ''),
+            action_description=f'{action_type} trade: {trade_data.get("deal_number", "")}',
+            request_method='POST',
+            request_path=request.path,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            status='SUCCESS'
+        )
+
+        if action == 'reject':
+            messages.warning(request, success_msg)
+        else:
+            messages.success(request, success_msg)
+
+    except Exception as e:
+        messages.error(request, f'Error processing trade: {str(e)}')
+
+    return redirect('trade:detail', trade_id=trade_id)
+
+
+def trade_settle(request, trade_id):
+    """Settle trade (Checker action: Settle -> SETTLED)."""
+    if request.method != 'POST':
+        return redirect('trade:detail', trade_id=trade_id)
+
+    trade_data = trade_kudu_repository.get_trade_by_id(trade_id)
+    if not trade_data:
+        messages.error(request, f'Trade {trade_id} not found')
+        return redirect('trade:list')
+
+    user_info = get_user_info(request)
+    comments = request.POST.get('comments', '').strip()
+
+    try:
+        success = trade_kudu_repository.settle_trade(trade_id, user_info['username'], comments)
+
+        if not success:
+            raise Exception('Failed to settle trade')
+
+        audit_log_kudu_repository.log_action(
+            user_id=user_info['user_id'],
+            username=user_info['username'],
+            user_email=user_info['user_email'],
+            action_type='SETTLE',
+            entity_type='TRADE',
+            entity_id=str(trade_id),
+            entity_name=trade_data.get('deal_number', ''),
+            action_description=f'Settled trade: {trade_data.get("deal_number", "")}',
+            request_method='POST',
+            request_path=request.path,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            status='SUCCESS'
+        )
+
+        messages.success(request, 'Trade settled and is now ACTIVE!')
+    except Exception as e:
+        messages.error(request, f'Error settling trade: {str(e)}')
+
+    return redirect('trade:detail', trade_id=trade_id)
+
+
+def trade_cancel(request, trade_id):
+    """Cancel trade."""
+    if request.method != 'POST':
+        return redirect('trade:detail', trade_id=trade_id)
+
+    trade_data = trade_kudu_repository.get_trade_by_id(trade_id)
+    if not trade_data:
+        messages.error(request, f'Trade {trade_id} not found')
+        return redirect('trade:list')
+
+    user_info = get_user_info(request)
+    reason = request.POST.get('reason', '').strip()
+
+    try:
+        success = trade_kudu_repository.soft_delete_trade(trade_id, user_info['username'], reason)
+
+        if not success:
+            raise Exception('Failed to cancel trade')
+
+        audit_log_kudu_repository.log_action(
+            user_id=user_info['user_id'],
+            username=user_info['username'],
+            user_email=user_info['user_email'],
+            action_type='CANCEL',
+            entity_type='TRADE',
+            entity_id=str(trade_id),
+            entity_name=trade_data.get('deal_number', ''),
+            action_description=f'Cancelled trade: {trade_data.get("deal_number", "")}',
+            request_method='POST',
+            request_path=request.path,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            status='SUCCESS'
+        )
+
+        messages.warning(request, 'Trade has been cancelled.')
+    except Exception as e:
+        messages.error(request, f'Error cancelling trade: {str(e)}')
+
+    return redirect('trade:detail', trade_id=trade_id)
+
+
+def trade_reactivate(request, trade_id):
+    """Reactivate cancelled trade."""
+    if request.method != 'POST':
+        return redirect('trade:detail', trade_id=trade_id)
+
+    messages.info(request, 'Reactivate functionality not yet implemented.')
+    return redirect('trade:detail', trade_id=trade_id)
+
+
+def trade_delete(request, trade_id):
+    """Soft delete trade."""
+    return trade_cancel(request, trade_id)
+
+
+# =============================================================================
+# APPROVAL QUEUES
+# =============================================================================
+
+def pending_validation(request):
+    """List trades pending validation (for Checkers)."""
+    trades_data = trade_kudu_repository.get_pending_validation_trades()
+    wrapped_trades = [TradeWrapper(t, idx) for idx, t in enumerate(trades_data)]
+
+    stats = trade_kudu_repository.get_trade_statistics()
+
+    context = {
+        'trades': wrapped_trades,
+        'pending_count': len(trades_data),
+        'view_type': 'validation',
+        'pending_validation_count': stats.get('pending_validation', 0),
+        'pending_settlement_count': stats.get('pending_settlement', 0),
+    }
+
+    return render(request, 'trade/pending_approvals.html', context)
+
+
+def pending_settlement(request):
+    """List validated trades ready for settlement (for Checkers)."""
+    trades_data = trade_kudu_repository.get_pending_settlement_trades()
+    wrapped_trades = [TradeWrapper(t, idx) for idx, t in enumerate(trades_data)]
+
+    stats = trade_kudu_repository.get_trade_statistics()
+
+    context = {
+        'trades': wrapped_trades,
+        'pending_count': len(trades_data),
+        'view_type': 'settlement',
+        'pending_validation_count': stats.get('pending_validation', 0),
+        'pending_settlement_count': stats.get('pending_settlement', 0),
+    }
+
+    return render(request, 'trade/pending_approvals.html', context)
+
+
+# =============================================================================
+# HISTORY
+# =============================================================================
+
+def trade_history(request, trade_id):
+    """View trade history."""
+    trade_data = trade_kudu_repository.get_trade_by_id(trade_id)
+    if not trade_data:
+        raise Http404(f"Trade {trade_id} not found")
+
+    history = trade_kudu_repository.get_trade_history(trade_id)
+
+    context = {
+        'trade': TradeWrapper(trade_data),
+        'history': history,
+    }
+
+    return render(request, 'trade/trade_history.html', context)
+
+
+# =============================================================================
+# API ENDPOINTS FOR AJAX VALIDATION
+# =============================================================================
+
+@require_http_methods(["GET"])
+def api_validate_portfolio(request):
+    """API: Validate portfolio exists and is valid for trading."""
+    portfolio_name = request.GET.get('name', '').strip()
+    result = trade_validation_repository.validate_portfolio(portfolio_name)
+
+    return JsonResponse({
+        'is_valid': result.is_valid,
+        'message': result.message,
+        'details': result.details
+    })
+
+
+@require_http_methods(["GET"])
+def api_validate_security(request):
+    """API: Validate security exists and is valid for trading."""
+    security_name = request.GET.get('name', '').strip()
+    result = trade_validation_repository.validate_security(security_name)
+
+    return JsonResponse({
+        'is_valid': result.is_valid,
+        'message': result.message,
+        'details': result.details
+    })
+
+
+@require_http_methods(["GET"])
+def api_validate_counterparty(request):
+    """API: Validate counterparty exists and is active."""
+    counterparty_name = request.GET.get('name', '').strip()
+    result = trade_validation_repository.validate_counterparty(counterparty_name)
+
+    return JsonResponse({
+        'is_valid': result.is_valid,
+        'message': result.message,
+        'details': result.details
+    })
+
+
+@require_http_methods(["GET"])
+def api_portfolios(request):
+    """API: Get valid portfolios for dropdown (with search)."""
+    search = request.GET.get('search', '').strip()
+    portfolios = trade_dropdown_service.get_portfolios(search=search if search else None)
+
+    return JsonResponse({'results': portfolios})
+
+
+@require_http_methods(["GET"])
+def api_securities(request):
+    """API: Get valid securities for dropdown (with search)."""
+    search = request.GET.get('search', '').strip()
+    securities = trade_dropdown_service.get_securities(search=search if search else None)
+
+    return JsonResponse({'results': securities})
+
+
+@require_http_methods(["GET"])
+def api_counterparties(request):
+    """API: Get valid counterparties for dropdown (with search)."""
+    search = request.GET.get('search', '').strip()
+    counterparties = trade_dropdown_service.get_counterparties(search=search if search else None)
+
+    return JsonResponse({'results': counterparties})
+
+
+@require_http_methods(["GET"])
+def api_get_position(request):
+    """API: Get current position for portfolio-security."""
+    portfolio = request.GET.get('portfolio', '').strip()
+    security = request.GET.get('security', '').strip()
+
+    position = trade_kudu_repository.get_position(portfolio, security)
+
+    if position:
+        return JsonResponse({
+            'exists': True,
+            'quantity': position.get('quantity', 0),
+            'average_cost': position.get('average_cost', 0),
+            'status': position.get('status', '')
+        })
+    else:
+        return JsonResponse({
+            'exists': False,
+            'quantity': 0,
+            'average_cost': 0,
+            'status': ''
+        })
