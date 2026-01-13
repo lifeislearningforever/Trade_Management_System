@@ -47,6 +47,9 @@ urlpatterns = [
 
     # Security Master Data
     path('security/', include('security.urls')),
+
+    # Trade Management
+    path('trade/', include('trade.urls')),
 ]
 
 # Serve static files in development

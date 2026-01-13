@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'udf.apps.UdfConfig',
     'reference_data.apps.ReferenceDataConfig',
     'security.apps.SecurityConfig',
+    'trade.apps.TradeConfig',
 ]
 
 MIDDLEWARE = [

@@ -50,6 +50,35 @@
             </li>
         </ul>
 
+        <!-- Trade Management Section -->
+        <div class="nav-section-title">Trade Management</div>
+        <ul class="nav flex-column">
+            <li class="nav-item">
+                <a class="nav-link {% if 'trade' in request.path and 'create' not in request.path and 'pending' not in request.path %}active{% endif %}" href="{% url 'trade:list' %}">
+                    <i class="bi bi-graph-up"></i>
+                    <span>Trades</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if 'trade/create' in request.path %}active{% endif %}" href="{% url 'trade:create' %}">
+                    <i class="bi bi-plus-circle"></i>
+                    <span>New Trade</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if 'pending-validation' in request.path %}active{% endif %}" href="{% url 'trade:pending_validation' %}">
+                    <i class="bi bi-clock-history"></i>
+                    <span>Pending Validation</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if 'pending-settlement' in request.path %}active{% endif %}" href="{% url 'trade:pending_settlement' %}">
+                    <i class="bi bi-check2-circle"></i>
+                    <span>Pending Settlement</span>
+                </a>
+            </li>
+        </ul>
+
         <!-- Market Data Section -->
         <div class="nav-section-title">Market Data</div>
         <ul class="nav flex-column">

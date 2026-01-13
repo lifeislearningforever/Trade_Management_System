@@ -42,4 +42,8 @@ urlpatterns = [
     path('api/securities/', views.api_securities, name='api_securities'),
     path('api/counterparties/', views.api_counterparties, name='api_counterparties'),
     path('api/position/', views.api_get_position, name='api_get_position'),
+
+    # Detailed API endpoints for modal selection
+    path('api/portfolios-detailed/', views.api_portfolios_detailed, name='api_portfolios_detailed'),
+    path('api/securities-detailed/', views.api_securities_detailed, name='api_securities_detailed'),
 ]

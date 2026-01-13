@@ -1,0 +1,754 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{% if is_edit %}Edit{% else %}Create{% endif %} Trade - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'trade:list' %}">Trades</a></li>
+    <li class="breadcrumb-item active">{% if is_edit %}Edit {{ trade.deal_number }}{% else %}Create Trade{% endif %}</li>
+{% endblock %}
+
+{% block content %}
+<div class="trade-form-container">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            <i class="bi bi-{% if is_edit %}pencil{% else %}plus-circle{% endif %} text-primary"></i>
+            {% if is_edit %}Edit Trade{% else %}Create New Trade{% endif %}
+        </h1>
+        <p class="content-subtitle">
+            {% if is_edit %}
+                Editing {{ trade.deal_number }} - Status will change to MODIFIED
+            {% else %}
+                Fill in the trade details. Trade will be created with INITIAL status.
+            {% endif %}
+        </p>
+    </div>
+
+    <form method="post" id="tradeForm" class="needs-validation" novalidate>
+        {% csrf_token %}
+
+        <!-- Tab Navigation for Trade Type -->
+        <ul class="nav nav-tabs mb-4" id="tradeTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="basic-tab" data-bs-toggle="tab" data-bs-target="#basic" type="button">
+                    <i class="bi bi-info-circle"></i> Basic Info
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="pricing-tab" data-bs-toggle="tab" data-bs-target="#pricing" type="button">
+                    <i class="bi bi-calculator"></i> Pricing
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="gl-tab" data-bs-toggle="tab" data-bs-target="#gl" type="button">
+                    <i class="bi bi-bank"></i> GL & Broker
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="udf-tab" data-bs-toggle="tab" data-bs-target="#udf" type="button">
+                    <i class="bi bi-sliders"></i> UDF
+                </button>
+            </li>
+        </ul>
+
+        <!-- Tab Content -->
+        <div class="tab-content" id="tradeTabsContent">
+            <!-- Basic Info Tab -->
+            <div class="tab-pane fade show active" id="basic" role="tabpanel">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Basic Trade Information</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <!-- Trade Type -->
+                            <div class="col-md-3">
+                                <label class="form-label">Trade Type <span class="text-danger">*</span></label>
+                                <select class="form-select" name="trade_type" id="trade_type" required {% if is_edit %}disabled{% endif %}>
+                                    {% for tt in dropdown_options.trade_types %}
+                                    <option value="{{ tt.value }}"
+                                        {% if trade_type == tt.value or trade.trade_type == tt.value %}selected{% endif %}>
+                                        {{ tt.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                                {% if is_edit %}
+                                <input type="hidden" name="trade_type" value="{{ trade.trade_type }}">
+                                {% endif %}
+                            </div>
+
+                            <!-- Trade Status -->
+                            <div class="col-md-3">
+                                <label class="form-label">Trade Status</label>
+                                <select class="form-select" name="trade_status" id="trade_status">
+                                    <option value="">Select Status</option>
+                                    {% for ts in dropdown_options.trade_statuses %}
+                                    <option value="{{ ts.value }}"
+                                        {% if trade.trade_status == ts.value %}selected{% endif %}>
+                                        {{ ts.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                            <!-- Trade Date -->
+                            <div class="col-md-3">
+                                <label class="form-label">Trade Date <span class="text-danger">*</span></label>
+                                <input type="date" class="form-control" name="trade_date" id="trade_date"
+                                       value="{{ trade.trade_date|default:'' }}" required>
+                            </div>
+
+                            <!-- Settle Date -->
+                            <div class="col-md-3">
+                                <label class="form-label">Settle Date</label>
+                                <input type="date" class="form-control" name="settle_date" id="settle_date"
+                                       value="{{ trade.settle_date|default:'' }}">
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+
+                        <div class="row g-3">
+                            <!-- Portfolio -->
+                            <div class="col-md-4">
+                                <label class="form-label">Portfolio <span class="text-danger">*</span></label>
+                                <div class="input-group">
+                                    <select class="form-select" name="portfolio_short_name" id="portfolio_short_name" required
+                                            {% if is_edit %}disabled{% endif %}>
+                                        <option value="">Select Portfolio</option>
+                                        {% for p in dropdown_options.portfolios %}
+                                        <option value="{{ p.value }}"
+                                            {% if trade.portfolio_short_name == p.value %}selected{% endif %}
+                                            data-currency="{{ p.currency }}"
+                                            data-manager="{{ p.manager }}">
+                                            {{ p.label }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                    <span class="input-group-text" id="portfolio_status">
+                                        <i class="bi bi-question-circle text-muted"></i>
+                                    </span>
+                                </div>
+                                {% if is_edit %}
+                                <input type="hidden" name="portfolio_short_name" value="{{ trade.portfolio_short_name }}">
+                                {% endif %}
+                                <small class="text-muted" id="portfolio_info"></small>
+                            </div>
+
+                            <!-- Security -->
+                            <div class="col-md-4">
+                                <label class="form-label">Security <span class="text-danger">*</span></label>
+                                <div class="input-group">
+                                    <select class="form-select" name="security_label" id="security_label" required
+                                            {% if is_edit %}disabled{% endif %}>
+                                        <option value="">Select Security</option>
+                                        {% for s in dropdown_options.securities %}
+                                        <option value="{{ s.value }}"
+                                            {% if trade.security_label == s.value %}selected{% endif %}
+                                            data-type="{{ s.security_type }}"
+                                            data-currency="{{ s.currency }}"
+                                            data-price="{{ s.price }}">
+                                            {{ s.label }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                    <span class="input-group-text" id="security_status">
+                                        <i class="bi bi-question-circle text-muted"></i>
+                                    </span>
+                                </div>
+                                {% if is_edit %}
+                                <input type="hidden" name="security_label" value="{{ trade.security_label }}">
+                                {% endif %}
+                                <small class="text-muted" id="security_info"></small>
+                            </div>
+
+                            <!-- Counterparty -->
+                            <div class="col-md-4">
+                                <label class="form-label">Counterparty</label>
+                                <div class="input-group">
+                                    <select class="form-select" name="counterparty" id="counterparty">
+                                        <option value="">Select Counterparty</option>
+                                        {% for c in dropdown_options.counterparties %}
+                                        <option value="{{ c.value }}"
+                                            {% if trade.counterparty == c.value %}selected{% endif %}
+                                            data-country="{{ c.country }}">
+                                            {{ c.label }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                    <span class="input-group-text" id="counterparty_status">
+                                        <i class="bi bi-question-circle text-muted"></i>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Position Info (for Sell trades) -->
+                        <div id="position_info_section" class="alert alert-info mt-3" style="display: none;">
+                            <i class="bi bi-info-circle"></i>
+                            <span id="position_info_text">Select portfolio and security to check position.</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pricing Tab -->
+            <div class="tab-pane fade" id="pricing" role="tabpanel">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Quantity & Pricing</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-3">
+                                <label class="form-label">Quantity <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" name="quantity" id="quantity"
+                                       step="0.01" value="{{ trade.quantity|default:'' }}" required>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Face Value</label>
+                                <input type="number" class="form-control" name="face_value" id="face_value"
+                                       step="0.01" value="{{ trade.face_value|default:'' }}">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Lot</label>
+                                <input type="number" class="form-control" name="lot" id="lot"
+                                       step="1" value="{{ trade.lot|default:'' }}">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Price <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" name="price" id="price"
+                                       step="0.0001" value="{{ trade.price|default:'' }}" required>
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+                        <h6>Costs & Fees</h6>
+
+                        <div class="row g-3">
+                            <div class="col-md-2">
+                                <label class="form-label">Commission</label>
+                                <input type="number" class="form-control" name="commission" id="commission"
+                                       step="0.01" value="{{ trade.commission|default:'0' }}">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Accrued Interest</label>
+                                <input type="number" class="form-control" name="accrued_interest" id="accrued_interest"
+                                       step="0.01" value="{{ trade.accrued_interest|default:'0' }}">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">SEC Fee</label>
+                                <input type="number" class="form-control" name="sec_fee" id="sec_fee"
+                                       step="0.01" value="{{ trade.sec_fee|default:'0' }}">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Other Charges</label>
+                                <input type="number" class="form-control" name="other_charges" id="other_charges"
+                                       step="0.01" value="{{ trade.other_charges|default:'0' }}">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Total Amount</label>
+                                <input type="number" class="form-control fw-bold" name="total_amount" id="total_amount"
+                                       step="0.01" value="{{ trade.total_amount|default:'' }}" readonly>
+                                <button type="button" class="btn btn-sm btn-outline-primary mt-1" onclick="calculateTotal()">
+                                    <i class="bi bi-calculator"></i> Calculate
+                                </button>
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+                        <h6>FX & Dealing</h6>
+
+                        <div class="row g-3">
+                            <div class="col-md-3">
+                                <label class="form-label">Open FX Rate</label>
+                                <input type="number" class="form-control" name="open_fx_rate" id="open_fx_rate"
+                                       step="0.000001" value="{{ trade.open_fx_rate|default:'' }}">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Curr Dealing</label>
+                                <input type="number" class="form-control" name="curr_dealing" id="curr_dealing"
+                                       step="0.01" value="{{ trade.curr_dealing|default:'' }}">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Open Dealing</label>
+                                <input type="number" class="form-control" name="open_dealing" id="open_dealing"
+                                       step="0.01" value="{{ trade.open_dealing|default:'' }}">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Qty Entitled</label>
+                                <input type="number" class="form-control" name="qty_entitled" id="qty_entitled"
+                                       step="0.01" value="{{ trade.qty_entitled|default:'' }}">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- GL & Broker Tab -->
+            <div class="tab-pane fade" id="gl" role="tabpanel">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">GL, Broker & Settlement</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-3">
+                                <label class="form-label">Open/Close Position</label>
+                                <select class="form-select" name="open_close_position" id="open_close_position">
+                                    <option value="">Select</option>
+                                    {% for oc in dropdown_options.open_close_options %}
+                                    <option value="{{ oc.value }}"
+                                        {% if trade.open_close_position == oc.value %}selected{% endif %}>
+                                        {{ oc.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Extension</label>
+                                <select class="form-select" name="extension" id="extension">
+                                    <option value="">Select</option>
+                                    {% for ext in dropdown_options.extensions %}
+                                    <option value="{{ ext.value }}"
+                                        {% if trade.extension == ext.value %}selected{% endif %}>
+                                        {{ ext.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Broker</label>
+                                <select class="form-select" name="brokers" id="brokers">
+                                    <option value="">Select Broker</option>
+                                    {% for b in dropdown_options.brokers %}
+                                    <option value="{{ b.value }}"
+                                        {% if trade.brokers == b.value %}selected{% endif %}>
+                                        {{ b.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Broker Name</label>
+                                <input type="text" class="form-control" name="broker_name" id="broker_name"
+                                       value="{{ trade.broker_name|default:'' }}">
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+                        <h6>GL Codes</h6>
+
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label">GL Fund Type</label>
+                                <select class="form-select" name="gl_fund_type" id="gl_fund_type">
+                                    <option value="">Select</option>
+                                    {% for gf in dropdown_options.gl_fund_types %}
+                                    <option value="{{ gf.value }}"
+                                        {% if trade.gl_fund_type == gf.value %}selected{% endif %}>
+                                        {{ gf.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">GL Cost Centre</label>
+                                <select class="form-select" name="gl_cost_centre" id="gl_cost_centre">
+                                    <option value="">Select</option>
+                                    {% for gc in dropdown_options.gl_cost_centres %}
+                                    <option value="{{ gc.value }}"
+                                        {% if trade.gl_cost_centre == gc.value %}selected{% endif %}>
+                                        {{ gc.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">GL Account Code</label>
+                                <select class="form-select" name="gl_account_code" id="gl_account_code">
+                                    <option value="">Select</option>
+                                    {% for ga in dropdown_options.gl_account_codes %}
+                                    <option value="{{ ga.value }}"
+                                        {% if trade.gl_account_code == ga.value %}selected{% endif %}>
+                                        {{ ga.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+                        <h6>Settlement</h6>
+
+                        <div class="row g-3">
+                            <div class="col-md-3">
+                                <label class="form-label">Custodian</label>
+                                <select class="form-select" name="custodian" id="custodian">
+                                    <option value="">Select</option>
+                                    {% for cust in dropdown_options.custodians %}
+                                    <option value="{{ cust.value }}"
+                                        {% if trade.custodian == cust.value %}selected{% endif %}>
+                                        {{ cust.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Selling Rule</label>
+                                <select class="form-select" name="selling_rule" id="selling_rule">
+                                    <option value="">Select</option>
+                                    {% for sr in dropdown_options.selling_rules %}
+                                    <option value="{{ sr.value }}"
+                                        {% if trade.selling_rule == sr.value %}selected{% endif %}>
+                                        {{ sr.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Amor/Accr Method</label>
+                                <select class="form-select" name="amor_accr_method" id="amor_accr_method">
+                                    <option value="">Select</option>
+                                    {% for am in dropdown_options.amor_methods %}
+                                    <option value="{{ am.value }}"
+                                        {% if trade.amor_accr_method == am.value %}selected{% endif %}>
+                                        {{ am.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Cash Balance</label>
+                                <input type="number" class="form-control" name="cash_balance" id="cash_balance"
+                                       step="0.01" value="{{ trade.cash_balance|default:'' }}">
+                            </div>
+                        </div>
+
+                        <div class="row g-3 mt-2">
+                            <div class="col-md-4">
+                                <label class="form-label">Contract Reference</label>
+                                <input type="text" class="form-control" name="contract_ref" id="contract_ref"
+                                       value="{{ trade.contract_ref|default:'' }}">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">FD Receipt</label>
+                                <input type="text" class="form-control" name="fd_receipt" id="fd_receipt"
+                                       value="{{ trade.fd_receipt|default:'' }}">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Original Purchase Date</label>
+                                <input type="date" class="form-control" name="org_pur_date" id="org_pur_date"
+                                       value="{{ trade.org_pur_date|default:'' }}">
+                            </div>
+                        </div>
+
+                        <div class="row g-3 mt-2">
+                            <div class="col-12">
+                                <label class="form-label">Remarks</label>
+                                <textarea class="form-control" name="remarks" id="remarks" rows="3">{{ trade.remarks|default:'' }}</textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- UDF Tab -->
+            <div class="tab-pane fade" id="udf" role="tabpanel">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">User Defined Fields (Trade)</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label">Fund Type</label>
+                                <select class="form-select" name="udf_fund_type" id="udf_fund_type">
+                                    <option value="">Select</option>
+                                    {% for ft in dropdown_options.fund_types %}
+                                    <option value="{{ ft.value }}"
+                                        {% if trade.udf_fund_type == ft.value %}selected{% endif %}>
+                                        {{ ft.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Section 31/26</label>
+                                <select class="form-select" name="udf_section_31_26" id="udf_section_31_26">
+                                    <option value="">Select</option>
+                                    {% for sec in dropdown_options.section_options %}
+                                    <option value="{{ sec.value }}"
+                                        {% if trade.udf_section_31_26 == sec.value %}selected{% endif %}>
+                                        {{ sec.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Sub Custodian</label>
+                                <select class="form-select" name="udf_sub_custodian" id="udf_sub_custodian">
+                                    <option value="">Select</option>
+                                    {% for sc in dropdown_options.sub_custodians %}
+                                    <option value="{{ sc.value }}"
+                                        {% if trade.udf_sub_custodian == sc.value %}selected{% endif %}>
+                                        {{ sc.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="row g-3 mt-2">
+                            <div class="col-md-4">
+                                <label class="form-label">UOBN/UOBN-HK</label>
+                                <select class="form-select" name="udf_uobn_uobn_hk" id="udf_uobn_uobn_hk">
+                                    <option value="">Select</option>
+                                    {% for uobn in dropdown_options.uobn_options %}
+                                    <option value="{{ uobn.value }}"
+                                        {% if trade.udf_uobn_uobn_hk == uobn.value %}selected{% endif %}>
+                                        {{ uobn.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Income/Expense Type</label>
+                                <select class="form-select" name="udf_income_exp_type" id="udf_income_exp_type">
+                                    <option value="">Select</option>
+                                    {% for iet in dropdown_options.income_exp_types %}
+                                    <option value="{{ iet.value }}"
+                                        {% if trade.udf_income_exp_type == iet.value %}selected{% endif %}>
+                                        {{ iet.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Revision Code</label>
+                                <select class="form-select" name="udf_revision_code" id="udf_revision_code">
+                                    <option value="">Select</option>
+                                    {% for rc in dropdown_options.revision_codes %}
+                                    <option value="{{ rc.value }}"
+                                        {% if trade.udf_revision_code == rc.value %}selected{% endif %}>
+                                        {{ rc.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+                        <h6>Boolean Flags</h6>
+
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="udf_disclosure_req"
+                                           id="udf_disclosure_req" {% if trade.udf_disclosure_req %}checked{% endif %}>
+                                    <label class="form-check-label" for="udf_disclosure_req">
+                                        Disclosure Required
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="udf_counter_pledged"
+                                           id="udf_counter_pledged" {% if trade.udf_counter_pledged %}checked{% endif %}>
+                                    <label class="form-check-label" for="udf_counter_pledged">
+                                        Counter Pledged
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="udf_currency_hedge"
+                                           id="udf_currency_hedge" {% if trade.udf_currency_hedge %}checked{% endif %}>
+                                    <label class="form-check-label" for="udf_currency_hedge">
+                                        Currency Hedge
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Form Actions -->
+        <div class="card">
+            <div class="card-body d-flex justify-content-between">
+                <a href="{% url 'trade:list' %}" class="btn btn-outline-secondary">
+                    <i class="bi bi-x-circle"></i> Cancel
+                </a>
+                <button type="submit" class="btn btn-primary btn-lg">
+                    <i class="bi bi-check-circle"></i>
+                    {% if is_edit %}Save Changes{% else %}Create Trade{% endif %}
+                </button>
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Validate portfolio on selection change
+document.getElementById('portfolio_short_name').addEventListener('change', function() {
+    const portfolioName = this.value;
+    const statusIcon = document.getElementById('portfolio_status');
+    const infoText = document.getElementById('portfolio_info');
+
+    if (!portfolioName) {
+        statusIcon.innerHTML = '<i class="bi bi-question-circle text-muted"></i>';
+        infoText.textContent = '';
+        return;
+    }
+
+    statusIcon.innerHTML = '<div class="spinner-border spinner-border-sm" role="status"></div>';
+
+    fetch(`{% url 'trade:api_validate_portfolio' %}?name=${encodeURIComponent(portfolioName)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.is_valid) {
+                statusIcon.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
+                infoText.textContent = data.message;
+                infoText.className = 'text-success small';
+            } else {
+                statusIcon.innerHTML = '<i class="bi bi-x-circle-fill text-danger"></i>';
+                infoText.textContent = data.message;
+                infoText.className = 'text-danger small';
+            }
+            checkPosition();
+        })
+        .catch(error => {
+            statusIcon.innerHTML = '<i class="bi bi-exclamation-circle text-warning"></i>';
+            infoText.textContent = 'Error validating portfolio';
+            infoText.className = 'text-warning small';
+        });
+});
+
+// Validate security on selection change
+document.getElementById('security_label').addEventListener('change', function() {
+    const securityName = this.value;
+    const statusIcon = document.getElementById('security_status');
+    const infoText = document.getElementById('security_info');
+
+    if (!securityName) {
+        statusIcon.innerHTML = '<i class="bi bi-question-circle text-muted"></i>';
+        infoText.textContent = '';
+        return;
+    }
+
+    statusIcon.innerHTML = '<div class="spinner-border spinner-border-sm" role="status"></div>';
+
+    fetch(`{% url 'trade:api_validate_security' %}?name=${encodeURIComponent(securityName)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.is_valid) {
+                statusIcon.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
+                infoText.textContent = data.message;
+                infoText.className = 'text-success small';
+
+                // Auto-fill price if available
+                const selectedOption = document.querySelector(`#security_label option[value="${securityName}"]`);
+                if (selectedOption && selectedOption.dataset.price) {
+                    const priceField = document.getElementById('price');
+                    if (!priceField.value) {
+                        priceField.value = selectedOption.dataset.price;
+                    }
+                }
+            } else {
+                statusIcon.innerHTML = '<i class="bi bi-x-circle-fill text-danger"></i>';
+                infoText.textContent = data.message;
+                infoText.className = 'text-danger small';
+            }
+            checkPosition();
+        })
+        .catch(error => {
+            statusIcon.innerHTML = '<i class="bi bi-exclamation-circle text-warning"></i>';
+            infoText.textContent = 'Error validating security';
+            infoText.className = 'text-warning small';
+        });
+});
+
+// Check position for Sell trades
+function checkPosition() {
+    const tradeType = document.getElementById('trade_type').value;
+    const portfolio = document.getElementById('portfolio_short_name').value;
+    const security = document.getElementById('security_label').value;
+    const positionSection = document.getElementById('position_info_section');
+    const positionText = document.getElementById('position_info_text');
+
+    if (tradeType !== 'SELL' || !portfolio || !security) {
+        positionSection.style.display = 'none';
+        return;
+    }
+
+    positionSection.style.display = 'block';
+    positionText.innerHTML = '<div class="spinner-border spinner-border-sm" role="status"></div> Checking position...';
+
+    fetch(`{% url 'trade:api_get_position' %}?portfolio=${encodeURIComponent(portfolio)}&security=${encodeURIComponent(security)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.exists) {
+                positionText.innerHTML = `<strong>Current Position:</strong> ${data.quantity} units at avg cost ${data.average_cost}`;
+                positionSection.className = 'alert alert-info mt-3';
+            } else {
+                positionText.innerHTML = '<strong>Warning:</strong> No position found for this portfolio-security combination.';
+                positionSection.className = 'alert alert-warning mt-3';
+            }
+        })
+        .catch(error => {
+            positionText.innerHTML = 'Error checking position';
+            positionSection.className = 'alert alert-danger mt-3';
+        });
+}
+
+// Calculate total amount
+function calculateTotal() {
+    const quantity = parseFloat(document.getElementById('quantity').value) || 0;
+    const price = parseFloat(document.getElementById('price').value) || 0;
+    const commission = parseFloat(document.getElementById('commission').value) || 0;
+    const secFee = parseFloat(document.getElementById('sec_fee').value) || 0;
+    const otherCharges = parseFloat(document.getElementById('other_charges').value) || 0;
+
+    const tradeType = document.getElementById('trade_type').value;
+    let total = quantity * price;
+
+    if (tradeType === 'BUY') {
+        total = total + commission + secFee + otherCharges;
+    } else if (tradeType === 'SELL') {
+        total = total - commission - secFee - otherCharges;
+    }
+
+    document.getElementById('total_amount').value = total.toFixed(2);
+}
+
+// Trade type change handler
+document.getElementById('trade_type').addEventListener('change', function() {
+    checkPosition();
+});
+
+// Auto-calculate on input change
+['quantity', 'price', 'commission', 'sec_fee', 'other_charges'].forEach(function(fieldId) {
+    document.getElementById(fieldId).addEventListener('input', calculateTotal);
+});
+
+// Form validation
+document.getElementById('tradeForm').addEventListener('submit', function(event) {
+    if (!this.checkValidity()) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    this.classList.add('was-validated');
+});
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    checkPosition();
+});
+</script>
+{% endblock %}

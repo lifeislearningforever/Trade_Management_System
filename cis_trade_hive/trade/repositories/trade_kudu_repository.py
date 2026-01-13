@@ -172,7 +172,46 @@ class TradeKuduRepository:
         trade_date_to: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        Retrieve trades from Kudu with filters.
+        Retrieve trades from Kudu with filters (single portfolio/security).
+        """
+        return self.get_all_trades_multi_filter(
+            limit=limit,
+            trade_type=trade_type,
+            status=status,
+            portfolios=[portfolio] if portfolio else None,
+            securities=[security] if security else None,
+            search=search,
+            trade_date_from=trade_date_from,
+            trade_date_to=trade_date_to
+        )
+
+    def get_all_trades_multi_filter(
+        self,
+        limit: int = 1000,
+        trade_type: Optional[str] = None,
+        status: Optional[str] = None,
+        portfolios: Optional[List[str]] = None,
+        securities: Optional[List[str]] = None,
+        search: Optional[str] = None,
+        trade_date_from: Optional[str] = None,
+        trade_date_to: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve trades from Kudu with multi-select filters.
+        Portfolios and Securities use OR logic within their groups.
+
+        Args:
+            limit: Maximum records to return
+            trade_type: Single trade type filter
+            status: Single status filter
+            portfolios: List of portfolio names (OR logic)
+            securities: List of security labels (OR logic)
+            search: Text search in deal_number, security_label, portfolio_short_name
+            trade_date_from: Start date filter (YYYY-MM-DD)
+            trade_date_to: End date filter (YYYY-MM-DD)
+
+        Returns:
+            List of trade dictionaries
         """
         try:
             where_clauses = ["(is_deleted = false OR is_deleted IS NULL)"]
@@ -183,11 +222,17 @@ class TradeKuduRepository:
             if status:
                 where_clauses.append(f"status = {self.escape_value(status)}")
 
-            if portfolio:
-                where_clauses.append(f"portfolio_short_name = {self.escape_value(portfolio)}")
+            # Multi-select portfolios with OR logic
+            if portfolios and len(portfolios) > 0:
+                portfolio_values = ", ".join([self.escape_value(p) for p in portfolios if p])
+                if portfolio_values:
+                    where_clauses.append(f"portfolio_short_name IN ({portfolio_values})")
 
-            if security:
-                where_clauses.append(f"security_label = {self.escape_value(security)}")
+            # Multi-select securities with OR logic
+            if securities and len(securities) > 0:
+                security_values = ", ".join([self.escape_value(s) for s in securities if s])
+                if security_values:
+                    where_clauses.append(f"security_label IN ({security_values})")
 
             if search:
                 search_escaped = search.replace("'", "''")
@@ -218,7 +263,7 @@ class TradeKuduRepository:
             return results if results else []
 
         except Exception as e:
-            logger.error(f"Error retrieving trades: {str(e)}")
+            logger.error(f"Error retrieving trades with multi-filter: {str(e)}")
             return []
 
     def get_trade_by_id(self, trade_id: int) -> Optional[Dict[str, Any]]:

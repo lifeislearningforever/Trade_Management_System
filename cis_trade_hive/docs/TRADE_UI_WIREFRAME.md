@@ -23,15 +23,23 @@ This document provides wireframes for the Trade Management module with Buy, Sell
 ├─────────────────────────────────────────────────────────────────────────────────────────┤
 │  🔍 SEARCH & FILTER                                                                      │
 │  ┌────────────────────────────────────────────────────────────────────────────────────┐ │
-│  │  Search                     Trade Type           Status              Portfolio     │ │
-│  │  ┌──────────────────────┐  ┌──────────────────┐ ┌──────────────────┐ ┌───────────┐ │ │
-│  │  │ 🔍 Deal#, Security...│  │ All Types      ▼│ │ All Statuses   ▼│ │ All     ▼ │ │ │
-│  │  └──────────────────────┘  └──────────────────┘ └──────────────────┘ └───────────┘ │ │
+│  │  Search                     Trade Type           Status                            │ │
+│  │  ┌──────────────────────┐  ┌──────────────────┐ ┌──────────────────┐               │ │
+│  │  │ 🔍 Deal#, Security...│  │ All Types      ▼│ │ All Statuses   ▼│               │ │
+│  │  └──────────────────────┘  └──────────────────┘ └──────────────────┘               │ │
 │  │                                                                                    │ │
-│  │  Trade Date From           Trade Date To        Security Label                     │ │
-│  │  ┌──────────────────────┐  ┌──────────────────┐ ┌──────────────────────────────┐  │ │
-│  │  │ 📅 YYYY-MM-DD        │  │ 📅 YYYY-MM-DD    │ │ Select Security           ▼│  │ │
-│  │  └──────────────────────┘  └──────────────────┘ └──────────────────────────────┘  │ │
+│  │  Portfolio (Multi-Select)                Security (Multi-Select)                   │ │
+│  │  ┌─────────────────────────────────────┐ ┌─────────────────────────────────────┐  │ │
+│  │  │ [📋 Select Portfolios...]           │ │ [📋 Select Securities...]           │  │ │
+│  │  │ (Click to open modal)               │ │ (Click to open modal)               │  │ │
+│  │  └─────────────────────────────────────┘ └─────────────────────────────────────┘  │ │
+│  │                                                                                    │ │
+│  │  Selected: [Badge: 3 portfolios] [×]      Selected: [Badge: 2 securities] [×]    │ │
+│  │                                                                                    │ │
+│  │  Trade Date From           Trade Date To                                           │ │
+│  │  ┌──────────────────────┐  ┌──────────────────┐                                   │ │
+│  │  │ 📅 YYYY-MM-DD        │  │ 📅 YYYY-MM-DD    │                                   │ │
+│  │  └──────────────────────┘  └──────────────────┘                                   │ │
 │  │                                                                                    │ │
 │  │  [🔍 Search]  [✖ Clear]                                                           │ │
 │  └────────────────────────────────────────────────────────────────────────────────────┘ │
@@ -54,6 +62,203 @@ This document provides wireframes for the Trade Management module with Buy, Sell
 │  • CHECKER: Validate→VALIDATED, Reject→CANCELLED, Settle→SETTLED                        │
 │  • Makers cannot validate/settle their own trades                                       │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 1A. Portfolio Multi-Select Modal
+
+Purpose: Allow users to select multiple portfolios for filtering trades using OR logic.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                         SELECT PORTFOLIOS                                    [X]         │
+├─────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                          │
+│  🔍 Search Portfolios                                                                    │
+│  ┌─────────────────────────────────────────────────────────────────────────────────────┐│
+│  │ 🔍 Type to search portfolios...                                                     ││
+│  └─────────────────────────────────────────────────────────────────────────────────────┘│
+│                                                                                          │
+│  Selected: 3 portfolios                                              [Clear Selection]  │
+│                                                                                          │
+│  ┌─────────────────────────────────────────────────────────────────────────────────────┐│
+│  │ ☐ │ Portfolio Name     │ Currency │ Manager         │ Status   │ Cash Balance      ││
+│  ├───┼────────────────────┼──────────┼─────────────────┼──────────┼───────────────────┤│
+│  │ ☑ │ A A ANTHONY SEC    │ SGD      │ John Manager    │ SETTLED  │ 1,250,000.00      ││
+│  │ ☑ │ AIIF CP            │ USD      │ Jane Manager    │ SETTLED  │ 2,500,000.00      ││
+│  │ ☐ │ AIIF CP II LTD     │ USD      │ Jane Manager    │ SETTLED  │ 3,750,000.00      ││
+│  │ ☑ │ AMADIA INVESTME    │ HKD      │ Bob Manager     │ SETTLED  │ 500,000.00        ││
+│  │ ☐ │ ASEAN CHINA II     │ CNY      │ Alice Manager   │ SETTLED  │ 8,000,000.00      ││
+│  │ ☐ │ ASIA FIXED INCOME  │ SGD      │ John Manager    │ SETTLED  │ 4,200,000.00      ││
+│  │ ☐ │ GLOBAL EQUITY FUND │ USD      │ Sarah Manager   │ SETTLED  │ 15,000,000.00     ││
+│  │ ...                                                                                  ││
+│  └─────────────────────────────────────────────────────────────────────────────────────┘│
+│                                                                                          │
+│  Showing 1-20 of 150 portfolios                      [Load More]                        │
+│                                                                                          │
+│  ┌──────────────────────────────────────────────────────────────────────────────────┐   │
+│  │                              [Cancel]  [Apply Selection (3)]                     │   │
+│  └──────────────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                          │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Features:**
+- Real-time search filtering
+- Checkbox selection for multiple portfolios
+- Shows portfolio details (Currency, Manager, Status, Cash Balance)
+- Selection count badge
+- Clear selection button
+- Lazy loading with "Load More" for large datasets
+- OR logic: Selecting A, B, C shows trades for A OR B OR C
+
+---
+
+## 1B. Security Multi-Select Modal
+
+Purpose: Allow users to select multiple securities for filtering trades using OR logic.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                         SELECT SECURITIES                                    [X]         │
+├─────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                          │
+│  🔍 Search Securities                                                                    │
+│  ┌─────────────────────────────────────────────────────────────────────────────────────┐│
+│  │ 🔍 Search by name, ISIN, or ticker...                                               ││
+│  └─────────────────────────────────────────────────────────────────────────────────────┘│
+│                                                                                          │
+│  Selected: 2 securities                                              [Clear Selection]  │
+│                                                                                          │
+│  ┌─────────────────────────────────────────────────────────────────────────────────────┐│
+│  │ ☐ │ Security Name             │ Type   │ ISIN         │ Ticker │ Currency │ Price  ││
+│  ├───┼───────────────────────────┼────────┼──────────────┼────────┼──────────┼────────┤│
+│  │ ☑ │ Reyes, Torres and Bishop  │ EQUITY │ US1234567890 │ RTB    │ USD      │ 150.25 ││
+│  │ ☐ │ Rose, Winters and Morrison│ EQUITY │ US0987654321 │ RWM    │ USD      │ 220.50 ││
+│  │ ☑ │ Thomas, Bruce and Williams│ EQUITY │ GB1234567890 │ TBW    │ GBP      │ 180.00 ││
+│  │ ☐ │ Cooke-Garcia              │ BOND   │ DE0987654321 │ CGR    │ EUR      │ 95.00  ││
+│  │ ☐ │ Buck Ltd                  │ EQUITY │ HK1234567890 │ BUCK   │ HKD      │ 45.75  ││
+│  │ ☐ │ Alpha Technologies Inc    │ EQUITY │ US5555555555 │ ATI    │ USD      │ 89.99  ││
+│  │ ☐ │ Beta Financial Corp       │ BOND   │ US6666666666 │ BFC    │ USD      │ 102.50 ││
+│  │ ...                                                                                  ││
+│  └─────────────────────────────────────────────────────────────────────────────────────┘│
+│                                                                                          │
+│  Showing 1-20 of 500 securities                      [Load More]                        │
+│                                                                                          │
+│  ┌──────────────────────────────────────────────────────────────────────────────────┐   │
+│  │                              [Cancel]  [Apply Selection (2)]                     │   │
+│  └──────────────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                          │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Features:**
+- Search by security name, ISIN, or ticker symbol
+- Checkbox selection for multiple securities
+- Shows security details (Type, ISIN, Ticker, Currency, Price)
+- Selection count badge
+- Clear selection button
+- Lazy loading with "Load More" for large datasets
+- OR logic: Selecting A, B, C shows trades for A OR B OR C
+
+---
+
+## 1C. Multi-Select Filter Behavior
+
+### Filter Logic
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│  FILTER LOGIC EXAMPLE                                                                    │
+│                                                                                          │
+│  Selected Portfolios: [A A ANTHONY SEC], [AIIF CP], [AMADIA INVESTME]                   │
+│  Selected Securities: [Reyes, Torres and Bishop], [Thomas, Bruce and Williams]         │
+│                                                                                          │
+│  SQL Generated:                                                                          │
+│  WHERE (portfolio_short_name IN ('A A ANTHONY SEC', 'AIIF CP', 'AMADIA INVESTME'))     │
+│    AND (security_label IN ('Reyes, Torres and Bishop', 'Thomas, Bruce and Williams'))   │
+│                                                                                          │
+│  Result: Shows trades matching ANY of the selected portfolios                           │
+│          AND ANY of the selected securities                                              │
+│                                                                                          │
+│  • Within Portfolio filter: OR logic (Portfolio A OR B OR C)                            │
+│  • Within Security filter: OR logic (Security X OR Y OR Z)                              │
+│  • Between filters: AND logic (Portfolios AND Securities AND Status AND...)            │
+│                                                                                          │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Selected Items Display
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│  Portfolio Filter Display:                                                               │
+│                                                                                          │
+│  ┌─────────────────────────────────────────────────────────────────────────────────────┐│
+│  │ [A A ANTHONY SEC ×] [AIIF CP ×] [AMADIA INVESTME ×]        [📋 Select] [Clear All] ││
+│  └─────────────────────────────────────────────────────────────────────────────────────┘│
+│                                                                                          │
+│  • Click × on individual badge to remove single selection                               │
+│  • Click "Clear All" to remove all selections                                            │
+│  • Click "Select" to open modal and modify selections                                   │
+│  • Badges are truncated if too many (e.g., "+5 more")                                   │
+│                                                                                          │
+│  When many items selected:                                                               │
+│  ┌─────────────────────────────────────────────────────────────────────────────────────┐│
+│  │ [3 Portfolios Selected]  [📋 Modify]  [Clear All]                                   ││
+│  └─────────────────────────────────────────────────────────────────────────────────────┘│
+│                                                                                          │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 1D. API Endpoints for Multi-Select
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/trade/api/portfolios-detailed/` | GET | Returns portfolios with full details for modal |
+| `/trade/api/securities-detailed/` | GET | Returns securities with full details for modal |
+
+Query Parameters:
+- `search`: Filter by name/ISIN/ticker
+- `limit`: Number of results (default: 100)
+- `offset`: Pagination offset
+
+Response Format (Portfolios):
+```json
+{
+  "results": [
+    {
+      "portfolio_short_name": "A A ANTHONY SEC",
+      "portfolio_full_name": "A A ANTHONY SEC",
+      "currency": "SGD",
+      "manager": "John Manager",
+      "cash_balance": "1250000.00",
+      "status": "SETTLED"
+    }
+  ],
+  "count": 150
+}
+```
+
+Response Format (Securities):
+```json
+{
+  "results": [
+    {
+      "security_label": "Reyes, Torres and Bishop",
+      "security_full_name": "Reyes, Torres and Bishop",
+      "security_type": "EQUITY",
+      "isin": "US1234567890",
+      "ticker": "RTB",
+      "currency_code": "USD",
+      "current_price": "150.25",
+      "issuer": "Reyes Group",
+      "status": "ACTIVE"
+    }
+  ],
+  "count": 500
+}
 ```
 
 ---
@@ -768,6 +973,15 @@ This document provides wireframes for the Trade Management module with Buy, Sell
 ---
 
 ## Document Version
-- Version: 1.0
+- Version: 1.1
 - Created: 2024-01-15
+- Updated: 2026-01-13
 - Author: System Design Team
+
+### Changelog
+- **v1.1 (2026-01-13)**: Added Multi-Select Modal functionality for Portfolio and Security filters
+  - Section 1A: Portfolio Multi-Select Modal wireframe
+  - Section 1B: Security Multi-Select Modal wireframe
+  - Section 1C: Multi-Select Filter Behavior documentation
+  - Section 1D: API Endpoints for Multi-Select
+  - Updated Trade List View to show multi-select filter buttons

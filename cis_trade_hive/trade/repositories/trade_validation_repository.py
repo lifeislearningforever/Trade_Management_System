@@ -38,8 +38,8 @@ class TradeValidationRepository:
     PORTFOLIO_VALID_STATUSES = ['SETTLED']
 
     # Security table
-    SECURITY_TABLE = 'cis_security'
-    SECURITY_VALID_STATUSES = ['ACTIVE', 'APPROVED']
+    SECURITY_TABLE = 'cis_security_kudu'
+    SECURITY_VALID_STATUSES = ['ACTIVE', 'APPROVED', 'SETTLED']
 
     # Counterparty table
     COUNTERPARTY_TABLE = 'cis_counterparty_kudu'

@@ -146,16 +146,32 @@ def trade_list(request):
     search_query = request.GET.get('search', '').strip()
     status_filter = request.GET.get('status', '').strip()
     trade_type_filter = request.GET.get('trade_type', '').strip()
-    portfolio_filter = request.GET.get('portfolio', '').strip()
     trade_date_from = request.GET.get('trade_date_from', '').strip()
     trade_date_to = request.GET.get('trade_date_to', '').strip()
     export = request.GET.get('export', '').strip()
 
-    trades_data = trade_kudu_repository.get_all_trades(
+    # Multi-select portfolios (comma-separated or list)
+    portfolio_filter = request.GET.getlist('portfolios')
+    if not portfolio_filter:
+        # Fallback to single portfolio param
+        single_portfolio = request.GET.get('portfolio', '').strip()
+        if single_portfolio:
+            portfolio_filter = [single_portfolio]
+
+    # Multi-select securities (comma-separated or list)
+    security_filter = request.GET.getlist('securities')
+    if not security_filter:
+        # Fallback to single security param
+        single_security = request.GET.get('security', '').strip()
+        if single_security:
+            security_filter = [single_security]
+
+    trades_data = trade_kudu_repository.get_all_trades_multi_filter(
         limit=1000,
         trade_type=trade_type_filter if trade_type_filter else None,
         status=status_filter if status_filter else None,
-        portfolio=portfolio_filter if portfolio_filter else None,
+        portfolios=portfolio_filter if portfolio_filter else None,
+        securities=security_filter if security_filter else None,
         search=search_query if search_query else None,
         trade_date_from=trade_date_from if trade_date_from else None,
         trade_date_to=trade_date_to if trade_date_to else None
@@ -237,13 +253,15 @@ def trade_list(request):
         'search_query': search_query,
         'status_filter': status_filter,
         'trade_type_filter': trade_type_filter,
-        'portfolio_filter': portfolio_filter,
+        'selected_portfolios': portfolio_filter,  # List of selected portfolio names
+        'selected_securities': security_filter,   # List of selected security names
         'trade_date_from': trade_date_from,
         'trade_date_to': trade_date_to,
         'total_count': len(trades_data),
         'status_options': status_options,
         'trade_types': dropdown_options.get('trade_types', []),
         'portfolios': dropdown_options.get('portfolios', []),
+        'securities': dropdown_options.get('securities', []),
         'stats': stats,
         'pending_validation_count': stats.get('pending_validation', 0),
         'pending_settlement_count': stats.get('pending_settlement', 0),
@@ -887,3 +905,52 @@ def api_get_position(request):
             'average_cost': 0,
             'status': ''
         })
+
+
+@require_http_methods(["GET"])
+def api_portfolios_detailed(request):
+    """
+    API: Get valid portfolios with full details for modal selection.
+    Returns portfolio details including currency, manager, status for display.
+    """
+    search = request.GET.get('search', '').strip()
+    portfolios = trade_validation_repository.get_valid_portfolios(search=search if search else None, limit=500)
+
+    results = []
+    for p in portfolios:
+        results.append({
+            'portfolio_short_name': p.get('portfolio_short_name', ''),
+            'portfolio_full_name': p.get('portfolio_full_name', ''),
+            'currency': p.get('currency', ''),
+            'manager': p.get('manager', ''),
+            'cash_balance': p.get('cash_balance', 0),
+            'status': p.get('status', ''),
+        })
+
+    return JsonResponse({'results': results, 'total': len(results)})
+
+
+@require_http_methods(["GET"])
+def api_securities_detailed(request):
+    """
+    API: Get valid securities with full details for modal selection.
+    Returns security details including type, ISIN, ticker, currency, price.
+    """
+    search = request.GET.get('search', '').strip()
+    securities = trade_validation_repository.get_valid_securities(search=search if search else None, limit=500)
+
+    results = []
+    for s in securities:
+        results.append({
+            'security_label': s.get('security_label', ''),
+            'security_full_name': s.get('security_full_name', ''),
+            'security_type': s.get('security_type', ''),
+            'isin': s.get('isin', ''),
+            'ticker': s.get('ticker', ''),
+            'currency_code': s.get('currency_code', ''),
+            'current_price': s.get('current_price', 0),
+            'issuer': s.get('issuer', ''),
+            'status': s.get('status', ''),
+        })
+
+    return JsonResponse({'results': results, 'total': len(results)})
