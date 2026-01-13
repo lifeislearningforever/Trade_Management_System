@@ -29,6 +29,16 @@
             <input type="text" placeholder="Search portfolios, trades..." id="global-search" name="q">
         </form>
 
+        <!-- Font Size Control -->
+        <div class="font-size-control d-none d-md-flex" id="font-size-control" title="Adjust display size">
+            <span class="font-size-control-label">Display:</span>
+            <button type="button" class="font-size-btn" data-scale="small" title="Small (85%)">S</button>
+            <button type="button" class="font-size-btn active" data-scale="default" title="Default (100%)">M</button>
+            <button type="button" class="font-size-btn" data-scale="large" title="Large (115%)">L</button>
+            <button type="button" class="font-size-btn" data-scale="xlarge" title="Extra Large (130%)">XL</button>
+            <span class="font-size-indicator" id="font-size-indicator">100%</span>
+        </div>
+
         <!-- Icons -->
         <div class="navbar-icons">
             <!-- Notifications -->
