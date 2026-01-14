@@ -1,0 +1,263 @@
+# CLAUDE.md - CIS Trade Hive Project Guide
+
+## Project Overview
+
+**CisTrade** is an enterprise-grade Trade Management System built with Django 5.2.9. It manages trade portfolios, market data, and security master data with comprehensive audit logging, role-based access control, and maker-checker workflow (Four-Eyes principle).
+
+## Database Architecture
+
+**All data is stored in Apache Kudu via Impala.** No SQLite or MySQL.
+
+### Environments
+| Environment | Impala Host | Notes |
+|-------------|-------------|-------|
+| **Local Dev** | `localhost:21050` | Docker container with Kudu/Impala |
+| **Work/Prod** | Cloudera CML | Cloudera Machine Learning platform |
+
+### Key Kudu Tables (Database: `gmp_cis`)
+- `cis_portfolio` - Portfolio master data
+- `cis_trade` - Trade records
+- `cis_trade_history` - Trade audit trail
+- `cis_security_kudu` - Security master data
+- `cis_counterparty_kudu` - Counterparty/broker data
+- `cis_audit_log` - System audit trail
+- `cis_user`, `cis_user_group`, `cis_group_permissions` - ACL tables
+
+## Quick Start
+
+```bash
+# Activate virtual environment
+source .venv/bin/activate
+
+# Start Docker Kudu/Impala (local development)
+docker start kudu-impala  # or your container name
+
+# Test Impala connection
+python manage.py test_hive
+
+# Run development server
+python manage.py runserver 0.0.0.0:8000
+
+# Run tests
+pytest
+
+# Run with coverage
+pytest --cov=core --cov=portfolio --cov=udf --cov=reference_data
+```
+
+## Project Structure
+
+```
+cis_trade_hive/
+├── config/              # Django settings, URLs, WSGI/ASGI
+├── core/                # Foundation: auth, audit, ACL, middleware
+├── portfolio/           # Portfolio management with maker-checker
+├── trade/               # Trade execution and settlement
+├── market_data/         # FX rates and market data
+├── reference_data/      # Currencies, countries, calendars, counterparties
+├── security/            # Security master data (Kudu-based)
+├── udf/                 # User-Defined Fields for extensibility
+├── templates/           # HTML templates (Bootstrap 5)
+├── static/              # CSS, JS, images (local, no CDN)
+├── sql/                 # Kudu DDL and sample data
+├── kudu_ddl/            # Kudu-specific DDL files
+└── docs/                # Project documentation
+```
+
+## Key Architecture Decisions
+
+### Kudu/Impala as Primary Database
+- All application data stored in Kudu tables
+- Accessed via Impala SQL interface using PyHive
+- Connection pool: 35 connections via `ImpalaConnectionManager`
+- Database: `gmp_cis`
+
+### SOLID Architecture
+- **Models:** Data wrappers (e.g., `TradeWrapper` for Kudu dict data)
+- **Services:** Business logic (`*_service.py`)
+- **Views:** HTTP handling
+- **Repositories:** Data access (`*_kudu_repository.py`)
+
+### Four-Eyes Principle (Maker-Checker)
+Status flow: `DRAFT → PENDING_APPROVAL → APPROVED/REJECTED → ACTIVE → INACTIVE → CLOSED`
+
+## Common Commands
+
+```bash
+# Kudu/Impala
+python manage.py create_hive_db  # Create Kudu tables
+python manage.py test_hive       # Test Impala connection
+
+# Impala Shell (direct access)
+impala-shell -i localhost:21050 -d gmp_cis
+
+# Testing
+pytest                           # Run all tests
+pytest core/tests/               # Run specific module
+pytest -v --tb=short             # Verbose with short traceback
+
+# Static files
+python manage.py collectstatic --noinput
+
+# Production
+gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4 --threads 4
+```
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `config/settings.py` | Django settings, Impala config |
+| `core/repositories/impala_connection.py` | Kudu/Impala connection pool manager |
+| `core/services/acl_service.py` | Role-based access control |
+| `core/middleware/acl_middleware.py` | ACL attachment to requests |
+| `core/middleware/audit_middleware.py` | Audit logging |
+| `core/audit/audit_kudu_repository.py` | Audit logging to Kudu |
+| `trade/repositories/trade_kudu_repository.py` | Trade data access |
+| `security/repositories/security_kudu_repository.py` | Security data access |
+
+## Environment Variables
+
+Key settings in `.env`:
+
+```ini
+# Django
+DJANGO_DEBUG=True
+DJANGO_SECRET_KEY=your-secret-key
+
+# Impala/Kudu - Local Docker
+IMPALA_HOST=localhost
+IMPALA_PORT=21050
+IMPALA_DB=gmp_cis
+IMPALA_AUTH=NOSASL
+IMPALA_TIMEOUT=60
+IMPALA_POOL_SIZE=35
+
+# Impala/Kudu - Cloudera CML (work)
+# IMPALA_HOST=your-cloudera-host
+# IMPALA_PORT=21050
+# IMPALA_AUTH=GSSAPI  # or LDAP depending on setup
+# IMPALA_USERNAME=your-username
+# IMPALA_PASSWORD=your-password
+```
+
+## URL Patterns
+
+| App | Base URL | Key Endpoints |
+|-----|----------|---------------|
+| Core | `/` | `/login/`, `/logout/`, `/dashboard/` |
+| Portfolio | `/portfolio/` | `/create/`, `/<name>/`, `/pending-validation/` |
+| Trade | `/trade/` | `/create/`, `/<id>/`, `/pending-settlement/` |
+| Market Data | `/market-data/` | `/fx-rates/`, `/dashboard/` |
+| Reference Data | `/reference-data/` | `/currencies/`, `/countries/`, `/counterparties/` |
+| Security | `/security/` | `/`, `/create/`, `/<id>/edit/` |
+| UDF | `/udf/` | `/definitions/`, `/values/<entity_type>/` |
+
+## Impala/Kudu Query Patterns
+
+```python
+# Using ImpalaConnectionManager
+from core.repositories.impala_connection import ImpalaConnectionManager
+
+conn_manager = ImpalaConnectionManager()
+with conn_manager.get_connection() as conn:
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM gmp_cis.cis_trade LIMIT 10")
+    results = cursor.fetchall()
+
+# UPSERT for Kudu (not INSERT)
+cursor.execute("""
+    UPSERT INTO gmp_cis.cis_trade (trade_id, portfolio_short_name, ...)
+    VALUES (?, ?, ...)
+""", params)
+```
+
+## Testing
+
+- **Framework:** pytest + pytest-django
+- **Coverage:** 39.33% (90 tests)
+- **Config:** `pytest.ini`, `.coveragerc`
+
+```bash
+# Generate HTML coverage report
+pytest --cov=. --cov-report=html
+open htmlcov/index.html
+```
+
+## Code Style Guidelines
+
+- Follow PEP 8
+- Use type hints where practical
+- Services handle business logic, not views
+- Repositories handle Kudu data access via Impala
+- All database writes should be audited
+- Use UPSERT for Kudu writes (not INSERT)
+- Four-Eyes workflow for critical operations
+
+## Dependencies
+
+**Core:**
+- Django 5.2.9
+- PyHive 0.7.0 (Impala connection)
+- thrift 0.16.0, thrift-sasl 0.4.3 (required by PyHive)
+- djangorestframework 3.16.1
+
+**Testing:**
+- pytest 9.0.1
+- pytest-cov 7.0.0
+
+**Frontend:**
+- Bootstrap 5.3.3 (local)
+- jQuery, Select2 (local)
+
+## Audit Logging
+
+All writes are logged to Kudu `cis_audit_log` table with:
+- Action type (CREATE, UPDATE, DELETE, APPROVE, REJECT, etc.)
+- Old/new values as JSON
+- User, IP, timestamp
+- Four-Eyes approval status
+
+## Performance Notes
+
+- Impala connection pool: 35 connections
+- ACL caching: 300s per user
+- Audit logging: async (non-blocking)
+- Static files: WhiteNoise compression
+- Tested: 500 concurrent users, <1000ms avg response
+
+## Troubleshooting
+
+**Impala connection fails (Local Docker):**
+```bash
+# Check if Docker container is running
+docker ps | grep kudu
+
+# Start container if stopped
+docker start kudu-impala
+
+# Test connection
+python manage.py test_hive
+
+# Direct impala-shell test
+impala-shell -i localhost:21050 -q "SHOW DATABASES"
+```
+
+**Impala connection fails (Cloudera CML):**
+- Verify Kerberos ticket: `klist`
+- Check IMPALA_HOST points to correct Cloudera coordinator
+- Verify IMPALA_AUTH matches your Cloudera auth method (GSSAPI/LDAP)
+
+**Permission denied:**
+- Check ACL tables in Kudu (`cis_user`, `cis_user_group`, `cis_group_permissions`)
+- Verify user group assignments
+- Query: `SELECT * FROM gmp_cis.cis_user WHERE username = 'your-user'`
+
+**Kudu table doesn't exist:**
+```bash
+# Create tables
+python manage.py create_hive_db
+
+# Or run DDL manually
+impala-shell -i localhost:21050 -f sql/ddl/cis_trade_kudu.sql
+```

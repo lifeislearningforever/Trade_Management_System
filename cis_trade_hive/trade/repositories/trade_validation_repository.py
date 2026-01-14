@@ -39,7 +39,8 @@ class TradeValidationRepository:
 
     # Security table
     SECURITY_TABLE = 'cis_security_kudu'
-    SECURITY_VALID_STATUSES = ['ACTIVE', 'APPROVED', 'SETTLED']
+    # Note: NULL status is also allowed for legacy data that hasn't been migrated
+    SECURITY_VALID_STATUSES = ['ACTIVE', 'APPROVED', 'SETTLED', None, '']
 
     # Counterparty table
     COUNTERPARTY_TABLE = 'cis_counterparty_kudu'
@@ -215,7 +216,13 @@ class TradeValidationRepository:
             status = security.get('status', '')
             is_active = security.get('is_active', False)
 
-            if status not in self.SECURITY_VALID_STATUSES:
+            # Check if status is valid (including NULL/empty for legacy data)
+            status_valid = (status in self.SECURITY_VALID_STATUSES or
+                          status is None or
+                          status == '' or
+                          status == 'None')
+
+            if not status_valid:
                 return ValidationResult(
                     is_valid=False,
                     entity_type='SECURITY',
@@ -262,7 +269,9 @@ class TradeValidationRepository:
             List of security dictionaries
         """
         try:
-            status_list = ", ".join([f"'{s}'" for s in self.SECURITY_VALID_STATUSES])
+            # Build status filter including NULL
+            non_null_statuses = [s for s in self.SECURITY_VALID_STATUSES if s is not None and s != '']
+            status_list = ", ".join([f"'{s}'" for s in non_null_statuses])
 
             query = f"""
             SELECT security_name AS security_label,
@@ -275,7 +284,7 @@ class TradeValidationRepository:
                    issuer,
                    status
             FROM {self.DATABASE}.{self.SECURITY_TABLE}
-            WHERE status IN ({status_list})
+            WHERE (status IN ({status_list}) OR status IS NULL OR status = '')
               AND is_active = true
             """
 
