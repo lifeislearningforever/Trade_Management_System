@@ -18,6 +18,7 @@ from core.audit.audit_kudu_repository import AuditLogKuduRepository
 from market_data.repositories.fx_rate_hive_repository import fx_rate_hive_repository
 from market_data.repositories.equity_price_hive_repository import EquityPriceHiveRepository
 from security.repositories.security_hive_repository import security_hive_repository
+from trade.repositories.trade_kudu_repository import trade_kudu_repository
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +151,21 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
             'latest_date': 'N/A',
         }
 
+    # Get trade analytics
+    trade_stats = {}
+    try:
+        trade_stats = trade_kudu_repository.get_trade_statistics()
+    except Exception as e:
+        logger.error(f"Error fetching trade statistics: {str(e)}")
+        trade_stats = {
+            'total_trades': 0,
+            'pending_validation': 0,
+            'pending_settlement': 0,
+            'settled': 0,
+            'status_breakdown': {},
+            'type_breakdown': {},
+        }
+
     context = {
         'user': user_info,
         'permissions': permissions,
@@ -158,6 +174,7 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         'fx_stats': fx_stats,
         'security_stats': security_stats,
         'equity_price_stats': equity_price_stats,
+        'trade_stats': trade_stats,
         'page_title': 'Dashboard',
     }
 

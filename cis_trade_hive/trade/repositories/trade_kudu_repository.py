@@ -73,6 +73,21 @@ class TradeKuduRepository:
             return str(val).lower()
         return str(val)
 
+    @staticmethod
+    def to_decimal(val: Any, default: float = 0) -> str:
+        """Convert value to decimal string for SQL (no quotes)."""
+        if val is None or val == '':
+            return str(default)
+        try:
+            if isinstance(val, str):
+                val = val.strip()
+                if val == '':
+                    return str(default)
+                return str(float(val))
+            return str(float(val))
+        except (ValueError, TypeError):
+            return str(default)
+
     # =========================================================================
     # ID GENERATION
     # =========================================================================
@@ -356,15 +371,16 @@ class TradeKuduRepository:
                 self.escape_value(trade_data.get('trade_status', '')),
                 self.escape_value(trade_data.get('trade_date')),
                 self.escape_value(trade_data.get('settle_date', '')),
-                self.escape_value(trade_data.get('quantity', 0)),
-                self.escape_value(trade_data.get('face_value', 0)),
-                self.escape_value(trade_data.get('lot', 0)),
-                self.escape_value(trade_data.get('price', 0)),
-                self.escape_value(trade_data.get('commission', 0)),
-                self.escape_value(trade_data.get('accrued_interest', 0)),
-                self.escape_value(trade_data.get('sec_fee', 0)),
-                self.escape_value(trade_data.get('other_charges', 0)),
-                self.escape_value(trade_data.get('total_amount', 0)),
+                # Numeric fields - use to_decimal (no quotes)
+                self.to_decimal(trade_data.get('quantity'), 0),
+                self.to_decimal(trade_data.get('face_value'), 0),
+                self.to_decimal(trade_data.get('lot'), 0),
+                self.to_decimal(trade_data.get('price'), 0),
+                self.to_decimal(trade_data.get('commission'), 0),
+                self.to_decimal(trade_data.get('accrued_interest'), 0),
+                self.to_decimal(trade_data.get('sec_fee'), 0),
+                self.to_decimal(trade_data.get('other_charges'), 0),
+                self.to_decimal(trade_data.get('total_amount'), 0),
                 self.escape_value(trade_data.get('open_close_position', '')),
                 self.escape_value(trade_data.get('extension', '')),
                 self.escape_value(trade_data.get('brokers', '')),
@@ -375,13 +391,14 @@ class TradeKuduRepository:
                 self.escape_value(trade_data.get('contract_ref', '')),
                 self.escape_value(trade_data.get('fd_receipt', '')),
                 self.escape_value(trade_data.get('org_pur_date', '')),
-                self.escape_value(trade_data.get('open_fx_rate', 0)),
-                self.escape_value(trade_data.get('curr_dealing', 0)),
-                self.escape_value(trade_data.get('open_dealing', 0)),
-                self.escape_value(trade_data.get('input_tax_oth', 0)),
-                self.escape_value(trade_data.get('qty_entitled', 0)),
+                # More numeric fields
+                self.to_decimal(trade_data.get('open_fx_rate'), 0),
+                self.to_decimal(trade_data.get('curr_dealing'), 0),
+                self.to_decimal(trade_data.get('open_dealing'), 0),
+                self.to_decimal(trade_data.get('input_tax_oth'), 0),
+                self.to_decimal(trade_data.get('qty_entitled'), 0),
                 self.escape_value(trade_data.get('selling_rule', '')),
-                self.escape_value(trade_data.get('cash_balance', 0)),
+                self.to_decimal(trade_data.get('cash_balance'), 0),
                 self.escape_value(trade_data.get('custodian', '')),
                 self.escape_value(trade_data.get('amor_accr_method', '')),
                 self.escape_value(trade_data.get('remarks', '')),
@@ -867,7 +884,7 @@ class TradeKuduRepository:
             return False
 
     # =========================================================================
-    # HISTORY
+    # HISTORY (Async for performance - non-blocking)
     # =========================================================================
 
     def insert_trade_history(
@@ -879,9 +896,16 @@ class TradeKuduRepository:
         new_status: str,
         changes: Dict[str, Any],
         comments: str,
-        performed_by: str
+        performed_by: str,
+        async_write: bool = True
     ) -> bool:
-        """Insert trade history record."""
+        """
+        Insert trade history record.
+
+        Args:
+            async_write: If True (default), write asynchronously for better performance.
+                        Set to False for critical operations that need immediate confirmation.
+        """
         try:
             history_id = self.get_next_id('trade_history_id')
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -900,7 +924,13 @@ class TradeKuduRepository:
             )
             """
 
-            return impala_manager.execute_write(query, database=self.DATABASE)
+            if async_write:
+                # Non-blocking write for history - improves response time
+                impala_manager.execute_write_async(query, database=self.DATABASE)
+                logger.debug(f"Queued async history write for trade {trade_id}")
+                return True
+            else:
+                return impala_manager.execute_write(query, database=self.DATABASE)
 
         except Exception as e:
             logger.error(f"Error inserting trade history: {str(e)}")

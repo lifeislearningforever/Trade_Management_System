@@ -595,11 +595,20 @@
 
 {% block extra_js %}
 <script>
+// Track pending validation requests to prevent race conditions
+let pendingPortfolioRequest = null;
+let pendingSecurityRequest = null;
+
 // Validate portfolio on selection change
 document.getElementById('portfolio_short_name').addEventListener('change', function() {
     const portfolioName = this.value;
     const statusIcon = document.getElementById('portfolio_status');
     const infoText = document.getElementById('portfolio_info');
+
+    // Cancel any pending request
+    if (pendingPortfolioRequest) {
+        pendingPortfolioRequest.abort();
+    }
 
     if (!portfolioName) {
         statusIcon.innerHTML = '<i class="bi bi-question-circle text-muted"></i>';
@@ -608,22 +617,38 @@ document.getElementById('portfolio_short_name').addEventListener('change', funct
     }
 
     statusIcon.innerHTML = '<div class="spinner-border spinner-border-sm" role="status"></div>';
+    infoText.textContent = 'Validating...';
+    infoText.className = 'text-muted small';
 
-    fetch(`{% url 'trade:api_validate_portfolio' %}?name=${encodeURIComponent(portfolioName)}`)
+    // Create AbortController for this request
+    const controller = new AbortController();
+    pendingPortfolioRequest = controller;
+
+    fetch(`/trade/api/validate-portfolio/?name=${encodeURIComponent(portfolioName)}`, {
+        signal: controller.signal
+    })
         .then(response => response.json())
         .then(data => {
-            if (data.is_valid) {
+            console.log('Portfolio validation response:', data);
+            // Check is_valid as boolean (handle string 'true'/'false' too)
+            const isValid = data.is_valid === true || data.is_valid === 'true';
+            if (isValid) {
                 statusIcon.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
-                infoText.textContent = data.message;
+                infoText.textContent = data.message || 'Valid';
                 infoText.className = 'text-success small';
             } else {
                 statusIcon.innerHTML = '<i class="bi bi-x-circle-fill text-danger"></i>';
-                infoText.textContent = data.message;
+                infoText.textContent = data.message || 'Invalid';
                 infoText.className = 'text-danger small';
             }
             checkPosition();
         })
         .catch(error => {
+            if (error.name === 'AbortError') {
+                console.log('Portfolio validation request aborted');
+                return;
+            }
+            console.error('Portfolio validation error:', error);
             statusIcon.innerHTML = '<i class="bi bi-exclamation-circle text-warning"></i>';
             infoText.textContent = 'Error validating portfolio';
             infoText.className = 'text-warning small';
@@ -636,6 +661,11 @@ document.getElementById('security_label').addEventListener('change', function() 
     const statusIcon = document.getElementById('security_status');
     const infoText = document.getElementById('security_info');
 
+    // Cancel any pending request
+    if (pendingSecurityRequest) {
+        pendingSecurityRequest.abort();
+    }
+
     if (!securityName) {
         statusIcon.innerHTML = '<i class="bi bi-question-circle text-muted"></i>';
         infoText.textContent = '';
@@ -643,13 +673,24 @@ document.getElementById('security_label').addEventListener('change', function() 
     }
 
     statusIcon.innerHTML = '<div class="spinner-border spinner-border-sm" role="status"></div>';
+    infoText.textContent = 'Validating...';
+    infoText.className = 'text-muted small';
 
-    fetch(`{% url 'trade:api_validate_security' %}?name=${encodeURIComponent(securityName)}`)
+    // Create AbortController for this request
+    const controller = new AbortController();
+    pendingSecurityRequest = controller;
+
+    fetch(`/trade/api/validate-security/?name=${encodeURIComponent(securityName)}`, {
+        signal: controller.signal
+    })
         .then(response => response.json())
         .then(data => {
-            if (data.is_valid) {
+            console.log('Security validation response:', data);
+            // Check is_valid as boolean (handle string 'true'/'false' too)
+            const isValid = data.is_valid === true || data.is_valid === 'true';
+            if (isValid) {
                 statusIcon.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
-                infoText.textContent = data.message;
+                infoText.textContent = data.message || 'Valid';
                 infoText.className = 'text-success small';
 
                 // Auto-fill price if available
@@ -662,12 +703,17 @@ document.getElementById('security_label').addEventListener('change', function() 
                 }
             } else {
                 statusIcon.innerHTML = '<i class="bi bi-x-circle-fill text-danger"></i>';
-                infoText.textContent = data.message;
+                infoText.textContent = data.message || 'Invalid';
                 infoText.className = 'text-danger small';
             }
             checkPosition();
         })
         .catch(error => {
+            if (error.name === 'AbortError') {
+                console.log('Security validation request aborted');
+                return;
+            }
+            console.error('Security validation error:', error);
             statusIcon.innerHTML = '<i class="bi bi-exclamation-circle text-warning"></i>';
             infoText.textContent = 'Error validating security';
             infoText.className = 'text-warning small';
@@ -676,11 +722,20 @@ document.getElementById('security_label').addEventListener('change', function() 
 
 // Check position for Sell trades
 function checkPosition() {
-    const tradeType = document.getElementById('trade_type').value;
-    const portfolio = document.getElementById('portfolio_short_name').value;
-    const security = document.getElementById('security_label').value;
+    const tradeTypeEl = document.getElementById('trade_type');
+    const portfolioEl = document.getElementById('portfolio_short_name');
+    const securityEl = document.getElementById('security_label');
     const positionSection = document.getElementById('position_info_section');
     const positionText = document.getElementById('position_info_text');
+
+    // Safety check - if elements don't exist, just return
+    if (!tradeTypeEl || !portfolioEl || !securityEl || !positionSection || !positionText) {
+        return;
+    }
+
+    const tradeType = tradeTypeEl.value;
+    const portfolio = portfolioEl.value;
+    const security = securityEl.value;
 
     if (tradeType !== 'SELL' || !portfolio || !security) {
         positionSection.style.display = 'none';
@@ -690,7 +745,7 @@ function checkPosition() {
     positionSection.style.display = 'block';
     positionText.innerHTML = '<div class="spinner-border spinner-border-sm" role="status"></div> Checking position...';
 
-    fetch(`{% url 'trade:api_get_position' %}?portfolio=${encodeURIComponent(portfolio)}&security=${encodeURIComponent(security)}`)
+    fetch(`/trade/api/position/?portfolio=${encodeURIComponent(portfolio)}&security=${encodeURIComponent(security)}`)
         .then(response => response.json())
         .then(data => {
             if (data.exists) {

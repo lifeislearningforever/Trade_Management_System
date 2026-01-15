@@ -38,12 +38,13 @@ validate_portfolio() validate_security() validate_counterparty()
 |-------|-------------|---------------|
 | Required | Portfolio name cannot be empty | "Portfolio name is required" |
 | Exists | Must exist in `cis_portfolio` table | "Portfolio '{name}' not found" |
-| Status | Must be **SETTLED** | "Portfolio '{name}' has status '{status}'. Only SETTLED portfolios can be used for trading." |
+| Status | Must be **SETTLED** (case-insensitive) | "Portfolio '{name}' has status '{status}'. Only SETTLED portfolios can be used for trading." |
+| Active | `is_active` must be **true** | "Portfolio '{name}' is not active (is_active=false)." |
 
 ### Valid Statuses
 
 ```python
-PORTFOLIO_VALID_STATUSES = ['SETTLED']
+PORTFOLIO_VALID_STATUSES = ['SETTLED', 'settled']  # Case-insensitive matching used
 ```
 
 ### SQL Query
@@ -82,10 +83,13 @@ Only **SETTLED** portfolios have completed all approvals and are ready for tradi
 ### Valid Statuses
 
 ```python
-SECURITY_VALID_STATUSES = ['ACTIVE', 'APPROVED', 'SETTLED', None, '']
+SECURITY_VALID_STATUSES = ['ACTIVE', 'APPROVED', 'SETTLED', None, '']  # Case-insensitive matching used
 ```
 
-> **Note:** NULL/empty status is allowed for legacy data that hasn't been migrated to the new status workflow.
+> **Note:**
+> - NULL/empty status is allowed for legacy data that hasn't been migrated to the new status workflow
+> - Status matching is case-insensitive (ACTIVE, active, Active all work)
+> - If `is_active` is NULL/missing, it defaults to True for legacy data compatibility
 
 ### SQL Query
 

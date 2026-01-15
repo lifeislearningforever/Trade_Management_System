@@ -1,7 +1,15 @@
 """
 Trade Dropdown Service
 
-Provides dropdown options for trade forms by querying lookup tables in Kudu.
+Provides dropdown options for trade forms by querying:
+1. UDF field table (cis_udf_field) for configurable dropdown options
+2. Counterparty table for brokers/custodians
+3. Lookup tables as fallback
+
+UDF Simplified Logic:
+- Object Type: TRADE
+- Field Name: The dropdown field (e.g., 'Fund Type', 'Selling Rule')
+- Field Value: The dropdown option values (created by admin/system)
 """
 
 import logging
@@ -9,6 +17,7 @@ from typing import Dict, List, Any
 
 from core.repositories.impala_connection import impala_manager
 from trade.repositories.trade_validation_repository import trade_validation_repository
+from udf.repositories.udf_field_repository import udf_field_repository
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +26,37 @@ class TradeDropdownService:
     """Service for fetching dropdown options for trade forms"""
 
     DATABASE = 'gmp_cis'
+    OBJECT_TYPE = 'TRADE'  # UDF Object Type for Trade entity
+
+    # =========================================================================
+    # UDF FIELD HELPER
+    # =========================================================================
+
+    def _get_udf_options(self, field_name: str) -> List[Dict[str, Any]]:
+        """
+        Get dropdown options from UDF field table.
+
+        Args:
+            field_name: The field name in UDF table (e.g., 'Fund Type', 'Selling Rule')
+
+        Returns:
+            List of options with 'value' and 'label' keys
+        """
+        try:
+            # Query UDF field values for this field_name
+            results = udf_field_repository.get_field_values(self.OBJECT_TYPE, field_name)
+            if results:
+                logger.debug(f"Loaded {len(results)} options from UDF for {field_name}")
+                return [
+                    {
+                        'value': r.get('field_value', ''),
+                        'label': r.get('field_value', '').replace('_', ' ').title()
+                    }
+                    for r in results if r.get('field_value')
+                ]
+        except Exception as e:
+            logger.warning(f"Could not load UDF options for {field_name}: {str(e)}")
+        return []
 
     def get_all_dropdown_options(self) -> Dict[str, List[Dict[str, Any]]]:
         """
@@ -149,7 +189,37 @@ class TradeDropdownService:
     # =========================================================================
 
     def get_brokers(self) -> List[Dict[str, Any]]:
-        """Get broker options from lookup table."""
+        """
+        Get broker options from counterparty table where is_broker=true.
+        Falls back to lookup table if counterparty query fails.
+        """
+        try:
+            query = f"""
+            SELECT counterparty_short_name as value,
+                   COALESCE(counterparty_full_name, counterparty_short_name) as label,
+                   country
+            FROM {self.DATABASE}.cis_counterparty_kudu
+            WHERE is_broker = true
+              AND is_active = true
+              AND (is_deleted = false OR is_deleted IS NULL)
+            ORDER BY counterparty_short_name
+            LIMIT 200
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            if results:
+                logger.debug(f"Loaded {len(results)} brokers from counterparty table")
+                return [
+                    {
+                        'value': r.get('value', ''),
+                        'label': f"{r.get('label', '')} ({r.get('value', '')})" if r.get('label') != r.get('value') else r.get('value', ''),
+                        'country': r.get('country', '')
+                    }
+                    for r in results
+                ]
+        except Exception as e:
+            logger.warning(f"Could not load brokers from counterparty: {str(e)}")
+
+        # Fallback to lookup table
         options = self._execute_lookup_query(
             'cis_broker_lookup', 'broker_code', 'broker_name'
         )
@@ -164,7 +234,13 @@ class TradeDropdownService:
         return options
 
     def get_gl_fund_types(self) -> List[Dict[str, Any]]:
-        """Get GL fund type options."""
+        """Get GL fund type options from UDF field table."""
+        # Try UDF first
+        options = self._get_udf_options('GL Fund Type')
+        if options:
+            return options
+
+        # Fallback to lookup table
         options = self._execute_lookup_query(
             'cis_gl_fund_type_lookup', 'fund_type_code', 'fund_type_name'
         )
@@ -178,7 +254,13 @@ class TradeDropdownService:
         return options
 
     def get_gl_cost_centres(self) -> List[Dict[str, Any]]:
-        """Get GL cost centre options."""
+        """Get GL cost centre options from UDF field table."""
+        # Try UDF first
+        options = self._get_udf_options('GL Cost Centre')
+        if options:
+            return options
+
+        # Fallback to lookup table
         options = self._execute_lookup_query(
             'cis_gl_cost_centre_lookup', 'cost_centre_code', 'cost_centre_name'
         )
@@ -191,7 +273,13 @@ class TradeDropdownService:
         return options
 
     def get_gl_account_codes(self) -> List[Dict[str, Any]]:
-        """Get GL account code options."""
+        """Get GL account code options from UDF field table."""
+        # Try UDF first
+        options = self._get_udf_options('GL Account Code')
+        if options:
+            return options
+
+        # Fallback to lookup table
         options = self._execute_lookup_query(
             'cis_gl_account_code_lookup', 'account_code', 'account_name'
         )
@@ -208,7 +296,13 @@ class TradeDropdownService:
     # =========================================================================
 
     def get_selling_rules(self) -> List[Dict[str, Any]]:
-        """Get selling rule options."""
+        """Get selling rule options from UDF field table."""
+        # Try UDF first
+        options = self._get_udf_options('Selling Rule')
+        if options:
+            return options
+
+        # Fallback to lookup table
         options = self._execute_lookup_query(
             'cis_selling_rule_lookup', 'rule_code', 'rule_name'
         )
@@ -222,7 +316,37 @@ class TradeDropdownService:
         return options
 
     def get_custodians(self) -> List[Dict[str, Any]]:
-        """Get custodian options."""
+        """
+        Get custodian options from counterparty table where is_custodian=true.
+        Falls back to lookup table if counterparty query fails.
+        """
+        try:
+            query = f"""
+            SELECT counterparty_short_name as value,
+                   COALESCE(counterparty_full_name, counterparty_short_name) as label,
+                   country
+            FROM {self.DATABASE}.cis_counterparty_kudu
+            WHERE is_custodian = true
+              AND is_active = true
+              AND (is_deleted = false OR is_deleted IS NULL)
+            ORDER BY counterparty_short_name
+            LIMIT 200
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            if results:
+                logger.debug(f"Loaded {len(results)} custodians from counterparty table")
+                return [
+                    {
+                        'value': r.get('value', ''),
+                        'label': f"{r.get('label', '')} ({r.get('value', '')})" if r.get('label') != r.get('value') else r.get('value', ''),
+                        'country': r.get('country', '')
+                    }
+                    for r in results
+                ]
+        except Exception as e:
+            logger.warning(f"Could not load custodians from counterparty: {str(e)}")
+
+        # Fallback to lookup table
         options = self._execute_lookup_query(
             'cis_custodian_lookup', 'custodian_code', 'custodian_name'
         )
@@ -236,7 +360,13 @@ class TradeDropdownService:
         return options
 
     def get_sub_custodians(self) -> List[Dict[str, Any]]:
-        """Get sub-custodian options."""
+        """Get sub-custodian options from UDF field table."""
+        # Try UDF first
+        options = self._get_udf_options('Sub Custodian')
+        if options:
+            return options
+
+        # Fallback to lookup table
         options = self._execute_lookup_query(
             'cis_sub_custodian_lookup', 'sub_custodian_code', 'sub_custodian_name'
         )
@@ -253,14 +383,26 @@ class TradeDropdownService:
     # =========================================================================
 
     def get_open_close_options(self) -> List[Dict[str, Any]]:
-        """Get open/close position options."""
+        """Get open/close position options from UDF field table."""
+        # Try UDF first
+        options = self._get_udf_options('Open/Close Position')
+        if options:
+            return options
+
+        # Fallback defaults
         return [
             {'value': 'OPEN', 'label': 'Open'},
             {'value': 'CLOSE', 'label': 'Close'},
         ]
 
     def get_extensions(self) -> List[Dict[str, Any]]:
-        """Get extension options."""
+        """Get extension options from UDF field table."""
+        # Try UDF first
+        options = self._get_udf_options('Extension')
+        if options:
+            return options
+
+        # Fallback to lookup table
         options = self._execute_lookup_query(
             'cis_extension_lookup', 'extension_code', 'extension_name'
         )
@@ -273,7 +415,13 @@ class TradeDropdownService:
         return options
 
     def get_fund_types(self) -> List[Dict[str, Any]]:
-        """Get fund type UDF options."""
+        """Get fund type UDF options from UDF field table."""
+        # Try UDF first
+        options = self._get_udf_options('Fund Type')
+        if options:
+            return options
+
+        # Fallback to lookup table
         options = self._execute_lookup_query(
             'cis_fund_type_lookup', 'fund_type_code', 'fund_type_name'
         )
@@ -287,7 +435,13 @@ class TradeDropdownService:
         return options
 
     def get_income_exp_types(self) -> List[Dict[str, Any]]:
-        """Get income/expense type UDF options."""
+        """Get income/expense type UDF options from UDF field table."""
+        # Try UDF first
+        options = self._get_udf_options('Income/Exp Type')
+        if options:
+            return options
+
+        # Fallback to lookup table
         options = self._execute_lookup_query(
             'cis_income_exp_type_lookup', 'type_code', 'type_name'
         )
@@ -301,7 +455,13 @@ class TradeDropdownService:
         return options
 
     def get_uobn_options(self) -> List[Dict[str, Any]]:
-        """Get UOBN/UOBN-HK UDF options."""
+        """Get UOBN/UOBN-HK UDF options from UDF field table."""
+        # Try UDF first
+        options = self._get_udf_options('UOBN/UOBN-HK')
+        if options:
+            return options
+
+        # Fallback to lookup table
         options = self._execute_lookup_query(
             'cis_uobn_lookup', 'uobn_code', 'uobn_name'
         )
@@ -314,7 +474,13 @@ class TradeDropdownService:
         return options
 
     def get_section_options(self) -> List[Dict[str, Any]]:
-        """Get Section 31/26 UDF options."""
+        """Get Section 31/26 UDF options from UDF field table."""
+        # Try UDF first
+        options = self._get_udf_options('Section 31/26')
+        if options:
+            return options
+
+        # Fallback to lookup table
         options = self._execute_lookup_query(
             'cis_section_lookup', 'section_code', 'section_name'
         )
@@ -328,7 +494,13 @@ class TradeDropdownService:
         return options
 
     def get_revision_codes(self) -> List[Dict[str, Any]]:
-        """Get revision code UDF options."""
+        """Get revision code UDF options from UDF field table."""
+        # Try UDF first
+        options = self._get_udf_options('Revision Code')
+        if options:
+            return options
+
+        # Fallback to lookup table
         options = self._execute_lookup_query(
             'cis_revision_code_lookup', 'revision_code', 'revision_name'
         )
@@ -341,7 +513,13 @@ class TradeDropdownService:
         return options
 
     def get_amor_methods(self) -> List[Dict[str, Any]]:
-        """Get amortisation method options."""
+        """Get amortisation method options from UDF field table."""
+        # Try UDF first
+        options = self._get_udf_options('Amortisation Method')
+        if options:
+            return options
+
+        # Fallback to lookup table
         options = self._execute_lookup_query(
             'cis_amor_method_lookup', 'method_code', 'method_name'
         )
@@ -359,7 +537,13 @@ class TradeDropdownService:
     # =========================================================================
 
     def get_delivery_types(self) -> List[Dict[str, Any]]:
-        """Get delivery type options for Deliver Long."""
+        """Get delivery type options for Deliver Long from UDF field table."""
+        # Try UDF first
+        options = self._get_udf_options('Delivery Type')
+        if options:
+            return options
+
+        # Fallback to lookup table
         options = self._execute_lookup_query(
             'cis_delivery_type_lookup', 'delivery_type_code', 'delivery_type_name'
         )
@@ -373,7 +557,13 @@ class TradeDropdownService:
         return options
 
     def get_income_types(self) -> List[Dict[str, Any]]:
-        """Get income type options for Income tab."""
+        """Get income type options for Income tab from UDF field table."""
+        # Try UDF first
+        options = self._get_udf_options('Income Type')
+        if options:
+            return options
+
+        # Fallback to lookup table
         options = self._execute_lookup_query(
             'cis_income_type_lookup', 'income_type_code', 'income_type_name'
         )
@@ -388,7 +578,13 @@ class TradeDropdownService:
         return options
 
     def get_split_types(self) -> List[Dict[str, Any]]:
-        """Get split type options for Split Transaction."""
+        """Get split type options for Split Transaction from UDF field table."""
+        # Try UDF first
+        options = self._get_udf_options('Split Type')
+        if options:
+            return options
+
+        # Fallback to lookup table
         options = self._execute_lookup_query(
             'cis_split_type_lookup', 'split_type_code', 'split_type_name'
         )
@@ -402,7 +598,13 @@ class TradeDropdownService:
         return options
 
     def get_reduction_types(self) -> List[Dict[str, Any]]:
-        """Get reduction type options for Reduction Basis."""
+        """Get reduction type options for Reduction Basis from UDF field table."""
+        # Try UDF first
+        options = self._get_udf_options('Reduction Type')
+        if options:
+            return options
+
+        # Fallback to lookup table
         options = self._execute_lookup_query(
             'cis_reduction_type_lookup', 'reduction_type_code', 'reduction_type_name'
         )

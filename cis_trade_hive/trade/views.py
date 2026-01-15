@@ -276,7 +276,19 @@ def trade_list(request):
 
 def trade_detail(request, trade_id):
     """View trade details."""
-    trade_data = trade_kudu_repository.get_trade_by_id(trade_id)
+    import time
+
+    # Retry logic for Kudu eventual consistency
+    trade_data = None
+    max_retries = 3
+    retry_delay = 0.5  # seconds
+
+    for attempt in range(max_retries):
+        trade_data = trade_kudu_repository.get_trade_by_id(trade_id)
+        if trade_data:
+            break
+        if attempt < max_retries - 1:
+            time.sleep(retry_delay)
 
     if not trade_data:
         raise Http404(f"Trade '{trade_id}' not found")
@@ -418,8 +430,9 @@ def trade_create(request, trade_type=None):
                 status='SUCCESS'
             )
 
-            messages.success(request, f'Trade created with INITIAL status. Submit for validation when ready.')
-            return redirect('trade:detail', trade_id=trade_id)
+            messages.success(request, f'Trade {trade_id} created with INITIAL status. Submit for validation when ready.')
+            # Redirect to trade list instead of detail to avoid Kudu sync delay issues
+            return redirect('trade:list')
 
         except ValueError as e:
             messages.error(request, str(e))
@@ -588,11 +601,12 @@ def trade_submit(request, trade_id):
             status='SUCCESS'
         )
 
-        messages.success(request, 'Trade submitted for validation.')
+        messages.success(request, f'Trade {trade_id} submitted for validation.')
     except Exception as e:
         messages.error(request, f'Error submitting trade: {str(e)}')
 
-    return redirect('trade:detail', trade_id=trade_id)
+    # Redirect to pending validation list to avoid Kudu sync delay
+    return redirect('trade:pending_validation')
 
 
 def trade_validate(request, trade_id):

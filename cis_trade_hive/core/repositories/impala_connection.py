@@ -4,14 +4,21 @@ Impala/Kudu Connection Manager
 Handles connections to Impala/Kudu database following the Repository pattern.
 Implements connection pooling and error handling.
 Uses Impala Python library for connectivity (supports Kudu writes).
+
+Performance Features:
+- Connection pooling with configurable pool size
+- Async write support for non-blocking audit/history operations
+- Thread-safe implementation
 """
 
 import logging
 import threading
 import time
-from typing import Optional, Any, List, Dict
+from typing import Optional, Any, List, Dict, Callable
 from contextlib import contextmanager
 from queue import Queue, Empty
+from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 from django.conf import settings
 
 logger = logging.getLogger('core')
@@ -57,8 +64,14 @@ class ImpalaConnectionManager:
             self._connection_count = 0
             self._max_connections = max_pool_size
             self._connection_timeout = 3600  # 1 hour in seconds
+
+            # Thread pool for async writes (audit logs, history)
+            # Using 5 workers for background tasks to not overwhelm Kudu
+            self._async_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix='kudu_async_')
+            self._async_futures = []
+
             self._initialized = True
-            logger.info(f"Impala connection pool initialized (max: {max_pool_size} connections)")
+            logger.info(f"Impala connection pool initialized (max: {max_pool_size} connections, async workers: 5)")
 
     def _create_connection(self, database: Optional[str] = None):
         """
@@ -400,6 +413,163 @@ class ImpalaConnectionManager:
             logger.error(f"Failed to describe table {table_name}: {str(e)}")
             return []
 
+    # =========================================================================
+    # ASYNC WRITE OPERATIONS (Non-blocking for audit/history)
+    # =========================================================================
+
+    def execute_write_async(self, query: str, params: Optional[List] = None,
+                            database: Optional[str] = None,
+                            callback: Optional[Callable[[bool], None]] = None) -> None:
+        """
+        Execute a write query asynchronously (non-blocking).
+        Ideal for audit logs, history records that don't need immediate confirmation.
+
+        Args:
+            query: SQL query to execute
+            params: Optional query parameters
+            database: Optional database name
+            callback: Optional callback function called with success status
+
+        Returns:
+            None (fire-and-forget, use callback if you need result)
+        """
+        def _async_write():
+            try:
+                success = self.execute_write(query, params, database)
+                if callback:
+                    callback(success)
+                return success
+            except Exception as e:
+                logger.error(f"Async write failed: {str(e)}")
+                if callback:
+                    callback(False)
+                return False
+
+        try:
+            future = self._async_executor.submit(_async_write)
+            # Clean up completed futures periodically
+            self._cleanup_futures()
+            self._async_futures.append(future)
+            logger.debug("Queued async write operation")
+        except Exception as e:
+            logger.error(f"Failed to queue async write: {str(e)}")
+            # Fallback to sync write if async queue fails
+            self.execute_write(query, params, database)
+
+    def _cleanup_futures(self):
+        """Remove completed futures from tracking list."""
+        self._async_futures = [f for f in self._async_futures if not f.done()]
+
+    def wait_for_async_writes(self, timeout: float = 30.0) -> int:
+        """
+        Wait for all pending async writes to complete.
+        Call this before application shutdown.
+
+        Args:
+            timeout: Maximum time to wait in seconds
+
+        Returns:
+            Number of writes that completed
+        """
+        completed = 0
+        for future in self._async_futures:
+            try:
+                future.result(timeout=timeout)
+                completed += 1
+            except Exception as e:
+                logger.error(f"Async write failed during wait: {str(e)}")
+        self._async_futures.clear()
+        return completed
+
+    def get_async_queue_size(self) -> int:
+        """Get number of pending async write operations."""
+        self._cleanup_futures()
+        return len(self._async_futures)
+
 
 # Global instance
 impala_manager = ImpalaConnectionManager()
+
+
+# =========================================================================
+# CACHING UTILITIES FOR DROPDOWN DATA
+# =========================================================================
+
+class QueryCache:
+    """
+    Simple time-based cache for expensive queries (dropdown data).
+    Thread-safe with configurable TTL.
+    """
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        if not hasattr(self, '_initialized'):
+            self._cache = {}
+            self._cache_lock = threading.Lock()
+            self._default_ttl = 300  # 5 minutes default TTL
+            self._initialized = True
+
+    def get(self, key: str) -> Optional[Any]:
+        """Get value from cache if not expired."""
+        with self._cache_lock:
+            if key in self._cache:
+                value, expiry = self._cache[key]
+                if time.time() < expiry:
+                    logger.debug(f"Cache hit for key: {key}")
+                    return value
+                else:
+                    # Expired, remove it
+                    del self._cache[key]
+        return None
+
+    def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+        """Set value in cache with TTL."""
+        ttl = ttl or self._default_ttl
+        expiry = time.time() + ttl
+        with self._cache_lock:
+            self._cache[key] = (value, expiry)
+            logger.debug(f"Cache set for key: {key} (TTL: {ttl}s)")
+
+    def invalidate(self, key: str) -> None:
+        """Remove specific key from cache."""
+        with self._cache_lock:
+            if key in self._cache:
+                del self._cache[key]
+
+    def invalidate_pattern(self, pattern: str) -> int:
+        """Remove all keys matching pattern (simple prefix match)."""
+        removed = 0
+        with self._cache_lock:
+            keys_to_remove = [k for k in self._cache.keys() if k.startswith(pattern)]
+            for key in keys_to_remove:
+                del self._cache[key]
+                removed += 1
+        return removed
+
+    def clear(self) -> None:
+        """Clear entire cache."""
+        with self._cache_lock:
+            self._cache.clear()
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get cache statistics."""
+        with self._cache_lock:
+            now = time.time()
+            valid_count = sum(1 for _, (_, expiry) in self._cache.items() if now < expiry)
+            return {
+                'total_keys': len(self._cache),
+                'valid_keys': valid_count,
+                'expired_keys': len(self._cache) - valid_count
+            }
+
+
+# Global cache instance
+query_cache = QueryCache()

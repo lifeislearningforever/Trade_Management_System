@@ -7,13 +7,17 @@ Validates trade references against master data:
 - Counterparty: Must exist in cis_counterparty_kudu with is_active=true
 
 All queries use Kudu via Impala.
+
+Performance Features:
+- Dropdown data cached for 5 minutes to reduce database load
+- Individual entity validation uses fresh data (no cache)
 """
 
 import logging
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 
-from core.repositories.impala_connection import impala_manager
+from core.repositories.impala_connection import impala_manager, query_cache
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +39,14 @@ class TradeValidationRepository:
 
     # Portfolio table
     PORTFOLIO_TABLE = 'cis_portfolio'
-    PORTFOLIO_VALID_STATUSES = ['SETTLED']
+    # Only SETTLED portfolios can be used for trading (completed maker-checker workflow)
+    PORTFOLIO_VALID_STATUSES = ['SETTLED', 'settled']
 
     # Security table
     SECURITY_TABLE = 'cis_security_kudu'
     # Note: NULL status is also allowed for legacy data that hasn't been migrated
-    SECURITY_VALID_STATUSES = ['ACTIVE', 'APPROVED', 'SETTLED', None, '']
+    # Case-insensitive matching for status
+    SECURITY_VALID_STATUSES = ['ACTIVE', 'APPROVED', 'SETTLED', 'active', 'approved', 'settled', None, '']
 
     # Counterparty table
     COUNTERPARTY_TABLE = 'cis_counterparty_kudu'
@@ -100,10 +106,16 @@ class TradeValidationRepository:
                 )
 
             portfolio = results[0]
-            status = portfolio.get('status', '')
+            status = portfolio.get('status', '') or ''
             is_active = portfolio.get('is_active', False)
 
-            if status not in self.PORTFOLIO_VALID_STATUSES:
+            # Case-insensitive status check
+            status_upper = status.upper() if status else ''
+            valid_statuses_upper = [s.upper() for s in self.PORTFOLIO_VALID_STATUSES if s]
+
+            logger.debug(f"Portfolio '{portfolio_name}' - status: '{status}', is_active: {is_active}")
+
+            if status_upper not in valid_statuses_upper:
                 return ValidationResult(
                     is_valid=False,
                     entity_type='PORTFOLIO',
@@ -112,11 +124,21 @@ class TradeValidationRepository:
                     details=portfolio
                 )
 
+            # Also check is_active flag
+            if not is_active:
+                return ValidationResult(
+                    is_valid=False,
+                    entity_type='PORTFOLIO',
+                    entity_name=portfolio_name,
+                    message=f"Portfolio '{portfolio_name}' is not active (is_active=false).",
+                    details=portfolio
+                )
+
             return ValidationResult(
                 is_valid=True,
                 entity_type='PORTFOLIO',
                 entity_name=portfolio_name,
-                message=f"Portfolio '{portfolio_name}' is valid for trading",
+                message=f"Portfolio '{portfolio_name}' is valid for trading (status: {status})",
                 details=portfolio
             )
 
@@ -129,9 +151,13 @@ class TradeValidationRepository:
                 message=f"Error validating portfolio: {str(e)}"
             )
 
+    # Cache TTL for dropdown data (5 minutes)
+    CACHE_TTL = 300
+
     def get_valid_portfolios(self, search: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
         """
         Get list of valid portfolios for trade entry dropdown.
+        Results are cached for 5 minutes to improve performance.
 
         Args:
             search: Optional search term
@@ -141,8 +167,14 @@ class TradeValidationRepository:
             List of portfolio dictionaries
         """
         try:
-            status_list = ", ".join([f"'{s}'" for s in self.PORTFOLIO_VALID_STATUSES])
+            # Check cache first (only for non-search queries)
+            cache_key = f"portfolios:{search or 'all'}:{limit}"
+            if not search:  # Cache only full list queries
+                cached = query_cache.get(cache_key)
+                if cached:
+                    return cached
 
+            # Use UPPER() for case-insensitive status matching
             query = f"""
             SELECT name AS portfolio_short_name,
                    name AS portfolio_full_name,
@@ -151,7 +183,7 @@ class TradeValidationRepository:
                    cash_balance,
                    status
             FROM {self.DATABASE}.{self.PORTFOLIO_TABLE}
-            WHERE status IN ({status_list})
+            WHERE UPPER(status) = 'SETTLED'
               AND is_active = true
             """
 
@@ -161,7 +193,14 @@ class TradeValidationRepository:
 
             query += f" ORDER BY name LIMIT {limit}"
 
+            logger.debug(f"get_valid_portfolios query: {query}")
             results = impala_manager.execute_query(query, database=self.DATABASE)
+            logger.debug(f"get_valid_portfolios returned {len(results) if results else 0} portfolios")
+
+            # Cache the results
+            if not search and results:
+                query_cache.set(cache_key, results, self.CACHE_TTL)
+
             return results if results else []
 
         except Exception as e:
@@ -213,14 +252,27 @@ class TradeValidationRepository:
                 )
 
             security = results[0]
-            status = security.get('status', '')
-            is_active = security.get('is_active', False)
+            status = security.get('status', '') or ''
+            is_active = security.get('is_active')
 
-            # Check if status is valid (including NULL/empty for legacy data)
-            status_valid = (status in self.SECURITY_VALID_STATUSES or
+            # Handle various representations of is_active (boolean, string, None)
+            if isinstance(is_active, str):
+                is_active = is_active.lower() in ('true', '1', 'yes')
+            elif is_active is None:
+                is_active = True  # Default to True for legacy data without is_active field
+
+            logger.debug(f"Security '{security_name}' - status: '{status}', is_active: {is_active}")
+
+            # Case-insensitive status check (including NULL/empty for legacy data)
+            status_upper = status.upper() if status else ''
+            valid_statuses_upper = ['ACTIVE', 'APPROVED', 'SETTLED']
+
+            # Status is valid if it's in valid list, or empty/None (legacy data)
+            status_valid = (status_upper in valid_statuses_upper or
                           status is None or
                           status == '' or
-                          status == 'None')
+                          status == 'None' or
+                          status_upper == 'NONE')
 
             if not status_valid:
                 return ValidationResult(
@@ -236,7 +288,7 @@ class TradeValidationRepository:
                     is_valid=False,
                     entity_type='SECURITY',
                     entity_name=security_name,
-                    message=f"Security '{security_name}' is not active.",
+                    message=f"Security '{security_name}' is not active (is_active=false).",
                     details=security
                 )
 
@@ -244,7 +296,7 @@ class TradeValidationRepository:
                 is_valid=True,
                 entity_type='SECURITY',
                 entity_name=security_name,
-                message=f"Security '{security_name}' is valid for trading",
+                message=f"Security '{security_name}' is valid for trading (status: {status or 'N/A'})",
                 details=security
             )
 
@@ -260,6 +312,7 @@ class TradeValidationRepository:
     def get_valid_securities(self, search: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
         """
         Get list of valid securities for trade entry dropdown.
+        Results are cached for 5 minutes to improve performance.
 
         Args:
             search: Optional search term
@@ -269,10 +322,15 @@ class TradeValidationRepository:
             List of security dictionaries
         """
         try:
-            # Build status filter including NULL
-            non_null_statuses = [s for s in self.SECURITY_VALID_STATUSES if s is not None and s != '']
-            status_list = ", ".join([f"'{s}'" for s in non_null_statuses])
+            # Check cache first (only for non-search queries)
+            cache_key = f"securities:{search or 'all'}:{limit}"
+            if not search:  # Cache only full list queries
+                cached = query_cache.get(cache_key)
+                if cached:
+                    return cached
 
+            # Use UPPER() for case-insensitive status matching
+            # Include NULL/empty status for legacy data
             query = f"""
             SELECT security_name AS security_label,
                    security_name AS security_full_name,
@@ -284,8 +342,11 @@ class TradeValidationRepository:
                    issuer,
                    status
             FROM {self.DATABASE}.{self.SECURITY_TABLE}
-            WHERE (status IN ({status_list}) OR status IS NULL OR status = '')
-              AND is_active = true
+            WHERE (UPPER(status) IN ('ACTIVE', 'APPROVED', 'SETTLED')
+                   OR status IS NULL
+                   OR status = ''
+                   OR UPPER(status) = 'NONE')
+              AND (is_active = true OR is_active IS NULL)
             """
 
             if search:
@@ -298,7 +359,14 @@ class TradeValidationRepository:
 
             query += f" ORDER BY security_name LIMIT {limit}"
 
+            logger.debug(f"get_valid_securities query: {query}")
             results = impala_manager.execute_query(query, database=self.DATABASE)
+            logger.debug(f"get_valid_securities returned {len(results) if results else 0} securities")
+
+            # Cache the results
+            if not search and results:
+                query_cache.set(cache_key, results, self.CACHE_TTL)
+
             return results if results else []
 
         except Exception as e:
@@ -391,6 +459,7 @@ class TradeValidationRepository:
     def get_valid_counterparties(self, search: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
         """
         Get list of valid counterparties for trade entry dropdown.
+        Results are cached for 5 minutes to improve performance.
 
         Args:
             search: Optional search term
@@ -400,6 +469,13 @@ class TradeValidationRepository:
             List of counterparty dictionaries
         """
         try:
+            # Check cache first (only for non-search queries)
+            cache_key = f"counterparties:{search or 'all'}:{limit}"
+            if not search:  # Cache only full list queries
+                cached = query_cache.get(cache_key)
+                if cached:
+                    return cached
+
             query = f"""
             SELECT counterparty_short_name,
                    counterparty_full_name,
@@ -421,6 +497,11 @@ class TradeValidationRepository:
             query += f" ORDER BY counterparty_short_name LIMIT {limit}"
 
             results = impala_manager.execute_query(query, database=self.DATABASE)
+
+            # Cache the results
+            if not search and results:
+                query_cache.set(cache_key, results, self.CACHE_TTL)
+
             return results if results else []
 
         except Exception as e:
