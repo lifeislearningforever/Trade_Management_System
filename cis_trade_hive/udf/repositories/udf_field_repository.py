@@ -1,20 +1,21 @@
 """
-UDF Field Repository - Simplified Schema with Cascading Dropdowns
+UDF Field Repository - Composite Primary Key Schema
 
-Schema:
-- udf_id: Primary key
-- object_type: Entity this UDF belongs to (PORTFOLIO, EQUITY_PRICE, SECURITY, etc.)
-- field_name: Field definition name (e.g., 'Portfolio Manager', 'Account Group') - ADMIN CREATES THIS
-- field_value: Dropdown option value (e.g., 'John Doe', 'Jane Smith') - USER ADDS THESE
+Schema with Composite Primary Key:
+- object_type: Entity this UDF belongs to (TRADE, PORTFOLIO, SECURITY, etc.)
+- field_name: Field definition name (e.g., 'Fund Type', 'Selling Rule') - ADMIN CREATES
+- field_value: Dropdown option value - PRIMARY KEY COMPONENT
   - Empty ('') for field definition records (admin-created)
-  - Non-empty for dropdown option records (user-added values)
+  - Non-empty for dropdown option records (admin/system adds values)
 - is_active: Soft delete flag
 - Audit fields: created_by, created_at, updated_by, updated_at
 
+Primary Key: (object_type, field_name, field_value)
+
 Cascading Logic:
-1. Object Types: Get distinct object_type values
-2. Field Definitions by Object: WHERE object_type = '<selected>' AND (field_value IS NULL OR field_value = '')
-3. Dropdown Values by Field: WHERE object_type = '<selected>' AND field_name = '<selected>' AND field_value IS NOT NULL AND field_value != ''
+1. Object Types: Get distinct object_type where field_value = ''
+2. Field Definitions: WHERE object_type = '<selected>' AND field_value = ''
+3. Dropdown Values: WHERE object_type = '<selected>' AND field_name = '<selected>' AND field_value != ''
 """
 
 from typing import List, Dict, Any, Optional
@@ -45,13 +46,18 @@ class UDFFieldRepositoryInterface(ABC):
         pass
 
     @abstractmethod
+    def get_field_values(self, object_type: str, field_name: str) -> List[Dict[str, Any]]:
+        """Get all dropdown values for a specific field."""
+        pass
+
+    @abstractmethod
     def get_all(self, object_type: Optional[str] = None, is_active: Optional[bool] = None) -> List[Dict[str, Any]]:
         """Get all UDF fields with optional filters."""
         pass
 
     @abstractmethod
-    def get_by_id(self, udf_id: int) -> Optional[Dict[str, Any]]:
-        """Get UDF field by ID."""
+    def get_by_key(self, object_type: str, field_name: str, field_value: str) -> Optional[Dict[str, Any]]:
+        """Get UDF field by composite key."""
         pass
 
     @abstractmethod
@@ -60,17 +66,17 @@ class UDFFieldRepositoryInterface(ABC):
         pass
 
     @abstractmethod
-    def update(self, udf_id: int, field_data: Dict[str, Any]) -> bool:
+    def update(self, object_type: str, field_name: str, field_value: str, field_data: Dict[str, Any]) -> bool:
         """Update existing UDF field."""
         pass
 
     @abstractmethod
-    def soft_delete(self, udf_id: int, updated_by: str) -> bool:
+    def soft_delete(self, object_type: str, field_name: str, field_value: str, updated_by: str) -> bool:
         """Soft delete UDF field by setting is_active = false."""
         pass
 
     @abstractmethod
-    def restore(self, udf_id: int, updated_by: str) -> bool:
+    def restore(self, object_type: str, field_name: str, field_value: str, updated_by: str) -> bool:
         """Restore soft-deleted UDF field by setting is_active = true."""
         pass
 
@@ -80,17 +86,23 @@ class UDFFieldRepositoryInterface(ABC):
 # ============================================================================
 
 class UDFFieldRepository(UDFFieldRepositoryInterface):
-    """Repository for UDF field data access operations."""
+    """Repository for UDF field data access operations with composite primary key."""
 
     DATABASE = 'gmp_cis'
     TABLE_NAME = 'cis_udf_field'
+
+    def _escape_string(self, value: str) -> str:
+        """Escape single quotes in string for SQL."""
+        if value is None:
+            return ''
+        return value.replace("'", "\\'")
 
     def get_object_types(self) -> List[str]:
         """
         Get all available entity types (where field_value is empty).
 
         Returns:
-            List of entity type strings (e.g., ['PORTFOLIO', 'EQUITY_PRICE', 'SECURITY'])
+            List of entity type strings (e.g., ['PORTFOLIO', 'TRADE', 'SECURITY'])
         """
         try:
             query = f"""
@@ -104,32 +116,29 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
             results = impala_manager.execute_query(query, database=self.DATABASE)
             object_types = [row['object_type'] for row in results] if results else []
 
-            logger.info(f"Retrieved {len(object_types)} entity types")
+            logger.info(f"Retrieved {len(object_types)} object types")
             return object_types
 
         except Exception as e:
-            logger.error(f"Error retrieving entity types: {str(e)}")
+            logger.error(f"Error retrieving object types: {str(e)}")
             return []
 
     def get_fields_by_entity(self, object_type: str) -> List[Dict[str, Any]]:
         """
         Get all FIELD DEFINITIONS for a specific entity type.
         Field definitions are records where field_value IS empty (admin-created).
-        Examples: 'Portfolio Manager', 'Account Group', 'Report Group'
 
         Args:
-            object_type: Entity type to filter by (e.g., 'PORTFOLIO', 'EQUITY_PRICE')
+            object_type: Entity type to filter by (e.g., 'TRADE', 'PORTFOLIO')
 
         Returns:
             List of field definition dictionaries with field_name
         """
         try:
-            escaped_entity = object_type.replace("'", "\\'")
+            escaped_entity = self._escape_string(object_type)
 
-            # Get field definitions (records where field_value is empty)
             query = f"""
-            SELECT DISTINCT
-                field_name
+            SELECT DISTINCT field_name
             FROM {self.TABLE_NAME}
             WHERE object_type = '{escaped_entity}'
               AND (field_value IS NULL OR field_value = '')
@@ -139,43 +148,33 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
 
             results = impala_manager.execute_query(query, database=self.DATABASE)
 
-            # Return unique field names as field definitions
-            unique_fields = []
-            seen = set()
-            for row in (results or []):
-                field_name = row.get('field_name')
-                if field_name and field_name not in seen:
-                    seen.add(field_name)
-                    unique_fields.append({'field_name': field_name})
+            fields = [{'field_name': row['field_name']} for row in (results or [])]
 
-            logger.info(f"Retrieved {len(unique_fields)} field definitions for entity type: {object_type}")
-            return unique_fields
+            logger.info(f"Retrieved {len(fields)} field definitions for: {object_type}")
+            return fields
 
         except Exception as e:
-            logger.error(f"Error retrieving field definitions for entity {object_type}: {str(e)}")
+            logger.error(f"Error retrieving field definitions for {object_type}: {str(e)}")
             return []
 
     def get_field_values(self, object_type: str, field_name: str) -> List[Dict[str, Any]]:
         """
         Get all VALUES (dropdown options) for a specific field.
-        Values are records where field_value IS NOT empty (user-added).
-        Examples: 'John Doe', 'Jane Smith' for 'Portfolio Manager' field.
+        Values are records where field_value IS NOT empty.
 
         Args:
-            object_type: Entity type (e.g., 'PORTFOLIO')
-            field_name: Field definition name (e.g., 'Portfolio Manager')
+            object_type: Entity type (e.g., 'TRADE')
+            field_name: Field definition name (e.g., 'Fund Type')
 
         Returns:
             List of value dictionaries with field_value
         """
         try:
-            escaped_entity = object_type.replace("'", "\\'")
-            escaped_field = field_name.replace("'", "\\'")
+            escaped_entity = self._escape_string(object_type)
+            escaped_field = self._escape_string(field_name)
 
-            # Get only value records (where field_value is NOT empty)
             query = f"""
             SELECT
-                udf_id,
                 object_type,
                 field_name,
                 field_value,
@@ -206,8 +205,8 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
         Get all UDF fields with optional filters.
 
         Args:
-            object_type: Filter by entity type (PORTFOLIO, EQUITY_PRICE, etc.)
-            is_active: Filter by active status (True/False/None for all)
+            object_type: Filter by entity type
+            is_active: Filter by active status
 
         Returns:
             List of UDF field dictionaries
@@ -215,7 +214,6 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
         try:
             query = f"""
             SELECT
-                udf_id,
                 object_type,
                 field_name,
                 field_value,
@@ -229,11 +227,11 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
 
             conditions = []
 
-            # Always exclude object type records (where field_value is empty)
+            # Exclude field definition records (where field_value is empty)
             conditions.append("(field_value IS NOT NULL AND field_value != '')")
 
             if object_type:
-                escaped_entity = object_type.replace("'", "\\'")
+                escaped_entity = self._escape_string(object_type)
                 conditions.append(f"object_type = '{escaped_entity}'")
 
             if is_active is not None:
@@ -242,7 +240,7 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
 
-            query += " ORDER BY object_type, field_name"
+            query += " ORDER BY object_type, field_name, field_value"
 
             results = impala_manager.execute_query(query, database=self.DATABASE)
             logger.info(f"Retrieved {len(results) if results else 0} UDF fields")
@@ -250,23 +248,27 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
 
         except Exception as e:
             logger.error(f"Error retrieving UDF fields: {str(e)}")
-            logger.error(f"Query: {query}")
             raise
 
-    def get_by_id(self, udf_id: int) -> Optional[Dict[str, Any]]:
+    def get_by_key(self, object_type: str, field_name: str, field_value: str) -> Optional[Dict[str, Any]]:
         """
-        Get UDF field by ID.
+        Get UDF field by composite primary key.
 
         Args:
-            udf_id: UDF field ID
+            object_type: Entity type
+            field_name: Field name
+            field_value: Field value
 
         Returns:
             UDF field dictionary or None
         """
         try:
+            escaped_entity = self._escape_string(object_type)
+            escaped_field = self._escape_string(field_name)
+            escaped_value = self._escape_string(field_value or '')
+
             query = f"""
             SELECT
-                udf_id,
                 object_type,
                 field_name,
                 field_value,
@@ -276,7 +278,9 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
                 updated_by,
                 updated_at
             FROM {self.TABLE_NAME}
-            WHERE udf_id = {udf_id}
+            WHERE object_type = '{escaped_entity}'
+              AND field_name = '{escaped_field}'
+              AND field_value = '{escaped_value}'
             LIMIT 1
             """
 
@@ -284,8 +288,17 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
             return results[0] if results else None
 
         except Exception as e:
-            logger.error(f"Error retrieving UDF field {udf_id}: {str(e)}")
+            logger.error(f"Error retrieving UDF field {object_type}.{field_name}.{field_value}: {str(e)}")
             raise
+
+    # Legacy method for backward compatibility
+    def get_by_id(self, udf_id: int) -> Optional[Dict[str, Any]]:
+        """
+        DEPRECATED: Use get_by_key() instead.
+        This method is kept for backward compatibility.
+        """
+        logger.warning("get_by_id() is deprecated. Use get_by_key() instead.")
+        return None
 
     def create(self, field_data: Dict[str, Any]) -> bool:
         """
@@ -293,42 +306,46 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
 
         Args:
             field_data: Dictionary with UDF field data
-                Required keys: udf_id, object_type, field_name, field_value, created_by
+                Required keys: object_type, field_name, field_value, created_by
 
         Returns:
             True if successful, False otherwise
         """
         try:
             # Validate required fields
-            required = ['udf_id', 'object_type', 'field_name', 'field_value', 'created_by']
+            required = ['object_type', 'field_name', 'created_by']
             for field in required:
                 if field not in field_data:
                     raise ValueError(f"Missing required field: {field}")
 
+            # Ensure field_value exists (empty string for definitions)
+            field_data.setdefault('field_value', '')
+
             # Set timestamps
             timestamp = int(datetime.now().timestamp() * 1000)
-            field_data['created_at'] = timestamp
+            field_data['created_at'] = field_data.get('created_at', timestamp)
             field_data['updated_at'] = timestamp
-            field_data['updated_by'] = field_data['created_by']
+            field_data['updated_by'] = field_data.get('updated_by', field_data['created_by'])
 
             # Set defaults
             field_data.setdefault('is_active', True)
 
             # Build UPSERT query
-            columns = []
+            columns = ['object_type', 'field_name', 'field_value', 'is_active',
+                       'created_by', 'created_at', 'updated_by', 'updated_at']
             values = []
 
-            for key, value in field_data.items():
-                columns.append(key)
+            for col in columns:
+                value = field_data.get(col)
                 if isinstance(value, str):
-                    escaped_value = value.replace("'", "\\'")
+                    escaped_value = self._escape_string(value)
                     values.append(f"'{escaped_value}'")
                 elif isinstance(value, bool):
                     values.append('true' if value else 'false')
                 elif isinstance(value, (int, float)):
                     values.append(str(value))
                 else:
-                    values.append('NULL')
+                    values.append("''")  # Default to empty string
 
             upsert_query = f"""
             UPSERT INTO {self.DATABASE}.{self.TABLE_NAME}
@@ -339,7 +356,7 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
             success = impala_manager.execute_write(upsert_query, database=self.DATABASE)
 
             if success:
-                logger.info(f"Successfully created UDF field: {field_data.get('object_type')}.{field_data.get('field_name')}")
+                logger.info(f"Successfully created UDF field: {field_data.get('object_type')}.{field_data.get('field_name')}.{field_data.get('field_value', '')}")
 
             return success
 
@@ -348,20 +365,24 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
             logger.error(f"Field data: {field_data}")
             return False
 
-    def update(self, udf_id: int, field_data: Dict[str, Any]) -> bool:
+    def update(self, object_type: str, field_name: str, field_value: str, field_data: Dict[str, Any]) -> bool:
         """
-        Update existing UDF field.
+        Update existing UDF field by composite key.
 
         Args:
-            udf_id: UDF field ID
+            object_type: Entity type
+            field_name: Field name
+            field_value: Field value
             field_data: Dictionary with updated field data
 
         Returns:
             True if successful, False otherwise
         """
         try:
-            # Ensure udf_id is in the data
-            field_data['udf_id'] = udf_id
+            # Set composite key values
+            field_data['object_type'] = object_type
+            field_data['field_name'] = field_name
+            field_data['field_value'] = field_value or ''
 
             # Update timestamp
             timestamp = int(datetime.now().timestamp() * 1000)
@@ -371,15 +392,17 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
             return self.create(field_data)
 
         except Exception as e:
-            logger.error(f"Error updating UDF field {udf_id}: {str(e)}")
+            logger.error(f"Error updating UDF field {object_type}.{field_name}.{field_value}: {str(e)}")
             return False
 
-    def soft_delete(self, udf_id: int, updated_by: str) -> bool:
+    def soft_delete(self, object_type: str, field_name: str, field_value: str, updated_by: str) -> bool:
         """
         Soft delete UDF field by setting is_active = false.
 
         Args:
-            udf_id: UDF field ID to delete
+            object_type: Entity type
+            field_name: Field name
+            field_value: Field value
             updated_by: Username performing the delete
 
         Returns:
@@ -389,28 +412,27 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
             timestamp = int(datetime.now().timestamp() * 1000)
 
             # Fetch existing record first
-            existing = self.get_by_id(udf_id)
+            existing = self.get_by_key(object_type, field_name, field_value)
             if not existing:
-                logger.error(f"UDF field {udf_id} not found for soft delete")
+                logger.error(f"UDF field not found for soft delete: {object_type}.{field_name}.{field_value}")
                 return False
 
             # Update with is_active = false
             update_data = {
-                'udf_id': udf_id,
-                'object_type': existing['object_type'],
-                'field_name': existing['field_name'],
-                'field_value': existing['field_value'],
-                'is_active': False,  # Soft delete
+                'object_type': object_type,
+                'field_name': field_name,
+                'field_value': field_value or '',
+                'is_active': False,
                 'created_by': existing['created_by'],
                 'created_at': existing['created_at'],
                 'updated_by': updated_by,
                 'updated_at': timestamp,
             }
 
-            success = self.create(update_data)  # UPSERT
+            success = self.create(update_data)
 
             if success:
-                logger.info(f"Successfully soft deleted UDF field ID: {udf_id}")
+                logger.info(f"Successfully soft deleted UDF field: {object_type}.{field_name}.{field_value}")
 
             return success
 
@@ -418,12 +440,14 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
             logger.error(f"Error soft deleting UDF field: {str(e)}")
             return False
 
-    def restore(self, udf_id: int, updated_by: str) -> bool:
+    def restore(self, object_type: str, field_name: str, field_value: str, updated_by: str) -> bool:
         """
         Restore soft-deleted UDF field by setting is_active = true.
 
         Args:
-            udf_id: UDF field ID to restore
+            object_type: Entity type
+            field_name: Field name
+            field_value: Field value
             updated_by: Username performing the restore
 
         Returns:
@@ -433,28 +457,27 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
             timestamp = int(datetime.now().timestamp() * 1000)
 
             # Fetch existing record first
-            existing = self.get_by_id(udf_id)
+            existing = self.get_by_key(object_type, field_name, field_value)
             if not existing:
-                logger.error(f"UDF field {udf_id} not found for restore")
+                logger.error(f"UDF field not found for restore: {object_type}.{field_name}.{field_value}")
                 return False
 
             # Update with is_active = true
             update_data = {
-                'udf_id': udf_id,
-                'object_type': existing['object_type'],
-                'field_name': existing['field_name'],
-                'field_value': existing['field_value'],
-                'is_active': True,  # Restore
+                'object_type': object_type,
+                'field_name': field_name,
+                'field_value': field_value or '',
+                'is_active': True,
                 'created_by': existing['created_by'],
                 'created_at': existing['created_at'],
                 'updated_by': updated_by,
                 'updated_at': timestamp,
             }
 
-            success = self.create(update_data)  # UPSERT
+            success = self.create(update_data)
 
             if success:
-                logger.info(f"Successfully restored UDF field ID: {udf_id}")
+                logger.info(f"Successfully restored UDF field: {object_type}.{field_name}.{field_value}")
 
             return success
 
@@ -490,24 +513,47 @@ class UDFFieldRepository(UDFFieldRepositoryInterface):
             logger.error(f"Error retrieving UDF stats: {str(e)}")
             raise
 
-    def get_next_id(self) -> int:
+    def add_field_definition(self, object_type: str, field_name: str, created_by: str) -> bool:
         """
-        Get next available UDF ID.
+        Add a new field definition (empty field_value).
+
+        Args:
+            object_type: Entity type
+            field_name: Field name
+            created_by: Username
 
         Returns:
-            Next UDF ID
+            True if successful
         """
-        try:
-            query = f"SELECT MAX(udf_id) as max_id FROM {self.TABLE_NAME}"
-            results = impala_manager.execute_query(query, database=self.DATABASE)
+        return self.create({
+            'object_type': object_type,
+            'field_name': field_name,
+            'field_value': '',
+            'created_by': created_by
+        })
 
-            if results and results[0]['max_id']:
-                return int(results[0]['max_id']) + 1
-            return 1
+    def add_field_value(self, object_type: str, field_name: str, field_value: str, created_by: str) -> bool:
+        """
+        Add a new dropdown value for a field.
 
-        except Exception as e:
-            logger.error(f"Error getting next UDF ID: {str(e)}")
-            return 1
+        Args:
+            object_type: Entity type
+            field_name: Field name
+            field_value: The dropdown value to add
+            created_by: Username
+
+        Returns:
+            True if successful
+        """
+        if not field_value:
+            raise ValueError("field_value cannot be empty for dropdown values")
+
+        return self.create({
+            'object_type': object_type,
+            'field_name': field_name,
+            'field_value': field_value,
+            'created_by': created_by
+        })
 
 
 # ============================================================================

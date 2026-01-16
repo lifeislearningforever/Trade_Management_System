@@ -2,11 +2,17 @@
 <aside class="sidebar" id="sidebar">
     <!-- Sidebar Header -->
     <div class="sidebar-header">
-        <a href="{% url 'dashboard' %}" class="sidebar-brand">
-            <!-- UOB Logo -->
-            <img src="{% static 'images/uob.png' %}" alt="UOB Logo" class="sidebar-logo">
-            <span>CisTrade</span>
-        </a>
+        <div class="sidebar-header-content">
+            <!-- Brand Link with Logo and Title stacked vertically -->
+            <a href="{% url 'dashboard' %}" class="sidebar-brand">
+                <img src="{% static 'images/uob.png' %}" alt="UOB Logo" class="sidebar-logo">
+            </a>
+            <div class="sidebar-title">Cooperative Investment System</div>
+        </div>
+        <!-- Toggle Button -->
+        <button type="button" class="sidebar-toggle-btn" id="sidebarToggle" title="Hide/Show Menu" onclick="toggleSidebar()">
+            <i class="bi bi-chevron-double-left" id="toggleIcon"></i>
+        </button>
     </div>
 
     <!-- Sidebar Navigation -->

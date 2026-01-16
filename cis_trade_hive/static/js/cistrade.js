@@ -5,21 +5,49 @@
 
 document.addEventListener('DOMContentLoaded', function() {
     // Sidebar Toggle for Mobile
-    const sidebarToggle = document.getElementById('sidebar-toggle');
+    const sidebarToggleMobile = document.getElementById('sidebar-toggle');
     const sidebar = document.getElementById('sidebar');
+    const mainContent = document.querySelector('.main-content');
 
-    if (sidebarToggle && sidebar) {
-        sidebarToggle.addEventListener('click', function() {
+    if (sidebarToggleMobile && sidebar) {
+        sidebarToggleMobile.addEventListener('click', function() {
             sidebar.classList.toggle('show');
         });
 
         // Close sidebar when clicking outside on mobile
         document.addEventListener('click', function(event) {
             if (window.innerWidth < 768) {
-                if (!sidebar.contains(event.target) && !sidebarToggle.contains(event.target)) {
+                if (!sidebar.contains(event.target) && !sidebarToggleMobile.contains(event.target)) {
                     sidebar.classList.remove('show');
                 }
             }
+        });
+    }
+
+    // Sidebar Collapse/Expand Toggle (Desktop)
+    const sidebarCollapseToggle = document.getElementById('sidebarToggle');
+    const sidebarElement = document.getElementById('sidebar');
+
+    if (sidebarCollapseToggle && sidebarElement) {
+        // Check localStorage for saved state
+        const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+        if (isCollapsed) {
+            sidebarElement.classList.add('collapsed');
+            if (mainContent) mainContent.classList.add('sidebar-collapsed');
+        }
+
+        sidebarCollapseToggle.addEventListener('click', function(event) {
+            event.preventDefault();
+            event.stopPropagation();
+
+            sidebarElement.classList.toggle('collapsed');
+            if (mainContent) mainContent.classList.toggle('sidebar-collapsed');
+
+            // Save state to localStorage
+            const nowCollapsed = sidebarElement.classList.contains('collapsed');
+            localStorage.setItem('sidebarCollapsed', nowCollapsed);
+
+            console.log('Sidebar toggled, collapsed:', nowCollapsed);
         });
     }
 

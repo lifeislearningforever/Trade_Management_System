@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="ie=edge">
-    <title>{% block title %}CisTrade - Professional Trade Management{% endblock %}</title>
+    <title>{% block title %}CIS - Cooperative Investment System{% endblock %}</title>
 
     <!-- Bootstrap 5 CSS (Local) -->
     <link rel="stylesheet" href="{% static 'bootstrap/css/bootstrap.min.css' %}">
@@ -66,6 +66,40 @@
     <script src="{% static 'js/responsive.js' %}"></script>
     <script src="{% static 'js/cistrade.js' %}"></script>
     <script src="{% static 'js/custom.js' %}"></script>
+
+    <!-- Sidebar Toggle Script -->
+    <script>
+    function toggleSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        const mainContent = document.querySelector('.main-content');
+        const toggleIcon = document.getElementById('toggleIcon');
+
+        if (sidebar) {
+            sidebar.classList.toggle('collapsed');
+            if (mainContent) {
+                mainContent.classList.toggle('sidebar-collapsed');
+            }
+
+            // Save state
+            const isCollapsed = sidebar.classList.contains('collapsed');
+            localStorage.setItem('sidebarCollapsed', isCollapsed);
+        }
+    }
+
+    // Restore sidebar state on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        const sidebar = document.getElementById('sidebar');
+        const mainContent = document.querySelector('.main-content');
+        const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+
+        if (isCollapsed && sidebar) {
+            sidebar.classList.add('collapsed');
+            if (mainContent) {
+                mainContent.classList.add('sidebar-collapsed');
+            }
+        }
+    });
+    </script>
 
     {% block extra_js %}{% endblock %}
 </body>
