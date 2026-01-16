@@ -6,7 +6,7 @@ Implements:
 - CRUD operations for trades
 - Four-Eyes (Maker-Checker) workflow
 - Audit trail with field-level change tracking
-- Position management
+- Trade Details management (positions)
 
 Trade Types:
 - BUY, SELL, ADD_LONG, DELIVER_LONG
@@ -32,7 +32,8 @@ class TradeKuduRepository:
     TABLE_NAME = 'cis_trade'
     HISTORY_TABLE = 'cis_trade_history'
     NOTE_TABLE = 'cis_trade_note'
-    POSITION_TABLE = 'cis_position'
+    TRADE_DETAILS_TABLE = 'cis_trade_details'
+    TRADE_DETAILS_HISTORY_TABLE = 'cis_trade_details_history'
     SEQUENCE_TABLE = 'cis_sequence'
 
     # Trade Types
@@ -159,15 +160,15 @@ class TradeKuduRepository:
                 errors.append("Price is required for Buy/Sell trades")
 
         if trade_type == self.TRADE_TYPE_SELL:
-            # Check position exists with sufficient quantity
-            position = self.get_position(
+            # Check trade details exists with sufficient quantity
+            trade_detail = self.get_trade_detail(
                 trade_data.get('portfolio_short_name', ''),
                 trade_data.get('security_label', '')
             )
-            if not position:
-                errors.append(f"No position found for {trade_data.get('security_label')} in portfolio {trade_data.get('portfolio_short_name')}")
-            elif position.get('quantity', 0) < float(trade_data.get('quantity', 0)):
-                errors.append(f"Insufficient quantity. Available: {position.get('quantity', 0)}, Requested: {trade_data.get('quantity', 0)}")
+            if not trade_detail:
+                errors.append(f"No trade detail found for {trade_data.get('security_label')} in portfolio {trade_data.get('portfolio_short_name')}")
+            elif trade_detail.get('quantity', 0) < float(trade_data.get('quantity', 0)):
+                errors.append(f"Insufficient quantity. Available: {trade_detail.get('quantity', 0)}, Requested: {trade_data.get('quantity', 0)}")
 
         return len(errors) == 0, errors
 
@@ -758,8 +759,8 @@ class TradeKuduRepository:
             success = impala_manager.execute_write(query, database=self.DATABASE)
 
             if success:
-                # Update position
-                self.update_position_from_trade(current_trade, settled_by)
+                # Update trade details
+                self.update_trade_detail_from_trade(current_trade, settled_by)
 
                 self.insert_trade_history(
                     trade_id=trade_id,
@@ -780,15 +781,15 @@ class TradeKuduRepository:
             raise
 
     # =========================================================================
-    # POSITION MANAGEMENT
+    # TRADE DETAILS MANAGEMENT (formerly Position Management)
     # =========================================================================
 
-    def get_position(self, portfolio_name: str, security_label: str) -> Optional[Dict[str, Any]]:
-        """Get current position for portfolio-security combination."""
+    def get_trade_detail(self, portfolio_name: str, security_label: str) -> Optional[Dict[str, Any]]:
+        """Get current trade detail for portfolio-security combination."""
         try:
             query = f"""
             SELECT *
-            FROM {self.DATABASE}.{self.POSITION_TABLE}
+            FROM {self.DATABASE}.{self.TRADE_DETAILS_TABLE}
             WHERE portfolio_short_name = {self.escape_value(portfolio_name)}
               AND security_label = {self.escape_value(security_label)}
               AND status = 'OPEN'
@@ -798,11 +799,11 @@ class TradeKuduRepository:
             results = impala_manager.execute_query(query, database=self.DATABASE)
             return results[0] if results else None
         except Exception as e:
-            logger.error(f"Error getting position: {str(e)}")
+            logger.error(f"Error getting trade detail: {str(e)}")
             return None
 
-    def update_position_from_trade(self, trade: Dict[str, Any], updated_by: str) -> bool:
-        """Update position based on settled trade."""
+    def update_trade_detail_from_trade(self, trade: Dict[str, Any], updated_by: str) -> bool:
+        """Update trade detail based on settled trade."""
         try:
             portfolio = trade.get('portfolio_short_name', '')
             security = trade.get('security_label', '')
@@ -810,36 +811,36 @@ class TradeKuduRepository:
             quantity = float(trade.get('quantity', 0))
             price = float(trade.get('price', 0))
 
-            current_position = self.get_position(portfolio, security)
+            current_detail = self.get_trade_detail(portfolio, security)
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             if trade_type == self.TRADE_TYPE_BUY:
-                if current_position:
-                    # Update existing position
-                    old_qty = float(current_position.get('quantity', 0))
-                    old_cost = float(current_position.get('average_cost', 0))
+                if current_detail:
+                    # Update existing trade detail
+                    old_qty = float(current_detail.get('quantity', 0))
+                    old_cost = float(current_detail.get('average_cost', 0))
                     new_qty = old_qty + quantity
                     new_avg_cost = ((old_qty * old_cost) + (quantity * price)) / new_qty if new_qty > 0 else 0
 
                     query = f"""
-                    UPDATE {self.DATABASE}.{self.POSITION_TABLE}
+                    UPDATE {self.DATABASE}.{self.TRADE_DETAILS_TABLE}
                     SET quantity = {new_qty},
                         average_cost = {new_avg_cost},
                         total_cost = {new_qty * new_avg_cost},
                         last_trade_id = {trade.get('trade_id')},
                         last_trade_date = '{trade.get('trade_date', '')}',
                         updated_at = '{timestamp}'
-                    WHERE position_id = {current_position.get('position_id')}
+                    WHERE trade_detail_id = {current_detail.get('trade_detail_id')}
                     """
                 else:
-                    # Create new position
-                    position_id = self.get_next_id('position_id')
+                    # Create new trade detail
+                    trade_detail_id = self.get_next_id('trade_detail_id')
                     query = f"""
-                    UPSERT INTO {self.DATABASE}.{self.POSITION_TABLE}
-                    (position_id, portfolio_short_name, security_label, quantity, average_cost, total_cost,
+                    UPSERT INTO {self.DATABASE}.{self.TRADE_DETAILS_TABLE}
+                    (trade_detail_id, portfolio_short_name, security_label, quantity, average_cost, total_cost,
                      status, is_active, last_trade_id, last_trade_date, created_at, updated_at)
                     VALUES (
-                        {position_id}, {self.escape_value(portfolio)}, {self.escape_value(security)},
+                        {trade_detail_id}, {self.escape_value(portfolio)}, {self.escape_value(security)},
                         {quantity}, {price}, {quantity * price}, 'OPEN', true,
                         {trade.get('trade_id')}, '{trade.get('trade_date', '')}', '{timestamp}', '{timestamp}'
                     )
@@ -848,31 +849,31 @@ class TradeKuduRepository:
                 return impala_manager.execute_write(query, database=self.DATABASE)
 
             elif trade_type == self.TRADE_TYPE_SELL:
-                if current_position:
-                    old_qty = float(current_position.get('quantity', 0))
+                if current_detail:
+                    old_qty = float(current_detail.get('quantity', 0))
                     new_qty = old_qty - quantity
 
                     if new_qty <= 0:
-                        # Close position
+                        # Close trade detail
                         query = f"""
-                        UPDATE {self.DATABASE}.{self.POSITION_TABLE}
+                        UPDATE {self.DATABASE}.{self.TRADE_DETAILS_TABLE}
                         SET quantity = 0,
                             status = 'CLOSED',
                             is_active = false,
                             last_trade_id = {trade.get('trade_id')},
                             last_trade_date = '{trade.get('trade_date', '')}',
                             updated_at = '{timestamp}'
-                        WHERE position_id = {current_position.get('position_id')}
+                        WHERE trade_detail_id = {current_detail.get('trade_detail_id')}
                         """
                     else:
                         query = f"""
-                        UPDATE {self.DATABASE}.{self.POSITION_TABLE}
+                        UPDATE {self.DATABASE}.{self.TRADE_DETAILS_TABLE}
                         SET quantity = {new_qty},
-                            total_cost = {new_qty * float(current_position.get('average_cost', 0))},
+                            total_cost = {new_qty * float(current_detail.get('average_cost', 0))},
                             last_trade_id = {trade.get('trade_id')},
                             last_trade_date = '{trade.get('trade_date', '')}',
                             updated_at = '{timestamp}'
-                        WHERE position_id = {current_position.get('position_id')}
+                        WHERE trade_detail_id = {current_detail.get('trade_detail_id')}
                         """
 
                     return impala_manager.execute_write(query, database=self.DATABASE)
@@ -880,7 +881,7 @@ class TradeKuduRepository:
             return True
 
         except Exception as e:
-            logger.error(f"Error updating position: {str(e)}")
+            logger.error(f"Error updating trade detail: {str(e)}")
             return False
 
     # =========================================================================

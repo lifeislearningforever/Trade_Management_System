@@ -327,17 +327,17 @@ SELECT
 */
 
 -- ============================================================================
--- Query 8: Get current position for SELL validation
+-- Query 8: Get current trade detail for SELL validation
 -- ============================================================================
 -- Parameters: :portfolio_name, :security_name
--- Returns: Current position quantity (cannot sell more than held)
+-- Returns: Current trade detail quantity (cannot sell more than held)
 
 /*
 SELECT
     COALESCE(quantity, 0) AS current_quantity,
     COALESCE(average_cost, 0) AS average_cost,
     status
-FROM cis_position
+FROM cis_trade_details
 WHERE portfolio_short_name = :portfolio_name
   AND security_label = :security_name
   AND status = 'OPEN'

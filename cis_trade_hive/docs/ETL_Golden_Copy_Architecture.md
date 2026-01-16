@@ -29,7 +29,7 @@ This document outlines the data architecture for managing GMP upstream data and 
 ┌─────────────────────────────────────────────────────────────────┐
 │                    BRONZE LAYER (Raw Ingestion)                  │
 │  Hive External Tables → Parquet, Partitioned by processing_date │
-│  - gmp_raw_position_YYYYMMDD                                    │
+│  - gmp_raw_trade_details_YYYYMMDD                               │
 │  - gmp_raw_trade_YYYYMMDD                                       │
 │  - gmp_raw_portfolio_YYYYMMDD                                   │
 │  - gmp_raw_security_YYYYMMDD                                    │
@@ -40,7 +40,7 @@ This document outlines the data architecture for managing GMP upstream data and 
 ┌─────────────────────────────────────────────────────────────────┐
 │                   SILVER LAYER (Cleansed & Validated)            │
 │  Hive Tables → Parquet, Partitioned by processing_date          │
-│  - cleansed_position (dedupe, validation, type conversion)      │
+│  - cleansed_trade_details (dedupe, validation, type conversion) │
 │  - cleansed_trade                                               │
 │  - cleansed_portfolio                                           │
 │  - cleansed_security                                            │
@@ -51,7 +51,7 @@ This document outlines the data architecture for managing GMP upstream data and 
 ┌─────────────────────────────────────────────────────────────────┐
 │                    GOLD LAYER (Golden Copy)                      │
 │  Kudu Tables (via Impala) - Real-time Access                    │
-│  - cis_position_kudu          (current + history tables)        │
+│  - cis_trade_details_kudu     (current + history tables)        │
 │  - cis_trade_kudu                                               │
 │  - cis_portfolio_kudu                                           │
 │  - cis_security_kudu                                            │
@@ -189,14 +189,14 @@ PARTITION BY HASH (trade_id) PARTITIONS 16
 STORED AS KUDU;
 ```
 
-#### C. Position (NEW - Aggregated View)
+#### C. Trade Details (NEW - Aggregated View)
 
 ```sql
-CREATE TABLE gmp_cis.cis_position_kudu (
-    position_id BIGINT,
-    position_date DATE,
+CREATE TABLE gmp_cis.cis_trade_details_kudu (
+    trade_detail_id BIGINT,
+    trade_detail_date DATE,
 
-    -- Position Keys
+    -- Trade Detail Keys
     portfolio_name STRING,
     security_id STRING,
 
@@ -204,7 +204,7 @@ CREATE TABLE gmp_cis.cis_position_kudu (
     src_system STRING,
     src_record_id STRING,
 
-    -- Position Data
+    -- Trade Detail Data
     quantity DECIMAL(18,4),
     market_value DECIMAL(18,2),
     book_cost DECIMAL(18,2),
@@ -233,10 +233,10 @@ CREATE TABLE gmp_cis.cis_position_kudu (
     is_active BOOLEAN,
     is_deleted BOOLEAN,
 
-    PRIMARY KEY (position_id, position_date, version_number)
+    PRIMARY KEY (trade_detail_id, trade_detail_date, version_number)
 )
-PARTITION BY HASH (position_id) PARTITIONS 16,
-             RANGE (position_date) (
+PARTITION BY HASH (trade_detail_id) PARTITIONS 16,
+             RANGE (trade_detail_date) (
                  PARTITION VALUES < '2024-01-01',
                  PARTITION '2024-01-01' <= VALUES < '2025-01-01',
                  PARTITION '2025-01-01' <= VALUES
@@ -327,7 +327,7 @@ class BronzeIngestion:
         entities = {
             'portfolio': '/gmp/export/portfolio_{}.csv',
             'trade': '/gmp/export/trade_{}.csv',
-            'position': '/gmp/export/position_{}.csv',
+            'trade_details': '/gmp/export/trade_details_{}.csv',
             'security': '/gmp/export/security_{}.csv',
             'counterparty': '/gmp/export/counterparty_{}.csv'
         }
@@ -483,7 +483,7 @@ class GoldenRecordManager:
     CONFLICT_RULES = {
         'portfolio': 'GMP_WINS',      # GMP is source of truth
         'trade': 'GMP_WINS',          # GMP is authoritative
-        'position': 'GMP_WINS',       # GMP calculates positions
+        'trade_details': 'GMP_WINS',  # GMP calculates trade details
         'security': 'LATEST',         # Take most recent update
         'counterparty': 'MANUAL'      # Requires human review
     }
@@ -765,12 +765,12 @@ class GoldenRecordManager:
 ### 5.1 Partitioning Strategy
 
 ```sql
--- Time-based partitioning for Position (most queried by date)
-CREATE TABLE gmp_cis.cis_position_kudu (
+-- Time-based partitioning for Trade Details (most queried by date)
+CREATE TABLE gmp_cis.cis_trade_details_kudu (
     ...
 )
-PARTITION BY HASH (position_id) PARTITIONS 16,
-             RANGE (position_date) (
+PARTITION BY HASH (trade_detail_id) PARTITIONS 16,
+             RANGE (trade_detail_date) (
                  -- Historical (read-only, compressed)
                  PARTITION VALUES < '2024-01-01',
 
@@ -790,7 +790,7 @@ STORED AS KUDU;
 ENTITY_KEYS = {
     'portfolio': ['name', 'version_number'],
     'trade': ['trade_ref', 'version_number'],
-    'position': ['position_id', 'position_date', 'version_number'],
+    'trade_details': ['trade_detail_id', 'trade_detail_date', 'version_number'],
     'security': ['security_id', 'version_number'],
     'counterparty': ['counterparty_short_name', 'version_number']
 }
@@ -945,7 +945,7 @@ cis_trade_hive/
 │   │   └── schemas/
 │   │       ├── portfolio_schema.py
 │   │       ├── trade_schema.py
-│   │       └── position_schema.py
+│   │       └── trade_details_schema.py
 │   ├── silver/
 │   │   ├── silver_cleanse_validate.py
 │   │   └── validation_rules.yaml

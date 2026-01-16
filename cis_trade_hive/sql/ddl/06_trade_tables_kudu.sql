@@ -17,8 +17,8 @@
 --   1. cis_trade           - Main trade table
 --   2. cis_trade_history   - Audit trail for trades
 --   3. cis_trade_note      - Trade notes/comments
---   4. cis_position        - Position tracking
---   5. cis_position_history - Position audit trail
+--   4. cis_trade_details   - Trade details tracking (positions)
+--   5. cis_trade_details_history - Trade details audit trail
 --
 -- Workflow Statuses:
 --   MAKER Side:
@@ -345,17 +345,17 @@ TBLPROPERTIES (
 );
 
 -- ============================================================================
--- TABLE 4: cis_position (Position Tracking)
+-- TABLE 4: cis_trade_details (Trade Details Tracking)
 -- ============================================================================
 -- Tracks current holdings/positions per portfolio-security combination
 -- Updated after each trade is SETTLED
 -- ============================================================================
 
-DROP TABLE IF EXISTS cis_position;
+DROP TABLE IF EXISTS cis_trade_details;
 
-CREATE TABLE cis_position (
+CREATE TABLE cis_trade_details (
     -- Primary Key (composite: portfolio + security)
-    position_id BIGINT NOT NULL,
+    trade_detail_id BIGINT NOT NULL,
 
     -- Portfolio Reference
     portfolio_short_name STRING NOT NULL,
@@ -363,7 +363,7 @@ CREATE TABLE cis_position (
     -- Security Reference
     security_label STRING NOT NULL,
 
-    -- Position Details
+    -- Trade Detail Fields
     quantity DECIMAL(20,6),              -- Current holding quantity
     average_cost DECIMAL(20,6),          -- Weighted average cost
     total_cost DECIMAL(20,6),            -- Total cost basis
@@ -392,7 +392,7 @@ CREATE TABLE cis_position (
     created_at STRING,
     updated_at STRING,
 
-    PRIMARY KEY (position_id)
+    PRIMARY KEY (trade_detail_id)
 )
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
@@ -401,19 +401,19 @@ TBLPROPERTIES (
 );
 
 -- ============================================================================
--- TABLE 5: cis_position_history (Position Audit Trail)
+-- TABLE 5: cis_trade_details_history (Trade Details Audit Trail)
 -- ============================================================================
--- Tracks changes to positions over time
+-- Tracks changes to trade details over time
 -- ============================================================================
 
-DROP TABLE IF EXISTS cis_position_history;
+DROP TABLE IF EXISTS cis_trade_details_history;
 
-CREATE TABLE cis_position_history (
+CREATE TABLE cis_trade_details_history (
     -- Primary Key
     history_id BIGINT NOT NULL,
 
-    -- Position Reference
-    position_id BIGINT NOT NULL,
+    -- Trade Detail Reference
+    trade_detail_id BIGINT NOT NULL,
     portfolio_short_name STRING,
     security_label STRING,
 
@@ -421,7 +421,7 @@ CREATE TABLE cis_position_history (
     trade_id BIGINT,
     trade_type STRING,
 
-    -- Position snapshot
+    -- Trade detail snapshot
     quantity_before DECIMAL(20,6),
     quantity_after DECIMAL(20,6),
     quantity_change DECIMAL(20,6),
@@ -453,8 +453,8 @@ CREATE TABLE cis_trade_lot (
     -- Primary Key
     lot_id BIGINT NOT NULL,
 
-    -- Position Reference
-    position_id BIGINT NOT NULL,
+    -- Trade Detail Reference
+    trade_detail_id BIGINT NOT NULL,
     portfolio_short_name STRING,
     security_label STRING,
 
@@ -509,8 +509,8 @@ TBLPROPERTIES (
 INSERT INTO cis_sequence VALUES ('trade_id', 1000000, 1);
 INSERT INTO cis_sequence VALUES ('trade_history_id', 1000000, 1);
 INSERT INTO cis_sequence VALUES ('trade_note_id', 1000000, 1);
-INSERT INTO cis_sequence VALUES ('position_id', 1000000, 1);
-INSERT INTO cis_sequence VALUES ('position_history_id', 1000000, 1);
+INSERT INTO cis_sequence VALUES ('trade_detail_id', 1000000, 1);
+INSERT INTO cis_sequence VALUES ('trade_detail_history_id', 1000000, 1);
 INSERT INTO cis_sequence VALUES ('lot_id', 1000000, 1);
 
 -- ============================================================================
@@ -532,9 +532,9 @@ CREATE INDEX idx_trade_deal_number ON cis_trade (deal_number);
 CREATE INDEX idx_trade_history_trade ON cis_trade_history (trade_id);
 CREATE INDEX idx_trade_history_date ON cis_trade_history (performed_at);
 
--- Position indexes
-CREATE INDEX idx_position_portfolio ON cis_position (portfolio_short_name);
-CREATE INDEX idx_position_security ON cis_position (security_label);
+-- Trade details indexes
+CREATE INDEX idx_trade_details_portfolio ON cis_trade_details (portfolio_short_name);
+CREATE INDEX idx_trade_details_security ON cis_trade_details (security_label);
 */
 
 -- ============================================================================
@@ -543,15 +543,14 @@ CREATE INDEX idx_position_security ON cis_position (security_label);
 
 -- List all created tables
 SHOW TABLES LIKE 'cis_trade*';
-SHOW TABLES LIKE 'cis_position*';
 SHOW TABLES LIKE 'cis_sequence';
 
 -- Check table structures
 DESCRIBE cis_trade;
 DESCRIBE cis_trade_history;
 DESCRIBE cis_trade_note;
-DESCRIBE cis_position;
-DESCRIBE cis_position_history;
+DESCRIBE cis_trade_details;
+DESCRIBE cis_trade_details_history;
 DESCRIBE cis_trade_lot;
 DESCRIBE cis_sequence;
 
