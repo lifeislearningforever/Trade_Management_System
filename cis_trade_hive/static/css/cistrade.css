@@ -109,7 +109,7 @@ body {
     top: 0;
     bottom: 0;
     z-index: 1000;
-    transition: transform var(--transition-base);
+    transition: width var(--transition-base), transform var(--transition-base);
     box-shadow: var(--shadow-lg);
     overflow-y: auto;
 }
@@ -311,6 +311,7 @@ body {
     min-width: 0; /* Fix for Chrome horizontal scrolling with flexbox */
     display: flex;
     flex-direction: column;
+    transition: margin-left var(--transition-base);
 }
 
 /* Top Navbar */

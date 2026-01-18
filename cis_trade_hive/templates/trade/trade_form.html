@@ -3,6 +3,14 @@
 
 {% block title %}{% if is_edit %}Edit{% else %}Create{% endif %} Trade - CisTrade{% endblock %}
 
+{% block extra_css %}
+<!-- Select2 CSS - Local -->
+<link href="{% static 'css/select2.min.css' %}" rel="stylesheet" />
+<link href="{% static 'css/select2-bootstrap-5-theme.min.css' %}" rel="stylesheet" />
+<!-- CIS Trade Hive Select2 Custom Styles -->
+<link href="{% static 'css/select2-custom.css' %}" rel="stylesheet" />
+{% endblock %}
+
 {% block breadcrumb %}
     <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
     <li class="breadcrumb-item"><a href="{% url 'trade:list' %}">Trades</a></li>
@@ -594,6 +602,15 @@
 {% endblock %}
 
 {% block extra_js %}
+<!-- jQuery (required for Select2) - Local -->
+<script src="{% static 'js/jquery-3.7.1.min.js' %}"></script>
+
+<!-- Select2 JS - Local -->
+<script src="{% static 'js/select2.min.js' %}"></script>
+
+<!-- CIS Trade Hive Select2 Global Initialization -->
+<script src="{% static 'js/select2-init.js' %}"></script>
+
 <script>
 // Track pending validation requests to prevent race conditions
 let pendingPortfolioRequest = null;
@@ -804,6 +821,42 @@ document.getElementById('tradeForm').addEventListener('submit', function(event) 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     checkPosition();
+});
+
+// Initialize Select2 on ALL dropdowns using project-level init
+$(document).ready(function() {
+    // List of ALL dropdown IDs to initialize with Select2
+    var allDropdownIds = [
+        // Basic Info Tab
+        'trade_type',
+        'trade_status',
+        // Portfolio, Security, Counterparty (with validation)
+        {% if not is_edit %}
+        'portfolio_short_name',
+        'security_label',
+        {% endif %}
+        'counterparty',
+        // GL & Broker Tab
+        'open_close_position',
+        'extension',
+        'brokers',
+        'gl_fund_type',
+        'gl_cost_centre',
+        'gl_account_code',
+        'custodian',
+        'selling_rule',
+        'amor_accr_method',
+        // UDF Tab
+        'udf_fund_type',
+        'udf_section_31_26',
+        'udf_sub_custodian',
+        'udf_uobn_uobn_hk',
+        'udf_income_exp_type',
+        'udf_revision_code'
+    ];
+
+    // Initialize all dropdowns using the global CISSelect2 utility
+    CISSelect2.initByIds(allDropdownIds);
 });
 </script>
 {% endblock %}

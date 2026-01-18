@@ -3,6 +3,14 @@
 
 {% block title %}{% if is_edit %}Edit{% else %}Create{% endif %} Counterparty - CisTrade{% endblock %}
 
+{% block extra_css %}
+<!-- Select2 CSS - Local -->
+<link href="{% static 'css/select2.min.css' %}" rel="stylesheet" />
+<link href="{% static 'css/select2-bootstrap-5-theme.min.css' %}" rel="stylesheet" />
+<!-- CIS Trade Hive Select2 Custom Styles -->
+<link href="{% static 'css/select2-custom.css' %}" rel="stylesheet" />
+{% endblock %}
+
 {% block breadcrumb %}
     <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
     <li class="breadcrumb-item"><a href="#">Reference Data</a></li>
@@ -489,5 +497,40 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+</script>
+
+<!-- jQuery (required for Select2) - Local -->
+<script src="{% static 'js/jquery-3.7.1.min.js' %}"></script>
+
+<!-- Select2 JS - Local -->
+<script src="{% static 'js/select2.min.js' %}"></script>
+
+<!-- CIS Trade Hive Select2 Global Initialization -->
+<script src="{% static 'js/select2-init.js' %}"></script>
+
+<script>
+// Initialize Select2 on ALL counterparty form dropdowns
+$(document).ready(function() {
+    // Initialize existing CIF country dropdowns with Select2
+    $('.cif-country').each(function() {
+        CISSelect2.initElement($(this));
+    });
+});
+
+// Override addCIFRow to initialize Select2 on new country dropdown
+var originalAddCIFRow = window.addCIFRow;
+window.addCIFRow = function() {
+    originalAddCIFRow();
+    // Initialize Select2 on the newly added country dropdown
+    var container = document.getElementById('cif-rows-container');
+    var rows = container.querySelectorAll('.cif-row');
+    if (rows.length > 0) {
+        var lastRow = rows[rows.length - 1];
+        var newCountrySelect = lastRow.querySelector('.cif-country');
+        if (newCountrySelect && typeof $ !== 'undefined') {
+            CISSelect2.initElement($(newCountrySelect));
+        }
+    }
+};
 </script>
 {% endblock %}

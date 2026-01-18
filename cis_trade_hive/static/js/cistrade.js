@@ -24,32 +24,8 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Sidebar Collapse/Expand Toggle (Desktop)
-    const sidebarCollapseToggle = document.getElementById('sidebarToggle');
-    const sidebarElement = document.getElementById('sidebar');
-
-    if (sidebarCollapseToggle && sidebarElement) {
-        // Check localStorage for saved state
-        const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
-        if (isCollapsed) {
-            sidebarElement.classList.add('collapsed');
-            if (mainContent) mainContent.classList.add('sidebar-collapsed');
-        }
-
-        sidebarCollapseToggle.addEventListener('click', function(event) {
-            event.preventDefault();
-            event.stopPropagation();
-
-            sidebarElement.classList.toggle('collapsed');
-            if (mainContent) mainContent.classList.toggle('sidebar-collapsed');
-
-            // Save state to localStorage
-            const nowCollapsed = sidebarElement.classList.contains('collapsed');
-            localStorage.setItem('sidebarCollapsed', nowCollapsed);
-
-            console.log('Sidebar toggled, collapsed:', nowCollapsed);
-        });
-    }
+    // Note: Sidebar Collapse/Expand Toggle is handled by sidebar-toggle.js
+    // This prevents duplicate event handlers and conflicts
 
     // User Menu Dropdown
     const userMenu = document.getElementById('user-menu');

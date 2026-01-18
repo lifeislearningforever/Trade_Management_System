@@ -62,44 +62,13 @@
     <!-- Bootstrap JS (Local) -->
     <script src="{% static 'bootstrap/js/bootstrap.bundle.min.js' %}"></script>
 
+    <!-- Sidebar Toggle Script (Load first to ensure toggle function is available) -->
+    <script src="{% static 'js/sidebar-toggle.js' %}"></script>
+
     <!-- Custom JS -->
     <script src="{% static 'js/responsive.js' %}"></script>
     <script src="{% static 'js/cistrade.js' %}"></script>
     <script src="{% static 'js/custom.js' %}"></script>
-
-    <!-- Sidebar Toggle Script -->
-    <script>
-    function toggleSidebar() {
-        const sidebar = document.getElementById('sidebar');
-        const mainContent = document.querySelector('.main-content');
-        const toggleIcon = document.getElementById('toggleIcon');
-
-        if (sidebar) {
-            sidebar.classList.toggle('collapsed');
-            if (mainContent) {
-                mainContent.classList.toggle('sidebar-collapsed');
-            }
-
-            // Save state
-            const isCollapsed = sidebar.classList.contains('collapsed');
-            localStorage.setItem('sidebarCollapsed', isCollapsed);
-        }
-    }
-
-    // Restore sidebar state on page load
-    document.addEventListener('DOMContentLoaded', function() {
-        const sidebar = document.getElementById('sidebar');
-        const mainContent = document.querySelector('.main-content');
-        const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
-
-        if (isCollapsed && sidebar) {
-            sidebar.classList.add('collapsed');
-            if (mainContent) {
-                mainContent.classList.add('sidebar-collapsed');
-            }
-        }
-    });
-    </script>
 
     {% block extra_js %}{% endblock %}
 </body>

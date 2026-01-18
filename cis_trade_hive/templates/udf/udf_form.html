@@ -3,6 +3,14 @@
 
 {% block title %}{% if udf %}Edit UDF{% else %}Create UDF{% endif %} - CIS Trade{% endblock %}
 
+{% block extra_css %}
+<!-- Select2 CSS - Local -->
+<link href="{% static 'css/select2.min.css' %}" rel="stylesheet" />
+<link href="{% static 'css/select2-bootstrap-5-theme.min.css' %}" rel="stylesheet" />
+<!-- CIS Trade Hive Select2 Custom Styles -->
+<link href="{% static 'css/select2-custom.css' %}" rel="stylesheet" />
+{% endblock %}
+
 {% block content %}
 <div class="container-fluid">
     <div class="row mb-4">
@@ -334,5 +342,28 @@ function addNewOption() {
         alert('Error adding option: ' + error);
     });
 }
+</script>
+
+<!-- jQuery (required for Select2) - Local -->
+<script src="{% static 'js/jquery-3.7.1.min.js' %}"></script>
+
+<!-- Select2 JS - Local -->
+<script src="{% static 'js/select2.min.js' %}"></script>
+
+<!-- CIS Trade Hive Select2 Global Initialization -->
+<script src="{% static 'js/select2-init.js' %}"></script>
+
+<script>
+// Initialize Select2 on ALL UDF form dropdowns
+$(document).ready(function() {
+    // List of ALL dropdown IDs in the UDF form
+    var allDropdownIds = [
+        'field_type',
+        'entity_type'
+    ];
+
+    // Initialize all dropdowns using the global CISSelect2 utility
+    CISSelect2.initByIds(allDropdownIds);
+});
 </script>
 {% endblock %}

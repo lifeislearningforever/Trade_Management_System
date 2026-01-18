@@ -3,6 +3,14 @@
 
 {% block title %}{% if is_edit %}Edit{% else %}Add{% endif %} Equity Price - CisTrade{% endblock %}
 
+{% block extra_css %}
+<!-- Select2 CSS - Local -->
+<link href="{% static 'css/select2.min.css' %}" rel="stylesheet" />
+<link href="{% static 'css/select2-bootstrap-5-theme.min.css' %}" rel="stylesheet" />
+<!-- CIS Trade Hive Select2 Custom Styles -->
+<link href="{% static 'css/select2-custom.css' %}" rel="stylesheet" />
+{% endblock %}
+
 {% block breadcrumb %}
     <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
     <li class="breadcrumb-item"><a href="{% url 'market_data:equity_price_list' %}">Equity Prices</a></li>
@@ -291,5 +299,29 @@
         }
     });
 })();
+</script>
+
+<!-- jQuery (required for Select2) - Local -->
+<script src="{% static 'js/jquery-3.7.1.min.js' %}"></script>
+
+<!-- Select2 JS - Local -->
+<script src="{% static 'js/select2.min.js' %}"></script>
+
+<!-- CIS Trade Hive Select2 Global Initialization -->
+<script src="{% static 'js/select2-init.js' %}"></script>
+
+<script>
+// Initialize Select2 on ALL equity price form dropdowns
+$(document).ready(function() {
+    // List of ALL dropdown IDs in the equity price form
+    var allDropdownIds = [
+        'currency_code',
+        'security_label',
+        'market'
+    ];
+
+    // Initialize all dropdowns using the global CISSelect2 utility
+    CISSelect2.initByIds(allDropdownIds);
+});
 </script>
 {% endblock %}
