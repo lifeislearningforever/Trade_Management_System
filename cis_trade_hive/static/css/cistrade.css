@@ -300,6 +300,63 @@ body {
     border-radius: 1rem;
 }
 
+/* Sidebar Submenu Styles */
+.nav-link-toggle {
+    position: relative;
+}
+
+.nav-link-toggle .submenu-icon {
+    margin-left: auto;
+    font-size: 0.75rem;
+    transition: transform var(--transition-fast);
+}
+
+.nav-link-toggle[aria-expanded="true"] .submenu-icon {
+    transform: rotate(180deg);
+}
+
+.nav-submenu {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    background-color: rgba(0, 0, 0, 0.15);
+}
+
+.nav-submenu .nav-item {
+    border-left: 2px solid transparent;
+}
+
+.nav-submenu .nav-link {
+    padding: 0.5rem 1.5rem 0.5rem 2.5rem;
+    font-size: var(--font-size-sm);
+    font-weight: 400;
+    border-left: none;
+}
+
+.nav-submenu .nav-link:hover {
+    padding-left: 2.75rem;
+    background-color: var(--sidebar-hover);
+}
+
+.nav-submenu .nav-link.active {
+    background-color: rgba(59, 130, 246, 0.2);
+    color: #ffffff;
+}
+
+.nav-submenu .nav-link i {
+    font-size: 0.875rem;
+    width: 1.25rem;
+}
+
+/* Hide submenu in collapsed sidebar */
+.sidebar.collapsed .nav-submenu {
+    display: none;
+}
+
+.sidebar.collapsed .submenu-icon {
+    display: none;
+}
+
 /* =====================================================
    Main Content Area
    ===================================================== */

@@ -89,6 +89,7 @@ class EquityPriceHiveRepository:
                 market,
                 price_timestamp,
                 group_name,
+                src_system,
                 is_active,
                 created_by,
                 created_at,
@@ -147,6 +148,7 @@ class EquityPriceHiveRepository:
                 market,
                 price_timestamp,
                 group_name,
+                src_system,
                 is_active,
                 created_by,
                 created_at,
@@ -210,6 +212,7 @@ class EquityPriceHiveRepository:
             market = equity_price_data.get('market', '').replace("'", "\\'") if equity_price_data.get('market') else ''
             price_timestamp = equity_price_data.get('price_timestamp', int(time.time() * 1000))
             group_name = equity_price_data.get('group_name', '').replace("'", "\\'") if equity_price_data.get('group_name') else ''
+            src_system = equity_price_data.get('src_system', 'CIS').replace("'", "\\'")
             created_by = equity_price_data.get('created_by', 'SYSTEM').replace("'", "\\'")
             created_at = int(time.time() * 1000)
 
@@ -225,6 +228,7 @@ class EquityPriceHiveRepository:
                 market,
                 price_timestamp,
                 group_name,
+                src_system,
                 is_active,
                 created_by,
                 created_at
@@ -238,6 +242,7 @@ class EquityPriceHiveRepository:
                 {f"'{market}'" if market else 'NULL'},
                 {price_timestamp},
                 {f"'{group_name}'" if group_name else 'NULL'},
+                '{src_system}',
                 true,
                 '{created_by}',
                 {created_at}
@@ -345,6 +350,7 @@ class EquityPriceHiveRepository:
             market = merged_data.get('market', '').replace("'", "\\'") if merged_data.get('market') else ''
             price_timestamp = merged_data.get('price_timestamp', int(time.time() * 1000))
             group_name = merged_data.get('group_name', '').replace("'", "\\'") if merged_data.get('group_name') else ''
+            src_system = merged_data.get('src_system', 'CIS').replace("'", "\\'")
             created_by = merged_data.get('created_by', 'SYSTEM').replace("'", "\\'")
             created_at = merged_data.get('created_at', int(time.time() * 1000))
 
@@ -359,6 +365,7 @@ class EquityPriceHiveRepository:
                 market,
                 price_timestamp,
                 group_name,
+                src_system,
                 is_active,
                 created_by,
                 created_at,
@@ -374,6 +381,7 @@ class EquityPriceHiveRepository:
                 {f"'{market}'" if market else 'NULL'},
                 {price_timestamp},
                 {f"'{group_name}'" if group_name else 'NULL'},
+                '{src_system}',
                 true,
                 '{created_by}',
                 {created_at},

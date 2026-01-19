@@ -27,61 +27,74 @@
             </li>
         </ul>
 
-        <!-- Portfolio Section -->
-        <div class="nav-section-title">Portfolio Management</div>
+        <!-- Portfolio & Trade Management Section (Combined like Security) -->
+        <div class="nav-section-title">Portfolio & Trade</div>
         <ul class="nav flex-column">
+            <!-- Portfolio with submenu -->
             <li class="nav-item">
-                <a class="nav-link {% if 'portfolio' in request.path %}active{% endif %}" href="{% url 'portfolio:list' %}">
+                <a class="nav-link nav-link-toggle {% if 'portfolio' in request.path %}active{% endif %}" href="#portfolioSubmenu" data-bs-toggle="collapse" aria-expanded="{% if 'portfolio' in request.path %}true{% else %}false{% endif %}">
                     <i class="bi bi-briefcase"></i>
                     <span>Portfolios</span>
-                    {% if pending_portfolios_count %}
-                        <span class="nav-badge">{{ pending_portfolios_count }}</span>
-                    {% endif %}
+                    <i class="bi bi-chevron-down submenu-icon"></i>
                 </a>
+                <ul class="collapse nav-submenu {% if 'portfolio' in request.path %}show{% endif %}" id="portfolioSubmenu">
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'list' and 'portfolio' in request.path %}active{% endif %}" href="{% url 'portfolio:list' %}">
+                            <i class="bi bi-list-ul"></i>
+                            <span>All Portfolios</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if 'create' in request.path and 'portfolio' in request.path %}active{% endif %}" href="{% url 'portfolio:create' %}">
+                            <i class="bi bi-plus-circle"></i>
+                            <span>New Portfolio</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if 'pending' in request.path and 'portfolio' in request.path %}active{% endif %}" href="{% url 'portfolio:pending_approvals' %}">
+                            <i class="bi bi-clock-history"></i>
+                            <span>Pending Approvals</span>
+                            {% if pending_portfolios_count %}
+                                <span class="nav-badge">{{ pending_portfolios_count }}</span>
+                            {% endif %}
+                        </a>
+                    </li>
+                </ul>
             </li>
-            <li class="nav-item">
-                <a class="nav-link" href="{% url 'portfolio:create' %}">
-                    <i class="bi bi-plus-circle"></i>
-                    <span>New Portfolio</span>
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link" href="{% url 'portfolio:pending_approvals' %}">
-                    <i class="bi bi-clock-history"></i>
-                    <span>Pending Approvals</span>
-                    {% if pending_portfolios_count %}
-                        <span class="nav-badge">{{ pending_portfolios_count }}</span>
-                    {% endif %}
-                </a>
-            </li>
-        </ul>
 
-        <!-- Trade Management Section -->
-        <div class="nav-section-title">Trade Management</div>
-        <ul class="nav flex-column">
+            <!-- Trade with submenu -->
             <li class="nav-item">
-                <a class="nav-link {% if 'trade' in request.path and 'create' not in request.path and 'pending' not in request.path %}active{% endif %}" href="{% url 'trade:list' %}">
+                <a class="nav-link nav-link-toggle {% if 'trade' in request.path %}active{% endif %}" href="#tradeSubmenu" data-bs-toggle="collapse" aria-expanded="{% if 'trade' in request.path %}true{% else %}false{% endif %}">
                     <i class="bi bi-graph-up"></i>
                     <span>Trades</span>
+                    <i class="bi bi-chevron-down submenu-icon"></i>
                 </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link {% if 'trade/create' in request.path %}active{% endif %}" href="{% url 'trade:create' %}">
-                    <i class="bi bi-plus-circle"></i>
-                    <span>New Trade</span>
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link {% if 'pending-validation' in request.path %}active{% endif %}" href="{% url 'trade:pending_validation' %}">
-                    <i class="bi bi-clock-history"></i>
-                    <span>Pending Validation</span>
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link {% if 'pending-settlement' in request.path %}active{% endif %}" href="{% url 'trade:pending_settlement' %}">
-                    <i class="bi bi-check2-circle"></i>
-                    <span>Pending Settlement</span>
-                </a>
+                <ul class="collapse nav-submenu {% if 'trade' in request.path %}show{% endif %}" id="tradeSubmenu">
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'list' and 'trade' in request.path %}active{% endif %}" href="{% url 'trade:list' %}">
+                            <i class="bi bi-list-ul"></i>
+                            <span>All Trades</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if 'create' in request.path and 'trade' in request.path %}active{% endif %}" href="{% url 'trade:create' %}">
+                            <i class="bi bi-plus-circle"></i>
+                            <span>New Trade</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if 'pending-validation' in request.path %}active{% endif %}" href="{% url 'trade:pending_validation' %}">
+                            <i class="bi bi-clock-history"></i>
+                            <span>Pending Validation</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if 'pending-settlement' in request.path %}active{% endif %}" href="{% url 'trade:pending_settlement' %}">
+                            <i class="bi bi-check2-circle"></i>
+                            <span>Pending Settlement</span>
+                        </a>
+                    </li>
+                </ul>
             </li>
         </ul>
 
@@ -100,14 +113,12 @@
                     <span>FX Rates</span>
                 </a>
             </li>
-            {% comment "Equity Prices - DISABLED (keeping backend logic intact)" %}
             <li class="nav-item">
                 <a class="nav-link {% if 'market-data/equity-prices' in request.path %}active{% endif %}" href="{% url 'market_data:equity_price_list' %}">
                     <i class="bi bi-graph-up-arrow"></i>
                     <span>Equity Prices</span>
                 </a>
             </li>
-            {% endcomment %}
         </ul>
 
         <!-- Reference Data Section -->

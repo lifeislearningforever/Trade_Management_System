@@ -437,6 +437,7 @@ class EquityPriceWrapper:
         self.price_timestamp = data.get('price_timestamp', '')
         self.group_name = data.get('group_name', '')
         self.price_datetime = data.get('price_datetime', '')
+        self.src_system = data.get('src_system', 'CIS')
 
         # Audit fields
         self.is_active = data.get('is_active', True)
@@ -592,6 +593,7 @@ def equity_price_create(request):
             'main_closing_price': request.POST.get('main_closing_price', '').strip(),
             'market': request.POST.get('market', '').strip(),
             'group_name': request.POST.get('group_name', '').strip(),
+            'src_system': request.POST.get('src_system', 'CIS').strip(),
         }
 
         # Get user info

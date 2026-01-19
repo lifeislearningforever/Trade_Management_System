@@ -125,6 +125,15 @@
                                value="{% if equity_price %}{{ equity_price.group_name }}{% elif form_data %}{{ form_data.group_name }}{% endif %}"
                                placeholder="e.g., Technology, Energy">
                     </div>
+
+                    <!-- Source System -->
+                    <div class="col-md-6 mb-3">
+                        <label for="src_system" class="form-label">Source System</label>
+                        <input type="text" class="form-control" id="src_system" name="src_system"
+                               value="{% if equity_price.src_system %}{{ equity_price.src_system }}{% else %}CIS{% endif %}"
+                               readonly style="background-color: #e9ecef;">
+                        <small class="form-text text-muted">System creating this record (auto-set to CIS)</small>
+                    </div>
                 </div>
 
                 <!-- Form Actions -->
