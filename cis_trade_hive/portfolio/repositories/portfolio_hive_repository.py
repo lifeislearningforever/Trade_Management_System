@@ -33,7 +33,8 @@ class PortfolioHiveRepository:
     STATUS_SETTLED = 'SETTLED'
 
     # Status groups for filtering
-    MAKER_EDITABLE_STATUSES = [STATUS_INITIAL, STATUS_MODIFIED, STATUS_CANCELLED]
+    # Allow edits during PENDING_VALIDATION (Maker can modify while awaiting approval)
+    MAKER_EDITABLE_STATUSES = [STATUS_INITIAL, STATUS_MODIFIED, STATUS_PENDING_VALIDATION, STATUS_CANCELLED]
     CHECKER_ACTIONABLE_STATUSES = [STATUS_PENDING_VALIDATION, STATUS_VALIDATED]
 
     @staticmethod
@@ -218,8 +219,8 @@ class PortfolioHiveRepository:
             (`name`, `description`, `currency`, `manager`, `portfolio_client`,
              `cash_balance`, `cost_centre_code`, `corp_code`, `account_group`,
              `portfolio_group`, `report_group`, `entity_group`, `status`,
-             `is_active`, `revaluation_status`, `src_system`, `created_by`, `created_at`,
-             `updated_by`, `updated_at`)
+             `is_active`, `revaluation_status`, `accounting_section`, `src_system`,
+             `created_by`, `created_at`, `updated_by`, `updated_at`)
             VALUES (
                 {escape(portfolio_data.get('name'))},
                 {escape(portfolio_data.get('description', ''))},
@@ -236,6 +237,7 @@ class PortfolioHiveRepository:
                 '{PortfolioHiveRepository.STATUS_INITIAL}',
                 false,
                 {escape(portfolio_data.get('revaluation_status', ''))},
+                {escape(portfolio_data.get('accounting_section', ''))},
                 'CIS',
                 {escape(created_by)},
                 '{timestamp}',
@@ -278,6 +280,7 @@ class PortfolioHiveRepository:
                 `report_group` = {escape(portfolio_data.get('report_group', ''))},
                 `entity_group` = {escape(portfolio_data.get('entity_group', ''))},
                 `revaluation_status` = {escape(portfolio_data.get('revaluation_status', ''))},
+                `accounting_section` = {escape(portfolio_data.get('accounting_section', ''))},
                 `status` = '{PortfolioHiveRepository.STATUS_MODIFIED}',
                 `updated_by` = {escape(updated_by)},
                 `updated_at` = '{timestamp}'

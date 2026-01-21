@@ -1087,3 +1087,77 @@ body {
     overflow-x: auto !important;
     -webkit-overflow-scrolling: touch !important;
 }
+
+/* =====================================================
+   Sticky Action Column for Tables
+   ===================================================== */
+.sticky-action-column {
+    position: sticky;
+    right: 0;
+    background-color: var(--bg-primary);
+    z-index: 5;
+    box-shadow: -2px 0 5px rgba(0, 0, 0, 0.1);
+}
+
+/* Header sticky action column */
+thead .sticky-action-column {
+    background-color: #f8f9fa;
+    z-index: 11;
+}
+
+/* Maintain background color for cancelled rows */
+tr[style*="opacity: 0.6"] .sticky-action-column {
+    background-color: #f8f9fa;
+}
+
+/* Ensure sticky column works in dark mode if implemented later */
+.table-hover tbody tr:hover .sticky-action-column {
+    background-color: var(--bg-secondary);
+}
+
+/* =====================================================
+   Sortable Table Headers
+   ===================================================== */
+.sortable-table th.sortable {
+    cursor: pointer;
+    position: relative;
+    padding-right: 25px;
+    user-select: none;
+    transition: background-color var(--transition-fast);
+}
+
+.sortable-table th.sortable:hover {
+    background-color: var(--gray-200);
+}
+
+.sortable-table th.sortable::after {
+    content: '\2195';  /* Up/Down arrows */
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.75rem;
+    color: var(--gray-400);
+    opacity: 0.5;
+}
+
+.sortable-table th.sortable.sort-asc::after {
+    content: '\25B2';  /* Up arrow */
+    color: var(--primary-color);
+    opacity: 1;
+}
+
+.sortable-table th.sortable.sort-desc::after {
+    content: '\25BC';  /* Down arrow */
+    color: var(--primary-color);
+    opacity: 1;
+}
+
+/* Sticky header action column for sortable tables */
+.sortable-table th.sticky-action-column {
+    cursor: default;
+}
+
+.sortable-table th.sticky-action-column::after {
+    content: none;
+}

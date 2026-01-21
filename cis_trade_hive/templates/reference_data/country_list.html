@@ -87,11 +87,11 @@
         <div class="card-body p-0">
             {% if countries %}
                 <div class="table-responsive" style="overflow-x: auto;">
-                    <table class="table table-hover mb-0" style="min-width: 600px;">
+                    <table class="table table-hover mb-0 sortable-table" style="min-width: 600px;">
                         <thead>
                             <tr>
-                                <th style="width: 20%;">Code</th>
-                                <th style="width: 80%;">Name</th>
+                                <th class="sortable" data-sort-type="text" style="width: 20%;">Code</th>
+                                <th class="sortable" data-sort-type="text" style="width: 80%;">Name</th>
                             </tr>
                         </thead>
                         <tbody>

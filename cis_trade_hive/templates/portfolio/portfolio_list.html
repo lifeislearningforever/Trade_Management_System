@@ -24,15 +24,9 @@
             <i class="bi bi-plus-circle"></i> Create New Portfolio
         </a>
         <a href="{% url 'portfolio:pending_validation' %}" class="btn btn-warning">
-            <i class="bi bi-clock-history"></i> Pending Validation
+            <i class="bi bi-clock-history"></i> Pending Approval
             {% if pending_validation_count %}
                 <span class="badge bg-danger">{{ pending_validation_count }}</span>
-            {% endif %}
-        </a>
-        <a href="{% url 'portfolio:pending_settlement' %}" class="btn btn-info">
-            <i class="bi bi-check2-circle"></i> Pending Settlement
-            {% if pending_settlement_count %}
-                <span class="badge bg-danger">{{ pending_settlement_count }}</span>
             {% endif %}
         </a>
     </div>
@@ -97,39 +91,30 @@
         <div class="card-body p-0">
             {% if page_obj %}
                 <div class="table-responsive" style="display: block; width: 100%; max-height: 600px; overflow-x: auto; overflow-y: auto;">
-                    <table class="table table-hover table-sm mb-0" style="width: max-content;">
+                    <table class="table table-hover table-sm mb-0 sortable-table" style="width: max-content;">
                         <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
                             <tr>
-                                <th style="min-width: 80px;">Source</th>
-                                <th style="min-width: 180px;">Name</th>
-                                <th style="min-width: 200px;">Description</th>
-                                <th style="min-width: 100px;">Currency</th>
-                                <th style="min-width: 150px;">Manager</th>
-                                <th style="min-width: 150px;">Client</th>
-                                <th style="min-width: 120px;">Cash Balance</th>
-                                <th style="min-width: 130px;">Status</th>
-                                <th style="min-width: 120px;">Cost Centre</th>
-                                <th style="min-width: 100px;">Corp Code</th>
-                                <th style="min-width: 130px;">Account Group</th>
-                                <th style="min-width: 140px;">Portfolio Group</th>
-                                <th style="min-width: 120px;">Report Group</th>
-                                <th style="min-width: 120px;">Entity Group</th>
-                                <th style="min-width: 130px;">Revaluation</th>
-                                <th style="min-width: 140px;">Created At</th>
-                                <th style="min-width: 140px;">Updated At</th>
-                                <th style="min-width: 200px; position: sticky; right: 0; background-color: #f8f9fa; z-index: 5;">Actions</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 180px;">Portfolio Name</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 200px;">Portfolio Description</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 100px;">Currency</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 130px;">Revaluation</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 130px;">Account Group</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 120px;">Entity Group</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 120px;">Report Group</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 140px;">Portfolio Group</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 100px;">Corp Code</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 120px;">Cost Centre</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Manager</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Client</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 130px;">Status</th>
+                                <th class="sortable" data-sort-type="date" style="min-width: 140px;">Created At</th>
+                                <th class="sortable" data-sort-type="date" style="min-width: 140px;">Updated At</th>
+                                <th class="sticky-action-column" style="min-width: 200px;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for portfolio in page_obj %}
                             <tr {% if portfolio.status == 'CANCELLED' %}style="opacity: 0.6; background-color: #f8f9fa;"{% endif %}>
-                                <td>
-                                    {% if portfolio.src_system|upper == 'CIS' %}
-                                        <span class="badge badge-success">CIS</span>
-                                    {% else %}
-                                        <span class="badge badge-secondary">{{ portfolio.src_system|upper|default:"GMP" }}</span>
-                                    {% endif %}
-                                </td>
                                 <td>
                                     <strong class="text-primary">{{ portfolio.name }}</strong>
                                 </td>
@@ -139,9 +124,15 @@
                                 <td>
                                     <span class="badge badge-info">{{ portfolio.currency }}</span>
                                 </td>
+                                <td>{{ portfolio.revaluation_status|default:"-" }}</td>
+                                <td>{{ portfolio.account_group|default:"-" }}</td>
+                                <td>{{ portfolio.entity_group|default:"-" }}</td>
+                                <td>{{ portfolio.report_group|default:"-" }}</td>
+                                <td>{{ portfolio.portfolio_group|default:"-" }}</td>
+                                <td>{{ portfolio.corp_code|default:"-" }}</td>
+                                <td>{{ portfolio.cost_centre_code|default:"-" }}</td>
                                 <td>{{ portfolio.manager|default:"-" }}</td>
                                 <td>{{ portfolio.portfolio_client|default:"-" }}</td>
-                                <td class="text-end">{{ portfolio.cash_balance|floatformat:2|default:"0.00" }}</td>
                                 <td>
                                     {% if portfolio.status == 'INITIAL' %}
                                         <span class="badge badge-secondary">Initial</span>
@@ -159,24 +150,19 @@
                                         <span class="badge badge-secondary">{{ portfolio.status|default:"-" }}</span>
                                     {% endif %}
                                 </td>
-                                <td>{{ portfolio.cost_centre_code|default:"-" }}</td>
-                                <td>{{ portfolio.corp_code|default:"-" }}</td>
-                                <td>{{ portfolio.account_group|default:"-" }}</td>
-                                <td>{{ portfolio.portfolio_group|default:"-" }}</td>
-                                <td>{{ portfolio.report_group|default:"-" }}</td>
-                                <td>{{ portfolio.entity_group|default:"-" }}</td>
-                                <td>{{ portfolio.revaluation_status|default:"-" }}</td>
                                 <td style="font-size: 0.85rem;">{{ portfolio.created_at|default:"-" }}</td>
                                 <td style="font-size: 0.85rem;">{{ portfolio.updated_at|default:"-" }}</td>
-                                <td style="position: sticky; right: 0; background-color: {% if portfolio.status == 'CANCELLED' %}#f8f9fa{% else %}white{% endif %}; z-index: 4;">
+                                <td class="sticky-action-column">
                                     <div class="btn-group btn-group-sm" role="group">
                                         <a href="{% url 'portfolio:detail' portfolio.name %}" class="btn btn-sm btn-outline-primary" title="View Details">
                                             <i class="bi bi-eye"></i>
                                         </a>
-                                        {% if portfolio.status == 'INITIAL' or portfolio.status == 'MODIFIED' %}
+                                        {% if portfolio.status == 'INITIAL' or portfolio.status == 'MODIFIED' or portfolio.status == 'PENDING_VALIDATION' %}
                                             <a href="{% url 'portfolio:edit' portfolio.name %}" class="btn btn-sm btn-outline-warning" title="Edit">
                                                 <i class="bi bi-pencil"></i>
                                             </a>
+                                        {% endif %}
+                                        {% if portfolio.status == 'INITIAL' or portfolio.status == 'MODIFIED' %}
                                             <form method="post" action="{% url 'portfolio:submit' portfolio.name %}" class="d-inline">
                                                 {% csrf_token %}
                                                 <button type="submit" class="btn btn-sm btn-outline-info" title="Submit for Validation" onclick="return confirm('Submit for validation?')">

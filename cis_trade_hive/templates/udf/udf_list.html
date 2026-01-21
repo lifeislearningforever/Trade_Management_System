@@ -90,18 +90,18 @@
         <div class="card-body p-0">
             {% if page_obj %}
                 <div class="table-responsive" style="overflow-x: auto;">
-                    <table class="table table-hover mb-0" style="min-width: 1000px;">
+                    <table class="table table-hover mb-0 sortable-table" style="min-width: 1000px;">
                         <thead>
                             <tr>
-                                <th style="width: 15%;">Field Name</th>
-                                <th style="width: 15%;">Label</th>
-                                <th style="width: 10%;">Type</th>
-                                <th style="width: 10%;">Entity</th>
-                                <th style="width: 8%;">Required</th>
-                                <th style="width: 8%;">Active</th>
-                                <th style="width: 8%;">Order</th>
-                                <th style="width: 10%;">Group</th>
-                                <th style="width: 10%;">Actions</th>
+                                <th class="sortable" data-sort-type="text" style="width: 15%;">Field Name</th>
+                                <th class="sortable" data-sort-type="text" style="width: 15%;">Label</th>
+                                <th class="sortable" data-sort-type="text" style="width: 10%;">Type</th>
+                                <th class="sortable" data-sort-type="text" style="width: 10%;">Entity</th>
+                                <th class="sortable" data-sort-type="text" style="width: 8%;">Required</th>
+                                <th class="sortable" data-sort-type="text" style="width: 8%;">Active</th>
+                                <th class="sortable" data-sort-type="number" style="width: 8%;">Order</th>
+                                <th class="sortable" data-sort-type="text" style="width: 10%;">Group</th>
+                                <th class="sticky-action-column" style="width: 10%;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -133,7 +133,7 @@
                                 </td>
                                 <td>{{ udf.display_order }}</td>
                                 <td>{{ udf.group_name|default:"-" }}</td>
-                                <td>
+                                <td class="sticky-action-column">
                                     <div class="btn-group btn-group-sm">
                                         <a href="{% url 'udf:detail' udf.field_name %}" class="btn btn-outline-primary" title="View">
                                             <i class="bi bi-eye"></i>

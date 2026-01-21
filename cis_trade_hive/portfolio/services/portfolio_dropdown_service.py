@@ -243,15 +243,22 @@ class PortfolioDropdownService:
         """
         Get account group options from UDF system.
 
+        Note: Filtered to only show UOB GROUP and UOB ASSOC GROUP per business requirement.
+
         Args:
             user: Username for audit logging
 
         Returns:
-            List of account group names
+            List of account group names (filtered to allowed values)
         """
         try:
             results = PortfolioDropdownRepository.get_dropdown_options_by_field_name('Account Group', 'PORTFOLIO')
-            account_groups = [r.get('field_value') for r in results if r.get('field_value')]
+            all_groups = [r.get('field_value') for r in results if r.get('field_value')]
+
+            # Filter to only allowed values per business requirement
+            allowed_groups = ['UOB GROUP', 'UOB ASSOC GROUP']
+            account_groups = [g for g in all_groups if g in allowed_groups]
+
             self._log_dropdown_fetch('account_groups', len(account_groups), user)
             return account_groups
         except Exception as e:
@@ -334,6 +341,25 @@ class PortfolioDropdownService:
             logger.error(f"Error fetching revaluation_status: {str(e)}")
             return []
 
+    def get_accounting_sections(self, user: str = 'SYSTEM') -> List[str]:
+        """
+        Get accounting section options from UDF system.
+
+        Args:
+            user: Username for audit logging
+
+        Returns:
+            List of accounting section values
+        """
+        try:
+            results = PortfolioDropdownRepository.get_dropdown_options_by_field_name('Accounting Section', 'PORTFOLIO')
+            accounting_sections = [r.get('field_value') for r in results if r.get('field_value')]
+            self._log_dropdown_fetch('accounting_sections', len(accounting_sections), user)
+            return accounting_sections
+        except Exception as e:
+            logger.error(f"Error fetching accounting_sections: {str(e)}")
+            return []
+
     def get_statuses(self, user: str = 'SYSTEM') -> List[str]:
         """
         Get portfolio status options.
@@ -392,6 +418,7 @@ class PortfolioDropdownService:
             'report_groups': self.get_report_groups(user),
             'entity_groups': self.get_entity_groups(user),
             'revaluation_statuses': self.get_revaluation_statuses(user),
+            'accounting_sections': self.get_accounting_sections(user),
             'currencies': self.get_currencies(user),
         }
 

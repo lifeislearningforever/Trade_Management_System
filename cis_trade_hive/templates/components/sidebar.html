@@ -51,9 +51,9 @@
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link {% if 'pending' in request.path and 'portfolio' in request.path %}active{% endif %}" href="{% url 'portfolio:pending_approvals' %}">
+                        <a class="nav-link {% if 'pending-validation' in request.path and 'portfolio' in request.path %}active{% endif %}" href="{% url 'portfolio:pending_validation' %}">
                             <i class="bi bi-clock-history"></i>
-                            <span>Pending Approvals</span>
+                            <span>Pending Approval</span>
                             {% if pending_portfolios_count %}
                                 <span class="nav-badge">{{ pending_portfolios_count }}</span>
                             {% endif %}

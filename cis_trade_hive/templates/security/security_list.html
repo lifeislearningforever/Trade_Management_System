@@ -90,26 +90,26 @@
         <div class="card-body p-0">
             {% if page_obj %}
                 <div class="table-responsive" style="display: block; width: 100%; max-height: 600px; overflow-x: auto; overflow-y: auto;">
-                    <table class="table table-hover table-sm mb-0" style="width: max-content;">
+                    <table class="table table-hover table-sm mb-0 sortable-table" style="width: max-content;">
                         <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
                             <tr>
-                                <th style="min-width: 200px;">Security Name</th>
-                                <th style="min-width: 130px;">ISIN</th>
-                                <th style="min-width: 150px;">Security Type</th>
-                                <th style="min-width: 150px;">Investment Type</th>
-                                <th style="min-width: 150px;">Industry</th>
-                                <th style="min-width: 150px;">Issuer</th>
-                                <th style="min-width: 100px;">Currency</th>
-                                <th style="min-width: 100px;">Ticker</th>
-                                <th style="min-width: 120px;">Price</th>
-                                <th style="min-width: 120px;">Price Date</th>
-                                <th style="min-width: 150px;">Country of Inc.</th>
-                                <th style="min-width: 150px;">Exchange Code</th>
-                                <th style="min-width: 120px;">Status</th>
-                                <th style="min-width: 150px;">Created By</th>
-                                <th style="min-width: 140px;">Created At</th>
-                                <th style="min-width: 140px;">Updated At</th>
-                                <th style="min-width: 180px; position: sticky; right: 0; background-color: #f8f9fa; z-index: 5;">Actions</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 200px;">Security Name</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 130px;">ISIN</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Security Type</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Investment Type</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Industry</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Issuer</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 100px;">Currency</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 100px;">Ticker</th>
+                                <th class="sortable" data-sort-type="number" style="min-width: 120px;">Price</th>
+                                <th class="sortable" data-sort-type="date" style="min-width: 120px;">Price Date</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Country of Inc.</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Exchange Code</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 120px;">Status</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Created By</th>
+                                <th class="sortable" data-sort-type="date" style="min-width: 140px;">Created At</th>
+                                <th class="sortable" data-sort-type="date" style="min-width: 140px;">Updated At</th>
+                                <th class="sticky-action-column" style="min-width: 180px;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -149,7 +149,7 @@
                                 <td>{{ security.created_by|default:"-" }}</td>
                                 <td style="font-size: 0.85rem;">{{ security.created_at|default:"-" }}</td>
                                 <td style="font-size: 0.85rem;">{{ security.updated_at|default:"-" }}</td>
-                                <td style="position: sticky; right: 0; background-color: {% if not security.is_active %}#f8f9fa{% else %}white{% endif %}; z-index: 4;">
+                                <td class="sticky-action-column" style="background-color: {% if not security.is_active %}#f8f9fa{% else %}white{% endif %};">
                                     <div class="btn-group btn-group-sm" role="group">
                                         <a href="{% url 'security:detail' security.security_id %}" class="btn btn-sm btn-outline-primary" title="View Details">
                                             <i class="bi bi-eye"></i>

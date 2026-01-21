@@ -57,6 +57,7 @@ class PortfolioWrapper:
         self.report_group = data.get('report_group', '')
         self.entity_group = data.get('entity_group', '')
         self.revaluation_status = data.get('revaluation_status', '')
+        self.accounting_section = data.get('accounting_section', '')
 
         # Audit fields
         self.created_by = data.get('created_by', '-')
@@ -229,9 +230,11 @@ def portfolio_detail(request, portfolio_name):
     is_cis_record = src_system and src_system.upper() == 'CIS'
 
     # Maker actions (only for CIS records)
+    # Allow edits during PENDING_VALIDATION (Maker can modify while awaiting approval)
     can_edit = is_cis_record and status in [
         PortfolioHiveRepository.STATUS_INITIAL,
         PortfolioHiveRepository.STATUS_MODIFIED,
+        PortfolioHiveRepository.STATUS_PENDING_VALIDATION,
         PortfolioHiveRepository.STATUS_CANCELLED
     ]
     can_submit = is_cis_record and status in [
@@ -299,6 +302,18 @@ def portfolio_create(request):
             if existing:
                 raise ValidationError(f"Portfolio '{portfolio_name}' already exists")
 
+            # Get form data
+            corp_code = request.POST.get('corp_code', '').strip()
+            cost_centre_code = request.POST.get('cost_centre_code', '').strip()
+
+            # Validate Corp Code (must be exactly 4 digits if provided)
+            if corp_code and (len(corp_code) != 4 or not corp_code.isdigit()):
+                raise ValidationError("Corp Code must be exactly 4 digits")
+
+            # Validate Cost Centre (must be exactly 4 digits if provided)
+            if cost_centre_code and (len(cost_centre_code) != 4 or not cost_centre_code.isdigit()):
+                raise ValidationError("Cost Centre must be exactly 4 digits")
+
             data = {
                 'name': portfolio_name,
                 'description': request.POST.get('description', ''),
@@ -306,13 +321,14 @@ def portfolio_create(request):
                 'manager': request.POST.get('manager'),
                 'portfolio_client': request.POST.get('portfolio_client', ''),
                 'cash_balance': float(request.POST.get('cash_balance', 0)) if request.POST.get('cash_balance') else 0,
-                'cost_centre_code': request.POST.get('cost_centre_code', ''),
-                'corp_code': request.POST.get('corp_code', ''),
+                'cost_centre_code': cost_centre_code,
+                'corp_code': corp_code,
                 'account_group': request.POST.get('account_group', ''),
                 'portfolio_group': request.POST.get('portfolio_group', ''),
                 'report_group': request.POST.get('report_group', ''),
                 'entity_group': request.POST.get('entity_group', ''),
                 'revaluation_status': request.POST.get('revaluation_status', ''),
+                'accounting_section': request.POST.get('accounting_section', ''),
             }
 
             if not data.get('currency'):
@@ -376,30 +392,45 @@ def portfolio_edit(request, portfolio_name):
         messages.error(request, f'Cannot edit GMP records. Only CIS records can be edited.')
         return redirect('portfolio:detail', portfolio_name=portfolio_name)
 
+    # Allow edits during PENDING_VALIDATION (Maker can modify while awaiting approval)
     editable_statuses = [
         PortfolioHiveRepository.STATUS_INITIAL,
         PortfolioHiveRepository.STATUS_MODIFIED,
+        PortfolioHiveRepository.STATUS_PENDING_VALIDATION,
         PortfolioHiveRepository.STATUS_CANCELLED
     ]
     if current_status not in editable_statuses:
-        messages.error(request, f'Cannot edit portfolio with status "{current_status}". Only INITIAL, MODIFIED, or CANCELLED portfolios can be edited.')
+        messages.error(request, f'Cannot edit portfolio with status "{current_status}". Only INITIAL, MODIFIED, PENDING APPROVAL, or CANCELLED portfolios can be edited.')
         return redirect('portfolio:detail', portfolio_name=portfolio_name)
 
     if request.method == 'POST':
         try:
+            # Get form data
+            corp_code = request.POST.get('corp_code', '').strip()
+            cost_centre_code = request.POST.get('cost_centre_code', '').strip()
+
+            # Validate Corp Code (must be exactly 4 digits if provided)
+            if corp_code and (len(corp_code) != 4 or not corp_code.isdigit()):
+                raise ValidationError("Corp Code must be exactly 4 digits")
+
+            # Validate Cost Centre (must be exactly 4 digits if provided)
+            if cost_centre_code and (len(cost_centre_code) != 4 or not cost_centre_code.isdigit()):
+                raise ValidationError("Cost Centre must be exactly 4 digits")
+
             data = {
                 'description': request.POST.get('description', ''),
                 'currency': request.POST.get('currency'),
                 'manager': request.POST.get('manager'),
                 'portfolio_client': request.POST.get('portfolio_client', ''),
                 'cash_balance': request.POST.get('cash_balance', '0'),
-                'cost_centre_code': request.POST.get('cost_centre_code', ''),
-                'corp_code': request.POST.get('corp_code', ''),
+                'cost_centre_code': cost_centre_code,
+                'corp_code': corp_code,
                 'account_group': request.POST.get('account_group', ''),
                 'portfolio_group': request.POST.get('portfolio_group', ''),
                 'report_group': request.POST.get('report_group', ''),
                 'entity_group': request.POST.get('entity_group', ''),
                 'revaluation_status': request.POST.get('revaluation_status', ''),
+                'accounting_section': request.POST.get('accounting_section', ''),
             }
 
             success = portfolio_hive_repository.update_portfolio(

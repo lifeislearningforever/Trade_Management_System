@@ -94,12 +94,12 @@
         <div class="card-body p-0">
             {% if calendars %}
                 <div class="table-responsive" style="overflow-x: auto;">
-                    <table class="table table-hover mb-0" style="min-width: 800px;">
+                    <table class="table table-hover mb-0 sortable-table" style="min-width: 800px;">
                         <thead>
                             <tr>
-                                <th style="width: 20%;">Calendar</th>
-                                <th style="width: 50%;">Description</th>
-                                <th style="width: 30%;">Holiday Date</th>
+                                <th class="sortable" data-sort-type="text" style="width: 20%;">Calendar</th>
+                                <th class="sortable" data-sort-type="text" style="width: 50%;">Description</th>
+                                <th class="sortable" data-sort-type="date" style="width: 30%;">Holiday Date</th>
                             </tr>
                         </thead>
                         <tbody>

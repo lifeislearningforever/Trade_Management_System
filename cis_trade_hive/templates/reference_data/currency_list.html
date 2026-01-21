@@ -75,17 +75,17 @@
         <div class="card-body p-0">
             {% if currencies %}
                 <div class="table-responsive" style="overflow-x: auto;">
-                    <table class="table table-hover mb-0" style="min-width: 1000px;">
+                    <table class="table table-hover mb-0 sortable-table" style="min-width: 1000px;">
                         <thead>
                             <tr>
-                                <th style="width: 12%;">ISO Code</th>
-                                <th style="width: 15%;">Name</th>
-                                <th style="width: 20%;">Full Name</th>
-                                <th style="width: 10%;">Symbol</th>
-                                <th style="width: 10%;">Precision</th>
-                                <th style="width: 13%;">Rate Precision</th>
-                                <th style="width: 10%;">Calendar</th>
-                                <th style="width: 10%;">Spot Schedule</th>
+                                <th class="sortable" data-sort-type="text" style="width: 12%;">ISO Code</th>
+                                <th class="sortable" data-sort-type="text" style="width: 15%;">Name</th>
+                                <th class="sortable" data-sort-type="text" style="width: 20%;">Full Name</th>
+                                <th class="sortable" data-sort-type="text" style="width: 10%;">Symbol</th>
+                                <th class="sortable" data-sort-type="number" style="width: 10%;">Precision</th>
+                                <th class="sortable" data-sort-type="number" style="width: 13%;">Rate Precision</th>
+                                <th class="sortable" data-sort-type="text" style="width: 10%;">Calendar</th>
+                                <th class="sortable" data-sort-type="text" style="width: 10%;">Spot Schedule</th>
                             </tr>
                         </thead>
                         <tbody>

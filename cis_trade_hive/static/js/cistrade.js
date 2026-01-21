@@ -260,3 +260,133 @@ function createToastContainer() {
     document.body.appendChild(container);
     return container;
 }
+
+/**
+ * =====================================================
+ * Sortable Tables Functionality
+ * =====================================================
+ * Initialize sortable tables by adding class 'sortable-table' to the table
+ * and class 'sortable' to the th elements that should be sortable.
+ *
+ * Usage:
+ * <table class="table sortable-table">
+ *   <thead>
+ *     <tr>
+ *       <th class="sortable" data-sort-type="text">Name</th>
+ *       <th class="sortable" data-sort-type="number">Amount</th>
+ *       <th class="sortable" data-sort-type="date">Date</th>
+ *       <th class="sticky-action-column">Actions</th>
+ *     </tr>
+ *   </thead>
+ *   ...
+ * </table>
+ */
+
+/**
+ * Initialize sortable tables
+ */
+function initSortableTables() {
+    const tables = document.querySelectorAll('.sortable-table');
+
+    tables.forEach(function(table) {
+        const headers = table.querySelectorAll('th.sortable');
+
+        headers.forEach(function(header, columnIndex) {
+            header.addEventListener('click', function() {
+                sortTable(table, columnIndex, header);
+            });
+        });
+    });
+}
+
+/**
+ * Sort table by column
+ */
+function sortTable(table, columnIndex, header) {
+    const tbody = table.querySelector('tbody');
+    if (!tbody) return;
+
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const sortType = header.getAttribute('data-sort-type') || 'text';
+
+    // Determine sort direction
+    let ascending = true;
+    if (header.classList.contains('sort-asc')) {
+        ascending = false;
+    }
+
+    // Remove sort classes from all headers
+    table.querySelectorAll('th.sortable').forEach(function(th) {
+        th.classList.remove('sort-asc', 'sort-desc');
+    });
+
+    // Add appropriate sort class
+    header.classList.add(ascending ? 'sort-asc' : 'sort-desc');
+
+    // Sort rows
+    rows.sort(function(rowA, rowB) {
+        const cellA = rowA.cells[columnIndex];
+        const cellB = rowB.cells[columnIndex];
+
+        if (!cellA || !cellB) return 0;
+
+        let valueA = getCellValue(cellA, sortType);
+        let valueB = getCellValue(cellB, sortType);
+
+        let comparison = 0;
+
+        switch (sortType) {
+            case 'number':
+                comparison = valueA - valueB;
+                break;
+            case 'date':
+                comparison = valueA - valueB;
+                break;
+            case 'text':
+            default:
+                comparison = valueA.localeCompare(valueB, undefined, {numeric: true, sensitivity: 'base'});
+                break;
+        }
+
+        return ascending ? comparison : -comparison;
+    });
+
+    // Re-append sorted rows
+    rows.forEach(function(row) {
+        tbody.appendChild(row);
+    });
+}
+
+/**
+ * Get cell value for sorting
+ */
+function getCellValue(cell, sortType) {
+    // Get text content, handling badges and other elements
+    let text = cell.textContent.trim();
+
+    // Also check for data-sort-value attribute for custom sort values
+    if (cell.hasAttribute('data-sort-value')) {
+        text = cell.getAttribute('data-sort-value');
+    }
+
+    switch (sortType) {
+        case 'number':
+            // Remove currency symbols, commas, and parse as float
+            const numStr = text.replace(/[^0-9.-]/g, '');
+            return parseFloat(numStr) || 0;
+
+        case 'date':
+            // Parse date string
+            const date = new Date(text);
+            return isNaN(date.getTime()) ? 0 : date.getTime();
+
+        case 'text':
+        default:
+            return text.toLowerCase();
+    }
+}
+
+// Initialize sortable tables when DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+    initSortableTables();
+});
