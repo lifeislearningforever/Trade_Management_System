@@ -1,0 +1,213 @@
+{% extends 'base.html' %}
+{% load static core_filters %}
+
+{% block title %}{{ table_info.display_name }} - Lookup Tables{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'lookup:table_list' %}">Lookup Tables</a></li>
+    <li class="breadcrumb-item active">{{ table_info.display_name }}</li>
+{% endblock %}
+
+{% block content %}
+<div class="lookup-detail-container">
+    <!-- Page Header -->
+    <div class="content-header d-flex justify-content-between align-items-start">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-table text-primary"></i> {{ table_info.display_name }}
+            </h1>
+            <p class="content-subtitle">
+                <code>{{ table_name }}</code> | {{ total_count }} rows | PK: <code>{{ pk_column }}</code>
+            </p>
+        </div>
+        <a href="{% url 'lookup:table_list' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Tables
+        </a>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="mb-4">
+        <a href="{% url 'lookup:row_create' table_name %}" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Add New Row
+        </a>
+        <a href="?export=csv{% if search %}&search={{ search }}{% endif %}" class="btn btn-success">
+            <i class="bi bi-download"></i> Export CSV
+        </a>
+    </div>
+
+    <!-- Search Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-search"></i> Search
+            </h5>
+        </div>
+        <div class="card-body">
+            <form method="get" action="{% url 'lookup:table_detail' table_name %}" class="row g-3">
+                <div class="col-md-8">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" name="search" value="{{ search }}"
+                               placeholder="Search across all text columns...">
+                    </div>
+                </div>
+                <div class="col-md-4 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i> Search
+                    </button>
+                    <a href="{% url 'lookup:table_detail' table_name %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-x-circle"></i> Clear
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Data Table -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-list-ul"></i> Data
+                <span class="badge badge-primary ms-2">{{ total_count }} rows</span>
+            </h5>
+        </div>
+        <div class="card-body p-0">
+            {% if rows %}
+                <div class="table-responsive" style="overflow-x: auto; max-height: 600px;">
+                    <table class="table table-hover table-sm mb-0 sortable-table">
+                        <thead class="table-light" style="position: sticky; top: 0; z-index: 10;">
+                            <tr>
+                                {% for col in columns %}
+                                <th class="sortable" data-sort-type="{% if col.type == 'INT' or col.type == 'BIGINT' or col.type == 'FLOAT' or col.type == 'DOUBLE' %}number{% elif col.type == 'BOOLEAN' %}text{% else %}text{% endif %}">
+                                    {{ col.display_name }}
+                                    {% if col.name == pk_column %}
+                                        <i class="bi bi-key-fill text-warning" title="Primary Key"></i>
+                                    {% endif %}
+                                </th>
+                                {% endfor %}
+                                <th class="sticky-action-column" style="min-width: 120px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in rows %}
+                            <tr>
+                                {% for col in columns %}
+                                <td>
+                                    {% with value=row|get_item:col.name %}
+                                        {% if col.type == 'BOOLEAN' or col.type == 'BOOL' %}
+                                            {% if value %}
+                                                <span class="badge badge-success">Yes</span>
+                                            {% else %}
+                                                <span class="badge badge-secondary">No</span>
+                                            {% endif %}
+                                        {% elif col.name == pk_column %}
+                                            <strong class="text-primary">{{ value|default:"-" }}</strong>
+                                        {% else %}
+                                            {{ value|default:"-" }}
+                                        {% endif %}
+                                    {% endwith %}
+                                </td>
+                                {% endfor %}
+                                <td class="sticky-action-column">
+                                    <div class="btn-group btn-group-sm">
+                                        <a href="{% url 'lookup:row_edit' table_name row|get_item:pk_column %}"
+                                           class="btn btn-outline-warning" title="Edit">
+                                            <i class="bi bi-pencil"></i>
+                                        </a>
+                                        <form method="post" action="{% url 'lookup:row_delete' table_name row|get_item:pk_column %}"
+                                              class="d-inline" onsubmit="return confirm('Delete this row?');">
+                                            {% csrf_token %}
+                                            <button type="submit" class="btn btn-outline-danger" title="Delete">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                {% if total_pages > 1 %}
+                <div class="card-footer">
+                    <nav aria-label="Lookup pagination">
+                        <ul class="pagination justify-content-center mb-0">
+                            {% if has_previous %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}">First</a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ previous_page }}{% if search %}&search={{ search }}{% endif %}">Previous</a>
+                                </li>
+                            {% endif %}
+
+                            <li class="page-item active">
+                                <span class="page-link">
+                                    Page {{ page }} of {{ total_pages }}
+                                </span>
+                            </li>
+
+                            {% if has_next %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ next_page }}{% if search %}&search={{ search }}{% endif %}">Next</a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ total_pages }}{% if search %}&search={{ search }}{% endif %}">Last</a>
+                                </li>
+                            {% endif %}
+                        </ul>
+                    </nav>
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="text-center py-5" style="color: var(--gray-500);">
+                    <i class="bi bi-inbox" style="font-size: 3rem; opacity: 0.3;"></i>
+                    <p class="mt-3 mb-0">No data found</p>
+                    {% if search %}
+                        <p class="text-muted">Try adjusting your search</p>
+                    {% else %}
+                        <p class="text-muted mt-2">
+                            <a href="{% url 'lookup:row_create' table_name %}" class="btn btn-primary">
+                                <i class="bi bi-plus-circle"></i> Add first row
+                            </a>
+                        </p>
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Column Info -->
+    <div class="card mt-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-info-circle"></i> Column Information
+            </h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                {% for col in columns %}
+                <div class="col-md-3 col-sm-4 mb-2">
+                    <span class="badge {% if col.name == pk_column %}badge-warning{% else %}badge-secondary{% endif %}">
+                        {{ col.type }}
+                    </span>
+                    <code>{{ col.name }}</code>
+                    {% if col.name == pk_column %}
+                        <i class="bi bi-key-fill text-warning" title="Primary Key"></i>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Custom template filter for getting dict item
+</script>
+{% endblock %}

@@ -50,6 +50,9 @@ urlpatterns = [
 
     # Trade Management
     path('trade/', include('trade.urls')),
+
+    # Lookup Tables (Configuration)
+    path('lookup/', include('lookup.urls')),
 ]
 
 # Serve static files in development

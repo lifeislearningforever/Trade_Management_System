@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     'reference_data.apps.ReferenceDataConfig',
     'security.apps.SecurityConfig',
     'trade.apps.TradeConfig',
+    'lookup',
 ]
 
 MIDDLEWARE = [
