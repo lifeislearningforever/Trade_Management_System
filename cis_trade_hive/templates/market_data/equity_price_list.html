@@ -43,8 +43,8 @@
                     <select class="form-select" name="currency_code">
                         <option value="">All Currencies</option>
                         {% for curr in currencies %}
-                            <option value="{{ curr.curr_name }}" {% if currency_code == curr.curr_name %}selected{% endif %}>
-                                {{ curr.curr_name }} ({{ curr.curr_code }})
+                            <option value="{{ curr.iso_code }}" {% if currency_code == curr.iso_code %}selected{% endif %}>
+                                {{ curr.iso_code }}
                             </option>
                         {% endfor %}
                     </select>

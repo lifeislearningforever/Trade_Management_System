@@ -203,6 +203,7 @@
                                 <th class="sortable" data-sort-type="text" style="min-width: 120px;">Deal #</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 100px;">Type</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 150px;">Portfolio</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 70px;">Ccy</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 180px;">Security</th>
                                 <th class="sortable" data-sort-type="date" style="min-width: 110px;">Trade Date</th>
                                 <th class="sortable" data-sort-type="date" style="min-width: 110px;">Settle Date</th>
@@ -246,6 +247,13 @@
                                     {% endif %}
                                 </td>
                                 <td>{{ trade.portfolio_short_name|default:"-" }}</td>
+                                <td>
+                                    {% if trade.currency_code %}
+                                        <span class="badge bg-info">{{ trade.currency_code }}</span>
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
                                 <td style="max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
                                     title="{{ trade.security_full_name }}">
                                     {{ trade.security_label|default:"-" }}

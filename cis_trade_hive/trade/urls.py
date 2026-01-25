@@ -46,4 +46,9 @@ urlpatterns = [
     # Detailed API endpoints for modal selection
     path('api/portfolios-detailed/', views.api_portfolios_detailed, name='api_portfolios_detailed'),
     path('api/securities-detailed/', views.api_securities_detailed, name='api_securities_detailed'),
+
+    # Currency-based API endpoints for cascading dropdown
+    path('api/currencies/', views.api_currencies, name='api_currencies'),
+    path('api/securities-by-currency/', views.api_securities_by_currency, name='api_securities_by_currency'),
+    path('api/equity-price/', views.api_get_equity_price, name='api_get_equity_price'),
 ]

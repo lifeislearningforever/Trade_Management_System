@@ -78,6 +78,9 @@ CREATE TABLE cis_trade (
     security_full_name STRING,  -- Output: auto-populated from security
     security_type STRING,       -- Output: auto-populated from security
 
+    -- Currency (for filtering securities and auto-filling price)
+    currency_code STRING,       -- Currency for the trade (USD, SGD, etc.)
+
     -- Trade Status (workflow status, different from trading status)
     trade_status STRING,  -- Dropdown: from UDF Trade Status options
 

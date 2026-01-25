@@ -3,9 +3,10 @@ Equity Price Repository for Market Data Module
 
 Manages equity/security pricing data in Kudu via Impala.
 Follows SOLID principles with clean separation of data access logic.
+Includes audit logging for CREATE, UPDATE, DELETE operations.
 
 Author: CisTrade Team
-Last Updated: 2026-01-04
+Last Updated: 2026-01-25
 """
 
 from typing import List, Dict, Any, Optional
@@ -14,6 +15,7 @@ import logging
 import time
 
 from core.repositories.impala_connection import impala_manager
+from core.audit.audit_decorator import log_audit
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +91,6 @@ class EquityPriceHiveRepository:
                 market,
                 price_timestamp,
                 group_name,
-                src_system,
                 is_active,
                 created_by,
                 created_at,
@@ -148,7 +149,6 @@ class EquityPriceHiveRepository:
                 market,
                 price_timestamp,
                 group_name,
-                src_system,
                 is_active,
                 created_by,
                 created_at,
@@ -189,16 +189,21 @@ class EquityPriceHiveRepository:
             return None
 
     @staticmethod
-    def insert_equity_price(equity_price_data: Dict[str, Any]) -> bool:
+    def insert_equity_price(equity_price_data: Dict[str, Any], username: str = 'SYSTEM') -> bool:
         """
         Insert new equity price record.
 
         Args:
             equity_price_data: Dictionary with equity price fields
+            username: User performing the operation (for audit)
 
         Returns:
             True if successful, False otherwise
         """
+        start_time = time.time()
+        success = False
+        error_msg = None
+
         try:
             # Get next ID
             next_id = EquityPriceHiveRepository._get_next_id()
@@ -212,8 +217,7 @@ class EquityPriceHiveRepository:
             market = equity_price_data.get('market', '').replace("'", "\\'") if equity_price_data.get('market') else ''
             price_timestamp = equity_price_data.get('price_timestamp', int(time.time() * 1000))
             group_name = equity_price_data.get('group_name', '').replace("'", "\\'") if equity_price_data.get('group_name') else ''
-            src_system = equity_price_data.get('src_system', 'CIS').replace("'", "\\'")
-            created_by = equity_price_data.get('created_by', 'SYSTEM').replace("'", "\\'")
+            created_by = equity_price_data.get('created_by', username).replace("'", "\\'")
             created_at = int(time.time() * 1000)
 
             # Build INSERT query
@@ -228,7 +232,6 @@ class EquityPriceHiveRepository:
                 market,
                 price_timestamp,
                 group_name,
-                src_system,
                 is_active,
                 created_by,
                 created_at
@@ -242,7 +245,6 @@ class EquityPriceHiveRepository:
                 {f"'{market}'" if market else 'NULL'},
                 {price_timestamp},
                 {f"'{group_name}'" if group_name else 'NULL'},
-                '{src_system}',
                 true,
                 '{created_by}',
                 {created_at}
@@ -256,26 +258,56 @@ class EquityPriceHiveRepository:
                 logger.info(f"Successfully inserted equity price ID: {next_id}")
             else:
                 logger.error(f"Failed to insert equity price for {security_label}")
+                error_msg = "Insert operation returned False"
 
             return success
 
         except Exception as e:
-            logger.error(f"Error inserting equity price: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"Error inserting equity price: {error_msg}")
             return False
 
+        finally:
+            # Audit logging (fire and forget - non-blocking)
+            log_audit(
+                action_type='CREATE',
+                entity_type='EQUITY_PRICE',
+                entity_id=equity_price_data.get('security_label'),
+                entity_name=equity_price_data.get('security_label'),
+                new_value=equity_price_data,
+                success=success,
+                error_message=error_msg,
+                username=username
+            )
+
     @staticmethod
-    def update_equity_price(equity_price_id: int, equity_price_data: Dict[str, Any]) -> bool:
+    def update_equity_price(equity_price_id: int, equity_price_data: Dict[str, Any], username: str = 'SYSTEM') -> bool:
         """
         Update existing equity price record.
 
         Args:
             equity_price_id: Primary key
             equity_price_data: Dictionary with fields to update
+            username: User performing the operation (for audit)
 
         Returns:
             True if successful, False otherwise
         """
+        start_time = time.time()
+        success = False
+        error_msg = None
+        old_value = None
+
         try:
+            # Get existing record for audit comparison
+            existing = EquityPriceHiveRepository.get_equity_price_by_id(equity_price_id)
+            if not existing:
+                logger.error(f"Cannot update: equity price ID {equity_price_id} not found")
+                error_msg = f"Equity price ID {equity_price_id} not found"
+                return False
+
+            old_value = existing
+
             # Build SET clause
             set_clauses = []
 
@@ -318,22 +350,13 @@ class EquityPriceHiveRepository:
                     set_clauses.append("group_name = NULL")
 
             # Add audit fields
-            updated_by = equity_price_data.get('updated_by', 'SYSTEM').replace("'", "\\'")
+            updated_by = equity_price_data.get('updated_by', username).replace("'", "\\'")
             updated_at = int(time.time() * 1000)
             set_clauses.append(f"updated_by = '{updated_by}'")
             set_clauses.append(f"updated_at = {updated_at}")
 
             if not set_clauses:
                 logger.warning("No fields to update")
-                return False
-
-            set_clause = ", ".join(set_clauses)
-
-            # Build UPDATE query (using UPSERT for Kudu)
-            # First, get existing record
-            existing = EquityPriceHiveRepository.get_equity_price_by_id(equity_price_id)
-            if not existing:
-                logger.error(f"Cannot update: equity price ID {equity_price_id} not found")
                 return False
 
             # Merge existing data with updates
@@ -350,7 +373,6 @@ class EquityPriceHiveRepository:
             market = merged_data.get('market', '').replace("'", "\\'") if merged_data.get('market') else ''
             price_timestamp = merged_data.get('price_timestamp', int(time.time() * 1000))
             group_name = merged_data.get('group_name', '').replace("'", "\\'") if merged_data.get('group_name') else ''
-            src_system = merged_data.get('src_system', 'CIS').replace("'", "\\'")
             created_by = merged_data.get('created_by', 'SYSTEM').replace("'", "\\'")
             created_at = merged_data.get('created_at', int(time.time() * 1000))
 
@@ -365,7 +387,6 @@ class EquityPriceHiveRepository:
                 market,
                 price_timestamp,
                 group_name,
-                src_system,
                 is_active,
                 created_by,
                 created_at,
@@ -381,7 +402,6 @@ class EquityPriceHiveRepository:
                 {f"'{market}'" if market else 'NULL'},
                 {price_timestamp},
                 {f"'{group_name}'" if group_name else 'NULL'},
-                '{src_system}',
                 true,
                 '{created_by}',
                 {created_at},
@@ -397,12 +417,28 @@ class EquityPriceHiveRepository:
                 logger.info(f"Successfully updated equity price ID: {equity_price_id}")
             else:
                 logger.error(f"Failed to update equity price ID: {equity_price_id}")
+                error_msg = "Update operation returned False"
 
             return success
 
         except Exception as e:
-            logger.error(f"Error updating equity price {equity_price_id}: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"Error updating equity price {equity_price_id}: {error_msg}")
             return False
+
+        finally:
+            # Audit logging (fire and forget - non-blocking)
+            log_audit(
+                action_type='UPDATE',
+                entity_type='EQUITY_PRICE',
+                entity_id=equity_price_id,
+                entity_name=equity_price_data.get('security_label') or (old_value.get('security_label') if old_value else None),
+                old_value=old_value,
+                new_value=equity_price_data,
+                success=success,
+                error_message=error_msg,
+                username=username
+            )
 
     @staticmethod
     def delete_equity_price(equity_price_id: int, deleted_by: str) -> bool:
@@ -416,17 +452,50 @@ class EquityPriceHiveRepository:
         Returns:
             True if successful, False otherwise
         """
+        start_time = time.time()
+        success = False
+        error_msg = None
+        old_value = None
+
         try:
-            return EquityPriceHiveRepository.update_equity_price(
+            # Get existing record for audit
+            old_value = EquityPriceHiveRepository.get_equity_price_by_id(equity_price_id)
+            if not old_value:
+                error_msg = f"Equity price ID {equity_price_id} not found"
+                return False
+
+            # Perform soft delete via update
+            success = EquityPriceHiveRepository.update_equity_price(
                 equity_price_id,
                 {
                     'is_active': False,
                     'updated_by': deleted_by
-                }
+                },
+                username=deleted_by
             )
+
+            if not success:
+                error_msg = "Delete operation returned False"
+
+            return success
+
         except Exception as e:
-            logger.error(f"Error deleting equity price {equity_price_id}: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"Error deleting equity price {equity_price_id}: {error_msg}")
             return False
+
+        finally:
+            # Audit logging (fire and forget - non-blocking)
+            log_audit(
+                action_type='DELETE',
+                entity_type='EQUITY_PRICE',
+                entity_id=equity_price_id,
+                entity_name=old_value.get('security_label') if old_value else None,
+                old_value=old_value,
+                success=success,
+                error_message=error_msg,
+                username=deleted_by
+            )
 
     @staticmethod
     def get_price_history(

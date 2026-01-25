@@ -342,6 +342,7 @@ class TradeKuduRepository:
                 'trade_id', 'trade_type', 'deal_number',
                 'portfolio_short_name', 'portfolio_full_name',
                 'security_label', 'security_full_name', 'security_type',
+                'currency_code',
                 'trade_status', 'trade_date', 'settle_date',
                 'quantity', 'face_value', 'lot', 'price',
                 'commission', 'accrued_interest', 'sec_fee',
@@ -369,6 +370,7 @@ class TradeKuduRepository:
                 self.escape_value(trade_data.get('security_label')),
                 self.escape_value(security_details.get('security_name', '') if security_details else ''),
                 self.escape_value(security_details.get('security_type', '') if security_details else ''),
+                self.escape_value(trade_data.get('currency_code', '')),
                 self.escape_value(trade_data.get('trade_status', '')),
                 self.escape_value(trade_data.get('trade_date')),
                 self.escape_value(trade_data.get('settle_date', '')),
@@ -479,7 +481,7 @@ class TradeKuduRepository:
 
             # Updatable fields
             updatable_fields = [
-                'trade_status', 'trade_date', 'settle_date',
+                'currency_code', 'trade_status', 'trade_date', 'settle_date',
                 'quantity', 'face_value', 'lot', 'price',
                 'commission', 'accrued_interest', 'sec_fee',
                 'other_charges', 'total_amount',

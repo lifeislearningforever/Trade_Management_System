@@ -55,10 +55,9 @@
                         <select class="form-select" id="currency_code" name="currency_code" required>
                             <option value="">-- Select Currency --</option>
                             {% for curr in currencies %}
-                                <option value="{{ curr.curr_name }}"
-                                        data-curr-code="{{ curr.iso_code }}"
-                                        {% if equity_price.currency_code == curr.curr_name or form_data.currency_code == curr.curr_name %}selected{% endif %}>
-                                    {{ curr.curr_name }} ({{ curr.iso_code }})
+                                <option value="{{ curr.iso_code }}"
+                                        {% if equity_price.currency_code == curr.iso_code or form_data.currency_code == curr.iso_code %}selected{% endif %}>
+                                    {{ curr.iso_code }}
                                 </option>
                             {% endfor %}
                         </select>
@@ -119,20 +118,11 @@
 
                 <div class="row">
                     <!-- Group -->
-                    <div class="col-md-6 mb-3">
+                    <div class="col-md-12 mb-3">
                         <label for="group_name" class="form-label">Group</label>
                         <input type="text" class="form-control" id="group_name" name="group_name"
                                value="{% if equity_price %}{{ equity_price.group_name }}{% elif form_data %}{{ form_data.group_name }}{% endif %}"
                                placeholder="e.g., Technology, Energy">
-                    </div>
-
-                    <!-- Source System -->
-                    <div class="col-md-6 mb-3">
-                        <label for="src_system" class="form-label">Source System</label>
-                        <input type="text" class="form-control" id="src_system" name="src_system"
-                               value="{% if equity_price.src_system %}{{ equity_price.src_system }}{% else %}CIS{% endif %}"
-                               readonly style="background-color: #e9ecef;">
-                        <small class="form-text text-muted">System creating this record (auto-set to CIS)</small>
                     </div>
                 </div>
 
@@ -252,13 +242,10 @@
      * Event Listener: Currency change
      */
     currencySelect.addEventListener('change', function() {
-        const selectedCurrencyName = this.value;
+        // The dropdown value is now directly the iso_code (e.g., "SGD")
+        const currencyCode = this.value;
 
-        // Get the actual currency code from the selected option
-        const selectedOption = this.options[this.selectedIndex];
-        const currencyCode = selectedOption ? selectedOption.dataset.currCode : '';
-
-        // Filter securities
+        // Filter securities by selected currency code
         filterSecuritiesByCurrency(currencyCode);
 
         // Clear ISIN when currency changes
@@ -278,12 +265,9 @@
     document.addEventListener('DOMContentLoaded', function() {
         // If editing, pre-populate dropdowns
         if (preSelectedCurrency) {
-            // Get currency code from the selected currency
-            const currencyOption = currencySelect.querySelector(`option[value="${preSelectedCurrency}"]`);
-            const currencyCode = currencyOption ? currencyOption.dataset.currCode : '';
-
+            // The dropdown value is now directly the currency code (iso_code)
             // Filter securities by pre-selected currency
-            filterSecuritiesByCurrency(currencyCode);
+            filterSecuritiesByCurrency(preSelectedCurrency);
 
             // Set pre-selected ISIN
             if (preSelectedIsin) {

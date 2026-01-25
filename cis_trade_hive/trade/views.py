@@ -45,6 +45,7 @@ class TradeWrapper:
         self.security_label = data.get('security_label', '')
         self.security_full_name = data.get('security_full_name', '')
         self.security_type = data.get('security_type', '')
+        self.currency_code = data.get('currency_code', '')
 
         # Dates & Quantities
         self.trade_status = data.get('trade_status', '')
@@ -350,6 +351,7 @@ def trade_create(request, trade_type=None):
             trade_data = {
                 'trade_type': request.POST.get('trade_type', trade_type or 'BUY'),
                 'portfolio_short_name': request.POST.get('portfolio_short_name', '').strip(),
+                'currency_code': request.POST.get('currency_code', '').strip(),
                 'security_label': request.POST.get('security_label', '').strip(),
                 'trade_status': request.POST.get('trade_status', ''),
                 'trade_date': request.POST.get('trade_date', ''),
@@ -478,6 +480,7 @@ def trade_edit(request, trade_id):
         try:
             # Collect form data (same as create)
             updated_data = {
+                'currency_code': request.POST.get('currency_code', '').strip(),
                 'trade_status': request.POST.get('trade_status', ''),
                 'trade_date': request.POST.get('trade_date', ''),
                 'settle_date': request.POST.get('settle_date', ''),
@@ -968,3 +971,46 @@ def api_securities_detailed(request):
         })
 
     return JsonResponse({'results': results, 'total': len(results)})
+
+
+@require_http_methods(["GET"])
+def api_securities_by_currency(request):
+    """
+    API: Get securities filtered by currency code.
+    Returns security list for cascading dropdown.
+    """
+    currency_code = request.GET.get('currency', '').strip()
+
+    if not currency_code:
+        return JsonResponse({'results': [], 'error': 'Currency code required'})
+
+    securities = trade_dropdown_service.get_securities_by_currency(currency_code)
+
+    return JsonResponse({'results': securities, 'total': len(securities)})
+
+
+@require_http_methods(["GET"])
+def api_get_equity_price(request):
+    """
+    API: Get latest equity price for a security and currency.
+    Used to auto-fill price field based on currency and security selection.
+    """
+    security_label = request.GET.get('security', '').strip()
+    currency_code = request.GET.get('currency', '').strip()
+
+    if not security_label:
+        return JsonResponse({'price': 0, 'error': 'Security label required'})
+
+    price_data = trade_dropdown_service.get_equity_price(security_label, currency_code)
+
+    return JsonResponse(price_data)
+
+
+@require_http_methods(["GET"])
+def api_currencies(request):
+    """
+    API: Get available currencies for dropdown.
+    Returns currencies that have associated securities/equity prices.
+    """
+    currencies = trade_dropdown_service.get_currencies()
+    return JsonResponse({'results': currencies})

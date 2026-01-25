@@ -12,8 +12,6 @@ from typing import List, Dict, Any, Optional
 import logging
 
 from core.repositories.impala_connection import impala_manager
-from udf.repositories.udf_hive_repository import udf_option_repository
-from core.audit.audit_kudu_repository import audit_log_kudu_repository
 
 logger = logging.getLogger(__name__)
 
@@ -43,43 +41,20 @@ class EquityPriceDropdownService:
             query = """
             SELECT DISTINCT
                 iso_code,
-                curr_name
+                iso_code as curr_name
             FROM gmp_cis.gmp_cis_sta_dly_currency
             WHERE iso_code IS NOT NULL
-              AND curr_name IS NOT NULL
-            ORDER BY curr_name
+            ORDER BY iso_code
             """
 
             logger.info(f"Fetching currencies for user: {user}")
             results = impala_manager.execute_query(query, database='gmp_cis')
-
-            # Log to audit
-            audit_log_kudu_repository.log_action(
-                user_id='0',
-                username=user,
-                user_email='',
-                action_type='DROPDOWN_FETCH',
-                entity_type='EQUITY_PRICE',
-                entity_name='Currency Dropdown',
-                action_description=f'Fetched {len(results)} currencies for equity price dropdown',
-                status='SUCCESS'
-            )
 
             logger.info(f"Retrieved {len(results)} currencies")
             return results
 
         except Exception as e:
             logger.error(f"Error fetching currencies: {str(e)}")
-            audit_log_kudu_repository.log_action(
-                user_id='0',
-                username=user,
-                user_email='',
-                action_type='DROPDOWN_FETCH',
-                entity_type='EQUITY_PRICE',
-                entity_name='Currency Dropdown',
-                action_description=f'Failed to fetch currencies: {str(e)}',
-                status='FAILURE'
-            )
             return []
 
     @staticmethod
@@ -123,33 +98,11 @@ class EquityPriceDropdownService:
             logger.info(f"Fetching securities for currency: {currency_code or 'ALL'} (user: {user})")
             results = impala_manager.execute_query(query, database='gmp_cis')
 
-            # Log to audit
-            audit_log_kudu_repository.log_action(
-                user_id='0',
-                username=user,
-                user_email='',
-                action_type='DROPDOWN_FETCH',
-                entity_type='EQUITY_PRICE',
-                entity_name='Security Dropdown',
-                action_description=f'Fetched {len(results)} securities for currency: {currency_code or "ALL"}',
-                status='SUCCESS'
-            )
-
             logger.info(f"Retrieved {len(results)} securities")
             return results
 
         except Exception as e:
             logger.error(f"Error fetching securities: {str(e)}")
-            audit_log_kudu_repository.log_action(
-                user_id='0',
-                username=user,
-                user_email='',
-                action_type='DROPDOWN_FETCH',
-                entity_type='EQUITY_PRICE',
-                entity_name='Security Dropdown',
-                action_description=f'Failed to fetch securities: {str(e)}',
-                status='FAILURE'
-            )
             return []
 
     @staticmethod
@@ -214,7 +167,7 @@ class EquityPriceDropdownService:
     @staticmethod
     def get_markets(user: str = 'SYSTEM') -> List[str]:
         """
-        Get market options from UDF system.
+        Get market options (using default markets).
 
         Args:
             user: Username for audit logging
@@ -222,65 +175,13 @@ class EquityPriceDropdownService:
         Returns:
             List of market names
         """
-        try:
-            # Get markets from UDF with entity_type='EQUITY_PRICE' and label='market'
-            udf_options = udf_option_repository.get_udf_options_by_entity_and_label(
-                entity_type='EQUITY_PRICE',
-                label='market'
-            )
-
-            if udf_options:
-                markets = [opt.get('field_name') for opt in udf_options if opt.get('field_name')]
-                logger.info(f"Retrieved {len(markets)} markets from UDF")
-
-                # Log to audit
-                audit_log_kudu_repository.log_action(
-                    user_id='0',
-                    username=user,
-                    user_email='',
-                    action_type='DROPDOWN_FETCH',
-                    entity_type='EQUITY_PRICE',
-                    entity_name='Market Dropdown',
-                    action_description=f'Fetched {len(markets)} markets from UDF',
-                    status='SUCCESS'
-                )
-
-                return markets
-            else:
-                logger.warning("No UDF markets found for EQUITY_PRICE.market - using defaults")
-                # Fallback to common markets if UDF not configured
-                default_markets = [
-                    'NYSE', 'NASDAQ', 'SGX', 'LSE', 'HKEX',
-                    'TSE', 'SSE', 'SZSE', 'ASX', 'BSE'
-                ]
-
-                audit_log_kudu_repository.log_action(
-                    user_id='0',
-                    username=user,
-                    user_email='',
-                    action_type='DROPDOWN_FETCH',
-                    entity_type='EQUITY_PRICE',
-                    entity_name='Market Dropdown',
-                    action_description=f'Using default markets (UDF not configured): {len(default_markets)} markets',
-                    status='SUCCESS'
-                )
-
-                return default_markets
-
-        except Exception as e:
-            logger.error(f"Error fetching markets: {str(e)}")
-            audit_log_kudu_repository.log_action(
-                user_id='0',
-                username=user,
-                user_email='',
-                action_type='DROPDOWN_FETCH',
-                entity_type='EQUITY_PRICE',
-                entity_name='Market Dropdown',
-                action_description=f'Failed to fetch markets: {str(e)}',
-                status='FAILURE'
-            )
-            # Return default markets on error
-            return ['NYSE', 'NASDAQ', 'SGX', 'LSE', 'HKEX', 'TSE', 'SSE', 'SZSE', 'ASX', 'BSE']
+        # Return default markets directly (UDF integration can be added later)
+        default_markets = [
+            'NYSE', 'NASDAQ', 'SGX', 'LSE', 'HKEX',
+            'TSE', 'SSE', 'SZSE', 'ASX', 'BSE'
+        ]
+        logger.info(f"Returning {len(default_markets)} default markets")
+        return default_markets
 
     @staticmethod
     def get_all_dropdown_options(user: str = 'SYSTEM') -> Dict[str, Any]:

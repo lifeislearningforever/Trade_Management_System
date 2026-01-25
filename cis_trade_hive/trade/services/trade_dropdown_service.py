@@ -69,6 +69,7 @@ class TradeDropdownService:
             'trade_types': self.get_trade_types(),
             'trade_statuses': self.get_trade_statuses(),
             'portfolios': self.get_portfolios(),
+            'currencies': self.get_currencies(),
             'securities': self.get_securities(),
             'counterparties': self.get_counterparties(),
             'brokers': self.get_brokers(),
@@ -616,6 +617,268 @@ class TradeDropdownService:
                 {'value': 'PARTIAL_REDEMP', 'label': 'Partial Redemption'},
             ]
         return options
+
+
+    # =========================================================================
+    # CURRENCY & PRICE METHODS (for cascading dropdown)
+    # =========================================================================
+
+    def get_currencies(self) -> List[Dict[str, Any]]:
+        """
+        Get available currencies from both cis_security_kudu and cis_equity_price.
+        Returns combined unique currencies for the currency dropdown.
+        """
+        currencies_set = set()
+
+        # Get currencies from cis_security_kudu
+        try:
+            query = f"""
+            SELECT DISTINCT currency_code
+            FROM {self.DATABASE}.cis_security_kudu
+            WHERE (is_active = true OR is_active IS NULL)
+              AND currency_code IS NOT NULL
+              AND currency_code <> ''
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            if results:
+                for r in results:
+                    if r.get('currency_code'):
+                        currencies_set.add(r.get('currency_code'))
+                logger.debug(f"Loaded {len(results)} currencies from cis_security_kudu")
+        except Exception as e:
+            logger.warning(f"Could not load currencies from cis_security_kudu: {str(e)}")
+
+        # Get currencies from cis_equity_price (may have additional currencies)
+        try:
+            query = f"""
+            SELECT DISTINCT currency_code
+            FROM {self.DATABASE}.cis_equity_price
+            WHERE (is_active = true OR is_active IS NULL)
+              AND currency_code IS NOT NULL
+              AND currency_code <> ''
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            if results:
+                for r in results:
+                    if r.get('currency_code'):
+                        currencies_set.add(r.get('currency_code'))
+                logger.debug(f"Loaded {len(results)} currencies from cis_equity_price")
+        except Exception as e:
+            logger.warning(f"Could not load currencies from cis_equity_price: {str(e)}")
+
+        # Convert to sorted list of dicts
+        if currencies_set:
+            return [
+                {'value': c, 'label': c}
+                for c in sorted(currencies_set)
+            ]
+
+        # Fallback to reference_data currencies
+        try:
+            query = f"""
+            SELECT currency_code, currency_name
+            FROM {self.DATABASE}.cis_currency
+            WHERE is_active = true
+            ORDER BY currency_code
+            LIMIT 50
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            if results:
+                return [
+                    {
+                        'value': r.get('currency_code', ''),
+                        'label': f"{r.get('currency_code', '')} - {r.get('currency_name', '')}"
+                    }
+                    for r in results if r.get('currency_code')
+                ]
+        except Exception as e:
+            logger.warning(f"Could not load currencies: {str(e)}")
+
+        # Final fallback
+        return [
+            {'value': 'USD', 'label': 'USD - US Dollar'},
+            {'value': 'SGD', 'label': 'SGD - Singapore Dollar'},
+            {'value': 'EUR', 'label': 'EUR - Euro'},
+            {'value': 'GBP', 'label': 'GBP - British Pound'},
+        ]
+
+    def get_securities_by_currency(self, currency_code: str) -> List[Dict[str, Any]]:
+        """
+        Get securities filtered by currency code.
+        Combines securities from cis_security_kudu and cis_equity_price.
+        Price priority: cis_equity_price > cis_security_kudu
+        """
+        if not currency_code:
+            return []
+
+        securities_dict = {}  # key: security_name, value: security data
+
+        # First, get securities from cis_security_kudu (base data with price)
+        try:
+            query = f"""
+            SELECT
+                security_name,
+                isin,
+                price,
+                price_date,
+                exchange_code as market
+            FROM {self.DATABASE}.cis_security_kudu
+            WHERE currency_code = '{currency_code}'
+              AND (is_active = true OR is_active IS NULL)
+            ORDER BY security_name
+            LIMIT 500
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+
+            if results:
+                for r in results:
+                    sec_name = r.get('security_name', '')
+                    if sec_name:
+                        securities_dict[sec_name] = {
+                            'value': sec_name,
+                            'label': f"{sec_name} ({r.get('isin', '')})",
+                            'isin': r.get('isin', ''),
+                            'price': float(r.get('price', 0)) if r.get('price') else 0,
+                            'market': r.get('market', ''),
+                            'price_date': str(r.get('price_date', '')),
+                            'source': 'security'
+                        }
+                logger.debug(f"Loaded {len(results)} securities from cis_security_kudu for {currency_code}")
+        except Exception as e:
+            logger.warning(f"Error loading from cis_security_kudu: {str(e)}")
+
+        # Then, get/update with equity prices (overwrite price if available)
+        try:
+            query = f"""
+            SELECT
+                security_label,
+                isin,
+                main_closing_price as price,
+                price_date,
+                market
+            FROM {self.DATABASE}.cis_equity_price
+            WHERE currency_code = '{currency_code}'
+              AND (is_active = true OR is_active IS NULL)
+            ORDER BY security_label, price_date DESC
+            LIMIT 500
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+
+            if results:
+                for r in results:
+                    sec_label = r.get('security_label', '')
+                    if sec_label:
+                        # If security exists, update price from equity_price (takes priority)
+                        # If not exists, add as new security
+                        equity_price = float(r.get('price', 0)) if r.get('price') else 0
+                        if sec_label in securities_dict:
+                            # Update price from equity_price (higher priority)
+                            if equity_price > 0:
+                                securities_dict[sec_label]['price'] = equity_price
+                                securities_dict[sec_label]['price_date'] = str(r.get('price_date', ''))
+                                securities_dict[sec_label]['source'] = 'equity_price'
+                        else:
+                            # Add new security from equity_price
+                            securities_dict[sec_label] = {
+                                'value': sec_label,
+                                'label': f"{sec_label} ({r.get('isin', '')})",
+                                'isin': r.get('isin', ''),
+                                'price': equity_price,
+                                'market': r.get('market', ''),
+                                'price_date': str(r.get('price_date', '')),
+                                'source': 'equity_price'
+                            }
+                logger.debug(f"Updated with {len(results)} prices from cis_equity_price for {currency_code}")
+        except Exception as e:
+            logger.warning(f"Error loading from cis_equity_price: {str(e)}")
+
+        # Convert to sorted list
+        result = sorted(securities_dict.values(), key=lambda x: x['value'])
+        logger.info(f"Total {len(result)} unique securities for currency {currency_code}")
+        return result
+
+    def get_equity_price(self, security_label: str, currency_code: str = None) -> Dict[str, Any]:
+        """
+        Get the price for a security.
+        Priority: cis_equity_price > cis_security_kudu (NVL logic)
+        """
+        if not security_label:
+            return {'price': 0, 'found': False}
+
+        currency_filter = ""
+        if currency_code:
+            currency_filter = f"AND currency_code = '{currency_code}'"
+
+        # First, try cis_equity_price (higher priority)
+        try:
+            query = f"""
+            SELECT
+                security_label,
+                currency_code,
+                main_closing_price as price,
+                price_date,
+                market,
+                isin
+            FROM {self.DATABASE}.cis_equity_price
+            WHERE security_label = '{security_label}'
+              AND (is_active = true OR is_active IS NULL)
+              {currency_filter}
+            ORDER BY price_date DESC, price_timestamp DESC
+            LIMIT 1
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+
+            if results and len(results) > 0:
+                r = results[0]
+                price = float(r.get('price', 0)) if r.get('price') else 0
+                if price > 0:
+                    return {
+                        'price': price,
+                        'currency_code': r.get('currency_code', ''),
+                        'price_date': str(r.get('price_date', '')),
+                        'market': r.get('market', ''),
+                        'isin': r.get('isin', ''),
+                        'source': 'equity_price',
+                        'found': True
+                    }
+        except Exception as e:
+            logger.warning(f"Error getting price from cis_equity_price: {str(e)}")
+
+        # Fallback to cis_security_kudu
+        try:
+            query = f"""
+            SELECT
+                security_name,
+                currency_code,
+                price,
+                price_date,
+                exchange_code as market,
+                isin
+            FROM {self.DATABASE}.cis_security_kudu
+            WHERE security_name = '{security_label}'
+              AND (is_active = true OR is_active IS NULL)
+              {currency_filter}
+            ORDER BY price_date DESC
+            LIMIT 1
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+
+            if results and len(results) > 0:
+                r = results[0]
+                price = float(r.get('price', 0)) if r.get('price') else 0
+                return {
+                    'price': price,
+                    'currency_code': r.get('currency_code', ''),
+                    'price_date': str(r.get('price_date', '')),
+                    'market': r.get('market', ''),
+                    'isin': r.get('isin', ''),
+                    'source': 'security',
+                    'found': price > 0
+                }
+        except Exception as e:
+            logger.warning(f"Error getting price from cis_security_kudu: {str(e)}")
+
+        return {'price': 0, 'found': False}
 
 
 # Singleton instance

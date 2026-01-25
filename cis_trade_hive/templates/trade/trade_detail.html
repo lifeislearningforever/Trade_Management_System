@@ -137,10 +137,20 @@
                     </div>
                     <hr>
                     <div class="row">
-                        <div class="col-md-6 mb-3">
+                        <div class="col-md-4 mb-3">
                             <label class="form-label text-muted">Portfolio</label>
                             <div class="fw-bold">{{ trade.portfolio_short_name|default:"-" }}</div>
                             <small class="text-muted">{{ trade.portfolio_full_name|default:"" }}</small>
+                        </div>
+                        <div class="col-md-2 mb-3">
+                            <label class="form-label text-muted">Currency</label>
+                            <div class="fw-bold">
+                                {% if trade.currency_code %}
+                                    <span class="badge bg-info">{{ trade.currency_code }}</span>
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </div>
                         </div>
                         <div class="col-md-6 mb-3">
                             <label class="form-label text-muted">Security</label>
