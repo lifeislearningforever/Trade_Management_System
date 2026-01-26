@@ -1,0 +1,782 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{% if is_edit %}Edit{% else %}Create{% endif %} Party - CisTrade{% endblock %}
+
+{% block extra_css %}
+<!-- Select2 CSS - Local -->
+<link href="{% static 'css/select2.min.css' %}" rel="stylesheet" />
+<link href="{% static 'css/select2-bootstrap-5-theme.min.css' %}" rel="stylesheet" />
+<!-- CIS Trade Hive Select2 Custom Styles -->
+<link href="{% static 'css/select2-custom.css' %}" rel="stylesheet" />
+{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="#">Reference Data</a></li>
+    <li class="breadcrumb-item"><a href="{% if next_url %}{{ next_url }}{% else %}{% url 'reference_data:party_list' %}{% endif %}">Parties</a></li>
+    <li class="breadcrumb-item active">{% if is_edit %}Edit{% else %}Create{% endif %}</li>
+{% endblock %}
+
+{% block content %}
+<div class="party-form-container" style="max-width: 1200px; margin: 0 auto;">
+    <!-- Page Header -->
+    <div class="content-header d-flex justify-content-between align-items-start mb-4">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-{% if is_edit %}pencil{% else %}plus-circle{% endif %} text-primary"></i>
+                {% if is_edit %}Edit Party{% else %}Create New Party{% endif %}
+            </h1>
+            <p class="content-subtitle">
+                {% if is_edit %}
+                    Update party information for: <strong>{{ party.party_short_name }}</strong>
+                {% else %}
+                    Add a new party to the system
+                {% endif %}
+            </p>
+        </div>
+        <a href="{% if next_url %}{{ next_url }}{% else %}{% url 'reference_data:party_list' %}{% endif %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to List
+        </a>
+    </div>
+
+    <!-- Form Card -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-info-circle"></i> Party Information
+            </h5>
+        </div>
+        <div class="card-body">
+            <form method="post" class="needs-validation" novalidate>
+                {% csrf_token %}
+                {% if next_url %}
+                    <input type="hidden" name="next" value="{{ next_url }}">
+                {% endif %}
+
+                <!-- Basic Information Section -->
+                <div class="mb-4">
+                    <h6 class="text-muted mb-3 border-bottom pb-2">
+                        <i class="bi bi-person-badge"></i> Basic Information
+                    </h6>
+                    <div class="row g-3">
+                        <!-- Short Name (Primary Key) -->
+                        <div class="col-md-4">
+                            <label for="party_short_name" class="form-label">
+                                Short Name <span class="text-danger">*</span>
+                            </label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="party_short_name"
+                                   name="party_short_name"
+                                   value="{{ party.party_short_name|default:'' }}"
+                                   required
+                                   {% if is_edit %}readonly{% endif %}>
+                            <div class="form-text">
+                                {% if is_edit %}
+                                    Primary key - cannot be changed
+                                {% else %}
+                                    Unique identifier for this party (required)
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- Full Name -->
+                        <div class="col-md-8">
+                            <label for="party_full_name" class="form-label">Full Name</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="party_full_name"
+                                   name="party_full_name"
+                                   value="{{ party.party_full_name|default:'' }}">
+                        </div>
+
+                        <!-- GICS Code -->
+                        <div class="col-md-4">
+                            <label for="gics_code" class="form-label">GICS Code</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="gics_code"
+                                   name="gics_code"
+                                   value="{{ party.gics_code|default:'' }}"
+                                   placeholder="Global Industry Classification Standard">
+                        </div>
+
+                        <!-- Industry -->
+                        <div class="col-md-4">
+                            <label for="industry" class="form-label">Industry</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="industry"
+                                   name="industry"
+                                   value="{{ party.industry|default:'' }}">
+                        </div>
+
+                        <!-- Industry Group -->
+                        <div class="col-md-4">
+                            <label for="industry_group" class="form-label">Industry Group</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="industry_group"
+                                   name="industry_group"
+                                   value="{{ party.industry_group|default:'' }}">
+                        </div>
+
+                        <!-- MAS Industry Code -->
+                        <div class="col-md-4">
+                            <label for="mas_industry_code" class="form-label">MAS Industry Code</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="mas_industry_code"
+                                   name="mas_industry_code"
+                                   value="{{ party.mas_industry_code|default:'' }}">
+                        </div>
+
+                        <!-- Resident Y/N -->
+                        <div class="col-md-4">
+                            <label for="resident_y_n" class="form-label">Resident (Y/N)</label>
+                            <select class="form-select" id="resident_y_n" name="resident_y_n">
+                                <option value="">Select...</option>
+                                <option value="Y" {% if party.resident_y_n == 'Y' %}selected{% endif %}>Yes</option>
+                                <option value="N" {% if party.resident_y_n == 'N' %}selected{% endif %}>No</option>
+                            </select>
+                        </div>
+
+                        <!-- Subsidiary Level -->
+                        <div class="col-md-4">
+                            <label for="subsidiary_level" class="form-label">Subsidiary Level</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="subsidiary_level"
+                                   name="subsidiary_level"
+                                   value="{{ party.subsidiary_level|default:'' }}">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Hierarchy Section -->
+                <div class="mb-4">
+                    <h6 class="text-muted mb-3 border-bottom pb-2">
+                        <i class="bi bi-diagram-3"></i> Party Hierarchy
+                    </h6>
+                    <div class="row g-3">
+                        <!-- Party Grandparent -->
+                        <div class="col-md-6">
+                            <label for="party_grandparent" class="form-label">Party Grandparent</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="party_grandparent"
+                                   name="party_grandparent"
+                                   value="{{ party.party_grandparent|default:'' }}">
+                        </div>
+
+                        <!-- Party Parent -->
+                        <div class="col-md-6">
+                            <label for="party_parent" class="form-label">Party Parent</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="party_parent"
+                                   name="party_parent"
+                                   value="{{ party.party_parent|default:'' }}">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Address Information Section -->
+                <div class="mb-4">
+                    <h6 class="text-muted mb-3 border-bottom pb-2">
+                        <i class="bi bi-geo-alt"></i> Address Information
+                    </h6>
+                    <div class="row g-3">
+                        <!-- Address Line 0 -->
+                        <div class="col-md-6">
+                            <label for="address_line_0" class="form-label">Address Line 1</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="address_line_0"
+                                   name="address_line_0"
+                                   value="{{ party.address_line_0|default:'' }}">
+                        </div>
+
+                        <!-- Address Line 1 -->
+                        <div class="col-md-6">
+                            <label for="address_line_1" class="form-label">Address Line 2</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="address_line_1"
+                                   name="address_line_1"
+                                   value="{{ party.address_line_1|default:'' }}">
+                        </div>
+
+                        <!-- Address Line 2 -->
+                        <div class="col-md-6">
+                            <label for="address_line_2" class="form-label">Address Line 3</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="address_line_2"
+                                   name="address_line_2"
+                                   value="{{ party.address_line_2|default:'' }}">
+                        </div>
+
+                        <!-- Address Line 3 -->
+                        <div class="col-md-6">
+                            <label for="address_line_3" class="form-label">Address Line 4</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="address_line_3"
+                                   name="address_line_3"
+                                   value="{{ party.address_line_3|default:'' }}">
+                        </div>
+
+                        <!-- City -->
+                        <div class="col-md-4">
+                            <label for="city" class="form-label">City</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="city"
+                                   name="city"
+                                   value="{{ party.city|default:'' }}">
+                        </div>
+
+                        <!-- Country (Dropdown) -->
+                        <div class="col-md-4">
+                            <label for="country" class="form-label">Country</label>
+                            <select class="form-select select2-country" id="country" name="country">
+                                <option value="">Select Country...</option>
+                                {% for c in countries %}
+                                <option value="{{ c.code }}" {% if party.country == c.code %}selected{% endif %}>
+                                    {{ c.code }} - {{ c.name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <!-- Postal Code -->
+                        <div class="col-md-4">
+                            <label for="postal_code" class="form-label">Postal Code</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="postal_code"
+                                   name="postal_code"
+                                   value="{{ party.postal_code|default:'' }}">
+                        </div>
+
+                        <!-- Country of Incorporation (Dropdown) -->
+                        <div class="col-md-4">
+                            <label for="country_of_incorporation" class="form-label">Country of Incorporation</label>
+                            <select class="form-select select2-country" id="country_of_incorporation" name="country_of_incorporation">
+                                <option value="">Select Country...</option>
+                                {% for c in countries %}
+                                <option value="{{ c.code }}" {% if party.country_of_incorporation == c.code %}selected{% endif %}>
+                                    {{ c.code }} - {{ c.name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Contact Information Section -->
+                <div class="mb-4">
+                    <h6 class="text-muted mb-3 border-bottom pb-2">
+                        <i class="bi bi-telephone"></i> Contact Information
+                    </h6>
+                    <div class="row g-3">
+                        <!-- Primary Contact -->
+                        <div class="col-md-6">
+                            <label for="primary_contact" class="form-label">Primary Contact</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="primary_contact"
+                                   name="primary_contact"
+                                   value="{{ party.primary_contact|default:'' }}">
+                        </div>
+
+                        <!-- Primary Number -->
+                        <div class="col-md-6">
+                            <label for="primary_number" class="form-label">Primary Number</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="primary_number"
+                                   name="primary_number"
+                                   value="{{ party.primary_number|default:'' }}">
+                        </div>
+
+                        <!-- Other Contact -->
+                        <div class="col-md-6">
+                            <label for="other_contact" class="form-label">Other Contact</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="other_contact"
+                                   name="other_contact"
+                                   value="{{ party.other_contact|default:'' }}">
+                        </div>
+
+                        <!-- Other Number -->
+                        <div class="col-md-6">
+                            <label for="other_number" class="form-label">Other Number</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="other_number"
+                                   name="other_number"
+                                   value="{{ party.other_number|default:'' }}">
+                        </div>
+
+                        <!-- Fax Number -->
+                        <div class="col-md-6">
+                            <label for="fax_number" class="form-label">Fax Number</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="fax_number"
+                                   name="fax_number"
+                                   value="{{ party.fax_number|default:'' }}">
+                        </div>
+
+                        <!-- Telex Number -->
+                        <div class="col-md-6">
+                            <label for="telex_number" class="form-label">Telex Number</label>
+                            <input type="text"
+                                   class="form-control"
+                                   id="telex_number"
+                                   name="telex_number"
+                                   value="{{ party.telex_number|default:'' }}">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Classification Flags Section -->
+                <div class="mb-4">
+                    <h6 class="text-muted mb-3 border-bottom pb-2">
+                        <i class="bi bi-tags"></i> Classification
+                    </h6>
+                    <div class="row g-3">
+                        <div class="col-md-2">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="is_bank"
+                                       name="is_bank"
+                                       {% if party.is_bank %}checked{% endif %}>
+                                <label class="form-check-label" for="is_bank">
+                                    Is Bank
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="col-md-2">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="is_broker"
+                                       name="is_broker"
+                                       {% if party.is_broker %}checked{% endif %}>
+                                <label class="form-check-label" for="is_broker">
+                                    Is Broker
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="col-md-2">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="is_custodian"
+                                       name="is_custodian"
+                                       {% if party.is_custodian %}checked{% endif %}>
+                                <label class="form-check-label" for="is_custodian">
+                                    Is Custodian
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="col-md-2">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="is_issuer"
+                                       name="is_issuer"
+                                       {% if party.is_issuer %}checked{% endif %}>
+                                <label class="form-check-label" for="is_issuer">
+                                    Is Issuer
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="col-md-2">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="is_corporate"
+                                       name="is_corporate"
+                                       {% if party.is_corporate %}checked{% endif %}>
+                                <label class="form-check-label" for="is_corporate">
+                                    Is Corporate
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="col-md-2">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="is_subsidiary"
+                                       name="is_subsidiary"
+                                       {% if party.is_subsidiary %}checked{% endif %}>
+                                <label class="form-check-label" for="is_subsidiary">
+                                    Is Subsidiary
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CIF Management Section -->
+                <div class="mt-4 pt-4 border-top">
+                    <h6 class="text-muted mb-3">
+                        <i class="bi bi-file-earmark-text"></i> CIF Management
+                        <small class="text-muted">(Customer Identification Numbers)</small>
+                    </h6>
+
+                    <!-- Existing CIFs (for edit mode) -->
+                    {% if is_edit and existing_cifs %}
+                    <div class="alert alert-info mb-3">
+                        <strong>Existing CIFs:</strong> {{ existing_cifs|length }} CIF(s) found
+                    </div>
+                    <div class="table-responsive mb-3">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>M-Label</th>
+                                    <th>Country</th>
+                                    <th>Source</th>
+                                    <th>ISIN</th>
+                                    <th>Description</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for cif in existing_cifs %}
+                                <tr>
+                                    <td>{{ cif.m_label }}</td>
+                                    <td>{{ cif.country }}</td>
+                                    <td>
+                                        {% if cif.src_system|upper == 'CIS' %}
+                                            <span class="badge bg-success">CIS</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">{{ cif.src_system|upper|default:"GMP" }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ cif.isin|default:'-' }}</td>
+                                    <td>{{ cif.description|default:'-' }}</td>
+                                    <td>
+                                        {% if cif.is_active %}
+                                            <span class="badge bg-success">Active</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">Inactive</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% endif %}
+
+                    <!-- Add New CIFs -->
+                    <div class="card">
+                        <div class="card-header bg-light">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span><i class="bi bi-plus-circle"></i> Add CIF(s)</span>
+                                <button type="button" class="btn btn-sm btn-success" onclick="addCIFRow()">
+                                    <i class="bi bi-plus"></i> Add CIF
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="cif-rows-container">
+                                <!-- Initial CIF row (hidden template) -->
+                                <div class="cif-row-template" style="display: none;">
+                                    <div class="row g-3 mb-3 pb-3 border-bottom cif-row">
+                                        <div class="col-md-4">
+                                            <label class="form-label">Country <span class="text-danger">*</span></label>
+                                            <select class="form-select cif-country"
+                                                    name="cif_country[]"
+                                                    required>
+                                                <option value="">Select Country...</option>
+                                                {% for c in countries %}
+                                                <option value="{{ c.code }}">{{ c.code }} - {{ c.name }}</option>
+                                                {% endfor %}
+                                            </select>
+                                            <div class="invalid-feedback country-duplicate-error" style="display: none;">
+                                                Duplicate country - Only one CIF allowed per country
+                                            </div>
+                                            <div class="invalid-feedback country-required-error">
+                                                Country is required for CIF
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label">ISIN</label>
+                                            <input type="text"
+                                                   class="form-control cif-isin"
+                                                   name="cif_isin[]">
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label">Description</label>
+                                            <input type="text"
+                                                   class="form-control cif-description"
+                                                   name="cif_description[]">
+                                        </div>
+                                        <div class="col-md-1 d-flex align-items-end">
+                                            <button type="button"
+                                                    class="btn btn-outline-danger w-100"
+                                                    onclick="removeCIFRow(this)"
+                                                    title="Remove CIF">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- CIF rows will be added here -->
+                                <div id="no-cifs-message" class="text-muted text-center py-3">
+                                    <i class="bi bi-info-circle"></i> No CIFs added yet. Click "Add CIF" to begin.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-text mt-2">
+                        <i class="bi bi-info-circle"></i> <strong>Note:</strong>
+                        Each CIF must have a unique country. M-Label is auto-generated when you save.
+                    </div>
+                </div>
+
+                <!-- Form Actions -->
+                <div class="d-flex justify-content-end gap-2 mt-4 pt-3 border-top">
+                    <a href="{% if next_url %}{{ next_url }}{% else %}{% url 'reference_data:party_list' %}{% endif %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-x-circle"></i> Cancel
+                    </a>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-circle"></i>
+                        {% if is_edit %}Update Party{% else %}Create Party{% endif %}
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Help Info -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-info-circle"></i>
+        <strong>Note:</strong>
+        <ul class="mb-0 mt-2">
+            <li>Short Name is the primary key and must be unique</li>
+            <li>M-Label is auto-generated from Short Name for matching with external systems</li>
+            <li>GICS Code is the Global Industry Classification Standard code</li>
+            <li>Classification flags help categorize party types</li>
+            <li>CIF M-Labels are auto-generated when you add CIFs (format: {party}_{country}_{counter})</li>
+            <li>All changes are logged with audit trail (created_by, updated_by, timestamps)</li>
+        </ul>
+    </div>
+</div>
+
+<script>
+// Client-side form validation
+(function() {
+    'use strict';
+    var forms = document.querySelectorAll('.needs-validation');
+    Array.prototype.slice.call(forms).forEach(function(form) {
+        form.addEventListener('submit', function(event) {
+            if (!form.checkValidity()) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            form.classList.add('was-validated');
+        }, false);
+    });
+})();
+
+// CIF Management Functions
+let cifRowCounter = 0;
+
+function addCIFRow() {
+    cifRowCounter++;
+
+    // Clone the template
+    const template = document.querySelector('.cif-row-template');
+    const newRow = template.cloneNode(true);
+
+    // Show the cloned row
+    newRow.style.display = 'block';
+    newRow.classList.remove('cif-row-template');
+    newRow.classList.add('cif-row-active');
+
+    // Update IDs and names to be unique
+    const rowId = `cif-row-${cifRowCounter}`;
+    newRow.querySelector('.cif-row').id = rowId;
+
+    // Add change event to country dropdown for duplicate detection
+    const countrySelect = newRow.querySelector('.cif-country');
+    countrySelect.addEventListener('change', checkDuplicateCountries);
+
+    // Insert before the "no CIFs" message
+    const container = document.getElementById('cif-rows-container');
+    const noMessageDiv = document.getElementById('no-cifs-message');
+    container.insertBefore(newRow.firstElementChild, noMessageDiv);
+
+    // Hide the "no CIFs" message
+    noMessageDiv.style.display = 'none';
+
+    // Get the newly added country select element
+    const newCountrySelect = container.querySelector(`#${rowId} .cif-country`);
+}
+
+function removeCIFRow(button) {
+    const row = button.closest('.cif-row');
+    row.remove();
+
+    // Check if there are any CIF rows left
+    const container = document.getElementById('cif-rows-container');
+    const rows = container.querySelectorAll('.cif-row');
+
+    if (rows.length === 0) {
+        document.getElementById('no-cifs-message').style.display = 'block';
+    }
+
+    // Recheck for duplicate countries
+    checkDuplicateCountries();
+}
+
+function checkDuplicateCountries() {
+    const container = document.getElementById('cif-rows-container');
+    const rows = container.querySelectorAll('.cif-row');
+    const countries = {};
+    let hasDuplicates = false;
+
+    // Reset all error states
+    rows.forEach(row => {
+        const select = row.querySelector('.cif-country');
+        const errorDiv = row.querySelector('.country-duplicate-error');
+        select.classList.remove('is-invalid');
+        errorDiv.style.display = 'none';
+    });
+
+    // Check for duplicates
+    rows.forEach(row => {
+        const select = row.querySelector('.cif-country');
+        const country = select.value;
+
+        if (country) {
+            if (countries[country]) {
+                // Duplicate found
+                const errorDiv = row.querySelector('.country-duplicate-error');
+                select.classList.add('is-invalid');
+                errorDiv.style.display = 'block';
+                hasDuplicates = true;
+
+                // Also mark the first occurrence
+                const firstRow = countries[country];
+                const firstSelect = firstRow.querySelector('.cif-country');
+                const firstErrorDiv = firstRow.querySelector('.country-duplicate-error');
+                firstSelect.classList.add('is-invalid');
+                firstErrorDiv.style.display = 'block';
+            } else {
+                countries[country] = row;
+            }
+        }
+    });
+
+    return !hasDuplicates;
+}
+
+// Add validation before form submission
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.querySelector('form');
+    if (form) {
+        form.addEventListener('submit', function(event) {
+            // Check for duplicate countries
+            if (!checkDuplicateCountries()) {
+                event.preventDefault();
+                event.stopPropagation();
+                alert('Please fix duplicate country errors before submitting.');
+                return false;
+            }
+
+            // Check that all CIF rows have a country selected
+            if (!validateCIFCountries()) {
+                event.preventDefault();
+                event.stopPropagation();
+                alert('Please select a country for each CIF. Country is required.');
+                return false;
+            }
+        });
+    }
+});
+
+function validateCIFCountries() {
+    const container = document.getElementById('cif-rows-container');
+    const rows = container.querySelectorAll('.cif-row');
+    let isValid = true;
+
+    rows.forEach(row => {
+        const select = row.querySelector('.cif-country');
+        const errorDiv = row.querySelector('.country-required-error');
+
+        if (!select.value) {
+            select.classList.add('is-invalid');
+            if (errorDiv) {
+                errorDiv.style.display = 'block';
+            }
+            isValid = false;
+        } else {
+            select.classList.remove('is-invalid');
+            if (errorDiv) {
+                errorDiv.style.display = 'none';
+            }
+        }
+    });
+
+    return isValid;
+}
+</script>
+
+<!-- jQuery (required for Select2) - Local -->
+<script src="{% static 'js/jquery-3.7.1.min.js' %}"></script>
+
+<!-- Select2 JS - Local -->
+<script src="{% static 'js/select2.min.js' %}"></script>
+
+<!-- CIS Trade Hive Select2 Global Initialization -->
+<script src="{% static 'js/select2-init.js' %}"></script>
+
+<script>
+// Initialize Select2 on ALL party form dropdowns
+$(document).ready(function() {
+    // Initialize country dropdowns with Select2
+    $('.select2-country').each(function() {
+        CISSelect2.initElement($(this));
+    });
+
+    // Initialize existing CIF country dropdowns with Select2
+    $('.cif-country').each(function() {
+        CISSelect2.initElement($(this));
+    });
+});
+
+// Override addCIFRow to initialize Select2 on new country dropdown
+var originalAddCIFRow = window.addCIFRow;
+window.addCIFRow = function() {
+    originalAddCIFRow();
+    // Initialize Select2 on the newly added country dropdown
+    var container = document.getElementById('cif-rows-container');
+    var rows = container.querySelectorAll('.cif-row');
+    if (rows.length > 0) {
+        var lastRow = rows[rows.length - 1];
+        var newCountrySelect = lastRow.querySelector('.cif-country');
+        if (newCountrySelect && typeof $ !== 'undefined') {
+            CISSelect2.initElement($(newCountrySelect));
+        }
+    }
+};
+</script>
+{% endblock %}

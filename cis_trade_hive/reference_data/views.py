@@ -24,6 +24,7 @@ from .services.reference_data_service import (
     counterparty_service
 )
 from .services.counterparty_cif_service import counterparty_cif_service
+from .services.party_service import party_service, party_cif_service
 
 logger = logging.getLogger('reference_data')
 
@@ -1092,6 +1093,768 @@ def counterparty_cif_delete(request, short_name, m_label):
 
     except Exception as e:
         logger.error(f"Error deleting CIF: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
+
+
+# ============================================================================
+# Party Views (New naming - uses cis_party and cis_party_cif tables)
+# ============================================================================
+
+@require_login
+def party_list(request):
+    """
+    Party list view with filtering and CSV export - Uses cis_party table
+    Requires: Authentication
+    """
+    search = request.GET.get('search', '').strip()
+    country_filter = request.GET.get('country', '').strip()
+    status_filter = request.GET.get('status', 'active').strip()
+    cif_filter = request.GET.get('cif_filter', '').strip()
+    export = request.GET.get('export') == 'csv'
+    page_number = request.GET.get('page', 1)
+
+    try:
+        # Determine is_active filter
+        is_active = None
+        if status_filter == 'active':
+            is_active = True
+        elif status_filter == 'inactive':
+            is_active = False
+
+        # Filter for parties with multiple CIFs
+        if cif_filter == 'multiple':
+            multi_cif_names = party_cif_service.get_parties_with_multiple_cifs(is_active=True)
+            parties = party_service.list_all(
+                search=search if search else None,
+                country=country_filter if country_filter else None,
+                is_active=is_active
+            )
+            multi_cif_names_set = set(multi_cif_names)
+            parties = [p for p in parties if p.get('party_short_name') in multi_cif_names_set]
+        else:
+            parties = party_service.list_all(
+                search=search if search else None,
+                country=country_filter if country_filter else None,
+                is_active=is_active
+            )
+
+        # Get user info from session
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+
+        # CSV Export
+        if export:
+            response = HttpResponse(content_type='text/csv')
+            response['Content-Disposition'] = f'attachment; filename="parties_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv"'
+
+            writer = csv.writer(response)
+            writer.writerow([
+                'Short Name', 'Full Name', 'GICS Code', 'Industry', 'Industry Group',
+                'MAS Industry Code', 'Resident Y/N', 'Subsidiary Level',
+                'Party Grandparent', 'Party Parent',
+                'Address Line 1', 'Address Line 2', 'Address Line 3', 'Address Line 4',
+                'City', 'Country', 'Postal Code', 'Country of Incorporation',
+                'Primary Contact', 'Primary Number', 'Other Contact', 'Other Number',
+                'Fax Number', 'Telex Number',
+                'Is Bank', 'Is Broker', 'Is Custodian', 'Is Issuer', 'Is Corporate', 'Is Subsidiary',
+                'Status', 'Source System'
+            ])
+
+            for party in parties:
+                writer.writerow([
+                    party.get('party_short_name', ''),
+                    party.get('party_full_name', ''),
+                    party.get('gics_code', ''),
+                    party.get('industry', ''),
+                    party.get('industry_group', ''),
+                    party.get('mas_industry_code', ''),
+                    party.get('resident_y_n', ''),
+                    party.get('subsidiary_level', ''),
+                    party.get('party_grandparent', ''),
+                    party.get('party_parent', ''),
+                    party.get('address_line_0', ''),
+                    party.get('address_line_1', ''),
+                    party.get('address_line_2', ''),
+                    party.get('address_line_3', ''),
+                    party.get('city', ''),
+                    party.get('country', ''),
+                    party.get('postal_code', ''),
+                    party.get('country_of_incorporation', ''),
+                    party.get('primary_contact', ''),
+                    party.get('primary_number', ''),
+                    party.get('other_contact', ''),
+                    party.get('other_number', ''),
+                    party.get('fax_number', ''),
+                    party.get('telex_number', ''),
+                    'Yes' if party.get('is_bank') else 'No',
+                    'Yes' if party.get('is_broker') else 'No',
+                    'Yes' if party.get('is_custodian') else 'No',
+                    'Yes' if party.get('is_issuer') else 'No',
+                    'Yes' if party.get('is_corporate') else 'No',
+                    'Yes' if party.get('is_subsidiary') else 'No',
+                    'Active' if party.get('is_active') else 'Inactive',
+                    party.get('src_system', ''),
+                ])
+
+            audit_log_kudu_repository.log_action(
+                user_id=user_id,
+                username=username,
+                user_email=user_email,
+                action_type='EXPORT',
+                entity_type='REFERENCE_DATA',
+                entity_name='Party',
+                entity_id='PARTY_EXPORT',
+                action_description=f'Exported {len(parties)} parties to CSV',
+                request_method=request.method,
+                request_path=request.path,
+                ip_address=get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
+            )
+
+            return response
+
+        # Pagination
+        paginator = Paginator(parties, 25)
+        page_obj = paginator.get_page(page_number)
+
+        # Get distinct countries for filter dropdown
+        countries = party_service.get_distinct_countries()
+
+        context = {
+            'parties': page_obj,
+            'search': search,
+            'countries': countries,
+            'selected_country': country_filter,
+            'selected_status': status_filter,
+            'cif_filter': cif_filter,
+            'total_count': len(parties),
+        }
+
+        return render(request, 'reference_data/party_list.html', context)
+
+    except Exception as e:
+        logger.error(f"Error in party_list: {str(e)}")
+        messages.error(request, f"Error loading parties: {str(e)}")
+        return render(request, 'reference_data/party_list.html', {
+            'parties': [],
+            'countries': []
+        })
+
+
+@require_login
+def party_detail(request, short_name):
+    """
+    View party details including all fields and CIFs
+    Requires: Authentication
+    """
+    try:
+        party = party_service.get_by_short_name(short_name)
+
+        if not party:
+            messages.error(request, f"Party '{short_name}' not found")
+            return redirect('reference_data:party_list')
+
+        # Get all CIFs for this party
+        cifs = party_cif_service.list_cifs_for_party(short_name, is_active=None)
+
+        context = {
+            'party': party,
+            'cifs': cifs,
+            'cif_count': len(cifs),
+        }
+
+        return render(request, 'reference_data/party_details.html', context)
+
+    except Exception as e:
+        logger.error(f"Error in party_detail: {str(e)}")
+        messages.error(request, f"Error loading party details: {str(e)}")
+        return redirect('reference_data:party_list')
+
+
+@require_login
+def party_create(request):
+    """
+    Create new party
+    Requires: Authentication
+    """
+    if request.method == 'POST':
+        try:
+            username = request.session.get('user_login', 'anonymous')
+            user_id = str(request.session.get('user_id', ''))
+            user_email = request.session.get('user_email', '')
+
+            party_data = {
+                # Basic Information
+                'party_short_name': request.POST.get('party_short_name', '').strip(),
+                'party_full_name': request.POST.get('party_full_name', '').strip(),
+                'gics_code': request.POST.get('gics_code', '').strip(),
+                'industry': request.POST.get('industry', '').strip(),
+                'industry_group': request.POST.get('industry_group', '').strip(),
+                'mas_industry_code': request.POST.get('mas_industry_code', '').strip(),
+                'resident_y_n': request.POST.get('resident_y_n', '').strip(),
+                'subsidiary_level': request.POST.get('subsidiary_level', '').strip(),
+                # Hierarchy
+                'party_grandparent': request.POST.get('party_grandparent', '').strip(),
+                'party_parent': request.POST.get('party_parent', '').strip(),
+                # Address
+                'address_line_0': request.POST.get('address_line_0', '').strip(),
+                'address_line_1': request.POST.get('address_line_1', '').strip(),
+                'address_line_2': request.POST.get('address_line_2', '').strip(),
+                'address_line_3': request.POST.get('address_line_3', '').strip(),
+                'city': request.POST.get('city', '').strip(),
+                'country': request.POST.get('country', '').strip(),
+                'postal_code': request.POST.get('postal_code', '').strip(),
+                'country_of_incorporation': request.POST.get('country_of_incorporation', '').strip(),
+                # Contact
+                'primary_contact': request.POST.get('primary_contact', '').strip(),
+                'primary_number': request.POST.get('primary_number', '').strip(),
+                'other_contact': request.POST.get('other_contact', '').strip(),
+                'other_number': request.POST.get('other_number', '').strip(),
+                'fax_number': request.POST.get('fax_number', '').strip(),
+                'telex_number': request.POST.get('telex_number', '').strip(),
+                # Classification flags
+                'is_bank': request.POST.get('is_bank') == 'on',
+                'is_broker': request.POST.get('is_broker') == 'on',
+                'is_custodian': request.POST.get('is_custodian') == 'on',
+                'is_issuer': request.POST.get('is_issuer') == 'on',
+                'is_corporate': request.POST.get('is_corporate') == 'on',
+                'is_subsidiary': request.POST.get('is_subsidiary') == 'on',
+            }
+
+            user_info = {'username': username, 'user_id': user_id, 'user_email': user_email}
+
+            success, error_msg = party_service.create_party(party_data, user_info)
+
+            if success:
+                # Handle CIF data
+                cif_countries = request.POST.getlist('cif_country[]')
+                cif_isins = request.POST.getlist('cif_isin[]')
+                cif_descriptions = request.POST.getlist('cif_description[]')
+
+                party_short_name = party_data['party_short_name']
+                cif_count = 0
+                for i in range(len(cif_countries)):
+                    if cif_countries[i]:
+                        cif_data = {
+                            'party_name': party_short_name,
+                            'country': cif_countries[i],
+                            'isin': cif_isins[i] if i < len(cif_isins) else '',
+                            'description': cif_descriptions[i] if i < len(cif_descriptions) else '',
+                        }
+                        try:
+                            party_cif_service.create_cif(cif_data, user_info)
+                            cif_count += 1
+                        except Exception as cif_error:
+                            logger.error(f"Error creating CIF: {str(cif_error)}")
+
+                audit_log_kudu_repository.log_action(
+                    user_id=user_id,
+                    username=username,
+                    user_email=user_email,
+                    action_type='CREATE',
+                    entity_type='REFERENCE_DATA',
+                    entity_name='Party',
+                    entity_id=party_data['party_short_name'],
+                    action_description=f"Created party: {party_data['party_short_name']}" + (f" with {cif_count} CIF(s)" if cif_count > 0 else ""),
+                    request_method=request.method,
+                    request_path=request.path,
+                    ip_address=get_client_ip(request),
+                    user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                    status='SUCCESS'
+                )
+
+                messages.success(request, f"Party '{party_data['party_short_name']}' created successfully" + (f" with {cif_count} CIF(s)" if cif_count > 0 else ""))
+                return redirect('reference_data:party_list')
+            else:
+                messages.error(request, error_msg)
+
+        except Exception as e:
+            logger.error(f"Error creating party: {str(e)}")
+            messages.error(request, f"Error creating party: {str(e)}")
+
+    countries = country_service.list_all()
+    context = {
+        'countries': countries,
+    }
+    return render(request, 'reference_data/party_form.html', context)
+
+
+@require_login
+def party_edit(request, short_name):
+    """
+    Edit existing party
+    Requires: Authentication
+    """
+    try:
+        party = party_service.get_by_short_name(short_name)
+        if not party:
+            messages.error(request, f"Party '{short_name}' not found")
+            return redirect('reference_data:party_list')
+
+        if not party_service.can_edit_party(party):
+            src_system = party.get('src_system', 'unknown')
+            messages.warning(request, f"Cannot edit party from source system '{src_system}'. Only CIS records are editable.")
+            return redirect('reference_data:party_list')
+
+        if request.method == 'POST':
+            username = request.session.get('user_login', 'anonymous')
+            user_id = str(request.session.get('user_id', ''))
+            user_email = request.session.get('user_email', '')
+
+            party_data = {
+                # Basic Information
+                'party_full_name': request.POST.get('party_full_name', '').strip(),
+                'gics_code': request.POST.get('gics_code', '').strip(),
+                'industry': request.POST.get('industry', '').strip(),
+                'industry_group': request.POST.get('industry_group', '').strip(),
+                'mas_industry_code': request.POST.get('mas_industry_code', '').strip(),
+                'resident_y_n': request.POST.get('resident_y_n', '').strip(),
+                'subsidiary_level': request.POST.get('subsidiary_level', '').strip(),
+                # Hierarchy
+                'party_grandparent': request.POST.get('party_grandparent', '').strip(),
+                'party_parent': request.POST.get('party_parent', '').strip(),
+                # Address
+                'address_line_0': request.POST.get('address_line_0', '').strip(),
+                'address_line_1': request.POST.get('address_line_1', '').strip(),
+                'address_line_2': request.POST.get('address_line_2', '').strip(),
+                'address_line_3': request.POST.get('address_line_3', '').strip(),
+                'city': request.POST.get('city', '').strip(),
+                'country': request.POST.get('country', '').strip(),
+                'postal_code': request.POST.get('postal_code', '').strip(),
+                'country_of_incorporation': request.POST.get('country_of_incorporation', '').strip(),
+                # Contact
+                'primary_contact': request.POST.get('primary_contact', '').strip(),
+                'primary_number': request.POST.get('primary_number', '').strip(),
+                'other_contact': request.POST.get('other_contact', '').strip(),
+                'other_number': request.POST.get('other_number', '').strip(),
+                'fax_number': request.POST.get('fax_number', '').strip(),
+                'telex_number': request.POST.get('telex_number', '').strip(),
+                # Classification flags
+                'is_bank': request.POST.get('is_bank') == 'on',
+                'is_broker': request.POST.get('is_broker') == 'on',
+                'is_custodian': request.POST.get('is_custodian') == 'on',
+                'is_issuer': request.POST.get('is_issuer') == 'on',
+                'is_corporate': request.POST.get('is_corporate') == 'on',
+                'is_subsidiary': request.POST.get('is_subsidiary') == 'on',
+            }
+
+            user_info = {'username': username, 'user_id': user_id, 'user_email': user_email}
+
+            success, error_msg = party_service.update_party(short_name, party_data, user_info)
+
+            if success:
+                # Handle CIF data
+                cif_countries = request.POST.getlist('cif_country[]')
+                cif_isins = request.POST.getlist('cif_isin[]')
+                cif_descriptions = request.POST.getlist('cif_description[]')
+
+                cif_count = 0
+                for i in range(len(cif_countries)):
+                    if cif_countries[i]:
+                        cif_data = {
+                            'party_name': short_name,
+                            'country': cif_countries[i],
+                            'isin': cif_isins[i] if i < len(cif_isins) else '',
+                            'description': cif_descriptions[i] if i < len(cif_descriptions) else '',
+                        }
+                        try:
+                            party_cif_service.create_cif(cif_data, user_info)
+                            cif_count += 1
+                        except Exception as cif_error:
+                            logger.error(f"Error creating CIF: {str(cif_error)}")
+
+                # Track changes for audit
+                old_values = {}
+                new_values = {}
+                changed_fields = []
+
+                trackable_fields = ['party_full_name', 'record_type', 'city', 'country',
+                                   'postal_code', 'primary_contact', 'primary_number', 'industry',
+                                   'gics_code', 'party_grandparent', 'party_parent',
+                                   'is_bank', 'is_broker', 'is_custodian', 'is_issuer',
+                                   'is_corporate', 'is_subsidiary']
+
+                for field in trackable_fields:
+                    old_val = party.get(field, '')
+                    new_val = party_data.get(field, '')
+                    if str(old_val) != str(new_val):
+                        old_values[field] = old_val
+                        new_values[field] = new_val
+                        changed_fields.append(field)
+
+                audit_log_kudu_repository.log_action(
+                    user_id=user_id,
+                    username=username,
+                    user_email=user_email,
+                    action_type='UPDATE',
+                    entity_type='REFERENCE_DATA',
+                    entity_name='Party',
+                    entity_id=short_name,
+                    action_description=f"Updated party: {short_name} - Changed fields: {', '.join(changed_fields) if changed_fields else 'No changes'}" + (f" and added {cif_count} CIF(s)" if cif_count > 0 else ""),
+                    old_value=json.dumps(old_values, default=str) if old_values else None,
+                    new_value=json.dumps(new_values, default=str) if new_values else None,
+                    field_name=', '.join(changed_fields) if changed_fields else None,
+                    request_method=request.method,
+                    request_path=request.path,
+                    ip_address=get_client_ip(request),
+                    user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                    status='SUCCESS'
+                )
+
+                messages.success(request, f"Party '{short_name}' updated successfully" + (f" and added {cif_count} CIF(s)" if cif_count > 0 else ""))
+
+                next_url = request.GET.get('next') or request.POST.get('next')
+                if next_url:
+                    return redirect(next_url)
+                return redirect('reference_data:party_list')
+            else:
+                messages.error(request, error_msg)
+
+        countries = country_service.list_all()
+        existing_cifs = party_cif_service.list_cifs_for_party(short_name, is_active=True)
+
+        context = {
+            'party': party,
+            'countries': countries,
+            'existing_cifs': existing_cifs,
+            'next_url': request.GET.get('next', ''),
+            'is_edit': True
+        }
+        return render(request, 'reference_data/party_form.html', context)
+
+    except Exception as e:
+        logger.error(f"Error editing party: {str(e)}")
+        messages.error(request, f"Error editing party: {str(e)}")
+        return redirect('reference_data:party_list')
+
+
+@require_login
+def party_delete(request, short_name):
+    """
+    Soft delete party (POST only)
+    Requires: Authentication
+    """
+    if request.method != 'POST':
+        return redirect('reference_data:party_list')
+
+    try:
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+
+        user_info = {'username': username, 'user_id': user_id, 'user_email': user_email}
+
+        success, error_msg = party_service.delete_party(short_name, user_info)
+
+        if success:
+            audit_log_kudu_repository.log_action(
+                user_id=user_id,
+                username=username,
+                user_email=user_email,
+                action_type='DELETE',
+                entity_type='REFERENCE_DATA',
+                entity_name='Party',
+                entity_id=short_name,
+                action_description=f"Deleted party: {short_name}",
+                request_method=request.method,
+                request_path=request.path,
+                ip_address=get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
+            )
+
+            messages.success(request, f"Party '{short_name}' deleted successfully")
+        else:
+            messages.error(request, error_msg)
+
+    except Exception as e:
+        logger.error(f"Error deleting party: {str(e)}")
+        messages.error(request, f"Error deleting party: {str(e)}")
+
+    return redirect('reference_data:party_list')
+
+
+@require_login
+def party_restore(request, short_name):
+    """
+    Restore soft-deleted party (POST only)
+    Requires: Authentication
+    """
+    if request.method != 'POST':
+        return redirect('reference_data:party_list')
+
+    try:
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+
+        user_info = {'username': username, 'user_id': user_id, 'user_email': user_email}
+
+        success, error_msg = party_service.restore_party(short_name, user_info)
+
+        if success:
+            audit_log_kudu_repository.log_action(
+                user_id=user_id,
+                username=username,
+                user_email=user_email,
+                action_type='RESTORE',
+                entity_type='REFERENCE_DATA',
+                entity_name='Party',
+                entity_id=short_name,
+                action_description=f"Restored party: {short_name}",
+                request_method=request.method,
+                request_path=request.path,
+                ip_address=get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
+            )
+
+            messages.success(request, f"Party '{short_name}' restored successfully")
+        else:
+            messages.error(request, error_msg)
+
+    except Exception as e:
+        logger.error(f"Error restoring party: {str(e)}")
+        messages.error(request, f"Error restoring party: {str(e)}")
+
+    return redirect('reference_data:party_list')
+
+
+# ============================================================================
+# Party CIF Views (AJAX API)
+# ============================================================================
+
+@require_login
+@require_http_methods(["GET"])
+def party_cif_list(request, short_name):
+    """
+    Get all CIFs for a party (AJAX endpoint)
+    Returns: JSON response with CIF list
+    """
+    try:
+        cifs = party_cif_service.list_cifs_for_party(short_name, is_active=True)
+
+        return JsonResponse({
+            'success': True,
+            'cifs': cifs,
+            'count': len(cifs)
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching CIFs for party {short_name}: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
+
+
+@require_login
+@require_http_methods(["POST"])
+def party_cif_create(request, short_name):
+    """
+    Create new CIF for a party (AJAX endpoint)
+    Returns: JSON response with success/error
+    """
+    try:
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+
+        data = json.loads(request.body)
+
+        cif_data = {
+            'party_name': short_name,
+            'country': data.get('country', '').strip(),
+            'isin': data.get('isin', '').strip(),
+            'description': data.get('description', '').strip(),
+        }
+
+        user_info = {'username': username, 'user_id': user_id, 'user_email': user_email}
+
+        success, error_msg = party_cif_service.create_cif(cif_data, user_info)
+
+        if success:
+            audit_log_kudu_repository.log_action(
+                user_id=user_id,
+                username=username,
+                user_email=user_email,
+                action_type='CREATE',
+                entity_type='PARTY_CIF',
+                entity_name='Party CIF',
+                entity_id=f"{short_name}:{cif_data.get('country', '')}",
+                action_description=f"Created CIF for party {short_name} in country {cif_data.get('country', '')}",
+                request_method=request.method,
+                request_path=request.path,
+                ip_address=get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
+            )
+
+            return JsonResponse({
+                'success': True,
+                'message': f"CIF created successfully for party {short_name}"
+            })
+        else:
+            return JsonResponse({
+                'success': False,
+                'error': error_msg
+            }, status=400)
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid JSON data'
+        }, status=400)
+    except Exception as e:
+        logger.error(f"Error creating party CIF: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
+
+
+@require_login
+@require_http_methods(["POST"])
+def party_cif_update(request, short_name, m_label):
+    """
+    Update existing party CIF (AJAX endpoint)
+    Returns: JSON response with success/error
+    """
+    try:
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+
+        existing_cif = party_cif_service.get_cif(short_name, m_label)
+
+        data = json.loads(request.body)
+        country = data.get('country', '').strip()
+
+        cif_data = {
+            'isin': data.get('isin', '').strip(),
+            'description': data.get('description', '').strip(),
+        }
+
+        user_info = {'username': username, 'user_id': user_id, 'user_email': user_email}
+
+        success, error_msg = party_cif_service.update_cif(short_name, m_label, country, cif_data, user_info)
+
+        if success:
+            old_values = {}
+            new_values = {}
+            changed_fields = []
+
+            if existing_cif:
+                trackable_fields = ['isin', 'description']
+                for field in trackable_fields:
+                    old_val = existing_cif.get(field, '')
+                    new_val = cif_data.get(field, '')
+                    if str(old_val) != str(new_val):
+                        old_values[field] = old_val
+                        new_values[field] = new_val
+                        changed_fields.append(field)
+
+            audit_log_kudu_repository.log_action(
+                user_id=user_id,
+                username=username,
+                user_email=user_email,
+                action_type='UPDATE',
+                entity_type='PARTY_CIF',
+                entity_name='Party CIF',
+                entity_id=f"{short_name}:{m_label}",
+                action_description=f"Updated CIF {m_label} for party {short_name} - Changed fields: {', '.join(changed_fields) if changed_fields else 'No changes'}",
+                old_value=json.dumps(old_values, default=str) if old_values else None,
+                new_value=json.dumps(new_values, default=str) if new_values else None,
+                field_name=', '.join(changed_fields) if changed_fields else None,
+                request_method=request.method,
+                request_path=request.path,
+                ip_address=get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
+            )
+
+            return JsonResponse({
+                'success': True,
+                'message': f"CIF '{m_label}' updated successfully"
+            })
+        else:
+            return JsonResponse({
+                'success': False,
+                'error': error_msg
+            }, status=400)
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid JSON data'
+        }, status=400)
+    except Exception as e:
+        logger.error(f"Error updating party CIF: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
+
+
+@require_login
+@require_http_methods(["POST"])
+def party_cif_delete(request, short_name, m_label):
+    """
+    Soft delete party CIF (AJAX endpoint)
+    Returns: JSON response with success/error
+    """
+    try:
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+
+        # Get country from request body
+        data = json.loads(request.body) if request.body else {}
+        country = data.get('country', '')
+
+        user_info = {'username': username, 'user_id': user_id, 'user_email': user_email}
+
+        success, error_msg = party_cif_service.delete_cif(short_name, m_label, country, user_info)
+
+        if success:
+            audit_log_kudu_repository.log_action(
+                user_id=user_id,
+                username=username,
+                user_email=user_email,
+                action_type='DELETE',
+                entity_type='PARTY_CIF',
+                entity_name='Party CIF',
+                entity_id=f"{short_name}:{m_label}",
+                action_description=f"Deleted CIF {m_label} for party {short_name}",
+                request_method=request.method,
+                request_path=request.path,
+                ip_address=get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
+            )
+
+            return JsonResponse({
+                'success': True,
+                'message': f"CIF '{m_label}' deleted successfully"
+            })
+        else:
+            return JsonResponse({
+                'success': False,
+                'error': error_msg
+            }, status=400)
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid JSON data'
+        }, status=400)
+    except Exception as e:
+        logger.error(f"Error deleting party CIF: {str(e)}")
         return JsonResponse({
             'success': False,
             'error': str(e)

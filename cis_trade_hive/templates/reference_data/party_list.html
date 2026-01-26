@@ -1,0 +1,559 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Parties - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="#">Reference Data</a></li>
+    <li class="breadcrumb-item active">Parties</li>
+{% endblock %}
+
+{% block content %}
+<div class="party-list-container" style="max-width: 100%; overflow-x: hidden;">
+    <!-- Page Header -->
+    <div class="content-header d-flex justify-content-between align-items-start">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-building text-primary"></i> Parties
+            </h1>
+            <p class="content-subtitle">Manage party reference data from Kudu table: cis_party</p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{% url 'reference_data:party_create' %}" class="btn btn-primary">
+                <i class="bi bi-plus-circle"></i> Create Party
+            </a>
+            <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Back
+            </a>
+        </div>
+    </div>
+
+    <!-- Search & Filter Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-funnel"></i> Search & Filter
+            </h5>
+        </div>
+        <div class="card-body">
+            <form method="get" action="{% url 'reference_data:party_list' %}" class="row g-3">
+                <!-- Search -->
+                <div class="col-md-6">
+                    <label class="form-label">Search</label>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" name="search" value="{{ search }}"
+                               placeholder="Search by short name or full name...">
+                    </div>
+                </div>
+
+                <!-- Country Filter -->
+                <div class="col-md-3">
+                    <label class="form-label">Country</label>
+                    <select class="form-select" name="country">
+                        <option value="">All Countries</option>
+                        {% for country in countries %}
+                            <option value="{{ country }}" {% if selected_country == country %}selected{% endif %}>
+                                {{ country }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Status Filter -->
+                <div class="col-md-2">
+                    <label class="form-label">Status</label>
+                    <select class="form-select" name="status">
+                        <option value="active" {% if selected_status == 'active' %}selected{% endif %}>Active</option>
+                        <option value="inactive" {% if selected_status == 'inactive' %}selected{% endif %}>Inactive</option>
+                        <option value="all" {% if selected_status == 'all' %}selected{% endif %}>All</option>
+                    </select>
+                </div>
+
+                <!-- CIF Filter -->
+                <div class="col-md-2">
+                    <label class="form-label">CIF Count</label>
+                    <select class="form-select" name="cif_filter">
+                        <option value="" {% if not cif_filter %}selected{% endif %}>All</option>
+                        <option value="multiple" {% if cif_filter == 'multiple' %}selected{% endif %}>Multiple CIFs Only</option>
+                    </select>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="col-md-1 d-flex align-items-end gap-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i>
+                    </button>
+                    <a href="{% url 'reference_data:party_list' %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-x-circle"></i>
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Parties Table -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0">
+                Party List
+                <span class="badge badge-primary ms-2">{{ total_count }} parties</span>
+            </h5>
+            <a href="?export=csv{% if search %}&search={{ search }}{% endif %}{% if selected_country %}&country={{ selected_country }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}" class="btn btn-sm btn-success">
+                <i class="bi bi-download"></i> Export CSV
+            </a>
+        </div>
+        <div class="card-body p-0">
+            {% if parties %}
+                <div class="table-responsive" style="display: block; width: 100%; max-height: 600px; overflow-x: auto; overflow-y: auto;">
+                    <table class="table table-hover table-sm mb-0" style="font-size: 0.875rem; white-space: nowrap; width: max-content;">
+                        <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
+                            <tr>
+                                <th style="width: 150px; position: sticky; left: 0; background-color: #f8f9fa; z-index: 11; border-right: 2px solid #dee2e6;">Short Name</th>
+                                <th style="width: 80px;">Source</th>
+                                <th style="width: 70px;">CIFs</th>
+                                <th style="width: 200px;">Full Name</th>
+                                <th style="width: 120px;">GICS Code</th>
+                                <th style="width: 100px;">Industry</th>
+                                <th style="width: 120px;">Industry Group</th>
+                                <th style="width: 120px;">MAS Code</th>
+                                <th style="width: 120px;">City</th>
+                                <th style="width: 120px;">Country</th>
+                                <th style="width: 150px;">Party Grandparent</th>
+                                <th style="width: 150px;">Party Parent</th>
+                                <th style="width: 80px;">Subsidiary</th>
+                                <th style="width: 80px;">Bank</th>
+                                <th style="width: 80px;">Broker</th>
+                                <th style="width: 80px;">Custodian</th>
+                                <th style="width: 80px;">Issuer</th>
+                                <th style="width: 80px;">Corporate</th>
+                                <th style="width: 80px;">Status</th>
+                                <th style="width: 220px; position: sticky; right: 0; background-color: #f8f9fa; z-index: 11; border-left: 2px solid #dee2e6;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for party in parties %}
+                            <tr>
+                                <td style="position: sticky; left: 0; background-color: white; z-index: 9; border-right: 2px solid #dee2e6;">
+                                    <strong class="text-primary">{{ party.party_short_name|default:"-" }}</strong>
+                                </td>
+                                <td>
+                                    {% if party.src_system|upper == 'CIS' %}
+                                        <span class="badge badge-success">CIS</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">{{ party.src_system|upper|default:"GMP" }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <button type="button" class="btn btn-sm btn-outline-info"
+                                            onclick="viewCIFs('{{ party.party_short_name }}')"
+                                            title="View CIFs">
+                                        <i class="bi bi-file-earmark-text"></i>
+                                    </button>
+                                </td>
+                                <td>{{ party.party_full_name|default:"-" }}</td>
+                                <td>{{ party.gics_code|default:"-" }}</td>
+                                <td>{{ party.industry|default:"-" }}</td>
+                                <td>{{ party.industry_group|default:"-" }}</td>
+                                <td>{{ party.mas_industry_code|default:"-" }}</td>
+                                <td>{{ party.city|default:"-" }}</td>
+                                <td>{{ party.country|default:"-" }}</td>
+                                <td>{{ party.party_grandparent|default:"-" }}</td>
+                                <td>{{ party.party_parent|default:"-" }}</td>
+                                <td>
+                                    {% if party.is_subsidiary %}
+                                        <span class="badge badge-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">No</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if party.is_bank %}
+                                        <span class="badge badge-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">No</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if party.is_broker %}
+                                        <span class="badge badge-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">No</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if party.is_custodian %}
+                                        <span class="badge badge-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">No</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if party.is_issuer %}
+                                        <span class="badge badge-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">No</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if party.is_corporate %}
+                                        <span class="badge badge-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">No</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if party.is_active %}
+                                        <span class="badge badge-success">Active</span>
+                                    {% else %}
+                                        <span class="badge badge-warning">Inactive</span>
+                                    {% endif %}
+                                </td>
+                                <td style="position: sticky; right: 0; background-color: white; z-index: 9; border-left: 2px solid #dee2e6;">
+                                    <div class="btn-group" role="group">
+                                        {# View button - available for all records #}
+                                        <a href="{% url 'reference_data:party_detail' party.party_short_name %}"
+                                           class="btn btn-sm btn-outline-info" title="View Details">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                        {% if party.src_system|lower == 'cis' %}
+                                            {# CIS records - fully editable #}
+                                            <a href="{% url 'reference_data:party_edit' party.party_short_name %}?next={{ request.get_full_path|urlencode }}"
+                                               class="btn btn-sm btn-outline-primary" title="Edit">
+                                                <i class="bi bi-pencil"></i>
+                                            </a>
+                                        {% else %}
+                                            {# GMP records - read-only #}
+                                            <button class="btn btn-sm btn-outline-secondary" disabled title="Read-only: {{ party.src_system|upper }} record">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                        {% endif %}
+
+                                        {% if party.src_system|lower == 'cis' %}
+                                            {# Only allow delete/restore for CIS records #}
+                                            {% if party.is_deleted %}
+                                                <form method="post" action="{% url 'reference_data:party_restore' party.party_short_name %}"
+                                                      style="display: inline;" onsubmit="return confirm('Restore this party?');">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-sm btn-outline-success" title="Restore">
+                                                        <i class="bi bi-arrow-counterclockwise"></i>
+                                                    </button>
+                                                </form>
+                                            {% else %}
+                                                <form method="post" action="{% url 'reference_data:party_delete' party.party_short_name %}"
+                                                      style="display: inline;" onsubmit="return confirm('Delete this party?');">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                                                        <i class="bi bi-trash"></i>
+                                                    </button>
+                                                </form>
+                                            {% endif %}
+                                        {% else %}
+                                            {# GMP records - no delete option #}
+                                            <button class="btn btn-sm btn-outline-secondary" disabled title="Read-only: {{ party.src_system|upper }} record">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                {% if parties.has_other_pages %}
+                <div class="card-footer">
+                    <nav aria-label="Party pagination">
+                        <ul class="pagination justify-content-center mb-0">
+                            {% if parties.has_previous %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if selected_country %}&country={{ selected_country }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if cif_filter %}&cif_filter={{ cif_filter }}{% endif %}" aria-label="First">
+                                        <span aria-hidden="true">&laquo;&laquo;</span>
+                                    </a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ parties.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if selected_country %}&country={{ selected_country }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if cif_filter %}&cif_filter={{ cif_filter }}{% endif %}" aria-label="Previous">
+                                        <span aria-hidden="true">&laquo;</span>
+                                    </a>
+                                </li>
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">&laquo;&laquo;</span>
+                                </li>
+                                <li class="page-item disabled">
+                                    <span class="page-link">&laquo;</span>
+                                </li>
+                            {% endif %}
+
+                            {% for num in parties.paginator.page_range %}
+                                {% if parties.number == num %}
+                                    <li class="page-item active">
+                                        <span class="page-link">{{ num }}</span>
+                                    </li>
+                                {% elif num > parties.number|add:'-3' and num < parties.number|add:'3' %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="?page={{ num }}{% if search %}&search={{ search }}{% endif %}{% if selected_country %}&country={{ selected_country }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if cif_filter %}&cif_filter={{ cif_filter }}{% endif %}">{{ num }}</a>
+                                    </li>
+                                {% endif %}
+                            {% endfor %}
+
+                            {% if parties.has_next %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ parties.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if selected_country %}&country={{ selected_country }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if cif_filter %}&cif_filter={{ cif_filter }}{% endif %}" aria-label="Next">
+                                        <span aria-hidden="true">&raquo;</span>
+                                    </a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ parties.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if selected_country %}&country={{ selected_country }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if cif_filter %}&cif_filter={{ cif_filter }}{% endif %}" aria-label="Last">
+                                        <span aria-hidden="true">&raquo;&raquo;</span>
+                                    </a>
+                                </li>
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">&raquo;</span>
+                                </li>
+                                <li class="page-item disabled">
+                                    <span class="page-link">&raquo;&raquo;</span>
+                                </li>
+                            {% endif %}
+                        </ul>
+                        <div class="text-center mt-2" style="font-size: var(--font-size-sm); color: var(--gray-600);">
+                            Page {{ parties.number }} of {{ parties.paginator.num_pages }} ({{ total_count }} total parties)
+                        </div>
+                    </nav>
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="text-center py-5" style="color: var(--gray-500);">
+                    <i class="bi bi-building" style="font-size: 3rem; opacity: 0.3;"></i>
+                    <p class="mt-3 mb-0">No parties found</p>
+                    {% if search or selected_country or selected_status != 'active' %}
+                        <p class="text-muted">Try adjusting your filters</p>
+                        <a href="{% url 'reference_data:party_list' %}" class="btn btn-sm btn-primary mt-2">Clear Filters</a>
+                    {% else %}
+                        <a href="{% url 'reference_data:party_create' %}" class="btn btn-sm btn-primary mt-2">
+                            <i class="bi bi-plus-circle"></i> Create First Party
+                        </a>
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-info-circle"></i>
+        <strong>Note:</strong> Party data is stored in Kudu table <code>cis_party</code> with a stable primary key (<code>party_short_name</code>).
+        This replaces the old <code>cis_counterparty_kudu</code> table with improved column naming.
+    </div>
+
+    <!-- CIF Details Modal -->
+    <div class="modal" id="cifModal" tabindex="-1" aria-labelledby="cifModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="cifModalLabel">
+                        <i class="bi bi-file-earmark-text"></i> CIF Details
+                    </h5>
+                    <button type="button" class="btn-close" onclick="closeCIFModal()" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="cifLoadingSpinner" class="text-center py-4" style="display: none;">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-muted">Loading CIFs...</p>
+                    </div>
+
+                    <div id="cifContent" style="display: none;">
+                        <h6 class="mb-3">
+                            Party: <strong id="cifPartyName" class="text-primary"></strong>
+                        </h6>
+
+                        <div id="cifList"></div>
+
+                        <div id="noCIFsMessage" class="text-center py-4" style="display: none;">
+                            <i class="bi bi-inbox" style="font-size: 3rem; opacity: 0.3;"></i>
+                            <p class="mt-3 mb-0 text-muted">No CIFs found for this party</p>
+                        </div>
+                    </div>
+
+                    <div id="cifErrorMessage" class="alert alert-danger" style="display: none;">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <span id="cifErrorText"></span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeCIFModal()">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// CIF Modal Functionality with client-side caching
+let cifCache = new Map();
+
+function viewCIFs(partyShortName) {
+    console.log('viewCIFs called for:', partyShortName);
+
+    const modal = document.getElementById('cifModal');
+
+    // Remove ALL existing backdrops
+    const allBackdrops = document.querySelectorAll('.modal-backdrop');
+    allBackdrops.forEach(backdrop => backdrop.remove());
+
+    // Reset modal state
+    document.getElementById('cifList').innerHTML = '';
+    document.getElementById('cifLoadingSpinner').style.display = 'block';
+    document.getElementById('cifContent').style.display = 'none';
+    document.getElementById('cifErrorMessage').style.display = 'none';
+    document.getElementById('noCIFsMessage').style.display = 'none';
+    document.getElementById('cifPartyName').textContent = partyShortName;
+
+    // Show modal
+    modal.classList.add('show');
+    modal.style.display = 'block';
+    document.body.classList.add('modal-open');
+    document.body.style.overflow = '';
+    document.body.style.paddingRight = '';
+
+    // Add backdrop
+    const newBackdrop = document.createElement('div');
+    newBackdrop.className = 'modal-backdrop show';
+    newBackdrop.onclick = closeCIFModal;
+    document.body.appendChild(newBackdrop);
+
+    // Check cache first
+    if (cifCache.has(partyShortName)) {
+        console.log('Using cached data for:', partyShortName);
+        const cachedData = cifCache.get(partyShortName);
+        document.getElementById('cifLoadingSpinner').style.display = 'none';
+        document.getElementById('cifContent').style.display = 'block';
+
+        if (cachedData.cifs && cachedData.cifs.length > 0) {
+            displayCIFs(cachedData.cifs);
+        } else {
+            document.getElementById('noCIFsMessage').style.display = 'block';
+        }
+        return;
+    }
+
+    // Fetch CIFs via AJAX
+    console.log('Fetching from server for:', partyShortName);
+    fetchCIFsFromServer(partyShortName);
+}
+
+function closeCIFModal() {
+    console.log('closeCIFModal called');
+
+    const modal = document.getElementById('cifModal');
+
+    const allBackdrops = document.querySelectorAll('.modal-backdrop');
+    allBackdrops.forEach(backdrop => backdrop.remove());
+
+    modal.classList.remove('show');
+    modal.style.display = 'none';
+    document.body.classList.remove('modal-open');
+    document.body.style.overflow = '';
+    document.body.style.paddingRight = '';
+
+    console.log('Modal closed successfully');
+}
+
+window.addEventListener('error', function(e) {
+    console.error('JavaScript Error:', e.message, 'at', e.filename, ':', e.lineno);
+});
+
+function fetchCIFsFromServer(partyShortName) {
+    const url = `/reference-data/party/${encodeURIComponent(partyShortName)}/cif/`;
+
+    fetch(url, {
+        method: 'GET',
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+        },
+        credentials: 'same-origin'
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Failed to fetch CIFs');
+        }
+        return response.json();
+    })
+    .then(data => {
+        cifCache.set(partyShortName, data);
+
+        document.getElementById('cifLoadingSpinner').style.display = 'none';
+        document.getElementById('cifContent').style.display = 'block';
+
+        if (data.success && data.cifs && data.cifs.length > 0) {
+            displayCIFs(data.cifs);
+            document.getElementById('noCIFsMessage').style.display = 'none';
+        } else {
+            document.getElementById('cifList').innerHTML = '';
+            document.getElementById('noCIFsMessage').style.display = 'block';
+        }
+    })
+    .catch(error => {
+        document.getElementById('cifLoadingSpinner').style.display = 'none';
+        document.getElementById('cifErrorMessage').style.display = 'block';
+        document.getElementById('cifErrorText').textContent = 'Error loading CIFs: ' + error.message;
+    });
+}
+
+function displayCIFs(cifs) {
+    const cifListContainer = document.getElementById('cifList');
+
+    const htmlContent = cifs.map(cif => `
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <p class="mb-2">
+                            <strong>Country:</strong> ${cif.country || '-'}
+                        </p>
+                        <p class="mb-2">
+                            <strong>Source:</strong>
+                            ${(cif.src_system || '').toUpperCase() === 'CIS' ? '<span class="badge badge-success">CIS</span>' : '<span class="badge badge-secondary">' + ((cif.src_system || 'GMP').toUpperCase()) + '</span>'}
+                        </p>
+                    </div>
+                    <div class="col-md-6">
+                        <p class="mb-2">
+                            <strong>ISIN:</strong> ${cif.isin || '-'}
+                        </p>
+                        <p class="mb-2">
+                            <strong>Status:</strong>
+                            ${cif.is_active ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-warning">Inactive</span>'}
+                        </p>
+                    </div>
+                </div>
+                ${cif.description ? `
+                <div class="row mt-2">
+                    <div class="col-12">
+                        <p class="mb-0">
+                            <strong>Description:</strong> ${cif.description}
+                        </p>
+                    </div>
+                </div>
+                ` : ''}
+                <div class="row mt-2">
+                    <div class="col-12">
+                        <small class="text-muted">
+                            Created by: ${cif.created_by || '-'} |
+                            Updated by: ${cif.updated_by || '-'}
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+
+    cifListContainer.innerHTML = htmlContent;
+}
+</script>
+{% endblock %}
