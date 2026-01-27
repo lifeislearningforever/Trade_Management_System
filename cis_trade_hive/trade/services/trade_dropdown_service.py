@@ -173,12 +173,12 @@ class TradeDropdownService:
         ]
 
     def get_counterparties(self, search: str = None) -> List[Dict[str, Any]]:
-        """Get valid counterparties for dropdown."""
+        """Get valid counterparties (parties) for dropdown."""
         counterparties = trade_validation_repository.get_valid_counterparties(search=search)
         return [
             {
-                'value': c.get('counterparty_short_name', ''),
-                'label': f"{c.get('counterparty_full_name', '')} ({c.get('counterparty_short_name', '')})",
+                'value': c.get('party_short_name', ''),
+                'label': f"{c.get('party_full_name', '')} ({c.get('party_short_name', '')})",
                 'country': c.get('country', ''),
                 'is_broker': c.get('is_broker', False)
             }
@@ -191,24 +191,24 @@ class TradeDropdownService:
 
     def get_brokers(self) -> List[Dict[str, Any]]:
         """
-        Get broker options from counterparty table where is_broker=true.
-        Falls back to lookup table if counterparty query fails.
+        Get broker options from cis_party table where is_broker=true.
+        Falls back to lookup table if party query fails.
         """
         try:
             query = f"""
-            SELECT counterparty_short_name as value,
-                   COALESCE(counterparty_full_name, counterparty_short_name) as label,
+            SELECT party_short_name as value,
+                   COALESCE(party_full_name, party_short_name) as label,
                    country
-            FROM {self.DATABASE}.cis_counterparty_kudu
+            FROM {self.DATABASE}.cis_party
             WHERE is_broker = true
               AND is_active = true
               AND (is_deleted = false OR is_deleted IS NULL)
-            ORDER BY counterparty_short_name
+            ORDER BY party_short_name
             LIMIT 200
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
             if results:
-                logger.debug(f"Loaded {len(results)} brokers from counterparty table")
+                logger.debug(f"Loaded {len(results)} brokers from cis_party table")
                 return [
                     {
                         'value': r.get('value', ''),
@@ -218,7 +218,7 @@ class TradeDropdownService:
                     for r in results
                 ]
         except Exception as e:
-            logger.warning(f"Could not load brokers from counterparty: {str(e)}")
+            logger.warning(f"Could not load brokers from cis_party: {str(e)}")
 
         # Fallback to lookup table
         options = self._execute_lookup_query(
@@ -318,24 +318,24 @@ class TradeDropdownService:
 
     def get_custodians(self) -> List[Dict[str, Any]]:
         """
-        Get custodian options from counterparty table where is_custodian=true.
-        Falls back to lookup table if counterparty query fails.
+        Get custodian options from cis_party table where is_custodian=true.
+        Falls back to lookup table if party query fails.
         """
         try:
             query = f"""
-            SELECT counterparty_short_name as value,
-                   COALESCE(counterparty_full_name, counterparty_short_name) as label,
+            SELECT party_short_name as value,
+                   COALESCE(party_full_name, party_short_name) as label,
                    country
-            FROM {self.DATABASE}.cis_counterparty_kudu
+            FROM {self.DATABASE}.cis_party
             WHERE is_custodian = true
               AND is_active = true
               AND (is_deleted = false OR is_deleted IS NULL)
-            ORDER BY counterparty_short_name
+            ORDER BY party_short_name
             LIMIT 200
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
             if results:
-                logger.debug(f"Loaded {len(results)} custodians from counterparty table")
+                logger.debug(f"Loaded {len(results)} custodians from cis_party table")
                 return [
                     {
                         'value': r.get('value', ''),
@@ -345,7 +345,7 @@ class TradeDropdownService:
                     for r in results
                 ]
         except Exception as e:
-            logger.warning(f"Could not load custodians from counterparty: {str(e)}")
+            logger.warning(f"Could not load custodians from cis_party: {str(e)}")
 
         # Fallback to lookup table
         options = self._execute_lookup_query(

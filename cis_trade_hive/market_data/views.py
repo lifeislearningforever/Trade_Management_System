@@ -422,20 +422,21 @@ from django.shortcuts import redirect
 class EquityPriceWrapper:
     """
     Wrapper to convert Hive dict data to object with attributes for template compatibility.
+
+    Uses composite key: (currency_code, security_label)
     """
     def __init__(self, data, index=0):
         self.data = data
 
-        # Map fields from Kudu table
-        self.equity_price_id = data.get('equity_price_id', '')
+        # Map fields from Kudu table - Composite key fields
         self.currency_code = data.get('currency_code', '')
         self.security_label = data.get('security_label', '')
+
+        # Business fields
         self.isin = data.get('isin', '')
         self.price_date = data.get('price_date', '')
         self.main_closing_price = data.get('main_closing_price', 0)
-        self.market = data.get('market', '')
         self.price_timestamp = data.get('price_timestamp', '')
-        self.group_name = data.get('group_name', '')
         self.price_datetime = data.get('price_datetime', '')
         self.src_system = data.get('src_system', 'CIS')
 
@@ -446,8 +447,8 @@ class EquityPriceWrapper:
         self.updated_by = data.get('updated_by', '')
         self.updated_at_display = data.get('updated_at_display', '')
 
-        # Generate ID for template
-        self.id = self.equity_price_id if self.equity_price_id else abs(hash(str(data))) % 1000000
+        # Generate ID for template (hash of composite key)
+        self.id = abs(hash(f"{self.currency_code}/{self.security_label}")) % 1000000
 
 
 def equity_price_list(request):
@@ -460,7 +461,6 @@ def equity_price_list(request):
     isin = request.GET.get('isin', '').strip()
     date_from = request.GET.get('date_from', '').strip()
     date_to = request.GET.get('date_to', '').strip()
-    market = request.GET.get('market', '').strip()
     export = request.GET.get('export', '').strip()
 
     # Get equity prices from service layer
@@ -471,8 +471,7 @@ def equity_price_list(request):
             security_label=security_label if security_label else None,
             isin=isin if isin else None,
             date_from=date_from if date_from else None,
-            date_to=date_to if date_to else None,
-            market=market if market else None
+            date_to=date_to if date_to else None
         )
     except ValidationError as e:
         equity_prices_data = []
@@ -484,8 +483,8 @@ def equity_price_list(request):
 
         writer = csv.writer(response)
         writer.writerow([
-            'Currency', 'Security', 'ISIN', 'Date', 'Price', 'Market',
-            'Timestamp', 'Group', 'Created By', 'Created At'
+            'Currency', 'Security', 'ISIN', 'Date', 'Price',
+            'Timestamp', 'Source System', 'Created By', 'Created At'
         ])
 
         for price_data in equity_prices_data:
@@ -496,9 +495,8 @@ def equity_price_list(request):
                 price.isin,
                 price.price_date,
                 price.main_closing_price,
-                price.market,
                 price.price_datetime,
-                price.group_name,
+                price.src_system,
                 price.created_by,
                 price.created_at_display
             ])
@@ -569,9 +567,7 @@ def equity_price_list(request):
         'isin': isin,
         'date_from': date_from,
         'date_to': date_to,
-        'market': market,
         'currencies': dropdown_options.get('currencies', []),
-        'markets': dropdown_options.get('markets', []),
         'securities': dropdown_options.get('securities', []),
         'total_count': len(equity_prices_data),
     }
@@ -582,17 +578,17 @@ def equity_price_list(request):
 def equity_price_create(request):
     """
     Create new equity price.
+
+    Uses composite key: (currency_code, security_label)
     """
     if request.method == 'POST':
-        # Get form data
+        # Get form data - removed market and group_name
         equity_price_data = {
             'currency_code': request.POST.get('currency_code', '').strip(),
             'security_label': request.POST.get('security_label', '').strip(),
             'isin': request.POST.get('isin', '').strip(),
             'price_date': request.POST.get('price_date', '').strip(),
             'main_closing_price': request.POST.get('main_closing_price', '').strip(),
-            'market': request.POST.get('market', '').strip(),
-            'group_name': request.POST.get('group_name', '').strip(),
             'src_system': request.POST.get('src_system', 'CIS').strip(),
         }
 
@@ -617,6 +613,7 @@ def equity_price_create(request):
                     user_email=user_email,
                     action_type='CREATE',
                     entity_type='EQUITY_PRICE',
+                    entity_id=f"{equity_price_data['currency_code']}/{equity_price_data['security_label']}",
                     entity_name=equity_price_data['security_label'],
                     action_description=f"Created equity price for {equity_price_data['security_label']} on {equity_price_data['price_date']}",
                     status='SUCCESS',
@@ -640,7 +637,6 @@ def equity_price_create(request):
             'error': error_message,
             'form_data': equity_price_data,
             'currencies': dropdown_options.get('currencies', []),
-            'markets': dropdown_options.get('markets', []),
             'securities': dropdown_options.get('securities', []),
         }
 
@@ -657,7 +653,6 @@ def equity_price_create(request):
 
         context = {
             'currencies': dropdown_options.get('currencies', []),
-            'markets': dropdown_options.get('markets', []),
             'securities': dropdown_options.get('securities', []),
             'default_date': today,
         }
@@ -665,37 +660,41 @@ def equity_price_create(request):
         return render(request, 'market_data/equity_price_form.html', context)
 
 
-def equity_price_edit(request, equity_price_id):
+def equity_price_edit(request, currency_code: str, security_label: str):
     """
     Edit existing equity price.
+
+    Uses composite key: (currency_code, security_label)
     """
-    # Get existing price
+    # URL decode the security_label (may contain spaces, special characters)
+    from urllib.parse import unquote
+    security_label = unquote(security_label)
+
+    # Get existing price by composite key
     try:
-        existing_price = equity_price_service.get_equity_price_by_id(equity_price_id)
+        existing_price = equity_price_service.get_equity_price_by_key(currency_code, security_label)
         if not existing_price:
             return HttpResponse("Equity price not found", status=404)
     except Exception as e:
         return HttpResponse(f"Error: {str(e)}", status=500)
 
     if request.method == 'POST':
-        # Get form data
+        # Get form data - removed market and group_name
         equity_price_data = {
-            'currency_code': request.POST.get('currency_code', '').strip(),
-            'security_label': request.POST.get('security_label', '').strip(),
             'isin': request.POST.get('isin', '').strip(),
             'price_date': request.POST.get('price_date', '').strip(),
             'main_closing_price': request.POST.get('main_closing_price', '').strip(),
-            'market': request.POST.get('market', '').strip(),
-            'group_name': request.POST.get('group_name', '').strip(),
+            'src_system': request.POST.get('src_system', 'CIS').strip(),
         }
 
         # Get user info
         username = request.session.get('user_login', 'SYSTEM')
 
         try:
-            # Update equity price
+            # Update equity price using composite key
             success = equity_price_service.update_equity_price(
-                equity_price_id,
+                currency_code,
+                security_label,
                 equity_price_data,
                 user=username
             )
@@ -706,8 +705,7 @@ def equity_price_edit(request, equity_price_id):
                 new_values = {}
                 changed_fields = []
 
-                trackable_fields = ['currency_code', 'security_label', 'isin', 'price_date',
-                                   'main_closing_price', 'market', 'group_name']
+                trackable_fields = ['isin', 'price_date', 'main_closing_price', 'src_system']
 
                 for field in trackable_fields:
                     old_val = existing_price.get(field, '')
@@ -727,9 +725,9 @@ def equity_price_edit(request, equity_price_id):
                     user_email=user_email,
                     action_type='UPDATE',
                     entity_type='EQUITY_PRICE',
-                    entity_id=str(equity_price_id),
-                    entity_name=equity_price_data['security_label'],
-                    action_description=f"Updated equity price for {equity_price_data['security_label']} on {equity_price_data['price_date']} - Changed fields: {', '.join(changed_fields) if changed_fields else 'No changes'}",
+                    entity_id=f"{currency_code}/{security_label}",
+                    entity_name=security_label,
+                    action_description=f"Updated equity price for {security_label} on {equity_price_data['price_date']} - Changed fields: {', '.join(changed_fields) if changed_fields else 'No changes'}",
                     old_value=json.dumps(old_values, default=str) if old_values else None,
                     new_value=json.dumps(new_values, default=str) if new_values else None,
                     field_name=', '.join(changed_fields) if changed_fields else None,
@@ -756,7 +754,6 @@ def equity_price_edit(request, equity_price_id):
             'equity_price': existing_price,
             'form_data': equity_price_data,
             'currencies': dropdown_options.get('currencies', []),
-            'markets': dropdown_options.get('markets', []),
             'securities': dropdown_options.get('securities', []),
             'is_edit': True,
         }
@@ -771,7 +768,6 @@ def equity_price_edit(request, equity_price_id):
         context = {
             'equity_price': existing_price,
             'currencies': dropdown_options.get('currencies', []),
-            'markets': dropdown_options.get('markets', []),
             'securities': dropdown_options.get('securities', []),
             'is_edit': True,
         }

@@ -4,7 +4,7 @@ Trade Validation Repository
 Validates trade references against master data:
 - Portfolio: Must exist in cis_portfolio with SETTLED status
 - Security: Must exist in cis_security with ACTIVE/APPROVED status
-- Counterparty: Must exist in cis_counterparty_kudu with is_active=true
+- Counterparty: Must exist in cis_party with is_active=true
 
 All queries use Kudu via Impala.
 
@@ -48,8 +48,8 @@ class TradeValidationRepository:
     # Case-insensitive matching for status
     SECURITY_VALID_STATUSES = ['ACTIVE', 'APPROVED', 'SETTLED', 'active', 'approved', 'settled', None, '']
 
-    # Counterparty table
-    COUNTERPARTY_TABLE = 'cis_counterparty_kudu'
+    # Counterparty table (using cis_party instead of deprecated cis_counterparty_kudu)
+    COUNTERPARTY_TABLE = 'cis_party'
 
     @staticmethod
     def escape_value(val: Any) -> str:
@@ -379,10 +379,10 @@ class TradeValidationRepository:
 
     def validate_counterparty(self, counterparty_name: str) -> ValidationResult:
         """
-        Validate that counterparty exists and is active.
+        Validate that counterparty (party) exists and is active.
 
         Args:
-            counterparty_name: Counterparty short name to validate
+            counterparty_name: Party short name to validate
 
         Returns:
             ValidationResult with is_valid, message, and counterparty details
@@ -400,10 +400,10 @@ class TradeValidationRepository:
             counterparty_escaped = counterparty_name.replace("'", "''")
 
             query = f"""
-            SELECT counterparty_short_name, counterparty_full_name,
+            SELECT party_short_name, party_full_name,
                    country, is_broker, is_custodian, is_active, is_deleted
             FROM {self.DATABASE}.{self.COUNTERPARTY_TABLE}
-            WHERE counterparty_short_name = '{counterparty_escaped}'
+            WHERE party_short_name = '{counterparty_escaped}'
             LIMIT 1
             """
 
@@ -458,7 +458,7 @@ class TradeValidationRepository:
 
     def get_valid_counterparties(self, search: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
         """
-        Get list of valid counterparties for trade entry dropdown.
+        Get list of valid counterparties (parties) for trade entry dropdown.
         Results are cached for 5 minutes to improve performance.
 
         Args:
@@ -466,7 +466,7 @@ class TradeValidationRepository:
             limit: Maximum results
 
         Returns:
-            List of counterparty dictionaries
+            List of counterparty dictionaries with party_short_name and party_full_name
         """
         try:
             # Check cache first (only for non-search queries)
@@ -477,8 +477,8 @@ class TradeValidationRepository:
                     return cached
 
             query = f"""
-            SELECT counterparty_short_name,
-                   counterparty_full_name,
+            SELECT party_short_name,
+                   party_full_name,
                    country,
                    is_broker,
                    is_custodian
@@ -490,11 +490,11 @@ class TradeValidationRepository:
             if search:
                 search_escaped = search.replace("'", "''")
                 query += f"""
-                AND (LOWER(counterparty_short_name) LIKE '%{search_escaped.lower()}%'
-                     OR LOWER(counterparty_full_name) LIKE '%{search_escaped.lower()}%')
+                AND (LOWER(party_short_name) LIKE '%{search_escaped.lower()}%'
+                     OR LOWER(party_full_name) LIKE '%{search_escaped.lower()}%')
                 """
 
-            query += f" ORDER BY counterparty_short_name LIMIT {limit}"
+            query += f" ORDER BY party_short_name LIMIT {limit}"
 
             results = impala_manager.execute_query(query, database=self.DATABASE)
 

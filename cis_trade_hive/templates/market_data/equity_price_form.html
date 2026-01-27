@@ -101,28 +101,12 @@
                                placeholder="0.0000" required>
                     </div>
 
-                    <!-- Market -->
+                    <!-- Source System -->
                     <div class="col-md-4 mb-3">
-                        <label for="market" class="form-label">Market</label>
-                        <select class="form-select" id="market" name="market">
-                            <option value="">-- Select Market --</option>
-                            {% for mkt in markets %}
-                                <option value="{{ mkt }}"
-                                        {% if equity_price.market == mkt or form_data.market == mkt %}selected{% endif %}>
-                                    {{ mkt }}
-                                </option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                </div>
-
-                <div class="row">
-                    <!-- Group -->
-                    <div class="col-md-12 mb-3">
-                        <label for="group_name" class="form-label">Group</label>
-                        <input type="text" class="form-control" id="group_name" name="group_name"
-                               value="{% if equity_price %}{{ equity_price.group_name }}{% elif form_data %}{{ form_data.group_name }}{% endif %}"
-                               placeholder="e.g., Technology, Energy">
+                        <label for="src_system" class="form-label">Source System</label>
+                        <input type="text" class="form-control" id="src_system" name="src_system"
+                               value="{% if equity_price %}{{ equity_price.src_system }}{% elif form_data %}{{ form_data.src_system }}{% else %}CIS{% endif %}"
+                               placeholder="e.g., CIS, Bloomberg">
                     </div>
                 </div>
 
@@ -309,8 +293,7 @@ $(document).ready(function() {
     // List of ALL dropdown IDs in the equity price form
     var allDropdownIds = [
         'currency_code',
-        'security_label',
-        'market'
+        'security_label'
     ];
 
     // Initialize all dropdowns using the global CISSelect2 utility
