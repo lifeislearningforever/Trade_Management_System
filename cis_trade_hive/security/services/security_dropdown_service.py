@@ -29,7 +29,7 @@ class SecurityDropdownRepository:
 
     DATABASE = 'gmp_cis'
     UDF_FIELD_TABLE = 'cis_udf_field'
-    COUNTERPARTY_TABLE = 'gmp_cis.cis_counterparty_kudu'
+    PARTY_TABLE = 'gmp_cis.cis_party'
     COUNTRY_TABLE = 'gmp_cis_sta_dly_country'
     CURRENCY_TABLE = 'gmp_cis_sta_dly_currency'
 
@@ -81,18 +81,18 @@ class SecurityDropdownRepository:
     @staticmethod
     def get_issuers() -> List[Dict[str, str]]:
         """
-        Get issuers from cis_counterparty_kudu table where is_issuer=TRUE.
+        Get issuers from cis_party table.
 
         Returns:
-            List of issuer dictionaries with 'name' key (counterparty_short_name)
+            List of issuer dictionaries with 'name' key (party_short_name)
         """
         try:
             query = f"""
-            SELECT counterparty_short_name
-            FROM {SecurityDropdownRepository.COUNTERPARTY_TABLE}
-            WHERE is_issuer = TRUE
-              AND is_active = TRUE
-            ORDER BY counterparty_short_name
+            SELECT party_short_name, party_full_name
+            FROM {SecurityDropdownRepository.PARTY_TABLE}
+            WHERE is_active = TRUE
+              AND (is_deleted IS NULL OR is_deleted = FALSE)
+            ORDER BY party_short_name
             """
 
             result = impala_manager.execute_query(query, database=SecurityDropdownRepository.DATABASE)
@@ -100,7 +100,7 @@ class SecurityDropdownRepository:
             if not result:
                 return []
 
-            return [{'name': row.get('counterparty_short_name', '')} for row in result]
+            return [{'name': row.get('party_short_name', '')} for row in result]
 
         except Exception as e:
             logger.error(f"Error fetching issuers: {str(e)}")
@@ -350,7 +350,7 @@ class SecurityDropdownService:
     # ==========================================================================
 
     def get_issuers(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get Issuer dropdown options from counterparty table"""
+        """Get Issuer dropdown options from party table"""
         issuers = self.repository.get_issuers()
         self._log_dropdown_fetch('issuers', len(issuers), user)
         return issuers

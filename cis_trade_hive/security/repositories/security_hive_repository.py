@@ -51,7 +51,7 @@ class SecurityHiveRepository:
 
         Args:
             limit: Maximum number of records to return
-            status: Filter by status (DRAFT, PENDING_APPROVAL, ACTIVE, etc.)
+            status: Filter by status (INITIAL, MODIFIED, VALIDATED)
             search: Search term for security_name or ISIN
             currency: Filter by currency_code
             security_type: Filter by security_type
@@ -208,6 +208,10 @@ class SecurityHiveRepository:
                 'fund_index_fund': str,
                 'management_limit_classification': str,
                 'relative_index': str,
+                'pct_hld_entity_1': str,
+                'pct_hld_entity_2': str,
+                'pct_hld_entity_3': str,
+                'pct_hld_entity_aggr': str,
             }
 
             for field, field_type in field_mapping.items():
@@ -219,7 +223,7 @@ class SecurityHiveRepository:
             columns.extend(['status', 'submitted_for_approval_at', 'submitted_by',
                            'reviewed_at', 'reviewed_by', 'review_comments'])
             values.extend([
-                SecurityHiveRepository.escape_value(security_data.get('status', 'DRAFT')),
+                SecurityHiveRepository.escape_value(security_data.get('status', 'INITIAL')),
                 'NULL',
                 'NULL',
                 'NULL',
@@ -289,7 +293,9 @@ class SecurityHiveRepository:
                 'shareholding_aggregated', 'substantial_10_pct', 'bwciif', 'bwciif_others',
                 'cels', 'approved_s32', 'basel_iv_fund', 'mas_643_entity_type', 'mas_6d_code',
                 'fin_nonfin_ind', 'business_unit_head', 'person_in_charge', 'core_noncore',
-                'fund_index_fund', 'management_limit_classification', 'relative_index'
+                'fund_index_fund', 'management_limit_classification', 'relative_index',
+                'status',
+                'pct_hld_entity_1', 'pct_hld_entity_2', 'pct_hld_entity_3', 'pct_hld_entity_aggr',
             ]
 
             for field in updatable_fields:
@@ -354,20 +360,18 @@ class SecurityHiveRepository:
                 f"updated_at = {timestamp_ms}"
             ]
 
-            if status == 'PENDING_APPROVAL' and submitted_by:
+            if submitted_by:
                 set_clauses.append(f"submitted_for_approval_at = {timestamp_ms}")
                 set_clauses.append(f"submitted_by = {SecurityHiveRepository.escape_value(submitted_by)}")
 
-            if status in ['APPROVED', 'ACTIVE', 'REJECTED'] and reviewed_by:
+            if status == 'VALIDATED' and reviewed_by:
                 set_clauses.append(f"reviewed_at = {timestamp_ms}")
                 set_clauses.append(f"reviewed_by = {SecurityHiveRepository.escape_value(reviewed_by)}")
                 if review_comments:
                     set_clauses.append(f"review_comments = {SecurityHiveRepository.escape_value(review_comments)}")
 
-            if status in ['APPROVED', 'ACTIVE']:
+            if status == 'VALIDATED':
                 set_clauses.append("is_active = true")
-            elif status in ['REJECTED', 'INACTIVE']:
-                set_clauses.append("is_active = false")
 
             update_sql = f"""
             UPDATE {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
@@ -405,8 +409,9 @@ class SecurityHiveRepository:
 
             status_counts = {}
             total_securities = 0
-            active_securities = 0
-            pending_approvals = 0
+            validated_securities = 0
+            initial_securities = 0
+            modified_securities = 0
 
             if status_results:
                 for row in status_results:
@@ -415,16 +420,31 @@ class SecurityHiveRepository:
                     status_counts[status] = count
                     total_securities += count
 
-                    if status in ['ACTIVE', 'APPROVED']:
-                        active_securities += count
-                    elif status == 'PENDING_APPROVAL':
-                        pending_approvals = count
+                    if status == 'VALIDATED':
+                        validated_securities += count
+                    elif status == 'INITIAL':
+                        initial_securities += count
+                    elif status == 'MODIFIED':
+                        modified_securities += count
+
+            # Count by Quoted/Unquoted
+            quoted_query = f"""
+            SELECT quoted_unquoted, COUNT(*) as count
+            FROM {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
+            GROUP BY quoted_unquoted
+            ORDER BY count DESC
+            """
+            quoted_results = impala_manager.execute_query(quoted_query, database=SecurityHiveRepository.DATABASE)
+
+            quoted_unquoted = []
+            if quoted_results:
+                quoted_unquoted = [{'quoted_unquoted': row.get('quoted_unquoted', 'N/A') or 'N/A', 'count': row.get('count', 0)}
+                                  for row in quoted_results]
 
             # Count by security type
             type_query = f"""
             SELECT security_type, COUNT(*) as count
             FROM {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
-            WHERE status IN ('ACTIVE', 'APPROVED')
             GROUP BY security_type
             ORDER BY count DESC
             LIMIT 10
@@ -433,14 +453,13 @@ class SecurityHiveRepository:
 
             security_types = []
             if type_results:
-                security_types = [{'type': row.get('security_type', 'Unknown'), 'count': row.get('count', 0)}
+                security_types = [{'security_type': row.get('security_type', 'Unknown'), 'count': row.get('count', 0)}
                                  for row in type_results]
 
             # Count by currency
             currency_query = f"""
             SELECT currency_code, COUNT(*) as count
             FROM {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
-            WHERE status IN ('ACTIVE', 'APPROVED')
             GROUP BY currency_code
             ORDER BY count DESC
             LIMIT 10
@@ -449,27 +468,65 @@ class SecurityHiveRepository:
 
             currencies = []
             if currency_results:
-                currencies = [{'currency': row.get('currency_code', 'Unknown'), 'count': row.get('count', 0)}
+                currencies = [{'currency_code': row.get('currency_code', 'Unknown'), 'count': row.get('count', 0)}
                              for row in currency_results]
+
+            # Count by investment type
+            investment_query = f"""
+            SELECT investment_type, COUNT(*) as count
+            FROM {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
+            GROUP BY investment_type
+            ORDER BY count DESC
+            LIMIT 10
+            """
+            investment_results = impala_manager.execute_query(investment_query, database=SecurityHiveRepository.DATABASE)
+
+            investment_types = []
+            if investment_results:
+                investment_types = [{'investment_type': row.get('investment_type', 'Unknown'), 'count': row.get('count', 0)}
+                                   for row in investment_results]
+
+            # Count by industry
+            industry_query = f"""
+            SELECT industry, COUNT(*) as count
+            FROM {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
+            GROUP BY industry
+            ORDER BY count DESC
+            LIMIT 15
+            """
+            industry_results = impala_manager.execute_query(industry_query, database=SecurityHiveRepository.DATABASE)
+
+            industries = []
+            if industry_results:
+                industries = [{'industry': row.get('industry', 'Unknown'), 'count': row.get('count', 0)}
+                             for row in industry_results]
 
             return {
                 'total_securities': total_securities,
-                'active_securities': active_securities,
-                'pending_approvals': pending_approvals,
+                'validated_securities': validated_securities,
+                'initial_securities': initial_securities,
+                'modified_securities': modified_securities,
                 'status_breakdown': status_counts,
-                'security_types': security_types,
-                'currencies': currencies
+                'by_quoted_unquoted': quoted_unquoted,
+                'by_security_type': security_types,
+                'by_currency': currencies,
+                'by_investment_type': investment_types,
+                'by_industry': industries,
             }
 
         except Exception as e:
             logger.error(f"Error getting statistics: {str(e)}")
             return {
                 'total_securities': 0,
-                'active_securities': 0,
-                'pending_approvals': 0,
+                'validated_securities': 0,
+                'initial_securities': 0,
+                'modified_securities': 0,
                 'status_breakdown': {},
-                'security_types': [],
-                'currencies': []
+                'by_quoted_unquoted': [],
+                'by_security_type': [],
+                'by_currency': [],
+                'by_investment_type': [],
+                'by_industry': [],
             }
 
     @staticmethod

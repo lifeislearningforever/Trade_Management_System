@@ -98,9 +98,9 @@
                         <label for="country_of_incorporation" class="form-label">Country of Incorporation</label>
                         <select class="form-select" id="country_of_incorporation" name="country_of_incorporation">
                             <option value="">Select Country</option>
-                            {% for country in dropdown_options.country_of_incorporation_options %}
-                                <option value="{{ country.value }}" {% if security.country_of_incorporation == country.value %}selected{% endif %}>
-                                    {{ country.value }}
+                            {% for country in dropdown_options.countries %}
+                                <option value="{{ country.name }}" {% if security.country_of_incorporation == country.name %}selected{% endif %}>
+                                    {{ country.name }}
                                 </option>
                             {% endfor %}
                         </select>
@@ -231,11 +231,8 @@
                     <a href="{% url 'security:list' %}" class="btn btn-outline-secondary btn-lg">
                         <i class="bi bi-x-circle"></i> Cancel
                     </a>
-                    <button type="submit" name="action" value="save_draft" class="btn btn-secondary btn-lg">
-                        <i class="bi bi-save"></i> Save as Draft
-                    </button>
-                    <button type="submit" name="action" value="submit" class="btn btn-success btn-lg">
-                        <i class="bi bi-check2-circle"></i> Save & Submit for Approval
+                    <button type="submit" name="action" value="save" class="btn btn-primary btn-lg">
+                        <i class="bi bi-save"></i> Save
                     </button>
                 </div>
             </form>
@@ -246,11 +243,11 @@
     <div class="alert alert-info mt-4">
         <i class="bi bi-info-circle"></i>
         {% if security %}
-            <strong>Four-Eyes Workflow:</strong> After updating, you can submit the security for approval.
-            Only DRAFT and REJECTED securities can be edited. A different user (Checker) must approve changes.
+            <strong>Maker-Checker Workflow:</strong> Editing a security changes its status to <strong>MODIFIED</strong>.
+            A different user (Checker) must validate the changes. Only CIS records can be edited.
         {% else %}
-            <strong>Four-Eyes Workflow:</strong> New securities are created in <strong>DRAFT</strong> status.
-            After creation, submit for approval. Only a different user (Checker) can approve it to make it ACTIVE.
+            <strong>Maker-Checker Workflow:</strong> New securities are created in <strong>INITIAL</strong> status.
+            A different user (Checker) must validate the security (Four-Eyes principle).
         {% endif %}
     </div>
 </div>
@@ -487,6 +484,37 @@
                             {% endfor %}
                         </select>
                     </div>
+
+                    <!-- New String Fields -->
+                    <div class="col-12 mt-3 mb-2">
+                        <h6 class="border-bottom pb-2" style="color: var(--primary); font-weight: 600;">
+                            <i class="bi bi-tag"></i> Additional Fields
+                        </h6>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_cels" class="form-label">CELS</label>
+                        <input type="text" class="form-control" id="modal_cels" placeholder="Enter CELS" maxlength="100">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_mas_6d_code" class="form-label">MAS 6D Code</label>
+                        <input type="text" class="form-control" id="modal_mas_6d_code" placeholder="Enter MAS 6D Code" maxlength="100">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_pct_hld_entity_1" class="form-label">PCT HLD Entity 1</label>
+                        <input type="text" class="form-control" id="modal_pct_hld_entity_1" placeholder="Enter PCT HLD Entity 1" maxlength="200">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_pct_hld_entity_2" class="form-label">PCT HLD Entity 2</label>
+                        <input type="text" class="form-control" id="modal_pct_hld_entity_2" placeholder="Enter PCT HLD Entity 2" maxlength="200">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_pct_hld_entity_3" class="form-label">PCT HLD Entity 3</label>
+                        <input type="text" class="form-control" id="modal_pct_hld_entity_3" placeholder="Enter PCT HLD Entity 3" maxlength="200">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="modal_pct_hld_entity_aggr" class="form-label">PCT HLD Entity AGGR</label>
+                        <input type="text" class="form-control" id="modal_pct_hld_entity_aggr" placeholder="Enter PCT HLD Entity AGGR" maxlength="200">
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -536,7 +564,13 @@ function saveRegulatoryData() {
         s32_representative: document.getElementById('modal_s32_representative').value || null,
         substantial_gt_10_percent: document.getElementById('modal_substantial_gt_10_percent').value || null,
         relative_index: document.getElementById('modal_relative_index').value || null,
-        fin_non_fin_ind: document.getElementById('modal_fin_non_fin_ind').value || null
+        fin_non_fin_ind: document.getElementById('modal_fin_non_fin_ind').value || null,
+        cels: document.getElementById('modal_cels').value || null,
+        mas_6d_code: document.getElementById('modal_mas_6d_code').value || null,
+        pct_hld_entity_1: document.getElementById('modal_pct_hld_entity_1').value || null,
+        pct_hld_entity_2: document.getElementById('modal_pct_hld_entity_2').value || null,
+        pct_hld_entity_3: document.getElementById('modal_pct_hld_entity_3').value || null,
+        pct_hld_entity_aggr: document.getElementById('modal_pct_hld_entity_aggr').value || null
     };
     document.getElementById('regulatoryData').value = JSON.stringify(data);
     bootstrap.Modal.getInstance(document.getElementById('regulatoryModal')).hide();
@@ -588,6 +622,12 @@ function loadExistingData() {
     document.getElementById('modal_substantial_gt_10_percent').value = '{{ security.substantial_gt_10_percent|default:"" }}';
     document.getElementById('modal_relative_index').value = '{{ security.relative_index|default:"" }}';
     document.getElementById('modal_fin_non_fin_ind').value = '{{ security.fin_non_fin_ind|default:"" }}';
+    document.getElementById('modal_cels').value = '{{ security.cels|default:"" }}';
+    document.getElementById('modal_mas_6d_code').value = '{{ security.mas_6d_code|default:"" }}';
+    document.getElementById('modal_pct_hld_entity_1').value = '{{ security.pct_hld_entity_1|default:"" }}';
+    document.getElementById('modal_pct_hld_entity_2').value = '{{ security.pct_hld_entity_2|default:"" }}';
+    document.getElementById('modal_pct_hld_entity_3').value = '{{ security.pct_hld_entity_3|default:"" }}';
+    document.getElementById('modal_pct_hld_entity_aggr').value = '{{ security.pct_hld_entity_aggr|default:"" }}';
     {% endif %}
 }
 

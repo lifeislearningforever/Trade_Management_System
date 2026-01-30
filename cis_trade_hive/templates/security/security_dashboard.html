@@ -28,17 +28,14 @@
             <i class="bi bi-list"></i> View All Securities
         </a>
         <a href="{% url 'security:pending_approvals' %}" class="btn btn-warning">
-            <i class="bi bi-clock-history"></i> Pending Approvals
-            {% if stats.pending_approvals > 0 %}
-                <span class="badge bg-danger">{{ stats.pending_approvals }}</span>
-            {% endif %}
+            <i class="bi bi-clock-history"></i> Pending Validation
         </a>
     </div>
 
     <!-- Overview Statistics -->
     <div class="row mb-4">
         <div class="col-md-3">
-            <div class="card text-white bg-primary">
+            <div class="card text-white bg-primary h-100">
                 <div class="card-body">
                     <div class="d-flex align-items-center">
                         <div class="flex-grow-1">
@@ -54,12 +51,12 @@
         </div>
 
         <div class="col-md-3">
-            <div class="card text-white bg-success">
+            <div class="card text-white bg-success h-100">
                 <div class="card-body">
                     <div class="d-flex align-items-center">
                         <div class="flex-grow-1">
-                            <h6 class="card-title text-white">Active Securities</h6>
-                            <h2 class="mb-0">{{ stats.active_securities|default:0 }}</h2>
+                            <h6 class="card-title text-white">Validated</h6>
+                            <h2 class="mb-0">{{ stats.validated_securities|default:0 }}</h2>
                         </div>
                         <div class="flex-shrink-0">
                             <i class="bi bi-check-circle" style="font-size: 3rem; opacity: 0.3;"></i>
@@ -70,28 +67,12 @@
         </div>
 
         <div class="col-md-3">
-            <div class="card text-white bg-warning">
+            <div class="card text-white bg-secondary h-100">
                 <div class="card-body">
                     <div class="d-flex align-items-center">
                         <div class="flex-grow-1">
-                            <h6 class="card-title text-white">Pending Approvals</h6>
-                            <h2 class="mb-0">{{ stats.pending_approvals|default:0 }}</h2>
-                        </div>
-                        <div class="flex-shrink-0">
-                            <i class="bi bi-clock-history" style="font-size: 3rem; opacity: 0.3;"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-md-3">
-            <div class="card text-white bg-secondary">
-                <div class="card-body">
-                    <div class="d-flex align-items-center">
-                        <div class="flex-grow-1">
-                            <h6 class="card-title text-white">Draft Securities</h6>
-                            <h2 class="mb-0">{{ stats.draft_securities|default:0 }}</h2>
+                            <h6 class="card-title text-white">Initial</h6>
+                            <h2 class="mb-0">{{ stats.initial_securities|default:0 }}</h2>
                         </div>
                         <div class="flex-shrink-0">
                             <i class="bi bi-file-earmark-text" style="font-size: 3rem; opacity: 0.3;"></i>
@@ -100,12 +81,113 @@
                 </div>
             </div>
         </div>
+
+        <div class="col-md-3">
+            <div class="card text-white bg-info h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-grow-1">
+                            <h6 class="card-title text-white">Modified</h6>
+                            <h2 class="mb-0">{{ stats.modified_securities|default:0 }}</h2>
+                        </div>
+                        <div class="flex-shrink-0">
+                            <i class="bi bi-pencil-square" style="font-size: 3rem; opacity: 0.3;"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <!-- Breakdown by Type -->
+    <!-- Quoted/Unquoted and Workflow Status -->
     <div class="row mb-4">
         <div class="col-md-6">
-            <div class="card">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-bar-chart"></i> Quoted / Unquoted Breakdown
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if stats.by_quoted_unquoted %}
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th class="text-end">Count</th>
+                                    <th style="width: 50%;">Distribution</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in stats.by_quoted_unquoted %}
+                                <tr>
+                                    <td>
+                                        {% if item.quoted_unquoted == 'Quoted' %}
+                                            <span class="badge badge-success">{{ item.quoted_unquoted }}</span>
+                                        {% elif item.quoted_unquoted == 'Unquoted' %}
+                                            <span class="badge badge-warning">{{ item.quoted_unquoted }}</span>
+                                        {% else %}
+                                            <span class="badge badge-secondary">{{ item.quoted_unquoted }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end"><strong>{{ item.count }}</strong></td>
+                                    <td>
+                                        <div class="progress" style="height: 20px;">
+                                            <div class="progress-bar {% if item.quoted_unquoted == 'Quoted' %}bg-success{% elif item.quoted_unquoted == 'Unquoted' %}bg-warning{% else %}bg-secondary{% endif %}" role="progressbar"
+                                                 style="width: {% widthratio item.count stats.total_securities 100 %}%"
+                                                 aria-valuenow="{{ item.count }}" aria-valuemin="0" aria-valuemax="{{ stats.total_securities }}">
+                                                {% widthratio item.count stats.total_securities 100 %}%
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    {% else %}
+                        <p class="text-muted text-center">No data available</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-diagram-3"></i> Workflow Status Distribution
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <span class="badge badge-secondary fs-5">{{ stats.initial_securities|default:0 }}</span>
+                                <p class="text-muted mt-2 mb-0">Initial</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <span class="badge badge-info fs-5">{{ stats.modified_securities|default:0 }}</span>
+                                <p class="text-muted mt-2 mb-0">Modified</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <span class="badge badge-success fs-5">{{ stats.validated_securities|default:0 }}</span>
+                                <p class="text-muted mt-2 mb-0">Validated</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Breakdown by Type and Currency -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card h-100">
                 <div class="card-header">
                     <h5 class="card-title mb-0">
                         <i class="bi bi-pie-chart"></i> Securities by Type
@@ -147,7 +229,7 @@
         </div>
 
         <div class="col-md-6">
-            <div class="card">
+            <div class="card h-100">
                 <div class="card-header">
                     <h5 class="card-title mb-0">
                         <i class="bi bi-currency-exchange"></i> Securities by Currency
@@ -194,7 +276,7 @@
     <!-- Breakdown by Investment Type and Industry -->
     <div class="row mb-4">
         <div class="col-md-6">
-            <div class="card">
+            <div class="card h-100">
                 <div class="card-header">
                     <h5 class="card-title mb-0">
                         <i class="bi bi-graph-up-arrow"></i> Securities by Investment Type
@@ -236,7 +318,7 @@
         </div>
 
         <div class="col-md-6">
-            <div class="card">
+            <div class="card h-100">
                 <div class="card-header">
                     <h5 class="card-title mb-0">
                         <i class="bi bi-building"></i> Securities by Industry
@@ -268,63 +350,15 @@
         </div>
     </div>
 
-    <!-- Workflow Status Breakdown -->
-    <div class="row mb-4">
-        <div class="col-md-12">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="card-title mb-0">
-                        <i class="bi bi-diagram-3"></i> Workflow Status Distribution
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <div class="row text-center">
-                        <div class="col-md-2">
-                            <div class="mb-3">
-                                <span class="badge badge-secondary fs-5">{{ stats.draft_securities|default:0 }}</span>
-                                <p class="text-muted mt-2 mb-0">Draft</p>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="mb-3">
-                                <span class="badge badge-warning fs-5">{{ stats.pending_approvals|default:0 }}</span>
-                                <p class="text-muted mt-2 mb-0">Pending Approval</p>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="mb-3">
-                                <span class="badge badge-success fs-5">{{ stats.active_securities|default:0 }}</span>
-                                <p class="text-muted mt-2 mb-0">Active</p>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="mb-3">
-                                <span class="badge badge-danger fs-5">{{ stats.rejected_securities|default:0 }}</span>
-                                <p class="text-muted mt-2 mb-0">Rejected</p>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="mb-3">
-                                <span class="badge badge-dark fs-5">{{ stats.inactive_securities|default:0 }}</span>
-                                <p class="text-muted mt-2 mb-0">Inactive</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- Info Alert -->
     <div class="alert alert-info">
         <i class="bi bi-info-circle"></i>
-        <strong>Four-Eyes Workflow:</strong>
+        <strong>Maker-Checker Workflow:</strong>
         <ul class="mb-0 mt-2">
-            <li><strong>Makers</strong> create securities in <strong>DRAFT</strong> status</li>
-            <li>Makers submit for approval → status becomes <strong>PENDING_APPROVAL</strong></li>
-            <li><strong>Checkers</strong> approve → status becomes <strong>ACTIVE</strong></li>
-            <li>Checkers reject → status becomes <strong>REJECTED</strong> (can be edited and resubmitted)</li>
-            <li><strong>Important:</strong> Makers cannot approve their own securities (Four-Eyes principle)</li>
+            <li><strong>Makers</strong> create securities in <strong>INITIAL</strong> status</li>
+            <li>Editing a security changes status to <strong>MODIFIED</strong></li>
+            <li><strong>Checkers</strong> validate → status becomes <strong>VALIDATED</strong></li>
+            <li><strong>Important:</strong> Makers cannot validate their own securities (Four-Eyes principle)</li>
         </ul>
     </div>
 

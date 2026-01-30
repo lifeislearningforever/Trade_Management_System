@@ -25,7 +25,5 @@ urlpatterns = [
     path('<int:security_id>/edit/', views.security_edit, name='edit'),
 
     # Workflow Actions
-    path('<int:security_id>/submit/', views.security_submit, name='submit'),
-    path('<int:security_id>/approve/', views.security_approve, name='approve'),
-    path('<int:security_id>/reject/', views.security_reject, name='reject'),
+    path('<int:security_id>/validate/', views.security_validate, name='validate'),
 ]

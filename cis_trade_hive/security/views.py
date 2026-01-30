@@ -83,10 +83,10 @@ def security_list(request: HttpRequest) -> HttpResponse:
         'securities': securities_page,
         'page_obj': securities_page,
         'total_count': len(securities),
-        'status_filter': status_filter,
-        'search_term': search_term,
-        'currency_filter': currency_filter,
-        'security_type_filter': security_type_filter,
+        'status': status_filter,
+        'search': search_term,
+        'currency': currency_filter,
+        'security_type': security_type_filter,
     }
 
     return render(request, 'security/security_list.html', context)
@@ -114,8 +114,8 @@ def security_detail(request: HttpRequest, security_id: int) -> HttpResponse:
 
     # Check permissions
     can_edit = security_service.can_user_edit(security, user_id)
-    can_approve = security_service.can_user_approve(security, username)
-    can_submit = security.get('status') in ['DRAFT', 'REJECTED']
+    can_validate = security_service.can_user_validate(security, username)
+    can_submit = False  # No submit step in simplified flow
 
     # Get status color
     security['status_color'] = security_service.get_status_display_color(security.get('status', ''))
@@ -137,7 +137,7 @@ def security_detail(request: HttpRequest, security_id: int) -> HttpResponse:
         'security': security,
         'history': history,
         'can_edit': can_edit,
-        'can_approve': can_approve,
+        'can_validate': can_validate,
         'can_submit': can_submit,
     }
 
@@ -231,10 +231,7 @@ def security_create(request: HttpRequest) -> HttpResponse:
                 except json.JSONDecodeError:
                     pass
 
-            # Determine action
-            action = request.POST.get('action', 'save_draft')
-
-            # Create security
+            # Create security (status = INITIAL)
             success, security_id, error = security_service.create_security(
                 security_data=security_data,
                 user_id=user_id,
@@ -252,20 +249,7 @@ def security_create(request: HttpRequest) -> HttpResponse:
                 }
                 return render(request, 'security/security_form.html', context)
 
-            # If action is submit, submit for approval
-            if action == 'submit' and security_id:
-                submit_success, submit_error = security_service.submit_for_approval(
-                    security_id=security_id,
-                    user_id=user_id,
-                    username=username,
-                    user_email=user_email
-                )
-                if submit_success:
-                    messages.success(request, f'Security "{security_data["security_name"]}" created and submitted for approval')
-                else:
-                    messages.warning(request, f'Security created but submission failed: {submit_error}')
-            else:
-                messages.success(request, f'Security "{security_data["security_name"]}" created successfully')
+            messages.success(request, f'Security "{security_data["security_name"]}" created successfully')
 
             return redirect('security:detail', security_id=security_id)
 
@@ -300,9 +284,9 @@ def security_edit(request: HttpRequest, security_id: int) -> HttpResponse:
         messages.error(request, f'Security {security_id} not found')
         return redirect('security:list')
 
-    # Check if editable
+    # Check if editable (only CIS src_system records)
     if not security_service.can_user_edit(security, user_id):
-        messages.error(request, f'Cannot edit security with status {security.get("status")}')
+        messages.error(request, f'Cannot edit security with source system {security.get("src_system")}. Only CIS records can be edited.')
         return redirect('security:detail', security_id=security_id)
 
     if request.method == 'POST':
@@ -413,36 +397,10 @@ def security_edit(request: HttpRequest, security_id: int) -> HttpResponse:
 
 @require_login
 @require_http_methods(['POST'])
-def security_submit(request: HttpRequest, security_id: int) -> HttpResponse:
+def security_validate(request: HttpRequest, security_id: int) -> HttpResponse:
     """
-    Submit security for approval.
-    """
-    # Get user session info
-    user_id = str(request.session.get('user_id', ''))
-    username = request.session.get('user_login', 'anonymous')
-    user_email = request.session.get('user_email', '')
-
-    success, error = security_service.submit_for_approval(
-        security_id=security_id,
-        user_id=user_id,
-        username=username,
-        user_email=user_email
-    )
-
-    if success:
-        messages.success(request, 'Security submitted for approval')
-    else:
-        messages.error(request, f'Error submitting security: {error}')
-
-    return redirect('security:detail', security_id=security_id)
-
-
-@require_login
-# @check_permission('cis-security', 'APPROVE')  # Commented for demo
-@require_http_methods(['POST'])
-def security_approve(request: HttpRequest, security_id: int) -> HttpResponse:
-    """
-    Approve security (Checker action).
+    Validate security (Checker action).
+    INITIAL/MODIFIED → VALIDATED
     """
     # Get user session info
     user_id = str(request.session.get('user_id', ''))
@@ -451,7 +409,7 @@ def security_approve(request: HttpRequest, security_id: int) -> HttpResponse:
 
     comments = request.POST.get('comments', '').strip()
 
-    success, error = security_service.approve_security(
+    success, error = security_service.validate_security(
         security_id=security_id,
         user_id=user_id,
         username=username,
@@ -460,43 +418,9 @@ def security_approve(request: HttpRequest, security_id: int) -> HttpResponse:
     )
 
     if success:
-        messages.success(request, 'Security approved successfully')
+        messages.success(request, 'Security validated successfully')
     else:
-        messages.error(request, f'Error approving security: {error}')
-
-    return redirect('security:detail', security_id=security_id)
-
-
-@require_login
-# @check_permission('cis-security', 'APPROVE')  # Commented for demo
-@require_http_methods(['POST'])
-def security_reject(request: HttpRequest, security_id: int) -> HttpResponse:
-    """
-    Reject security (Checker action).
-    """
-    # Get user session info
-    user_id = str(request.session.get('user_id', ''))
-    username = request.session.get('user_login', 'anonymous')
-    user_email = request.session.get('user_email', '')
-
-    comments = request.POST.get('comments', '').strip()
-
-    if not comments:
-        messages.error(request, 'Rejection comments are required')
-        return redirect('security:detail', security_id=security_id)
-
-    success, error = security_service.reject_security(
-        security_id=security_id,
-        user_id=user_id,
-        username=username,
-        user_email=user_email,
-        comments=comments
-    )
-
-    if success:
-        messages.success(request, 'Security rejected')
-    else:
-        messages.error(request, f'Error rejecting security: {error}')
+        messages.error(request, f'Error validating security: {error}')
 
     return redirect('security:detail', security_id=security_id)
 
@@ -512,15 +436,20 @@ def pending_approvals(request: HttpRequest) -> HttpResponse:
     username = request.session.get('user_login', 'anonymous')
     user_email = request.session.get('user_email', '')
 
-    # Fetch pending securities
-    securities = security_hive_repository.get_all_securities(
+    # Fetch securities pending validation (INITIAL or MODIFIED)
+    initial_securities = security_hive_repository.get_all_securities(
         limit=1000,
-        status='PENDING_APPROVAL'
+        status='INITIAL'
     )
+    modified_securities = security_hive_repository.get_all_securities(
+        limit=1000,
+        status='MODIFIED'
+    )
+    securities = initial_securities + modified_securities
 
     # Add status color
     for security in securities:
-        security['status_color'] = 'warning'
+        security['status_color'] = security_service.get_status_display_color(security.get('status', ''))
 
     # Pagination
     paginator = Paginator(securities, 25)

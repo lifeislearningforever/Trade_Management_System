@@ -1,8 +1,12 @@
 """
 Security Service
 
-Business logic layer for security operations with Four-Eyes workflow.
+Business logic layer for security operations with maker-checker workflow.
 All data operations use Kudu tables via repository layer.
+
+Status Flow:
+  INITIAL → VALIDATED (new security created → validated by checker)
+  VALIDATED → MODIFIED → VALIDATED (edit validated record → re-validate)
 """
 
 import logging
@@ -17,7 +21,12 @@ logger = logging.getLogger(__name__)
 
 
 class SecurityService:
-    """Service for security business logic with Four-Eyes principle"""
+    """Service for security business logic with maker-checker workflow"""
+
+    # Status constants
+    STATUS_INITIAL = 'INITIAL'
+    STATUS_MODIFIED = 'MODIFIED'
+    STATUS_VALIDATED = 'VALIDATED'
 
     @staticmethod
     def create_security(
@@ -51,7 +60,7 @@ class SecurityService:
                     return False, None, f"Security with ISIN '{isin}' already exists"
 
             # Set initial status
-            security_data['status'] = 'DRAFT'
+            security_data['status'] = 'INITIAL'
 
             # Insert security
             success = security_hive_repository.insert_security(security_data, created_by=username)
@@ -81,7 +90,7 @@ class SecurityService:
                 security_name=security_data.get('security_name', ''),
                 isin=isin or '',
                 action='CREATE',
-                status='DRAFT',
+                status='INITIAL',
                 changes={'created': True},
                 comments=f'Security created by {username}',
                 performed_by=username
@@ -116,6 +125,7 @@ class SecurityService:
     ) -> tuple[bool, Optional[str]]:
         """
         Update an existing security.
+        Status changes to MODIFIED after edit (if was INITIAL or VALIDATED).
 
         Args:
             security_id: Security ID
@@ -133,14 +143,10 @@ class SecurityService:
             if not security:
                 return False, f"Security {security_id} not found"
 
-            # Validate status (only DRAFT or REJECTED can be edited)
-            current_status = security.get('status', '')
-            if current_status not in ['DRAFT', 'REJECTED']:
-                return False, f"Cannot edit security with status {current_status}. Only DRAFT or REJECTED securities can be edited."
-
-            # Validate user is the creator (optional - can be removed for demo)
-            # if security.get('created_by') != username:
-            #     return False, "You can only edit securities you created"
+            # Only CIS src_system records can be edited
+            src_system = security.get('src_system', '')
+            if src_system and src_system.upper() != 'CIS':
+                return False, f"Cannot edit security with source system '{src_system}'. Only CIS records can be edited."
 
             # Track changes
             changes = {}
@@ -151,6 +157,10 @@ class SecurityService:
 
             if not changes:
                 return False, "No changes to update"
+
+            # Set status to MODIFIED after edit
+            current_status = security.get('status', '')
+            security_data['status'] = 'MODIFIED'
 
             # Update security
             success = security_hive_repository.update_security(
@@ -168,7 +178,7 @@ class SecurityService:
                 security_name=security.get('security_name', ''),
                 isin=security.get('isin', ''),
                 action='UPDATE',
-                status=current_status,
+                status='MODIFIED',
                 changes=changes,
                 comments=f'Security updated by {username}',
                 performed_by=username
@@ -202,79 +212,7 @@ class SecurityService:
             return False, str(e)
 
     @staticmethod
-    def submit_for_approval(
-        security_id: int,
-        user_id: str,
-        username: str,
-        user_email: str
-    ) -> tuple[bool, Optional[str]]:
-        """
-        Submit security for approval (Maker action).
-
-        Args:
-            security_id: Security ID
-            user_id: User ID
-            username: Username
-            user_email: User email
-
-        Returns:
-            Tuple of (success, error_message)
-        """
-        try:
-            # Get security
-            security = security_hive_repository.get_security_by_id(security_id)
-            if not security:
-                return False, f"Security {security_id} not found"
-
-            # Validate status
-            current_status = security.get('status', '')
-            if current_status not in ['DRAFT', 'REJECTED']:
-                return False, f"Cannot submit security with status {current_status}. Only DRAFT or REJECTED securities can be submitted."
-
-            # Update status to PENDING_APPROVAL
-            success = security_hive_repository.update_security_status(
-                security_id=security_id,
-                status='PENDING_APPROVAL',
-                updated_by=username,
-                submitted_by=username
-            )
-
-            if not success:
-                return False, "Failed to update security status"
-
-            # Insert history record
-            security_hive_repository.insert_security_history(
-                security_id=security_id,
-                security_name=security.get('security_name', ''),
-                isin=security.get('isin', ''),
-                action='SUBMIT',
-                status='PENDING_APPROVAL',
-                changes={'status': {'old': current_status, 'new': 'PENDING_APPROVAL'}},
-                comments=f'Submitted for approval by {username}',
-                performed_by=username
-            )
-
-            # Log to audit
-            AuditLogKuduRepository.log_action(
-                user_id=user_id,
-                username=username,
-                user_email=user_email,
-                action_type='SUBMIT',
-                entity_type='SECURITY',
-                entity_id=str(security_id),
-                entity_name=security.get('security_name', ''),
-                action_description=f'Submitted security for approval: {security.get("security_name")}',
-                status='SUCCESS'
-            )
-
-            return True, None
-
-        except Exception as e:
-            logger.error(f"Error submitting security {security_id}: {str(e)}")
-            return False, str(e)
-
-    @staticmethod
-    def approve_security(
+    def validate_security(
         security_id: int,
         user_id: str,
         username: str,
@@ -282,14 +220,15 @@ class SecurityService:
         comments: str = ''
     ) -> tuple[bool, Optional[str]]:
         """
-        Approve security (Checker action).
+        Validate security (Checker action).
+        INITIAL/MODIFIED → VALIDATED
 
         Args:
             security_id: Security ID
             user_id: User ID
             username: Username
             user_email: User email
-            comments: Approval comments
+            comments: Validation comments
 
         Returns:
             Tuple of (success, error_message)
@@ -302,35 +241,35 @@ class SecurityService:
 
             # Validate status
             current_status = security.get('status', '')
-            if current_status != 'PENDING_APPROVAL':
-                return False, f"Cannot approve security with status {current_status}. Only PENDING_APPROVAL securities can be approved."
+            if current_status not in ['INITIAL', 'MODIFIED']:
+                return False, f"Cannot validate security with status {current_status}. Only INITIAL or MODIFIED securities can be validated."
 
-            # Four-Eyes check: approver cannot be the creator
+            # Four-Eyes check: validator cannot be the creator
             created_by = security.get('created_by', '')
             if created_by == username:
-                return False, "You cannot approve your own security (Four-Eyes principle)"
+                return False, "You cannot validate your own security (Four-Eyes principle)"
 
-            # Update status to ACTIVE
+            # Update status to VALIDATED
             success = security_hive_repository.update_security_status(
                 security_id=security_id,
-                status='ACTIVE',
+                status='VALIDATED',
                 updated_by=username,
                 reviewed_by=username,
                 review_comments=comments
             )
 
             if not success:
-                return False, "Failed to approve security"
+                return False, "Failed to validate security"
 
             # Insert history record
             security_hive_repository.insert_security_history(
                 security_id=security_id,
                 security_name=security.get('security_name', ''),
                 isin=security.get('isin', ''),
-                action='APPROVE',
-                status='ACTIVE',
-                changes={'status': {'old': current_status, 'new': 'ACTIVE'}},
-                comments=comments or f'Approved by {username}',
+                action='VALIDATE',
+                status='VALIDATED',
+                changes={'status': {'old': current_status, 'new': 'VALIDATED'}},
+                comments=comments or f'Validated by {username}',
                 performed_by=username
             )
 
@@ -339,11 +278,11 @@ class SecurityService:
                 user_id=user_id,
                 username=username,
                 user_email=user_email,
-                action_type='APPROVE',
+                action_type='VALIDATE',
                 entity_type='SECURITY',
                 entity_id=str(security_id),
                 entity_name=security.get('security_name', ''),
-                action_description=f'Approved security: {security.get("security_name")}',
+                action_description=f'Validated security: {security.get("security_name")}',
                 new_value=comments,
                 status='SUCCESS'
             )
@@ -351,93 +290,14 @@ class SecurityService:
             return True, None
 
         except Exception as e:
-            logger.error(f"Error approving security {security_id}: {str(e)}")
-            return False, str(e)
-
-    @staticmethod
-    def reject_security(
-        security_id: int,
-        user_id: str,
-        username: str,
-        user_email: str,
-        comments: str
-    ) -> tuple[bool, Optional[str]]:
-        """
-        Reject security (Checker action).
-
-        Args:
-            security_id: Security ID
-            user_id: User ID
-            username: Username
-            user_email: User email
-            comments: Rejection comments (required)
-
-        Returns:
-            Tuple of (success, error_message)
-        """
-        try:
-            # Validate comments are provided
-            if not comments or not comments.strip():
-                return False, "Rejection comments are required"
-
-            # Get security
-            security = security_hive_repository.get_security_by_id(security_id)
-            if not security:
-                return False, f"Security {security_id} not found"
-
-            # Validate status
-            current_status = security.get('status', '')
-            if current_status != 'PENDING_APPROVAL':
-                return False, f"Cannot reject security with status {current_status}. Only PENDING_APPROVAL securities can be rejected."
-
-            # Update status to REJECTED
-            success = security_hive_repository.update_security_status(
-                security_id=security_id,
-                status='REJECTED',
-                updated_by=username,
-                reviewed_by=username,
-                review_comments=comments
-            )
-
-            if not success:
-                return False, "Failed to reject security"
-
-            # Insert history record
-            security_hive_repository.insert_security_history(
-                security_id=security_id,
-                security_name=security.get('security_name', ''),
-                isin=security.get('isin', ''),
-                action='REJECT',
-                status='REJECTED',
-                changes={'status': {'old': current_status, 'new': 'REJECTED'}},
-                comments=comments,
-                performed_by=username
-            )
-
-            # Log to audit
-            AuditLogKuduRepository.log_action(
-                user_id=user_id,
-                username=username,
-                user_email=user_email,
-                action_type='REJECT',
-                entity_type='SECURITY',
-                entity_id=str(security_id),
-                entity_name=security.get('security_name', ''),
-                action_description=f'Rejected security: {security.get("security_name")}',
-                new_value=comments,
-                status='SUCCESS'
-            )
-
-            return True, None
-
-        except Exception as e:
-            logger.error(f"Error rejecting security {security_id}: {str(e)}")
+            logger.error(f"Error validating security {security_id}: {str(e)}")
             return False, str(e)
 
     @staticmethod
     def can_user_edit(security: Dict[str, Any], user_id: str) -> bool:
         """
         Check if user can edit a security.
+        Only CIS src_system records can be edited.
 
         Args:
             security: Security dictionary
@@ -449,30 +309,33 @@ class SecurityService:
         if not security:
             return False
 
-        # Can edit if status is DRAFT or REJECTED
-        status = security.get('status', '')
-        return status in ['DRAFT', 'REJECTED']
+        # Only CIS records can be edited
+        src_system = security.get('src_system', '')
+        if src_system and src_system.upper() != 'CIS':
+            return False
+
+        return True
 
     @staticmethod
-    def can_user_approve(security: Dict[str, Any], username: str) -> bool:
+    def can_user_validate(security: Dict[str, Any], username: str) -> bool:
         """
-        Check if user can approve a security.
+        Check if user can validate a security.
 
         Args:
             security: Security dictionary
             username: Username
 
         Returns:
-            True if user can approve, False otherwise
+            True if user can validate, False otherwise
         """
         if not security:
             return False
 
-        # Can approve if status is PENDING_APPROVAL and user is not the creator
+        # Can validate if status is INITIAL or MODIFIED and user is not the creator
         status = security.get('status', '')
         created_by = security.get('created_by', '')
 
-        return status == 'PENDING_APPROVAL' and created_by != username
+        return status in ['INITIAL', 'MODIFIED'] and created_by != username
 
     @staticmethod
     def get_status_display_color(status: str) -> str:
@@ -486,12 +349,9 @@ class SecurityService:
             Bootstrap color class
         """
         colors = {
-            'DRAFT': 'secondary',
-            'PENDING_APPROVAL': 'warning',
-            'APPROVED': 'success',
-            'ACTIVE': 'success',
-            'REJECTED': 'danger',
-            'INACTIVE': 'dark',
+            'INITIAL': 'secondary',
+            'MODIFIED': 'info',
+            'VALIDATED': 'success',
         }
         return colors.get(status, 'secondary')
 

@@ -143,13 +143,7 @@
                 </a>
             </li>
             <li class="nav-item">
-                <a class="nav-link {% if 'counterparty' in request.path %}active{% endif %}" href="{% url 'reference_data:counterparty_list' %}">
-                    <i class="bi bi-building"></i>
-                    <span>Counterparties</span>
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link {% if 'party' in request.path and 'counterparty' not in request.path %}active{% endif %}" href="{% url 'reference_data:party_list' %}">
+                <a class="nav-link {% if 'party' in request.path %}active{% endif %}" href="{% url 'reference_data:party_list' %}">
                     <i class="bi bi-people"></i>
                     <span>Parties</span>
                 </a>
