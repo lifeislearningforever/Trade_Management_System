@@ -2,7 +2,8 @@
 Equity Price Service
 Business logic for equity price operations following SOLID principles.
 
-Uses composite primary key: (currency_code, security_label)
+Uses composite primary key: (currency_code, security_label, price_date)
+Supports versioned price history - multiple prices per security (one per date).
 
 SOLID Principles Applied:
 - Single Responsibility: Each method has one clear purpose
@@ -12,7 +13,7 @@ SOLID Principles Applied:
 - Dependency Inversion: Depends on repository abstraction
 
 Author: CisTrade Team
-Last Updated: 2026-01-28
+Last Updated: 2026-01-31
 """
 
 from typing import List, Dict, Optional, Any
@@ -32,7 +33,8 @@ class EquityPriceService:
     """
     Service for equity price business logic.
 
-    Uses composite key: (currency_code, security_label)
+    Uses composite key: (currency_code, security_label, price_date)
+    Supports versioned price history - multiple prices per security (one per date).
 
     Handles:
     - Equity price CRUD operations with business rules
@@ -99,13 +101,14 @@ class EquityPriceService:
             raise
 
     @staticmethod
-    def get_equity_price_by_key(currency_code: str, security_label: str) -> Optional[Dict[str, Any]]:
+    def get_equity_price_by_key(currency_code: str, security_label: str, price_date: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Get equity price by composite key.
 
         Args:
             currency_code: Currency code (part of composite key)
             security_label: Security label (part of composite key)
+            price_date: Price date in YYYY-MM-DD format (optional - if None, returns latest)
 
         Returns:
             Equity price record or None
@@ -117,12 +120,12 @@ class EquityPriceService:
             raise ValidationError("Both currency_code and security_label are required")
 
         try:
-            price = equity_price_hive_repository.get_equity_price_by_key(currency_code, security_label)
+            price = equity_price_hive_repository.get_equity_price_by_key(currency_code, security_label, price_date)
 
             if price:
-                logger.info(f"Found equity price: {currency_code}/{security_label}")
+                logger.info(f"Found equity price: {currency_code}/{security_label}/{price_date or 'latest'}")
             else:
-                logger.warning(f"No equity price found: {currency_code}/{security_label}")
+                logger.warning(f"No equity price found: {currency_code}/{security_label}/{price_date or 'latest'}")
 
             return price
 
@@ -195,7 +198,8 @@ class EquityPriceService:
         currency_code: str,
         security_label: str,
         equity_price_data: Dict[str, Any],
-        user: str = 'SYSTEM'
+        user: str = 'SYSTEM',
+        price_date: Optional[str] = None
     ) -> bool:
         """
         Update existing equity price with validation.
@@ -205,6 +209,7 @@ class EquityPriceService:
             security_label: Security label (part of composite key)
             equity_price_data: Dictionary with fields to update
             user: Username updating the price
+            price_date: Price date (part of composite key). If None, updates the latest price.
 
         Returns:
             True if successful
@@ -237,15 +242,16 @@ class EquityPriceService:
                 currency_code,
                 security_label,
                 equity_price_data,
-                username=user
+                username=user,
+                price_date=price_date
             )
 
             if success:
-                logger.info(f"Successfully updated equity price: {currency_code}/{security_label}")
+                logger.info(f"Successfully updated equity price: {currency_code}/{security_label}/{price_date or 'latest'}")
                 # Clear cache
                 EquityPriceService.clear_cache()
             else:
-                logger.error(f"Failed to update equity price: {currency_code}/{security_label}")
+                logger.error(f"Failed to update equity price: {currency_code}/{security_label}/{price_date or 'latest'}")
 
             return success
 
@@ -257,7 +263,8 @@ class EquityPriceService:
     def delete_equity_price(
         currency_code: str,
         security_label: str,
-        user: str = 'SYSTEM'
+        user: str = 'SYSTEM',
+        price_date: Optional[str] = None
     ) -> bool:
         """
         Soft delete equity price.
@@ -266,6 +273,7 @@ class EquityPriceService:
             currency_code: Currency code (part of composite key)
             security_label: Security label (part of composite key)
             user: Username deleting the price
+            price_date: Price date (part of composite key). If None, deletes the latest price.
 
         Returns:
             True if successful
@@ -280,15 +288,16 @@ class EquityPriceService:
             success = equity_price_hive_repository.delete_equity_price(
                 currency_code,
                 security_label,
-                deleted_by=user
+                deleted_by=user,
+                price_date=price_date
             )
 
             if success:
-                logger.info(f"Successfully deleted equity price: {currency_code}/{security_label}")
+                logger.info(f"Successfully deleted equity price: {currency_code}/{security_label}/{price_date or 'latest'}")
                 # Clear cache
                 EquityPriceService.clear_cache()
             else:
-                logger.error(f"Failed to delete equity price: {currency_code}/{security_label}")
+                logger.error(f"Failed to delete equity price: {currency_code}/{security_label}/{price_date or 'latest'}")
 
             return success
 

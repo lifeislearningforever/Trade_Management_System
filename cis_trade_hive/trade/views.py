@@ -271,6 +271,17 @@ def trade_list(request):
     return render(request, 'trade/trade_list.html', context)
 
 
+def trade_dashboard(request):
+    """Trade dashboard with statistics."""
+    stats = trade_kudu_repository.get_trade_statistics()
+
+    context = {
+        'stats': stats,
+    }
+
+    return render(request, 'trade/trade_dashboard.html', context)
+
+
 # =============================================================================
 # TRADE DETAIL
 # =============================================================================
@@ -319,9 +330,20 @@ def trade_detail(request, trade_id):
     # Get trade history
     history = trade_kudu_repository.get_trade_history(trade_id)
 
+    # Get position impact for settled trades
+    position = None
+    if status == TradeKuduRepository.STATUS_SETTLED:
+        portfolio = trade_data.get('portfolio_short_name', '')
+        security = trade_data.get('security_label', '')
+        if portfolio and security:
+            position_data = trade_kudu_repository.get_position(portfolio, security)
+            if position_data:
+                position = PositionWrapper(position_data)
+
     context = {
         'trade': trade,
         'history': history,
+        'position': position,
         'can_edit': can_edit,
         'can_submit': can_submit,
         'can_cancel': can_cancel,
@@ -1014,3 +1036,71 @@ def api_currencies(request):
     """
     currencies = trade_dropdown_service.get_currencies()
     return JsonResponse({'results': currencies})
+
+
+# =========================================================================
+# POSITION VIEWS
+# =========================================================================
+
+class PositionWrapper:
+    """Wrapper for position dict to enable template attribute access and numeric comparisons."""
+
+    def __init__(self, data: dict):
+        self._data = data
+
+    def __getattr__(self, name):
+        if name.startswith('_'):
+            return super().__getattribute__(name)
+        val = self._data.get(name)
+        if name in ('version_id', 'position_id'):
+            try:
+                return int(float(val)) if val is not None else 0
+            except (ValueError, TypeError):
+                return 0
+        if name in ('quantity', 'average_cost', 'total_cost', 'current_price',
+                     'market_value', 'unrealized_pnl', 'realized_pnl'):
+            try:
+                return float(val) if val is not None else 0.0
+            except (ValueError, TypeError):
+                return 0.0
+        return val
+
+
+def position_list(request):
+    """List all positions with P&L summary."""
+    positions_raw = trade_kudu_repository.get_all_positions(status='OPEN')
+    stats = trade_kudu_repository.get_position_statistics()
+
+    positions = [PositionWrapper(p) for p in positions_raw]
+
+    return render(request, 'trade/position_list.html', {
+        'positions': positions,
+        'stats': stats,
+    })
+
+
+def position_detail(request, position_id):
+    """Position detail view with version history."""
+    position_raw = trade_kudu_repository.get_position_by_id(position_id)
+    if not position_raw:
+        raise Http404("Position not found")
+
+    position = PositionWrapper(position_raw)
+    position_versions = trade_kudu_repository.get_position_versions(position_id)
+
+    return render(request, 'trade/position_detail.html', {
+        'position': position,
+        'position_versions': position_versions,
+    })
+
+
+@require_http_methods(["POST"])
+def refresh_positions(request):
+    """Refresh market values for all open positions."""
+    counters = trade_kudu_repository.refresh_market_values()
+    messages.success(
+        request,
+        f"Market values refreshed: {counters['updated']} updated, "
+        f"{counters['skipped']} skipped, {counters['errors']} errors"
+    )
+    return redirect('trade:position_list')

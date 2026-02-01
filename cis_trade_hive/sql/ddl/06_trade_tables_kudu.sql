@@ -17,8 +17,7 @@
 --   1. cis_trade           - Main trade table
 --   2. cis_trade_history   - Audit trail for trades
 --   3. cis_trade_note      - Trade notes/comments
---   4. cis_trade_details   - Trade details tracking (positions)
---   5. cis_trade_details_history - Trade details audit trail
+--   4. cis_trade_position  - Versioned position snapshots (replaces cis_trade_details + history)
 --
 -- Workflow Statuses:
 --   MAKER Side:
@@ -348,17 +347,26 @@ TBLPROPERTIES (
 );
 
 -- ============================================================================
--- TABLE 4: cis_trade_details (Trade Details Tracking)
+-- TABLE 4: cis_trade_position (Versioned Position Snapshots)
 -- ============================================================================
--- Tracks current holdings/positions per portfolio-security combination
--- Updated after each trade is SETTLED
+-- Tracks positions using a versioned snapshot pattern.
+-- Each trade INSERTs a new version row (never UPDATE in place).
+-- Latest position = MAX(version_id) per position_id.
+-- Replaces both old cis_trade_details and cis_trade_details_history tables.
+-- Position created on trade create (not settle).
 -- ============================================================================
 
-DROP TABLE IF EXISTS cis_trade_details;
+DROP TABLE IF EXISTS cis_trade_position;
 
-CREATE TABLE cis_trade_details (
-    -- Primary Key (composite: portfolio + security)
-    trade_detail_id BIGINT NOT NULL,
+CREATE TABLE cis_trade_position (
+    -- Primary Key (auto-increment per snapshot)
+    version_id BIGINT NOT NULL,
+
+    -- Position Identity (same across all versions for a portfolio+security)
+    position_id BIGINT NOT NULL,
+
+    -- Snapshot date
+    position_date STRING NOT NULL,
 
     -- Portfolio Reference
     portfolio_short_name STRING NOT NULL,
@@ -366,77 +374,35 @@ CREATE TABLE cis_trade_details (
     -- Security Reference
     security_label STRING NOT NULL,
 
-    -- Trade Detail Fields
+    -- Position State
     quantity DECIMAL(20,6),              -- Current holding quantity
     average_cost DECIMAL(20,6),          -- Weighted average cost
     total_cost DECIMAL(20,6),            -- Total cost basis
 
-    -- Market Value (updated by market data process)
-    current_price DECIMAL(20,6),
-    market_value DECIMAL(20,6),
-    unrealized_pnl DECIMAL(20,6),
+    -- P&L
+    realized_pnl DECIMAL(20,6),          -- Cumulative realized P&L
+    current_price DECIMAL(20,6),         -- Latest market price
+    market_value DECIMAL(20,6),          -- qty * current_price
+    unrealized_pnl DECIMAL(20,6),        -- market_value - total_cost
 
-    -- Lot tracking (for FIFO/LIFO)
-    lots_held INT,
+    -- Trade that caused this version
+    trade_id BIGINT,
+    trade_type STRING,                   -- BUY, SELL, ADD_LONG, DELIVER_LONG, MARKET_REFRESH
 
     -- Additional Info
+    lots_held INT,
     custodian STRING,
     sub_custodian STRING,
-
-    -- Last Trade Info
-    last_trade_id BIGINT,
-    last_trade_date STRING,
 
     -- Status
     status STRING,                       -- OPEN, CLOSED
     is_active BOOLEAN,
 
-    -- Timestamps
+    -- Metadata
+    created_by STRING,
     created_at STRING,
-    updated_at STRING,
 
-    PRIMARY KEY (trade_detail_id)
-)
-PARTITION BY HASH PARTITIONS 4
-STORED AS KUDU
-TBLPROPERTIES (
-    'kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251'
-);
-
--- ============================================================================
--- TABLE 5: cis_trade_details_history (Trade Details Audit Trail)
--- ============================================================================
--- Tracks changes to trade details over time
--- ============================================================================
-
-DROP TABLE IF EXISTS cis_trade_details_history;
-
-CREATE TABLE cis_trade_details_history (
-    -- Primary Key
-    history_id BIGINT NOT NULL,
-
-    -- Trade Detail Reference
-    trade_detail_id BIGINT NOT NULL,
-    portfolio_short_name STRING,
-    security_label STRING,
-
-    -- Trade that caused this change
-    trade_id BIGINT,
-    trade_type STRING,
-
-    -- Trade detail snapshot
-    quantity_before DECIMAL(20,6),
-    quantity_after DECIMAL(20,6),
-    quantity_change DECIMAL(20,6),
-
-    average_cost_before DECIMAL(20,6),
-    average_cost_after DECIMAL(20,6),
-
-    -- Timestamp
-    changed_at STRING,
-    changed_by STRING,
-
-    PRIMARY KEY (history_id)
+    PRIMARY KEY (version_id)
 )
 PARTITION BY HASH PARTITIONS 4
 STORED AS KUDU
@@ -456,8 +422,8 @@ CREATE TABLE cis_trade_lot (
     -- Primary Key
     lot_id BIGINT NOT NULL,
 
-    -- Trade Detail Reference
-    trade_detail_id BIGINT NOT NULL,
+    -- Position Reference
+    position_id BIGINT NOT NULL,
     portfolio_short_name STRING,
     security_label STRING,
 
@@ -512,8 +478,8 @@ TBLPROPERTIES (
 INSERT INTO cis_sequence VALUES ('trade_id', 1000000, 1);
 INSERT INTO cis_sequence VALUES ('trade_history_id', 1000000, 1);
 INSERT INTO cis_sequence VALUES ('trade_note_id', 1000000, 1);
-INSERT INTO cis_sequence VALUES ('trade_detail_id', 1000000, 1);
-INSERT INTO cis_sequence VALUES ('trade_detail_history_id', 1000000, 1);
+INSERT INTO cis_sequence VALUES ('position_id', 1000000, 1);
+INSERT INTO cis_sequence VALUES ('position_version_id', 1000000, 1);
 INSERT INTO cis_sequence VALUES ('lot_id', 1000000, 1);
 
 -- ============================================================================
@@ -535,9 +501,10 @@ CREATE INDEX idx_trade_deal_number ON cis_trade (deal_number);
 CREATE INDEX idx_trade_history_trade ON cis_trade_history (trade_id);
 CREATE INDEX idx_trade_history_date ON cis_trade_history (performed_at);
 
--- Trade details indexes
-CREATE INDEX idx_trade_details_portfolio ON cis_trade_details (portfolio_short_name);
-CREATE INDEX idx_trade_details_security ON cis_trade_details (security_label);
+-- Trade position indexes
+CREATE INDEX idx_trade_position_portfolio ON cis_trade_position (portfolio_short_name);
+CREATE INDEX idx_trade_position_security ON cis_trade_position (security_label);
+CREATE INDEX idx_trade_position_position_id ON cis_trade_position (position_id);
 */
 
 -- ============================================================================
@@ -552,8 +519,7 @@ SHOW TABLES LIKE 'cis_sequence';
 DESCRIBE cis_trade;
 DESCRIBE cis_trade_history;
 DESCRIBE cis_trade_note;
-DESCRIBE cis_trade_details;
-DESCRIBE cis_trade_details_history;
+DESCRIBE cis_trade_position;
 DESCRIBE cis_trade_lot;
 DESCRIBE cis_sequence;
 

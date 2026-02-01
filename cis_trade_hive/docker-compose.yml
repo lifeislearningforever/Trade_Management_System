@@ -1,8 +1,42 @@
 version: '3.8'
 
+# Common logging config to prevent unbounded Docker JSON log growth
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
+# Common Kudu master config
+x-master-common: &master-common
+  image: apache/kudu:latest
+  logging: *default-logging
+  restart: unless-stopped
+  mem_limit: 256m
+  memswap_limit: 256m
+  networks:
+    - kudu-network
+
+# Common Kudu tserver config
+x-tserver-common: &tserver-common
+  image: apache/kudu:latest
+  logging: *default-logging
+  restart: unless-stopped
+  mem_limit: 512m
+  memswap_limit: 512m
+  depends_on:
+    kudu-master-1:
+      condition: service_started
+    kudu-master-2:
+      condition: service_started
+    kudu-master-3:
+      condition: service_started
+  networks:
+    - kudu-network
+
 services:
   kudu-master-1:
-    image: apache/kudu:latest
+    <<: *master-common
     container_name: kudu-master-1
     hostname: kudu-master-1
     ports:
@@ -11,14 +45,18 @@ services:
     command: ["master"]
     environment:
       - KUDU_MASTERS=kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251
-      - MASTER_ARGS=--fs_wal_dir=/var/lib/kudu/master --rpc_bind_addresses=0.0.0.0:7051 --rpc_advertised_addresses=kudu-master-1:7051 --webserver_port=8051 --webserver_advertised_addresses=kudu-master-1:8051 --unlock_unsafe_flags --use_hybrid_clock=false
+      - MASTER_ARGS=--fs_wal_dir=/var/lib/kudu/master --rpc_bind_addresses=0.0.0.0:7051 --rpc_advertised_addresses=kudu-master-1:7051 --webserver_port=8051 --webserver_advertised_addresses=kudu-master-1:8051 --unlock_unsafe_flags --use_hybrid_clock=false --max_log_files=3 --log_dir=/tmp --logtostderr=false
     volumes:
       - kudu-master-1:/var/lib/kudu
-    networks:
-      - kudu-network
+    healthcheck:
+      test: ["CMD-SHELL", "kudu master status kudu-master-1:7051 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   kudu-master-2:
-    image: apache/kudu:latest
+    <<: *master-common
     container_name: kudu-master-2
     hostname: kudu-master-2
     ports:
@@ -27,14 +65,18 @@ services:
     command: ["master"]
     environment:
       - KUDU_MASTERS=kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251
-      - MASTER_ARGS=--fs_wal_dir=/var/lib/kudu/master --rpc_bind_addresses=0.0.0.0:7151 --rpc_advertised_addresses=kudu-master-2:7151 --webserver_port=8151 --webserver_advertised_addresses=kudu-master-2:8151 --unlock_unsafe_flags --use_hybrid_clock=false
+      - MASTER_ARGS=--fs_wal_dir=/var/lib/kudu/master --rpc_bind_addresses=0.0.0.0:7151 --rpc_advertised_addresses=kudu-master-2:7151 --webserver_port=8151 --webserver_advertised_addresses=kudu-master-2:8151 --unlock_unsafe_flags --use_hybrid_clock=false --max_log_files=3 --log_dir=/tmp --logtostderr=false
     volumes:
       - kudu-master-2:/var/lib/kudu
-    networks:
-      - kudu-network
+    healthcheck:
+      test: ["CMD-SHELL", "kudu master status kudu-master-2:7151 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   kudu-master-3:
-    image: apache/kudu:latest
+    <<: *master-common
     container_name: kudu-master-3
     hostname: kudu-master-3
     ports:
@@ -43,83 +85,97 @@ services:
     command: ["master"]
     environment:
       - KUDU_MASTERS=kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251
-      - MASTER_ARGS=--fs_wal_dir=/var/lib/kudu/master --rpc_bind_addresses=0.0.0.0:7251 --rpc_advertised_addresses=kudu-master-3:7251 --webserver_port=8251 --webserver_advertised_addresses=kudu-master-3:8251 --unlock_unsafe_flags --use_hybrid_clock=false
+      - MASTER_ARGS=--fs_wal_dir=/var/lib/kudu/master --rpc_bind_addresses=0.0.0.0:7251 --rpc_advertised_addresses=kudu-master-3:7251 --webserver_port=8251 --webserver_advertised_addresses=kudu-master-3:8251 --unlock_unsafe_flags --use_hybrid_clock=false --max_log_files=3 --log_dir=/tmp --logtostderr=false
     volumes:
       - kudu-master-3:/var/lib/kudu
-    networks:
-      - kudu-network
+    healthcheck:
+      test: ["CMD-SHELL", "kudu master status kudu-master-3:7251 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   kudu-tserver-1:
-    image: apache/kudu:latest
+    <<: *tserver-common
     container_name: kudu-tserver-1
     hostname: kudu-tserver-1
-    depends_on:
-      - kudu-master-1
-      - kudu-master-2
-      - kudu-master-3
     ports:
       - "7050:7050"
       - "8050:8050"
     command: ["tserver"]
     environment:
       - KUDU_MASTERS=kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251
-      - TSERVER_ARGS=--fs_wal_dir=/var/lib/kudu/tserver --rpc_bind_addresses=0.0.0.0:7050 --rpc_advertised_addresses=kudu-tserver-1:7050 --webserver_port=8050 --webserver_advertised_addresses=kudu-tserver-1:8050 --unlock_unsafe_flags --use_hybrid_clock=false
+      - TSERVER_ARGS=--fs_wal_dir=/var/lib/kudu/tserver --rpc_bind_addresses=0.0.0.0:7050 --rpc_advertised_addresses=kudu-tserver-1:7050 --webserver_port=8050 --webserver_advertised_addresses=kudu-tserver-1:8050 --unlock_unsafe_flags --use_hybrid_clock=false --max_log_files=3 --log_dir=/tmp --logtostderr=false --maintenance_manager_num_threads=1 --log_segment_size_mb=4 --memory_limit_hard_bytes=402653184
     volumes:
       - kudu-tserver-1:/var/lib/kudu
-    networks:
-      - kudu-network
+    healthcheck:
+      test: ["CMD-SHELL", "kudu tserver status kudu-tserver-1:7050 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
 
   kudu-tserver-2:
-    image: apache/kudu:latest
+    <<: *tserver-common
     container_name: kudu-tserver-2
     hostname: kudu-tserver-2
-    depends_on:
-      - kudu-master-1
-      - kudu-master-2
-      - kudu-master-3
     ports:
       - "7150:7150"
       - "8150:8150"
     command: ["tserver"]
     environment:
       - KUDU_MASTERS=kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251
-      - TSERVER_ARGS=--fs_wal_dir=/var/lib/kudu/tserver --rpc_bind_addresses=0.0.0.0:7150 --rpc_advertised_addresses=kudu-tserver-2:7150 --webserver_port=8150 --webserver_advertised_addresses=kudu-tserver-2:8150 --unlock_unsafe_flags --use_hybrid_clock=false
+      - TSERVER_ARGS=--fs_wal_dir=/var/lib/kudu/tserver --rpc_bind_addresses=0.0.0.0:7150 --rpc_advertised_addresses=kudu-tserver-2:7150 --webserver_port=8150 --webserver_advertised_addresses=kudu-tserver-2:8150 --unlock_unsafe_flags --use_hybrid_clock=false --max_log_files=3 --log_dir=/tmp --logtostderr=false --maintenance_manager_num_threads=1 --log_segment_size_mb=4 --memory_limit_hard_bytes=402653184
     volumes:
       - kudu-tserver-2:/var/lib/kudu
-    networks:
-      - kudu-network
+    healthcheck:
+      test: ["CMD-SHELL", "kudu tserver status kudu-tserver-2:7150 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
 
   kudu-tserver-3:
-    image: apache/kudu:latest
+    <<: *tserver-common
     container_name: kudu-tserver-3
     hostname: kudu-tserver-3
-    depends_on:
-      - kudu-master-1
-      - kudu-master-2
-      - kudu-master-3
     ports:
       - "7250:7250"
       - "8250:8250"
     command: ["tserver"]
     environment:
       - KUDU_MASTERS=kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251
-      - TSERVER_ARGS=--fs_wal_dir=/var/lib/kudu/tserver --rpc_bind_addresses=0.0.0.0:7250 --rpc_advertised_addresses=kudu-tserver-3:7250 --webserver_port=8250 --webserver_advertised_addresses=kudu-tserver-3:8250 --unlock_unsafe_flags --use_hybrid_clock=false
+      - TSERVER_ARGS=--fs_wal_dir=/var/lib/kudu/tserver --rpc_bind_addresses=0.0.0.0:7250 --rpc_advertised_addresses=kudu-tserver-3:7250 --webserver_port=8250 --webserver_advertised_addresses=kudu-tserver-3:8250 --unlock_unsafe_flags --use_hybrid_clock=false --max_log_files=3 --log_dir=/tmp --logtostderr=false --maintenance_manager_num_threads=1 --log_segment_size_mb=4 --memory_limit_hard_bytes=402653184
     volumes:
       - kudu-tserver-3:/var/lib/kudu
-    networks:
-      - kudu-network
+    healthcheck:
+      test: ["CMD-SHELL", "kudu tserver status kudu-tserver-3:7250 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
 
   impala:
     image: apache/kudu:impala-latest
     container_name: kudu-impala-new
     hostname: impala
+    logging: *default-logging
+    restart: unless-stopped
+    mem_limit: 1536m
+    memswap_limit: 1536m
     depends_on:
-      - kudu-master-1
-      - kudu-master-2
-      - kudu-master-3
-      - kudu-tserver-1
-      - kudu-tserver-2
-      - kudu-tserver-3
+      kudu-master-1:
+        condition: service_started
+      kudu-master-2:
+        condition: service_started
+      kudu-master-3:
+        condition: service_started
+      kudu-tserver-1:
+        condition: service_started
+      kudu-tserver-2:
+        condition: service_started
+      kudu-tserver-3:
+        condition: service_started
     ports:
       - "21000:21000"
       - "21050:21050"
@@ -129,6 +185,12 @@ services:
     command: ["impala"]
     environment:
       - KUDU_MASTERS=kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251
+    healthcheck:
+      test: ["CMD-SHELL", "impala-shell -q 'SELECT 1' 2>/dev/null || exit 1"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
     networks:
       - kudu-network
 

@@ -19,5 +19,5 @@ urlpatterns = [
     # Equity Prices
     path('equity-prices/', views.equity_price_list, name='equity_price_list'),
     path('equity-prices/create/', views.equity_price_create, name='equity_price_create'),
-    path('equity-prices/<str:currency_code>/<str:security_label>/edit/', views.equity_price_edit, name='equity_price_edit'),
+    path('equity-prices/<str:currency_code>/<str:security_label>/<str:price_date>/edit/', views.equity_price_edit, name='equity_price_edit'),
 ]

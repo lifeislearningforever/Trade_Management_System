@@ -13,6 +13,9 @@ urlpatterns = [
     # Trade List
     path('', views.trade_list, name='list'),
 
+    # Dashboard
+    path('dashboard/', views.trade_dashboard, name='dashboard'),
+
     # Trade CRUD
     path('create/', views.trade_create, name='create'),
     path('create/<str:trade_type>/', views.trade_create, name='create_type'),
@@ -30,6 +33,11 @@ urlpatterns = [
     # Approval Queues
     path('pending-validation/', views.pending_validation, name='pending_validation'),
     path('pending-settlement/', views.pending_settlement, name='pending_settlement'),
+
+    # Positions
+    path('positions/', views.position_list, name='position_list'),
+    path('positions/<int:position_id>/', views.position_detail, name='position_detail'),
+    path('positions/refresh/', views.refresh_positions, name='refresh_positions'),
 
     # History
     path('<int:trade_id>/history/', views.trade_history, name='history'),

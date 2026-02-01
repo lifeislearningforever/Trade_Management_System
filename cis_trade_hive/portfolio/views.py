@@ -215,6 +215,17 @@ def portfolio_list(request):
     return render(request, 'portfolio/portfolio_list.html', context)
 
 
+def portfolio_dashboard(request):
+    """Portfolio dashboard with statistics."""
+    stats = portfolio_hive_repository.get_portfolio_statistics()
+
+    context = {
+        'stats': stats,
+    }
+
+    return render(request, 'portfolio/portfolio_dashboard.html', context)
+
+
 def portfolio_detail(request, portfolio_name):
     """View portfolio details."""
     portfolio_data = portfolio_hive_repository.get_portfolio_by_code(portfolio_name)

@@ -6,7 +6,7 @@ Implements:
 - CRUD operations for trades
 - Four-Eyes (Maker-Checker) workflow
 - Audit trail with field-level change tracking
-- Trade Details management (positions)
+- Position management (versioned snapshots)
 
 Trade Types:
 - BUY, SELL, ADD_LONG, DELIVER_LONG
@@ -32,8 +32,7 @@ class TradeKuduRepository:
     TABLE_NAME = 'cis_trade'
     HISTORY_TABLE = 'cis_trade_history'
     NOTE_TABLE = 'cis_trade_note'
-    TRADE_DETAILS_TABLE = 'cis_trade_details'
-    TRADE_DETAILS_HISTORY_TABLE = 'cis_trade_details_history'
+    TRADE_POSITION_TABLE = 'cis_trade_position'
     SEQUENCE_TABLE = 'cis_sequence'
 
     # Trade Types
@@ -446,6 +445,20 @@ class TradeKuduRepository:
                     performed_by=created_by
                 )
                 logger.info(f"Created trade {trade_id} ({deal_number}) with INITIAL status")
+
+                # Auto-create/update position from trade
+                trade_for_position = {
+                    'portfolio_short_name': trade_data.get('portfolio_short_name', ''),
+                    'security_label': trade_data.get('security_label', ''),
+                    'trade_type': trade_data.get('trade_type', ''),
+                    'quantity': trade_data.get('quantity', 0),
+                    'price': trade_data.get('price', 0),
+                    'total_amount': trade_data.get('total_amount', 0),
+                    'trade_id': trade_id,
+                    'trade_date': trade_data.get('trade_date', ''),
+                }
+                self.update_position_from_trade(trade_for_position, created_by)
+
                 return trade_id
 
             return None
@@ -761,9 +774,6 @@ class TradeKuduRepository:
             success = impala_manager.execute_write(query, database=self.DATABASE)
 
             if success:
-                # Update trade details
-                self.update_trade_detail_from_trade(current_trade, settled_by)
-
                 self.insert_trade_history(
                     trade_id=trade_id,
                     deal_number=current_trade.get('deal_number', ''),
@@ -783,108 +793,374 @@ class TradeKuduRepository:
             raise
 
     # =========================================================================
-    # TRADE DETAILS MANAGEMENT (formerly Position Management)
+    # POSITION MANAGEMENT (Versioned Snapshots)
     # =========================================================================
 
-    def get_trade_detail(self, portfolio_name: str, security_label: str) -> Optional[Dict[str, Any]]:
-        """Get current trade detail for portfolio-security combination."""
+    def get_position(self, portfolio_name: str, security_label: str) -> Optional[Dict[str, Any]]:
+        """Get current position (latest version) for portfolio-security combination."""
         try:
             query = f"""
             SELECT *
-            FROM {self.DATABASE}.{self.TRADE_DETAILS_TABLE}
+            FROM {self.DATABASE}.{self.TRADE_POSITION_TABLE}
             WHERE portfolio_short_name = {self.escape_value(portfolio_name)}
               AND security_label = {self.escape_value(security_label)}
               AND status = 'OPEN'
               AND is_active = true
+            ORDER BY version_id DESC
             LIMIT 1
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
             return results[0] if results else None
         except Exception as e:
-            logger.error(f"Error getting trade detail: {str(e)}")
+            logger.error(f"Error getting position: {str(e)}")
             return None
 
-    def update_trade_detail_from_trade(self, trade: Dict[str, Any], updated_by: str) -> bool:
-        """Update trade detail based on settled trade."""
+    def get_trade_detail(self, portfolio_name: str, security_label: str) -> Optional[Dict[str, Any]]:
+        """Alias for backward compatibility - used by validation."""
+        return self.get_position(portfolio_name, security_label)
+
+    def get_position_by_id(self, position_id: int) -> Optional[Dict[str, Any]]:
+        """Get latest version of a position by position_id."""
+        try:
+            query = f"""
+            SELECT *
+            FROM {self.DATABASE}.{self.TRADE_POSITION_TABLE}
+            WHERE position_id = {position_id}
+            ORDER BY version_id DESC
+            LIMIT 1
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            return results[0] if results else None
+        except Exception as e:
+            logger.error(f"Error getting position by ID: {str(e)}")
+            return None
+
+    def get_all_positions(self, status: Optional[str] = None, limit: int = 500) -> List[Dict[str, Any]]:
+        """Get all positions (latest version per position_id)."""
+        try:
+            where_clauses = []
+            if status:
+                where_clauses.append(f"p.status = {self.escape_value(status)}")
+
+            where_clause = f"AND {' AND '.join(where_clauses)}" if where_clauses else ""
+
+            query = f"""
+            SELECT p.*
+            FROM {self.DATABASE}.{self.TRADE_POSITION_TABLE} p
+            INNER JOIN (
+                SELECT position_id, MAX(version_id) as max_version
+                FROM {self.DATABASE}.{self.TRADE_POSITION_TABLE}
+                GROUP BY position_id
+            ) latest ON p.position_id = latest.position_id AND p.version_id = latest.max_version
+            WHERE 1=1 {where_clause}
+            ORDER BY p.created_at DESC
+            LIMIT {limit}
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            return results if results else []
+        except Exception as e:
+            logger.error(f"Error getting all positions: {str(e)}")
+            return []
+
+    def get_position_versions(self, position_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get all version snapshots for a position (the versions ARE the history)."""
+        try:
+            query = f"""
+            SELECT *
+            FROM {self.DATABASE}.{self.TRADE_POSITION_TABLE}
+            WHERE position_id = {position_id}
+            ORDER BY version_id DESC
+            LIMIT {limit}
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            return results if results else []
+        except Exception as e:
+            logger.error(f"Error getting position versions: {str(e)}")
+            return []
+
+    def get_position_statistics(self) -> Dict[str, Any]:
+        """Get position statistics for the position list page."""
+        try:
+            query = f"""
+            SELECT
+                COUNT(*) as total_positions,
+                SUM(CASE WHEN p.market_value IS NOT NULL THEN p.market_value ELSE 0 END) as total_market_value,
+                SUM(CASE WHEN p.unrealized_pnl IS NOT NULL THEN p.unrealized_pnl ELSE 0 END) as total_unrealized_pnl,
+                SUM(CASE WHEN p.realized_pnl IS NOT NULL THEN p.realized_pnl ELSE 0 END) as total_realized_pnl
+            FROM {self.DATABASE}.{self.TRADE_POSITION_TABLE} p
+            INNER JOIN (
+                SELECT position_id, MAX(version_id) as max_version
+                FROM {self.DATABASE}.{self.TRADE_POSITION_TABLE}
+                GROUP BY position_id
+            ) latest ON p.position_id = latest.position_id AND p.version_id = latest.max_version
+            WHERE p.status = 'OPEN' AND p.is_active = true
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            if results and results[0]:
+                row = results[0]
+                return {
+                    'total_positions': row.get('total_positions', 0),
+                    'total_market_value': float(row.get('total_market_value', 0) or 0),
+                    'total_unrealized_pnl': float(row.get('total_unrealized_pnl', 0) or 0),
+                    'total_realized_pnl': float(row.get('total_realized_pnl', 0) or 0),
+                }
+            return {'total_positions': 0, 'total_market_value': 0, 'total_unrealized_pnl': 0, 'total_realized_pnl': 0}
+        except Exception as e:
+            logger.error(f"Error getting position statistics: {str(e)}")
+            return {'total_positions': 0, 'total_market_value': 0, 'total_unrealized_pnl': 0, 'total_realized_pnl': 0}
+
+    def _get_equity_price(self, security_label: str) -> Optional[float]:
+        """Fetch latest equity price for a security from cis_equity_price_kudu or cis_security_kudu."""
+        try:
+            query = f"""
+            SELECT main_closing_price
+            FROM {self.DATABASE}.cis_equity_price_kudu
+            WHERE security_label = {self.escape_value(security_label)}
+              AND is_active = true
+            ORDER BY price_date DESC, price_timestamp DESC
+            LIMIT 1
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            if results and results[0].get('main_closing_price') is not None:
+                return float(results[0]['main_closing_price'])
+
+            # Fallback to security master price
+            fallback_query = f"""
+            SELECT price
+            FROM {self.DATABASE}.cis_security_kudu
+            WHERE security_name = {self.escape_value(security_label)}
+            LIMIT 1
+            """
+            fallback_results = impala_manager.execute_query(fallback_query, database=self.DATABASE)
+            if fallback_results and fallback_results[0].get('price') is not None:
+                return float(fallback_results[0]['price'])
+
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching equity price for {security_label}: {str(e)}")
+            return None
+
+    def update_position_from_trade(self, trade: Dict[str, Any], updated_by: str) -> bool:
+        """
+        Create a new position version snapshot based on trade.
+        Uses INSERT-only pattern - each trade creates a new version row.
+        Implements full P&L calculations matching SA spreadsheet design.
+        """
         try:
             portfolio = trade.get('portfolio_short_name', '')
             security = trade.get('security_label', '')
             trade_type = trade.get('trade_type', '')
-            quantity = float(trade.get('quantity', 0))
-            price = float(trade.get('price', 0))
+            trade_qty = float(trade.get('quantity', 0))
+            trade_price = float(trade.get('price', 0))
+            trade_total_amt = float(trade.get('total_amount', 0) or (trade_qty * trade_price))
+            trade_id = trade.get('trade_id')
+            trade_date = trade.get('trade_date', datetime.now().strftime('%Y-%m-%d'))
 
-            current_detail = self.get_trade_detail(portfolio, security)
+            # Get latest position version for this portfolio+security
+            current_position = self.get_position(portfolio, security)
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            if trade_type == self.TRADE_TYPE_BUY:
-                if current_detail:
-                    # Update existing trade detail
-                    old_qty = float(current_detail.get('quantity', 0))
-                    old_cost = float(current_detail.get('average_cost', 0))
-                    new_qty = old_qty + quantity
-                    new_avg_cost = ((old_qty * old_cost) + (quantity * price)) / new_qty if new_qty > 0 else 0
+            # Fetch current equity price for market value calculation
+            equity_price = self._get_equity_price(security)
 
-                    query = f"""
-                    UPDATE {self.DATABASE}.{self.TRADE_DETAILS_TABLE}
-                    SET quantity = {new_qty},
-                        average_cost = {new_avg_cost},
-                        total_cost = {new_qty * new_avg_cost},
-                        last_trade_id = {trade.get('trade_id')},
-                        last_trade_date = '{trade.get('trade_date', '')}',
-                        updated_at = '{timestamp}'
-                    WHERE trade_detail_id = {current_detail.get('trade_detail_id')}
-                    """
-                else:
-                    # Create new trade detail
-                    trade_detail_id = self.get_next_id('trade_detail_id')
-                    query = f"""
-                    UPSERT INTO {self.DATABASE}.{self.TRADE_DETAILS_TABLE}
-                    (trade_detail_id, portfolio_short_name, security_label, quantity, average_cost, total_cost,
-                     status, is_active, last_trade_id, last_trade_date, created_at, updated_at)
-                    VALUES (
-                        {trade_detail_id}, {self.escape_value(portfolio)}, {self.escape_value(security)},
-                        {quantity}, {price}, {quantity * price}, 'OPEN', true,
-                        {trade.get('trade_id')}, '{trade.get('trade_date', '')}', '{timestamp}', '{timestamp}'
+            # Generate new version_id (always)
+            version_id = self.get_next_id('position_version_id')
+
+            if trade_type in [self.TRADE_TYPE_BUY, self.TRADE_TYPE_ADD_LONG]:
+                if current_position:
+                    # Add to existing position - new version with updated values
+                    position_id = current_position.get('position_id')
+                    old_qty = float(current_position.get('quantity', 0))
+                    old_avg_cost = float(current_position.get('average_cost', 0))
+                    old_realized_pnl = float(current_position.get('realized_pnl', 0) or 0)
+
+                    new_qty = old_qty + trade_qty
+                    new_avg_cost = ((old_qty * old_avg_cost) + (trade_qty * trade_price)) / new_qty if new_qty > 0 else 0
+                    new_total_cost = new_qty * new_avg_cost
+
+                    current_price = equity_price if equity_price is not None else trade_price
+                    market_value = new_qty * current_price
+                    unrealized_pnl = market_value - new_total_cost
+
+                    return self._insert_position_version(
+                        version_id=version_id, position_id=position_id,
+                        position_date=trade_date, portfolio=portfolio, security=security,
+                        quantity=new_qty, average_cost=new_avg_cost, total_cost=new_total_cost,
+                        realized_pnl=old_realized_pnl, current_price=current_price,
+                        market_value=market_value, unrealized_pnl=unrealized_pnl,
+                        trade_id=trade_id, trade_type=trade_type,
+                        status='OPEN', is_active=True, created_by=updated_by
                     )
-                    """
+                else:
+                    # New position - generate new position_id
+                    position_id = self.get_next_id('position_id')
+                    new_total_cost = trade_qty * trade_price
 
-                return impala_manager.execute_write(query, database=self.DATABASE)
+                    current_price = equity_price if equity_price is not None else trade_price
+                    market_value = trade_qty * current_price
+                    unrealized_pnl = market_value - new_total_cost
 
-            elif trade_type == self.TRADE_TYPE_SELL:
-                if current_detail:
-                    old_qty = float(current_detail.get('quantity', 0))
-                    new_qty = old_qty - quantity
+                    return self._insert_position_version(
+                        version_id=version_id, position_id=position_id,
+                        position_date=trade_date, portfolio=portfolio, security=security,
+                        quantity=trade_qty, average_cost=trade_price, total_cost=new_total_cost,
+                        realized_pnl=0, current_price=current_price,
+                        market_value=market_value, unrealized_pnl=unrealized_pnl,
+                        trade_id=trade_id, trade_type=trade_type,
+                        status='OPEN', is_active=True, created_by=updated_by
+                    )
+
+            elif trade_type in [self.TRADE_TYPE_SELL, self.TRADE_TYPE_DELIVER_LONG]:
+                if current_position:
+                    position_id = current_position.get('position_id')
+                    old_qty = float(current_position.get('quantity', 0))
+                    old_avg_cost = float(current_position.get('average_cost', 0))
+                    old_realized_pnl = float(current_position.get('realized_pnl', 0) or 0)
+
+                    new_qty = old_qty - trade_qty
+
+                    # Realized P&L calculation
+                    sell_cost_basis = trade_qty * old_avg_cost
+                    realized_pnl_this_trade = trade_total_amt - sell_cost_basis
+                    cumulative_realized_pnl = old_realized_pnl + realized_pnl_this_trade
 
                     if new_qty <= 0:
-                        # Close trade detail
-                        query = f"""
-                        UPDATE {self.DATABASE}.{self.TRADE_DETAILS_TABLE}
-                        SET quantity = 0,
-                            status = 'CLOSED',
-                            is_active = false,
-                            last_trade_id = {trade.get('trade_id')},
-                            last_trade_date = '{trade.get('trade_date', '')}',
-                            updated_at = '{timestamp}'
-                        WHERE trade_detail_id = {current_detail.get('trade_detail_id')}
-                        """
+                        # Close position
+                        return self._insert_position_version(
+                            version_id=version_id, position_id=position_id,
+                            position_date=trade_date, portfolio=portfolio, security=security,
+                            quantity=0, average_cost=0, total_cost=0,
+                            realized_pnl=cumulative_realized_pnl, current_price=0,
+                            market_value=0, unrealized_pnl=0,
+                            trade_id=trade_id, trade_type=trade_type,
+                            status='CLOSED', is_active=False, created_by=updated_by
+                        )
                     else:
-                        query = f"""
-                        UPDATE {self.DATABASE}.{self.TRADE_DETAILS_TABLE}
-                        SET quantity = {new_qty},
-                            total_cost = {new_qty * float(current_detail.get('average_cost', 0))},
-                            last_trade_id = {trade.get('trade_id')},
-                            last_trade_date = '{trade.get('trade_date', '')}',
-                            updated_at = '{timestamp}'
-                        WHERE trade_detail_id = {current_detail.get('trade_detail_id')}
-                        """
+                        # Partial sell - avg_cost unchanged
+                        new_total_cost = new_qty * old_avg_cost
+                        current_price = equity_price if equity_price is not None else trade_price
+                        market_value = new_qty * current_price
+                        unrealized_pnl = market_value - new_total_cost
 
-                    return impala_manager.execute_write(query, database=self.DATABASE)
+                        return self._insert_position_version(
+                            version_id=version_id, position_id=position_id,
+                            position_date=trade_date, portfolio=portfolio, security=security,
+                            quantity=new_qty, average_cost=old_avg_cost, total_cost=new_total_cost,
+                            realized_pnl=cumulative_realized_pnl, current_price=current_price,
+                            market_value=market_value, unrealized_pnl=unrealized_pnl,
+                            trade_id=trade_id, trade_type=trade_type,
+                            status='OPEN', is_active=True, created_by=updated_by
+                        )
 
             return True
 
         except Exception as e:
-            logger.error(f"Error updating trade detail: {str(e)}")
+            logger.error(f"Error updating position from trade: {str(e)}")
             return False
+
+    def _insert_position_version(
+        self,
+        version_id: int,
+        position_id: int,
+        position_date: str,
+        portfolio: str,
+        security: str,
+        quantity: float,
+        average_cost: float,
+        total_cost: float,
+        realized_pnl: float,
+        current_price: float,
+        market_value: float,
+        unrealized_pnl: float,
+        trade_id: int,
+        trade_type: str,
+        status: str,
+        is_active: bool,
+        created_by: str
+    ) -> bool:
+        """Insert a new position version row into cis_trade_position."""
+        try:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            query = f"""
+            UPSERT INTO {self.DATABASE}.{self.TRADE_POSITION_TABLE}
+            (version_id, position_id, position_date, portfolio_short_name, security_label,
+             quantity, average_cost, total_cost,
+             realized_pnl, current_price, market_value, unrealized_pnl,
+             trade_id, trade_type,
+             status, is_active,
+             created_by, created_at)
+            VALUES (
+                {version_id}, {position_id}, {self.escape_value(position_date)},
+                {self.escape_value(portfolio)}, {self.escape_value(security)},
+                {quantity}, {average_cost}, {total_cost},
+                {realized_pnl}, {current_price}, {market_value}, {unrealized_pnl},
+                {trade_id}, {self.escape_value(trade_type)},
+                {self.escape_value(status)}, {str(is_active).lower()},
+                {self.escape_value(created_by)}, '{timestamp}'
+            )
+            """
+            return impala_manager.execute_write(query, database=self.DATABASE)
+        except Exception as e:
+            logger.error(f"Error inserting position version: {str(e)}")
+            return False
+
+    def refresh_market_values(self, portfolio_filter: Optional[str] = None) -> Dict[str, int]:
+        """Refresh market values for all open positions by inserting new version snapshots."""
+        counters = {'updated': 0, 'skipped': 0, 'errors': 0}
+        try:
+            positions = self.get_all_positions(status='OPEN')
+            if portfolio_filter:
+                positions = [p for p in positions if p.get('portfolio_short_name') == portfolio_filter]
+
+            for position in positions:
+                try:
+                    security = position.get('security_label', '')
+                    qty = float(position.get('quantity', 0) or 0)
+                    total_cost = float(position.get('total_cost', 0) or 0)
+                    position_id = position.get('position_id')
+                    avg_cost = float(position.get('average_cost', 0) or 0)
+                    old_realized_pnl = float(position.get('realized_pnl', 0) or 0)
+
+                    if not qty or not total_cost:
+                        counters['skipped'] += 1
+                        continue
+
+                    price = self._get_equity_price(security)
+                    if price is None:
+                        counters['skipped'] += 1
+                        continue
+
+                    market_value = qty * price
+                    unrealized_pnl = market_value - total_cost
+
+                    version_id = self.get_next_id('position_version_id')
+                    success = self._insert_position_version(
+                        version_id=version_id, position_id=position_id,
+                        position_date=datetime.now().strftime('%Y-%m-%d'),
+                        portfolio=position.get('portfolio_short_name', ''),
+                        security=security,
+                        quantity=qty, average_cost=avg_cost, total_cost=total_cost,
+                        realized_pnl=old_realized_pnl, current_price=price,
+                        market_value=market_value, unrealized_pnl=unrealized_pnl,
+                        trade_id=position.get('trade_id', 0),
+                        trade_type='MARKET_REFRESH',
+                        status='OPEN', is_active=True,
+                        created_by='SYSTEM'
+                    )
+                    if success:
+                        counters['updated'] += 1
+                    else:
+                        counters['errors'] += 1
+
+                except Exception as e:
+                    logger.error(f"Error refreshing position {position.get('position_id')}: {str(e)}")
+                    counters['errors'] += 1
+
+            return counters
+        except Exception as e:
+            logger.error(f"Error in refresh_market_values: {str(e)}")
+            return counters
 
     # =========================================================================
     # HISTORY (Async for performance - non-blocking)

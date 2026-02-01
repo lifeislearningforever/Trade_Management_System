@@ -25,6 +25,7 @@ urlpatterns = [
     # List and Create
     path('', views.portfolio_list, name='list'),
     path('create/', views.portfolio_create, name='create'),
+    path('dashboard/', views.portfolio_dashboard, name='dashboard'),
 
     # Checker Lists - MUST come before <str:portfolio_name>/ pattern
     path('pending-validation/', views.pending_validation, name='pending_validation'),

@@ -660,19 +660,19 @@ def equity_price_create(request):
         return render(request, 'market_data/equity_price_form.html', context)
 
 
-def equity_price_edit(request, currency_code: str, security_label: str):
+def equity_price_edit(request, currency_code: str, security_label: str, price_date: str):
     """
     Edit existing equity price.
 
-    Uses composite key: (currency_code, security_label)
+    Uses composite key: (currency_code, security_label, price_date)
     """
     # URL decode the security_label (may contain spaces, special characters)
     from urllib.parse import unquote
     security_label = unquote(security_label)
 
-    # Get existing price by composite key
+    # Get existing price by composite key (including price_date)
     try:
-        existing_price = equity_price_service.get_equity_price_by_key(currency_code, security_label)
+        existing_price = equity_price_service.get_equity_price_by_key(currency_code, security_label, price_date)
         if not existing_price:
             return HttpResponse("Equity price not found", status=404)
     except Exception as e:
@@ -691,12 +691,13 @@ def equity_price_edit(request, currency_code: str, security_label: str):
         username = request.session.get('user_login', 'SYSTEM')
 
         try:
-            # Update equity price using composite key
+            # Update equity price using composite key (including price_date)
             success = equity_price_service.update_equity_price(
                 currency_code,
                 security_label,
                 equity_price_data,
-                user=username
+                user=username,
+                price_date=price_date
             )
 
             if success:
@@ -725,9 +726,9 @@ def equity_price_edit(request, currency_code: str, security_label: str):
                     user_email=user_email,
                     action_type='UPDATE',
                     entity_type='EQUITY_PRICE',
-                    entity_id=f"{currency_code}/{security_label}",
+                    entity_id=f"{currency_code}/{security_label}/{price_date}",
                     entity_name=security_label,
-                    action_description=f"Updated equity price for {security_label} on {equity_price_data['price_date']} - Changed fields: {', '.join(changed_fields) if changed_fields else 'No changes'}",
+                    action_description=f"Updated equity price for {security_label} on {price_date} - Changed fields: {', '.join(changed_fields) if changed_fields else 'No changes'}",
                     old_value=json.dumps(old_values, default=str) if old_values else None,
                     new_value=json.dumps(new_values, default=str) if new_values else None,
                     field_name=', '.join(changed_fields) if changed_fields else None,

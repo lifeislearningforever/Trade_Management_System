@@ -754,8 +754,7 @@ class TradeDropdownService:
                 security_label,
                 isin,
                 main_closing_price as price,
-                price_date,
-                market
+                price_date
             FROM {self.DATABASE}.cis_equity_price
             WHERE currency_code = '{currency_code}'
               AND (is_active = true OR is_active IS NULL)
@@ -784,7 +783,7 @@ class TradeDropdownService:
                                 'label': f"{sec_label} ({r.get('isin', '')})",
                                 'isin': r.get('isin', ''),
                                 'price': equity_price,
-                                'market': r.get('market', ''),
+                                'market': '',
                                 'price_date': str(r.get('price_date', '')),
                                 'source': 'equity_price'
                             }
@@ -817,7 +816,6 @@ class TradeDropdownService:
                 currency_code,
                 main_closing_price as price,
                 price_date,
-                market,
                 isin
             FROM {self.DATABASE}.cis_equity_price
             WHERE security_label = '{security_label}'
@@ -836,7 +834,7 @@ class TradeDropdownService:
                         'price': price,
                         'currency_code': r.get('currency_code', ''),
                         'price_date': str(r.get('price_date', '')),
-                        'market': r.get('market', ''),
+                        'market': '',
                         'isin': r.get('isin', ''),
                         'source': 'equity_price',
                         'found': True

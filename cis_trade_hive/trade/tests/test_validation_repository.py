@@ -591,7 +591,7 @@ class TradeValidationRepositoryTestCase(TestCase):
                 return [self.valid_portfolio]
             elif 'cis_security' in query:
                 return [self.valid_security]
-            elif 'cis_counterparty' in query:
+            elif 'cis_party' in query:
                 return [self.valid_counterparty]
             return []
 
@@ -762,7 +762,7 @@ class TradeValidationRepositoryTestCase(TestCase):
 
     def test_counterparty_table_constant(self):
         """Test COUNTERPARTY_TABLE constant"""
-        self.assertEqual(self.TradeValidationRepository.COUNTERPARTY_TABLE, 'cis_counterparty_kudu')
+        self.assertEqual(self.TradeValidationRepository.COUNTERPARTY_TABLE, 'cis_party')
 
     def test_portfolio_valid_statuses(self):
         """Test PORTFOLIO_VALID_STATUSES"""

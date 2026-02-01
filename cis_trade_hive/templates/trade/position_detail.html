@@ -1,0 +1,219 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Position Detail - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'trade:list' %}">Trades</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'trade:position_list' %}">Positions</a></li>
+    <li class="breadcrumb-item active">{{ position.portfolio_short_name }} / {{ position.security_label }}</li>
+{% endblock %}
+
+{% block content %}
+<div class="position-detail-container">
+    <!-- Page Header -->
+    <div class="content-header d-flex justify-content-between align-items-center">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-graph-up-arrow text-primary"></i> Position: {{ position.portfolio_short_name }} / {{ position.security_label }}
+            </h1>
+            <p class="content-subtitle">Position Details and History</p>
+        </div>
+    </div>
+
+    <!-- Summary Cards Row -->
+    <div class="row mb-4">
+        <!-- Current Holdings Card -->
+        <div class="col-lg-4 mb-3">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-box"></i> Current Holdings
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label text-muted small">Quantity</label>
+                        <div class="fw-bold fs-4">{{ position.quantity|floatformat:2 }}</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small">Average Cost</label>
+                        <div class="fw-bold">{{ position.average_cost|floatformat:4 }}</div>
+                    </div>
+                    <div class="mb-0">
+                        <label class="form-label text-muted small">Total Cost</label>
+                        <div class="fw-bold text-primary">{{ position.total_cost|floatformat:2 }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Market Valuation Card -->
+        <div class="col-lg-4 mb-3">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-currency-dollar"></i> Market Valuation
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label text-muted small">Current Price</label>
+                        <div class="fw-bold fs-4">{{ position.current_price|floatformat:4 }}</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small">Market Value</label>
+                        <div class="fw-bold">{{ position.market_value|floatformat:2 }}</div>
+                    </div>
+                    <div class="mb-0">
+                        <label class="form-label text-muted small">Unrealized P&L</label>
+                        <div class="fw-bold fs-5 {% if position.unrealized_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                            {{ position.unrealized_pnl|floatformat:2 }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Realized P&L Card -->
+        <div class="col-lg-4 mb-3">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-wallet2"></i> Realized P&L
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label text-muted small">Realized P&L</label>
+                        <div class="fw-bold fs-3 {% if position.realized_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                            {{ position.realized_pnl|floatformat:2 }}
+                        </div>
+                    </div>
+                    <div class="mb-0">
+                        <label class="form-label text-muted small">Status</label>
+                        <div>
+                            {% if position.status == 'OPEN' %}
+                                <span class="badge badge-success fs-6">OPEN</span>
+                            {% elif position.status == 'CLOSED' %}
+                                <span class="badge badge-secondary fs-6">CLOSED</span>
+                            {% else %}
+                                <span class="badge badge-info fs-6">{{ position.status|default:"UNKNOWN" }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Position Version History (Snapshots) -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-clock-history"></i> Position Version History
+                {% if position_versions %}
+                    <span class="badge badge-primary ms-2">{{ position_versions|length }} version{{ position_versions|length|pluralize }}</span>
+                {% endif %}
+            </h5>
+        </div>
+        <div class="card-body">
+            {% if position_versions %}
+            <div class="table-responsive">
+                <table class="table table-hover table-striped align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Version</th>
+                            <th>Date</th>
+                            <th>Trade Type</th>
+                            <th class="text-end">Quantity</th>
+                            <th class="text-end">Avg Cost</th>
+                            <th class="text-end">Total Cost</th>
+                            <th class="text-end">Realized P&L</th>
+                            <th class="text-end">Market Value</th>
+                            <th class="text-end">Unrealized P&L</th>
+                            <th>Status</th>
+                            <th>Created By</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for ver in position_versions %}
+                        <tr {% if forloop.first %}class="table-active"{% endif %}>
+                            <td><strong>{{ ver.version_id|default:"-" }}</strong></td>
+                            <td>
+                                <small>{{ ver.position_date|default:ver.created_at|default:"-" }}</small>
+                            </td>
+                            <td>
+                                {% if ver.trade_type == 'BUY' %}
+                                    <span class="badge bg-success">Buy</span>
+                                {% elif ver.trade_type == 'SELL' %}
+                                    <span class="badge bg-danger">Sell</span>
+                                {% elif ver.trade_type == 'ADD_LONG' %}
+                                    <span class="badge bg-info">Add Long</span>
+                                {% elif ver.trade_type == 'DELIVER_LONG' %}
+                                    <span class="badge bg-warning text-dark">Deliver Long</span>
+                                {% elif ver.trade_type == 'MARKET_REFRESH' %}
+                                    <span class="badge bg-primary">Refresh</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">{{ ver.trade_type|default:"-" }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end">{{ ver.quantity|floatformat:2|default:"0.00" }}</td>
+                            <td class="text-end">{{ ver.average_cost|floatformat:4|default:"0.0000" }}</td>
+                            <td class="text-end">{{ ver.total_cost|floatformat:2|default:"0.00" }}</td>
+                            <td class="text-end">
+                                {% if ver.realized_pnl > 0 %}
+                                    <span class="text-success fw-bold">{{ ver.realized_pnl|floatformat:2 }}</span>
+                                {% elif ver.realized_pnl < 0 %}
+                                    <span class="text-danger fw-bold">{{ ver.realized_pnl|floatformat:2 }}</span>
+                                {% else %}
+                                    {{ ver.realized_pnl|floatformat:2|default:"0.00" }}
+                                {% endif %}
+                            </td>
+                            <td class="text-end">{{ ver.market_value|floatformat:2|default:"0.00" }}</td>
+                            <td class="text-end">
+                                {% if ver.unrealized_pnl > 0 %}
+                                    <span class="text-success fw-bold">{{ ver.unrealized_pnl|floatformat:2 }}</span>
+                                {% elif ver.unrealized_pnl < 0 %}
+                                    <span class="text-danger fw-bold">{{ ver.unrealized_pnl|floatformat:2 }}</span>
+                                {% else %}
+                                    {{ ver.unrealized_pnl|floatformat:2|default:"0.00" }}
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if ver.status == 'OPEN' %}
+                                    <span class="badge badge-success">Open</span>
+                                {% elif ver.status == 'CLOSED' %}
+                                    <span class="badge badge-secondary">Closed</span>
+                                {% else %}
+                                    <span class="badge badge-info">{{ ver.status|default:"-" }}</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ ver.created_by|default:"-" }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="alert alert-info mb-0">
+                <i class="bi bi-info-circle"></i> No position versions available.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Action Buttons and Last Updated -->
+    <div class="d-flex justify-content-between align-items-center">
+        <a href="{% url 'trade:position_list' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Positions
+        </a>
+        <div class="text-muted">
+            <small>
+                <i class="bi bi-clock"></i> Last updated: {{ position.updated_at|default:"-" }}
+            </small>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -176,8 +176,8 @@ class TradeDropdownServiceTestCase(TestCase):
         """Test fetching counterparties for dropdown"""
         mock_validation_repo.get_valid_counterparties.return_value = [
             {
-                'counterparty_short_name': 'CP001',
-                'counterparty_full_name': 'Counterparty One',
+                'party_short_name': 'CP001',
+                'party_full_name': 'Counterparty One',
                 'country': 'US',
                 'is_broker': True
             }

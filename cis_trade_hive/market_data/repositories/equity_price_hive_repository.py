@@ -2,12 +2,13 @@
 Equity Price Repository for Market Data Module
 
 Manages equity/security pricing data in Kudu via Impala.
-Uses composite primary key: (currency_code, security_label)
+Uses composite primary key: (currency_code, security_label, price_date)
+Supports versioned price history - multiple prices per security (one per date).
 Follows SOLID principles with clean separation of data access logic.
 Includes audit logging for CREATE, UPDATE, DELETE operations.
 
 Author: CisTrade Team
-Last Updated: 2026-01-28
+Last Updated: 2026-01-31
 """
 
 from typing import List, Dict, Any, Optional
@@ -24,7 +25,8 @@ logger = logging.getLogger(__name__)
 class EquityPriceHiveRepository:
     """Repository for Equity Price operations with Impala/Kudu.
 
-    Uses composite primary key: (currency_code, security_label)
+    Uses composite primary key: (currency_code, security_label, price_date)
+    Supports versioned price history - multiple prices per security (one per date).
     """
 
     TABLE_NAME = "gmp_cis.cis_equity_price"
@@ -124,13 +126,15 @@ class EquityPriceHiveRepository:
             return []
 
     @staticmethod
-    def get_equity_price_by_key(currency_code: str, security_label: str) -> Optional[Dict[str, Any]]:
+    def get_equity_price_by_key(currency_code: str, security_label: str, price_date: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
-        Get equity price by composite key (currency_code, security_label).
+        Get equity price by composite key (currency_code, security_label, price_date).
+        If price_date is not provided, returns the latest price for this security.
 
         Args:
             currency_code: Currency code (part of composite key)
             security_label: Security label (part of composite key)
+            price_date: Price date in YYYY-MM-DD format (optional - if None, returns latest)
 
         Returns:
             Equity price record or None
@@ -138,6 +142,11 @@ class EquityPriceHiveRepository:
         try:
             escaped_currency = currency_code.replace("'", "\\'")
             escaped_security = security_label.replace("'", "\\'")
+
+            date_clause = ""
+            if price_date:
+                escaped_date = price_date.replace("'", "\\'")
+                date_clause = f"AND price_date = '{escaped_date}'"
 
             query = f"""
             SELECT
@@ -157,14 +166,16 @@ class EquityPriceHiveRepository:
             WHERE currency_code = '{escaped_currency}'
               AND security_label = '{escaped_security}'
               AND is_active = true
+              {date_clause}
+            ORDER BY price_date DESC, price_timestamp DESC
             LIMIT 1
             """
 
-            logger.info(f"Retrieving equity price by key: {currency_code}/{security_label}")
+            logger.info(f"Retrieving equity price by key: {currency_code}/{security_label}/{price_date or 'latest'}")
             results = impala_manager.execute_query(query, database=EquityPriceHiveRepository.DATABASE)
 
             if not results:
-                logger.warning(f"No equity price found with key: {currency_code}/{security_label}")
+                logger.warning(f"No equity price found with key: {currency_code}/{security_label}/{price_date or 'latest'}")
                 return None
 
             row = results[0]
@@ -186,6 +197,51 @@ class EquityPriceHiveRepository:
 
         except Exception as e:
             logger.error(f"Error getting equity price by key {currency_code}/{security_label}: {str(e)}")
+            return None
+
+    @staticmethod
+    def get_latest_price(security_label: str) -> Optional[Dict[str, Any]]:
+        """
+        Get the latest equity price for a security across all currencies.
+        Used by trade creation to get the current market price.
+
+        Args:
+            security_label: Security label
+
+        Returns:
+            Latest equity price record or None
+        """
+        try:
+            escaped_security = security_label.replace("'", "\\'")
+
+            query = f"""
+            SELECT
+                currency_code,
+                security_label,
+                isin,
+                price_date,
+                main_closing_price,
+                price_timestamp,
+                src_system,
+                is_active,
+                created_by,
+                created_at
+            FROM {EquityPriceHiveRepository.TABLE_NAME}
+            WHERE security_label = '{escaped_security}'
+              AND is_active = true
+            ORDER BY price_date DESC, price_timestamp DESC
+            LIMIT 1
+            """
+
+            results = impala_manager.execute_query(query, database=EquityPriceHiveRepository.DATABASE)
+
+            if not results:
+                return None
+
+            return results[0]
+
+        except Exception as e:
+            logger.error(f"Error getting latest price for {security_label}: {str(e)}")
             return None
 
     @staticmethod
@@ -279,7 +335,7 @@ class EquityPriceHiveRepository:
             )
 
     @staticmethod
-    def update_equity_price(currency_code: str, security_label: str, equity_price_data: Dict[str, Any], username: str = 'SYSTEM') -> bool:
+    def update_equity_price(currency_code: str, security_label: str, equity_price_data: Dict[str, Any], username: str = 'SYSTEM', price_date: Optional[str] = None) -> bool:
         """
         Update existing equity price using UPSERT.
 
@@ -288,6 +344,7 @@ class EquityPriceHiveRepository:
             security_label: Security label (part of composite key)
             equity_price_data: Dictionary with fields to update
             username: User performing the operation (for audit)
+            price_date: Price date (part of composite key). If None, updates the latest price.
 
         Returns:
             True if successful, False otherwise
@@ -299,10 +356,10 @@ class EquityPriceHiveRepository:
 
         try:
             # Get existing record for audit comparison
-            existing = EquityPriceHiveRepository.get_equity_price_by_key(currency_code, security_label)
+            existing = EquityPriceHiveRepository.get_equity_price_by_key(currency_code, security_label, price_date)
             if not existing:
-                logger.error(f"Cannot update: equity price {currency_code}/{security_label} not found")
-                error_msg = f"Equity price {currency_code}/{security_label} not found"
+                logger.error(f"Cannot update: equity price {currency_code}/{security_label}/{price_date or 'latest'} not found")
+                error_msg = f"Equity price {currency_code}/{security_label}/{price_date or 'latest'} not found"
                 return False
 
             old_value = existing
@@ -332,7 +389,7 @@ class EquityPriceHiveRepository:
             log_audit(
                 action_type='UPDATE',
                 entity_type='EQUITY_PRICE',
-                entity_id=f"{currency_code}/{security_label}",
+                entity_id=f"{currency_code}/{security_label}/{price_date or 'latest'}",
                 entity_name=security_label,
                 old_value=old_value,
                 new_value=equity_price_data,
@@ -342,7 +399,7 @@ class EquityPriceHiveRepository:
             )
 
     @staticmethod
-    def delete_equity_price(currency_code: str, security_label: str, deleted_by: str) -> bool:
+    def delete_equity_price(currency_code: str, security_label: str, deleted_by: str, price_date: Optional[str] = None) -> bool:
         """
         Soft delete equity price (set is_active to false).
 
@@ -350,6 +407,7 @@ class EquityPriceHiveRepository:
             currency_code: Currency code (part of composite key)
             security_label: Security label (part of composite key)
             deleted_by: User performing deletion
+            price_date: Price date (part of composite key). If None, deletes the latest price.
 
         Returns:
             True if successful, False otherwise
@@ -361,10 +419,13 @@ class EquityPriceHiveRepository:
 
         try:
             # Get existing record for audit
-            old_value = EquityPriceHiveRepository.get_equity_price_by_key(currency_code, security_label)
+            old_value = EquityPriceHiveRepository.get_equity_price_by_key(currency_code, security_label, price_date)
             if not old_value:
-                error_msg = f"Equity price {currency_code}/{security_label} not found"
+                error_msg = f"Equity price {currency_code}/{security_label}/{price_date or 'latest'} not found"
                 return False
+
+            # Use the actual price_date from the record found
+            actual_price_date = old_value.get('price_date', price_date)
 
             # Perform soft delete via update
             success = EquityPriceHiveRepository.update_equity_price(
@@ -374,7 +435,8 @@ class EquityPriceHiveRepository:
                     'is_active': False,
                     'updated_by': deleted_by
                 },
-                username=deleted_by
+                username=deleted_by,
+                price_date=actual_price_date
             )
 
             if not success:
@@ -392,7 +454,7 @@ class EquityPriceHiveRepository:
             log_audit(
                 action_type='DELETE',
                 entity_type='EQUITY_PRICE',
-                entity_id=f"{currency_code}/{security_label}",
+                entity_id=f"{currency_code}/{security_label}/{price_date or 'latest'}",
                 entity_name=security_label,
                 old_value=old_value,
                 success=success,

@@ -525,60 +525,41 @@ PARTITION BY HASH (note_id) PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES ('kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251');
 
--- 5.4 Trade Details Table
-DROP TABLE IF EXISTS cis_trade_details;
-CREATE TABLE cis_trade_details (
-    trade_detail_id BIGINT NOT NULL,
-    portfolio_short_name STRING,
-    security_label STRING,
+-- 5.4 Trade Position Table (Versioned Snapshots - replaces cis_trade_details + history)
+DROP TABLE IF EXISTS cis_trade_position;
+CREATE TABLE cis_trade_position (
+    version_id BIGINT NOT NULL,
+    position_id BIGINT NOT NULL,
+    position_date STRING NOT NULL,
+    portfolio_short_name STRING NOT NULL,
+    security_label STRING NOT NULL,
     quantity DECIMAL(20,6),
     average_cost DECIMAL(20,6),
     total_cost DECIMAL(20,6),
+    realized_pnl DECIMAL(20,6),
     current_price DECIMAL(20,6),
     market_value DECIMAL(20,6),
     unrealized_pnl DECIMAL(20,6),
+    trade_id BIGINT,
+    trade_type STRING,
     lots_held INT,
     custodian STRING,
     sub_custodian STRING,
-    last_trade_id BIGINT,
-    last_trade_date STRING,
     status STRING,
     is_active BOOLEAN,
+    created_by STRING,
     created_at STRING,
-    updated_at STRING,
-    PRIMARY KEY (trade_detail_id)
+    PRIMARY KEY (version_id)
 )
-PARTITION BY HASH (trade_detail_id) PARTITIONS 4
+PARTITION BY HASH (version_id) PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES ('kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251');
 
--- 5.5 Trade Details History Table
-DROP TABLE IF EXISTS cis_trade_details_history;
-CREATE TABLE cis_trade_details_history (
-    history_id BIGINT NOT NULL,
-    trade_detail_id BIGINT,
-    portfolio_short_name STRING,
-    security_label STRING,
-    trade_id BIGINT,
-    trade_type STRING,
-    quantity_before DECIMAL(20,6),
-    quantity_after DECIMAL(20,6),
-    quantity_change DECIMAL(20,6),
-    average_cost_before DECIMAL(20,6),
-    average_cost_after DECIMAL(20,6),
-    changed_at STRING,
-    changed_by STRING,
-    PRIMARY KEY (history_id)
-)
-PARTITION BY HASH (history_id) PARTITIONS 4
-STORED AS KUDU
-TBLPROPERTIES ('kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251');
-
--- 5.6 Trade Lot Table
+-- 5.5 Trade Lot Table
 DROP TABLE IF EXISTS cis_trade_lot;
 CREATE TABLE cis_trade_lot (
     lot_id BIGINT NOT NULL,
-    trade_detail_id BIGINT,
+    position_id BIGINT,
     portfolio_short_name STRING,
     security_label STRING,
     lot_number INT,
@@ -614,8 +595,8 @@ TBLPROPERTIES ('kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,
 UPSERT INTO cis_sequence VALUES ('trade_id', 1000000, 1);
 UPSERT INTO cis_sequence VALUES ('trade_history_id', 1000000, 1);
 UPSERT INTO cis_sequence VALUES ('trade_note_id', 1000000, 1);
-UPSERT INTO cis_sequence VALUES ('trade_detail_id', 1000000, 1);
-UPSERT INTO cis_sequence VALUES ('trade_detail_history_id', 1000000, 1);
+UPSERT INTO cis_sequence VALUES ('position_id', 1000000, 1);
+UPSERT INTO cis_sequence VALUES ('position_version_id', 1000000, 1);
 UPSERT INTO cis_sequence VALUES ('lot_id', 1000000, 1);
 UPSERT INTO cis_sequence VALUES ('audit_id', 1000000, 1);
 UPSERT INTO cis_sequence VALUES ('security_id', 1000000, 1);
@@ -625,29 +606,43 @@ UPSERT INTO cis_sequence VALUES ('portfolio_history_id', 1000000, 1);
 -- SECTION 6: MARKET DATA TABLES
 -- ============================================================================
 
--- 6.1 Equity Price Table
+-- 6.1 Equity Price Table (Versioned - composite PK includes price_date)
+-- Each (currency_code, security_label, price_date) is a unique row.
+-- Multiple prices per security supported (one per date).
+-- Latest price = ORDER BY price_date DESC, price_timestamp DESC LIMIT 1
 DROP TABLE IF EXISTS cis_equity_price;
-CREATE TABLE cis_equity_price (
-    equity_price_id BIGINT NOT NULL,
-    currency_code STRING,
-    security_label STRING,
+DROP TABLE IF EXISTS cis_equity_price_kudu;
+CREATE TABLE cis_equity_price_kudu (
+    -- Composite Primary Key fields (currency + security + date)
+    currency_code STRING NOT NULL,
+    security_label STRING NOT NULL,
+    price_date STRING NOT NULL,
+
+    -- Business Fields
     isin STRING,
-    price_date STRING,
     main_closing_price DECIMAL(18, 6),
-    market STRING,
     price_timestamp BIGINT,
-    group_name STRING,
-    src_system STRING,
-    is_active BOOLEAN,
-    created_by STRING,
-    created_at BIGINT,
+    src_system STRING DEFAULT 'CIS',
+
+    -- Audit Fields
+    is_active BOOLEAN DEFAULT true,
+    created_by STRING NOT NULL,
+    created_at BIGINT NOT NULL,
     updated_by STRING,
     updated_at BIGINT,
-    PRIMARY KEY (equity_price_id)
+
+    PRIMARY KEY (currency_code, security_label, price_date)
 )
-PARTITION BY HASH (equity_price_id) PARTITIONS 8
+PARTITION BY HASH (currency_code, security_label) PARTITIONS 16
 STORED AS KUDU
 TBLPROPERTIES ('kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251');
+
+-- Create alias view for backward compatibility
+CREATE EXTERNAL TABLE IF NOT EXISTS cis_equity_price
+STORED AS KUDU
+TBLPROPERTIES(
+    'kudu.table_name' = 'impala::gmp_cis.cis_equity_price_kudu'
+);
 
 -- 6.2 FX Rates Table
 DROP TABLE IF EXISTS gmp_cis_sta_dly_fx_rates;

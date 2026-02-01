@@ -11,7 +11,6 @@ Tests for the Hive repository layer including:
 from django.test import TestCase
 from unittest.mock import patch, Mock, MagicMock
 from market_data.repositories.fx_rate_hive_repository import (
-    HiveConnection,
     FXRateHiveRepository
 )
 import subprocess
