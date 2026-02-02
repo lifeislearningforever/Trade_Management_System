@@ -83,8 +83,11 @@ CREATE EXTERNAL TABLE IF NOT EXISTS cis_position_history STORED AS KUDU
 TBLPROPERTIES('kudu.table_name' = 'impala::gmp_cis.cis_position_history');
 
 -- Market Data Tables
-CREATE EXTERNAL TABLE IF NOT EXISTS cis_equity_price_kudu STORED AS KUDU
+CREATE EXTERNAL TABLE IF NOT EXISTS cis_equity_price STORED AS KUDU
 TBLPROPERTIES('kudu.table_name' = 'impala::gmp_cis.cis_equity_price_kudu');
+
+CREATE EXTERNAL TABLE IF NOT EXISTS cis_equity_price_history STORED AS KUDU
+TBLPROPERTIES('kudu.table_name' = 'impala::gmp_cis.cis_equity_price_history');
 
 -- UDF Tables
 CREATE EXTERNAL TABLE IF NOT EXISTS cis_udf_field_kudu STORED AS KUDU

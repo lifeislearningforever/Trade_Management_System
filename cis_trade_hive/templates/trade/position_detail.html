@@ -18,7 +18,7 @@
             <h1 class="content-title">
                 <i class="bi bi-graph-up-arrow text-primary"></i> Position: {{ position.portfolio_short_name }} / {{ position.security_label }}
             </h1>
-            <p class="content-subtitle">Position Details and History</p>
+            <p class="content-subtitle">Position Details and History{% if currency_code %} <span class="badge badge-info">{{ currency_code }}</span>{% endif %}</p>
         </div>
     </div>
 
@@ -39,11 +39,11 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label text-muted small">Average Cost</label>
-                        <div class="fw-bold">{{ position.average_cost|floatformat:4 }}</div>
+                        <div class="fw-bold">{{ currency_code }} {{ position.average_cost|floatformat:4 }}</div>
                     </div>
                     <div class="mb-0">
                         <label class="form-label text-muted small">Total Cost</label>
-                        <div class="fw-bold text-primary">{{ position.total_cost|floatformat:2 }}</div>
+                        <div class="fw-bold text-primary">{{ currency_code }} {{ position.total_cost|floatformat:2 }}</div>
                     </div>
                 </div>
             </div>
@@ -60,16 +60,16 @@
                 <div class="card-body">
                     <div class="mb-3">
                         <label class="form-label text-muted small">Current Price</label>
-                        <div class="fw-bold fs-4">{{ position.current_price|floatformat:4 }}</div>
+                        <div class="fw-bold fs-4">{{ currency_code }} {{ position.current_price|floatformat:4 }}</div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label text-muted small">Market Value</label>
-                        <div class="fw-bold">{{ position.market_value|floatformat:2 }}</div>
+                        <div class="fw-bold">{{ currency_code }} {{ position.market_value|floatformat:2 }}</div>
                     </div>
                     <div class="mb-0">
                         <label class="form-label text-muted small">Unrealized P&L</label>
                         <div class="fw-bold fs-5 {% if position.unrealized_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
-                            {{ position.unrealized_pnl|floatformat:2 }}
+                            {{ currency_code }} {{ position.unrealized_pnl|floatformat:2 }}
                         </div>
                     </div>
                 </div>
@@ -88,7 +88,7 @@
                     <div class="mb-3">
                         <label class="form-label text-muted small">Realized P&L</label>
                         <div class="fw-bold fs-3 {% if position.realized_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
-                            {{ position.realized_pnl|floatformat:2 }}
+                            {{ currency_code }} {{ position.realized_pnl|floatformat:2 }}
                         </div>
                     </div>
                     <div class="mb-0">

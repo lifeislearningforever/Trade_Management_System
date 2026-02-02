@@ -101,13 +101,7 @@
                                placeholder="0.0000" required>
                     </div>
 
-                    <!-- Source System -->
-                    <div class="col-md-4 mb-3">
-                        <label for="src_system" class="form-label">Source System</label>
-                        <input type="text" class="form-control" id="src_system" name="src_system"
-                               value="{% if equity_price %}{{ equity_price.src_system }}{% elif form_data %}{{ form_data.src_system }}{% else %}CIS{% endif %}"
-                               placeholder="e.g., CIS, Bloomberg">
-                    </div>
+                    <!-- Source System (auto-set, not editable) -->
                 </div>
 
                 <!-- Form Actions -->

@@ -643,6 +643,26 @@ TBLPROPERTIES(
     'kudu.table_name' = 'impala::gmp_cis.cis_equity_price_kudu'
 );
 
+-- 6.1b Equity Price History Table (Edit History - tracks old values before updates/deletes)
+DROP TABLE IF EXISTS cis_equity_price_history;
+CREATE TABLE cis_equity_price_history (
+    history_id BIGINT NOT NULL,
+    currency_code STRING NOT NULL,
+    security_label STRING NOT NULL,
+    price_date STRING NOT NULL,
+    isin STRING,
+    main_closing_price DECIMAL(18, 6),
+    price_timestamp BIGINT,
+    src_system STRING,
+    changed_by STRING NOT NULL,
+    changed_at BIGINT NOT NULL,
+    change_type STRING,
+    PRIMARY KEY (history_id)
+)
+PARTITION BY HASH (history_id) PARTITIONS 4
+STORED AS KUDU
+TBLPROPERTIES ('kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251');
+
 -- 6.2 FX Rates Table
 DROP TABLE IF EXISTS gmp_cis_sta_dly_fx_rates;
 CREATE TABLE gmp_cis_sta_dly_fx_rates (

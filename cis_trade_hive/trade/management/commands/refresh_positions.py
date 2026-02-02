@@ -255,10 +255,10 @@ class Command(BaseCommand):
             # Escape security label to prevent SQL injection
             safe_security = self._escape_string(security)
 
-            # Try to get price from cis_equity_price_kudu
+            # Try to get price from cis_equity_price
             query = f"""
                 SELECT main_closing_price, price_date
-                FROM {DATABASE}.cis_equity_price_kudu
+                FROM {DATABASE}.cis_equity_price
                 WHERE security_label = '{safe_security}' AND is_active = true
                 ORDER BY price_date DESC, price_timestamp DESC
                 LIMIT 1

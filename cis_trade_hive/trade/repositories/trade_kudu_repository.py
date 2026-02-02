@@ -910,11 +910,11 @@ class TradeKuduRepository:
             return {'total_positions': 0, 'total_market_value': 0, 'total_unrealized_pnl': 0, 'total_realized_pnl': 0}
 
     def _get_equity_price(self, security_label: str) -> Optional[float]:
-        """Fetch latest equity price for a security from cis_equity_price_kudu or cis_security_kudu."""
+        """Fetch latest equity price for a security from cis_equity_price or cis_security_kudu."""
         try:
             query = f"""
             SELECT main_closing_price
-            FROM {self.DATABASE}.cis_equity_price_kudu
+            FROM {self.DATABASE}.cis_equity_price
             WHERE security_label = {self.escape_value(security_label)}
               AND is_active = true
             ORDER BY price_date DESC, price_timestamp DESC

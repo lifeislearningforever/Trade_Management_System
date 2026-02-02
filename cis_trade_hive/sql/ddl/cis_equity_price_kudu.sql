@@ -91,6 +91,45 @@ TBLPROPERTIES(
 -- );
 
 -- =====================================================
+-- Equity Price History Table (Edit History)
+-- =====================================================
+-- Purpose: Store old values BEFORE an equity price is updated or deleted.
+-- This allows tracking of all edits made to a specific price record.
+-- PK: history_id (timestamp-based unique ID)
+-- =====================================================
+
+DROP TABLE IF EXISTS gmp_cis.cis_equity_price_history;
+
+CREATE TABLE gmp_cis.cis_equity_price_history (
+    -- Primary Key
+    history_id BIGINT NOT NULL,              -- Timestamp-based unique ID
+
+    -- Reference to original record (composite key of main table)
+    currency_code STRING NOT NULL,
+    security_label STRING NOT NULL,
+    price_date STRING NOT NULL,
+
+    -- Snapshot of old values at time of change
+    isin STRING,
+    main_closing_price DECIMAL(18, 6),       -- The OLD price value before edit
+    price_timestamp BIGINT,
+    src_system STRING,
+
+    -- Change metadata
+    changed_by STRING NOT NULL,              -- Who made the change
+    changed_at BIGINT NOT NULL,              -- When the change was made (ms)
+    change_type STRING,                      -- 'UPDATE' or 'DELETE'
+
+    PRIMARY KEY (history_id)
+)
+PARTITION BY HASH (history_id) PARTITIONS 8
+STORED AS KUDU
+TBLPROPERTIES(
+    'kudu.num_tablet_replicas' = '3'
+);
+
+
+-- =====================================================
 -- Useful Queries
 -- =====================================================
 -- Count all equity prices

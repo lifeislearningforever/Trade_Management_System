@@ -1401,14 +1401,14 @@ class TradeKuduRepositoryTestCase(TestCase):
 
     @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_equity_price_from_equity_table(self, mock_execute):
-        """Test fetching equity price from cis_equity_price_kudu"""
+        """Test fetching equity price from cis_equity_price"""
         mock_execute.return_value = [{'main_closing_price': 52.50}]
 
         result = self.repository._get_equity_price('SEC001')
 
         self.assertAlmostEqual(result, 52.50)
         call_args = mock_execute.call_args[0][0]
-        self.assertIn('cis_equity_price_kudu', call_args)
+        self.assertIn('cis_equity_price', call_args)
 
     @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_equity_price_fallback_to_security(self, mock_execute):

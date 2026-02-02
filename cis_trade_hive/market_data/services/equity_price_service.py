@@ -234,6 +234,16 @@ class EquityPriceService:
             except (ValueError, TypeError):
                 raise ValidationError("Invalid price value")
 
+        # Save old values to history before updating
+        try:
+            existing = equity_price_hive_repository.get_equity_price_by_key(
+                currency_code, security_label, price_date
+            )
+            if existing:
+                equity_price_hive_repository.save_to_history(existing, user, 'UPDATE')
+        except Exception as e:
+            logger.warning(f"Could not save history before update: {str(e)}")
+
         # Add updated_by
         equity_price_data['updated_by'] = user
 
@@ -283,6 +293,16 @@ class EquityPriceService:
         """
         if not currency_code or not security_label:
             raise ValidationError("Both currency_code and security_label are required")
+
+        # Save old values to history before deleting
+        try:
+            existing = equity_price_hive_repository.get_equity_price_by_key(
+                currency_code, security_label, price_date
+            )
+            if existing:
+                equity_price_hive_repository.save_to_history(existing, user, 'DELETE')
+        except Exception as e:
+            logger.warning(f"Could not save history before delete: {str(e)}")
 
         try:
             success = equity_price_hive_repository.delete_equity_price(
@@ -341,6 +361,60 @@ class EquityPriceService:
         except Exception as e:
             logger.error(f"Error getting price history for {security_label}: {str(e)}")
             raise
+
+    @staticmethod
+    def get_version_history(
+        currency_code: str,
+        security_label: str,
+        price_date: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Get edit history for a specific equity price record.
+
+        Args:
+            currency_code: Currency code
+            security_label: Security label
+            price_date: Price date
+
+        Returns:
+            List of historical versions (old values before edits)
+        """
+        if not currency_code or not security_label or not price_date:
+            return []
+
+        try:
+            return equity_price_hive_repository.get_version_history(
+                currency_code, security_label, price_date
+            )
+        except Exception as e:
+            logger.error(f"Error getting version history: {str(e)}")
+            return []
+
+    @staticmethod
+    def get_all_history_for_security(
+        currency_code: str,
+        security_label: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all edit history for a security across all dates.
+
+        Args:
+            currency_code: Currency code
+            security_label: Security label
+
+        Returns:
+            List of historical versions
+        """
+        if not currency_code or not security_label:
+            return []
+
+        try:
+            return equity_price_hive_repository.get_all_history_for_security(
+                currency_code, security_label
+            )
+        except Exception as e:
+            logger.error(f"Error getting security history: {str(e)}")
+            return []
 
     @staticmethod
     def get_statistics() -> Dict[str, Any]:

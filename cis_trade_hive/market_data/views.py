@@ -15,6 +15,7 @@ import json
 
 from market_data.services import fx_rate_service
 from core.audit.audit_kudu_repository import audit_log_kudu_repository
+from trade.repositories.trade_kudu_repository import trade_kudu_repository
 
 
 class FXRateWrapper:
@@ -575,6 +576,51 @@ def equity_price_list(request):
     return render(request, 'market_data/equity_price_list.html', context)
 
 
+def equity_price_detail(request, currency_code: str, security_label: str, price_date: str):
+    """
+    Detail view for equity price with version history.
+    Shows current price info and edit history (old values before changes).
+    """
+    from urllib.parse import unquote
+    security_label = unquote(security_label)
+
+    # Get current price by composite key
+    try:
+        current_price = equity_price_service.get_equity_price_by_key(currency_code, security_label, price_date)
+        if not current_price:
+            return HttpResponse("Equity price not found", status=404)
+    except Exception as e:
+        return HttpResponse(f"Error: {str(e)}", status=500)
+
+    # Get price history for this security (all dates from main table)
+    price_history = equity_price_service.get_price_history(security_label, days=90)
+
+    # Get version history (edit history from history table)
+    version_history = equity_price_service.get_version_history(currency_code, security_label, price_date)
+
+    # Get price trend
+    trend = equity_price_service.get_price_trend(security_label, days=30)
+
+    # Wrap current price
+    wrapped_price = EquityPriceWrapper(current_price)
+
+    # Wrap price history
+    wrapped_history = [EquityPriceWrapper(p, idx) for idx, p in enumerate(price_history)]
+
+    context = {
+        'price': wrapped_price,
+        'price_data': current_price,
+        'price_history': wrapped_history,
+        'version_history': version_history,
+        'trend': trend,
+        'currency_code': currency_code,
+        'security_label': security_label,
+        'price_date': price_date,
+    }
+
+    return render(request, 'market_data/equity_price_detail.html', context)
+
+
 def equity_price_create(request):
     """
     Create new equity price.
@@ -589,7 +635,7 @@ def equity_price_create(request):
             'isin': request.POST.get('isin', '').strip(),
             'price_date': request.POST.get('price_date', '').strip(),
             'main_closing_price': request.POST.get('main_closing_price', '').strip(),
-            'src_system': request.POST.get('src_system', 'CIS').strip(),
+            'src_system': 'CIS',
         }
 
         # Get user info
@@ -622,6 +668,12 @@ def equity_price_create(request):
                     ip_address=request.META.get('REMOTE_ADDR'),
                     user_agent=request.META.get('HTTP_USER_AGENT', '')
                 )
+
+                # Auto-refresh position market values
+                try:
+                    trade_kudu_repository.refresh_market_values()
+                except Exception:
+                    pass  # Non-blocking: don't fail price create if refresh fails
 
                 # Redirect to list
                 return redirect('market_data:equity_price_list')
@@ -684,7 +736,7 @@ def equity_price_edit(request, currency_code: str, security_label: str, price_da
             'isin': request.POST.get('isin', '').strip(),
             'price_date': request.POST.get('price_date', '').strip(),
             'main_closing_price': request.POST.get('main_closing_price', '').strip(),
-            'src_system': request.POST.get('src_system', 'CIS').strip(),
+            'src_system': existing_price.get('src_system', 'CIS'),
         }
 
         # Get user info
@@ -738,6 +790,12 @@ def equity_price_edit(request, currency_code: str, security_label: str, price_da
                     ip_address=request.META.get('REMOTE_ADDR'),
                     user_agent=request.META.get('HTTP_USER_AGENT', '')
                 )
+
+                # Auto-refresh position market values
+                try:
+                    trade_kudu_repository.refresh_market_values()
+                except Exception:
+                    pass  # Non-blocking: don't fail price edit if refresh fails
 
                 # Redirect to list
                 return redirect('market_data:equity_price_list')

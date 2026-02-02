@@ -1088,9 +1088,27 @@ def position_detail(request, position_id):
     position = PositionWrapper(position_raw)
     position_versions = trade_kudu_repository.get_position_versions(position_id)
 
+    # Look up currency_code from security table
+    currency_code = ''
+    try:
+        security_label = position_raw.get('security_label', '')
+        if security_label:
+            from core.repositories.impala_connection import impala_manager
+            escaped_label = security_label.replace('\\', '\\\\').replace("'", "\\'")
+            results = impala_manager.execute_query(
+                f"SELECT currency_code FROM gmp_cis.cis_security "
+                f"WHERE security_name = '{escaped_label}' LIMIT 1",
+                database='gmp_cis'
+            )
+            if results:
+                currency_code = results[0].get('currency_code', '')
+    except Exception:
+        pass
+
     return render(request, 'trade/position_detail.html', {
         'position': position,
         'position_versions': position_versions,
+        'currency_code': currency_code,
     })
 
 

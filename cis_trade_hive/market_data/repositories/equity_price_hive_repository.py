@@ -31,6 +31,7 @@ class EquityPriceHiveRepository:
 
     TABLE_NAME = "gmp_cis.cis_equity_price"
     DATABASE = "gmp_cis"
+    HISTORY_TABLE_NAME = "gmp_cis.cis_equity_price_history"
 
     @staticmethod
     def get_all_equity_prices(
@@ -512,6 +513,163 @@ class EquityPriceHiveRepository:
 
         except Exception as e:
             logger.error(f"Error getting price history for {security_label}: {str(e)}")
+            return []
+
+    @staticmethod
+    def save_to_history(existing_record: Dict[str, Any], changed_by: str, change_type: str = 'UPDATE') -> bool:
+        """
+        Save a snapshot of the existing record to the history table before it gets overwritten.
+        Called BEFORE update or delete operations.
+
+        Args:
+            existing_record: The current record dict (before the change)
+            changed_by: Username making the change
+            change_type: 'UPDATE' or 'DELETE'
+
+        Returns:
+            True if history record saved successfully
+        """
+        try:
+            history_id = int(time.time() * 1000)
+            changed_at = int(time.time() * 1000)
+
+            currency_code = str(existing_record.get('currency_code', '')).replace("'", "\\'")
+            security_label = str(existing_record.get('security_label', '')).replace("'", "\\'")
+            price_date = str(existing_record.get('price_date', '')).replace("'", "\\'")
+            isin = str(existing_record.get('isin', '')).replace("'", "\\'") if existing_record.get('isin') else None
+            main_closing_price = existing_record.get('main_closing_price', 0)
+            price_timestamp = existing_record.get('price_timestamp')
+            src_system = str(existing_record.get('src_system', '')).replace("'", "\\'") if existing_record.get('src_system') else None
+            escaped_changed_by = changed_by.replace("'", "\\'")
+            escaped_change_type = change_type.replace("'", "\\'")
+
+            query = f"""
+            UPSERT INTO {EquityPriceHiveRepository.HISTORY_TABLE_NAME} (
+                history_id, currency_code, security_label, price_date,
+                isin, main_closing_price, price_timestamp, src_system,
+                changed_by, changed_at, change_type
+            ) VALUES (
+                {history_id},
+                '{currency_code}',
+                '{security_label}',
+                '{price_date}',
+                {f"'{isin}'" if isin else 'NULL'},
+                {main_closing_price if main_closing_price is not None else 'NULL'},
+                {price_timestamp if price_timestamp else 'NULL'},
+                {f"'{src_system}'" if src_system else 'NULL'},
+                '{escaped_changed_by}',
+                {changed_at},
+                '{escaped_change_type}'
+            )
+            """
+
+            success = impala_manager.execute_write(query, database=EquityPriceHiveRepository.DATABASE)
+
+            if success:
+                logger.info(f"Saved history for {currency_code}/{security_label}/{price_date} ({change_type} by {changed_by})")
+            else:
+                logger.error(f"Failed to save history for {currency_code}/{security_label}/{price_date}")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Error saving to history: {str(e)}")
+            return False
+
+    @staticmethod
+    def get_version_history(
+        currency_code: str,
+        security_label: str,
+        price_date: str,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get edit history for a specific equity price record.
+
+        Args:
+            currency_code: Currency code
+            security_label: Security label
+            price_date: Price date
+            limit: Maximum records to return
+
+        Returns:
+            List of historical versions sorted by changed_at DESC
+        """
+        try:
+            escaped_currency = currency_code.replace("'", "\\'")
+            escaped_security = security_label.replace("'", "\\'")
+            escaped_date = price_date.replace("'", "\\'")
+
+            query = f"""
+            SELECT
+                history_id, currency_code, security_label, price_date,
+                isin, main_closing_price, price_timestamp, src_system,
+                changed_by, changed_at, change_type
+            FROM {EquityPriceHiveRepository.HISTORY_TABLE_NAME}
+            WHERE currency_code = '{escaped_currency}'
+              AND security_label = '{escaped_security}'
+              AND price_date = '{escaped_date}'
+            ORDER BY changed_at DESC
+            LIMIT {limit}
+            """
+
+            results = impala_manager.execute_query(query, database=EquityPriceHiveRepository.DATABASE)
+
+            for row in results:
+                if row.get('changed_at'):
+                    row['changed_at_display'] = datetime.fromtimestamp(row['changed_at'] / 1000).strftime('%Y-%m-%d %H:%M:%S')
+
+            logger.info(f"Retrieved {len(results)} history records for {currency_code}/{security_label}/{price_date}")
+            return results
+
+        except Exception as e:
+            logger.error(f"Error getting version history: {str(e)}")
+            return []
+
+    @staticmethod
+    def get_all_history_for_security(
+        currency_code: str,
+        security_label: str,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all edit history for a security across all dates.
+
+        Args:
+            currency_code: Currency code
+            security_label: Security label
+            limit: Maximum records to return
+
+        Returns:
+            List of historical versions sorted by changed_at DESC
+        """
+        try:
+            escaped_currency = currency_code.replace("'", "\\'")
+            escaped_security = security_label.replace("'", "\\'")
+
+            query = f"""
+            SELECT
+                history_id, currency_code, security_label, price_date,
+                isin, main_closing_price, price_timestamp, src_system,
+                changed_by, changed_at, change_type
+            FROM {EquityPriceHiveRepository.HISTORY_TABLE_NAME}
+            WHERE currency_code = '{escaped_currency}'
+              AND security_label = '{escaped_security}'
+            ORDER BY changed_at DESC
+            LIMIT {limit}
+            """
+
+            results = impala_manager.execute_query(query, database=EquityPriceHiveRepository.DATABASE)
+
+            for row in results:
+                if row.get('changed_at'):
+                    row['changed_at_display'] = datetime.fromtimestamp(row['changed_at'] / 1000).strftime('%Y-%m-%d %H:%M:%S')
+
+            logger.info(f"Retrieved {len(results)} history records for {currency_code}/{security_label}")
+            return results
+
+        except Exception as e:
+            logger.error(f"Error getting history for security: {str(e)}")
             return []
 
     @staticmethod

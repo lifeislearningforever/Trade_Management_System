@@ -3,7 +3,7 @@ PySpark Job: Merge GMP Equity Price Data into CIS Equity Price Table
 =====================================================================
 Problem:
   - GMP ETL sends equity price data
-  - cis_equity_price_kudu PK = (currency_code, security_label, price_date)
+  - cis_equity_price PK = (currency_code, security_label, price_date)
   - This is a NATURAL composite key - GMP provides all PK fields
   - No surrogate key gap (unlike security table)
 
@@ -41,7 +41,7 @@ from pyspark.sql import functions as F
 
 DATABASE = "gmp_cis"
 STAGING_TABLE = f"{DATABASE}.stg_gmp_equity_price"
-TARGET_TABLE = f"{DATABASE}.cis_equity_price_kudu"
+TARGET_TABLE = f"{DATABASE}.cis_equity_price"
 IMPALA_STAGING_TABLE = f"impala::{DATABASE}.stg_gmp_equity_price_kudu"
 IMPALA_TARGET_TABLE = f"impala::{DATABASE}.cis_equity_price_kudu"
 
@@ -80,7 +80,7 @@ def create_spark_session():
 def merge_equity_prices(spark, kudu_master, batch_id=None, dry_run=False):
     """Merge GMP equity prices into CIS target table.
 
-    Since cis_equity_price_kudu uses a natural composite PK
+    Since cis_equity_price uses a natural composite PK
     (currency_code, security_label, price_date), there is no ID gap.
     GMP provides all PK fields, so this is a straightforward UPSERT.
     """

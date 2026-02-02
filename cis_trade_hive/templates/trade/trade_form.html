@@ -140,34 +140,21 @@
                                 <small class="text-muted" id="portfolio_info"></small>
                             </div>
 
-                            <!-- Currency (cascading dropdown) -->
-                            <div class="col-md-2">
-                                <label class="form-label">Currency <span class="text-danger">*</span></label>
-                                <select class="form-select" name="currency_code" id="currency_code" required>
-                                    <option value="">Select Currency</option>
-                                    {% for c in dropdown_options.currencies %}
-                                    <option value="{{ c.value }}"
-                                        {% if trade.currency_code == c.value %}selected{% endif %}>
-                                        {{ c.label }}
-                                    </option>
-                                    {% endfor %}
-                                </select>
-                                <small class="text-muted" id="currency_info"></small>
-                            </div>
-
-                            <!-- Security (filtered by currency) -->
+                            <!-- Security (primary dropdown - select first) -->
                             <div class="col-md-4">
                                 <label class="form-label">Security <span class="text-danger">*</span></label>
                                 <div class="input-group">
                                     <select class="form-select" name="security_label" id="security_label" required
                                             {% if is_edit %}disabled{% endif %}>
-                                        <option value="">Select Currency First</option>
-                                        {% if trade.security_label %}
-                                        <option value="{{ trade.security_label }}" selected
-                                            data-price="{{ trade.price|default:'' }}">
-                                            {{ trade.security_label }}
+                                        <option value="">Select Security</option>
+                                        {% for s in dropdown_options.securities %}
+                                        <option value="{{ s.value }}"
+                                            data-currency="{{ s.currency }}"
+                                            data-price="{{ s.price|default:0 }}"
+                                            {% if trade.security_label == s.value %}selected{% endif %}>
+                                            {{ s.label }}
                                         </option>
-                                        {% endif %}
+                                        {% endfor %}
                                     </select>
                                     <span class="input-group-text" id="security_status">
                                         <i class="bi bi-question-circle text-muted"></i>
@@ -177,6 +164,21 @@
                                 <input type="hidden" name="security_label" value="{{ trade.security_label }}">
                                 {% endif %}
                                 <small class="text-muted" id="security_info"></small>
+                            </div>
+
+                            <!-- Currency (auto-populated from security selection) -->
+                            <div class="col-md-2">
+                                <label class="form-label">Currency <span class="text-danger">*</span></label>
+                                <select class="form-select" name="currency_code" id="currency_code" required>
+                                    <option value="">Select Security First</option>
+                                    {% for c in dropdown_options.currencies %}
+                                    <option value="{{ c.value }}"
+                                        {% if trade.currency_code == c.value %}selected{% endif %}>
+                                        {{ c.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                                <small class="text-muted" id="currency_info"></small>
                             </div>
 
                             <!-- Counterparty -->
@@ -838,147 +840,82 @@ document.addEventListener('DOMContentLoaded', function() {
         tradeDateEl.value = `${yyyy}-${mm}-${dd}`;
     }
 
-    // If editing and currency is already set, load securities for that currency
-    const currencyEl = document.getElementById('currency_code');
-    if (currencyEl && currencyEl.value) {
-        loadSecuritiesByCurrency(currencyEl.value, true);  // true = preserve existing selection
+    // If editing and security is already set, auto-populate currency
+    const securityEl = document.getElementById('security_label');
+    if (securityEl && securityEl.value) {
+        autoPopulateCurrencyFromSecurity();
     }
 });
 
 // =========================================================================
-// CURRENCY-SECURITY CASCADING DROPDOWN
+// SECURITY-CURRENCY CASCADING DROPDOWN (Security first, Currency auto-fills)
 // =========================================================================
 
-// Currency dropdown change handler - load securities filtered by currency
-document.getElementById('currency_code').addEventListener('change', function() {
-    const currencyCode = this.value;
-    const currencyInfo = document.getElementById('currency_info');
-
-    if (!currencyCode) {
-        // Reset security dropdown
-        resetSecurityDropdown();
-        currencyInfo.textContent = '';
-        return;
-    }
-
-    currencyInfo.textContent = 'Loading securities...';
-    currencyInfo.className = 'text-muted small';
-
-    loadSecuritiesByCurrency(currencyCode, false);
-});
-
-// Load securities by currency
-function loadSecuritiesByCurrency(currencyCode, preserveSelection) {
-    const securityEl = document.getElementById('security_label');
-    const currencyInfo = document.getElementById('currency_info');
-    const currentValue = preserveSelection ? securityEl.value : null;
-
-    // Show loading state
-    securityEl.innerHTML = '<option value="">Loading...</option>';
-    securityEl.disabled = true;
-
-    fetch(`/trade/api/securities-by-currency/?currency=${encodeURIComponent(currencyCode)}`)
-        .then(response => response.json())
-        .then(data => {
-            // Clear and populate dropdown
-            securityEl.innerHTML = '<option value="">Select Security</option>';
-
-            if (data.results && data.results.length > 0) {
-                data.results.forEach(function(sec) {
-                    const option = document.createElement('option');
-                    option.value = sec.value;
-                    option.textContent = sec.label;
-                    option.dataset.price = sec.price || 0;
-                    option.dataset.isin = sec.isin || '';
-                    option.dataset.market = sec.market || '';
-
-                    // Preserve selection if editing
-                    if (currentValue && sec.value === currentValue) {
-                        option.selected = true;
-                    }
-
-                    securityEl.appendChild(option);
-                });
-
-                currencyInfo.textContent = `${data.results.length} securities available`;
-                currencyInfo.className = 'text-success small';
-            } else {
-                currencyInfo.textContent = 'No securities found for this currency';
-                currencyInfo.className = 'text-warning small';
-            }
-
-            securityEl.disabled = false;
-
-            // Re-initialize Select2 if needed
-            if (typeof $ !== 'undefined' && $.fn.select2) {
-                $('#security_label').trigger('change');
-            }
-        })
-        .catch(error => {
-            console.error('Error loading securities:', error);
-            securityEl.innerHTML = '<option value="">Error loading securities</option>';
-            securityEl.disabled = false;
-            currencyInfo.textContent = 'Error loading securities';
-            currencyInfo.className = 'text-danger small';
-        });
-}
-
-// Reset security dropdown to initial state
-function resetSecurityDropdown() {
-    const securityEl = document.getElementById('security_label');
-    securityEl.innerHTML = '<option value="">Select Currency First</option>';
-
-    // Clear price field
-    document.getElementById('price').value = '';
-
-    // Reset security status icon
-    const statusIcon = document.getElementById('security_status');
-    if (statusIcon) {
-        statusIcon.innerHTML = '<i class="bi bi-question-circle text-muted"></i>';
-    }
-
-    const securityInfo = document.getElementById('security_info');
-    if (securityInfo) {
-        securityInfo.textContent = '';
-    }
-}
-
-// Auto-fill price when security is selected (enhanced version)
+// Security dropdown change handler - auto-populate currency and price
 document.getElementById('security_label').addEventListener('change', function() {
     const securityLabel = this.value;
-    const currencyCode = document.getElementById('currency_code').value;
     const priceField = document.getElementById('price');
+    const currencyEl = document.getElementById('currency_code');
+    const currencyInfo = document.getElementById('currency_info');
+    const securityInfo = document.getElementById('security_info');
 
     if (!securityLabel) {
+        // Reset currency to default
+        currencyEl.value = '';
+        currencyInfo.textContent = '';
+        securityInfo.textContent = '';
         return;
     }
 
-    // First try to get price from the option data attribute
+    // Auto-populate currency from selected security's data-currency attribute
+    autoPopulateCurrencyFromSecurity();
+
+    // Auto-fill price from data-price attribute
     const selectedOption = this.options[this.selectedIndex];
     if (selectedOption && selectedOption.dataset.price && parseFloat(selectedOption.dataset.price) > 0) {
         priceField.value = parseFloat(selectedOption.dataset.price).toFixed(4);
-        document.getElementById('security_info').textContent = 'Price auto-filled from equity price';
-        document.getElementById('security_info').className = 'text-success small';
-        return;
-    }
-
-    // If no price in option, fetch from API
-    if (currencyCode) {
-        fetch(`/trade/api/equity-price/?security=${encodeURIComponent(securityLabel)}&currency=${encodeURIComponent(currencyCode)}`)
-            .then(response => response.json())
-            .then(data => {
-                if (data.found && data.price > 0) {
-                    priceField.value = parseFloat(data.price).toFixed(4);
-                    document.getElementById('security_info').textContent =
-                        `Price: ${data.price} (${data.price_date || 'latest'})`;
-                    document.getElementById('security_info').className = 'text-success small';
-                }
-            })
-            .catch(error => {
-                console.log('Could not fetch equity price:', error);
-            });
+        securityInfo.textContent = 'Price auto-filled from security data';
+        securityInfo.className = 'text-success small';
+    } else {
+        // Fetch price from API using the auto-populated currency
+        const currencyCode = currencyEl.value;
+        if (currencyCode) {
+            fetch(`/trade/api/equity-price/?security=${encodeURIComponent(securityLabel)}&currency=${encodeURIComponent(currencyCode)}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.found && data.price > 0) {
+                        priceField.value = parseFloat(data.price).toFixed(4);
+                        securityInfo.textContent = `Price: ${data.price} (${data.price_date || 'latest'})`;
+                        securityInfo.className = 'text-success small';
+                    }
+                })
+                .catch(error => {
+                    console.log('Could not fetch equity price:', error);
+                });
+        }
     }
 });
+
+// Auto-populate currency from selected security
+function autoPopulateCurrencyFromSecurity() {
+    const securityEl = document.getElementById('security_label');
+    const currencyEl = document.getElementById('currency_code');
+    const currencyInfo = document.getElementById('currency_info');
+    const selectedOption = securityEl.options[securityEl.selectedIndex];
+
+    if (selectedOption && selectedOption.dataset.currency) {
+        const currency = selectedOption.dataset.currency;
+        // Set currency dropdown value
+        currencyEl.value = currency;
+        currencyInfo.textContent = `Currency auto-set from security: ${currency}`;
+        currencyInfo.className = 'text-info small';
+
+        // Trigger Select2 update if present
+        if (typeof $ !== 'undefined' && $.fn.select2) {
+            $('#currency_code').val(currency).trigger('change');
+        }
+    }
+}
 
 // Initialize Select2 on ALL dropdowns using project-level init
 $(document).ready(function() {
