@@ -189,12 +189,6 @@ class SecurityDropdownService:
     # Field names match the Excel spreadsheet provided
     # ==========================================================================
 
-    def get_price_sources(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get Price Source dropdown options (field_name='price source')"""
-        options = self.repository.get_udf_options_by_field_name('price source', 'SECURITY')
-        self._log_dropdown_fetch('price_source', len(options), user)
-        return options
-
     def get_exchange_codes(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
         """Get Exchange Code dropdown options (field_name='Exchange Code')"""
         options = self.repository.get_udf_options_by_field_name('Exchange Code', 'SECURITY')
@@ -205,12 +199,6 @@ class SecurityDropdownService:
         """Get Country of Issue dropdown options"""
         options = self.repository.get_udf_options_by_field_name('Country of Issue', 'SECURITY')
         self._log_dropdown_fetch('country_of_issue', len(options), user)
-        return options
-
-    def get_country_of_primary_exchange_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get Country of Primary Exchange dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('Country of Primary Exchange', 'SECURITY')
-        self._log_dropdown_fetch('country_of_primary_exchange', len(options), user)
         return options
 
     def get_security_types(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
@@ -225,28 +213,10 @@ class SecurityDropdownService:
         self._log_dropdown_fetch('investment_type', len(options), user)
         return options
 
-    def get_bwciif_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get BWCIF dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('BWCIF', 'SECURITY')
-        self._log_dropdown_fetch('bwcif', len(options), user)
-        return options
-
-    def get_bwciif_others_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get BWCIF Others dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('BWCIF others', 'SECURITY')
-        self._log_dropdown_fetch('bwcif_others', len(options), user)
-        return options
-
     def get_issuer_types(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
         """Get Issuer Type dropdown options"""
         options = self.repository.get_udf_options_by_field_name('Issuer Type', 'SECURITY')
         self._log_dropdown_fetch('issuer_type', len(options), user)
-        return options
-
-    def get_approved_s32_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get Approved S32 dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('Approved S32', 'SECURITY')
-        self._log_dropdown_fetch('approved_s32', len(options), user)
         return options
 
     def get_basel_iv_fund_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
@@ -345,6 +315,18 @@ class SecurityDropdownService:
         self._log_dropdown_fetch('quoted_unquoted', len(options), user)
         return options
 
+    def get_record_type_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get Record Type dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('Record Type', 'SECURITY')
+        self._log_dropdown_fetch('record_type', len(options), user)
+        return options
+
+    def get_pevc_s32_devest_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get PEVC/S32/Devest dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('PEVC_S32_DEVEST', 'SECURITY')
+        self._log_dropdown_fetch('pevc_s32_devest', len(options), user)
+        return options
+
     # ==========================================================================
     # Reference data dropdowns
     # ==========================================================================
@@ -382,16 +364,11 @@ class SecurityDropdownService:
 
         return {
             # UDF-based dropdowns (from Excel field names)
-            'price_sources': self.get_price_sources(user),
             'exchange_codes': self.get_exchange_codes(user),
             'country_of_issue_options': self.get_country_of_issue_options(user),
-            'country_of_primary_exchange_options': self.get_country_of_primary_exchange_options(user),
             'security_types': self.get_security_types(user),
             'investment_types': self.get_investment_types(user),
-            'bwciif_options': self.get_bwciif_options(user),
-            'bwciif_others_options': self.get_bwciif_others_options(user),
             'issuer_types': self.get_issuer_types(user),
-            'approved_s32_options': self.get_approved_s32_options(user),
             'basel_iv_fund_options': self.get_basel_iv_fund_options(user),
             'business_unit_head_options': self.get_business_unit_head_options(user),
             'core_non_core_options': self.get_core_non_core_options(user),
@@ -408,6 +385,8 @@ class SecurityDropdownService:
             'industries': self.get_industries(user),
             'country_of_incorporation_options': self.get_country_of_incorporation_options(user),
             'quoted_unquoted_options': self.get_quoted_unquoted_options(user),
+            'record_type_options': self.get_record_type_options(user),
+            'pevc_s32_devest_options': self.get_pevc_s32_devest_options(user),
 
             # Reference data dropdowns
             'issuers': self.get_issuers(user),

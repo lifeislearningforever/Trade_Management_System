@@ -59,8 +59,8 @@
                     <span class="badge badge-info fs-6">{{ security.currency_code|default:"N/A" }}</span>
                 </div>
                 <div class="col-md-3">
-                    <h6 class="text-muted mb-2">Price</h6>
-                    <strong class="fs-5">{{ security.price|floatformat:4|default:"-" }}</strong>
+                    <h6 class="text-muted mb-2">Record Type</h6>
+                    <span class="badge badge-info fs-6">{{ security.record_type|default:"N/A" }}</span>
                 </div>
             </div>
         </div>
@@ -76,6 +76,10 @@
                 </div>
                 <div class="card-body">
                     <table class="table table-sm">
+                        <tr>
+                            <th style="width: 45%;">Record Type:</th>
+                            <td>{{ security.record_type|default:"-" }}</td>
+                        </tr>
                         <tr>
                             <th style="width: 45%;">Security Name:</th>
                             <td><strong>{{ security.security_name }}</strong></td>
@@ -138,10 +142,6 @@
                             <td>{{ security.country_of_exchange|default:"-" }}</td>
                         </tr>
                         <tr>
-                            <th>Country of Primary Exchange:</th>
-                            <td>{{ security.country_of_primary_exchange|default:"-" }}</td>
-                        </tr>
-                        <tr>
                             <th>Exchange Code:</th>
                             <td>{{ security.exchange_code|default:"-" }}</td>
                         </tr>
@@ -158,34 +158,18 @@
             </div>
         </div>
 
-        <!-- Trading & Pricing Information -->
+        <!-- Pricing & Statistics -->
         <div class="col-md-6">
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="card-title mb-0"><i class="bi bi-graph-up"></i> Trading & Pricing</h5>
+                    <h5 class="card-title mb-0"><i class="bi bi-graph-up"></i> Pricing & Statistics</h5>
                 </div>
                 <div class="card-body">
                     <table class="table table-sm">
-                        <tr>
-                            <th style="width: 45%;">Price:</th>
-                            <td>{{ security.price|floatformat:4|default:"-" }}</td>
-                        </tr>
-                        <tr>
-                            <th>Price Date:</th>
-                            <td>{{ security.price_date|default:"-" }}</td>
-                        </tr>
-                        <tr>
-                            <th>Price Source:</th>
-                            <td>{{ security.price_source|default:"-" }}</td>
-                        </tr>
-                        <tr>
-                            <th>Beta:</th>
-                            <td>{{ security.beta|floatformat:2|default:"-" }}</td>
-                        </tr>
-                        <tr>
-                            <th>PAR Value:</th>
-                            <td>{{ security.par_value|floatformat:2|default:"-" }}</td>
-                        </tr>
+                        <tr><th style="width: 45%;">Price:</th><td>{{ security.price|floatformat:4|default:"-" }}</td></tr>
+                        <tr><th>Beta:</th><td>{{ security.beta|floatformat:4|default:"-" }}</td></tr>
+                        <tr><th>PAR Value:</th><td>{{ security.par_value|floatformat:6|default:"-" }}</td></tr>
+                        <tr><th>Shares Outstanding:</th><td>{{ security.shares_outstanding|default:"-" }}</td></tr>
                     </table>
                 </div>
             </div>
@@ -200,15 +184,7 @@
                 <div class="card-body" style="max-height: 400px; overflow-y: auto;">
                     <table class="table table-sm">
                         <tr>
-                            <th style="width: 45%;">BWCIIF:</th>
-                            <td>{{ security.bwciif|default:"-" }}</td>
-                        </tr>
-                        <tr>
-                            <th>BWCIIF Others:</th>
-                            <td>{{ security.bwciif_others|default:"-" }}</td>
-                        </tr>
-                        <tr>
-                            <th>Issuer Type:</th>
+                            <th style="width: 45%;">Issuer Type:</th>
                             <td>{{ security.issuer_type|default:"-" }}</td>
                         </tr>
                         <tr>
@@ -220,8 +196,12 @@
                             <td>{{ security.mas_6d_code|default:"-" }}</td>
                         </tr>
                         <tr>
-                            <th>Approved S32:</th>
-                            <td>{{ security.approved_s32|default:"-" }}</td>
+                            <th>PEVC/S32/Devest:</th>
+                            <td>{{ security.pevc_s32_devest|default:"-" }}</td>
+                        </tr>
+                        <tr>
+                            <th>S32 Representative:</th>
+                            <td>{{ security.s32_representative|default:"-" }}</td>
                         </tr>
                         <tr>
                             <th>BASEL IV - FUND:</th>
@@ -253,7 +233,7 @@
                         </tr>
                         <tr>
                             <th>Substantial >10%:</th>
-                            <td>{{ security.substantial_gt_10_percent|default:"-" }}</td>
+                            <td>{{ security.substantial_10_pct|default:"-" }}</td>
                         </tr>
                         <tr>
                             <th>Relative Index:</th>
@@ -305,22 +285,6 @@
                     <p><i class="bi bi-clock-history"></i> {{ security.updated_at|default:"-" }}</p>
                 </div>
             </div>
-            {% if security.reviewed_by %}
-            <div class="row mt-3">
-                <div class="col-md-4">
-                    <h6 class="text-muted mb-2">Validated By</h6>
-                    <p><i class="bi bi-person-check-fill"></i> {{ security.reviewed_by }}</p>
-                </div>
-                <div class="col-md-4">
-                    <h6 class="text-muted mb-2">Validated At</h6>
-                    <p><i class="bi bi-clock-history"></i> {{ security.reviewed_at|default:"-" }}</p>
-                </div>
-                <div class="col-md-4">
-                    <h6 class="text-muted mb-2">Validation Comments</h6>
-                    <p><i class="bi bi-chat-square-text"></i> {{ security.review_comments|default:"-" }}</p>
-                </div>
-            </div>
-            {% endif %}
         </div>
     </div>
 

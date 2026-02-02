@@ -6,7 +6,6 @@ All data operations use Kudu tables (no Django ORM).
 """
 
 import logging
-import json
 from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
@@ -157,7 +156,6 @@ def security_create(request: HttpRequest) -> HttpResponse:
 
     if request.method == 'POST':
         try:
-            # Helper function to safely convert to int
             def safe_int(value, default=None):
                 if not value or value == '':
                     return default
@@ -166,7 +164,6 @@ def security_create(request: HttpRequest) -> HttpResponse:
                 except (ValueError, TypeError):
                     return default
 
-            # Helper function to safely convert to float
             def safe_float(value, default=None):
                 if not value or value == '':
                     return default
@@ -175,8 +172,9 @@ def security_create(request: HttpRequest) -> HttpResponse:
                 except (ValueError, TypeError):
                     return default
 
-            # Parse main form fields with proper type conversions
+            # Parse all fields directly from POST (flat form, no modals)
             security_data = {
+                'record_type': request.POST.get('record_type', '').strip(),
                 'security_name': request.POST.get('security_name', '').strip(),
                 'isin': request.POST.get('isin', '').strip(),
                 'security_description': request.POST.get('security_description', '').strip(),
@@ -184,52 +182,37 @@ def security_create(request: HttpRequest) -> HttpResponse:
                 'industry': request.POST.get('industry', '').strip(),
                 'country_of_incorporation': request.POST.get('country_of_incorporation', '').strip(),
                 'shares_outstanding': safe_int(request.POST.get('shares_outstanding', '')),
+                'price': safe_float(request.POST.get('price', '')),
                 'country_of_exchange': request.POST.get('country_of_exchange', '').strip(),
                 'exchange_code': request.POST.get('exchange_code', '').strip(),
                 'currency_code': request.POST.get('currency_code', '').strip(),
                 'ticker': request.POST.get('ticker', '').strip(),
+                'country_of_issue': request.POST.get('country_of_issue', '').strip(),
+                'issuer_type': request.POST.get('issuer_type', '').strip(),
                 'quoted_unquoted': request.POST.get('quoted_unquoted', '').strip(),
                 'security_type': request.POST.get('security_type', '').strip(),
                 'investment_type': request.POST.get('investment_type', '').strip(),
+                'pct_hld_entity_1': request.POST.get('pct_hld_entity_1', '').strip(),
+                'pct_hld_entity_2': request.POST.get('pct_hld_entity_2', '').strip(),
+                'pct_hld_entity_3': request.POST.get('pct_hld_entity_3', '').strip(),
+                'pct_hld_entity_aggr': request.POST.get('pct_hld_entity_aggr', '').strip(),
+                'substantial_10_pct': request.POST.get('substantial_10_pct', '').strip(),
+                'cels': request.POST.get('cels', '').strip(),
+                'pevc_s32_devest': request.POST.get('pevc_s32_devest', '').strip(),
+                's32_representative': request.POST.get('s32_representative', '').strip(),
+                'basel_iv_fund': request.POST.get('basel_iv_fund', '').strip(),
+                'mas_643_entity_type': request.POST.get('mas_643_entity_type', '').strip(),
+                'mas_6d_code': request.POST.get('mas_6d_code', '').strip(),
+                'fin_nonfin_ind': request.POST.get('fin_nonfin_ind', '').strip(),
+                'beta': safe_float(request.POST.get('beta', '')),
+                'par_value': safe_float(request.POST.get('par_value', '')),
+                'business_unit_head': request.POST.get('business_unit_head', '').strip(),
+                'person_in_charge': request.POST.get('person_in_charge', '').strip(),
+                'core_noncore': request.POST.get('core_noncore', '').strip(),
+                'fund_index_fund': request.POST.get('fund_index_fund', '').strip(),
+                'management_limit_classification': request.POST.get('management_limit_classification', '').strip(),
+                'relative_index': request.POST.get('relative_index', '').strip(),
             }
-
-            # Parse modal data (trading & pricing) with type conversions
-            trading_data_json = request.POST.get('trading_data', '{}')
-            if trading_data_json:
-                try:
-                    trading_data = json.loads(trading_data_json)
-                    # Type conversions for trading fields
-                    if 'price' in trading_data:
-                        trading_data['price'] = safe_float(trading_data['price'])
-                    if 'beta' in trading_data:
-                        trading_data['beta'] = safe_float(trading_data['beta'])
-                    if 'par_value' in trading_data:
-                        trading_data['par_value'] = safe_float(trading_data['par_value'])
-                    security_data.update(trading_data)
-                except json.JSONDecodeError:
-                    pass
-
-            # Parse modal data (regulatory & management) with type conversions
-            regulatory_data_json = request.POST.get('regulatory_data', '{}')
-            if regulatory_data_json:
-                try:
-                    regulatory_data = json.loads(regulatory_data_json)
-                    # Type conversions for regulatory fields
-                    if 'shareholding_entity_1' in regulatory_data:
-                        regulatory_data['shareholding_entity_1'] = safe_float(regulatory_data['shareholding_entity_1'])
-                    if 'shareholding_entity_2' in regulatory_data:
-                        regulatory_data['shareholding_entity_2'] = safe_float(regulatory_data['shareholding_entity_2'])
-                    if 'shareholding_entity_3' in regulatory_data:
-                        regulatory_data['shareholding_entity_3'] = safe_float(regulatory_data['shareholding_entity_3'])
-                    if 'shareholding_aggregated' in regulatory_data:
-                        regulatory_data['shareholding_aggregated'] = safe_float(regulatory_data['shareholding_aggregated'])
-                    if 'bwciif' in regulatory_data:
-                        regulatory_data['bwciif'] = safe_int(regulatory_data['bwciif'])
-                    if 'bwciif_others' in regulatory_data:
-                        regulatory_data['bwciif_others'] = safe_int(regulatory_data['bwciif_others'])
-                    security_data.update(regulatory_data)
-                except json.JSONDecodeError:
-                    pass
 
             # Create security (status = INITIAL)
             success, security_id, error = security_service.create_security(
@@ -291,7 +274,6 @@ def security_edit(request: HttpRequest, security_id: int) -> HttpResponse:
 
     if request.method == 'POST':
         try:
-            # Helper function to safely convert to int
             def safe_int(value, default=None):
                 if not value or value == '':
                     return default
@@ -300,7 +282,6 @@ def security_edit(request: HttpRequest, security_id: int) -> HttpResponse:
                 except (ValueError, TypeError):
                     return default
 
-            # Helper function to safely convert to float
             def safe_float(value, default=None):
                 if not value or value == '':
                     return default
@@ -309,8 +290,9 @@ def security_edit(request: HttpRequest, security_id: int) -> HttpResponse:
                 except (ValueError, TypeError):
                     return default
 
-            # Parse all fields with proper type conversions
+            # Parse all fields directly from POST (flat form, no modals)
             security_data = {
+                'record_type': request.POST.get('record_type', '').strip(),
                 'security_name': request.POST.get('security_name', '').strip(),
                 'isin': request.POST.get('isin', '').strip(),
                 'security_description': request.POST.get('security_description', '').strip(),
@@ -318,51 +300,37 @@ def security_edit(request: HttpRequest, security_id: int) -> HttpResponse:
                 'industry': request.POST.get('industry', '').strip(),
                 'country_of_incorporation': request.POST.get('country_of_incorporation', '').strip(),
                 'shares_outstanding': safe_int(request.POST.get('shares_outstanding', '')),
+                'price': safe_float(request.POST.get('price', '')),
                 'country_of_exchange': request.POST.get('country_of_exchange', '').strip(),
                 'exchange_code': request.POST.get('exchange_code', '').strip(),
                 'currency_code': request.POST.get('currency_code', '').strip(),
                 'ticker': request.POST.get('ticker', '').strip(),
+                'country_of_issue': request.POST.get('country_of_issue', '').strip(),
+                'issuer_type': request.POST.get('issuer_type', '').strip(),
                 'quoted_unquoted': request.POST.get('quoted_unquoted', '').strip(),
                 'security_type': request.POST.get('security_type', '').strip(),
                 'investment_type': request.POST.get('investment_type', '').strip(),
+                'pct_hld_entity_1': request.POST.get('pct_hld_entity_1', '').strip(),
+                'pct_hld_entity_2': request.POST.get('pct_hld_entity_2', '').strip(),
+                'pct_hld_entity_3': request.POST.get('pct_hld_entity_3', '').strip(),
+                'pct_hld_entity_aggr': request.POST.get('pct_hld_entity_aggr', '').strip(),
+                'substantial_10_pct': request.POST.get('substantial_10_pct', '').strip(),
+                'cels': request.POST.get('cels', '').strip(),
+                'pevc_s32_devest': request.POST.get('pevc_s32_devest', '').strip(),
+                's32_representative': request.POST.get('s32_representative', '').strip(),
+                'basel_iv_fund': request.POST.get('basel_iv_fund', '').strip(),
+                'mas_643_entity_type': request.POST.get('mas_643_entity_type', '').strip(),
+                'mas_6d_code': request.POST.get('mas_6d_code', '').strip(),
+                'fin_nonfin_ind': request.POST.get('fin_nonfin_ind', '').strip(),
+                'beta': safe_float(request.POST.get('beta', '')),
+                'par_value': safe_float(request.POST.get('par_value', '')),
+                'business_unit_head': request.POST.get('business_unit_head', '').strip(),
+                'person_in_charge': request.POST.get('person_in_charge', '').strip(),
+                'core_noncore': request.POST.get('core_noncore', '').strip(),
+                'fund_index_fund': request.POST.get('fund_index_fund', '').strip(),
+                'management_limit_classification': request.POST.get('management_limit_classification', '').strip(),
+                'relative_index': request.POST.get('relative_index', '').strip(),
             }
-
-            # Parse modal data with type conversions
-            trading_data_json = request.POST.get('trading_data', '{}')
-            if trading_data_json:
-                try:
-                    trading_data = json.loads(trading_data_json)
-                    # Type conversions for trading fields
-                    if 'price' in trading_data:
-                        trading_data['price'] = safe_float(trading_data['price'])
-                    if 'beta' in trading_data:
-                        trading_data['beta'] = safe_float(trading_data['beta'])
-                    if 'par_value' in trading_data:
-                        trading_data['par_value'] = safe_float(trading_data['par_value'])
-                    security_data.update(trading_data)
-                except json.JSONDecodeError:
-                    pass
-
-            regulatory_data_json = request.POST.get('regulatory_data', '{}')
-            if regulatory_data_json:
-                try:
-                    regulatory_data = json.loads(regulatory_data_json)
-                    # Type conversions for regulatory fields
-                    if 'shareholding_entity_1' in regulatory_data:
-                        regulatory_data['shareholding_entity_1'] = safe_float(regulatory_data['shareholding_entity_1'])
-                    if 'shareholding_entity_2' in regulatory_data:
-                        regulatory_data['shareholding_entity_2'] = safe_float(regulatory_data['shareholding_entity_2'])
-                    if 'shareholding_entity_3' in regulatory_data:
-                        regulatory_data['shareholding_entity_3'] = safe_float(regulatory_data['shareholding_entity_3'])
-                    if 'shareholding_aggregated' in regulatory_data:
-                        regulatory_data['shareholding_aggregated'] = safe_float(regulatory_data['shareholding_aggregated'])
-                    if 'bwciif' in regulatory_data:
-                        regulatory_data['bwciif'] = safe_int(regulatory_data['bwciif'])
-                    if 'bwciif_others' in regulatory_data:
-                        regulatory_data['bwciif_others'] = safe_int(regulatory_data['bwciif_others'])
-                    security_data.update(regulatory_data)
-                except json.JSONDecodeError:
-                    pass
 
             # Update security
             success, error = security_service.update_security(

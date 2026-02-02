@@ -1,7 +1,7 @@
 """
 Django management command to set up UDF field definitions for SECURITY entity type.
 
-This command creates all 26 required UDF field definitions and populates them with
+This command creates all 20 required UDF field definitions and populates them with
 options extracted from existing security data and sensible defaults.
 
 Usage:
@@ -21,8 +21,14 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         self.stdout.write(self.style.WARNING('Starting UDF setup for SECURITY entity type...'))
 
-        # Define all 26 UDF fields with their options
+        # Define all UDF fields with their options
         udf_fields = {
+            'record_type': {
+                'field_name': 'Record Type',
+                'description': 'Type of security record',
+                'data_type': 'STRING',
+                'options': ['Equity', 'Fixed Income', 'Fund', 'Derivative', 'Other']
+            },
             'industry': {
                 'field_name': 'Industry',
                 'description': 'Industry classification',
@@ -64,12 +70,6 @@ class Command(BaseCommand):
                     'Equity', 'Fixed Income', 'Hybrid', 'Alternative', 'Cash Equivalent'
                 ])
             },
-            'price_source': {
-                'field_name': 'Price Source',
-                'description': 'Source of pricing data',
-                'data_type': 'STRING',
-                'options': ['Bloomberg', 'Reuters', 'IDC', 'Manual', 'Internal Pricing']
-            },
             'country_of_issue': {
                 'field_name': 'Country of Issue',
                 'description': 'Country where security was issued',
@@ -78,27 +78,6 @@ class Command(BaseCommand):
                     'Singapore', 'United States', 'United Kingdom', 'Hong Kong',
                     'Japan', 'Australia', 'Germany', 'France'
                 ])
-            },
-            'country_of_primary_exchange': {
-                'field_name': 'Country of Primary Exchange',
-                'description': 'Country of primary trading exchange',
-                'data_type': 'STRING',
-                'options': [
-                    'Singapore', 'United States', 'United Kingdom', 'Hong Kong',
-                    'Japan', 'Australia', 'Germany', 'France'
-                ]
-            },
-            'bwciif': {
-                'field_name': 'BWCIIF',
-                'description': 'BWCIIF classification',
-                'data_type': 'STRING',
-                'options': ['Yes', 'No', 'Not Applicable']
-            },
-            'bwciif_others': {
-                'field_name': 'BWCIIF Others',
-                'description': 'Additional BWCIIF details',
-                'data_type': 'STRING',
-                'options': ['Type A', 'Type B', 'Type C', 'Other']
             },
             'issuer_type': {
                 'field_name': 'Issuer Type',
@@ -109,11 +88,20 @@ class Command(BaseCommand):
                     'Supranational', 'Agency'
                 ]
             },
-            'approved_s32': {
-                'field_name': 'Approved S32',
-                'description': 'S32 approval status',
+            'pevc_s32_devest': {
+                'field_name': 'PEVC_S32_DEVEST',
+                'description': 'PEVC/S32/Divestment classification',
                 'data_type': 'STRING',
-                'options': ['Approved', 'Pending', 'Rejected', 'Not Required']
+                'options': ['PEVC', 'S32', 'Divestment', 'Not Applicable']
+            },
+            's32_representative': {
+                'field_name': 'S32 Representative',
+                'description': 'S32 representative assignment',
+                'data_type': 'STRING',
+                'options': self.get_existing_values('s32_representative', [
+                    'Representative A', 'Representative B', 'Representative C',
+                    'Not Assigned'
+                ])
             },
             'basel_iv_fund': {
                 'field_name': 'BASEL IV - FUND',

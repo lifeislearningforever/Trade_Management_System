@@ -3,6 +3,7 @@
 -- ============================================================================
 -- Description: Comprehensive security master data table for CIS Trade Hive
 -- Created: 2026-01-02
+-- Updated: 2026-02-02 - Restructured with new fields
 -- Database: gmp_cis
 -- Table: cis_security
 -- ============================================================================
@@ -20,6 +21,11 @@ CREATE TABLE gmp_cis.cis_security_kudu (
     -- PRIMARY KEY
     -- ========================================================================
     security_id BIGINT NOT NULL,  -- Auto-generated unique ID (timestamp-based)
+
+    -- ========================================================================
+    -- RECORD TYPE
+    -- ========================================================================
+    record_type STRING,                      -- Record type classification
 
     -- ========================================================================
     -- CORE IDENTIFICATION FIELDS
@@ -45,7 +51,6 @@ CREATE TABLE gmp_cis.cis_security_kudu (
     country_of_incorporation STRING,         -- Incorporation country
     country_of_exchange STRING,              -- Exchange country
     country_of_issue STRING,                 -- Issue country
-    country_of_primary_exchange STRING,      -- Primary exchange country
     exchange_code STRING,                    -- Exchange code
 
     -- ========================================================================
@@ -53,8 +58,6 @@ CREATE TABLE gmp_cis.cis_security_kudu (
     -- ========================================================================
     currency_code STRING,                    -- Trading currency (USD, SGD, AUD, etc.)
     price DECIMAL(20, 4),                    -- Current/last price
-    price_date STRING,                       -- Date of price (stored as string for flexibility)
-    price_source STRING,                     -- Source of price data
 
     -- ========================================================================
     -- NUMERIC/STATISTICAL FIELDS
@@ -64,21 +67,20 @@ CREATE TABLE gmp_cis.cis_security_kudu (
     par_value DECIMAL(20, 6),                -- Par value
 
     -- ========================================================================
-    -- SHAREHOLDING FIELDS (Percentages)
+    -- SHAREHOLDING FIELDS (Percentages as STRING)
     -- ========================================================================
-    shareholding_entity_1 DECIMAL(10, 4),    -- % shareholding entity 1
-    shareholding_entity_2 DECIMAL(10, 4),    -- % shareholding entity 2
-    shareholding_entity_3 DECIMAL(10, 4),    -- % shareholding entity 3
-    shareholding_aggregated DECIMAL(10, 4),  -- Aggregated shareholding %
+    pct_hld_entity_1 STRING,                 -- % shareholding entity 1
+    pct_hld_entity_2 STRING,                 -- % shareholding entity 2
+    pct_hld_entity_3 STRING,                 -- % shareholding entity 3
+    pct_hld_entity_aggr STRING,              -- Aggregated shareholding %
     substantial_10_pct STRING,               -- SUBSTANTIAL >10% or NON-SUBSTANTIAL
 
     -- ========================================================================
     -- REGULATORY & COMPLIANCE FIELDS
     -- ========================================================================
-    bwciif BIGINT,                          -- BWCIIF identifier
-    bwciif_others BIGINT,                   -- BWCIIF others
     cels STRING,                            -- CELS field
-    approved_s32 STRING,                    -- APPROVED S32 or NOT APPROVED
+    pevc_s32_devest STRING,                 -- PEVC S32 devest classification
+    s32_representative STRING,              -- S32 representative
     basel_iv_fund STRING,                   -- Basel IV fund classification
     mas_643_entity_type STRING,             -- MAS 643 entity type code
     mas_6d_code STRING,                     -- MAS 6D code
@@ -93,6 +95,12 @@ CREATE TABLE gmp_cis.cis_security_kudu (
     fund_index_fund STRING,                 -- ACTIVE FUND, INDEX FUND, or blank
     management_limit_classification STRING,  -- UNLIMITED, LIMITED, or blank
     relative_index STRING,                  -- Relative index (SGX, NASDAQ, SET, etc.)
+
+    -- ========================================================================
+    -- SYSTEM FIELDS
+    -- ========================================================================
+    status STRING,                          -- Status of the record
+    src_system STRING,                      -- Source system identifier
 
     -- ========================================================================
     -- AUDIT & METADATA FIELDS
@@ -155,8 +163,12 @@ LIMIT 5;
 -- 4. Decimal precision chosen based on data analysis:
 --    - Price: 20,4 (handles large values with 4 decimal places)
 --    - Beta: 10,4 (standard beta range with precision)
---    - Shareholding: 10,4 (percentage with 4 decimal places)
 --    - PAR Value: 20,6 (high precision for par value)
--- 5. String fields used for dates to preserve original format
+-- 5. Shareholding percentages stored as STRING for flexibility
 -- 6. Table is partitioned by security_id hash for performance
+-- 7. Removed workflow fields (submitted_for_approval_at, submitted_by, etc.)
+-- 8. Added: record_type, pevc_s32_devest, s32_representative
+-- 9. Removed: country_of_primary_exchange, price_date, price_source,
+--    shareholding_entity_1-3 (DECIMAL), shareholding_aggregated (DECIMAL),
+--    bwciif, bwciif_others, approved_s32
 -- ============================================================================

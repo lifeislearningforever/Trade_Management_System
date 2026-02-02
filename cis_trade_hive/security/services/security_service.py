@@ -253,9 +253,7 @@ class SecurityService:
             success = security_hive_repository.update_security_status(
                 security_id=security_id,
                 status='VALIDATED',
-                updated_by=username,
-                reviewed_by=username,
-                review_comments=comments
+                updated_by=username
             )
 
             if not success:

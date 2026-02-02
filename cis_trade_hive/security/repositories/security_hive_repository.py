@@ -167,6 +167,7 @@ class SecurityHiveRepository:
 
             # Add all business fields from security_data
             field_mapping = {
+                'record_type': str,
                 'security_name': str,
                 'isin': str,
                 'security_description': str,
@@ -180,24 +181,20 @@ class SecurityHiveRepository:
                 'country_of_incorporation': str,
                 'country_of_exchange': str,
                 'country_of_issue': str,
-                'country_of_primary_exchange': str,
                 'exchange_code': str,
                 'currency_code': str,
                 'price': float,
-                'price_date': str,
-                'price_source': str,
                 'shares_outstanding': int,
                 'beta': float,
                 'par_value': float,
-                'shareholding_entity_1': float,
-                'shareholding_entity_2': float,
-                'shareholding_entity_3': float,
-                'shareholding_aggregated': float,
+                'pct_hld_entity_1': str,
+                'pct_hld_entity_2': str,
+                'pct_hld_entity_3': str,
+                'pct_hld_entity_aggr': str,
                 'substantial_10_pct': str,
-                'bwciif': int,
-                'bwciif_others': int,
                 'cels': str,
-                'approved_s32': str,
+                'pevc_s32_devest': str,
+                's32_representative': str,
                 'basel_iv_fund': str,
                 'mas_643_entity_type': str,
                 'mas_6d_code': str,
@@ -208,10 +205,6 @@ class SecurityHiveRepository:
                 'fund_index_fund': str,
                 'management_limit_classification': str,
                 'relative_index': str,
-                'pct_hld_entity_1': str,
-                'pct_hld_entity_2': str,
-                'pct_hld_entity_3': str,
-                'pct_hld_entity_aggr': str,
             }
 
             for field, field_type in field_mapping.items():
@@ -219,17 +212,9 @@ class SecurityHiveRepository:
                     columns.append(field)
                     values.append(SecurityHiveRepository.escape_value(security_data[field]))
 
-            # Add workflow fields
-            columns.extend(['status', 'submitted_for_approval_at', 'submitted_by',
-                           'reviewed_at', 'reviewed_by', 'review_comments'])
-            values.extend([
-                SecurityHiveRepository.escape_value(security_data.get('status', 'INITIAL')),
-                'NULL',
-                'NULL',
-                'NULL',
-                'NULL',
-                'NULL'
-            ])
+            # Add status
+            columns.append('status')
+            values.append(SecurityHiveRepository.escape_value(security_data.get('status', 'INITIAL')))
 
             # Add src_system - 'CIS' for records created via UI
             columns.append('src_system')
@@ -284,18 +269,17 @@ class SecurityHiveRepository:
 
             # Update business fields if provided
             updatable_fields = [
-                'security_name', 'isin', 'security_description', 'issuer', 'ticker',
+                'record_type', 'security_name', 'isin', 'security_description', 'issuer', 'ticker',
                 'industry', 'security_type', 'investment_type', 'issuer_type', 'quoted_unquoted',
                 'country_of_incorporation', 'country_of_exchange', 'country_of_issue',
-                'country_of_primary_exchange', 'exchange_code', 'currency_code',
-                'price', 'price_date', 'price_source', 'shares_outstanding', 'beta', 'par_value',
-                'shareholding_entity_1', 'shareholding_entity_2', 'shareholding_entity_3',
-                'shareholding_aggregated', 'substantial_10_pct', 'bwciif', 'bwciif_others',
-                'cels', 'approved_s32', 'basel_iv_fund', 'mas_643_entity_type', 'mas_6d_code',
+                'exchange_code', 'currency_code',
+                'price', 'shares_outstanding', 'beta', 'par_value',
+                'pct_hld_entity_1', 'pct_hld_entity_2', 'pct_hld_entity_3', 'pct_hld_entity_aggr',
+                'substantial_10_pct', 'cels', 'pevc_s32_devest', 's32_representative',
+                'basel_iv_fund', 'mas_643_entity_type', 'mas_6d_code',
                 'fin_nonfin_ind', 'business_unit_head', 'person_in_charge', 'core_noncore',
                 'fund_index_fund', 'management_limit_classification', 'relative_index',
                 'status',
-                'pct_hld_entity_1', 'pct_hld_entity_2', 'pct_hld_entity_3', 'pct_hld_entity_aggr',
             ]
 
             for field in updatable_fields:
@@ -329,24 +313,14 @@ class SecurityHiveRepository:
             return False
 
     @staticmethod
-    def update_security_status(
-        security_id: int,
-        status: str,
-        updated_by: str,
-        submitted_by: Optional[str] = None,
-        reviewed_by: Optional[str] = None,
-        review_comments: Optional[str] = None
-    ) -> bool:
+    def update_security_status(security_id: int, status: str, updated_by: str) -> bool:
         """
-        Update security status and workflow fields.
+        Update security status.
 
         Args:
             security_id: Security ID
             status: New status
             updated_by: Username updating
-            submitted_by: Username who submitted (for PENDING_APPROVAL)
-            reviewed_by: Username who reviewed (for APPROVE/REJECT)
-            review_comments: Reviewer comments
 
         Returns:
             True if successful, False otherwise
@@ -359,16 +333,6 @@ class SecurityHiveRepository:
                 f"updated_by = {SecurityHiveRepository.escape_value(updated_by)}",
                 f"updated_at = {timestamp_ms}"
             ]
-
-            if submitted_by:
-                set_clauses.append(f"submitted_for_approval_at = {timestamp_ms}")
-                set_clauses.append(f"submitted_by = {SecurityHiveRepository.escape_value(submitted_by)}")
-
-            if status == 'VALIDATED' and reviewed_by:
-                set_clauses.append(f"reviewed_at = {timestamp_ms}")
-                set_clauses.append(f"reviewed_by = {SecurityHiveRepository.escape_value(reviewed_by)}")
-                if review_comments:
-                    set_clauses.append(f"review_comments = {SecurityHiveRepository.escape_value(review_comments)}")
 
             if status == 'VALIDATED':
                 set_clauses.append("is_active = true")

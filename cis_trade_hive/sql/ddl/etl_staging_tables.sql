@@ -35,6 +35,9 @@ CREATE TABLE gmp_cis.stg_gmp_security_kudu (
     -- Natural Key (what GMP provides)
     isin STRING NOT NULL,                           -- ISIN is the natural match key
 
+    -- Record Type
+    record_type STRING,
+
     -- Core Identification
     security_name STRING,
     security_description STRING,
@@ -52,32 +55,28 @@ CREATE TABLE gmp_cis.stg_gmp_security_kudu (
     country_of_incorporation STRING,
     country_of_exchange STRING,
     country_of_issue STRING,
-    country_of_primary_exchange STRING,
     exchange_code STRING,
 
     -- Trading & Pricing
     currency_code STRING,
     price DECIMAL(20, 4),
-    price_date STRING,
-    price_source STRING,
 
     -- Numeric/Statistical
     shares_outstanding BIGINT,
     beta DECIMAL(10, 4),
     par_value DECIMAL(20, 6),
 
-    -- Shareholding
-    shareholding_entity_1 DECIMAL(10, 4),
-    shareholding_entity_2 DECIMAL(10, 4),
-    shareholding_entity_3 DECIMAL(10, 4),
-    shareholding_aggregated DECIMAL(10, 4),
+    -- Shareholding (as STRING)
+    pct_hld_entity_1 STRING,
+    pct_hld_entity_2 STRING,
+    pct_hld_entity_3 STRING,
+    pct_hld_entity_aggr STRING,
     substantial_10_pct STRING,
 
     -- Regulatory & Compliance
-    bwciif BIGINT,
-    bwciif_others BIGINT,
     cels STRING,
-    approved_s32 STRING,
+    pevc_s32_devest STRING,
+    s32_representative STRING,
     basel_iv_fund STRING,
     mas_643_entity_type STRING,
     mas_6d_code STRING,
