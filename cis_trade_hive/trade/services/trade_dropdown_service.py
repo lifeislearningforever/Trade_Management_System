@@ -706,21 +706,19 @@ class TradeDropdownService:
         """
         Get securities filtered by currency code.
         Combines securities from cis_security_kudu and cis_equity_price.
-        Price priority: cis_equity_price > cis_security_kudu
+        Price source: cis_equity_price only (cis_security_kudu price is ignored).
         """
         if not currency_code:
             return []
 
         securities_dict = {}  # key: security_name, value: security data
 
-        # First, get securities from cis_security_kudu (base data with price)
+        # First, get securities from cis_security_kudu (base data only, price set to 0)
         try:
             query = f"""
             SELECT
                 security_name,
                 isin,
-                price,
-                price_date,
                 exchange_code as market
             FROM {self.DATABASE}.cis_security_kudu
             WHERE currency_code = '{currency_code}'
@@ -738,16 +736,16 @@ class TradeDropdownService:
                             'value': sec_name,
                             'label': f"{sec_name} ({r.get('isin', '')})",
                             'isin': r.get('isin', ''),
-                            'price': float(r.get('price', 0)) if r.get('price') else 0,
+                            'price': 0,
                             'market': r.get('market', ''),
-                            'price_date': str(r.get('price_date', '')),
+                            'price_date': '',
                             'source': 'security'
                         }
                 logger.debug(f"Loaded {len(results)} securities from cis_security_kudu for {currency_code}")
         except Exception as e:
             logger.warning(f"Error loading from cis_security_kudu: {str(e)}")
 
-        # Then, get/update with equity prices (overwrite price if available)
+        # Then, overlay equity prices from cis_equity_price (only source for prices)
         try:
             query = f"""
             SELECT
@@ -767,11 +765,9 @@ class TradeDropdownService:
                 for r in results:
                     sec_label = r.get('security_label', '')
                     if sec_label:
-                        # If security exists, update price from equity_price (takes priority)
-                        # If not exists, add as new security
                         equity_price = float(r.get('price', 0)) if r.get('price') else 0
                         if sec_label in securities_dict:
-                            # Update price from equity_price (higher priority)
+                            # Update price from equity_price
                             if equity_price > 0:
                                 securities_dict[sec_label]['price'] = equity_price
                                 securities_dict[sec_label]['price_date'] = str(r.get('price_date', ''))
@@ -798,8 +794,7 @@ class TradeDropdownService:
 
     def get_equity_price(self, security_label: str, currency_code: str = None) -> Dict[str, Any]:
         """
-        Get the price for a security.
-        Priority: cis_equity_price > cis_security_kudu (NVL logic)
+        Get the latest closing price for a security from cis_equity_price only.
         """
         if not security_label:
             return {'price': 0, 'found': False}
@@ -808,7 +803,6 @@ class TradeDropdownService:
         if currency_code:
             currency_filter = f"AND currency_code = '{currency_code}'"
 
-        # First, try cis_equity_price (higher priority)
         try:
             query = f"""
             SELECT
@@ -841,40 +835,6 @@ class TradeDropdownService:
                     }
         except Exception as e:
             logger.warning(f"Error getting price from cis_equity_price: {str(e)}")
-
-        # Fallback to cis_security_kudu
-        try:
-            query = f"""
-            SELECT
-                security_name,
-                currency_code,
-                price,
-                price_date,
-                exchange_code as market,
-                isin
-            FROM {self.DATABASE}.cis_security_kudu
-            WHERE security_name = '{security_label}'
-              AND (is_active = true OR is_active IS NULL)
-              {currency_filter}
-            ORDER BY price_date DESC
-            LIMIT 1
-            """
-            results = impala_manager.execute_query(query, database=self.DATABASE)
-
-            if results and len(results) > 0:
-                r = results[0]
-                price = float(r.get('price', 0)) if r.get('price') else 0
-                return {
-                    'price': price,
-                    'currency_code': r.get('currency_code', ''),
-                    'price_date': str(r.get('price_date', '')),
-                    'market': r.get('market', ''),
-                    'isin': r.get('isin', ''),
-                    'source': 'security',
-                    'found': price > 0
-                }
-        except Exception as e:
-            logger.warning(f"Error getting price from cis_security_kudu: {str(e)}")
 
         return {'price': 0, 'found': False}
 

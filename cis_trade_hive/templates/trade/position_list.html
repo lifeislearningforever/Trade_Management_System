@@ -83,13 +83,18 @@
         </div>
     </div>
 
-    <!-- Action Buttons -->
+    <!-- Search Bar -->
     <div class="mb-4">
-        <form method="post" action="{% url 'trade:refresh_positions' %}" class="d-inline">
-            {% csrf_token %}
-            <button type="submit" class="btn btn-primary" title="Refresh market values for all positions">
-                <i class="bi bi-arrow-clockwise"></i> Refresh Market Values
-            </button>
+        <form method="get" action="{% url 'trade:position_list' %}" class="d-flex align-items-center gap-2">
+            <div class="input-group" style="max-width: 400px;">
+                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                <input type="text" name="q" class="form-control" placeholder="Search by portfolio or security name..."
+                       value="{{ search_query|default:'' }}" autocomplete="off">
+            </div>
+            <button type="submit" class="btn btn-primary">Search</button>
+            {% if search_query %}
+                <a href="{% url 'trade:position_list' %}" class="btn btn-outline-secondary">Clear</a>
+            {% endif %}
         </form>
     </div>
 
@@ -99,6 +104,9 @@
             <h5 class="card-title mb-0">
                 Position List
                 <span class="badge badge-primary ms-2">{{ positions|length }} position{{ positions|length|pluralize }}</span>
+                {% if search_query %}
+                    <span class="badge bg-info ms-1">filtered: "{{ search_query }}"</span>
+                {% endif %}
             </h5>
             <a href="?export=csv" class="btn btn-sm btn-success">
                 <i class="bi bi-download"></i> Download CSV

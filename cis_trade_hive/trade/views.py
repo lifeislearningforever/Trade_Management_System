@@ -1067,15 +1067,29 @@ class PositionWrapper:
 
 
 def position_list(request):
-    """List all positions with P&L summary."""
+    """List all positions with P&L summary. Auto-refreshes market values on each load."""
+    # Auto-refresh market values on every page load
+    trade_kudu_repository.refresh_market_values()
+
     positions_raw = trade_kudu_repository.get_all_positions(status='OPEN')
     stats = trade_kudu_repository.get_position_statistics()
+
+    # Search filter
+    search_query = request.GET.get('q', '').strip()
+    if search_query:
+        search_lower = search_query.lower()
+        positions_raw = [
+            p for p in positions_raw
+            if search_lower in (p.get('portfolio_short_name', '') or '').lower()
+            or search_lower in (p.get('security_label', '') or '').lower()
+        ]
 
     positions = [PositionWrapper(p) for p in positions_raw]
 
     return render(request, 'trade/position_list.html', {
         'positions': positions,
         'stats': stats,
+        'search_query': search_query,
     })
 
 

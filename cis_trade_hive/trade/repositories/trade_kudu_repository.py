@@ -910,7 +910,7 @@ class TradeKuduRepository:
             return {'total_positions': 0, 'total_market_value': 0, 'total_unrealized_pnl': 0, 'total_realized_pnl': 0}
 
     def _get_equity_price(self, security_label: str) -> Optional[float]:
-        """Fetch latest equity price for a security from cis_equity_price or cis_security_kudu."""
+        """Fetch latest equity price for a security from cis_equity_price only."""
         try:
             query = f"""
             SELECT main_closing_price
@@ -923,17 +923,6 @@ class TradeKuduRepository:
             results = impala_manager.execute_query(query, database=self.DATABASE)
             if results and results[0].get('main_closing_price') is not None:
                 return float(results[0]['main_closing_price'])
-
-            # Fallback to security master price
-            fallback_query = f"""
-            SELECT price
-            FROM {self.DATABASE}.cis_security_kudu
-            WHERE security_name = {self.escape_value(security_label)}
-            LIMIT 1
-            """
-            fallback_results = impala_manager.execute_query(fallback_query, database=self.DATABASE)
-            if fallback_results and fallback_results[0].get('price') is not None:
-                return float(fallback_results[0]['price'])
 
             return None
         except Exception as e:

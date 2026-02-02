@@ -1411,26 +1411,19 @@ class TradeKuduRepositoryTestCase(TestCase):
         self.assertIn('cis_equity_price', call_args)
 
     @patch('core.repositories.impala_connection.impala_manager.execute_query')
-    def test_get_equity_price_fallback_to_security(self, mock_execute):
-        """Test equity price falls back to cis_security_kudu"""
-        # First call (equity price) returns empty, second call (security) returns price
-        mock_execute.side_effect = [
-            [],  # No equity price
-            [{'price': 48.00}]  # Security master price
-        ]
+    def test_get_equity_price_no_fallback_to_security(self, mock_execute):
+        """Test equity price returns None when no equity price found (no security fallback)"""
+        mock_execute.return_value = []  # No equity price
 
         result = self.repository._get_equity_price('SEC001')
 
-        self.assertAlmostEqual(result, 48.00)
-        self.assertEqual(mock_execute.call_count, 2)
+        self.assertIsNone(result)
+        self.assertEqual(mock_execute.call_count, 1)
 
     @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_equity_price_no_price_found(self, mock_execute):
         """Test returns None when no price available"""
-        mock_execute.side_effect = [
-            [],  # No equity price
-            []   # No security price
-        ]
+        mock_execute.return_value = []  # No equity price
 
         result = self.repository._get_equity_price('SEC001')
 

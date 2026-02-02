@@ -870,29 +870,24 @@ document.getElementById('security_label').addEventListener('change', function() 
     // Auto-populate currency from selected security's data-currency attribute
     autoPopulateCurrencyFromSecurity();
 
-    // Auto-fill price from data-price attribute
-    const selectedOption = this.options[this.selectedIndex];
-    if (selectedOption && selectedOption.dataset.price && parseFloat(selectedOption.dataset.price) > 0) {
-        priceField.value = parseFloat(selectedOption.dataset.price).toFixed(4);
-        securityInfo.textContent = 'Price auto-filled from security data';
-        securityInfo.className = 'text-success small';
-    } else {
-        // Fetch price from API using the auto-populated currency
-        const currencyCode = currencyEl.value;
-        if (currencyCode) {
-            fetch(`/trade/api/equity-price/?security=${encodeURIComponent(securityLabel)}&currency=${encodeURIComponent(currencyCode)}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.found && data.price > 0) {
-                        priceField.value = parseFloat(data.price).toFixed(4);
-                        securityInfo.textContent = `Price: ${data.price} (${data.price_date || 'latest'})`;
-                        securityInfo.className = 'text-success small';
-                    }
-                })
-                .catch(error => {
-                    console.log('Could not fetch equity price:', error);
-                });
-        }
+    // Fetch price from equity price table via API
+    const currencyCode = currencyEl.value;
+    if (currencyCode) {
+        fetch(`/trade/api/equity-price/?security=${encodeURIComponent(securityLabel)}&currency=${encodeURIComponent(currencyCode)}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.found && data.price > 0) {
+                    priceField.value = parseFloat(data.price).toFixed(4);
+                    securityInfo.textContent = `Price: ${data.price} (${data.price_date || 'latest'})`;
+                    securityInfo.className = 'text-success small';
+                } else {
+                    securityInfo.textContent = 'No equity price found for this security';
+                    securityInfo.className = 'text-warning small';
+                }
+            })
+            .catch(error => {
+                console.log('Could not fetch equity price:', error);
+            });
     }
 });
 
