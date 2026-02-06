@@ -97,6 +97,7 @@
                     <table class="table table-hover table-sm mb-0 sortable-table" style="width: max-content;">
                         <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
                             <tr>
+                                <th class="sortable" data-sort-type="text" style="min-width: 80px;">Source</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 180px;">Portfolio Name</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 200px;">Portfolio Description</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 100px;">Currency</th>
@@ -118,6 +119,13 @@
                         <tbody>
                             {% for portfolio in page_obj %}
                             <tr {% if portfolio.status == 'CANCELLED' %}style="opacity: 0.6; background-color: #f8f9fa;"{% endif %}>
+                                <td>
+                                    {% if portfolio.src_system|upper == 'CIS' %}
+                                        <span class="badge badge-success">CIS</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">{{ portfolio.src_system|upper|default:"GMP" }}</span>
+                                    {% endif %}
+                                </td>
                                 <td>
                                     <strong class="text-primary">{{ portfolio.name }}</strong>
                                 </td>
@@ -160,26 +168,28 @@
                                         <a href="{% url 'portfolio:detail' portfolio.name %}" class="btn btn-sm btn-outline-primary" title="View Details">
                                             <i class="bi bi-eye"></i>
                                         </a>
-                                        {% if portfolio.status == 'INITIAL' or portfolio.status == 'MODIFIED' or portfolio.status == 'PENDING_VALIDATION' %}
-                                            <a href="{% url 'portfolio:edit' portfolio.name %}" class="btn btn-sm btn-outline-warning" title="Edit">
-                                                <i class="bi bi-pencil"></i>
-                                            </a>
-                                        {% endif %}
-                                        {% if portfolio.status == 'INITIAL' or portfolio.status == 'MODIFIED' %}
-                                            <form method="post" action="{% url 'portfolio:submit' portfolio.name %}" class="d-inline">
-                                                {% csrf_token %}
-                                                <button type="submit" class="btn btn-sm btn-outline-info" title="Submit for Validation" onclick="return confirm('Submit for validation?')">
-                                                    <i class="bi bi-send"></i>
-                                                </button>
-                                            </form>
-                                        {% endif %}
-                                        {% if portfolio.status == 'CANCELLED' %}
-                                            <form method="post" action="{% url 'portfolio:reactivate' portfolio.name %}" class="d-inline">
-                                                {% csrf_token %}
-                                                <button type="submit" class="btn btn-sm btn-outline-success" title="Reactivate" onclick="return confirm('Reactivate this portfolio?')">
-                                                    <i class="bi bi-arrow-clockwise"></i>
-                                                </button>
-                                            </form>
+                                        {% if portfolio.src_system|upper == 'CIS' %}
+                                            {% if portfolio.status == 'INITIAL' or portfolio.status == 'MODIFIED' or portfolio.status == 'PENDING_VALIDATION' %}
+                                                <a href="{% url 'portfolio:edit' portfolio.name %}" class="btn btn-sm btn-outline-warning" title="Edit">
+                                                    <i class="bi bi-pencil"></i>
+                                                </a>
+                                            {% endif %}
+                                            {% if portfolio.status == 'INITIAL' or portfolio.status == 'MODIFIED' %}
+                                                <form method="post" action="{% url 'portfolio:submit' portfolio.name %}" class="d-inline">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-sm btn-outline-info" title="Submit for Validation" onclick="return confirm('Submit for validation?')">
+                                                        <i class="bi bi-send"></i>
+                                                    </button>
+                                                </form>
+                                            {% endif %}
+                                            {% if portfolio.status == 'CANCELLED' %}
+                                                <form method="post" action="{% url 'portfolio:reactivate' portfolio.name %}" class="d-inline">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-sm btn-outline-success" title="Reactivate" onclick="return confirm('Reactivate this portfolio?')">
+                                                        <i class="bi bi-arrow-clockwise"></i>
+                                                    </button>
+                                                </form>
+                                            {% endif %}
                                         {% endif %}
                                     </div>
                                 </td>

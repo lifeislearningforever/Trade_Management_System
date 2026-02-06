@@ -11,6 +11,7 @@ from django.shortcuts import render, redirect
 from django.http import HttpResponse, JsonResponse
 from django.contrib import messages
 from django.views import View
+from django.utils.safestring import mark_safe
 
 from lookup.services.lookup_service import lookup_service
 
@@ -68,11 +69,16 @@ class LookupTableDetailView(View):
                 page_size=page_size
             )
 
+            # Prepare columns for JavaScript (only name and type)
+            columns = table_info.get('columns', [])
+            columns_for_js = [{'name': col['name'], 'type': col['type']} for col in columns]
+
             context = {
                 'table_info': table_info,
                 'table_name': table_name,
                 'rows': result['rows'],
-                'columns': table_info.get('columns', []),
+                'columns': columns,
+                'columns_json': mark_safe(json.dumps(columns_for_js)),
                 'pk_column': table_info.get('pk_column'),
                 'total_count': result['total_count'],
                 'page': result['page'],

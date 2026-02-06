@@ -91,6 +91,7 @@
                     <table class="table table-hover table-sm mb-0 sortable-table" style="width: max-content;">
                         <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
                             <tr>
+                                <th class="sortable" data-sort-type="text" style="min-width: 80px;">Source</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 200px;">Security Name</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 120px;">Record Type</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 200px;">Description</th>
@@ -110,6 +111,13 @@
                         <tbody>
                             {% for security in page_obj %}
                             <tr>
+                                <td>
+                                    {% if security.src_system|upper == 'CIS' %}
+                                        <span class="badge badge-success">CIS</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">{{ security.src_system|upper|default:"GMP" }}</span>
+                                    {% endif %}
+                                </td>
                                 <td>
                                     <strong class="text-primary">{{ security.security_name }}</strong>
                                 </td>

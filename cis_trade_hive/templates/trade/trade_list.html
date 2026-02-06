@@ -290,24 +290,26 @@
                                         <a href="{% url 'trade:detail' trade.trade_id %}" class="btn btn-sm btn-outline-primary" title="View Details">
                                             <i class="bi bi-eye"></i>
                                         </a>
-                                        {% if trade.status == 'INITIAL' or trade.status == 'MODIFIED' %}
-                                            <a href="{% url 'trade:edit' trade.trade_id %}" class="btn btn-sm btn-outline-warning" title="Edit">
-                                                <i class="bi bi-pencil"></i>
-                                            </a>
-                                            <form method="post" action="{% url 'trade:submit' trade.trade_id %}" class="d-inline">
-                                                {% csrf_token %}
-                                                <button type="submit" class="btn btn-sm btn-outline-info" title="Submit for Validation" onclick="return confirm('Submit for validation?')">
-                                                    <i class="bi bi-send"></i>
-                                                </button>
-                                            </form>
-                                        {% endif %}
-                                        {% if trade.status == 'CANCELLED' %}
-                                            <form method="post" action="{% url 'trade:reactivate' trade.trade_id %}" class="d-inline">
-                                                {% csrf_token %}
-                                                <button type="submit" class="btn btn-sm btn-outline-success" title="Reactivate" onclick="return confirm('Reactivate this trade?')">
-                                                    <i class="bi bi-arrow-clockwise"></i>
-                                                </button>
-                                            </form>
+                                        {% if trade.src_system|upper == 'CIS' %}
+                                            {% if trade.status == 'INITIAL' or trade.status == 'MODIFIED' %}
+                                                <a href="{% url 'trade:edit' trade.trade_id %}" class="btn btn-sm btn-outline-warning" title="Edit">
+                                                    <i class="bi bi-pencil"></i>
+                                                </a>
+                                                <form method="post" action="{% url 'trade:submit' trade.trade_id %}" class="d-inline">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-sm btn-outline-info" title="Submit for Validation" onclick="return confirm('Submit for validation?')">
+                                                        <i class="bi bi-send"></i>
+                                                    </button>
+                                                </form>
+                                            {% endif %}
+                                            {% if trade.status == 'CANCELLED' %}
+                                                <form method="post" action="{% url 'trade:reactivate' trade.trade_id %}" class="d-inline">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-sm btn-outline-success" title="Reactivate" onclick="return confirm('Reactivate this trade?')">
+                                                        <i class="bi bi-arrow-clockwise"></i>
+                                                    </button>
+                                                </form>
+                                            {% endif %}
                                         {% endif %}
                                     </div>
                                 </td>
