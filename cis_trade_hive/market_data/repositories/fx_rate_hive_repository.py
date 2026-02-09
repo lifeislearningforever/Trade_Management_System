@@ -5,8 +5,26 @@ Fetches daily FX spot rates from gmp_cis.gmp_cis_sta_dly_fx_rates external table
 Data source: BOSET and other market data providers.
 Update frequency: Daily
 
+Table Structure (from screenshots):
+- SRC_SYSTEM: Source system (e.g., 'gmp')
+- SUB_SYSTEM: Sub-system (e.g., 'cis')
+- DATA_CAT: Data category (e.g., 'sta')
+- DATA_FRQ: Data frequency (e.g., 'dly')
+- RECORD_TYPE: Record type (e.g., 'D' for detail)
+- SPOT_FLAG: Spot flag (e.g., '1')
+- REF_QUOT_CCY: Currency pair reference (e.g., 'USD-AED')
+- BASE_CUR: Base currency (e.g., 'AED')
+- DATE: Trade date (YYYYMMDD format)
+- ASK_RATE: Ask rate
+- UNDERLYING_CUR: Quote/underlying currency (e.g., 'USD')
+- BID_RATE: Bid rate
+- MKTDATA_SET: Market data set (e.g., 'BOSET')
+- SPOT_RATE_D: Spot rate / mid rate
+- SRC_ID: Source identifier
+- PROCESSING_DATE: Processing date partition (YYYYMMDD)
+
 Author: CisTrade Team
-Last Updated: 2025-12-27
+Last Updated: 2026-02-08
 """
 
 from typing import List, Dict, Any, Optional
@@ -52,38 +70,43 @@ class FXRateHiveRepository:
             where_clauses = ["record_type = 'D'"]  # Only detail records
 
             if currency_pair:
-                where_clauses.append(f"spot_ff0 = '{currency_pair}'")
+                where_clauses.append(f"ref_quot_ccy = '{currency_pair}'")
 
             if base_currency:
-                where_clauses.append(f"base = '{base_currency}'")
+                where_clauses.append(f"underlying_cur = '{base_currency}'")
 
             if date_from:
-                where_clauses.append(f"trade_date >= '{date_from}'")
+                where_clauses.append(f"`date` >= '{date_from}'")
 
             if date_to:
-                where_clauses.append(f"trade_date <= '{date_to}'")
+                where_clauses.append(f"`date` <= '{date_to}'")
 
             if source:
-                where_clauses.append(f"alias = '{source}'")
+                where_clauses.append(f"mktdata_set = '{source}'")
 
             where_clause = " AND ".join(where_clauses)
 
-            # Build query
+            # Build query with new column names
             query = f"""
             SELECT
-                spot_ff0 as currency_pair,
-                base as base_currency,
-                underlng as quote_currency,
-                trade_date,
-                spot_rf_a as bid_rate,
-                spot_rf_b as ask_rate,
-                mid_rate,
-                alias as source,
-                ref_quot as reference_id,
-                processing_date
+                ref_quot_ccy as currency_pair,
+                underlying_cur as base_currency,
+                base_cur as quote_currency,
+                `date` as trade_date,
+                bid_rate,
+                ask_rate,
+                spot_rate_d as mid_rate,
+                mktdata_set as source,
+                src_id as reference_id,
+                processing_date,
+                src_system,
+                sub_system,
+                data_cat,
+                data_frq,
+                spot_flag
             FROM {FXRateHiveRepository.TABLE_NAME}
             WHERE {where_clause}
-            ORDER BY processing_date DESC, trade_date DESC, spot_ff0
+            ORDER BY processing_date DESC, `date` DESC, ref_quot_ccy
             LIMIT {limit}
             """
 
@@ -131,7 +154,7 @@ class FXRateHiveRepository:
         try:
             # Get the most recent trade date first
             date_query = f"""
-            SELECT MAX(trade_date) as max_date
+            SELECT MAX(`date`) as max_date
             FROM {FXRateHiveRepository.TABLE_NAME}
             WHERE record_type = 'D'
             """
@@ -146,20 +169,22 @@ class FXRateHiveRepository:
             # Get all rates for the latest date
             query = f"""
             SELECT
-                spot_ff0 as currency_pair,
-                base as base_currency,
-                underlng as quote_currency,
-                trade_date,
-                spot_rf_a as bid_rate,
-                spot_rf_b as ask_rate,
-                mid_rate,
-                alias as source,
-                ref_quot as reference_id,
-                processing_date
+                ref_quot_ccy as currency_pair,
+                underlying_cur as base_currency,
+                base_cur as quote_currency,
+                `date` as trade_date,
+                bid_rate,
+                ask_rate,
+                spot_rate_d as mid_rate,
+                mktdata_set as source,
+                src_id as reference_id,
+                processing_date,
+                src_system,
+                sub_system
             FROM {FXRateHiveRepository.TABLE_NAME}
             WHERE record_type = 'D'
-              AND trade_date = '{latest_date}'
-            ORDER BY spot_ff0
+              AND `date` = '{latest_date}'
+            ORDER BY ref_quot_ccy
             LIMIT {limit}
             """
 
@@ -211,20 +236,22 @@ class FXRateHiveRepository:
             # This allows viewing historical data regardless of when it was loaded
             query = f"""
             SELECT
-                spot_ff0 as currency_pair,
-                base as base_currency,
-                underlng as quote_currency,
-                trade_date,
-                spot_rf_a as bid_rate,
-                spot_rf_b as ask_rate,
-                mid_rate,
-                alias as source,
-                ref_quot as reference_id,
-                processing_date
+                ref_quot_ccy as currency_pair,
+                underlying_cur as base_currency,
+                base_cur as quote_currency,
+                `date` as trade_date,
+                bid_rate,
+                ask_rate,
+                spot_rate_d as mid_rate,
+                mktdata_set as source,
+                src_id as reference_id,
+                processing_date,
+                src_system,
+                sub_system
             FROM {FXRateHiveRepository.TABLE_NAME}
             WHERE record_type = 'D'
-              AND spot_ff0 = '{currency_pair}'
-            ORDER BY processing_date DESC, trade_date DESC
+              AND ref_quot_ccy = '{currency_pair}'
+            ORDER BY processing_date DESC, `date` DESC
             LIMIT {days}
             """
 
@@ -268,11 +295,11 @@ class FXRateHiveRepository:
         """
         try:
             query = f"""
-            SELECT DISTINCT spot_ff0 as currency_pair
+            SELECT DISTINCT ref_quot_ccy as currency_pair
             FROM {FXRateHiveRepository.TABLE_NAME}
             WHERE record_type = 'D'
-              AND spot_ff0 IS NOT NULL
-            ORDER BY spot_ff0
+              AND ref_quot_ccy IS NOT NULL
+            ORDER BY ref_quot_ccy
             """
 
             logger.info("Retrieving unique currency pairs")
@@ -297,11 +324,11 @@ class FXRateHiveRepository:
         """
         try:
             query = f"""
-            SELECT DISTINCT base as base_currency
+            SELECT DISTINCT underlying_cur as base_currency
             FROM {FXRateHiveRepository.TABLE_NAME}
             WHERE record_type = 'D'
-              AND base IS NOT NULL
-            ORDER BY base
+              AND underlying_cur IS NOT NULL
+            ORDER BY underlying_cur
             """
 
             logger.info("Retrieving unique base currencies")
@@ -326,11 +353,11 @@ class FXRateHiveRepository:
         """
         try:
             query = f"""
-            SELECT DISTINCT alias as source
+            SELECT DISTINCT mktdata_set as source
             FROM {FXRateHiveRepository.TABLE_NAME}
             WHERE record_type = 'D'
-              AND alias IS NOT NULL
-            ORDER BY alias
+              AND mktdata_set IS NOT NULL
+            ORDER BY mktdata_set
             """
 
             logger.info("Retrieving unique data sources")
@@ -358,10 +385,10 @@ class FXRateHiveRepository:
             stats_query = f"""
             SELECT
                 COUNT(*) as total_records,
-                COUNT(DISTINCT spot_ff0) as unique_pairs,
-                COUNT(DISTINCT alias) as unique_sources,
-                MAX(trade_date) as latest_date,
-                MIN(trade_date) as earliest_date,
+                COUNT(DISTINCT ref_quot_ccy) as unique_pairs,
+                COUNT(DISTINCT mktdata_set) as unique_sources,
+                MAX(`date`) as latest_date,
+                MIN(`date`) as earliest_date,
                 MAX(processing_date) as latest_processing_date,
                 MIN(processing_date) as earliest_processing_date,
                 COUNT(DISTINCT processing_date) as processing_date_count
@@ -405,11 +432,11 @@ class FXRateHiveRepository:
             # Get source breakdown
             source_query = f"""
             SELECT
-                alias as source,
+                mktdata_set as source,
                 COUNT(*) as record_count
             FROM {FXRateHiveRepository.TABLE_NAME}
             WHERE record_type = 'D'
-            GROUP BY alias
+            GROUP BY mktdata_set
             ORDER BY record_count DESC
             """
 
@@ -420,7 +447,7 @@ class FXRateHiveRepository:
             SELECT
                 processing_date,
                 COUNT(*) as record_count,
-                COUNT(DISTINCT spot_ff0) as pair_count
+                COUNT(DISTINCT ref_quot_ccy) as pair_count
             FROM {FXRateHiveRepository.TABLE_NAME}
             WHERE record_type = 'D'
             GROUP BY processing_date
@@ -468,20 +495,22 @@ class FXRateHiveRepository:
         try:
             query = f"""
             SELECT
-                spot_ff0 as currency_pair,
-                base as base_currency,
-                underlng as quote_currency,
-                trade_date,
-                spot_rf_a as bid_rate,
-                spot_rf_b as ask_rate,
-                mid_rate,
-                alias as source,
-                ref_quot as reference_id,
-                processing_date
+                ref_quot_ccy as currency_pair,
+                underlying_cur as base_currency,
+                base_cur as quote_currency,
+                `date` as trade_date,
+                bid_rate,
+                ask_rate,
+                spot_rate_d as mid_rate,
+                mktdata_set as source,
+                src_id as reference_id,
+                processing_date,
+                src_system,
+                sub_system
             FROM {FXRateHiveRepository.TABLE_NAME}
             WHERE record_type = 'D'
-              AND trade_date = '{trade_date}'
-              AND spot_ff0 = '{currency_pair}'
+              AND `date` = '{trade_date}'
+              AND ref_quot_ccy = '{currency_pair}'
             ORDER BY processing_date DESC
             LIMIT 1
             """
@@ -497,11 +526,11 @@ class FXRateHiveRepository:
 
             # Add formatted date
             if row.get('trade_date'):
-                trade_date = str(row['trade_date'])
-                if len(trade_date) == 8:
-                    row['trade_date_display'] = f"{trade_date[0:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+                trade_date_val = str(row['trade_date'])
+                if len(trade_date_val) == 8:
+                    row['trade_date_display'] = f"{trade_date_val[0:4]}-{trade_date_val[4:6]}-{trade_date_val[6:8]}"
                 else:
-                    row['trade_date_display'] = trade_date
+                    row['trade_date_display'] = trade_date_val
 
             # Calculate spread
             if row.get('bid_rate') and row.get('ask_rate'):

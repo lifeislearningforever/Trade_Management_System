@@ -22,14 +22,85 @@
         </div>
     </div>
 
+    <!-- Security & Classification Info -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-info-circle"></i> Security & Classification
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">ISIN</label>
+                            <div class="fw-bold"><code>{{ position.isin|default:"-" }}</code></div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">Security Currency</label>
+                            <div><span class="badge bg-secondary">{{ position.security_currency|default:"-" }}</span></div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">Portfolio Currency</label>
+                            <div><span class="badge bg-info">{{ position.portfolio_currency|default:"-" }}</span></div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">Country</label>
+                            <div class="fw-bold">{{ position.country|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">Asset Class</label>
+                            <div class="fw-bold">{{ position.asset_class|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">Listing Status</label>
+                            <div class="fw-bold">{{ position.listing_status|default:"-" }}</div>
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">Valuation Date</label>
+                            <div class="fw-bold">{{ position.valuation_date|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">Source System</label>
+                            <div><span class="badge bg-light text-dark">{{ position.src_system|default:"-" }}</span></div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">Market Unit Price</label>
+                            <div class="fw-bold">{{ position.market_unit_price|floatformat:4|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">% Ratio</label>
+                            <div class="fw-bold">{{ position.pct_ratio|floatformat:4|default:"-" }}%</div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label text-muted small">Status</label>
+                            <div>
+                                {% if position.status == 'OPEN' %}
+                                    <span class="badge badge-success">OPEN</span>
+                                {% elif position.status == 'CLOSED' %}
+                                    <span class="badge badge-secondary">CLOSED</span>
+                                {% else %}
+                                    <span class="badge badge-info">{{ position.status|default:"UNKNOWN" }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Summary Cards Row -->
     <div class="row mb-4">
-        <!-- Current Holdings Card -->
+        <!-- Holdings & Cost Card -->
         <div class="col-lg-4 mb-3">
             <div class="card h-100">
                 <div class="card-header">
                     <h5 class="card-title mb-0">
-                        <i class="bi bi-box"></i> Current Holdings
+                        <i class="bi bi-box"></i> Holdings & Cost
                     </h5>
                 </div>
                 <div class="card-body">
@@ -37,13 +108,26 @@
                         <label class="form-label text-muted small">Quantity</label>
                         <div class="fw-bold fs-4">{{ position.quantity|floatformat:2 }}</div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label text-muted small">Average Cost</label>
-                        <div class="fw-bold">{{ currency_code }} {{ position.average_cost|floatformat:4 }}</div>
+                    <div class="row">
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Cost (Local - {{ position.security_currency|default:"SEC" }})</label>
+                            <div class="fw-bold">{{ position.cost_value_local|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Cost (Base - {{ position.portfolio_currency|default:"PORT" }})</label>
+                            <div class="fw-bold text-primary">{{ position.cost_value_base|floatformat:2|default:"0.00" }}</div>
+                        </div>
                     </div>
-                    <div class="mb-0">
-                        <label class="form-label text-muted small">Total Cost</label>
-                        <div class="fw-bold text-primary">{{ currency_code }} {{ position.total_cost|floatformat:2 }}</div>
+                    <hr class="my-2">
+                    <div class="row">
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Avg Cost</label>
+                            <div class="fw-bold">{{ position.average_cost|floatformat:4|default:"0.0000" }}</div>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Total Cost (Legacy)</label>
+                            <div class="fw-bold">{{ position.total_cost|floatformat:2|default:"0.00" }}</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -59,48 +143,64 @@
                 </div>
                 <div class="card-body">
                     <div class="mb-3">
-                        <label class="form-label text-muted small">Current Price</label>
-                        <div class="fw-bold fs-4">{{ currency_code }} {{ position.current_price|floatformat:4 }}</div>
+                        <label class="form-label text-muted small">Current Price / Market Unit Price</label>
+                        <div class="fw-bold fs-4">{{ position.market_unit_price|default:position.current_price|floatformat:4|default:"0.0000" }}</div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label text-muted small">Market Value</label>
-                        <div class="fw-bold">{{ currency_code }} {{ position.market_value|floatformat:2 }}</div>
-                    </div>
-                    <div class="mb-0">
-                        <label class="form-label text-muted small">Unrealized P&L</label>
-                        <div class="fw-bold fs-5 {% if position.unrealized_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
-                            {{ currency_code }} {{ position.unrealized_pnl|floatformat:2 }}
+                    <div class="row">
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Market Value (Local - {{ position.security_currency|default:"SEC" }})</label>
+                            <div class="fw-bold">{{ position.market_value_local|floatformat:2|default:"0.00" }}</div>
                         </div>
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Market Value (Base - {{ position.portfolio_currency|default:"PORT" }})</label>
+                            <div class="fw-bold text-success">{{ position.market_value_base|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                    </div>
+                    <hr class="my-2">
+                    <div>
+                        <label class="form-label text-muted small">Market Value (Legacy)</label>
+                        <div class="fw-bold">{{ position.market_value|floatformat:2|default:"0.00" }}</div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Realized P&L Card -->
+        <!-- Unrealized P&L Card -->
         <div class="col-lg-4 mb-3">
             <div class="card h-100">
                 <div class="card-header">
                     <h5 class="card-title mb-0">
-                        <i class="bi bi-wallet2"></i> Realized P&L
+                        <i class="bi bi-graph-up-arrow"></i> Unrealized P&L
                     </h5>
                 </div>
                 <div class="card-body">
-                    <div class="mb-3">
-                        <label class="form-label text-muted small">Realized P&L</label>
-                        <div class="fw-bold fs-3 {% if position.realized_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
-                            {{ currency_code }} {{ position.realized_pnl|floatformat:2 }}
+                    <div class="row mb-3">
+                        <div class="col-6">
+                            <label class="form-label text-muted small">P&L (Local - {{ position.security_currency|default:"SEC" }})</label>
+                            <div class="fw-bold fs-5 {% if position.unrealized_pnl_local >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                {{ position.unrealized_pnl_local|floatformat:2|default:"0.00" }}
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label text-muted small">P&L (Base - {{ position.portfolio_currency|default:"PORT" }})</label>
+                            <div class="fw-bold fs-5 {% if position.unrealized_pnl_base >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                {{ position.unrealized_pnl_base|floatformat:2|default:"0.00" }}
+                            </div>
                         </div>
                     </div>
-                    <div class="mb-0">
-                        <label class="form-label text-muted small">Status</label>
-                        <div>
-                            {% if position.status == 'OPEN' %}
-                                <span class="badge badge-success fs-6">OPEN</span>
-                            {% elif position.status == 'CLOSED' %}
-                                <span class="badge badge-secondary fs-6">CLOSED</span>
-                            {% else %}
-                                <span class="badge badge-info fs-6">{{ position.status|default:"UNKNOWN" }}</span>
-                            {% endif %}
+                    <hr class="my-2">
+                    <div class="row">
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Unrealized P&L (Legacy)</label>
+                            <div class="fw-bold {% if position.unrealized_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                {{ position.unrealized_pnl|floatformat:2|default:"0.00" }}
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Realized P&L</label>
+                            <div class="fw-bold {% if position.realized_pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                {{ position.realized_pnl|floatformat:2|default:"0.00" }}
+                            </div>
                         </div>
                     </div>
                 </div>

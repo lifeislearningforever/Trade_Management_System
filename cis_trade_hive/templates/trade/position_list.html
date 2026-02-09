@@ -21,7 +21,7 @@
 
     <!-- Summary Cards -->
     <div class="row mb-4">
-        <div class="col-md-3 mb-3">
+        <div class="col-md-2 mb-3">
             <div class="card border-primary">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
@@ -36,13 +36,13 @@
                 </div>
             </div>
         </div>
-        <div class="col-md-3 mb-3">
+        <div class="col-md-2 mb-3">
             <div class="card border-success">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
-                            <h6 class="text-muted mb-1">Total Market Value</h6>
-                            <h3 class="mb-0 text-success">{{ stats.total_market_value|default:"0.00"|floatformat:2 }}</h3>
+                            <h6 class="text-muted mb-1">Market Value (Base)</h6>
+                            <h3 class="mb-0 text-success">{{ stats.total_market_value_base|default:stats.total_market_value|default:"0.00"|floatformat:2 }}</h3>
                         </div>
                         <div class="text-success" style="font-size: 2rem; opacity: 0.3;">
                             <i class="bi bi-cash-stack"></i>
@@ -51,13 +51,28 @@
                 </div>
             </div>
         </div>
-        <div class="col-md-3 mb-3">
+        <div class="col-md-2 mb-3">
+            <div class="card border-secondary">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-muted mb-1">Cost Value (Base)</h6>
+                            <h3 class="mb-0 text-secondary">{{ stats.total_cost_value_base|default:"0.00"|floatformat:2 }}</h3>
+                        </div>
+                        <div class="text-secondary" style="font-size: 2rem; opacity: 0.3;">
+                            <i class="bi bi-wallet2"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2 mb-3">
             <div class="card border-info">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
-                            <h6 class="text-muted mb-1">Total Unrealized P&L</h6>
-                            <h3 class="mb-0 text-info">{{ stats.total_unrealized_pnl|default:"0.00"|floatformat:2 }}</h3>
+                            <h6 class="text-muted mb-1">Unrealized P&L (Base)</h6>
+                            <h3 class="mb-0 {% if stats.total_unrealized_pnl_base > 0 %}text-success{% elif stats.total_unrealized_pnl_base < 0 %}text-danger{% else %}text-info{% endif %}">{{ stats.total_unrealized_pnl_base|default:stats.total_unrealized_pnl|default:"0.00"|floatformat:2 }}</h3>
                         </div>
                         <div class="text-info" style="font-size: 2rem; opacity: 0.3;">
                             <i class="bi bi-graph-up-arrow"></i>
@@ -66,15 +81,30 @@
                 </div>
             </div>
         </div>
-        <div class="col-md-3 mb-3">
+        <div class="col-md-2 mb-3">
             <div class="card border-warning">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
-                            <h6 class="text-muted mb-1">Total Realized P&L</h6>
-                            <h3 class="mb-0 text-warning">{{ stats.total_realized_pnl|default:"0.00"|floatformat:2 }}</h3>
+                            <h6 class="text-muted mb-1">Market Value (Local)</h6>
+                            <h3 class="mb-0 text-warning">{{ stats.total_market_value_local|default:"0.00"|floatformat:2 }}</h3>
                         </div>
                         <div class="text-warning" style="font-size: 2rem; opacity: 0.3;">
+                            <i class="bi bi-currency-exchange"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2 mb-3">
+            <div class="card border-dark">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-muted mb-1">Unrealized P&L (Local)</h6>
+                            <h3 class="mb-0 {% if stats.total_unrealized_pnl_local > 0 %}text-success{% elif stats.total_unrealized_pnl_local < 0 %}text-danger{% else %}text-dark{% endif %}">{{ stats.total_unrealized_pnl_local|default:"0.00"|floatformat:2 }}</h3>
+                        </div>
+                        <div class="text-dark" style="font-size: 2rem; opacity: 0.3;">
                             <i class="bi bi-bar-chart"></i>
                         </div>
                     </div>
@@ -118,50 +148,70 @@
                     <table class="table table-hover table-sm mb-0 sortable-table" style="width: max-content;">
                         <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
                             <tr>
-                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Portfolio</th>
+                                <th class="sortable sticky-first-column" data-sort-type="text" style="min-width: 120px; position: sticky; left: 0; z-index: 11; background-color: #f8f9fa;">Portfolio</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 180px;">Security</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 120px; text-align: right;">Qty</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 120px; text-align: right;">Avg Cost</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 130px; text-align: right;">Total Cost</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 130px; text-align: right;">Current Price</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 140px; text-align: right;">Market Value</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 140px; text-align: right;">Unrealized P&L</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 140px; text-align: right;">Realized P&L</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 100px;">Status</th>
-                                <th class="sticky-action-column" style="min-width: 120px;">Actions</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 120px;">ISIN</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 80px;">Sec Ccy</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 80px;">Port Ccy</th>
+                                <th class="sortable" data-sort-type="number" style="min-width: 100px; text-align: right;">Qty</th>
+                                <th class="sortable" data-sort-type="number" style="min-width: 100px; text-align: right;">% Ratio</th>
+                                <th class="sortable" data-sort-type="number" style="min-width: 110px; text-align: right;">Mkt Price</th>
+                                <th class="sortable" data-sort-type="number" style="min-width: 130px; text-align: right;">Cost (Local)</th>
+                                <th class="sortable" data-sort-type="number" style="min-width: 130px; text-align: right;">Cost (Base)</th>
+                                <th class="sortable" data-sort-type="number" style="min-width: 140px; text-align: right;">Mkt Val (Local)</th>
+                                <th class="sortable" data-sort-type="number" style="min-width: 140px; text-align: right;">Mkt Val (Base)</th>
+                                <th class="sortable" data-sort-type="number" style="min-width: 130px; text-align: right;">P&L (Local)</th>
+                                <th class="sortable" data-sort-type="number" style="min-width: 130px; text-align: right;">P&L (Base)</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 80px;">Country</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 100px;">Asset Class</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 90px;">Listing</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 100px;">Val Date</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 80px;">Source</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 80px;">Status</th>
+                                <th class="sticky-action-column" style="min-width: 80px;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for position in positions %}
                             <tr>
-                                <td><strong class="text-primary">{{ position.portfolio_short_name|default:"-" }}</strong></td>
+                                <td class="sticky-first-column" style="position: sticky; left: 0; z-index: 1; background-color: #fff;"><strong class="text-primary">{{ position.portfolio_short_name|default:"-" }}</strong></td>
                                 <td style="max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
                                     title="{{ position.security_label }}">
                                     {{ position.security_label|default:"-" }}
                                 </td>
+                                <td><code>{{ position.isin|default:"-" }}</code></td>
+                                <td><span class="badge bg-secondary">{{ position.security_currency|default:"-" }}</span></td>
+                                <td><span class="badge bg-info">{{ position.portfolio_currency|default:"-" }}</span></td>
                                 <td class="text-end">{{ position.quantity|floatformat:2|default:"0.00" }}</td>
-                                <td class="text-end">{{ position.average_cost|floatformat:4|default:"0.0000" }}</td>
-                                <td class="text-end">{{ position.total_cost|floatformat:2|default:"0.00" }}</td>
-                                <td class="text-end">{{ position.current_price|floatformat:4|default:"0.0000" }}</td>
-                                <td class="text-end">{{ position.market_value|floatformat:2|default:"0.00" }}</td>
+                                <td class="text-end">{{ position.pct_ratio|floatformat:4|default:"-" }}%</td>
+                                <td class="text-end">{{ position.market_unit_price|floatformat:4|default:"-" }}</td>
+                                <td class="text-end">{{ position.cost_value_local|floatformat:2|default:"0.00" }}</td>
+                                <td class="text-end">{{ position.cost_value_base|floatformat:2|default:"0.00" }}</td>
+                                <td class="text-end">{{ position.market_value_local|floatformat:2|default:"0.00" }}</td>
+                                <td class="text-end">{{ position.market_value_base|floatformat:2|default:"0.00" }}</td>
                                 <td class="text-end">
-                                    {% if position.unrealized_pnl > 0 %}
-                                        <span class="text-success fw-bold">{{ position.unrealized_pnl|floatformat:2 }}</span>
-                                    {% elif position.unrealized_pnl < 0 %}
-                                        <span class="text-danger fw-bold">{{ position.unrealized_pnl|floatformat:2 }}</span>
+                                    {% if position.unrealized_pnl_local > 0 %}
+                                        <span class="text-success fw-bold">{{ position.unrealized_pnl_local|floatformat:2 }}</span>
+                                    {% elif position.unrealized_pnl_local < 0 %}
+                                        <span class="text-danger fw-bold">{{ position.unrealized_pnl_local|floatformat:2 }}</span>
                                     {% else %}
-                                        {{ position.unrealized_pnl|floatformat:2|default:"0.00" }}
+                                        {{ position.unrealized_pnl_local|floatformat:2|default:"0.00" }}
                                     {% endif %}
                                 </td>
                                 <td class="text-end">
-                                    {% if position.realized_pnl > 0 %}
-                                        <span class="text-success fw-bold">{{ position.realized_pnl|floatformat:2 }}</span>
-                                    {% elif position.realized_pnl < 0 %}
-                                        <span class="text-danger fw-bold">{{ position.realized_pnl|floatformat:2 }}</span>
+                                    {% if position.unrealized_pnl_base > 0 %}
+                                        <span class="text-success fw-bold">{{ position.unrealized_pnl_base|floatformat:2 }}</span>
+                                    {% elif position.unrealized_pnl_base < 0 %}
+                                        <span class="text-danger fw-bold">{{ position.unrealized_pnl_base|floatformat:2 }}</span>
                                     {% else %}
-                                        {{ position.realized_pnl|floatformat:2|default:"0.00" }}
+                                        {{ position.unrealized_pnl_base|floatformat:2|default:"0.00" }}
                                     {% endif %}
                                 </td>
+                                <td>{{ position.country|default:"-" }}</td>
+                                <td>{{ position.asset_class|default:"-" }}</td>
+                                <td>{{ position.listing_status|default:"-" }}</td>
+                                <td>{{ position.valuation_date|default:"-" }}</td>
+                                <td><span class="badge bg-light text-dark">{{ position.src_system|default:"-" }}</span></td>
                                 <td>
                                     {% if position.status == 'OPEN' %}
                                         <span class="badge badge-success">Open</span>

@@ -929,11 +929,110 @@ class TradeKuduRepository:
             logger.error(f"Error fetching equity price for {security_label}: {str(e)}")
             return None
 
+    def _get_fx_rate(self, portfolio_ccy: str, security_ccy: str, rate_date: Optional[str] = None) -> Optional[float]:
+        """
+        Fetch FX rate from gmp_cis_sta_dly_fx_rates table.
+
+        Args:
+            portfolio_ccy: Portfolio currency (base currency, e.g., 'USD')
+            security_ccy: Security currency (foreign currency, e.g., 'SGD')
+            rate_date: Optional date in YYYYMMDD format
+
+        Returns:
+            FX rate or None if not found
+
+        Note:
+            FX pair format is {portfolio_ccy}-{security_ccy} (e.g., USD-SGD)
+            If currencies are the same, returns 1.0
+        """
+        try:
+            # Same currency - no conversion needed
+            if portfolio_ccy == security_ccy:
+                return 1.0
+
+            # Build FX pair: portfolio_ccy-security_ccy
+            fx_pair = f"{portfolio_ccy}-{security_ccy}"
+
+            query = f"""
+            SELECT spot_rate_d
+            FROM {self.DATABASE}.gmp_cis_sta_dly_fx_rates
+            WHERE ref_quot_ccy = {self.escape_value(fx_pair)}
+            """
+
+            if rate_date:
+                query += f" AND `date` = {self.escape_value(rate_date)}"
+
+            query += " ORDER BY `date` DESC LIMIT 1"
+
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            if results and results[0].get('spot_rate_d') is not None:
+                return float(results[0]['spot_rate_d'])
+
+            # Try reverse pair and invert
+            reverse_pair = f"{security_ccy}-{portfolio_ccy}"
+            query = f"""
+            SELECT spot_rate_d
+            FROM {self.DATABASE}.gmp_cis_sta_dly_fx_rates
+            WHERE ref_quot_ccy = {self.escape_value(reverse_pair)}
+            """
+
+            if rate_date:
+                query += f" AND `date` = {self.escape_value(rate_date)}"
+
+            query += " ORDER BY `date` DESC LIMIT 1"
+
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            if results and results[0].get('spot_rate_d') is not None:
+                rate = float(results[0]['spot_rate_d'])
+                return 1.0 / rate if rate != 0 else None
+
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching FX rate for {portfolio_ccy}-{security_ccy}: {str(e)}")
+            return None
+
+    def _get_portfolio_currency(self, portfolio_short_name: str) -> Optional[str]:
+        """Get base currency for a portfolio from cis_portfolio table."""
+        try:
+            query = f"""
+            SELECT currency
+            FROM {self.DATABASE}.cis_portfolio
+            WHERE name = {self.escape_value(portfolio_short_name)}
+            LIMIT 1
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            if results and results[0].get('currency'):
+                return results[0]['currency']
+            return None
+        except Exception as e:
+            logger.error(f"Error getting portfolio currency for {portfolio_short_name}: {str(e)}")
+            return None
+
+    def _get_security_details(self, security_label: str) -> Optional[Dict[str, Any]]:
+        """Get security details including currency, ISIN, country, asset_class, listing_status."""
+        try:
+            query = f"""
+            SELECT security_currency, isin, country, asset_class, listing_status
+            FROM {self.DATABASE}.cis_security_kudu
+            WHERE security_label = {self.escape_value(security_label)}
+            LIMIT 1
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            if results:
+                return results[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error getting security details for {security_label}: {str(e)}")
+            return None
+
     def update_position_from_trade(self, trade: Dict[str, Any], updated_by: str) -> bool:
         """
         Create a new position version snapshot based on trade.
         Uses INSERT-only pattern - each trade creates a new version row.
-        Implements full P&L calculations matching SA spreadsheet design.
+        Implements full P&L calculations with multi-currency support:
+        - cost_value_local, market_value_local, unrealized_pnl_local (security currency)
+        - cost_value_base, market_value_base, unrealized_pnl_base (portfolio currency)
+        - FX rate looked up dynamically from gmp_cis_sta_dly_fx_rates
         """
         try:
             portfolio = trade.get('portfolio_short_name', '')
@@ -944,16 +1043,59 @@ class TradeKuduRepository:
             trade_total_amt = float(trade.get('total_amount', 0) or (trade_qty * trade_price))
             trade_id = trade.get('trade_id')
             trade_date = trade.get('trade_date', datetime.now().strftime('%Y-%m-%d'))
+            valuation_date = trade_date
 
             # Get latest position version for this portfolio+security
             current_position = self.get_position(portfolio, security)
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             # Fetch current equity price for market value calculation
             equity_price = self._get_equity_price(security)
 
+            # Fetch multi-currency related data
+            portfolio_ccy = self._get_portfolio_currency(portfolio)
+            security_details = self._get_security_details(security)
+
+            security_ccy = security_details.get('security_currency') if security_details else None
+            isin = security_details.get('isin') if security_details else None
+            country = security_details.get('country') if security_details else None
+            asset_class = security_details.get('asset_class') if security_details else None
+            listing_status = security_details.get('listing_status') if security_details else None
+
+            # Get FX rate (portfolio_ccy to security_ccy)
+            fx_rate = self._get_fx_rate(portfolio_ccy, security_ccy) if portfolio_ccy and security_ccy else 1.0
+            if fx_rate is None:
+                fx_rate = 1.0  # Default to 1 if no rate found
+
             # Generate new version_id (always)
             version_id = self.get_next_id('position_version_id')
+
+            # Helper function to calculate multi-currency values
+            def calc_multicurrency_values(qty, avg_cost, current_price):
+                # Local values (security currency)
+                cost_local = qty * avg_cost
+                market_local = qty * current_price
+                unrealized_local = market_local - cost_local
+
+                # Base values (portfolio currency) - multiply by FX rate
+                # If FX rate is USD-SGD = 1.33, and security is in SGD, portfolio is USD:
+                # base_value = local_value / fx_rate (convert SGD to USD)
+                if fx_rate and fx_rate != 0:
+                    cost_base = cost_local / fx_rate
+                    market_base = market_local / fx_rate
+                    unrealized_base = unrealized_local / fx_rate
+                else:
+                    cost_base = cost_local
+                    market_base = market_local
+                    unrealized_base = unrealized_local
+
+                return {
+                    'cost_value_local': cost_local,
+                    'market_value_local': market_local,
+                    'unrealized_pnl_local': unrealized_local,
+                    'cost_value_base': cost_base,
+                    'market_value_base': market_base,
+                    'unrealized_pnl_base': unrealized_base
+                }
 
             if trade_type in [self.TRADE_TYPE_BUY, self.TRADE_TYPE_ADD_LONG]:
                 if current_position:
@@ -971,6 +1113,9 @@ class TradeKuduRepository:
                     market_value = new_qty * current_price
                     unrealized_pnl = market_value - new_total_cost
 
+                    # Calculate multi-currency values
+                    mc_vals = calc_multicurrency_values(new_qty, new_avg_cost, current_price)
+
                     return self._insert_position_version(
                         version_id=version_id, position_id=position_id,
                         position_date=trade_date, portfolio=portfolio, security=security,
@@ -978,7 +1123,23 @@ class TradeKuduRepository:
                         realized_pnl=old_realized_pnl, current_price=current_price,
                         market_value=market_value, unrealized_pnl=unrealized_pnl,
                         trade_id=trade_id, trade_type=trade_type,
-                        status='OPEN', is_active=True, created_by=updated_by
+                        status='OPEN', is_active=True, created_by=updated_by,
+                        # New multi-currency fields
+                        src_system='CIS',
+                        security_currency=security_ccy,
+                        portfolio_currency=portfolio_ccy,
+                        isin=isin,
+                        country=country,
+                        asset_class=asset_class,
+                        listing_status=listing_status,
+                        cost_value_local=mc_vals['cost_value_local'],
+                        cost_value_base=mc_vals['cost_value_base'],
+                        market_value_local=mc_vals['market_value_local'],
+                        market_value_base=mc_vals['market_value_base'],
+                        unrealized_pnl_local=mc_vals['unrealized_pnl_local'],
+                        unrealized_pnl_base=mc_vals['unrealized_pnl_base'],
+                        valuation_date=valuation_date,
+                        market_unit_price=current_price
                     )
                 else:
                     # New position - generate new position_id
@@ -989,6 +1150,9 @@ class TradeKuduRepository:
                     market_value = trade_qty * current_price
                     unrealized_pnl = market_value - new_total_cost
 
+                    # Calculate multi-currency values
+                    mc_vals = calc_multicurrency_values(trade_qty, trade_price, current_price)
+
                     return self._insert_position_version(
                         version_id=version_id, position_id=position_id,
                         position_date=trade_date, portfolio=portfolio, security=security,
@@ -996,7 +1160,23 @@ class TradeKuduRepository:
                         realized_pnl=0, current_price=current_price,
                         market_value=market_value, unrealized_pnl=unrealized_pnl,
                         trade_id=trade_id, trade_type=trade_type,
-                        status='OPEN', is_active=True, created_by=updated_by
+                        status='OPEN', is_active=True, created_by=updated_by,
+                        # New multi-currency fields
+                        src_system='CIS',
+                        security_currency=security_ccy,
+                        portfolio_currency=portfolio_ccy,
+                        isin=isin,
+                        country=country,
+                        asset_class=asset_class,
+                        listing_status=listing_status,
+                        cost_value_local=mc_vals['cost_value_local'],
+                        cost_value_base=mc_vals['cost_value_base'],
+                        market_value_local=mc_vals['market_value_local'],
+                        market_value_base=mc_vals['market_value_base'],
+                        unrealized_pnl_local=mc_vals['unrealized_pnl_local'],
+                        unrealized_pnl_base=mc_vals['unrealized_pnl_base'],
+                        valuation_date=valuation_date,
+                        market_unit_price=current_price
                     )
 
             elif trade_type in [self.TRADE_TYPE_SELL, self.TRADE_TYPE_DELIVER_LONG]:
@@ -1022,7 +1202,23 @@ class TradeKuduRepository:
                             realized_pnl=cumulative_realized_pnl, current_price=0,
                             market_value=0, unrealized_pnl=0,
                             trade_id=trade_id, trade_type=trade_type,
-                            status='CLOSED', is_active=False, created_by=updated_by
+                            status='CLOSED', is_active=False, created_by=updated_by,
+                            # New multi-currency fields - zeroed for closed position
+                            src_system='CIS',
+                            security_currency=security_ccy,
+                            portfolio_currency=portfolio_ccy,
+                            isin=isin,
+                            country=country,
+                            asset_class=asset_class,
+                            listing_status=listing_status,
+                            cost_value_local=0,
+                            cost_value_base=0,
+                            market_value_local=0,
+                            market_value_base=0,
+                            unrealized_pnl_local=0,
+                            unrealized_pnl_base=0,
+                            valuation_date=valuation_date,
+                            market_unit_price=0
                         )
                     else:
                         # Partial sell - avg_cost unchanged
@@ -1031,6 +1227,9 @@ class TradeKuduRepository:
                         market_value = new_qty * current_price
                         unrealized_pnl = market_value - new_total_cost
 
+                        # Calculate multi-currency values
+                        mc_vals = calc_multicurrency_values(new_qty, old_avg_cost, current_price)
+
                         return self._insert_position_version(
                             version_id=version_id, position_id=position_id,
                             position_date=trade_date, portfolio=portfolio, security=security,
@@ -1038,7 +1237,23 @@ class TradeKuduRepository:
                             realized_pnl=cumulative_realized_pnl, current_price=current_price,
                             market_value=market_value, unrealized_pnl=unrealized_pnl,
                             trade_id=trade_id, trade_type=trade_type,
-                            status='OPEN', is_active=True, created_by=updated_by
+                            status='OPEN', is_active=True, created_by=updated_by,
+                            # New multi-currency fields
+                            src_system='CIS',
+                            security_currency=security_ccy,
+                            portfolio_currency=portfolio_ccy,
+                            isin=isin,
+                            country=country,
+                            asset_class=asset_class,
+                            listing_status=listing_status,
+                            cost_value_local=mc_vals['cost_value_local'],
+                            cost_value_base=mc_vals['cost_value_base'],
+                            market_value_local=mc_vals['market_value_local'],
+                            market_value_base=mc_vals['market_value_base'],
+                            unrealized_pnl_local=mc_vals['unrealized_pnl_local'],
+                            unrealized_pnl_base=mc_vals['unrealized_pnl_base'],
+                            valuation_date=valuation_date,
+                            market_unit_price=current_price
                         )
 
             return True
@@ -1065,29 +1280,78 @@ class TradeKuduRepository:
         trade_type: str,
         status: str,
         is_active: bool,
-        created_by: str
+        created_by: str,
+        # New multi-currency fields
+        src_system: Optional[str] = 'CIS',
+        security_currency: Optional[str] = None,
+        portfolio_currency: Optional[str] = None,
+        pct_ratio: Optional[float] = None,
+        isin: Optional[str] = None,
+        country: Optional[str] = None,
+        asset_class: Optional[str] = None,
+        listing_status: Optional[str] = None,
+        cost_value_local: Optional[float] = None,
+        cost_value_base: Optional[float] = None,
+        market_value_local: Optional[float] = None,
+        market_value_base: Optional[float] = None,
+        unrealized_pnl_local: Optional[float] = None,
+        unrealized_pnl_base: Optional[float] = None,
+        valuation_date: Optional[str] = None,
+        market_unit_price: Optional[float] = None
     ) -> bool:
-        """Insert a new position version row into cis_trade_position."""
+        """Insert a new position version row into cis_trade_position with all new columns."""
         try:
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+            # Build column list
+            columns = [
+                'version_id', 'position_id', 'position_date', 'portfolio_short_name', 'security_label',
+                'quantity', 'average_cost', 'total_cost',
+                'realized_pnl', 'current_price', 'market_value', 'unrealized_pnl',
+                'trade_id', 'trade_type',
+                'status', 'is_active',
+                'created_by', 'created_at',
+                # New columns
+                'src_system', 'security_currency', 'portfolio_currency', 'pct_ratio', 'isin',
+                'country', 'asset_class', 'listing_status',
+                'cost_value_local', 'cost_value_base',
+                'market_value_local', 'market_value_base',
+                'unrealized_pnl_local', 'unrealized_pnl_base',
+                'valuation_date', 'market_unit_price'
+            ]
+
+            # Build values list
+            values = [
+                str(version_id), str(position_id), self.escape_value(position_date),
+                self.escape_value(portfolio), self.escape_value(security),
+                str(quantity), str(average_cost), str(total_cost),
+                str(realized_pnl), str(current_price), str(market_value), str(unrealized_pnl),
+                str(trade_id) if trade_id else 'NULL', self.escape_value(trade_type),
+                self.escape_value(status), str(is_active).lower(),
+                self.escape_value(created_by), f"'{timestamp}'",
+                # New column values
+                self.escape_value(src_system),
+                self.escape_value(security_currency),
+                self.escape_value(portfolio_currency),
+                str(pct_ratio) if pct_ratio is not None else 'NULL',
+                self.escape_value(isin),
+                self.escape_value(country),
+                self.escape_value(asset_class),
+                self.escape_value(listing_status),
+                str(cost_value_local) if cost_value_local is not None else 'NULL',
+                str(cost_value_base) if cost_value_base is not None else 'NULL',
+                str(market_value_local) if market_value_local is not None else 'NULL',
+                str(market_value_base) if market_value_base is not None else 'NULL',
+                str(unrealized_pnl_local) if unrealized_pnl_local is not None else 'NULL',
+                str(unrealized_pnl_base) if unrealized_pnl_base is not None else 'NULL',
+                self.escape_value(valuation_date),
+                str(market_unit_price) if market_unit_price is not None else 'NULL'
+            ]
+
             query = f"""
             UPSERT INTO {self.DATABASE}.{self.TRADE_POSITION_TABLE}
-            (version_id, position_id, position_date, portfolio_short_name, security_label,
-             quantity, average_cost, total_cost,
-             realized_pnl, current_price, market_value, unrealized_pnl,
-             trade_id, trade_type,
-             status, is_active,
-             created_by, created_at)
-            VALUES (
-                {version_id}, {position_id}, {self.escape_value(position_date)},
-                {self.escape_value(portfolio)}, {self.escape_value(security)},
-                {quantity}, {average_cost}, {total_cost},
-                {realized_pnl}, {current_price}, {market_value}, {unrealized_pnl},
-                {trade_id}, {self.escape_value(trade_type)},
-                {self.escape_value(status)}, {str(is_active).lower()},
-                {self.escape_value(created_by)}, '{timestamp}'
-            )
+            ({', '.join(columns)})
+            VALUES ({', '.join(values)})
             """
             return impala_manager.execute_write(query, database=self.DATABASE)
         except Exception as e:

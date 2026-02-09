@@ -684,6 +684,27 @@ PARTITION BY HASH (fx_rate_id) PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES ('kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251');
 
+CREATE EXTERNAL TABLE gmp_cis_sta_dly_fx_rates (
+    SRC_SYSTEM STRING,
+    SUB_SYSTEM STRING,
+    DATA_CAT STRING,
+    DATA_FRQ STRING,
+    RECORD_TYPE STRING,
+    SPOT_FLAG STRING,
+    REF_QUOT_CCY STRING,
+    BASE_CUR STRING,
+    `DATE` STRING,
+    ASK_RATE STRING,
+    UNDERLYING_CUR STRING,
+    BID_RATE STRING,
+    MKTDATA_SET STRING,
+    SPOT_RATE_D STRING,
+    SRC_ID STRING
+
+)
+PARTITIONED BY (PROCESSING_DATE STRING)
+STORED AS PARQUET;
+
 -- ============================================================================
 -- SECTION 7: UDF TABLES
 -- ============================================================================
