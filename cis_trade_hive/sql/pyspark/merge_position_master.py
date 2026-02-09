@@ -16,10 +16,15 @@ Data Flow:
   Staging Tables → Security Validation → cis_position_master (matched)
                                       → cis_position_unmatched (unmatched for review)
 
+Storage:
+  - Target tables: Hive External Tables with Parquet format
+  - Security master: Kudu (cis_security_kudu)
+  - Staging tables: Hive External Tables with Parquet format
+
 Security Validation Logic:
   1. Match on security_label + isin against cis_security_kudu
   2. If matched: set is_matched=True, security_id=matched_id, match_status=EXACT
-  3. If partial match (isin only): is_matched=True, match_status=FUZZY
+  3. If partial match (isin only): is_matched=True, match_status=ISIN_MATCH
   4. If no match: is_matched=False, move to cis_position_unmatched for:
      a) Manual review, OR
      b) Auto-creation in cis_security_kudu (future enhancement)
@@ -42,7 +47,7 @@ Usage:
     --batch-id BATCH_20260209_001
 
 Parameters:
-  --kudu-master    : Kudu master addresses (required)
+  --kudu-master    : Kudu master addresses (required for security master lookup)
   --source         : Source system to process: cis, gmp, ams, ims, or 'all' (default: all)
   --valuation-date : Filter by valuation date (YYYY-MM-DD)
   --batch-id       : Filter by ETL batch ID
@@ -51,6 +56,7 @@ Parameters:
 
 Author: CisTrade Team
 Created: 2026-02-09
+Updated: 2026-02-10 (Converted from Kudu to Hive/Parquet)
 """
 
 import argparse
@@ -70,40 +76,65 @@ from pyspark.sql.types import StructType, StructField, StringType, DecimalType, 
 
 DATABASE = "gmp_cis"
 
-# Target tables
-TARGET_TABLE = f"{DATABASE}.cis_position_master_kudu"
-IMPALA_TARGET_TABLE = f"impala::{DATABASE}.cis_position_master_kudu"
+# Target tables (Hive/Parquet)
+TARGET_TABLE = f"{DATABASE}.cis_position_master"
+UNMATCHED_TABLE = f"{DATABASE}.cis_position_unmatched"
+HISTORY_TABLE = f"{DATABASE}.cis_position_master_history"
 
-UNMATCHED_TABLE = f"{DATABASE}.cis_position_unmatched_kudu"
-IMPALA_UNMATCHED_TABLE = f"impala::{DATABASE}.cis_position_unmatched_kudu"
+# HDFS locations for Parquet files
+TARGET_LOCATION = "/data/gmp_cis/cis_position_master"
+UNMATCHED_LOCATION = "/data/gmp_cis/cis_position_unmatched"
+HISTORY_LOCATION = "/data/gmp_cis/cis_position_master_history"
 
-HISTORY_TABLE = f"{DATABASE}.cis_position_master_history_kudu"
-IMPALA_HISTORY_TABLE = f"impala::{DATABASE}.cis_position_master_history_kudu"
-
+# Security master (still Kudu for atomic lookups)
 SECURITY_TABLE = f"{DATABASE}.cis_security_kudu"
 IMPALA_SECURITY_TABLE = f"impala::{DATABASE}.cis_security_kudu"
 
-# Staging tables by source
+# Staging tables by source (Hive/Parquet)
 STAGING_TABLES = {
     "cis": {
-        "positions": f"impala::{DATABASE}.stg_cis_positions_kudu",
-        "summary": f"impala::{DATABASE}.stg_cis_summary_kudu",
-        "history": f"impala::{DATABASE}.stg_cis_history_kudu",
+        "positions": f"{DATABASE}.stg_cis_positions",
+        "summary": f"{DATABASE}.stg_cis_summary",
+        "history": f"{DATABASE}.stg_cis_history",
     },
     "gmp": {
-        "positions": f"impala::{DATABASE}.stg_gmp_positions_kudu",
-        "summary": f"impala::{DATABASE}.stg_gmp_summary_kudu",
-        "history": f"impala::{DATABASE}.stg_gmp_history_kudu",
+        "positions": f"{DATABASE}.stg_gmp_positions",
+        "summary": f"{DATABASE}.stg_gmp_summary",
+        "history": f"{DATABASE}.stg_gmp_history",
     },
     "ams": {
-        "positions": f"impala::{DATABASE}.stg_ams_positions_kudu",
-        "summary": f"impala::{DATABASE}.stg_ams_summary_kudu",
-        "history": f"impala::{DATABASE}.stg_ams_history_kudu",
+        "positions": f"{DATABASE}.stg_ams_positions",
+        "summary": f"{DATABASE}.stg_ams_summary",
+        "history": f"{DATABASE}.stg_ams_history",
     },
     "ims": {
-        "positions": f"impala::{DATABASE}.stg_ims_positions_kudu",
-        "summary": f"impala::{DATABASE}.stg_ims_summary_kudu",
-        "history": f"impala::{DATABASE}.stg_ims_history_kudu",
+        "positions": f"{DATABASE}.stg_ims_positions",
+        "summary": f"{DATABASE}.stg_ims_summary",
+        "history": f"{DATABASE}.stg_ims_history",
+    },
+}
+
+# Staging HDFS locations
+STAGING_LOCATIONS = {
+    "cis": {
+        "positions": "/data/gmp_cis/staging/stg_cis_positions",
+        "summary": "/data/gmp_cis/staging/stg_cis_summary",
+        "history": "/data/gmp_cis/staging/stg_cis_history",
+    },
+    "gmp": {
+        "positions": "/data/gmp_cis/staging/stg_gmp_positions",
+        "summary": "/data/gmp_cis/staging/stg_gmp_summary",
+        "history": "/data/gmp_cis/staging/stg_gmp_history",
+    },
+    "ams": {
+        "positions": "/data/gmp_cis/staging/stg_ams_positions",
+        "summary": "/data/gmp_cis/staging/stg_ams_summary",
+        "history": "/data/gmp_cis/staging/stg_ams_history",
+    },
+    "ims": {
+        "positions": "/data/gmp_cis/staging/stg_ims_positions",
+        "summary": "/data/gmp_cis/staging/stg_ims_summary",
+        "history": "/data/gmp_cis/staging/stg_ims_history",
     },
 }
 
@@ -161,7 +192,7 @@ def parse_args():
     parser.add_argument(
         "--kudu-master",
         required=True,
-        help="Kudu master addresses (e.g., kudu-master-1:7051,kudu-master-2:7151)",
+        help="Kudu master addresses for security master lookup (e.g., kudu-master-1:7051)",
     )
     parser.add_argument(
         "--source",
@@ -201,6 +232,8 @@ def create_spark_session() -> SparkSession:
         SparkSession.builder
         .appName("CIS_Merge_Position_Master")
         .config("spark.sql.shuffle.partitions", "32")
+        .config("spark.sql.parquet.compression.codec", "snappy")
+        .enableHiveSupport()
         .getOrCreate()
     )
 
@@ -211,22 +244,21 @@ def create_spark_session() -> SparkSession:
 
 def read_staging_positions(
     spark: SparkSession,
-    kudu_master: str,
     source: str,
     valuation_date: Optional[str] = None,
     batch_id: Optional[str] = None
 ) -> DataFrame:
-    """Read position data from a single source staging table."""
+    """Read position data from a single source staging table (Hive/Parquet)."""
 
     table = STAGING_TABLES[source]["positions"]
 
-    df = (
-        spark.read
-        .format("kudu")
-        .option("kudu.master", kudu_master)
-        .option("kudu.table", table)
-        .load()
-    )
+    try:
+        df = spark.table(table)
+    except Exception as e:
+        # Fallback to reading from HDFS location directly
+        location = STAGING_LOCATIONS[source]["positions"]
+        print(f"[INFO] Reading from HDFS location: {location}")
+        df = spark.read.parquet(location)
 
     # Add source system identifier
     df = df.withColumn("src_system", F.lit(source.upper()))
@@ -253,18 +285,17 @@ def read_staging_positions(
 
 def read_all_staging_positions(
     spark: SparkSession,
-    kudu_master: str,
     sources: List[str],
     valuation_date: Optional[str] = None,
     batch_id: Optional[str] = None
 ) -> DataFrame:
-    """Read and union position data from multiple staging tables."""
+    """Read and union position data from multiple staging tables (Hive/Parquet)."""
 
     dfs = []
 
     for source in sources:
         try:
-            df = read_staging_positions(spark, kudu_master, source, valuation_date, batch_id)
+            df = read_staging_positions(spark, source, valuation_date, batch_id)
             count = df.count()
             print(f"[INFO] {source.upper()}: {count} staging records loaded")
             if count > 0:
@@ -285,7 +316,7 @@ def read_all_staging_positions(
 
 
 def read_security_master(spark: SparkSession, kudu_master: str) -> DataFrame:
-    """Read security master for matching."""
+    """Read security master from Kudu for matching."""
 
     df = (
         spark.read
@@ -309,16 +340,12 @@ def read_security_master(spark: SparkSession, kudu_master: str) -> DataFrame:
     return df
 
 
-def read_existing_positions(spark: SparkSession, kudu_master: str) -> DataFrame:
-    """Read existing position master for updates."""
+def read_existing_positions(spark: SparkSession) -> DataFrame:
+    """Read existing position master from Hive/Parquet for updates."""
 
     try:
         df = (
-            spark.read
-            .format("kudu")
-            .option("kudu.master", kudu_master)
-            .option("kudu.table", IMPALA_TARGET_TABLE)
-            .load()
+            spark.table(TARGET_TABLE)
             .select(
                 "position_master_id",
                 "portfolio_short_name",
@@ -330,8 +357,24 @@ def read_existing_positions(spark: SparkSession, kudu_master: str) -> DataFrame:
         print(f"[INFO] Existing positions: {df.count()} records")
         return df
     except Exception as e:
-        print(f"[WARN] Could not read existing positions: {e}")
-        return None
+        print(f"[WARN] Could not read existing positions (table may not exist): {e}")
+        # Try reading from HDFS directly
+        try:
+            df = (
+                spark.read.parquet(TARGET_LOCATION)
+                .select(
+                    "position_master_id",
+                    "portfolio_short_name",
+                    "security_label",
+                    "valuation_date",
+                    "src_system",
+                )
+            )
+            print(f"[INFO] Existing positions from HDFS: {df.count()} records")
+            return df
+        except Exception as e2:
+            print(f"[WARN] Could not read existing positions from HDFS: {e2}")
+            return None
 
 
 # ============================================================================
@@ -499,7 +542,7 @@ def build_master_records(
     now_ms: int,
     now_str: str
 ) -> DataFrame:
-    """Build final position master records for UPSERT."""
+    """Build final position master records for merge."""
 
     # If we have existing positions, join to reuse position_master_id
     if existing_df is not None and existing_df.count() > 0:
@@ -586,7 +629,7 @@ def merge_positions(
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     print("=" * 70)
-    print("Position Master Merge")
+    print("Position Master Merge (Hive/Parquet)")
     print("=" * 70)
     print(f"Timestamp:       {now_str}")
     print(f"Sources:         {', '.join(sources)}")
@@ -594,11 +637,13 @@ def merge_positions(
     print(f"Batch ID:        {batch_id or 'ALL'}")
     print(f"Dry Run:         {dry_run}")
     print(f"Auto Create:     {auto_create}")
+    print(f"Target Table:    {TARGET_TABLE}")
+    print(f"Target Location: {TARGET_LOCATION}")
     print("=" * 70)
 
-    # Step 1: Load staging data from all sources
-    print("\n[STEP 1] Loading staging data...")
-    stg_df = read_all_staging_positions(spark, kudu_master, sources, valuation_date, batch_id)
+    # Step 1: Load staging data from all sources (Hive/Parquet)
+    print("\n[STEP 1] Loading staging data from Hive/Parquet...")
+    stg_df = read_all_staging_positions(spark, sources, valuation_date, batch_id)
 
     if stg_df is None or stg_df.count() == 0:
         print("[INFO] No staging records found. Nothing to merge.")
@@ -607,8 +652,8 @@ def merge_positions(
     total_staging = stg_df.count()
     print(f"[INFO] Total staging records: {total_staging}")
 
-    # Step 2: Load security master
-    print("\n[STEP 2] Loading security master...")
+    # Step 2: Load security master (Kudu)
+    print("\n[STEP 2] Loading security master from Kudu...")
     security_df = read_security_master(spark, kudu_master)
 
     # Step 3: Validate securities
@@ -625,9 +670,9 @@ def merge_positions(
     else:
         print("\n[STEP 4] Skipping auto-creation (disabled or no unmatched)")
 
-    # Step 5: Load existing positions for ID reuse
-    print("\n[STEP 5] Loading existing positions...")
-    existing_df = read_existing_positions(spark, kudu_master)
+    # Step 5: Load existing positions for ID reuse (Hive/Parquet)
+    print("\n[STEP 5] Loading existing positions from Hive/Parquet...")
+    existing_df = read_existing_positions(spark)
 
     # Step 6: Build final records
     print("\n[STEP 6] Building final records...")
@@ -657,8 +702,8 @@ def merge_positions(
 
         return
 
-    # Step 7: Write to Kudu
-    print("\n[STEP 7] Writing to Kudu...")
+    # Step 7: Write to Hive/Parquet
+    print("\n[STEP 7] Writing to Hive/Parquet...")
 
     # Write matched positions
     if master_count > 0:
@@ -684,16 +729,22 @@ def merge_positions(
             if col not in master_records.columns:
                 master_records = master_records.withColumn(col, F.lit(None))
 
+        # Write to Parquet (overwrite mode for full refresh)
+        # For incremental, use append or partitioned writes
         (
             master_records.select(master_cols).write
-            .format("kudu")
-            .option("kudu.master", kudu_master)
-            .option("kudu.table", IMPALA_TARGET_TABLE)
-            .option("kudu.operation", "upsert")
-            .mode("append")
-            .save()
+            .format("parquet")
+            .option("compression", "snappy")
+            .mode("overwrite")
+            .save(TARGET_LOCATION)
         )
-        print(f"[SUCCESS] Wrote {master_count} records to cis_position_master")
+        print(f"[SUCCESS] Wrote {master_count} records to {TARGET_LOCATION}")
+
+        # Refresh Hive table metadata
+        try:
+            spark.sql(f"MSCK REPAIR TABLE {TARGET_TABLE}")
+        except Exception as e:
+            print(f"[WARN] Could not repair table metadata: {e}")
 
     # Write unmatched positions
     if unmatched_count > 0:
@@ -720,16 +771,21 @@ def merge_positions(
             if col not in unmatched_records.columns:
                 unmatched_records = unmatched_records.withColumn(col, F.lit(None))
 
+        # Write to Parquet
         (
             unmatched_records.select(unmatched_cols).write
-            .format("kudu")
-            .option("kudu.master", kudu_master)
-            .option("kudu.table", IMPALA_UNMATCHED_TABLE)
-            .option("kudu.operation", "upsert")
-            .mode("append")
-            .save()
+            .format("parquet")
+            .option("compression", "snappy")
+            .mode("overwrite")
+            .save(UNMATCHED_LOCATION)
         )
-        print(f"[SUCCESS] Wrote {unmatched_count} records to cis_position_unmatched")
+        print(f"[SUCCESS] Wrote {unmatched_count} records to {UNMATCHED_LOCATION}")
+
+        # Refresh Hive table metadata
+        try:
+            spark.sql(f"MSCK REPAIR TABLE {UNMATCHED_TABLE}")
+        except Exception as e:
+            print(f"[WARN] Could not repair table metadata: {e}")
 
     print("\n" + "=" * 70)
     print("Position Master Merge Complete")

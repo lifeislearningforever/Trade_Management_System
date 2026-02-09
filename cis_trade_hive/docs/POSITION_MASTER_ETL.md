@@ -37,6 +37,40 @@ The Position Master system consolidates position data from 4 primary source syst
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+## Storage Architecture
+
+**All position tables use Hive External Tables with Parquet format.**
+
+| Layer | Storage | Format | Notes |
+|-------|---------|--------|-------|
+| **Staging** | Hive External | Parquet | 12 tables for position data ingestion |
+| **Master** | Hive External | Parquet | Consolidated position data |
+| **History** | Hive External | Parquet | Audit trail of changes |
+| **Unmatched** | Hive External | Parquet | Positions pending security resolution |
+| **Security Master** | Kudu | N/A | Used for security validation lookups |
+
+### HDFS Directory Structure
+
+```
+/data/gmp_cis/
+├── cis_position_master/           # Master position table
+├── cis_position_master_history/   # Position audit trail
+├── cis_position_unmatched/        # Unmatched positions
+└── staging/
+    ├── stg_cis_positions/
+    ├── stg_cis_summary/
+    ├── stg_cis_history/
+    ├── stg_gmp_positions/
+    ├── stg_gmp_summary/
+    ├── stg_gmp_history/
+    ├── stg_ams_positions/
+    ├── stg_ams_summary/
+    ├── stg_ams_history/
+    ├── stg_ims_positions/
+    ├── stg_ims_summary/
+    └── stg_ims_history/
+```
+
 ## Source Systems
 
 | # | System | Description | Sub-Tables |
@@ -48,15 +82,15 @@ The Position Master system consolidates position data from 4 primary source syst
 
 ## Database Tables
 
-### Master Tables
+### Master Tables (Hive/Parquet)
 
-| Table | Purpose |
-|-------|---------|
-| `gmp_cis.cis_position_master` | Consolidated positions from all sources |
-| `gmp_cis.cis_position_master_history` | Audit trail of position changes |
-| `gmp_cis.cis_position_unmatched` | Positions with unmatched securities |
+| Table | Purpose | HDFS Location |
+|-------|---------|---------------|
+| `gmp_cis.cis_position_master` | Consolidated positions from all sources | `/data/gmp_cis/cis_position_master` |
+| `gmp_cis.cis_position_master_history` | Audit trail of position changes | `/data/gmp_cis/cis_position_master_history` |
+| `gmp_cis.cis_position_unmatched` | Positions with unmatched securities | `/data/gmp_cis/cis_position_unmatched` |
 
-### Staging Tables (12 total)
+### Staging Tables (12 total - Hive/Parquet)
 
 | Source | Positions | Summary | History |
 |--------|-----------|---------|---------|
@@ -69,8 +103,8 @@ The Position Master system consolidates position data from 4 primary source syst
 
 | File | Description |
 |------|-------------|
-| `sql/ddl/11_cis_position_master_kudu.sql` | Master position tables DDL |
-| `sql/ddl/12_position_staging_tables.sql` | Staging tables DDL (12 tables) |
+| `sql/ddl/11_cis_position_master.sql` | Master position tables DDL (Hive/Parquet) |
+| `sql/ddl/12_position_staging_tables.sql` | Staging tables DDL (12 tables, Hive/Parquet) |
 
 ## ETL Job
 
@@ -108,7 +142,7 @@ spark-submit merge_position_master.py \
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
-| `--kudu-master` | Yes | - | Kudu master addresses |
+| `--kudu-master` | Yes | - | Kudu master addresses (for security lookup) |
 | `--source` | No | `all` | Source: cis, gmp, ams, ims, or all |
 | `--valuation-date` | No | All | Filter by valuation date (YYYY-MM-DD) |
 | `--batch-id` | No | All | Filter by ETL batch ID |
@@ -202,14 +236,14 @@ The `--auto-create` flag is a placeholder for future implementation. When implem
 
 ## ETL Processing Steps
 
-### Step 1: Load Staging Data
+### Step 1: Load Staging Data (Hive/Parquet)
 
 ```python
 # Read from all source staging tables
-stg_df = read_all_staging_positions(spark, kudu_master, sources, valuation_date, batch_id)
+stg_df = read_all_staging_positions(spark, sources, valuation_date, batch_id)
 ```
 
-### Step 2: Load Security Master
+### Step 2: Load Security Master (Kudu)
 
 ```python
 # Read active securities for matching
@@ -230,14 +264,14 @@ matched_df, unmatched_df = validate_securities(stg_df, security_df)
 master_records = generate_position_ids(matched_df, now_ms)
 ```
 
-### Step 5: Write to Kudu
+### Step 5: Write to Hive/Parquet
 
 ```python
-# UPSERT matched positions to master
-master_records.write.format("kudu").option("kudu.operation", "upsert").save()
+# Write matched positions to Parquet
+master_records.write.format("parquet").option("compression", "snappy").mode("overwrite").save(TARGET_LOCATION)
 
-# UPSERT unmatched to review table
-unmatched_records.write.format("kudu").option("kudu.operation", "upsert").save()
+# Write unmatched to review table
+unmatched_records.write.format("parquet").option("compression", "snappy").mode("overwrite").save(UNMATCHED_LOCATION)
 ```
 
 ## Scheduling
@@ -330,6 +364,33 @@ spark-submit merge_position_master.py \
 # http://localhost:4040
 ```
 
+## Hive/Parquet Notes
+
+### Writing Data
+
+Unlike Kudu, Parquet tables do not support UPSERT operations. The ETL job uses:
+- **Full refresh**: `mode("overwrite")` replaces all data
+- For incremental loads, consider partitioning by `valuation_date`
+
+### Advantages of Parquet
+
+1. **Columnar storage**: Efficient for analytical queries
+2. **Compression**: SNAPPY compression reduces storage costs
+3. **Schema evolution**: Supports adding new columns
+4. **Wide compatibility**: Works with Spark, Hive, Impala, Presto, etc.
+
+### Refresh Table Metadata
+
+After writing to Parquet, refresh the Hive metastore:
+
+```sql
+-- For non-partitioned tables
+REFRESH gmp_cis.cis_position_master;
+
+-- For partitioned tables
+MSCK REPAIR TABLE gmp_cis.cis_position_master;
+```
+
 ## Future Enhancements
 
 1. **Auto-create securities**: Implement `--auto-create` flag to automatically create missing securities in `cis_security_kudu`
@@ -342,6 +403,8 @@ spark-submit merge_position_master.py \
 
 5. **Real-time streaming**: Replace batch with Spark Structured Streaming
 
+6. **Delta Lake / Iceberg**: Consider Delta Lake or Apache Iceberg for ACID transactions on Parquet
+
 ---
 
-Last updated: 2026-02-09
+Last updated: 2026-02-10

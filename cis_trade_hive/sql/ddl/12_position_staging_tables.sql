@@ -18,17 +18,48 @@
 -- Data Flow:
 --   Source -> Staging Table -> Transform -> cis_position_master
 --
+-- Storage: Hive External Tables with Parquet format
 -- Database: gmp_cis
 -- Created: 2026-02-09
+-- Updated: 2026-02-10 (Converted from Kudu to Hive/Parquet)
 -- ============================================================================
 
 USE gmp_cis;
+
+-- ============================================================================
+-- HDFS DIRECTORY SETUP (run via hdfs dfs commands before creating tables)
+-- ============================================================================
+-- # CIS staging tables
+-- hdfs dfs -mkdir -p /data/gmp_cis/staging/stg_cis_positions
+-- hdfs dfs -mkdir -p /data/gmp_cis/staging/stg_cis_summary
+-- hdfs dfs -mkdir -p /data/gmp_cis/staging/stg_cis_history
+--
+-- # GMP staging tables
+-- hdfs dfs -mkdir -p /data/gmp_cis/staging/stg_gmp_positions
+-- hdfs dfs -mkdir -p /data/gmp_cis/staging/stg_gmp_summary
+-- hdfs dfs -mkdir -p /data/gmp_cis/staging/stg_gmp_history
+--
+-- # AMS staging tables
+-- hdfs dfs -mkdir -p /data/gmp_cis/staging/stg_ams_positions
+-- hdfs dfs -mkdir -p /data/gmp_cis/staging/stg_ams_summary
+-- hdfs dfs -mkdir -p /data/gmp_cis/staging/stg_ams_history
+--
+-- # IMS staging tables
+-- hdfs dfs -mkdir -p /data/gmp_cis/staging/stg_ims_positions
+-- hdfs dfs -mkdir -p /data/gmp_cis/staging/stg_ims_summary
+-- hdfs dfs -mkdir -p /data/gmp_cis/staging/stg_ims_history
+--
+-- # Set permissions
+-- hdfs dfs -chmod -R 777 /data/gmp_cis/staging
+-- ============================================================================
+
 
 -- ============================================================================
 -- STAGING TABLE TEMPLATE
 -- ============================================================================
 -- All staging tables share a common schema for consistent processing.
 -- Fields map to cis_position_master with source-specific extensions.
+-- Storage: External Hive tables with Parquet format
 -- ============================================================================
 
 
@@ -40,15 +71,15 @@ USE gmp_cis;
 -- ============================================================================
 
 -- 1.1 CIS Positions
-DROP TABLE IF EXISTS gmp_cis.stg_cis_positions_kudu;
+DROP TABLE IF EXISTS gmp_cis.stg_cis_positions;
 
-CREATE TABLE gmp_cis.stg_cis_positions_kudu (
-    stg_id BIGINT NOT NULL,
+CREATE EXTERNAL TABLE gmp_cis.stg_cis_positions (
+    stg_id BIGINT,
 
     -- Position Identity
-    portfolio_short_name STRING NOT NULL,
-    security_label STRING NOT NULL,
-    valuation_date STRING NOT NULL,
+    portfolio_short_name STRING,
+    security_label STRING,
+    valuation_date STRING,
 
     -- Security Reference
     isin STRING,
@@ -99,25 +130,20 @@ CREATE TABLE gmp_cis.stg_cis_positions_kudu (
     -- ETL Metadata
     src_position_id STRING,
     etl_batch_id STRING,
-    etl_load_timestamp BIGINT,
-
-    PRIMARY KEY (stg_id)
+    etl_load_timestamp BIGINT
 )
-PARTITION BY HASH (stg_id) PARTITIONS 4
-STORED AS KUDU;
-
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.stg_cis_positions
-STORED AS KUDU
-TBLPROPERTIES('kudu.table_name' = 'impala::gmp_cis.stg_cis_positions_kudu');
+STORED AS PARQUET
+LOCATION '/data/gmp_cis/staging/stg_cis_positions'
+TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
 
 -- 1.2 CIS Summary
-DROP TABLE IF EXISTS gmp_cis.stg_cis_summary_kudu;
+DROP TABLE IF EXISTS gmp_cis.stg_cis_summary;
 
-CREATE TABLE gmp_cis.stg_cis_summary_kudu (
-    stg_id BIGINT NOT NULL,
+CREATE EXTERNAL TABLE gmp_cis.stg_cis_summary (
+    stg_id BIGINT,
 
-    portfolio_short_name STRING NOT NULL,
-    valuation_date STRING NOT NULL,
+    portfolio_short_name STRING,
+    valuation_date STRING,
 
     -- Aggregate Metrics
     total_positions INT,
@@ -131,26 +157,21 @@ CREATE TABLE gmp_cis.stg_cis_summary_kudu (
 
     -- ETL Metadata
     etl_batch_id STRING,
-    etl_load_timestamp BIGINT,
-
-    PRIMARY KEY (stg_id)
+    etl_load_timestamp BIGINT
 )
-PARTITION BY HASH (stg_id) PARTITIONS 2
-STORED AS KUDU;
-
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.stg_cis_summary
-STORED AS KUDU
-TBLPROPERTIES('kudu.table_name' = 'impala::gmp_cis.stg_cis_summary_kudu');
+STORED AS PARQUET
+LOCATION '/data/gmp_cis/staging/stg_cis_summary'
+TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
 
 -- 1.3 CIS History
-DROP TABLE IF EXISTS gmp_cis.stg_cis_history_kudu;
+DROP TABLE IF EXISTS gmp_cis.stg_cis_history;
 
-CREATE TABLE gmp_cis.stg_cis_history_kudu (
-    stg_id BIGINT NOT NULL,
+CREATE EXTERNAL TABLE gmp_cis.stg_cis_history (
+    stg_id BIGINT,
 
-    portfolio_short_name STRING NOT NULL,
-    security_label STRING NOT NULL,
-    valuation_date STRING NOT NULL,
+    portfolio_short_name STRING,
+    security_label STRING,
+    valuation_date STRING,
     version_number INT,
 
     -- Snapshot Data
@@ -160,21 +181,16 @@ CREATE TABLE gmp_cis.stg_cis_history_kudu (
     unrealized_pnl DECIMAL(20,6),
 
     -- Change Info
-    change_type STRING,  -- BUY, SELL, ADJUSTMENT, PRICE_UPDATE
+    change_type STRING,                       -- BUY, SELL, ADJUSTMENT, PRICE_UPDATE
     change_amount DECIMAL(20,6),
 
     -- ETL Metadata
     etl_batch_id STRING,
-    etl_load_timestamp BIGINT,
-
-    PRIMARY KEY (stg_id)
+    etl_load_timestamp BIGINT
 )
-PARTITION BY HASH (stg_id) PARTITIONS 4
-STORED AS KUDU;
-
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.stg_cis_history
-STORED AS KUDU
-TBLPROPERTIES('kudu.table_name' = 'impala::gmp_cis.stg_cis_history_kudu');
+STORED AS PARQUET
+LOCATION '/data/gmp_cis/staging/stg_cis_history'
+TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
 
 
 -- ============================================================================
@@ -182,23 +198,23 @@ TBLPROPERTIES('kudu.table_name' = 'impala::gmp_cis.stg_cis_history_kudu');
 -- ============================================================================
 
 -- 2.1 GMP Positions
-DROP TABLE IF EXISTS gmp_cis.stg_gmp_positions_kudu;
+DROP TABLE IF EXISTS gmp_cis.stg_gmp_positions;
 
-CREATE TABLE gmp_cis.stg_gmp_positions_kudu (
-    stg_id BIGINT NOT NULL,
+CREATE EXTERNAL TABLE gmp_cis.stg_gmp_positions (
+    stg_id BIGINT,
 
     -- Position Identity
-    portfolio_short_name STRING NOT NULL,
-    security_label STRING NOT NULL,
-    valuation_date STRING NOT NULL,
+    portfolio_short_name STRING,
+    security_label STRING,
+    valuation_date STRING,
 
     -- Security Reference
     isin STRING,
     security_name STRING,
     security_type STRING,
     ticker STRING,
-    cusip STRING,               -- GMP-specific
-    sedol STRING,               -- GMP-specific
+    cusip STRING,                             -- GMP-specific
+    sedol STRING,                             -- GMP-specific
 
     -- Currency
     security_currency STRING,
@@ -248,25 +264,20 @@ CREATE TABLE gmp_cis.stg_gmp_positions_kudu (
     -- ETL Metadata
     src_position_id STRING,
     etl_batch_id STRING,
-    etl_load_timestamp BIGINT,
-
-    PRIMARY KEY (stg_id)
+    etl_load_timestamp BIGINT
 )
-PARTITION BY HASH (stg_id) PARTITIONS 4
-STORED AS KUDU;
-
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.stg_gmp_positions
-STORED AS KUDU
-TBLPROPERTIES('kudu.table_name' = 'impala::gmp_cis.stg_gmp_positions_kudu');
+STORED AS PARQUET
+LOCATION '/data/gmp_cis/staging/stg_gmp_positions'
+TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
 
 -- 2.2 GMP Summary
-DROP TABLE IF EXISTS gmp_cis.stg_gmp_summary_kudu;
+DROP TABLE IF EXISTS gmp_cis.stg_gmp_summary;
 
-CREATE TABLE gmp_cis.stg_gmp_summary_kudu (
-    stg_id BIGINT NOT NULL,
+CREATE EXTERNAL TABLE gmp_cis.stg_gmp_summary (
+    stg_id BIGINT,
 
-    portfolio_short_name STRING NOT NULL,
-    valuation_date STRING NOT NULL,
+    portfolio_short_name STRING,
+    valuation_date STRING,
     gmp_book_id STRING,
 
     total_positions INT,
@@ -278,26 +289,21 @@ CREATE TABLE gmp_cis.stg_gmp_summary_kudu (
     currency_breakdown STRING,
 
     etl_batch_id STRING,
-    etl_load_timestamp BIGINT,
-
-    PRIMARY KEY (stg_id)
+    etl_load_timestamp BIGINT
 )
-PARTITION BY HASH (stg_id) PARTITIONS 2
-STORED AS KUDU;
-
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.stg_gmp_summary
-STORED AS KUDU
-TBLPROPERTIES('kudu.table_name' = 'impala::gmp_cis.stg_gmp_summary_kudu');
+STORED AS PARQUET
+LOCATION '/data/gmp_cis/staging/stg_gmp_summary'
+TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
 
 -- 2.3 GMP History
-DROP TABLE IF EXISTS gmp_cis.stg_gmp_history_kudu;
+DROP TABLE IF EXISTS gmp_cis.stg_gmp_history;
 
-CREATE TABLE gmp_cis.stg_gmp_history_kudu (
-    stg_id BIGINT NOT NULL,
+CREATE EXTERNAL TABLE gmp_cis.stg_gmp_history (
+    stg_id BIGINT,
 
-    portfolio_short_name STRING NOT NULL,
-    security_label STRING NOT NULL,
-    valuation_date STRING NOT NULL,
+    portfolio_short_name STRING,
+    security_label STRING,
+    valuation_date STRING,
     version_number INT,
 
     quantity DECIMAL(20,6),
@@ -310,16 +316,11 @@ CREATE TABLE gmp_cis.stg_gmp_history_kudu (
     gmp_trade_id STRING,
 
     etl_batch_id STRING,
-    etl_load_timestamp BIGINT,
-
-    PRIMARY KEY (stg_id)
+    etl_load_timestamp BIGINT
 )
-PARTITION BY HASH (stg_id) PARTITIONS 4
-STORED AS KUDU;
-
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.stg_gmp_history
-STORED AS KUDU
-TBLPROPERTIES('kudu.table_name' = 'impala::gmp_cis.stg_gmp_history_kudu');
+STORED AS PARQUET
+LOCATION '/data/gmp_cis/staging/stg_gmp_history'
+TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
 
 
 -- ============================================================================
@@ -327,22 +328,22 @@ TBLPROPERTIES('kudu.table_name' = 'impala::gmp_cis.stg_gmp_history_kudu');
 -- ============================================================================
 
 -- 3.1 AMS Positions
-DROP TABLE IF EXISTS gmp_cis.stg_ams_positions_kudu;
+DROP TABLE IF EXISTS gmp_cis.stg_ams_positions;
 
-CREATE TABLE gmp_cis.stg_ams_positions_kudu (
-    stg_id BIGINT NOT NULL,
+CREATE EXTERNAL TABLE gmp_cis.stg_ams_positions (
+    stg_id BIGINT,
 
     -- Position Identity
-    portfolio_short_name STRING NOT NULL,
-    security_label STRING NOT NULL,
-    valuation_date STRING NOT NULL,
+    portfolio_short_name STRING,
+    security_label STRING,
+    valuation_date STRING,
 
     -- Security Reference
     isin STRING,
     security_name STRING,
     security_type STRING,
     ticker STRING,
-    ams_security_id STRING,     -- AMS-specific
+    ams_security_id STRING,                   -- AMS-specific
 
     -- Currency
     security_currency STRING,
@@ -394,25 +395,20 @@ CREATE TABLE gmp_cis.stg_ams_positions_kudu (
     -- ETL Metadata
     src_position_id STRING,
     etl_batch_id STRING,
-    etl_load_timestamp BIGINT,
-
-    PRIMARY KEY (stg_id)
+    etl_load_timestamp BIGINT
 )
-PARTITION BY HASH (stg_id) PARTITIONS 4
-STORED AS KUDU;
-
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.stg_ams_positions
-STORED AS KUDU
-TBLPROPERTIES('kudu.table_name' = 'impala::gmp_cis.stg_ams_positions_kudu');
+STORED AS PARQUET
+LOCATION '/data/gmp_cis/staging/stg_ams_positions'
+TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
 
 -- 3.2 AMS Summary
-DROP TABLE IF EXISTS gmp_cis.stg_ams_summary_kudu;
+DROP TABLE IF EXISTS gmp_cis.stg_ams_summary;
 
-CREATE TABLE gmp_cis.stg_ams_summary_kudu (
-    stg_id BIGINT NOT NULL,
+CREATE EXTERNAL TABLE gmp_cis.stg_ams_summary (
+    stg_id BIGINT,
 
-    portfolio_short_name STRING NOT NULL,
-    valuation_date STRING NOT NULL,
+    portfolio_short_name STRING,
+    valuation_date STRING,
     ams_fund_code STRING,
 
     total_positions INT,
@@ -421,32 +417,27 @@ CREATE TABLE gmp_cis.stg_ams_summary_kudu (
     total_unrealized_pnl DECIMAL(20,6),
     total_realized_pnl DECIMAL(20,6),
 
-    nav DECIMAL(20,6),              -- Net Asset Value
+    nav DECIMAL(20,6),                        -- Net Asset Value
     nav_per_unit DECIMAL(20,6),
 
     currency_breakdown STRING,
 
     etl_batch_id STRING,
-    etl_load_timestamp BIGINT,
-
-    PRIMARY KEY (stg_id)
+    etl_load_timestamp BIGINT
 )
-PARTITION BY HASH (stg_id) PARTITIONS 2
-STORED AS KUDU;
-
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.stg_ams_summary
-STORED AS KUDU
-TBLPROPERTIES('kudu.table_name' = 'impala::gmp_cis.stg_ams_summary_kudu');
+STORED AS PARQUET
+LOCATION '/data/gmp_cis/staging/stg_ams_summary'
+TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
 
 -- 3.3 AMS History
-DROP TABLE IF EXISTS gmp_cis.stg_ams_history_kudu;
+DROP TABLE IF EXISTS gmp_cis.stg_ams_history;
 
-CREATE TABLE gmp_cis.stg_ams_history_kudu (
-    stg_id BIGINT NOT NULL,
+CREATE EXTERNAL TABLE gmp_cis.stg_ams_history (
+    stg_id BIGINT,
 
-    portfolio_short_name STRING NOT NULL,
-    security_label STRING NOT NULL,
-    valuation_date STRING NOT NULL,
+    portfolio_short_name STRING,
+    security_label STRING,
+    valuation_date STRING,
     version_number INT,
 
     quantity DECIMAL(20,6),
@@ -459,16 +450,11 @@ CREATE TABLE gmp_cis.stg_ams_history_kudu (
     ams_trade_id STRING,
 
     etl_batch_id STRING,
-    etl_load_timestamp BIGINT,
-
-    PRIMARY KEY (stg_id)
+    etl_load_timestamp BIGINT
 )
-PARTITION BY HASH (stg_id) PARTITIONS 4
-STORED AS KUDU;
-
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.stg_ams_history
-STORED AS KUDU
-TBLPROPERTIES('kudu.table_name' = 'impala::gmp_cis.stg_ams_history_kudu');
+STORED AS PARQUET
+LOCATION '/data/gmp_cis/staging/stg_ams_history'
+TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
 
 
 -- ============================================================================
@@ -476,22 +462,22 @@ TBLPROPERTIES('kudu.table_name' = 'impala::gmp_cis.stg_ams_history_kudu');
 -- ============================================================================
 
 -- 4.1 IMS Positions
-DROP TABLE IF EXISTS gmp_cis.stg_ims_positions_kudu;
+DROP TABLE IF EXISTS gmp_cis.stg_ims_positions;
 
-CREATE TABLE gmp_cis.stg_ims_positions_kudu (
-    stg_id BIGINT NOT NULL,
+CREATE EXTERNAL TABLE gmp_cis.stg_ims_positions (
+    stg_id BIGINT,
 
     -- Position Identity
-    portfolio_short_name STRING NOT NULL,
-    security_label STRING NOT NULL,
-    valuation_date STRING NOT NULL,
+    portfolio_short_name STRING,
+    security_label STRING,
+    valuation_date STRING,
 
     -- Security Reference
     isin STRING,
     security_name STRING,
     security_type STRING,
     ticker STRING,
-    ims_instrument_id STRING,   -- IMS-specific
+    ims_instrument_id STRING,                 -- IMS-specific
 
     -- Currency
     security_currency STRING,
@@ -545,25 +531,20 @@ CREATE TABLE gmp_cis.stg_ims_positions_kudu (
     -- ETL Metadata
     src_position_id STRING,
     etl_batch_id STRING,
-    etl_load_timestamp BIGINT,
-
-    PRIMARY KEY (stg_id)
+    etl_load_timestamp BIGINT
 )
-PARTITION BY HASH (stg_id) PARTITIONS 4
-STORED AS KUDU;
-
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.stg_ims_positions
-STORED AS KUDU
-TBLPROPERTIES('kudu.table_name' = 'impala::gmp_cis.stg_ims_positions_kudu');
+STORED AS PARQUET
+LOCATION '/data/gmp_cis/staging/stg_ims_positions'
+TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
 
 -- 4.2 IMS Summary
-DROP TABLE IF EXISTS gmp_cis.stg_ims_summary_kudu;
+DROP TABLE IF EXISTS gmp_cis.stg_ims_summary;
 
-CREATE TABLE gmp_cis.stg_ims_summary_kudu (
-    stg_id BIGINT NOT NULL,
+CREATE EXTERNAL TABLE gmp_cis.stg_ims_summary (
+    stg_id BIGINT,
 
-    portfolio_short_name STRING NOT NULL,
-    valuation_date STRING NOT NULL,
+    portfolio_short_name STRING,
+    valuation_date STRING,
     ims_account_id STRING,
 
     total_positions INT,
@@ -579,26 +560,21 @@ CREATE TABLE gmp_cis.stg_ims_summary_kudu (
     currency_breakdown STRING,
 
     etl_batch_id STRING,
-    etl_load_timestamp BIGINT,
-
-    PRIMARY KEY (stg_id)
+    etl_load_timestamp BIGINT
 )
-PARTITION BY HASH (stg_id) PARTITIONS 2
-STORED AS KUDU;
-
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.stg_ims_summary
-STORED AS KUDU
-TBLPROPERTIES('kudu.table_name' = 'impala::gmp_cis.stg_ims_summary_kudu');
+STORED AS PARQUET
+LOCATION '/data/gmp_cis/staging/stg_ims_summary'
+TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
 
 -- 4.3 IMS History
-DROP TABLE IF EXISTS gmp_cis.stg_ims_history_kudu;
+DROP TABLE IF EXISTS gmp_cis.stg_ims_history;
 
-CREATE TABLE gmp_cis.stg_ims_history_kudu (
-    stg_id BIGINT NOT NULL,
+CREATE EXTERNAL TABLE gmp_cis.stg_ims_history (
+    stg_id BIGINT,
 
-    portfolio_short_name STRING NOT NULL,
-    security_label STRING NOT NULL,
-    valuation_date STRING NOT NULL,
+    portfolio_short_name STRING,
+    security_label STRING,
+    valuation_date STRING,
     version_number INT,
 
     quantity DECIMAL(20,6),
@@ -611,23 +587,18 @@ CREATE TABLE gmp_cis.stg_ims_history_kudu (
     ims_trade_id STRING,
 
     etl_batch_id STRING,
-    etl_load_timestamp BIGINT,
-
-    PRIMARY KEY (stg_id)
+    etl_load_timestamp BIGINT
 )
-PARTITION BY HASH (stg_id) PARTITIONS 4
-STORED AS KUDU;
-
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.stg_ims_history
-STORED AS KUDU
-TBLPROPERTIES('kudu.table_name' = 'impala::gmp_cis.stg_ims_history_kudu');
+STORED AS PARQUET
+LOCATION '/data/gmp_cis/staging/stg_ims_history'
+TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
 
 
 -- ============================================================================
--- SEQUENCE INITIALIZATION
+-- SEQUENCE INITIALIZATION (for Kudu-based sequence table)
 -- ============================================================================
 
--- Add sequences for staging tables
+-- Add sequences for staging tables (sequences still use Kudu for atomic increments)
 UPSERT INTO gmp_cis.cis_sequence VALUES ('stg_cis_positions_id', 1000000, 1);
 UPSERT INTO gmp_cis.cis_sequence VALUES ('stg_cis_summary_id', 1000000, 1);
 UPSERT INTO gmp_cis.cis_sequence VALUES ('stg_cis_history_id', 1000000, 1);
@@ -649,6 +620,27 @@ UPSERT INTO gmp_cis.cis_sequence VALUES ('stg_ims_history_id', 1000000, 1);
 SHOW TABLES LIKE 'stg_%_positions';
 SHOW TABLES LIKE 'stg_%_summary';
 SHOW TABLES LIKE 'stg_%_history';
+
+
+-- ============================================================================
+-- NOTES ON HIVE/PARQUET STAGING TABLES
+-- ============================================================================
+-- 1. Staging tables are designed for bulk loading from source systems.
+--
+-- 2. Load pattern:
+--    - Clear staging table (DROP/CREATE or TRUNCATE)
+--    - Load new data via INSERT INTO or Spark DataFrame write
+--    - Run merge_position_master.py to process staging data
+--
+-- 3. For incremental loads, use valuation_date and etl_batch_id for filtering.
+--
+-- 4. Parquet advantages for staging:
+--    - Fast columnar reads for analytics queries
+--    - Efficient compression reduces storage
+--    - Schema enforcement at write time
+--    - Compatible with Spark, Hive, Impala
+-- ============================================================================
+
 
 -- ============================================================================
 -- END OF DDL
