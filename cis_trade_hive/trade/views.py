@@ -330,15 +330,19 @@ def trade_detail(request, trade_id):
     # Get trade history
     history = trade_kudu_repository.get_trade_history(trade_id)
 
-    # Get position impact for settled trades
+    # ========================================================================
+    # POSITION IMPACT DISPLAY - DISABLED
+    # Uncomment the following code to show position info for settled trades.
+    # Also requires uncommenting PositionWrapper class and position views.
+    # ========================================================================
     position = None
-    if status == TradeKuduRepository.STATUS_SETTLED:
-        portfolio = trade_data.get('portfolio_short_name', '')
-        security = trade_data.get('security_label', '')
-        if portfolio and security:
-            position_data = trade_kudu_repository.get_position(portfolio, security)
-            if position_data:
-                position = PositionWrapper(position_data)
+    # if status == TradeKuduRepository.STATUS_SETTLED:
+    #     portfolio = trade_data.get('portfolio_short_name', '')
+    #     security = trade_data.get('security_label', '')
+    #     if portfolio and security:
+    #         position_data = trade_kudu_repository.get_position(portfolio, security)
+    #         if position_data:
+    #             position = PositionWrapper(position_data)
 
     context = {
         'trade': trade,
@@ -1038,101 +1042,106 @@ def api_currencies(request):
     return JsonResponse({'results': currencies})
 
 
-# =========================================================================
-# POSITION VIEWS
-# =========================================================================
+# ==========================================================================
+# POSITION VIEWS - DISABLED
+# ==========================================================================
+# To re-enable position functionality, uncomment the code below and also:
+#   1. Uncomment position URLs in trade/urls.py (lines 37-44)
+#   2. Uncomment sidebar link in templates/components/sidebar.html (lines 97-102)
+#   3. See docs/DISABLED_POSITION_CODE.md for full details
+# ==========================================================================
 
-class PositionWrapper:
-    """Wrapper for position dict to enable template attribute access and numeric comparisons."""
-
-    def __init__(self, data: dict):
-        self._data = data
-
-    def __getattr__(self, name):
-        if name.startswith('_'):
-            return super().__getattribute__(name)
-        val = self._data.get(name)
-        if name in ('version_id', 'position_id'):
-            try:
-                return int(float(val)) if val is not None else 0
-            except (ValueError, TypeError):
-                return 0
-        if name in ('quantity', 'average_cost', 'total_cost', 'current_price',
-                     'market_value', 'unrealized_pnl', 'realized_pnl'):
-            try:
-                return float(val) if val is not None else 0.0
-            except (ValueError, TypeError):
-                return 0.0
-        return val
-
-
-def position_list(request):
-    """List all positions with P&L summary. Auto-refreshes market values on each load."""
-    # Auto-refresh market values on every page load
-    trade_kudu_repository.refresh_market_values()
-
-    positions_raw = trade_kudu_repository.get_all_positions(status='OPEN')
-    stats = trade_kudu_repository.get_position_statistics()
-
-    # Search filter
-    search_query = request.GET.get('q', '').strip()
-    if search_query:
-        search_lower = search_query.lower()
-        positions_raw = [
-            p for p in positions_raw
-            if search_lower in (p.get('portfolio_short_name', '') or '').lower()
-            or search_lower in (p.get('security_label', '') or '').lower()
-        ]
-
-    positions = [PositionWrapper(p) for p in positions_raw]
-
-    return render(request, 'trade/position_list.html', {
-        'positions': positions,
-        'stats': stats,
-        'search_query': search_query,
-    })
-
-
-def position_detail(request, position_id):
-    """Position detail view with version history."""
-    position_raw = trade_kudu_repository.get_position_by_id(position_id)
-    if not position_raw:
-        raise Http404("Position not found")
-
-    position = PositionWrapper(position_raw)
-    position_versions = trade_kudu_repository.get_position_versions(position_id)
-
-    # Look up currency_code from security table
-    currency_code = ''
-    try:
-        security_label = position_raw.get('security_label', '')
-        if security_label:
-            from core.repositories.impala_connection import impala_manager
-            escaped_label = security_label.replace('\\', '\\\\').replace("'", "\\'")
-            results = impala_manager.execute_query(
-                f"SELECT currency_code FROM gmp_cis.cis_security "
-                f"WHERE security_name = '{escaped_label}' LIMIT 1",
-                database='gmp_cis'
-            )
-            if results:
-                currency_code = results[0].get('currency_code', '')
-    except Exception:
-        pass
-
-    return render(request, 'trade/position_detail.html', {
-        'position': position,
-        'position_versions': position_versions,
-        'currency_code': currency_code,
-    })
-
-
-@require_http_methods(["POST"])
-def refresh_positions(request):
-    """Refresh market values for all open positions."""
-    counters = trade_kudu_repository.refresh_market_values()
-    messages.success(
-        request,
-        f"Market values refreshed: {counters['updated']} updated, "
-        f"{counters['skipped']} skipped, {counters['errors']} errors"
-    )
-    return redirect('trade:position_list')
+# class PositionWrapper:
+#     """Wrapper for position dict to enable template attribute access and numeric comparisons."""
+#
+#     def __init__(self, data: dict):
+#         self._data = data
+#
+#     def __getattr__(self, name):
+#         if name.startswith('_'):
+#             return super().__getattribute__(name)
+#         val = self._data.get(name)
+#         if name in ('version_id', 'position_id'):
+#             try:
+#                 return int(float(val)) if val is not None else 0
+#             except (ValueError, TypeError):
+#                 return 0
+#         if name in ('quantity', 'average_cost', 'total_cost', 'current_price',
+#                      'market_value', 'unrealized_pnl', 'realized_pnl'):
+#             try:
+#                 return float(val) if val is not None else 0.0
+#             except (ValueError, TypeError):
+#                 return 0.0
+#         return val
+#
+#
+# def position_list(request):
+#     """List all positions with P&L summary. Auto-refreshes market values on each load."""
+#     # Auto-refresh market values on every page load
+#     trade_kudu_repository.refresh_market_values()
+#
+#     positions_raw = trade_kudu_repository.get_all_positions(status='OPEN')
+#     stats = trade_kudu_repository.get_position_statistics()
+#
+#     # Search filter
+#     search_query = request.GET.get('q', '').strip()
+#     if search_query:
+#         search_lower = search_query.lower()
+#         positions_raw = [
+#             p for p in positions_raw
+#             if search_lower in (p.get('portfolio_short_name', '') or '').lower()
+#             or search_lower in (p.get('security_label', '') or '').lower()
+#         ]
+#
+#     positions = [PositionWrapper(p) for p in positions_raw]
+#
+#     return render(request, 'trade/position_list.html', {
+#         'positions': positions,
+#         'stats': stats,
+#         'search_query': search_query,
+#     })
+#
+#
+# def position_detail(request, position_id):
+#     """Position detail view with version history."""
+#     position_raw = trade_kudu_repository.get_position_by_id(position_id)
+#     if not position_raw:
+#         raise Http404("Position not found")
+#
+#     position = PositionWrapper(position_raw)
+#     position_versions = trade_kudu_repository.get_position_versions(position_id)
+#
+#     # Look up currency_code from security table
+#     currency_code = ''
+#     try:
+#         security_label = position_raw.get('security_label', '')
+#         if security_label:
+#             from core.repositories.impala_connection import impala_manager
+#             escaped_label = security_label.replace('\\', '\\\\').replace("'", "\\'")
+#             results = impala_manager.execute_query(
+#                 f"SELECT currency_code FROM gmp_cis.cis_security "
+#                 f"WHERE security_name = '{escaped_label}' LIMIT 1",
+#                 database='gmp_cis'
+#             )
+#             if results:
+#                 currency_code = results[0].get('currency_code', '')
+#     except Exception:
+#         pass
+#
+#     return render(request, 'trade/position_detail.html', {
+#         'position': position,
+#         'position_versions': position_versions,
+#         'currency_code': currency_code,
+#     })
+#
+#
+# @require_http_methods(["POST"])
+# def refresh_positions(request):
+#     """Refresh market values for all open positions."""
+#     counters = trade_kudu_repository.refresh_market_values()
+#     messages.success(
+#         request,
+#         f"Market values refreshed: {counters['updated']} updated, "
+#         f"{counters['skipped']} skipped, {counters['errors']} errors"
+#     )
+#     return redirect('trade:position_list')

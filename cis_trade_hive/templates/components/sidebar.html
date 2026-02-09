@@ -94,12 +94,19 @@
                             <span>Pending Settlement</span>
                         </a>
                     </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if 'positions' in request.path %}active{% endif %}" href="{% url 'trade:position_list' %}">
-                            <i class="bi bi-pie-chart"></i>
-                            <span>Positions</span>
-                        </a>
-                    </li>
+                    {# ============================================================ #}
+                    {# POSITIONS LINK - DISABLED #}
+                    {# To re-enable, uncomment the link below and also: #}
+                    {#   1. Uncomment position URLs in trade/urls.py #}
+                    {#   2. Uncomment position views in trade/views.py #}
+                    {#   3. See docs/DISABLED_POSITION_CODE.md for full details #}
+                    {# ============================================================ #}
+                    {# <li class="nav-item"> #}
+                    {#     <a class="nav-link {% if 'positions' in request.path %}active{% endif %}" href="{% url 'trade:position_list' %}"> #}
+                    {#         <i class="bi bi-pie-chart"></i> #}
+                    {#         <span>Positions</span> #}
+                    {#     </a> #}
+                    {# </li> #}
                 </ul>
             </li>
         </ul>
