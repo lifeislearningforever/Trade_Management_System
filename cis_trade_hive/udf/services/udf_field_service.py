@@ -196,12 +196,8 @@ class UDFFieldService:
             if not is_valid:
                 return False, error_msg, None
 
-            # Get next UDF ID
-            udf_id = self.repository.get_next_id()
-
-            # Prepare data
+            # Prepare data - repository generates field_id internally
             create_data = {
-                'udf_id': udf_id,
                 'object_type': field_data['object_type'].upper(),
                 'field_name': field_data['field_name'],
                 'field_value': field_data['field_value'],
@@ -209,10 +205,10 @@ class UDFFieldService:
                 'created_by': user_info['username'],
             }
 
-            # Create in repository
-            success = self.repository.create(create_data)
+            # Create in repository - returns field_id or 0 on failure
+            udf_id = self.repository.create(create_data)
 
-            if success:
+            if udf_id:
                 # Log to audit
                 audit_log_kudu_repository.log_action(
                     user_id=str(user_info['user_id']),
