@@ -53,6 +53,9 @@ urlpatterns = [
 
     # Lookup Tables (Configuration)
     path('lookup/', include('lookup.urls')),
+
+    # Hive POC - Managed Tables with ORC
+    path('hive-poc/', include('hive_poc.urls')),
 ]
 
 # Serve static files in development

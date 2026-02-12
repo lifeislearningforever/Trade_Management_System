@@ -24,7 +24,7 @@ DEBUG = os.environ.get('DJANGO_DEBUG', 'true').lower() == 'true'
 # Development mode settings
 SKIP_PERMISSION_CHECKS = DEBUG  # Skip permission checks in dev mode
 
-ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1,0.0.0.0').split(',')
 
 # Application definition
 INSTALLED_APPS = [
@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'security.apps.SecurityConfig',
     'trade.apps.TradeConfig',
     'lookup',
+    'hive_poc.apps.HivePocConfig',  # Hive POC - Managed Tables with ORC
 ]
 
 MIDDLEWARE = [

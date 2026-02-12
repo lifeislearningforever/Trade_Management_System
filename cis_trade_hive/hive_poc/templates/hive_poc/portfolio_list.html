@@ -1,0 +1,68 @@
+{% extends 'hive_poc/base.html' %}
+{% block title %}Portfolios{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Portfolios</h2>
+    <div>
+        <a href="{% url 'hive_poc:portfolio_deleted' %}" class="btn btn-outline-secondary">View Deleted</a>
+        <a href="{% url 'hive_poc:portfolio_create' %}" class="btn btn-primary">+ Create Portfolio</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        Portfolio List (Hive Managed Table: portfolio_hive)
+    </div>
+    <div class="card-body">
+        {% if portfolios %}
+        <table class="table table-striped table-hover">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Code</th>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Currency</th>
+                    <th>Manager</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for portfolio in portfolios %}
+                <tr {% if portfolio.deleted_at %}class="deleted-row"{% endif %}>
+                    <td><code>{{ portfolio.portfolio_id }}</code></td>
+                    <td><strong>{{ portfolio.portfolio_code }}</strong></td>
+                    <td>{{ portfolio.portfolio_name }}</td>
+                    <td>{{ portfolio.portfolio_type }}</td>
+                    <td>{{ portfolio.currency }}</td>
+                    <td>{{ portfolio.manager_name|default:"-" }}</td>
+                    <td>
+                        <span class="badge {% if portfolio.status == 'ACTIVE' %}bg-success{% elif portfolio.status == 'INACTIVE' %}bg-danger{% elif portfolio.status == 'CLOSED' %}bg-dark{% else %}bg-secondary{% endif %}">
+                            {{ portfolio.status }}
+                        </span>
+                    </td>
+                    <td>
+                        {% if not portfolio.deleted_at %}
+                        <a href="{% url 'hive_poc:portfolio_edit' portfolio.portfolio_id %}" class="btn btn-sm btn-outline-primary">Edit</a>
+                        <form method="post" action="{% url 'hive_poc:portfolio_delete' portfolio.portfolio_id %}" style="display:inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure you want to delete this portfolio?');">Delete</button>
+                        </form>
+                        {% else %}
+                        <span class="badge bg-danger">Deleted</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="alert alert-info">
+            No portfolios found. <a href="{% url 'hive_poc:portfolio_create' %}">Create one</a>.
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
