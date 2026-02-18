@@ -1,588 +1,482 @@
 """
-Security Hive Repository
+Security Hive Repository (ORC + ACID)
 
-Data access layer for security master data in Kudu tables.
-All queries execute via Impala (no Django ORM).
+Data access layer for security master data in Hive managed tables.
+Implements CRUD operations with workflow support.
 """
 
 import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-import json
 
-from core.repositories.impala_connection import impala_manager
+from core.repositories.hive_connection import hive_manager
+from core.repositories.hive_base_repository import HiveBaseRepository
 
 logger = logging.getLogger(__name__)
 
 
-class SecurityHiveRepository:
-    """Repository for security operations with Kudu via Impala"""
+class SecurityHiveRepository(HiveBaseRepository):
+    """Repository for security operations with Hive managed tables (ORC + ACID)"""
 
-    DATABASE = 'gmp_cis'
-    TABLE_NAME = 'cis_security'
-    HISTORY_TABLE = 'cis_security_history'
+    # Workflow Status Constants
+    STATUS_DRAFT = 'DRAFT'
+    STATUS_PENDING_APPROVAL = 'PENDING_APPROVAL'
+    STATUS_APPROVED = 'APPROVED'
+    STATUS_REJECTED = 'REJECTED'
+    STATUS_ACTIVE = 'ACTIVE'
+    STATUS_INACTIVE = 'INACTIVE'
 
-    @staticmethod
-    def escape_value(value: Any) -> str:
-        """
-        Escape value for SQL query.
-        Uses backslash escaping for Impala compatibility.
-        """
-        if value is None or value == '':
-            return 'NULL'
-        if isinstance(value, bool):
-            return 'true' if value else 'false'
-        if isinstance(value, (int, float)):
-            return str(value)
-        # String - escape backslashes and single quotes
-        escaped = str(value).replace('\\', '\\\\').replace("'", "\\'")
-        return f"'{escaped}'"
+    MAKER_EDITABLE_STATUSES = [STATUS_DRAFT, STATUS_REJECTED]
+    CHECKER_ACTIONABLE_STATUSES = [STATUS_PENDING_APPROVAL]
 
-    @staticmethod
+    @property
+    def table_name(self) -> str:
+        return 'cis_security'
+
+    @property
+    def primary_key(self) -> str:
+        return 'security_id'
+
+    @property
+    def columns(self) -> List[str]:
+        return [
+            'security_id', 'security_code', 'security_name', 'security_type',
+            'asset_class', 'currency', 'exchange_code', 'country', 'sector',
+            'industry', 'isin', 'cusip', 'sedol', 'ticker', 'issuer',
+            'maturity_date', 'coupon_rate', 'face_value', 'status', 'is_active',
+            'created_at', 'created_by', 'updated_at', 'updated_by', 'deleted_at'
+        ]
+
+    # =========================================================================
+    # READ OPERATIONS
+    # =========================================================================
+
     def get_all_securities(
+        self,
         limit: int = 1000,
         status: Optional[str] = None,
         search: Optional[str] = None,
         currency: Optional[str] = None,
-        security_type: Optional[str] = None
+        security_type: Optional[str] = None,
+        asset_class: Optional[str] = None,
+        include_deleted: bool = False
     ) -> List[Dict[str, Any]]:
         """
-        Fetch all securities from Kudu with optional filters.
-
-        Args:
-            limit: Maximum number of records to return
-            status: Filter by status (INITIAL, MODIFIED, VALIDATED)
-            search: Search term for security_name or ISIN
-            currency: Filter by currency_code
-            security_type: Filter by security_type
-
-        Returns:
-            List of security dictionaries
+        Fetch all securities from Hive with optional filters.
         """
         try:
-            query = f"""
-            SELECT *
-            FROM {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
-            WHERE 1=1
-            """
+            where_clauses = []
 
-            # Apply filters
+            if not include_deleted:
+                where_clauses.append("deleted_at IS NULL")
+
             if status:
-                query += f" AND status = {SecurityHiveRepository.escape_value(status)}"
+                where_clauses.append(f"status = '{status}'")
 
             if search:
-                search_term = f"%{search}%"
-                query += f" AND (LOWER(security_name) LIKE LOWER({SecurityHiveRepository.escape_value(search_term)}) "
-                query += f"OR LOWER(isin) LIKE LOWER({SecurityHiveRepository.escape_value(search_term)}))"
+                search_term = search.replace("'", "''").lower()
+                where_clauses.append(
+                    f"(LOWER(security_name) LIKE '%{search_term}%' OR "
+                    f"LOWER(isin) LIKE '%{search_term}%' OR "
+                    f"LOWER(ticker) LIKE '%{search_term}%' OR "
+                    f"LOWER(security_code) LIKE '%{search_term}%')"
+                )
 
             if currency:
-                query += f" AND currency_code = {SecurityHiveRepository.escape_value(currency)}"
+                where_clauses.append(f"currency = '{currency}'")
 
             if security_type:
-                query += f" AND security_type = {SecurityHiveRepository.escape_value(security_type)}"
+                where_clauses.append(f"security_type = '{security_type}'")
 
-            # Order by src_system='CIS' first, then by most recent
-            query += " ORDER BY CASE WHEN UPPER(src_system) = 'CIS' THEN 0 ELSE 1 END, created_at DESC"
+            if asset_class:
+                where_clauses.append(f"asset_class = '{asset_class}'")
 
-            # Apply limit
-            query += f" LIMIT {limit}"
+            where_clause = " AND ".join(where_clauses) if where_clauses else "1=1"
 
-            result = impala_manager.execute_query(query, database=SecurityHiveRepository.DATABASE)
-            return result if result else []
+            query = f"""
+                SELECT *
+                FROM {self._get_full_table_name()}
+                WHERE {where_clause}
+                LIMIT {limit}
+            """
+
+            results = self.conn_manager.execute_query(query, database=self.database)
+            return results if results else []
 
         except Exception as e:
             logger.error(f"Error fetching securities: {str(e)}")
             return []
 
-    @staticmethod
-    def get_security_by_id(security_id: int) -> Optional[Dict[str, Any]]:
-        """
-        Fetch a single security by ID.
+    def get_security_by_id(self, security_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a single security by ID."""
+        return self.find_by_id(security_id)
 
-        Args:
-            security_id: Security ID
-
-        Returns:
-            Security dictionary or None
-        """
+    def get_security_by_isin(self, isin: str) -> Optional[Dict[str, Any]]:
+        """Fetch a single security by ISIN."""
         try:
+            isin_escaped = isin.replace("'", "''")
             query = f"""
-            SELECT *
-            FROM {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
-            WHERE security_id = {security_id}
+                SELECT *
+                FROM {self._get_full_table_name()}
+                WHERE isin = '{isin_escaped}'
+                  AND deleted_at IS NULL
+                LIMIT 1
             """
-
-            result = impala_manager.execute_query(query, database=SecurityHiveRepository.DATABASE)
-            return result[0] if result and len(result) > 0 else None
-
-        except Exception as e:
-            logger.error(f"Error fetching security {security_id}: {str(e)}")
-            return None
-
-    @staticmethod
-    def get_security_by_isin(isin: str) -> Optional[Dict[str, Any]]:
-        """
-        Fetch a single security by ISIN.
-
-        Args:
-            isin: International Securities Identification Number
-
-        Returns:
-            Security dictionary or None
-        """
-        try:
-            query = f"""
-            SELECT *
-            FROM {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
-            WHERE isin = {SecurityHiveRepository.escape_value(isin)}
-            """
-
-            result = impala_manager.execute_query(query, database=SecurityHiveRepository.DATABASE)
-            return result[0] if result and len(result) > 0 else None
-
+            results = self.conn_manager.execute_query(query, database=self.database)
+            return results[0] if results else None
         except Exception as e:
             logger.error(f"Error fetching security by ISIN {isin}: {str(e)}")
             return None
 
-    @staticmethod
-    def insert_security(security_data: Dict[str, Any], created_by: str) -> bool:
-        """
-        Insert a new security record into Kudu.
-
-        Args:
-            security_data: Dictionary of security fields
-            created_by: Username creating the security
-
-        Returns:
-            True if successful, False otherwise
-        """
+    def get_security_by_code(self, security_code: str) -> Optional[Dict[str, Any]]:
+        """Fetch a single security by security code."""
         try:
-            # Generate security_id (timestamp-based)
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
-            security_id = timestamp_ms
-
-            # Build column and value lists
-            columns = ['security_id']
-            values = [str(security_id)]
-
-            # Add all business fields from security_data
-            field_mapping = {
-                'record_type': str,
-                'security_name': str,
-                'isin': str,
-                'security_description': str,
-                'issuer': str,
-                'ticker': str,
-                'industry': str,
-                'security_type': str,
-                'investment_type': str,
-                'issuer_type': str,
-                'quoted_unquoted': str,
-                'country_of_incorporation': str,
-                'country_of_exchange': str,
-                'country_of_issue': str,
-                'exchange_code': str,
-                'currency_code': str,
-                'price': float,
-                'shares_outstanding': int,
-                'beta': float,
-                'par_value': float,
-                'pct_hld_entity_1': str,
-                'pct_hld_entity_2': str,
-                'pct_hld_entity_3': str,
-                'pct_hld_entity_aggr': str,
-                'substantial_10_pct': str,
-                'cels': str,
-                'pevc_s32_devest': str,
-                's32_representative': str,
-                'basel_iv_fund': str,
-                'mas_643_entity_type': str,
-                'mas_6d_code': str,
-                'fin_nonfin_ind': str,
-                'business_unit_head': str,
-                'person_in_charge': str,
-                'core_noncore': str,
-                'fund_index_fund': str,
-                'management_limit_classification': str,
-                'relative_index': str,
-            }
-
-            for field, field_type in field_mapping.items():
-                if field in security_data:
-                    columns.append(field)
-                    values.append(SecurityHiveRepository.escape_value(security_data[field]))
-
-            # Add status
-            columns.append('status')
-            values.append(SecurityHiveRepository.escape_value(security_data.get('status', 'INITIAL')))
-
-            # Add src_system - 'CIS' for records created via UI
-            columns.append('src_system')
-            values.append("'CIS'")
-
-            # Add audit fields
-            columns.extend(['is_active', 'created_by', 'created_at', 'updated_by', 'updated_at'])
-            values.extend([
-                'true',
-                SecurityHiveRepository.escape_value(created_by),
-                str(timestamp_ms),
-                SecurityHiveRepository.escape_value(created_by),
-                str(timestamp_ms)
-            ])
-
-            # Build UPSERT statement
-            upsert_sql = f"""
-            UPSERT INTO {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
-            ({', '.join(columns)})
-            VALUES ({', '.join(values)})
+            code_escaped = security_code.replace("'", "''")
+            query = f"""
+                SELECT *
+                FROM {self._get_full_table_name()}
+                WHERE security_code = '{code_escaped}'
+                  AND deleted_at IS NULL
+                LIMIT 1
             """
-
-            success = impala_manager.execute_write(upsert_sql, database=SecurityHiveRepository.DATABASE)
-
-            if success:
-                logger.info(f"Successfully inserted security {security_id}")
-
-            return success
-
+            results = self.conn_manager.execute_query(query, database=self.database)
+            return results[0] if results else None
         except Exception as e:
-            logger.error(f"Error inserting security: {str(e)}")
-            return False
+            logger.error(f"Error fetching security by code {security_code}: {str(e)}")
+            return None
 
-    @staticmethod
-    def update_security(security_id: int, security_data: Dict[str, Any], updated_by: str) -> bool:
-        """
-        Update an existing security record in Kudu.
-
-        Args:
-            security_id: Security ID to update
-            security_data: Dictionary of fields to update
-            updated_by: Username updating the security
-
-        Returns:
-            True if successful, False otherwise
-        """
+    def get_securities_by_status(self, statuses: List[str], limit: int = 1000) -> List[Dict[str, Any]]:
+        """Get securities filtered by multiple statuses."""
         try:
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
-
-            # Build SET clause
-            set_clauses = []
-
-            # Update business fields if provided
-            updatable_fields = [
-                'record_type', 'security_name', 'isin', 'security_description', 'issuer', 'ticker',
-                'industry', 'security_type', 'investment_type', 'issuer_type', 'quoted_unquoted',
-                'country_of_incorporation', 'country_of_exchange', 'country_of_issue',
-                'exchange_code', 'currency_code',
-                'price', 'shares_outstanding', 'beta', 'par_value',
-                'pct_hld_entity_1', 'pct_hld_entity_2', 'pct_hld_entity_3', 'pct_hld_entity_aggr',
-                'substantial_10_pct', 'cels', 'pevc_s32_devest', 's32_representative',
-                'basel_iv_fund', 'mas_643_entity_type', 'mas_6d_code',
-                'fin_nonfin_ind', 'business_unit_head', 'person_in_charge', 'core_noncore',
-                'fund_index_fund', 'management_limit_classification', 'relative_index',
-                'status',
-            ]
-
-            for field in updatable_fields:
-                if field in security_data:
-                    set_clauses.append(f"{field} = {SecurityHiveRepository.escape_value(security_data[field])}")
-
-            # Always update audit fields
-            set_clauses.append(f"updated_by = {SecurityHiveRepository.escape_value(updated_by)}")
-            set_clauses.append(f"updated_at = {timestamp_ms}")
-
-            if not set_clauses:
-                logger.warning(f"No fields to update for security {security_id}")
-                return False
-
-            # Build UPDATE statement
-            update_sql = f"""
-            UPDATE {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
-            SET {', '.join(set_clauses)}
-            WHERE security_id = {security_id}
+            status_list = ", ".join([f"'{s}'" for s in statuses])
+            query = f"""
+                SELECT *
+                FROM {self._get_full_table_name()}
+                WHERE status IN ({status_list})
+                  AND deleted_at IS NULL
+                LIMIT {limit}
             """
-
-            success = impala_manager.execute_write(update_sql, database=SecurityHiveRepository.DATABASE)
-
-            if success:
-                logger.info(f"Successfully updated security {security_id}")
-
-            return success
-
+            results = self.conn_manager.execute_query(query, database=self.database)
+            return results if results else []
         except Exception as e:
-            logger.error(f"Error updating security {security_id}: {str(e)}")
-            return False
+            logger.error(f"Error retrieving securities by status: {str(e)}")
+            return []
 
-    @staticmethod
-    def update_security_status(security_id: int, status: str, updated_by: str) -> bool:
-        """
-        Update security status.
+    def get_pending_approval_securities(self, limit: int = 1000) -> List[Dict[str, Any]]:
+        """Get securities pending approval."""
+        return self.get_securities_by_status([self.STATUS_PENDING_APPROVAL], limit)
 
-        Args:
-            security_id: Security ID
-            status: New status
-            updated_by: Username updating
+    def get_active_securities(self, limit: int = 1000) -> List[Dict[str, Any]]:
+        """Get active securities."""
+        return self.get_securities_by_status([self.STATUS_ACTIVE], limit)
 
-        Returns:
-            True if successful, False otherwise
-        """
+    def get_statistics(self) -> Dict[str, Any]:
+        """Get security statistics for dashboard."""
         try:
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
-
-            set_clauses = [
-                f"status = {SecurityHiveRepository.escape_value(status)}",
-                f"updated_by = {SecurityHiveRepository.escape_value(updated_by)}",
-                f"updated_at = {timestamp_ms}"
-            ]
-
-            if status == 'VALIDATED':
-                set_clauses.append("is_active = true")
-
-            update_sql = f"""
-            UPDATE {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
-            SET {', '.join(set_clauses)}
-            WHERE security_id = {security_id}
+            query = f"""
+                SELECT status, security_type, currency, asset_class
+                FROM {self._get_full_table_name()}
+                WHERE deleted_at IS NULL
             """
+            results = self.conn_manager.execute_query(query, database=self.database)
 
-            success = impala_manager.execute_write(update_sql, database=SecurityHiveRepository.DATABASE)
-
-            if success:
-                logger.info(f"Successfully updated security {security_id} status to {status}")
-
-            return success
-
-        except Exception as e:
-            logger.error(f"Error updating security status {security_id}: {str(e)}")
-            return False
-
-    @staticmethod
-    def get_statistics() -> Dict[str, Any]:
-        """
-        Get security statistics for dashboard.
-
-        Returns:
-            Dictionary of statistics
-        """
-        try:
-            # Count by status
-            status_query = f"""
-            SELECT status, COUNT(*) as count
-            FROM {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
-            GROUP BY status
-            """
-            status_results = impala_manager.execute_query(status_query, database=SecurityHiveRepository.DATABASE)
-
+            total = len(results) if results else 0
             status_counts = {}
-            total_securities = 0
-            validated_securities = 0
-            initial_securities = 0
-            modified_securities = 0
+            type_counts = {}
+            currency_counts = {}
+            asset_class_counts = {}
 
-            if status_results:
-                for row in status_results:
+            if results:
+                for row in results:
+                    # Status breakdown
                     status = row.get('status', 'Unknown')
-                    count = row.get('count', 0)
-                    status_counts[status] = count
-                    total_securities += count
+                    status_counts[status] = status_counts.get(status, 0) + 1
 
-                    if status == 'VALIDATED':
-                        validated_securities += count
-                    elif status == 'INITIAL':
-                        initial_securities += count
-                    elif status == 'MODIFIED':
-                        modified_securities += count
+                    # Security type breakdown
+                    sec_type = row.get('security_type', 'Unknown')
+                    type_counts[sec_type] = type_counts.get(sec_type, 0) + 1
 
-            # Count by Quoted/Unquoted
-            quoted_query = f"""
-            SELECT quoted_unquoted, COUNT(*) as count
-            FROM {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
-            GROUP BY quoted_unquoted
-            ORDER BY count DESC
-            """
-            quoted_results = impala_manager.execute_query(quoted_query, database=SecurityHiveRepository.DATABASE)
+                    # Currency breakdown
+                    curr = row.get('currency', 'Unknown')
+                    currency_counts[curr] = currency_counts.get(curr, 0) + 1
 
-            quoted_unquoted = []
-            if quoted_results:
-                quoted_unquoted = [{'quoted_unquoted': row.get('quoted_unquoted', 'N/A') or 'N/A', 'count': row.get('count', 0)}
-                                  for row in quoted_results]
-
-            # Count by security type
-            type_query = f"""
-            SELECT security_type, COUNT(*) as count
-            FROM {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
-            GROUP BY security_type
-            ORDER BY count DESC
-            LIMIT 10
-            """
-            type_results = impala_manager.execute_query(type_query, database=SecurityHiveRepository.DATABASE)
-
-            security_types = []
-            if type_results:
-                security_types = [{'security_type': row.get('security_type', 'Unknown'), 'count': row.get('count', 0)}
-                                 for row in type_results]
-
-            # Count by currency
-            currency_query = f"""
-            SELECT currency_code, COUNT(*) as count
-            FROM {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
-            GROUP BY currency_code
-            ORDER BY count DESC
-            LIMIT 10
-            """
-            currency_results = impala_manager.execute_query(currency_query, database=SecurityHiveRepository.DATABASE)
-
-            currencies = []
-            if currency_results:
-                currencies = [{'currency_code': row.get('currency_code', 'Unknown'), 'count': row.get('count', 0)}
-                             for row in currency_results]
-
-            # Count by investment type
-            investment_query = f"""
-            SELECT investment_type, COUNT(*) as count
-            FROM {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
-            GROUP BY investment_type
-            ORDER BY count DESC
-            LIMIT 10
-            """
-            investment_results = impala_manager.execute_query(investment_query, database=SecurityHiveRepository.DATABASE)
-
-            investment_types = []
-            if investment_results:
-                investment_types = [{'investment_type': row.get('investment_type', 'Unknown'), 'count': row.get('count', 0)}
-                                   for row in investment_results]
-
-            # Count by industry
-            industry_query = f"""
-            SELECT industry, COUNT(*) as count
-            FROM {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
-            GROUP BY industry
-            ORDER BY count DESC
-            LIMIT 15
-            """
-            industry_results = impala_manager.execute_query(industry_query, database=SecurityHiveRepository.DATABASE)
-
-            industries = []
-            if industry_results:
-                industries = [{'industry': row.get('industry', 'Unknown'), 'count': row.get('count', 0)}
-                             for row in industry_results]
+                    # Asset class breakdown
+                    asset = row.get('asset_class', 'Unknown')
+                    asset_class_counts[asset] = asset_class_counts.get(asset, 0) + 1
 
             return {
-                'total_securities': total_securities,
-                'validated_securities': validated_securities,
-                'initial_securities': initial_securities,
-                'modified_securities': modified_securities,
+                'total_securities': total,
+                'active_securities': status_counts.get(self.STATUS_ACTIVE, 0),
+                'pending_approval': status_counts.get(self.STATUS_PENDING_APPROVAL, 0),
+                'draft': status_counts.get(self.STATUS_DRAFT, 0),
                 'status_breakdown': status_counts,
-                'by_quoted_unquoted': quoted_unquoted,
-                'by_security_type': security_types,
-                'by_currency': currencies,
-                'by_investment_type': investment_types,
-                'by_industry': industries,
+                'by_security_type': [
+                    {'security_type': k, 'count': v}
+                    for k, v in sorted(type_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+                ],
+                'by_currency': [
+                    {'currency': k, 'count': v}
+                    for k, v in sorted(currency_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+                ],
+                'by_asset_class': [
+                    {'asset_class': k, 'count': v}
+                    for k, v in sorted(asset_class_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+                ],
             }
 
         except Exception as e:
             logger.error(f"Error getting statistics: {str(e)}")
             return {
                 'total_securities': 0,
-                'validated_securities': 0,
-                'initial_securities': 0,
-                'modified_securities': 0,
+                'active_securities': 0,
+                'pending_approval': 0,
+                'draft': 0,
                 'status_breakdown': {},
-                'by_quoted_unquoted': [],
                 'by_security_type': [],
                 'by_currency': [],
-                'by_investment_type': [],
-                'by_industry': [],
+                'by_asset_class': [],
             }
 
-    @staticmethod
-    def insert_security_history(
-        security_id: int,
-        security_name: str,
-        isin: str,
-        action: str,
-        status: str,
-        changes: Dict[str, Any],
-        comments: str,
-        performed_by: str
-    ) -> bool:
+    # =========================================================================
+    # WRITE OPERATIONS
+    # =========================================================================
+
+    def create_security(self, security_data: Dict[str, Any], created_by: str) -> Optional[str]:
         """
-        Insert a security history record.
-
-        Args:
-            security_id: Security ID
-            security_name: Security name (denormalized)
-            isin: ISIN (denormalized)
-            action: Action type (CREATE, UPDATE, SUBMIT, APPROVE, REJECT)
-            status: Status after action
-            changes: Dictionary of changes
-            comments: User comments
-            performed_by: Username who performed action
-
-        Returns:
-            True if successful, False otherwise
+        Create a new security with DRAFT status.
         """
         try:
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
-            history_id = timestamp_ms
+            security_id = self._generate_id('SEC')
+            now = datetime.now()
 
-            # Convert changes dict to JSON string
-            changes_json = json.dumps(changes) if changes else '{}'
+            data = {
+                'security_id': security_id,
+                'security_code': security_data.get('security_code'),
+                'security_name': security_data.get('security_name'),
+                'security_type': security_data.get('security_type'),
+                'asset_class': security_data.get('asset_class'),
+                'currency': security_data.get('currency'),
+                'exchange_code': security_data.get('exchange_code'),
+                'country': security_data.get('country'),
+                'sector': security_data.get('sector'),
+                'industry': security_data.get('industry'),
+                'isin': security_data.get('isin'),
+                'cusip': security_data.get('cusip'),
+                'sedol': security_data.get('sedol'),
+                'ticker': security_data.get('ticker'),
+                'issuer': security_data.get('issuer'),
+                'maturity_date': security_data.get('maturity_date'),
+                'coupon_rate': security_data.get('coupon_rate'),
+                'face_value': security_data.get('face_value'),
+                'status': self.STATUS_DRAFT,
+                'is_active': False,
+                'created_at': now,
+                'created_by': created_by,
+                'updated_at': now,
+                'updated_by': created_by,
+                'deleted_at': None
+            }
 
-            insert_sql = f"""
-            UPSERT INTO {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.HISTORY_TABLE}
-            (history_id, security_id, security_name, isin, action, status, changes, comments, performed_by, performed_at)
-            VALUES (
-                {history_id},
-                {security_id},
-                {SecurityHiveRepository.escape_value(security_name)},
-                {SecurityHiveRepository.escape_value(isin)},
-                {SecurityHiveRepository.escape_value(action)},
-                {SecurityHiveRepository.escape_value(status)},
-                {SecurityHiveRepository.escape_value(changes_json)},
-                {SecurityHiveRepository.escape_value(comments)},
-                {SecurityHiveRepository.escape_value(performed_by)},
-                {timestamp_ms}
-            )
-            """
+            if self.create(data):
+                logger.info(f"Created security {security_id} with DRAFT status")
+                self.create_history_record_async(
+                    security_id, 'CREATE', None, data, created_by
+                )
+                return security_id
+            return None
 
-            success = impala_manager.execute_write(insert_sql, database=SecurityHiveRepository.DATABASE)
+        except Exception as e:
+            logger.error(f"Error creating security: {str(e)}")
+            return None
+
+    def update_security(self, security_id: str, security_data: Dict[str, Any],
+                       updated_by: str) -> bool:
+        """Update security data."""
+        try:
+            old_data = self.find_by_id(security_id)
+            if not old_data:
+                logger.error(f"Security {security_id} not found")
+                return False
+
+            update_data = {}
+            updatable_fields = [
+                'security_code', 'security_name', 'security_type', 'asset_class',
+                'currency', 'exchange_code', 'country', 'sector', 'industry',
+                'isin', 'cusip', 'sedol', 'ticker', 'issuer',
+                'maturity_date', 'coupon_rate', 'face_value'
+            ]
+
+            for field in updatable_fields:
+                if field in security_data:
+                    update_data[field] = security_data[field]
+
+            update_data['updated_by'] = updated_by
+
+            # Reset to DRAFT if editable
+            if old_data.get('status') in self.MAKER_EDITABLE_STATUSES:
+                update_data['status'] = self.STATUS_DRAFT
+
+            success = self.update(security_id, update_data)
 
             if success:
-                logger.info(f"Successfully inserted history for security {security_id}, action {action}")
+                logger.info(f"Updated security {security_id}")
+                self.create_history_record_async(
+                    security_id, 'UPDATE', old_data, update_data, updated_by
+                )
 
             return success
 
         except Exception as e:
-            logger.error(f"Error inserting security history: {str(e)}")
+            logger.error(f"Error updating security: {str(e)}")
             return False
 
-    @staticmethod
-    def get_security_history(security_id: int, limit: int = 50) -> List[Dict[str, Any]]:
-        """
-        Get history records for a security.
-
-        Args:
-            security_id: Security ID
-            limit: Maximum number of records
-
-        Returns:
-            List of history dictionaries
-        """
+    def delete_security(self, security_id: str, deleted_by: str) -> bool:
+        """Soft delete a security."""
         try:
-            query = f"""
-            SELECT *
-            FROM {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.HISTORY_TABLE}
-            WHERE security_id = {security_id}
-            ORDER BY performed_at DESC
-            LIMIT {limit}
-            """
+            old_data = self.find_by_id(security_id)
+            if not old_data:
+                return False
 
-            result = impala_manager.execute_query(query, database=SecurityHiveRepository.DATABASE)
-            return result if result else []
+            success = self.soft_delete(security_id, deleted_by)
+
+            if success:
+                logger.info(f"Security {security_id} deleted by {deleted_by}")
+                self.create_history_record_async(
+                    security_id, 'DELETE', old_data, None, deleted_by
+                )
+
+            return success
 
         except Exception as e:
-            logger.error(f"Error fetching security history {security_id}: {str(e)}")
-            return []
+            logger.error(f"Error deleting security: {str(e)}")
+            return False
+
+    # =========================================================================
+    # WORKFLOW OPERATIONS
+    # =========================================================================
+
+    def submit_for_approval(self, security_id: str, submitted_by: str) -> bool:
+        """Submit security for approval."""
+        try:
+            old_data = self.find_by_id(security_id)
+            if not old_data:
+                return False
+
+            success = self.update(security_id, {
+                'status': self.STATUS_PENDING_APPROVAL,
+                'updated_by': submitted_by
+            })
+
+            if success:
+                logger.info(f"Security {security_id} submitted for approval")
+                self.create_history_record_async(
+                    security_id, 'SUBMIT_FOR_APPROVAL',
+                    {'status': old_data.get('status')},
+                    {'status': self.STATUS_PENDING_APPROVAL},
+                    submitted_by
+                )
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Error submitting security: {str(e)}")
+            return False
+
+    def approve_security(self, security_id: str, approved_by: str,
+                        comments: str = '') -> bool:
+        """Approve security."""
+        try:
+            old_data = self.find_by_id(security_id)
+            if not old_data:
+                return False
+
+            success = self.update(security_id, {
+                'status': self.STATUS_APPROVED,
+                'updated_by': approved_by
+            })
+
+            if success:
+                logger.info(f"Security {security_id} approved by {approved_by}")
+                self.create_history_record_async(
+                    security_id, 'APPROVE',
+                    {'status': old_data.get('status')},
+                    {'status': self.STATUS_APPROVED, 'comments': comments},
+                    approved_by
+                )
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Error approving security: {str(e)}")
+            return False
+
+    def reject_security(self, security_id: str, rejected_by: str,
+                       reason: str = '') -> bool:
+        """Reject security."""
+        try:
+            old_data = self.find_by_id(security_id)
+            if not old_data:
+                return False
+
+            success = self.update(security_id, {
+                'status': self.STATUS_REJECTED,
+                'updated_by': rejected_by
+            })
+
+            if success:
+                logger.info(f"Security {security_id} rejected by {rejected_by}")
+                self.create_history_record_async(
+                    security_id, 'REJECT',
+                    {'status': old_data.get('status')},
+                    {'status': self.STATUS_REJECTED, 'reason': reason},
+                    rejected_by
+                )
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Error rejecting security: {str(e)}")
+            return False
+
+    def activate_security(self, security_id: str, activated_by: str) -> bool:
+        """Activate security."""
+        try:
+            old_data = self.find_by_id(security_id)
+            if not old_data:
+                return False
+
+            success = self.update(security_id, {
+                'status': self.STATUS_ACTIVE,
+                'is_active': True,
+                'updated_by': activated_by
+            })
+
+            if success:
+                logger.info(f"Security {security_id} activated by {activated_by}")
+                self.create_history_record_async(
+                    security_id, 'ACTIVATE',
+                    {'status': old_data.get('status'), 'is_active': old_data.get('is_active')},
+                    {'status': self.STATUS_ACTIVE, 'is_active': True},
+                    activated_by
+                )
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Error activating security: {str(e)}")
+            return False
+
+    # =========================================================================
+    # SEARCH OPERATIONS
+    # =========================================================================
+
+    def search_securities(self, search_term: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """Search securities by name, ISIN, ticker, or code."""
+        return self.search(
+            search_term,
+            ['security_name', 'isin', 'ticker', 'security_code', 'issuer']
+        )[:limit]
 
 
-# Create singleton instance
+# Singleton instance
 security_hive_repository = SecurityHiveRepository()

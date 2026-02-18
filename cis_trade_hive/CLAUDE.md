@@ -6,22 +6,53 @@
 
 ## Database Architecture
 
-**All data is stored in Apache Kudu via Impala.** No SQLite or MySQL.
+**All data is stored in Apache Hive Managed Tables with ORC file format and ACID transaction support.**
+
+### Storage Technology
+- **Hive Managed Tables**: Full ACID support (INSERT, UPDATE, DELETE)
+- **ORC File Format**: Columnar storage with SNAPPY compression
+- **Bucketing**: All tables use CLUSTERED BY with 4 buckets for optimal performance
+- **Execution Engine**: MapReduce for transactional operations
 
 ### Environments
-| Environment | Impala Host | Notes |
-|-------------|-------------|-------|
-| **Local Dev** | `localhost:21050` | Docker container with Kudu/Impala |
-| **Work/Prod** | Cloudera CML | Cloudera Machine Learning platform |
+| Environment | Hive Host | Port | Notes |
+|-------------|-----------|------|-------|
+| **Local Dev** | `localhost` | `10000` | HiveServer2 with MapReduce |
+| **Work/Prod** | Cloudera | `10000` | Cloudera Hive deployment |
 
-### Key Kudu Tables (Database: `gmp_cis`)
+### Key Hive Tables (Database: `gmp_cis`)
+
+**Core Tables:**
+- `cis_user` - User accounts
+- `cis_user_group` - User groups/roles
+- `cis_group_permissions` - Permission assignments
+- `cis_user_group_membership` - User-group relationships
+- `cis_audit_log` - System audit trail
+
+**Business Tables:**
 - `cis_portfolio` - Portfolio master data
+- `cis_portfolio_history` - Portfolio audit trail
 - `cis_trade` - Trade records
 - `cis_trade_history` - Trade audit trail
-- `cis_security_kudu` - Security master data
-- `cis_counterparty_kudu` - Counterparty/broker data
-- `cis_audit_log` - System audit trail
-- `cis_user`, `cis_user_group`, `cis_group_permissions` - ACL tables
+- `cis_trade_note` - Trade annotations
+- `cis_trade_position` - Position tracking
+
+**Security & Market Data:**
+- `cis_security` - Security master data
+- `cis_security_history` - Security audit trail
+- `cis_equity_price` - Equity price history
+- `cis_fx_rate` - FX rate history
+
+**Reference Data:**
+- `cis_counterparty` - Counterparty/broker data
+- `cis_currency` - Currency definitions
+- `cis_country` - Country definitions
+
+**Extensibility:**
+- `cis_udf_field` - User-defined field definitions
+- `cis_udf_value` - User-defined field values
+- `cis_sequence` - ID sequence generator
+- `cis_help_content` - Help documentation
 
 ## Quick Start
 
@@ -29,11 +60,15 @@
 # Activate virtual environment
 source .venv/bin/activate
 
-# Start Docker Kudu/Impala (local development)
-docker start kudu-impala  # or your container name
+# Start HiveServer2 (if not running)
+hiveserver2 &
 
-# Test Impala connection
+# Test Hive connection
 python manage.py test_hive
+
+# Create all Hive tables
+beeline -u "jdbc:hive2://localhost:10000" -n prakashhosalli -p '0987!Adhira' \
+  -f sql/hive_ddl/create_all_tables.sql
 
 # Run development server
 python manage.py runserver 0.0.0.0:8000
@@ -42,7 +77,7 @@ python manage.py runserver 0.0.0.0:8000
 pytest
 
 # Run with coverage
-pytest --cov=core --cov=portfolio --cov=udf --cov=reference_data
+pytest --cov=core --cov=portfolio --cov=trade --cov=security --cov=udf --cov=reference_data
 ```
 
 ## Project Structure
@@ -51,32 +86,70 @@ pytest --cov=core --cov=portfolio --cov=udf --cov=reference_data
 cis_trade_hive/
 ├── config/              # Django settings, URLs, WSGI/ASGI
 ├── core/                # Foundation: auth, audit, ACL, middleware
+│   ├── repositories/
+│   │   ├── hive_connection.py       # Hive connection pool manager
+│   │   ├── hive_base_repository.py  # Abstract base repository
+│   │   └── acl_repository.py        # ACL data access
+│   └── audit/
+│       └── audit_hive_repository.py # Audit logging
 ├── portfolio/           # Portfolio management with maker-checker
+│   └── repositories/
+│       └── portfolio_hive_repository.py
 ├── trade/               # Trade execution and settlement
-├── market_data/         # FX rates and market data
-├── reference_data/      # Currencies, countries, calendars, counterparties
-├── security/            # Security master data (Kudu-based)
+│   └── repositories/
+│       └── trade_hive_repository.py
+├── market_data/         # FX rates and equity prices
+│   └── repositories/
+│       └── market_data_hive_repository.py
+├── reference_data/      # Currencies, countries, counterparties
+│   └── repositories/
+│       └── reference_data_hive_repository.py
+├── security/            # Security master data
+│   └── repositories/
+│       └── security_hive_repository.py
 ├── udf/                 # User-Defined Fields for extensibility
+│   └── repositories/
+│       └── udf_hive_repository.py
 ├── templates/           # HTML templates (Bootstrap 5)
 ├── static/              # CSS, JS, images (local, no CDN)
-├── sql/                 # Kudu DDL and sample data
-├── kudu_ddl/            # Kudu-specific DDL files
+├── sql/
+│   └── hive_ddl/        # Hive DDL scripts
+│       └── create_all_tables.sql
 └── docs/                # Project documentation
 ```
 
 ## Key Architecture Decisions
 
-### Kudu/Impala as Primary Database
-- All application data stored in Kudu tables
-- Accessed via Impala SQL interface using PyHive
-- Connection pool: 35 connections via `ImpalaConnectionManager`
+### Hive Managed Tables with ORC + ACID
+- All application data stored in Hive managed tables
+- ORC file format with SNAPPY compression
+- Full ACID transaction support (INSERT, UPDATE, DELETE)
+- MapReduce execution engine for transactional operations
+- Connection pool via `HiveConnectionManager`
 - Database: `gmp_cis`
 
 ### SOLID Architecture
-- **Models:** Data wrappers (e.g., `TradeWrapper` for Kudu dict data)
+- **Models:** Data wrappers (e.g., `TradeWrapper` for dict data)
 - **Services:** Business logic (`*_service.py`)
 - **Views:** HTTP handling
-- **Repositories:** Data access (`*_kudu_repository.py`)
+- **Repositories:** Data access (`*_hive_repository.py`)
+
+### Repository Pattern
+All repositories inherit from `HiveBaseRepository`:
+```python
+class HiveBaseRepository(ABC):
+    @property
+    @abstractmethod
+    def table_name(self) -> str: pass
+
+    @property
+    @abstractmethod
+    def primary_key(self) -> str: pass
+
+    @property
+    @abstractmethod
+    def columns(self) -> List[str]: pass
+```
 
 ### Four-Eyes Principle (Maker-Checker)
 Status flow: `DRAFT → PENDING_APPROVAL → APPROVED/REJECTED → ACTIVE → INACTIVE → CLOSED`
@@ -84,12 +157,15 @@ Status flow: `DRAFT → PENDING_APPROVAL → APPROVED/REJECTED → ACTIVE → IN
 ## Common Commands
 
 ```bash
-# Kudu/Impala
-python manage.py create_hive_db  # Create Kudu tables
-python manage.py test_hive       # Test Impala connection
+# Hive Operations
+beeline -u "jdbc:hive2://localhost:10000" -n prakashhosalli -p '0987!Adhira'
 
-# Impala Shell (direct access)
-impala-shell -i localhost:21050 -d gmp_cis
+# Create tables
+beeline -u "jdbc:hive2://localhost:10000" -n prakashhosalli -p '0987!Adhira' \
+  -f sql/hive_ddl/create_all_tables.sql
+
+# Test Hive connection
+python manage.py test_hive
 
 # Testing
 pytest                           # Run all tests
@@ -107,14 +183,21 @@ gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4 --threads 4
 
 | File | Purpose |
 |------|---------|
-| `config/settings.py` | Django settings, Impala config |
-| `core/repositories/impala_connection.py` | Kudu/Impala connection pool manager |
+| `config/settings.py` | Django settings, Hive config |
+| `core/repositories/hive_connection.py` | Hive connection pool manager |
+| `core/repositories/hive_base_repository.py` | Abstract base repository |
+| `core/repositories/acl_repository.py` | ACL data access |
 | `core/services/acl_service.py` | Role-based access control |
 | `core/middleware/acl_middleware.py` | ACL attachment to requests |
-| `core/middleware/audit_middleware.py` | Audit logging |
-| `core/audit/audit_kudu_repository.py` | Audit logging to Kudu |
-| `trade/repositories/trade_kudu_repository.py` | Trade data access |
-| `security/repositories/security_kudu_repository.py` | Security data access |
+| `core/middleware/audit_middleware.py` | Audit logging middleware |
+| `core/audit/audit_hive_repository.py` | Audit logging to Hive |
+| `portfolio/repositories/portfolio_hive_repository.py` | Portfolio data access |
+| `trade/repositories/trade_hive_repository.py` | Trade data access |
+| `security/repositories/security_hive_repository.py` | Security data access |
+| `market_data/repositories/market_data_hive_repository.py` | Market data access |
+| `reference_data/repositories/reference_data_hive_repository.py` | Reference data access |
+| `udf/repositories/udf_hive_repository.py` | UDF data access |
+| `sql/hive_ddl/create_all_tables.sql` | DDL for all 22 tables |
 
 ## Environment Variables
 
@@ -125,20 +208,22 @@ Key settings in `.env`:
 DJANGO_DEBUG=True
 DJANGO_SECRET_KEY=your-secret-key
 
-# Impala/Kudu - Local Docker
-IMPALA_HOST=localhost
-IMPALA_PORT=21050
-IMPALA_DB=gmp_cis
-IMPALA_AUTH=NOSASL
-IMPALA_TIMEOUT=60
-IMPALA_POOL_SIZE=35
+# Hive - Local Development
+HIVE_HOST=localhost
+HIVE_PORT=10000
+HIVE_DB=gmp_cis
+HIVE_AUTH=NONE
+HIVE_USERNAME=prakashhosalli
+HIVE_PASSWORD=0987!Adhira
+HIVE_POOL_SIZE=10
+HIVE_TIMEOUT=120
 
-# Impala/Kudu - Cloudera CML (work)
-# IMPALA_HOST=your-cloudera-host
-# IMPALA_PORT=21050
-# IMPALA_AUTH=GSSAPI  # or LDAP depending on setup
-# IMPALA_USERNAME=your-username
-# IMPALA_PASSWORD=your-password
+# Hive - Cloudera (work/prod)
+# HIVE_HOST=your-cloudera-host
+# HIVE_PORT=10000
+# HIVE_AUTH=LDAP  # or KERBEROS
+# HIVE_USERNAME=your-username
+# HIVE_PASSWORD=your-password
 ```
 
 ## URL Patterns
@@ -148,34 +233,48 @@ IMPALA_POOL_SIZE=35
 | Core | `/` | `/login/`, `/logout/`, `/dashboard/` |
 | Portfolio | `/portfolio/` | `/create/`, `/<name>/`, `/pending-validation/` |
 | Trade | `/trade/` | `/create/`, `/<id>/`, `/pending-settlement/` |
-| Market Data | `/market-data/` | `/fx-rates/`, `/dashboard/` |
+| Market Data | `/market-data/` | `/fx-rates/`, `/equity-prices/`, `/dashboard/` |
 | Reference Data | `/reference-data/` | `/currencies/`, `/countries/`, `/counterparties/` |
 | Security | `/security/` | `/`, `/create/`, `/<id>/edit/` |
 | UDF | `/udf/` | `/definitions/`, `/values/<entity_type>/` |
 
-## Impala/Kudu Query Patterns
+## Hive Query Patterns
 
 ```python
-# Using ImpalaConnectionManager
-from core.repositories.impala_connection import ImpalaConnectionManager
+# Using HiveConnectionManager
+from core.repositories.hive_connection import hive_manager
 
-conn_manager = ImpalaConnectionManager()
-with conn_manager.get_connection() as conn:
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM gmp_cis.cis_trade LIMIT 10")
-    results = cursor.fetchall()
+# Execute query
+results = hive_manager.execute_query(
+    "SELECT * FROM cis_trade WHERE deleted_at IS NULL LIMIT 10",
+    database='gmp_cis'
+)
 
-# UPSERT for Kudu (not INSERT)
-cursor.execute("""
-    UPSERT INTO gmp_cis.cis_trade (trade_id, portfolio_short_name, ...)
-    VALUES (?, ?, ...)
-""", params)
+# Execute write (INSERT/UPDATE/DELETE)
+hive_manager.execute_write(
+    "INSERT INTO cis_trade (trade_id, ...) VALUES ('TRD001', ...)",
+    database='gmp_cis'
+)
+
+# Using repository pattern
+from trade.repositories.trade_hive_repository import trade_hive_repository
+
+# Create
+trade_id = trade_hive_repository.create_trade(trade_data, created_by='user1')
+
+# Read
+trade = trade_hive_repository.find_by_id(trade_id)
+
+# Update
+trade_hive_repository.update(trade_id, {'status': 'APPROVED'})
+
+# Soft Delete
+trade_hive_repository.soft_delete(trade_id, deleted_by='user1')
 ```
 
 ## Testing
 
 - **Framework:** pytest + pytest-django
-- **Coverage:** 39.33% (90 tests)
 - **Config:** `pytest.ini`, `.coveragerc`
 
 ```bash
@@ -189,16 +288,17 @@ open htmlcov/index.html
 - Follow PEP 8
 - Use type hints where practical
 - Services handle business logic, not views
-- Repositories handle Kudu data access via Impala
+- Repositories handle Hive data access
 - All database writes should be audited
-- Use UPSERT for Kudu writes (not INSERT)
+- Use soft delete pattern (`deleted_at` timestamp)
 - Four-Eyes workflow for critical operations
+- All repositories inherit from `HiveBaseRepository`
 
 ## Dependencies
 
 **Core:**
 - Django 5.2.9
-- PyHive 0.7.0 (Impala connection)
+- PyHive 0.7.0 (HiveServer2 connection)
 - thrift 0.16.0, thrift-sasl 0.4.3 (required by PyHive)
 - djangorestframework 3.16.1
 
@@ -212,7 +312,7 @@ open htmlcov/index.html
 
 ## Audit Logging
 
-All writes are logged to Kudu `cis_audit_log` table with:
+All writes are logged to Hive `cis_audit_log` table with:
 - Action type (CREATE, UPDATE, DELETE, APPROVE, REJECT, etc.)
 - Old/new values as JSON
 - User, IP, timestamp
@@ -220,44 +320,163 @@ All writes are logged to Kudu `cis_audit_log` table with:
 
 ## Performance Notes
 
-- Impala connection pool: 35 connections
+- Hive connection pool: 10 connections
 - ACL caching: 300s per user
 - Audit logging: async (non-blocking)
 - Static files: WhiteNoise compression
-- Tested: 500 concurrent users, <1000ms avg response
+- ORC with SNAPPY compression for storage efficiency
+- Bucketed tables for optimal query performance
+
+## Hive ACID Configuration
+
+Required Hive settings for ACID support:
+```sql
+SET hive.support.concurrency=true;
+SET hive.enforce.bucketing=true;
+SET hive.exec.dynamic.partition.mode=nonstrict;
+SET hive.txn.manager=org.apache.hadoop.hive.ql.lockmgr.DbTxnManager;
+SET hive.compactor.initiator.on=true;
+SET hive.compactor.worker.threads=1;
+SET hive.execution.engine=mr;  -- MapReduce for transactional ops
+```
 
 ## Troubleshooting
 
-**Impala connection fails (Local Docker):**
+**Hive connection fails:**
 ```bash
-# Check if Docker container is running
-docker ps | grep kudu
+# Check if HiveServer2 is running
+pgrep -f HiveServer2
 
-# Start container if stopped
-docker start kudu-impala
+# Start HiveServer2 if not running
+hiveserver2 &
 
-# Test connection
-python manage.py test_hive
-
-# Direct impala-shell test
-impala-shell -i localhost:21050 -q "SHOW DATABASES"
+# Test connection with beeline
+beeline -u "jdbc:hive2://localhost:10000" -n prakashhosalli -p '0987!Adhira' \
+  -e "SHOW DATABASES"
 ```
 
-**Impala connection fails (Cloudera CML):**
-- Verify Kerberos ticket: `klist`
-- Check IMPALA_HOST points to correct Cloudera coordinator
-- Verify IMPALA_AUTH matches your Cloudera auth method (GSSAPI/LDAP)
+**ACID operations fail:**
+```bash
+# Verify table is transactional
+beeline -e "DESCRIBE FORMATTED gmp_cis.cis_trade" | grep transactional
+
+# Set execution engine to MapReduce
+SET hive.execution.engine=mr;
+```
 
 **Permission denied:**
-- Check ACL tables in Kudu (`cis_user`, `cis_user_group`, `cis_group_permissions`)
+- Check ACL tables in Hive (`cis_user`, `cis_user_group`, `cis_group_permissions`)
 - Verify user group assignments
 - Query: `SELECT * FROM gmp_cis.cis_user WHERE username = 'your-user'`
 
-**Kudu table doesn't exist:**
+**Table doesn't exist:**
 ```bash
-# Create tables
-python manage.py create_hive_db
+# Create all tables
+beeline -u "jdbc:hive2://localhost:10000" -n prakashhosalli -p '0987!Adhira' \
+  -f sql/hive_ddl/create_all_tables.sql
 
-# Or run DDL manually
-impala-shell -i localhost:21050 -f sql/ddl/cis_trade_kudu.sql
+# Verify tables exist
+beeline -e "SHOW TABLES IN gmp_cis"
 ```
+
+## Migration from Kudu/Impala
+
+This branch (`hive-managed-tables`) migrated from Kudu/Impala to Hive Managed Tables:
+
+| Component | Old (Kudu) | New (Hive) |
+|-----------|------------|------------|
+| Connection | `ImpalaConnectionManager` | `HiveConnectionManager` |
+| Port | 21050 | 10000 |
+| Write Pattern | UPSERT | INSERT/UPDATE/DELETE |
+| Storage | Kudu | ORC with SNAPPY |
+| Transactions | Limited | Full ACID |
+| Repositories | `*_kudu_repository.py` | `*_hive_repository.py` |
+
+Backward compatibility aliases are provided:
+```python
+from core.repositories.hive_connection import hive_manager
+# Also available as:
+from core.repositories.hive_connection import impala_manager  # alias
+```
+
+## Performance Benchmarking
+
+### Quick Start
+
+```bash
+# Run quick benchmark (50 users, 2 minutes)
+./run_benchmark.sh quick
+
+# Run standard benchmark (500 users, 10 minutes)
+./run_benchmark.sh standard
+
+# Run stress test (1000 users, 5 minutes)
+./run_benchmark.sh stress
+
+# Run Locust Web UI for real-time monitoring
+locust --host=http://localhost:8000
+# Open http://localhost:8089 in browser
+```
+
+### Benchmark Scenarios
+
+| Scenario | Users | Duration | Spawn Rate | Use Case |
+|----------|-------|----------|------------|----------|
+| `quick` | 50 | 2m | 5/s | Post-deployment sanity check |
+| `standard` | 500 | 10m | 10/s | Regular performance validation |
+| `stress` | 1000 | 5m | 50/s | Find breaking point |
+| `soak` | 200 | 2h | 5/s | Detect memory leaks |
+
+### User Profiles (locustfile.py)
+
+| User Type | Weight | Description |
+|-----------|--------|-------------|
+| TradeUser | 25% | Trade CRUD operations |
+| PortfolioUser | 15% | Portfolio management |
+| SecurityUser | 15% | Security master data |
+| EquityPriceUser | 10% | Equity price updates |
+| FXRateUser | 10% | FX rate updates |
+| CounterpartyUser | 10% | Counterparty management |
+| ReferenceDataUser | 5% | Reference data browsing |
+| UDFUser | 5% | UDF configuration |
+| DashboardUser | 5% | Dashboard monitoring |
+
+### Performance Targets (500 Users)
+
+| Metric | Target | Warning | Critical |
+|--------|--------|---------|----------|
+| Median Response | <300ms | 300-500ms | >500ms |
+| 95th Percentile | <2000ms | 2000-3000ms | >3000ms |
+| Requests/sec | >100 | 50-100 | <50 |
+| Error Rate | 0% | <0.5% | >1% |
+
+### Latest Benchmark Results (2026-02-18)
+
+Quick test (50 users, 2 minutes):
+
+| Endpoint | Requests | Median | Avg | 95th %ile | RPS |
+|----------|----------|--------|-----|-----------|-----|
+| Trade List | 55 | 12ms | 18ms | 37ms | 0.46 |
+| Portfolio List | 35 | 9ms | 12ms | 23ms | 0.30 |
+| Security List | 28 | 4ms | 8ms | 14ms | 0.24 |
+| Equity Price List | 20 | 6ms | 10ms | 63ms | 0.17 |
+| FX Rate List | 25 | 5ms | 7ms | 14ms | 0.21 |
+| Dashboard | 9 | 5ms | 6ms | 15ms | 0.08 |
+| **Aggregated** | 1505 | 6ms | 39ms | 27ms | 12.69 |
+
+### Results Location
+
+```
+benchmark_results/
+├── quick_[timestamp]/
+│   ├── report.html         # Visual HTML report
+│   ├── stats.csv           # Request statistics
+│   ├── stats_history.csv   # Time-series data
+│   └── failures.csv        # Error details
+```
+
+### Documentation
+
+- Full guide: `BENCHMARKING.md`
+- Locust config: `locustfile.py`
+- Benchmark script: `run_benchmark.sh`

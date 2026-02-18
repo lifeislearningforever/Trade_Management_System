@@ -34,6 +34,18 @@ db.sqlite3-journal
 /staticfiles/
 /media/
 
+# Logs directory
+logs/
+
+# Benchmark results (generated)
+benchmark_results/
+
+# Sample data images
+sql/sample_data/*.JPG
+sql/sample_data/*.jpg
+sql/sample_data/*.png
+sql/sample_data/*.PNG
+
 # IDEs
 .vscode/
 .idea/

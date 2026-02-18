@@ -32,14 +32,18 @@ class PortfolioWrapper:
     """Wrapper to convert Kudu dict data to object with attributes for template compatibility."""
     def __init__(self, data, index=0):
         self.data = data
-        self.code = data.get('name', '')[:20]
-        self.name = data.get('name', '')
+        # Support both old schema (name) and new schema (portfolio_short_name)
+        short_name = data.get('portfolio_short_name') or data.get('name', '')
+        portfolio_name = data.get('portfolio_name') or data.get('description', '')
+        self.code = short_name[:20] if short_name else ''
+        self.name = short_name or ''
+        self.portfolio_name = portfolio_name or ''
         self.description = data.get('description', '')
         self.currency = data.get('currency', '')
-        self.manager = data.get('manager', '')
+        self.manager = data.get('manager_name') or data.get('manager', '')
         self.portfolio_client = data.get('portfolio_client', '')
         self.cash_balance = data.get('cash_balance', 0)
-        self.status = data.get('status', 'INITIAL')
+        self.status = data.get('status', 'DRAFT')
         self.src_system = data.get('src_system', 'GMP')
 
         # Handle is_active

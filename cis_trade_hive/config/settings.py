@@ -102,19 +102,21 @@ DATABASES = {
     },
 }
 
-# Impala Configuration (Local Environment - Docker with Kudu)
-IMPALA_CONFIG = {
-    'HOST': os.environ.get('IMPALA_HOST', 'localhost'),
-    'PORT': int(os.environ.get('IMPALA_PORT', '21050')),
-    'DATABASE': os.environ.get('IMPALA_DB', 'gmp_cis'),
-    'AUTH': os.environ.get('IMPALA_AUTH', 'NOSASL'),
-    'USERNAME': os.environ.get('IMPALA_USERNAME', ''),
-    'PASSWORD': os.environ.get('IMPALA_PASSWORD', ''),
-    'TIMEOUT': int(os.environ.get('IMPALA_TIMEOUT', '60')),
+# Hive Configuration (Local HiveServer2 with ORC + ACID)
+# Connection: beeline -u "jdbc:hive2://localhost:10000" -n prakashhosalli -p '0987!Adhira'
+HIVE_CONFIG = {
+    'HOST': os.environ.get('HIVE_HOST', 'localhost'),
+    'PORT': int(os.environ.get('HIVE_PORT', '10000')),
+    'DATABASE': os.environ.get('HIVE_DB', 'gmp_cis'),
+    'AUTH': os.environ.get('HIVE_AUTH', 'NONE'),
+    'USERNAME': os.environ.get('HIVE_USERNAME', 'prakashhosalli'),
+    'PASSWORD': os.environ.get('HIVE_PASSWORD', '0987!Adhira'),
+    'TIMEOUT': int(os.environ.get('HIVE_TIMEOUT', '60')),
+    'POOL_SIZE': int(os.environ.get('HIVE_POOL_SIZE', '20')),
 }
 
-# Backward compatibility - keep HIVE_CONFIG pointing to IMPALA_CONFIG
-HIVE_CONFIG = IMPALA_CONFIG
+# Backward compatibility - keep IMPALA_CONFIG pointing to HIVE_CONFIG
+IMPALA_CONFIG = HIVE_CONFIG
 
 # Impala Connection Pool Configuration
 # Increased from 10 to 35 to support Gunicorn workers (4 workers x 4 threads + margin)

@@ -21,8 +21,9 @@ Date: 2026-01-01
 from typing import List, Dict, Any, Optional
 import logging
 from datetime import datetime
-from core.repositories.impala_connection import impala_manager
+from core.repositories.hive_connection import hive_manager
 from core.audit.audit_kudu_repository import AuditLogKuduRepository
+from reference_data.repositories import currency_repository
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +33,11 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 class PortfolioDropdownRepository:
-    """Repository for fetching dropdown data from Kudu/Impala tables."""
+    """Repository for fetching dropdown data from Hive managed tables."""
 
     DATABASE = 'gmp_cis'
     UDF_FIELD_TABLE = 'cis_udf_field'  # Simplified UDF table (ONLY table for UDF field definitions)
-    CURRENCY_TABLE = 'gmp_cis_sta_dly_currency'
+    CURRENCY_TABLE = 'cis_currency'  # Hive managed table for currencies
 
     @staticmethod
     def get_active_udf_fields(object_type: str = 'PORTFOLIO') -> List[Dict[str, Any]]:
@@ -59,7 +60,7 @@ class PortfolioDropdownRepository:
               AND field_value <> ''
             ORDER BY field_name
             """
-            results = impala_manager.execute_query(query, database=PortfolioDropdownRepository.DATABASE)
+            results = hive_manager.execute_query(query, database=PortfolioDropdownRepository.DATABASE)
             return results if results else []
 
         except Exception as e:
@@ -85,7 +86,7 @@ class PortfolioDropdownRepository:
               AND is_active = true
             ORDER BY display_order, option_value
             """
-            results = impala_manager.execute_query(query, database=PortfolioDropdownRepository.DATABASE)
+            results = hive_manager.execute_query(query, database=PortfolioDropdownRepository.DATABASE)
             return [r.get('option_value') for r in results if r.get('option_value')] if results else []
 
         except Exception as e:
@@ -95,38 +96,51 @@ class PortfolioDropdownRepository:
     @staticmethod
     def get_dropdown_options_by_field_name(field_name: str, object_type: str = 'PORTFOLIO') -> List[Dict[str, Any]]:
         """
-        Get dropdown options for a field by its field_name (definition).
+        Get dropdown options for a field by its field_name.
 
         Schema: cis_udf_field table where:
-        - field_name is the field definition (e.g., 'Portfolio Manager') - Admin creates this
-        - field_value contains the actual dropdown values (e.g., 'John Doe') - Users add these
-        - Records with empty field_value are DEFINITIONS, non-empty are VALUES
+        - field_name is the field definition (e.g., 'Portfolio Manager')
+        - options column contains JSON array of dropdown options
 
         Args:
             field_name: UDF field definition name (e.g., 'Portfolio Manager', 'Account Group')
             object_type: Object type (default: PORTFOLIO)
 
         Returns:
-            List of dicts with field_value (the actual dropdown values, excluding definition record)
+            List of dicts with field_value (parsed from options JSON)
         """
+        import json as json_lib
         try:
             escaped_field = field_name.replace("'", "''")
-            # Only get VALUE records (where field_value is NOT empty)
             query = f"""
-            SELECT udf_id, field_name, field_value, is_active
+            SELECT field_id, field_name, options, is_active
             FROM {PortfolioDropdownRepository.DATABASE}.{PortfolioDropdownRepository.UDF_FIELD_TABLE}
             WHERE object_type = '{object_type}'
               AND field_name = '{escaped_field}'
-              AND field_value IS NOT NULL
-              AND field_value != ''
               AND is_active = true
-            ORDER BY field_value
+            LIMIT 1
             """
 
             logger.info(f"Executing dropdown query for field_name={field_name}")
-            results = impala_manager.execute_query(query, database=PortfolioDropdownRepository.DATABASE)
-            logger.info(f"Dropdown query returned {len(results) if results else 0} values for {field_name}")
-            return results if results else []
+            results = hive_manager.execute_query(query, database=PortfolioDropdownRepository.DATABASE)
+
+            if not results:
+                logger.info(f"No UDF field found for {field_name}")
+                return []
+
+            # Parse options JSON to get dropdown values
+            options_str = results[0].get('options', '')
+            if not options_str:
+                return []
+
+            try:
+                options = json_lib.loads(options_str)
+                if isinstance(options, list):
+                    return [{'field_value': opt} for opt in options]
+                return []
+            except json_lib.JSONDecodeError:
+                logger.error(f"Failed to parse options JSON for {field_name}: {options_str}")
+                return []
 
         except Exception as e:
             logger.error(f"Error fetching options for field name {field_name}: {str(e)}")
@@ -135,26 +149,21 @@ class PortfolioDropdownRepository:
     @staticmethod
     def get_currencies() -> List[Dict[str, str]]:
         """
-        Get list of currencies from reference data table.
+        Get list of currencies from Hive cis_currency table.
 
         Returns:
             List of dicts with 'code' and 'name'
         """
         try:
-            query = f"""
-            SELECT DISTINCT `curr_symbol`, `curr_name`
-            FROM {PortfolioDropdownRepository.DATABASE}.{PortfolioDropdownRepository.CURRENCY_TABLE}
-            WHERE `curr_symbol` IS NOT NULL AND `curr_symbol` != ''
-            ORDER BY `curr_symbol`
-            """
-            results = impala_manager.execute_query(query, database=PortfolioDropdownRepository.DATABASE)
+            # Use the currency repository which now points to Hive
+            currencies = currency_repository.list_all()
             return [
                 {
-                    'code': r.get('curr_symbol'),
-                    'name': r.get('curr_name', r.get('curr_symbol'))
+                    'code': c.get('code'),
+                    'name': c.get('full_name') or c.get('name') or c.get('code')
                 }
-                for r in results if r.get('curr_symbol')
-            ] if results else []
+                for c in currencies if c.get('code')
+            ]
 
         except Exception as e:
             logger.error(f"Error fetching currencies: {str(e)}")
