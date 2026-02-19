@@ -201,11 +201,9 @@ def profile(request):
 # @login_required  # Commented for development
 def audit_log(request):
     """
-    Audit log list view with filtering and search - KUDU/IMPALA INTEGRATION.
-    Fetches audit logs from Kudu cis_audit_log table via Impala.
+    Audit log list view with filtering and search - HIVE INTEGRATION.
+    Fetches audit logs from Hive cis_audit_log table.
     """
-    from core.audit.audit_kudu_repository import audit_log_kudu_repository
-
     # Get filter parameters
     search_query = request.GET.get('search', '').strip()
     action_filter = request.GET.get('action', '').strip()
@@ -213,19 +211,19 @@ def audit_log(request):
     date_from = request.GET.get('date_from', '').strip()
     date_to = request.GET.get('date_to', '').strip()
 
-    # Get audit logs from Kudu/Impala with error handling
+    # Get audit logs from Hive with error handling
     try:
-        audit_logs_list = audit_log_kudu_repository.get_all_logs(
+        audit_logs_list = audit_log_repository.get_all_logs(
             limit=1000,  # Fetch more for client-side pagination
-            action_type=action_filter if action_filter else None,
+            action=action_filter if action_filter else None,
             entity_type=entity_filter if entity_filter else None,
             date_from=date_from if date_from else None,
             date_to=date_to if date_to else None,
             search=search_query if search_query else None
         )
     except Exception as e:
-        # If Kudu connection fails, return empty list with error message
-        messages.warning(request, f'Unable to connect to Kudu: {str(e)}. Showing empty results.')
+        # If Hive connection fails, return empty list with error message
+        messages.warning(request, f'Unable to connect to Hive: {str(e)}. Showing empty results.')
         audit_logs_list = []
 
     # Pagination
@@ -242,7 +240,7 @@ def audit_log(request):
         audit_logs = paginator.page(paginator.num_pages if paginator.num_pages > 0 else 1)
 
     # Get unique action types for filter dropdown
-    action_types = sorted(set([log.get('action_type') for log in audit_logs_list if log.get('action_type')]))
+    action_types = sorted(set([log.get('action') for log in audit_logs_list if log.get('action')]))
 
     # Get unique entity types for filter dropdown
     entity_types = sorted(set([log.get('entity_type') for log in audit_logs_list if log.get('entity_type')]))
@@ -258,7 +256,7 @@ def audit_log(request):
         'date_from': date_from,
         'date_to': date_to,
         'total_count': len(audit_logs_list),
-        'using_kudu': True,  # Flag to indicate Kudu integration
+        'using_hive': True,  # Flag to indicate Hive integration
     }
 
     return render(request, 'core/audit_log.html', context)

@@ -10,7 +10,7 @@ import io
 import logging
 from typing import Dict, List, Any, Optional, Tuple
 
-from lookup.repositories.lookup_kudu_repository import lookup_kudu_repository
+from lookup.repositories.lookup_hive_repository import lookup_hive_repository
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ class LookupService:
     """Service for lookup table management"""
 
     def __init__(self):
-        self.repository = lookup_kudu_repository
+        self.repository = lookup_hive_repository
 
     # =========================================================================
     # TABLE DISCOVERY

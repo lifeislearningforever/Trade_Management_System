@@ -14,6 +14,8 @@
 - **Bucketing**: All tables use CLUSTERED BY with 4 buckets for optimal performance
 - **Execution Engine**: MapReduce for transactional operations
 
+> **Important:** See [docs/HIVE_ACID_LIMITATIONS.md](docs/HIVE_ACID_LIMITATIONS.md) for known limitations (GROUP BY, DISTINCT, ORDER BY fail on ACID tables) and workarounds.
+
 ### Environments
 | Environment | Hive Host | Port | Notes |
 |-------------|-----------|------|-------|
@@ -398,6 +400,59 @@ from core.repositories.hive_connection import hive_manager
 # Also available as:
 from core.repositories.hive_connection import impala_manager  # alias
 ```
+
+## CML (Cloudera Machine Learning) Deployment
+
+### Deploying as CML Project Application
+
+**Entry Point:** `config/cml_app.py`
+
+1. **Create CML Project:**
+   - Import this repository into CML as a new project
+   - Ensure Python 3.10+ runtime is selected
+
+2. **Set Environment Variables in CML Project Settings:**
+   ```
+   HIVE_HOST=your-cloudera-hive-host
+   HIVE_PORT=10000
+   HIVE_DB=gmp_cis
+   HIVE_AUTH=LDAP  # or KERBEROS
+   HIVE_USERNAME=your-username
+   HIVE_PASSWORD=your-password
+   DJANGO_SECRET_KEY=your-production-secret-key
+   DJANGO_DEBUG=false
+   DJANGO_ALLOWED_HOSTS=*.your-cml-domain.com
+   ```
+
+3. **Create Application:**
+   - Go to **Applications** → **New Application**
+   - **Name:** CIS Trade Hive
+   - **Subdomain:** cis-trade-hive
+   - **Script:** `config/cml_app.py`
+   - **Resource Profile:** 2 vCPU / 4 GB Memory (minimum)
+
+4. **Optional Gunicorn Settings (Environment Variables):**
+   ```
+   GUNICORN_WORKERS=4
+   GUNICORN_THREADS=4
+   GUNICORN_TIMEOUT=120
+   ```
+
+### What cml_app.py Does
+
+1. Creates/activates virtual environment (`.venv`)
+2. Installs dependencies from `requirements.txt`
+3. Configures Django for CML (allowed hosts, debug mode)
+4. Collects static files
+5. Runs database migrations (if applicable)
+6. Starts Gunicorn WSGI server on `CDSW_APP_PORT`
+
+### CML Environment Variables (Auto-Set by CML)
+
+| Variable | Description |
+|----------|-------------|
+| `CDSW_APP_PORT` | Port assigned to the application |
+| `CDSW_DOMAIN` | CML domain for allowed hosts |
 
 ## Performance Benchmarking
 

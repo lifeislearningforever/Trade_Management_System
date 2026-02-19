@@ -42,8 +42,8 @@ urlpatterns = [
     # Market Data
     path('market-data/', include('market_data.urls')),
 
-    # UDF (User Defined Fields) - Simplified Free Text Approach
-    path('udf/', include('udf.urls_simplified')),
+    # UDF (User Defined Fields) - Hive Managed Tables
+    path('udf/', include('udf.urls')),
 
     # Security Master Data
     path('security/', include('security.urls')),

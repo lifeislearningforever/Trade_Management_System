@@ -695,7 +695,8 @@ To migrate data from Kudu to Hive:
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2026-02-19 | Claude Code | Initial comprehensive documentation |
+| 1.1 | 2026-02-20 | Claude Code | Added lookup_hive_repository.py, documented Hive ACID limitations |
 
 ---
 
-*Last updated: 2026-02-19*
+*Last updated: 2026-02-20*

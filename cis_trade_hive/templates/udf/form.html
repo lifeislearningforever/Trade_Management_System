@@ -51,9 +51,12 @@
                             </label>
                             <select class="form-select"
                                     id="object_type"
-                                    name="object_type"
-                                    required
+                                    {% if form_action != 'edit' %}name="object_type"{% endif %}
+                                    {% if form_action != 'edit' %}required{% endif %}
                                     {% if form_action == 'edit' %}disabled{% endif %}>
+                                {% if form_action == 'edit' %}
+                                <option value="{{ field_data.object_type }}" selected>{{ field_data.object_type }}</option>
+                                {% else %}
                                 <option value="">-- Select Object Type --</option>
                                 {% for object_type in object_types %}
                                 <option value="{{ object_type }}"
@@ -61,6 +64,7 @@
                                     {{ object_type }}
                                 </option>
                                 {% endfor %}
+                                {% endif %}
                             </select>
                             <div class="form-text">
                                 Module/Object this UDF belongs to. Select to filter available fields.
@@ -81,10 +85,14 @@
                             </label>
                             <select class="form-select"
                                     id="field_name"
-                                    name="field_name"
-                                    required
+                                    {% if form_action != 'edit' %}name="field_name"{% endif %}
+                                    {% if form_action != 'edit' %}required{% endif %}
                                     {% if form_action == 'edit' %}disabled{% endif %}>
+                                {% if form_action == 'edit' %}
+                                <option value="{{ field_data.field_name }}" selected>{{ field_data.field_name }}</option>
+                                {% else %}
                                 <option value="">-- Select Object Type First --</option>
+                                {% endif %}
                             </select>
                             <div class="form-text">
                                 Select the field to add a value to (e.g., Portfolio Manager, Account Group).
@@ -226,11 +234,19 @@
 (function() {
     'use strict';
 
-    // Get form elements
+    // Check if we're in edit mode - if so, skip all dynamic loading
+    const isEditMode = "{{ form_action }}" === "edit";
+
+    // In edit mode, field_name is read-only, no JavaScript needed
+    if (isEditMode) {
+        return;
+    }
+
+    // Get form elements (only for create mode)
     const objectTypeSelect = document.getElementById('object_type');
     const fieldNameSelect = document.getElementById('field_name');
 
-    // Store pre-selected values (works for both create with URL params and edit mode)
+    // Store pre-selected values (for create mode with URL params)
     const preSelectedObjectType = "{% if field_data %}{{ field_data.object_type|default:'' }}{% endif %}";
     const preSelectedFieldName = "{% if field_data %}{{ field_data.field_name|default:'' }}{% endif %}";
 
@@ -260,17 +276,18 @@
                         fieldNameSelect.innerHTML = '<option value="">-- No fields available for this object --</option>';
                         fieldNameSelect.disabled = true;
                     } else {
-                        // Populate options
-                        data.fields.forEach(field => {
+                        // Populate options (use Set to remove duplicates)
+                        const uniqueFieldNames = [...new Set(data.fields.map(f => f.field_name))];
+                        uniqueFieldNames.forEach(fieldName => {
                             const option = document.createElement('option');
-                            option.value = field.field_name;
-                            option.textContent = `${field.field_name} - ${field.field_value}`;
+                            option.value = fieldName;
+                            option.textContent = fieldName;
                             fieldNameSelect.appendChild(option);
                         });
 
                         fieldNameSelect.disabled = false;
 
-                        // Restore pre-selected value if in edit mode
+                        // Restore pre-selected value
                         if (preSelectedFieldName && callback) {
                             fieldNameSelect.value = preSelectedFieldName;
                         }
@@ -291,28 +308,26 @@
     }
 
     /**
-     * Event listener: Object Type change
+     * Event listener: Object Type change (create mode only)
      */
-    {% if form_action != 'edit' %}
     objectTypeSelect.addEventListener('change', function() {
         const selectedObjectType = this.value;
         loadFieldNamesByObjectType(selectedObjectType);
     });
-    {% endif %}
 
     /**
-     * Initialize on page load
+     * Initialize on page load (create mode only)
      */
     document.addEventListener('DOMContentLoaded', function() {
-        {% if field_data.object_type %}
-        // Load fields for pre-selected object type (works for both create and edit mode)
-        loadFieldNamesByObjectType(preSelectedObjectType, function() {
-            // Callback after fields are loaded - select the pre-selected field
-            if (preSelectedFieldName) {
-                fieldNameSelect.value = preSelectedFieldName;
-            }
-        });
-        {% endif %}
+        if (preSelectedObjectType) {
+            // Load fields for pre-selected object type
+            loadFieldNamesByObjectType(preSelectedObjectType, function() {
+                // Callback after fields are loaded - select the pre-selected field
+                if (preSelectedFieldName) {
+                    fieldNameSelect.value = preSelectedFieldName;
+                }
+            });
+        }
     });
 })();
 </script>

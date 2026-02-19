@@ -2,18 +2,18 @@
 Lookup Repositories
 
 Exports lookup table repository for dynamic table management.
-Uses backward-compatible impala_manager alias (maps to hive_manager).
+Uses HiveConnectionManager for Hive Managed Tables with ACID support.
 """
 
-from .lookup_kudu_repository import lookup_kudu_repository, LookupKuduRepository
+from .lookup_hive_repository import lookup_hive_repository, LookupHiveRepository
 
 # Backward compatibility aliases
-lookup_hive_repository = lookup_kudu_repository
-LookupHiveRepository = LookupKuduRepository
+lookup_kudu_repository = lookup_hive_repository
+LookupKuduRepository = LookupHiveRepository
 
 __all__ = [
-    'lookup_kudu_repository',
     'lookup_hive_repository',
-    'LookupKuduRepository',
+    'lookup_kudu_repository',
     'LookupHiveRepository',
+    'LookupKuduRepository',
 ]

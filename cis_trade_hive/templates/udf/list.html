@@ -141,14 +141,14 @@
                                             <button type="button"
                                                     class="btn btn-outline-danger"
                                                     title="Delete"
-                                                    onclick="confirmDelete({{ field.udf_id }}, '{{ field.field_value }}')">
+                                                    onclick="confirmDelete('{{ field.udf_id }}', '{{ field.field_value }}')">
                                                 <i class="bi bi-trash"></i>
                                             </button>
                                             {% else %}
                                             <button type="button"
                                                     class="btn btn-outline-success"
                                                     title="Restore"
-                                                    onclick="confirmRestore({{ field.udf_id }}, '{{ field.field_value }}')">
+                                                    onclick="confirmRestore('{{ field.udf_id }}', '{{ field.field_value }}')">
                                                 <i class="bi bi-arrow-counterclockwise"></i>
                                             </button>
                                             {% endif %}

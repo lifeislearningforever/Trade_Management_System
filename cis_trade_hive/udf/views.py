@@ -1,37 +1,27 @@
 """
-UDF Views - Single Table CRUD Operations
-
-Full CRUD flow for cis_udf_field table:
-- List: View all UDF fields with filters
-- Create: Add new UDF field definition
-- Detail: View single UDF field
-- Edit: Update UDF field
-- Delete: Soft delete (sets deleted_at timestamp)
-- Restore: Restore soft-deleted field
+UDF Views - Simplified Free Text Approach
+Clean, focused views following Single Responsibility Principle
 """
 
 import logging
-import json
 from django.shortcuts import render, redirect
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.http import require_http_methods
-from django.contrib import messages
-from django.core.paginator import Paginator
 
-from udf.repositories import udf_field_hive_repository
-from core.audit.audit_hive_repository import audit_hive_repository
+from core.views.auth_views import require_login
+from udf.services.udf_field_service import udf_field_service
 
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
+# ============================================================================
 # HELPER FUNCTIONS
-# =============================================================================
+# ============================================================================
 
-def get_user_info(request: HttpRequest) -> dict:
-    """Extract user information from session."""
+def get_user_info_from_request(request: HttpRequest) -> dict:
+    """Extract user information from request for audit logging."""
     return {
-        'user_id': str(request.session.get('user_id', '')),
+        'user_id': request.session.get('user_id', 0),
         'username': request.session.get('user_login', 'anonymous'),
         'user_email': request.session.get('user_email', ''),
         'ip_address': request.META.get('REMOTE_ADDR', ''),
@@ -39,470 +29,389 @@ def get_user_info(request: HttpRequest) -> dict:
     }
 
 
-class UDFFieldWrapper:
-    """Wrapper to convert dict data to object for template compatibility."""
+# ============================================================================
+# DASHBOARD VIEW
+# ============================================================================
 
-    def __init__(self, data: dict):
-        self.data = data
-        # Map all fields to attributes
-        self.field_id = data.get('field_id', '')
-        self.object_type = data.get('object_type', '')
-        self.field_name = data.get('field_name', '')
-        self.field_label = data.get('field_label', '')
-        self.field_type = data.get('field_type', 'TEXT')
-        self.is_required = data.get('is_required', False)
-        self.default_value = data.get('default_value', '')
-        self.options = data.get('options', '')
-        self.options_list = data.get('options_list', [])
-        self.display_order = data.get('display_order', 100)
-        self.is_active = data.get('is_active', True)
-        self.created_at = data.get('created_at', '')
-        self.created_by = data.get('created_by', '')
-        self.updated_at = data.get('updated_at', '')
-        self.updated_by = data.get('updated_by', '')
-        self.deleted_at = data.get('deleted_at')
-
-        # Template compatibility
-        self.id = self.field_id
-        self.pk = self.field_id
-
-    def get_field_type_display(self):
-        """Get human-readable field type."""
-        type_map = {
-            'TEXT': 'Text',
-            'NUMBER': 'Number',
-            'DATE': 'Date',
-            'BOOLEAN': 'Boolean',
-            'SELECT': 'Dropdown',
-            'MULTISELECT': 'Multi-Select',
-        }
-        return type_map.get(self.field_type, self.field_type)
-
-    def get_object_type_display(self):
-        """Get human-readable object type."""
-        type_map = {
-            'PORTFOLIO': 'Portfolio',
-            'TRADE': 'Trade',
-            'SECURITY': 'Security',
-            'COUNTERPARTY': 'Counterparty',
-        }
-        return type_map.get(self.object_type, self.object_type)
-
-    def is_deleted(self):
-        """Check if field is soft-deleted."""
-        return self.deleted_at is not None
-
-
-# =============================================================================
-# LIST VIEW
-# =============================================================================
-
-def udf_list(request: HttpRequest) -> HttpResponse:
+@require_login
+def udf_dashboard(request: HttpRequest) -> HttpResponse:
     """
-    List all UDF fields with filtering.
+    UDF Dashboard showing entity cards with field statistics.
 
-    Query params:
-    - object_type: Filter by entity type (PORTFOLIO, TRADE, etc.)
-    - status: 'active', 'deleted', or 'all'
-    - search: Search in field_name and field_label
+    Features:
+    - Card view for each entity type (Portfolio, Trade, Comments, etc.)
+    - Shows total fields, active count, inactive count per entity
+    - Quick "Add Field" button
     """
     try:
-        # Get filter parameters
-        object_type = request.GET.get('object_type', '')
-        status_filter = request.GET.get('status', 'active')
-        search = request.GET.get('search', '')
+        # Get statistics from service
+        stats = udf_field_service.get_dashboard_stats()
 
-        # Determine include_deleted based on status
-        if status_filter == 'deleted':
-            fields_data = udf_field_hive_repository.get_deleted_fields(
-                object_type=object_type if object_type else None
-            )
-        elif status_filter == 'all':
-            fields_data = udf_field_hive_repository.get_all_fields(
-                include_deleted=True,
-                object_type=object_type if object_type else None
-            )
-        else:  # active (default)
-            fields_data = udf_field_hive_repository.get_all_fields(
-                include_deleted=False,
-                object_type=object_type if object_type else None
-            )
+        # Get all entity types dynamically from database
+        object_types = udf_field_service.get_object_types()
 
-        # Apply search filter
-        if search:
-            search_lower = search.lower()
-            fields_data = [
-                f for f in fields_data
-                if search_lower in f.get('field_name', '').lower() or
-                   search_lower in f.get('field_label', '').lower()
-            ]
+        # Build stats map
+        stats_map = {stat['object_type']: stat for stat in stats}
 
-        # Wrap in UDFFieldWrapper objects
-        wrapped_fields = [UDFFieldWrapper(f) for f in fields_data]
-
-        # Pagination
-        paginator = Paginator(wrapped_fields, 25)
-        page_number = request.GET.get('page')
-        page_obj = paginator.get_page(page_number)
-
-        # Get object types for filter dropdown
-        object_types = udf_field_hive_repository.ALL_OBJECT_TYPES
+        # Ensure all entity types are present
+        dashboard_stats = []
+        for object_type in object_types:
+            if object_type in stats_map:
+                dashboard_stats.append(stats_map[object_type])
+            else:
+                dashboard_stats.append({
+                    'object_type': object_type,
+                    'total_fields': 0,
+                    'active_fields': 0,
+                    'inactive_fields': 0,
+                })
 
         context = {
-            'page_obj': page_obj,
-            'object_type': object_type,
-            'status_filter': status_filter,
-            'search': search,
-            'total_count': len(fields_data),
-            'object_types': object_types,
-            'field_types': udf_field_hive_repository.ALL_FIELD_TYPES,
+            'stats': dashboard_stats,
+            'page_title': 'UDF Dashboard',
         }
 
-        return render(request, 'udf/udf_list.html', context)
+        return render(request, 'udf/dashboard.html', context)
+
+    except Exception as e:
+        logger.error(f"Error loading UDF dashboard: {str(e)}")
+        return HttpResponse(f"Error loading dashboard: {str(e)}", status=500)
+
+
+# ============================================================================
+# LIST VIEW
+# ============================================================================
+
+@require_login
+def udf_list(request: HttpRequest) -> HttpResponse:
+    """
+    UDF List view with cascading dropdown filters.
+
+    Features:
+    - Filter by object type (dropdown 1)
+    - Filter by field name (dropdown 2 - cascades from object type)
+    - Filter by active/inactive status (dropdown 3)
+    - Actions: Edit, Soft Delete, Restore
+    """
+    try:
+        # Get query parameters
+        object_type_filter = request.GET.get('object_type', '').strip()
+        field_name_filter = request.GET.get('field_name', '').strip()
+        status_filter = request.GET.get('status', 'active')  # active, inactive, all
+
+        # Determine is_active filter
+        is_active = None
+        if status_filter == 'active':
+            is_active = True
+        elif status_filter == 'inactive':
+            is_active = False
+
+        # Get fields from service
+        fields = udf_field_service.get_all_fields(
+            object_type=object_type_filter if object_type_filter else None,
+            is_active=is_active
+        )
+
+        # Apply field_name filter if provided
+        if field_name_filter:
+            fields = [
+                f for f in fields
+                if f['field_name'] == field_name_filter
+            ]
+
+        # Get entity types dynamically
+        object_types = udf_field_service.get_object_types()
+
+        context = {
+            'fields': fields,
+            'object_type_filter': object_type_filter,
+            'field_name_filter': field_name_filter,
+            'status_filter': status_filter,
+            'object_types': object_types,
+            'page_title': 'UDF Fields',
+        }
+
+        return render(request, 'udf/list.html', context)
 
     except Exception as e:
         logger.error(f"Error loading UDF list: {str(e)}")
-        messages.error(request, f"Error loading UDF fields: {str(e)}")
-        return render(request, 'udf/udf_list.html', {'page_obj': [], 'total_count': 0})
+        return HttpResponse(f"Error loading list: {str(e)}", status=500)
 
 
-# =============================================================================
-# DETAIL VIEW
-# =============================================================================
-
-def udf_detail(request: HttpRequest, field_id: str) -> HttpResponse:
-    """View UDF field details."""
-    try:
-        field_data = udf_field_hive_repository.get_field_by_id(field_id)
-
-        if not field_data:
-            messages.error(request, f"UDF field '{field_id}' not found")
-            return redirect('udf:list')
-
-        field = UDFFieldWrapper(field_data)
-
-        context = {
-            'udf': field,
-        }
-
-        return render(request, 'udf/udf_detail.html', context)
-
-    except Exception as e:
-        logger.error(f"Error loading UDF detail: {str(e)}")
-        messages.error(request, f"Error: {str(e)}")
-        return redirect('udf:list')
-
-
-# =============================================================================
+# ============================================================================
 # CREATE VIEW
-# =============================================================================
+# ============================================================================
 
+@require_login
 @require_http_methods(["GET", "POST"])
 def udf_create(request: HttpRequest) -> HttpResponse:
-    """Create new UDF field."""
-    if request.method == 'POST':
-        try:
-            user_info = get_user_info(request)
+    """
+    Create new UDF field.
 
-            # Collect form data
-            data = {
-                'object_type': request.POST.get('object_type', ''),
-                'field_name': request.POST.get('field_name', ''),
-                'field_label': request.POST.get('field_label', ''),
-                'field_type': request.POST.get('field_type', 'TEXT'),
-                'is_required': request.POST.get('is_required') == 'on',
-                'default_value': request.POST.get('default_value', ''),
-                'options': request.POST.get('options', ''),
-                'display_order': int(request.POST.get('display_order', 100)),
-            }
+    GET: Display form (with optional pre-population from URL parameters)
+    POST: Process form and create field
 
-            # Validate required fields
-            if not data['object_type']:
-                messages.error(request, 'Object Type is required')
-                return render(request, 'udf/udf_form.html', {
-                    'form_data': data,
-                    'object_types': udf_field_hive_repository.ALL_OBJECT_TYPES,
-                    'field_types': udf_field_hive_repository.ALL_FIELD_TYPES,
-                })
+    URL Parameters (for pre-population from list page):
+    - object_type: Pre-select object type dropdown
+    - field_name: Pre-select field name dropdown
+    """
+    # Get entity types dynamically
+    object_types = udf_field_service.get_object_types()
 
-            if not data['field_name']:
-                messages.error(request, 'Field Name is required')
-                return render(request, 'udf/udf_form.html', {
-                    'form_data': data,
-                    'object_types': udf_field_hive_repository.ALL_OBJECT_TYPES,
-                    'field_types': udf_field_hive_repository.ALL_FIELD_TYPES,
-                })
+    if request.method == 'GET':
+        # Get URL parameters for pre-population
+        prepopulate_object_type = request.GET.get('object_type', '').strip()
+        prepopulate_field_name = request.GET.get('field_name', '').strip()
 
-            # Create field
-            field_id = udf_field_hive_repository.create_field(data, user_info['username'])
-
-            if field_id:
-                # Audit log
-                audit_hive_repository.log_action(
-                    user_id=user_info['user_id'],
-                    username=user_info['username'],
-                    action='CREATE',
-                    entity_type='UDF',
-                    entity_id=field_id,
-                    new_value=json.dumps(data),
-                    ip_address=user_info['ip_address'],
-                    user_agent=user_info['user_agent']
-                )
-
-                messages.success(request, f"UDF field '{data['field_label'] or data['field_name']}' created successfully")
-                return redirect('udf:detail', field_id=field_id)
-            else:
-                messages.error(request, 'Failed to create UDF field')
-
-        except Exception as e:
-            logger.error(f"Error creating UDF field: {str(e)}")
-            messages.error(request, f"Error: {str(e)}")
-
-    # GET request - show form
-    context = {
-        'object_types': udf_field_hive_repository.ALL_OBJECT_TYPES,
-        'field_types': udf_field_hive_repository.ALL_FIELD_TYPES,
-    }
-
-    return render(request, 'udf/udf_form.html', context)
-
-
-# =============================================================================
-# EDIT VIEW
-# =============================================================================
-
-@require_http_methods(["GET", "POST"])
-def udf_edit(request: HttpRequest, field_id: str) -> HttpResponse:
-    """Edit existing UDF field."""
-    try:
-        field_data = udf_field_hive_repository.get_field_by_id(field_id)
-
-        if not field_data:
-            messages.error(request, f"UDF field '{field_id}' not found")
-            return redirect('udf:list')
-
-        if request.method == 'POST':
-            user_info = get_user_info(request)
-
-            # Collect form data
-            update_data = {
-                'field_label': request.POST.get('field_label', ''),
-                'field_type': request.POST.get('field_type', 'TEXT'),
-                'is_required': request.POST.get('is_required') == 'on',
-                'default_value': request.POST.get('default_value', ''),
-                'options': request.POST.get('options', ''),
-                'display_order': int(request.POST.get('display_order', 100)),
-                'is_active': request.POST.get('is_active') == 'on',
-            }
-
-            # Update field
-            old_data = {k: v for k, v in field_data.items() if k in update_data}
-
-            if udf_field_hive_repository.update_field(field_id, update_data, user_info['username']):
-                # Audit log
-                audit_hive_repository.log_action(
-                    user_id=user_info['user_id'],
-                    username=user_info['username'],
-                    action='UPDATE',
-                    entity_type='UDF',
-                    entity_id=field_id,
-                    old_value=json.dumps(old_data),
-                    new_value=json.dumps(update_data),
-                    ip_address=user_info['ip_address'],
-                    user_agent=user_info['user_agent']
-                )
-
-                messages.success(request, f"UDF field updated successfully")
-                return redirect('udf:detail', field_id=field_id)
-            else:
-                messages.error(request, 'Failed to update UDF field')
-
-        # Show form with existing data
-        field = UDFFieldWrapper(field_data)
+        # Build field_data for pre-population
+        field_data = {}
+        if prepopulate_object_type:
+            field_data['object_type'] = prepopulate_object_type
+        if prepopulate_field_name:
+            field_data['field_name'] = prepopulate_field_name
 
         context = {
-            'udf': field,
-            'form_data': field_data,
-            'object_types': udf_field_hive_repository.ALL_OBJECT_TYPES,
-            'field_types': udf_field_hive_repository.ALL_FIELD_TYPES,
-            'is_edit': True,
+            'object_types': object_types,
+            'page_title': 'Create UDF Field',
+            'form_action': 'create',
+            'field_data': field_data if field_data else None,
+        }
+        return render(request, 'udf/form.html', context)
+
+    # POST - Process form
+    try:
+        user_info = get_user_info_from_request(request)
+
+        field_data = {
+            'field_name': request.POST.get('field_name', '').strip(),
+            'field_value': request.POST.get('field_value', '').strip(),
+            'object_type': request.POST.get('object_type', '').strip(),
         }
 
-        return render(request, 'udf/udf_form.html', context)
+        # Create via service
+        success, error_msg, udf_id = udf_field_service.create_field(field_data, user_info)
+
+        if success:
+            logger.info(f"UDF field created successfully: {udf_id}")
+            return redirect('udf:list')
+
+        # Show error
+        context = {
+            'object_types': object_types,
+            'page_title': 'Create UDF Field',
+            'form_action': 'create',
+            'error': error_msg,
+            'field_data': field_data,  # Pre-fill form
+        }
+        return render(request, 'udf/form.html', context)
 
     except Exception as e:
-        logger.error(f"Error editing UDF field: {str(e)}")
-        messages.error(request, f"Error: {str(e)}")
-        return redirect('udf:list')
+        logger.error(f"Error creating UDF field: {str(e)}")
+        context = {
+            'object_types': object_types,
+            'page_title': 'Create UDF Field',
+            'form_action': 'create',
+            'error': f"System error: {str(e)}",
+        }
+        return render(request, 'udf/form.html', context)
 
 
-# =============================================================================
-# DELETE VIEW (Soft Delete)
-# =============================================================================
+# ============================================================================
+# EDIT VIEW
+# ============================================================================
 
-@require_http_methods(["POST"])
-def udf_delete(request: HttpRequest, field_id: str) -> HttpResponse:
-    """Soft delete UDF field."""
+@require_login
+@require_http_methods(["GET", "POST"])
+def udf_edit(request: HttpRequest, udf_id: str) -> HttpResponse:
+    """
+    Edit existing UDF field.
+
+    GET: Display form with existing data
+    POST: Process form and update field
+    """
+    # Get existing field
+    field = udf_field_service.get_field_by_id(udf_id)
+    if not field:
+        return HttpResponse(f"UDF field {udf_id} not found", status=404)
+
+    # Get entity types dynamically
+    object_types = udf_field_service.get_object_types()
+
+    if request.method == 'GET':
+        context = {
+            'object_types': object_types,
+            'page_title': 'Edit UDF Field',
+            'form_action': 'edit',
+            'udf_id': udf_id,
+            'field_data': field,
+        }
+        return render(request, 'udf/form.html', context)
+
+    # POST - Process form
     try:
-        user_info = get_user_info(request)
+        user_info = get_user_info_from_request(request)
 
-        # Get field data before delete
-        field_data = udf_field_hive_repository.get_field_by_id(field_id)
+        field_data = {
+            'field_name': request.POST.get('field_name', '').strip(),
+            'field_value': request.POST.get('field_value', '').strip(),
+            'object_type': request.POST.get('object_type', '').strip(),
+            'is_active': request.POST.get('is_active') == 'on',
+        }
 
-        if not field_data:
-            messages.error(request, f"UDF field '{field_id}' not found")
+        # Update via service
+        success, error_msg = udf_field_service.update_field(udf_id, field_data, user_info)
+
+        if success:
+            logger.info(f"UDF field updated successfully: {udf_id}")
             return redirect('udf:list')
 
-        if field_data.get('deleted_at'):
-            messages.warning(request, 'Field is already deleted')
+        # Show error
+        context = {
+            'object_types': object_types,
+            'page_title': 'Edit UDF Field',
+            'form_action': 'edit',
+            'udf_id': udf_id,
+            'error': error_msg,
+            'field_data': field_data,  # Pre-fill form with submitted data
+        }
+        return render(request, 'udf/form.html', context)
+
+    except Exception as e:
+        logger.error(f"Error updating UDF field: {str(e)}")
+        context = {
+            'object_types': object_types,
+            'page_title': 'Edit UDF Field',
+            'form_action': 'edit',
+            'udf_id': udf_id,
+            'error': f"System error: {str(e)}",
+            'field_data': field,
+        }
+        return render(request, 'udf/form.html', context)
+
+
+# ============================================================================
+# DELETE VIEW (Soft Delete)
+# ============================================================================
+
+@require_login
+@require_http_methods(["POST"])
+def udf_delete(request: HttpRequest, udf_id: str) -> HttpResponse:
+    """
+    Soft delete UDF field (sets is_active = false).
+
+    POST only - requires confirmation from UI
+    """
+    try:
+        user_info = get_user_info_from_request(request)
+
+        # Delete via service
+        success, error_msg = udf_field_service.delete_field(udf_id, user_info)
+
+        if success:
+            logger.info(f"UDF field soft deleted: {udf_id}")
             return redirect('udf:list')
 
-        # Soft delete
-        if udf_field_hive_repository.delete_field(field_id, user_info['username']):
-            # Audit log
-            audit_hive_repository.log_action(
-                user_id=user_info['user_id'],
-                username=user_info['username'],
-                action='DELETE',
-                entity_type='UDF',
-                entity_id=field_id,
-                old_value=json.dumps({
-                    'field_name': field_data.get('field_name'),
-                    'field_label': field_data.get('field_label'),
-                    'object_type': field_data.get('object_type'),
-                }),
-                ip_address=user_info['ip_address'],
-                user_agent=user_info['user_agent']
-            )
-
-            messages.success(request, f"UDF field '{field_data.get('field_label') or field_data.get('field_name')}' deleted successfully")
-        else:
-            messages.error(request, 'Failed to delete UDF field')
+        return HttpResponse(f"Error deleting field: {error_msg}", status=400)
 
     except Exception as e:
         logger.error(f"Error deleting UDF field: {str(e)}")
-        messages.error(request, f"Error: {str(e)}")
-
-    return redirect('udf:list')
+        return HttpResponse(f"Error: {str(e)}", status=500)
 
 
-# =============================================================================
+# ============================================================================
 # RESTORE VIEW
-# =============================================================================
+# ============================================================================
 
+@require_login
 @require_http_methods(["POST"])
-def udf_restore(request: HttpRequest, field_id: str) -> HttpResponse:
-    """Restore soft-deleted UDF field."""
+def udf_restore(request: HttpRequest, udf_id: str) -> HttpResponse:
+    """
+    Restore soft-deleted UDF field (sets is_active = true).
+
+    POST only - requires confirmation from UI
+    """
     try:
-        user_info = get_user_info(request)
+        user_info = get_user_info_from_request(request)
 
-        # Get field data
-        field_data = udf_field_hive_repository.get_field_by_id(field_id)
+        # Restore via service
+        success, error_msg = udf_field_service.restore_field(udf_id, user_info)
 
-        if not field_data:
-            messages.error(request, f"UDF field '{field_id}' not found")
+        if success:
+            logger.info(f"UDF field restored: {udf_id}")
             return redirect('udf:list')
 
-        if not field_data.get('deleted_at'):
-            messages.warning(request, 'Field is not deleted')
-            return redirect('udf:detail', field_id=field_id)
-
-        # Restore
-        if udf_field_hive_repository.restore_field(field_id, user_info['username']):
-            # Audit log
-            audit_hive_repository.log_action(
-                user_id=user_info['user_id'],
-                username=user_info['username'],
-                action='RESTORE',
-                entity_type='UDF',
-                entity_id=field_id,
-                new_value=json.dumps({
-                    'field_name': field_data.get('field_name'),
-                    'field_label': field_data.get('field_label'),
-                    'object_type': field_data.get('object_type'),
-                    'restored': True
-                }),
-                ip_address=user_info['ip_address'],
-                user_agent=user_info['user_agent']
-            )
-
-            messages.success(request, f"UDF field '{field_data.get('field_label') or field_data.get('field_name')}' restored successfully")
-            return redirect('udf:detail', field_id=field_id)
-        else:
-            messages.error(request, 'Failed to restore UDF field')
+        return HttpResponse(f"Error restoring field: {error_msg}", status=400)
 
     except Exception as e:
         logger.error(f"Error restoring UDF field: {str(e)}")
-        messages.error(request, f"Error: {str(e)}")
-
-    return redirect('udf:list')
+        return HttpResponse(f"Error: {str(e)}", status=500)
 
 
-# =============================================================================
-# STATISTICS VIEW
-# =============================================================================
+# ============================================================================
+# API ENDPOINTS (For AJAX operations and cascading dropdowns)
+# ============================================================================
 
-def udf_statistics(request: HttpRequest) -> HttpResponse:
-    """View UDF statistics dashboard."""
-    try:
-        stats = udf_field_hive_repository.get_statistics()
-
-        context = {
-            'stats': stats,
-        }
-
-        return render(request, 'udf/udf_statistics.html', context)
-
-    except Exception as e:
-        logger.error(f"Error loading UDF statistics: {str(e)}")
-        messages.error(request, f"Error: {str(e)}")
-        return render(request, 'udf/udf_statistics.html', {'stats': {}})
-
-
-# =============================================================================
-# API ENDPOINTS
-# =============================================================================
-
-def api_get_fields_by_object_type(request: HttpRequest, object_type: str) -> JsonResponse:
-    """API: Get all fields for an object type."""
-    try:
-        fields = udf_field_hive_repository.get_fields_by_object_type(object_type)
-        return JsonResponse({
-            'success': True,
-            'fields': fields,
-            'count': len(fields)
-        })
-    except Exception as e:
-        return JsonResponse({'success': False, 'error': str(e)}, status=500)
-
-
-def api_get_field(request: HttpRequest, field_id: str) -> JsonResponse:
-    """API: Get single field by ID."""
-    try:
-        field = udf_field_hive_repository.get_field_by_id(field_id)
-        if field:
-            return JsonResponse({'success': True, 'field': field})
-        return JsonResponse({'success': False, 'error': 'Field not found'}, status=404)
-    except Exception as e:
-        return JsonResponse({'success': False, 'error': str(e)}, status=500)
-
-
+@require_login
+@require_http_methods(["GET"])
 def api_get_object_types(request: HttpRequest) -> JsonResponse:
-    """API: Get all available object types."""
+    """
+    API endpoint to get all entity types for first dropdown.
+
+    Used for cascading dropdown: First level (Entity Type selection).
+
+    Returns:
+        JSON with success flag and object_types array
+    """
     try:
-        object_types = udf_field_hive_repository.get_object_types()
-        # If no types in DB, return defaults
-        if not object_types:
-            object_types = udf_field_hive_repository.ALL_OBJECT_TYPES
+        object_types = udf_field_service.get_object_types()
         return JsonResponse({'success': True, 'object_types': object_types})
+
     except Exception as e:
+        logger.error(f"Error fetching entity types: {str(e)}")
         return JsonResponse({'success': False, 'error': str(e)}, status=500)
 
 
-def api_get_statistics(request: HttpRequest) -> JsonResponse:
-    """API: Get UDF statistics."""
+@require_login
+@require_http_methods(["GET"])
+def api_get_fields_by_entity(request: HttpRequest, object_type: str) -> JsonResponse:
+    """
+    API endpoint to get all fields for a specific entity type.
+
+    Used for cascading dropdown: Second level (Field Name selection based on Entity Type).
+
+    Args:
+        object_type: Entity type to filter by (e.g., PORTFOLIO, EQUITY_PRICE, SECURITY)
+
+    Returns:
+        JSON with success flag and fields array (each field has field_name, field_value, udf_id, etc.)
+    """
     try:
-        stats = udf_field_hive_repository.get_statistics()
-        return JsonResponse({'success': True, 'stats': stats})
+        fields = udf_field_service.get_fields_by_entity(object_type.upper())
+        return JsonResponse({'success': True, 'fields': fields})
+
     except Exception as e:
+        logger.error(f"Error fetching fields for entity {object_type}: {str(e)}")
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+@require_login
+@require_http_methods(["GET"])
+def udf_get_fields_by_entity(request: HttpRequest, object_type: str) -> JsonResponse:
+    """
+    Legacy API endpoint to get all active fields for a specific entity type.
+
+    DEPRECATED: Use api_get_fields_by_entity instead.
+    Kept for backward compatibility with existing modules.
+
+    Used by other modules (Portfolio, Trade, etc.) to fetch UDF fields dynamically.
+
+    Returns:
+        JSON array of field objects
+    """
+    try:
+        fields = udf_field_service.get_all_fields(object_type=object_type.upper(), is_active=True)
+        return JsonResponse({'success': True, 'fields': fields})
+
+    except Exception as e:
+        logger.error(f"Error fetching fields for entity {object_type}: {str(e)}")
         return JsonResponse({'success': False, 'error': str(e)}, status=500)

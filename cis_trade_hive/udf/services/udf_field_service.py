@@ -18,7 +18,7 @@ from datetime import datetime
 import logging
 
 from udf.repositories.udf_field_repository import udf_field_repository, UDFFieldRepositoryInterface
-from core.audit.audit_kudu_repository import audit_log_kudu_repository
+from core.audit.audit_hive_repository import audit_log_repository
 
 logger = logging.getLogger(__name__)
 
@@ -89,18 +89,18 @@ class UDFFieldService:
             logger.error(f"Service error getting UDF fields: {str(e)}")
             return []
 
-    def get_field_by_id(self, udf_id: int) -> Optional[Dict[str, Any]]:
+    def get_field_by_id(self, udf_id: str) -> Optional[Dict[str, Any]]:
         """
         Get UDF field by ID.
 
         Args:
-            udf_id: UDF field ID
+            udf_id: UDF field ID (string)
 
         Returns:
             UDF field dictionary or None
         """
         try:
-            return self.repository.get_by_id(udf_id)
+            return self.repository.get_by_id(str(udf_id))
         except Exception as e:
             logger.error(f"Service error getting UDF field {udf_id}: {str(e)}")
             return None
@@ -122,7 +122,7 @@ class UDFFieldService:
     # VALIDATION
     # ========================================================================
 
-    def validate_field_data(self, field_data: Dict[str, Any], udf_id: Optional[int] = None) -> tuple[bool, Optional[str]]:
+    def validate_field_data(self, field_data: Dict[str, Any], udf_id: Optional[str] = None) -> tuple[bool, Optional[str]]:
         """
         Validate UDF field data.
 
@@ -153,10 +153,12 @@ class UDFFieldService:
 
         # Update field_data with stripped values
         field_data['field_name'] = field_name
-        field_data['field_value'] = field_data['field_value'].strip()
+        field_value = field_data['field_value'].strip()
+        field_data['field_value'] = field_value
         field_data['object_type'] = field_data['object_type'].upper()
 
-        # Check uniqueness of (object_type, field_name) combination
+        # Check uniqueness of (object_type, field_name, field_value) combination
+        # Multiple field_values are allowed per field_name (dropdown options)
         existing_fields = self.repository.get_all(object_type=field_data['object_type'], is_active=True)
 
         for existing in existing_fields:
@@ -168,10 +170,11 @@ class UDFFieldService:
             if not existing.get('field_value'):
                 continue
 
-            # Check if combination already exists
+            # Check if exact combination already exists (same field_name AND field_value)
             if (existing.get('object_type') == field_data['object_type'] and
-                existing.get('field_name') == field_name):
-                return False, f"Field Name '{field_name}' already exists for entity type '{field_data['object_type']}'"
+                existing.get('field_name') == field_name and
+                existing.get('field_value') == field_value):
+                return False, f"Value '{field_value}' already exists for field '{field_name}' in '{field_data['object_type']}'"
 
         return True, None
 
@@ -210,20 +213,15 @@ class UDFFieldService:
 
             if udf_id:
                 # Log to audit
-                audit_log_kudu_repository.log_action(
+                audit_log_repository.log_action(
                     user_id=str(user_info['user_id']),
                     username=user_info['username'],
-                    user_email=user_info.get('user_email', ''),
-                    action_type='CREATE',
-                    object_type='UDF',
-                    entity_name=create_data['field_value'],
+                    action='CREATE',
+                    entity_type='UDF',
                     entity_id=str(udf_id),
-                    action_description=f"Created UDF field '{create_data['field_value']}' ({create_data['field_name']}) for {create_data['object_type']}",
-                    request_method='POST',
-                    request_path='/udf/create/',
+                    new_value=f"Created UDF field '{create_data['field_value']}' ({create_data['field_name']}) for {create_data['object_type']}",
                     ip_address=user_info.get('ip_address', ''),
-                    user_agent=user_info.get('user_agent', ''),
-                    status='SUCCESS'
+                    user_agent=user_info.get('user_agent', '')
                 )
 
                 logger.info(f"Created UDF field: {create_data['field_name']} (ID: {udf_id})")
@@ -240,12 +238,12 @@ class UDFFieldService:
     # UPDATE OPERATION
     # ========================================================================
 
-    def update_field(self, udf_id: int, field_data: Dict[str, Any], user_info: Dict[str, Any]) -> tuple[bool, Optional[str]]:
+    def update_field(self, udf_id: str, field_data: Dict[str, Any], user_info: Dict[str, Any]) -> tuple[bool, Optional[str]]:
         """
         Update existing UDF field with validation and audit logging.
 
         Args:
-            udf_id: UDF field ID to update
+            udf_id: UDF field ID to update (string)
             field_data: Dictionary with object_type, field_name, field_value, is_active
             user_info: Dictionary with user_id, username, user_email
 
@@ -253,6 +251,8 @@ class UDFFieldService:
             Tuple of (success, error_message)
         """
         try:
+            udf_id = str(udf_id)
+
             # Check if field exists
             existing = self.repository.get_by_id(udf_id)
             if not existing:
@@ -270,30 +270,30 @@ class UDFFieldService:
                 'field_name': field_data['field_name'],
                 'field_value': field_data['field_value'],
                 'is_active': field_data.get('is_active', True),
-                'created_by': existing['created_by'],
-                'created_at': existing['created_at'],
+                'created_by': existing.get('created_by', user_info['username']),
+                'created_at': existing.get('created_at'),
                 'updated_by': user_info['username'],
             }
 
             # Update in repository
-            success = self.repository.update(udf_id, update_data)
+            success = self.repository.update(
+                existing['object_type'],
+                existing['field_name'],
+                existing['field_value'],
+                update_data
+            )
 
             if success:
                 # Log to audit
-                audit_log_kudu_repository.log_action(
+                audit_log_repository.log_action(
                     user_id=str(user_info['user_id']),
                     username=user_info['username'],
-                    user_email=user_info.get('user_email', ''),
-                    action_type='UPDATE',
-                    object_type='UDF',
-                    entity_name=update_data['field_value'],
+                    action='UPDATE',
+                    entity_type='UDF',
                     entity_id=str(udf_id),
-                    action_description=f"Updated UDF field '{update_data['field_value']}' ({update_data['field_name']}) for {update_data['object_type']}",
-                    request_method='POST',
-                    request_path=f'/udf/{udf_id}/edit/',
+                    new_value=f"Updated UDF field '{update_data['field_value']}' ({update_data['field_name']}) for {update_data['object_type']}",
                     ip_address=user_info.get('ip_address', ''),
-                    user_agent=user_info.get('user_agent', ''),
-                    status='SUCCESS'
+                    user_agent=user_info.get('user_agent', '')
                 )
 
                 logger.info(f"Updated UDF field: {update_data['field_name']} (ID: {udf_id})")
@@ -310,18 +310,20 @@ class UDFFieldService:
     # DELETE OPERATION (Soft Delete)
     # ========================================================================
 
-    def delete_field(self, udf_id: int, user_info: Dict[str, Any]) -> tuple[bool, Optional[str]]:
+    def delete_field(self, udf_id: str, user_info: Dict[str, Any]) -> tuple[bool, Optional[str]]:
         """
         Soft delete UDF field with audit logging.
 
         Args:
-            udf_id: UDF field ID to delete
+            udf_id: UDF field ID to delete (string)
             user_info: Dictionary with user_id, username, user_email
 
         Returns:
             Tuple of (success, error_message)
         """
         try:
+            udf_id = str(udf_id)
+
             # Check if field exists
             existing = self.repository.get_by_id(udf_id)
             if not existing:
@@ -335,23 +337,18 @@ class UDFFieldService:
 
             if success:
                 # Log to audit
-                audit_log_kudu_repository.log_action(
+                audit_log_repository.log_action(
                     user_id=str(user_info['user_id']),
                     username=user_info['username'],
-                    user_email=user_info.get('user_email', ''),
-                    action_type='DELETE',
-                    object_type='UDF',
-                    entity_name=existing['field_value'],
+                    action='DELETE',
+                    entity_type='UDF',
                     entity_id=str(udf_id),
-                    action_description=f"Deleted UDF field '{existing['field_value']}' ({existing['field_name']}) for {existing['object_type']}",
-                    request_method='POST',
-                    request_path=f'/udf/{udf_id}/delete/',
+                    old_value=f"Deleted UDF field '{existing.get('field_value', '')}' ({existing.get('field_name', '')}) for {existing.get('object_type', '')}",
                     ip_address=user_info.get('ip_address', ''),
-                    user_agent=user_info.get('user_agent', ''),
-                    status='SUCCESS'
+                    user_agent=user_info.get('user_agent', '')
                 )
 
-                logger.info(f"Deleted UDF field: {existing['field_name']} (ID: {udf_id})")
+                logger.info(f"Deleted UDF field: {existing.get('field_name', '')} (ID: {udf_id})")
                 return True, None
 
             return False, "Failed to delete UDF field in database"
@@ -365,18 +362,20 @@ class UDFFieldService:
     # RESTORE OPERATION
     # ========================================================================
 
-    def restore_field(self, udf_id: int, user_info: Dict[str, Any]) -> tuple[bool, Optional[str]]:
+    def restore_field(self, udf_id: str, user_info: Dict[str, Any]) -> tuple[bool, Optional[str]]:
         """
         Restore soft-deleted UDF field with audit logging.
 
         Args:
-            udf_id: UDF field ID to restore
+            udf_id: UDF field ID to restore (string)
             user_info: Dictionary with user_id, username, user_email
 
         Returns:
             Tuple of (success, error_message)
         """
         try:
+            udf_id = str(udf_id)
+
             # Check if field exists
             existing = self.repository.get_by_id(udf_id)
             if not existing:
@@ -390,23 +389,18 @@ class UDFFieldService:
 
             if success:
                 # Log to audit
-                audit_log_kudu_repository.log_action(
+                audit_log_repository.log_action(
                     user_id=str(user_info['user_id']),
                     username=user_info['username'],
-                    user_email=user_info.get('user_email', ''),
-                    action_type='RESTORE',
-                    object_type='UDF',
-                    entity_name=existing['field_value'],
+                    action='RESTORE',
+                    entity_type='UDF',
                     entity_id=str(udf_id),
-                    action_description=f"Restored UDF field '{existing['field_value']}' ({existing['field_name']}) for {existing['object_type']}",
-                    request_method='POST',
-                    request_path=f'/udf/{udf_id}/restore/',
+                    new_value=f"Restored UDF field '{existing.get('field_value', '')}' ({existing.get('field_name', '')}) for {existing.get('object_type', '')}",
                     ip_address=user_info.get('ip_address', ''),
-                    user_agent=user_info.get('user_agent', ''),
-                    status='SUCCESS'
+                    user_agent=user_info.get('user_agent', '')
                 )
 
-                logger.info(f"Restored UDF field: {existing['field_name']} (ID: {udf_id})")
+                logger.info(f"Restored UDF field: {existing.get('field_name', '')} (ID: {udf_id})")
                 return True, None
 
             return False, "Failed to restore UDF field in database"
