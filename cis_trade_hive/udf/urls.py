@@ -1,5 +1,9 @@
 """
 UDF URL Configuration
+
+Single table CRUD operations for cis_udf_field:
+- List, Create, Detail, Edit, Delete, Restore
+- API endpoints for AJAX operations
 """
 
 from django.urls import path
@@ -8,23 +12,20 @@ from . import views
 app_name = 'udf'
 
 urlpatterns = [
-    # UDF Definition URLs
+    # UDF Field CRUD
     path('', views.udf_list, name='list'),
     path('create/', views.udf_create, name='create'),
-    path('<str:field_name>/', views.udf_detail, name='detail'),
-    path('<str:field_name>/edit/', views.udf_edit, name='edit'),
-    path('<str:field_name>/delete/', views.udf_delete, name='delete'),
+    path('<str:field_id>/', views.udf_detail, name='detail'),
+    path('<str:field_id>/edit/', views.udf_edit, name='edit'),
+    path('<str:field_id>/delete/', views.udf_delete, name='delete'),
+    path('<str:field_id>/restore/', views.udf_restore, name='restore'),
 
-    # UDF Value Management URLs
-    path('values/<str:entity_type>/<int:entity_id>/', views.entity_udf_values, name='entity_values'),
-    path('values/<str:entity_type>/<int:entity_id>/history/', views.udf_value_history, name='value_history'),
+    # Statistics Dashboard
+    path('dashboard/statistics/', views.udf_statistics, name='statistics'),
 
-    # UDF Option Management URLs
-    path('<str:field_name>/options/toggle/', views.udf_option_toggle, name='option_toggle'),
-    path('<str:field_name>/options/add/', views.udf_option_add, name='option_add'),
-
-    # AJAX URLs
-    path('ajax/values/<str:entity_type>/<int:entity_id>/', views.ajax_get_entity_udf_values, name='ajax_get_values'),
-    path('ajax/validate/', views.ajax_validate_udf_values, name='ajax_validate'),
-    path('ajax/dropdown-options/<str:field_name>/', views.ajax_get_dropdown_options, name='ajax_dropdown_options'),
+    # API Endpoints
+    path('api/object-types/', views.api_get_object_types, name='api_object_types'),
+    path('api/fields/<str:object_type>/', views.api_get_fields_by_object_type, name='api_fields_by_type'),
+    path('api/field/<str:field_id>/', views.api_get_field, name='api_field'),
+    path('api/statistics/', views.api_get_statistics, name='api_statistics'),
 ]

@@ -1,14 +1,21 @@
 """
-UDF (User-Defined Fields) Hive Repository (ORC + ACID)
+UDF (User-Defined Fields) Hive Repository
 
-Data access layer for UDF fields and values in Hive managed tables.
-Allows dynamic field extension for any entity type.
+Single table repository for cis_udf_field with full CRUD operations:
+- Create: Add new UDF field definition
+- Read: Get field by ID, list all fields, filter by object_type
+- Update: Modify field attributes
+- Soft Delete: Set deleted_at timestamp
+- Restore: Clear deleted_at timestamp
+
+Field Types: TEXT, NUMBER, DATE, BOOLEAN, SELECT, MULTISELECT
+Object Types: PORTFOLIO, TRADE, SECURITY, COUNTERPARTY
 """
 
 import logging
+import json
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-import json
 
 from core.repositories.hive_connection import hive_manager
 from core.repositories.hive_base_repository import HiveBaseRepository
@@ -16,34 +23,12 @@ from core.repositories.hive_base_repository import HiveBaseRepository
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# HIVE CONNECTION (Backward compatibility)
-# =============================================================================
-
-class HiveConnection:
-    """Manages Hive database connections for UDF module."""
-
-    DATABASE = 'gmp_cis'
-
-    @staticmethod
-    def execute_query(query: str) -> List[Dict[str, Any]]:
-        """Execute a Hive query and return results as list of dictionaries."""
-        try:
-            results = hive_manager.execute_query(query, database=HiveConnection.DATABASE)
-            logger.info(f"Query returned {len(results) if results else 0} rows")
-            return results if results else []
-        except Exception as e:
-            logger.error(f"Error executing query: {str(e)}")
-            logger.error(f"Query: {query}")
-            raise
-
-
-# =============================================================================
-# UDF FIELD REPOSITORY
-# =============================================================================
-
 class UDFFieldHiveRepository(HiveBaseRepository):
-    """Repository for UDF field definitions with Hive managed tables."""
+    """
+    Repository for UDF field definitions with Hive managed tables.
+
+    Provides full CRUD operations including soft delete and restore.
+    """
 
     # Field Types
     FIELD_TYPE_TEXT = 'TEXT'
@@ -85,91 +70,29 @@ class UDFFieldHiveRepository(HiveBaseRepository):
             'created_at', 'created_by', 'updated_at', 'updated_by', 'deleted_at'
         ]
 
-    def get_fields_by_object_type(
-        self,
-        object_type: str,
-        include_inactive: bool = False
-    ) -> List[Dict[str, Any]]:
-        """Get all UDF fields for a specific object type."""
-        try:
-            where_clauses = [
-                f"object_type = '{object_type}'",
-                "deleted_at IS NULL"
-            ]
-
-            if not include_inactive:
-                where_clauses.append("is_active = TRUE")
-
-            where_clause = " AND ".join(where_clauses)
-
-            query = f"""
-                SELECT *
-                FROM {self._get_full_table_name()}
-                WHERE {where_clause}
-            """
-
-            results = self.conn_manager.execute_query(query, database=self.database)
-
-            # Sort by display_order
-            if results:
-                results.sort(key=lambda x: x.get('display_order', 999))
-
-            return results if results else []
-
-        except Exception as e:
-            logger.error(f"Error fetching UDF fields for {object_type}: {str(e)}")
-            return []
-
-    def get_all_fields(self, include_inactive: bool = False) -> List[Dict[str, Any]]:
-        """Get all UDF fields."""
-        try:
-            where_clause = "deleted_at IS NULL"
-            if not include_inactive:
-                where_clause += " AND is_active = TRUE"
-
-            query = f"""
-                SELECT *
-                FROM {self._get_full_table_name()}
-                WHERE {where_clause}
-            """
-
-            results = self.conn_manager.execute_query(query, database=self.database)
-
-            # Sort by object_type then display_order
-            if results:
-                results.sort(key=lambda x: (x.get('object_type', ''), x.get('display_order', 999)))
-
-            return results if results else []
-
-        except Exception as e:
-            logger.error(f"Error fetching all UDF fields: {str(e)}")
-            return []
-
-    def get_field_by_id(self, field_id: str) -> Optional[Dict[str, Any]]:
-        """Get UDF field by ID."""
-        return self.find_by_id(field_id)
-
-    def get_field_by_name(self, object_type: str, field_name: str) -> Optional[Dict[str, Any]]:
-        """Get UDF field by object type and field name."""
-        try:
-            field_name_escaped = field_name.replace("'", "''")
-            query = f"""
-                SELECT *
-                FROM {self._get_full_table_name()}
-                WHERE object_type = '{object_type}'
-                  AND field_name = '{field_name_escaped}'
-                  AND deleted_at IS NULL
-                LIMIT 1
-            """
-            results = self.conn_manager.execute_query(query, database=self.database)
-            return results[0] if results else None
-
-        except Exception as e:
-            logger.error(f"Error fetching UDF field by name: {str(e)}")
-            return None
+    # =========================================================================
+    # CREATE
+    # =========================================================================
 
     def create_field(self, data: Dict[str, Any], created_by: str) -> Optional[str]:
-        """Create a new UDF field definition."""
+        """
+        Create a new UDF field definition.
+
+        Args:
+            data: Dictionary with field data
+                - object_type: Entity type (PORTFOLIO, TRADE, etc.)
+                - field_name: Technical field name
+                - field_label: Display label
+                - field_type: Field type (TEXT, NUMBER, etc.)
+                - is_required: Whether field is required (default: False)
+                - default_value: Default value (optional)
+                - options: List of options for SELECT/MULTISELECT (optional)
+                - display_order: Display order (default: 100)
+            created_by: Username of creator
+
+        Returns:
+            field_id if successful, None otherwise
+        """
         try:
             field_id = self._generate_id('UDF')
             now = datetime.now()
@@ -178,12 +101,19 @@ class UDFFieldHiveRepository(HiveBaseRepository):
             options = data.get('options')
             if options and isinstance(options, list):
                 options = json.dumps(options)
+            elif options and isinstance(options, str):
+                # Already a string, validate it's valid JSON or convert
+                try:
+                    json.loads(options)
+                except json.JSONDecodeError:
+                    # Convert comma-separated to JSON
+                    options = json.dumps([opt.strip() for opt in options.split(',') if opt.strip()])
 
             record = {
                 'field_id': field_id,
-                'object_type': data.get('object_type'),
-                'field_name': data.get('field_name'),
-                'field_label': data.get('field_label'),
+                'object_type': data.get('object_type', '').upper(),
+                'field_name': data.get('field_name', ''),
+                'field_label': data.get('field_label', ''),
                 'field_type': data.get('field_type', self.FIELD_TYPE_TEXT),
                 'is_required': data.get('is_required', False),
                 'default_value': data.get('default_value'),
@@ -206,9 +136,165 @@ class UDFFieldHiveRepository(HiveBaseRepository):
             logger.error(f"Error creating UDF field: {str(e)}")
             return None
 
-    def update_field(self, field_id: str, data: Dict[str, Any],
-                    updated_by: str) -> bool:
-        """Update UDF field definition."""
+    # =========================================================================
+    # READ
+    # =========================================================================
+
+    def get_field_by_id(self, field_id: str) -> Optional[Dict[str, Any]]:
+        """Get UDF field by ID (including soft-deleted)."""
+        try:
+            query = f"""
+                SELECT *
+                FROM {self._get_full_table_name()}
+                WHERE field_id = '{field_id}'
+                LIMIT 1
+            """
+            results = self.conn_manager.execute_query(query, database=self.database)
+            if results:
+                return self._parse_options(results[0])
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching UDF field {field_id}: {str(e)}")
+            return None
+
+    def get_fields_by_object_type(
+        self,
+        object_type: str,
+        include_deleted: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all UDF fields for a specific object type.
+
+        Args:
+            object_type: Entity type to filter by
+            include_deleted: Whether to include soft-deleted fields
+
+        Returns:
+            List of field dictionaries sorted by display_order
+        """
+        try:
+            where_clauses = [f"object_type = '{object_type.upper()}'"]
+
+            if not include_deleted:
+                where_clauses.append("deleted_at IS NULL")
+
+            where_clause = " AND ".join(where_clauses)
+
+            query = f"""
+                SELECT *
+                FROM {self._get_full_table_name()}
+                WHERE {where_clause}
+                ORDER BY display_order, field_name
+            """
+
+            results = self.conn_manager.execute_query(query, database=self.database)
+            return [self._parse_options(r) for r in (results or [])]
+
+        except Exception as e:
+            logger.error(f"Error fetching UDF fields for {object_type}: {str(e)}")
+            return []
+
+    def get_all_fields(
+        self,
+        include_deleted: bool = False,
+        object_type: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all UDF fields with optional filters.
+
+        Args:
+            include_deleted: Whether to include soft-deleted fields
+            object_type: Optional filter by object type
+
+        Returns:
+            List of field dictionaries
+        """
+        try:
+            where_clauses = []
+
+            if not include_deleted:
+                where_clauses.append("deleted_at IS NULL")
+
+            if object_type:
+                where_clauses.append(f"object_type = '{object_type.upper()}'")
+
+            where_clause = " AND ".join(where_clauses) if where_clauses else "1=1"
+
+            query = f"""
+                SELECT *
+                FROM {self._get_full_table_name()}
+                WHERE {where_clause}
+                ORDER BY object_type, display_order, field_name
+            """
+
+            results = self.conn_manager.execute_query(query, database=self.database)
+            return [self._parse_options(r) for r in (results or [])]
+
+        except Exception as e:
+            logger.error(f"Error fetching all UDF fields: {str(e)}")
+            return []
+
+    def get_deleted_fields(self, object_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get only soft-deleted fields."""
+        try:
+            where_clauses = ["deleted_at IS NOT NULL"]
+
+            if object_type:
+                where_clauses.append(f"object_type = '{object_type.upper()}'")
+
+            where_clause = " AND ".join(where_clauses)
+
+            query = f"""
+                SELECT *
+                FROM {self._get_full_table_name()}
+                WHERE {where_clause}
+                ORDER BY deleted_at DESC
+            """
+
+            results = self.conn_manager.execute_query(query, database=self.database)
+            return [self._parse_options(r) for r in (results or [])]
+
+        except Exception as e:
+            logger.error(f"Error fetching deleted UDF fields: {str(e)}")
+            return []
+
+    def get_field_by_name(self, object_type: str, field_name: str) -> Optional[Dict[str, Any]]:
+        """Get UDF field by object type and field name."""
+        try:
+            field_name_escaped = field_name.replace("'", "''")
+            query = f"""
+                SELECT *
+                FROM {self._get_full_table_name()}
+                WHERE object_type = '{object_type.upper()}'
+                  AND field_name = '{field_name_escaped}'
+                  AND deleted_at IS NULL
+                LIMIT 1
+            """
+            results = self.conn_manager.execute_query(query, database=self.database)
+            if results:
+                return self._parse_options(results[0])
+            return None
+
+        except Exception as e:
+            logger.error(f"Error fetching UDF field by name: {str(e)}")
+            return None
+
+    # =========================================================================
+    # UPDATE
+    # =========================================================================
+
+    def update_field(self, field_id: str, data: Dict[str, Any], updated_by: str) -> bool:
+        """
+        Update UDF field definition.
+
+        Args:
+            field_id: Field ID to update
+            data: Dictionary with fields to update
+            updated_by: Username performing update
+
+        Returns:
+            True if successful, False otherwise
+        """
         try:
             update_data = {}
             updatable_fields = [
@@ -231,17 +317,72 @@ class UDFFieldHiveRepository(HiveBaseRepository):
             logger.error(f"Error updating UDF field: {str(e)}")
             return False
 
+    # =========================================================================
+    # SOFT DELETE
+    # =========================================================================
+
     def delete_field(self, field_id: str, deleted_by: str) -> bool:
-        """Soft delete a UDF field."""
+        """
+        Soft delete a UDF field (sets deleted_at timestamp).
+
+        Args:
+            field_id: Field ID to delete
+            deleted_by: Username performing delete
+
+        Returns:
+            True if successful, False otherwise
+        """
         return self.soft_delete(field_id, deleted_by)
+
+    # =========================================================================
+    # RESTORE
+    # =========================================================================
+
+    def restore_field(self, field_id: str, restored_by: str) -> bool:
+        """
+        Restore a soft-deleted UDF field (clears deleted_at timestamp).
+
+        Args:
+            field_id: Field ID to restore
+            restored_by: Username performing restore
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            now = datetime.now()
+            now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+
+            query = f"""
+                UPDATE {self._get_full_table_name()}
+                SET deleted_at = NULL,
+                    is_active = TRUE,
+                    updated_at = '{now_str}',
+                    updated_by = '{restored_by}'
+                WHERE field_id = '{field_id}'
+            """
+
+            success = self.conn_manager.execute_write(query, database=self.database)
+
+            if success:
+                logger.info(f"Restored UDF field {field_id} by {restored_by}")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Error restoring UDF field {field_id}: {str(e)}")
+            return False
+
+    # =========================================================================
+    # STATISTICS
+    # =========================================================================
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get UDF field statistics."""
         try:
             query = f"""
-                SELECT object_type, field_type, is_active
+                SELECT object_type, field_type, deleted_at
                 FROM {self._get_full_table_name()}
-                WHERE deleted_at IS NULL
             """
             results = self.conn_manager.execute_query(query, database=self.database)
 
@@ -249,281 +390,96 @@ class UDFFieldHiveRepository(HiveBaseRepository):
             object_type_counts = {}
             field_type_counts = {}
             active_count = 0
+            deleted_count = 0
 
             if results:
                 for row in results:
-                    obj_type = row.get('object_type', 'Unknown')
+                    obj_type = row.get('object_type') or 'Unknown'
                     object_type_counts[obj_type] = object_type_counts.get(obj_type, 0) + 1
 
-                    f_type = row.get('field_type', 'Unknown')
+                    f_type = row.get('field_type') or 'Unknown'
                     field_type_counts[f_type] = field_type_counts.get(f_type, 0) + 1
 
-                    if row.get('is_active'):
+                    # Check if deleted_at is None or empty
+                    if row.get('deleted_at') is None:
                         active_count += 1
+                    else:
+                        deleted_count += 1
+
+            # Sort safely, filtering out None keys
+            sorted_obj_types = sorted(
+                [(k, v) for k, v in object_type_counts.items() if k is not None],
+                key=lambda x: x[0]
+            )
+            sorted_field_types = sorted(
+                [(k, v) for k, v in field_type_counts.items() if k is not None],
+                key=lambda x: x[1],
+                reverse=True
+            )
 
             return {
                 'total_fields': total,
                 'active_fields': active_count,
+                'deleted_fields': deleted_count,
                 'by_object_type': [
                     {'object_type': k, 'count': v}
-                    for k, v in sorted(object_type_counts.items())
+                    for k, v in sorted_obj_types
                 ],
                 'by_field_type': [
                     {'field_type': k, 'count': v}
-                    for k, v in sorted(field_type_counts.items(), key=lambda x: x[1], reverse=True)
+                    for k, v in sorted_field_types
                 ]
             }
 
         except Exception as e:
             logger.error(f"Error getting UDF field statistics: {str(e)}")
-            return {'total_fields': 0, 'active_fields': 0, 'by_object_type': [], 'by_field_type': []}
+            return {
+                'total_fields': 0,
+                'active_fields': 0,
+                'deleted_fields': 0,
+                'by_object_type': [],
+                'by_field_type': []
+            }
 
-
-# =============================================================================
-# UDF VALUE REPOSITORY
-# =============================================================================
-
-class UDFValueHiveRepository(HiveBaseRepository):
-    """Repository for UDF field values with Hive managed tables."""
-
-    @property
-    def table_name(self) -> str:
-        return 'cis_udf_value'
-
-    @property
-    def primary_key(self) -> str:
-        return 'value_id'
-
-    @property
-    def columns(self) -> List[str]:
-        return [
-            'value_id', 'field_id', 'object_type', 'object_id', 'field_value',
-            'created_at', 'created_by', 'updated_at', 'updated_by', 'deleted_at'
-        ]
-
-    def get_values_for_object(
-        self,
-        object_type: str,
-        object_id: str
-    ) -> List[Dict[str, Any]]:
-        """Get all UDF values for a specific object."""
+    def get_object_types(self) -> List[str]:
+        """Get list of distinct object types in use."""
         try:
             query = f"""
-                SELECT v.*, f.field_name, f.field_label, f.field_type
-                FROM {self._get_full_table_name()} v
-                JOIN {self.database}.cis_udf_field f ON v.field_id = f.field_id
-                WHERE v.object_type = '{object_type}'
-                  AND v.object_id = '{object_id}'
-                  AND v.deleted_at IS NULL
-                  AND f.deleted_at IS NULL
-            """
-
-            results = self.conn_manager.execute_query(query, database=self.database)
-            return results if results else []
-
-        except Exception as e:
-            logger.error(f"Error fetching UDF values for {object_type}/{object_id}: {str(e)}")
-            return []
-
-    def get_value(
-        self,
-        field_id: str,
-        object_type: str,
-        object_id: str
-    ) -> Optional[Dict[str, Any]]:
-        """Get specific UDF value."""
-        try:
-            query = f"""
-                SELECT *
+                SELECT DISTINCT object_type
                 FROM {self._get_full_table_name()}
-                WHERE field_id = '{field_id}'
-                  AND object_type = '{object_type}'
-                  AND object_id = '{object_id}'
-                  AND deleted_at IS NULL
-                LIMIT 1
+                WHERE deleted_at IS NULL
+                ORDER BY object_type
             """
             results = self.conn_manager.execute_query(query, database=self.database)
-            return results[0] if results else None
+            return [r['object_type'] for r in (results or [])]
 
         except Exception as e:
-            logger.error(f"Error fetching UDF value: {str(e)}")
-            return None
+            logger.error(f"Error fetching object types: {str(e)}")
+            return self.ALL_OBJECT_TYPES
 
-    def set_value(
-        self,
-        field_id: str,
-        object_type: str,
-        object_id: str,
-        field_value: str,
-        updated_by: str
-    ) -> bool:
-        """Set or update a UDF value."""
-        try:
-            now = datetime.now()
+    # =========================================================================
+    # HELPER METHODS
+    # =========================================================================
 
-            # Check if value exists
-            existing = self.get_value(field_id, object_type, object_id)
-
-            if existing:
-                # Update existing value
-                return self.update(existing['value_id'], {
-                    'field_value': field_value,
-                    'updated_by': updated_by
-                })
-            else:
-                # Create new value
-                value_id = self._generate_id('UV')
-
-                record = {
-                    'value_id': value_id,
-                    'field_id': field_id,
-                    'object_type': object_type,
-                    'object_id': object_id,
-                    'field_value': field_value,
-                    'created_at': now,
-                    'created_by': updated_by,
-                    'updated_at': now,
-                    'updated_by': updated_by,
-                    'deleted_at': None
-                }
-
-                return self.create(record)
-
-        except Exception as e:
-            logger.error(f"Error setting UDF value: {str(e)}")
-            return False
-
-    def set_values_bulk(
-        self,
-        object_type: str,
-        object_id: str,
-        values: Dict[str, str],
-        updated_by: str
-    ) -> bool:
-        """Set multiple UDF values for an object at once."""
-        try:
-            success = True
-            for field_id, field_value in values.items():
-                if not self.set_value(field_id, object_type, object_id, field_value, updated_by):
-                    success = False
-                    logger.warning(f"Failed to set UDF value for field {field_id}")
-
-            return success
-
-        except Exception as e:
-            logger.error(f"Error setting bulk UDF values: {str(e)}")
-            return False
-
-    def delete_values_for_object(
-        self,
-        object_type: str,
-        object_id: str,
-        deleted_by: str
-    ) -> bool:
-        """Soft delete all UDF values for an object."""
-        try:
-            now = datetime.now()
-
-            query = f"""
-                UPDATE {self._get_full_table_name()}
-                SET deleted_at = '{now.strftime('%Y-%m-%d %H:%M:%S')}',
-                    updated_at = '{now.strftime('%Y-%m-%d %H:%M:%S')}',
-                    updated_by = '{deleted_by}'
-                WHERE object_type = '{object_type}'
-                  AND object_id = '{object_id}'
-                  AND deleted_at IS NULL
-            """
-
-            return self.conn_manager.execute_write(query, database=self.database)
-
-        except Exception as e:
-            logger.error(f"Error deleting UDF values for object: {str(e)}")
-            return False
-
-    def get_objects_with_value(
-        self,
-        field_id: str,
-        field_value: str
-    ) -> List[Dict[str, Any]]:
-        """Find all objects that have a specific UDF value."""
-        try:
-            field_value_escaped = field_value.replace("'", "''")
-            query = f"""
-                SELECT object_type, object_id
-                FROM {self._get_full_table_name()}
-                WHERE field_id = '{field_id}'
-                  AND field_value = '{field_value_escaped}'
-                  AND deleted_at IS NULL
-            """
-            results = self.conn_manager.execute_query(query, database=self.database)
-            return results if results else []
-
-        except Exception as e:
-            logger.error(f"Error finding objects with UDF value: {str(e)}")
-            return []
+    def _parse_options(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        """Parse options JSON string to list if present."""
+        if record and record.get('options'):
+            try:
+                record['options_list'] = json.loads(record['options'])
+            except (json.JSONDecodeError, TypeError):
+                record['options_list'] = []
+        else:
+            record['options_list'] = []
+        return record
 
 
 # =============================================================================
-# REFERENCE DATA REPOSITORY (Backward compatibility)
+# SINGLETON INSTANCE
 # =============================================================================
 
-class ReferenceDataRepository:
-    """
-    Repository for fetching reference data from Hive tables.
-    Used to populate UDF dropdown options from Currency, Country, Counterparty tables.
-    """
-
-    @staticmethod
-    def get_currencies() -> List[Dict[str, Any]]:
-        """Fetch all currencies for dropdown options."""
-        query = "SELECT * FROM gmp_cis.cis_currency WHERE deleted_at IS NULL AND is_active = TRUE"
-        return HiveConnection.execute_query(query)
-
-    @staticmethod
-    def get_countries() -> List[Dict[str, Any]]:
-        """Fetch all countries for dropdown options."""
-        query = "SELECT * FROM gmp_cis.cis_country WHERE deleted_at IS NULL AND is_active = TRUE"
-        return HiveConnection.execute_query(query)
-
-    @staticmethod
-    def get_counterparties() -> List[Dict[str, Any]]:
-        """Fetch all counterparties for dropdown options."""
-        query = "SELECT * FROM gmp_cis.cis_counterparty WHERE deleted_at IS NULL AND is_active = TRUE"
-        return HiveConnection.execute_query(query)
-
-    @staticmethod
-    def get_account_groups() -> List[Dict[str, Any]]:
-        """Fetch account groups for Portfolio UDF dropdown."""
-        # Return predefined list
-        return [
-            {'value': 'TRADING', 'label': 'Trading'},
-            {'value': 'INVESTMENT', 'label': 'Investment'},
-            {'value': 'HEDGING', 'label': 'Hedging'},
-            {'value': 'TREASURY', 'label': 'Treasury'},
-            {'value': 'OPERATIONS', 'label': 'Operations'},
-        ]
-
-    @staticmethod
-    def get_entity_groups() -> List[Dict[str, Any]]:
-        """Fetch entity groups for Portfolio UDF dropdown."""
-        return [
-            {'value': 'CORPORATE', 'label': 'Corporate'},
-            {'value': 'INSTITUTIONAL', 'label': 'Institutional'},
-            {'value': 'RETAIL', 'label': 'Retail'},
-            {'value': 'GOVERNMENT', 'label': 'Government'},
-            {'value': 'FUND', 'label': 'Fund'},
-        ]
-
-
-# Singleton instances
 udf_field_hive_repository = UDFFieldHiveRepository()
-udf_value_hive_repository = UDFValueHiveRepository()
-reference_data_repository = ReferenceDataRepository()
 
 # Backward compatibility aliases
+udf_hive_repository = udf_field_hive_repository
 udf_definition_repository = udf_field_hive_repository
-udf_option_repository = None  # Options are now stored in field.options JSON
-udf_value_repository = udf_value_hive_repository
-
-# Class alias for imports expecting the old class name
 UDFDefinitionRepository = UDFFieldHiveRepository

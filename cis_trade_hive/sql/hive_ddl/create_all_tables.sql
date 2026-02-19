@@ -486,8 +486,10 @@ TBLPROPERTIES (
 );
 
 -- ============================================================================
--- UDF (User-Defined Fields) TABLES
+-- UDF (User-Defined Fields) TABLE
 -- ============================================================================
+-- Single table for UDF field definitions with full CRUD support
+-- Soft delete via deleted_at timestamp, restore by setting deleted_at to NULL
 
 CREATE TABLE IF NOT EXISTS cis_udf_field (
     field_id            STRING,
@@ -507,25 +509,6 @@ CREATE TABLE IF NOT EXISTS cis_udf_field (
     deleted_at          TIMESTAMP
 )
 CLUSTERED BY (field_id) INTO 2 BUCKETS
-STORED AS ORC
-TBLPROPERTIES (
-    'transactional' = 'true',
-    'orc.compress' = 'SNAPPY'
-);
-
-CREATE TABLE IF NOT EXISTS cis_udf_value (
-    value_id            STRING,
-    field_id            STRING,
-    object_type         STRING,
-    object_id           STRING,
-    field_value         STRING,
-    created_at          TIMESTAMP,
-    created_by          STRING,
-    updated_at          TIMESTAMP,
-    updated_by          STRING,
-    deleted_at          TIMESTAMP
-)
-CLUSTERED BY (value_id) INTO 2 BUCKETS
 STORED AS ORC
 TBLPROPERTIES (
     'transactional' = 'true',
