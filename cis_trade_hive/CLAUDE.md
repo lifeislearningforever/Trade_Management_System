@@ -480,3 +480,53 @@ benchmark_results/
 - Full guide: `BENCHMARKING.md`
 - Locust config: `locustfile.py`
 - Benchmark script: `run_benchmark.sh`
+
+## Feature Migration Status
+
+This branch (`hive-managed-tables`) contains all functionality migrated from the `cis_trade_hive` branch.
+
+### Migration Summary
+
+| Module | Features | Status |
+|--------|----------|--------|
+| **Core** | Auth, ACL, Audit, Connection Pool | ✅ Complete |
+| **Portfolio** | CRUD + Maker-Checker Workflow | ✅ Complete |
+| **Trade** | CRUD + Workflow + Positions | ✅ Complete |
+| **Security** | CRUD + Workflow | ✅ Complete |
+| **Market Data** | FX Rates + Equity Prices + History | ✅ Complete |
+| **Reference Data** | Currency, Country, Counterparty | ✅ Complete |
+| **UDF** | Field Definitions + Values | ✅ Complete |
+| **Lookup** | Configuration Tables | ✅ Complete |
+
+### Database Tables (24 Total)
+
+| Category | Tables |
+|----------|--------|
+| Core/ACL | cis_user, cis_user_group, cis_group_permissions, cis_user_group_membership |
+| Audit | cis_audit_log |
+| Portfolio | cis_portfolio, cis_portfolio_history |
+| Trade | cis_trade, cis_trade_history, cis_trade_note, cis_trade_position |
+| Security | cis_security, cis_security_history |
+| Market Data | cis_equity_price, cis_equity_price_history, cis_fx_rate, cis_fx_rate_history |
+| Reference | cis_counterparty, cis_currency, cis_country |
+| UDF | cis_udf_field, cis_udf_value |
+| Helper | cis_sequence, cis_help_content |
+
+### Key Architectural Changes from Kudu
+
+| Aspect | Old (Kudu) | New (Hive) |
+|--------|------------|------------|
+| Database | Kudu | Hive Managed Tables |
+| Port | 21050 | 10000 |
+| Format | Kudu native | ORC + SNAPPY |
+| Transactions | UPSERT only | Full ACID |
+| Connection | ImpalaConnectionManager | HiveConnectionManager |
+
+### Full Documentation
+
+See [docs/FUNCTIONALITY_COMPARISON.md](docs/FUNCTIONALITY_COMPARISON.md) for:
+- Complete feature inventory
+- API endpoints
+- Database schema details
+- Workflow diagrams
+- Testing checklist
