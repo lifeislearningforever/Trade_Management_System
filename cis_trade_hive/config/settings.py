@@ -105,8 +105,33 @@ DATABASES = {
 # =============================================================================
 # Environment Detection
 # Set CIS_ENV='work' for CML/Cloudera, defaults to 'local' for development
+# Auto-detect CML environment if not explicitly set
 # =============================================================================
-CIS_ENV = os.environ.get('CIS_ENV', 'local')  # 'local' or 'work'
+def _detect_environment():
+    """Auto-detect environment based on CML markers."""
+    explicit_env = os.environ.get('CIS_ENV')
+    if explicit_env:
+        return explicit_env
+
+    # Auto-detect CML/Cloudera environment
+    cml_markers = [
+        'CDSW_APP_PORT',      # CML Application
+        'CDSW_DOMAIN',        # CML Domain
+        'CDSW_PROJECT',       # CML Project
+        'CDSW_PROJECT_URL',   # CML Project URL
+        'CDSW_ENGINE_ID',     # CML Engine
+    ]
+
+    if any(os.environ.get(marker) for marker in cml_markers):
+        return 'work'
+
+    # Also check for typical CML paths
+    if os.path.exists('/home/cdsw'):
+        return 'work'
+
+    return 'local'
+
+CIS_ENV = _detect_environment()
 
 if CIS_ENV == 'work':
     # =============================================================================

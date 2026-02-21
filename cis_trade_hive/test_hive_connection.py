@@ -7,15 +7,25 @@ Run this in CML Session terminal:
 
 Or in Django shell:
     python manage.py shell < test_hive_connection.py
+
+IMPORTANT: This script automatically sets CIS_ENV='work' for CML testing.
 """
 
 import os
 import sys
 import socket
 
+# =============================================================================
+# CRITICAL: Set CIS_ENV BEFORE importing Django settings
+# This MUST be set before any Django imports to use work configuration
+# =============================================================================
+os.environ['CIS_ENV'] = 'work'
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+
 print("=" * 60)
 print("HIVE/IMPALA CONNECTION TEST")
 print("=" * 60)
+print(f"\nEnvironment: CIS_ENV = {os.environ.get('CIS_ENV')}")
 
 # Configuration
 IMPALA_HOST = os.environ.get('IMPALA_HOST', 'lxmrwsgv0d1.sg.uobnet.com')
@@ -153,17 +163,25 @@ print("[TEST 6] Django Hybrid Connection Manager")
 print("=" * 60)
 
 try:
-    # Set Django settings module
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
-
+    # NOTE: Django settings module and CIS_ENV already set at top of script
     import django
     django.setup()
+
+    # Verify settings loaded correctly
+    from django.conf import settings
+    print(f"\n  Django Settings Loaded:")
+    print(f"    CIS_ENV: {settings.CIS_ENV}")
+    print(f"    Impala Host: {settings.IMPALA_CONFIG.get('HOST')}")
+    print(f"    Impala Auth: {settings.IMPALA_CONFIG.get('AUTH_MECHANISM')}")
+    print(f"    Hive Host: {settings.HIVE_CONFIG.get('HOST')}")
+    print(f"    Hive Auth: {settings.HIVE_CONFIG.get('AUTH')}")
 
     from core.repositories.hybrid_connection import hybrid_manager
 
     results = hybrid_manager.test_connection()
-    print(f"  Impala: {'SUCCESS [OK]' if results.get('impala') else 'FAILED'}")
-    print(f"  Hive:   {'SUCCESS [OK]' if results.get('hive') else 'FAILED'}")
+    print(f"\n  Connection Tests:")
+    print(f"    Impala: {'SUCCESS [OK]' if results.get('impala') else 'FAILED'}")
+    print(f"    Hive:   {'SUCCESS [OK]' if results.get('hive') else 'FAILED'}")
 
     stats = hybrid_manager.get_pool_stats()
     print(f"\n  Pool Stats:")
@@ -171,8 +189,10 @@ try:
     print(f"    Hive:   {stats['hive']}")
 
 except Exception as e:
+    import traceback
     print(f"  Hybrid manager test: FAILED")
     print(f"    Error: {e}")
+    traceback.print_exc()
 
 # ==================== SUMMARY ====================
 print("\n" + "=" * 60)
