@@ -4,20 +4,45 @@ Base Repository for Hive Managed Tables
 Provides common CRUD operations for Hive tables with ORC format.
 Implements soft delete using deleted_at timestamp.
 
-Uses HybridConnectionManager from core.repositories:
-- Impala: Fast reads (SELECT queries)
-- Hive: ACID writes (INSERT, UPDATE, DELETE)
+Supports two connection modes (controlled by USE_REST_PROXY env var):
+1. Direct Connection (default for local): Uses HybridConnectionManager
+   - Impala: Fast reads (SELECT queries)
+   - Hive: ACID writes (INSERT, UPDATE, DELETE)
+
+2. REST Proxy (for CML environments): Uses HiveProxyRepository
+   - All operations via REST API to edge node
+   - Required when direct Hive/Impala connections fail
 """
 
+import os
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from abc import ABC, abstractmethod
 
-# Import hybrid connection manager from core
-from core.repositories.hybrid_connection import hybrid_manager
-
 logger = logging.getLogger('hive_poc')
+
+# Check if we should use REST proxy (for CML environments)
+USE_REST_PROXY = os.environ.get('USE_REST_PROXY', 'false').lower() == 'true'
+HIVE_PROXY_URL = os.environ.get('HIVE_PROXY_URL', 'http://localhost:5000')
+
+if USE_REST_PROXY:
+    logger.info(f"Using REST Proxy mode: {HIVE_PROXY_URL}")
+    # Import requests for REST proxy
+    try:
+        import requests
+        REQUESTS_AVAILABLE = True
+    except ImportError:
+        REQUESTS_AVAILABLE = False
+        logger.error("requests library not available for REST proxy - pip install requests")
+else:
+    logger.info("Using direct Hive/Impala connection mode")
+    # Import hybrid connection manager from core
+    try:
+        from core.repositories.hybrid_connection import hybrid_manager
+    except ImportError:
+        hybrid_manager = None
+        logger.warning("hybrid_manager not available")
 
 
 class HiveBaseRepository(ABC):
@@ -26,15 +51,24 @@ class HiveBaseRepository(ABC):
 
     Features:
     - CRUD operations on Hive ACID tables with ORC format
-    - Impala for fast reads (SELECT)
-    - Hive for ACID writes (INSERT, UPDATE, DELETE)
+    - Supports both direct connection and REST proxy modes
     - Soft delete support via deleted_at timestamp
     - Query builder patterns for consistency
     """
 
     def __init__(self):
-        self.conn_manager = hybrid_manager
-        self.database = 'gmp_cis'
+        self.use_proxy = USE_REST_PROXY
+        self.database = os.environ.get('HIVE_DATABASE', 'mrw_ima')
+
+        if self.use_proxy:
+            self.proxy_url = HIVE_PROXY_URL
+            self.api_key = os.environ.get('HIVE_PROXY_API_KEY', '')
+            self.timeout = int(os.environ.get('HIVE_TIMEOUT', '300'))
+            self._session = None
+            self.conn_manager = None
+        else:
+            self.conn_manager = hybrid_manager
+            self._session = None
 
     @property
     @abstractmethod
@@ -73,31 +107,92 @@ class HiveBaseRepository(ABC):
         else:
             return str(value)
 
-    # ==================== READ OPERATIONS (via Impala) ====================
+    # ==================== REST PROXY METHODS ====================
 
-    def find_all(self, include_deleted: bool = False) -> List[Dict[str, Any]]:
+    @property
+    def session(self) -> 'requests.Session':
+        """Get or create HTTP session for REST proxy."""
+        if not self.use_proxy:
+            raise RuntimeError("REST proxy not enabled")
+
+        if self._session is None:
+            import requests
+            self._session = requests.Session()
+            self._session.headers.update({
+                'Content-Type': 'application/json',
+                'X-User': os.environ.get('USER', 'hive_poc')
+            })
+            if self.api_key:
+                self._session.headers['X-API-Key'] = self.api_key
+
+        return self._session
+
+    def _make_proxy_request(self, endpoint: str, method: str = 'GET',
+                            data: dict = None, timeout: int = None) -> Dict:
+        """Make HTTP request to REST proxy."""
+        url = f"{self.proxy_url}{endpoint}"
+        request_timeout = timeout or self.timeout
+
+        try:
+            if method == 'GET':
+                response = self.session.get(url, timeout=request_timeout + 10)
+            else:
+                response = self.session.post(url, json=data, timeout=request_timeout + 10)
+
+            result = response.json()
+
+            if response.status_code == 200 and result.get('success'):
+                return result
+            else:
+                error = result.get('error', f'HTTP {response.status_code}')
+                logger.error(f"Proxy request failed: {error}")
+                raise RuntimeError(f"Proxy error: {error}")
+
+        except Exception as e:
+            if 'Timeout' in str(type(e).__name__):
+                raise RuntimeError("Request timeout")
+            elif 'ConnectionError' in str(type(e).__name__):
+                raise RuntimeError(f"Connection failed: {str(e)[:50]}")
+            raise
+
+    def _execute_proxy_query(self, sql: str) -> List[Dict[str, Any]]:
+        """Execute SELECT query via REST proxy."""
+        result = self._make_proxy_request('/query', method='POST', data={
+            'sql': sql,
+            'database': self.database
+        })
+        return result.get('data', [])
+
+    # ==================== READ OPERATIONS ====================
+
+    def find_all(self, include_deleted: bool = False, limit: int = None) -> List[Dict[str, Any]]:
         """
         Find all records from the table.
-        Uses Impala for fast reads.
 
         Args:
             include_deleted: If True, include soft-deleted records
+            limit: Maximum number of records to return
 
         Returns:
             List of dictionaries representing records
         """
         where_clause = "" if include_deleted else "WHERE deleted_at IS NULL"
+        limit_clause = f"LIMIT {limit}" if limit else ""
+
         query = f"""
             SELECT * FROM {self._get_full_table_name()}
             {where_clause}
+            {limit_clause}
         """
-        # Use execute_query which routes to Impala for reads
-        return self.conn_manager.execute_query(query)
+
+        if self.use_proxy:
+            return self._execute_proxy_query(query)
+        else:
+            return self.conn_manager.execute_query(query)
 
     def find_by_id(self, record_id: str, include_deleted: bool = False) -> Optional[Dict[str, Any]]:
         """
         Find a record by primary key.
-        Uses Impala for fast reads.
 
         Args:
             record_id: Primary key value
@@ -114,14 +209,17 @@ class HiveBaseRepository(ABC):
             SELECT * FROM {self._get_full_table_name()}
             {where_clause}
         """
-        # Use execute_query which routes to Impala for reads
-        results = self.conn_manager.execute_query(query)
+
+        if self.use_proxy:
+            results = self._execute_proxy_query(query)
+        else:
+            results = self.conn_manager.execute_query(query)
+
         return results[0] if results else None
 
     def count(self, include_deleted: bool = False) -> int:
         """
         Count records in the table.
-        Uses Impala for fast reads.
 
         Args:
             include_deleted: If True, include soft-deleted records
@@ -129,14 +227,22 @@ class HiveBaseRepository(ABC):
         Returns:
             Number of records
         """
-        # Use simple query and count in Python (Hive COUNT(*) can be slow)
-        records = self.find_all(include_deleted=include_deleted)
-        return len(records)
+        where_clause = "" if include_deleted else "WHERE deleted_at IS NULL"
+        query = f"SELECT COUNT(*) as cnt FROM {self._get_full_table_name()} {where_clause}"
+
+        if self.use_proxy:
+            results = self._execute_proxy_query(query)
+        else:
+            results = self.conn_manager.execute_query(query)
+
+        if results:
+            row = results[0]
+            return int(row.get('cnt', row.get('_c0', 0)))
+        return 0
 
     def exists(self, record_id: str) -> bool:
         """
         Check if a record exists (not soft-deleted).
-        Uses Impala for fast reads.
 
         Args:
             record_id: Primary key value
@@ -150,13 +256,17 @@ class HiveBaseRepository(ABC):
             AND deleted_at IS NULL
             LIMIT 1
         """
-        results = self.conn_manager.execute_query(query)
+
+        if self.use_proxy:
+            results = self._execute_proxy_query(query)
+        else:
+            results = self.conn_manager.execute_query(query)
+
         return len(results) > 0
 
     def find_deleted(self) -> List[Dict[str, Any]]:
         """
         Find all soft-deleted records.
-        Uses Impala for fast reads.
 
         Returns:
             List of soft-deleted records
@@ -165,24 +275,37 @@ class HiveBaseRepository(ABC):
             SELECT * FROM {self._get_full_table_name()}
             WHERE deleted_at IS NOT NULL
         """
-        return self.conn_manager.execute_query(query)
 
-    # ==================== WRITE OPERATIONS (via Hive) ====================
+        if self.use_proxy:
+            return self._execute_proxy_query(query)
+        else:
+            return self.conn_manager.execute_query(query)
+
+    # ==================== WRITE OPERATIONS ====================
 
     def _execute_acid_write(self, query: str) -> bool:
         """
-        Execute a write query via Hive for ACID support.
-
-        Hive ACID tables require MapReduce engine for full transactional support.
-        The hybrid connection manager handles routing to Hive automatically.
+        Execute a write query via Hive for ACID support (direct connection mode only).
         """
-        # execute_write routes to Hive and sets MapReduce engine
+        if self.use_proxy:
+            raise RuntimeError("Use proxy-specific methods for writes in proxy mode")
         return self.conn_manager.execute_write(query, use_mr_engine=True)
+
+    def _convert_datetime_to_string(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert datetime objects to strings for JSON serialization."""
+        result = {}
+        for key, value in data.items():
+            if isinstance(value, datetime):
+                result[key] = value.strftime('%Y-%m-%d %H:%M:%S')
+            elif value is None:
+                result[key] = None
+            else:
+                result[key] = value
+        return result
 
     def create(self, data: Dict[str, Any]) -> bool:
         """
         Create a new record.
-        Uses Hive for ACID writes.
 
         Args:
             data: Dictionary of column names to values
@@ -199,24 +322,32 @@ class HiveBaseRepository(ABC):
         if 'deleted_at' not in data:
             data['deleted_at'] = None
 
-        # Build INSERT query
-        columns = list(data.keys())
-        values = [self._format_value(data[col]) for col in columns]
-
-        query = f"""
-            INSERT INTO {self._get_full_table_name()} ({', '.join(columns)})
-            VALUES ({', '.join(values)})
-        """
-
         logger.info(f"Creating record in {self.table_name}")
-        return self._execute_acid_write(query)
+
+        if self.use_proxy:
+            # Use REST proxy
+            proxy_data = self._convert_datetime_to_string(data)
+            result = self._make_proxy_request(
+                f'/insert/{self._get_full_table_name()}',
+                method='POST',
+                data={'data': proxy_data}
+            )
+            logger.info(f"Created record via proxy: {result.get('elapsed_ms')}ms")
+            return True
+        else:
+            # Direct connection mode
+            columns = list(data.keys())
+            values = [self._format_value(data[col]) for col in columns]
+
+            query = f"""
+                INSERT INTO {self._get_full_table_name()} ({', '.join(columns)})
+                VALUES ({', '.join(values)})
+            """
+            return self._execute_acid_write(query)
 
     def update(self, record_id: str, data: Dict[str, Any]) -> bool:
         """
         Update an existing record.
-        Uses Hive for ACID writes.
-
-        Note: Hive managed tables with ACID support allow UPDATE operations.
 
         Args:
             record_id: Primary key value
@@ -225,26 +356,34 @@ class HiveBaseRepository(ABC):
         Returns:
             True if successful, False otherwise
         """
-        # Update timestamp
         data['updated_at'] = datetime.now()
-
-        # Build SET clause
-        set_clauses = [f"{col} = {self._format_value(val)}" for col, val in data.items()]
-
-        query = f"""
-            UPDATE {self._get_full_table_name()}
-            SET {', '.join(set_clauses)}
-            WHERE {self.primary_key} = '{record_id}'
-            AND deleted_at IS NULL
-        """
-
         logger.info(f"Updating record {record_id} in {self.table_name}")
-        return self._execute_acid_write(query)
+
+        if self.use_proxy:
+            proxy_data = self._convert_datetime_to_string(data)
+            result = self._make_proxy_request(
+                f'/update/{self._get_full_table_name()}',
+                method='POST',
+                data={
+                    'where': {self.primary_key: record_id},
+                    'data': proxy_data
+                }
+            )
+            logger.info(f"Updated via proxy: {result.get('elapsed_ms')}ms")
+            return True
+        else:
+            set_clauses = [f"{col} = {self._format_value(val)}" for col, val in data.items()]
+            query = f"""
+                UPDATE {self._get_full_table_name()}
+                SET {', '.join(set_clauses)}
+                WHERE {self.primary_key} = '{record_id}'
+                AND deleted_at IS NULL
+            """
+            return self._execute_acid_write(query)
 
     def soft_delete(self, record_id: str, deleted_by: str = 'system') -> bool:
         """
         Soft delete a record by setting deleted_at timestamp.
-        Uses Hive for ACID writes.
 
         Args:
             record_id: Primary key value
@@ -253,23 +392,36 @@ class HiveBaseRepository(ABC):
         Returns:
             True if successful, False otherwise
         """
-        now = datetime.now()
-        query = f"""
-            UPDATE {self._get_full_table_name()}
-            SET deleted_at = '{now.strftime('%Y-%m-%d %H:%M:%S')}',
-                updated_at = '{now.strftime('%Y-%m-%d %H:%M:%S')}',
-                updated_by = '{deleted_by}'
-            WHERE {self.primary_key} = '{record_id}'
-            AND deleted_at IS NULL
-        """
-
         logger.info(f"Soft deleting record {record_id} from {self.table_name}")
-        return self._execute_acid_write(query)
+
+        if self.use_proxy:
+            result = self._make_proxy_request(
+                f'/delete/{self._get_full_table_name()}',
+                method='POST',
+                data={
+                    'where': {self.primary_key: record_id},
+                    'soft_delete': True,
+                    'soft_delete_column': 'deleted_at',
+                    'deleted_by': deleted_by
+                }
+            )
+            logger.info(f"Soft deleted via proxy: {result.get('elapsed_ms')}ms")
+            return True
+        else:
+            now = datetime.now()
+            query = f"""
+                UPDATE {self._get_full_table_name()}
+                SET deleted_at = '{now.strftime('%Y-%m-%d %H:%M:%S')}',
+                    updated_at = '{now.strftime('%Y-%m-%d %H:%M:%S')}',
+                    updated_by = '{deleted_by}'
+                WHERE {self.primary_key} = '{record_id}'
+                AND deleted_at IS NULL
+            """
+            return self._execute_acid_write(query)
 
     def restore(self, record_id: str, restored_by: str = 'system') -> bool:
         """
         Restore a soft-deleted record.
-        Uses Hive for ACID writes.
 
         Args:
             record_id: Primary key value
@@ -278,23 +430,34 @@ class HiveBaseRepository(ABC):
         Returns:
             True if successful, False otherwise
         """
-        now = datetime.now()
-        query = f"""
-            UPDATE {self._get_full_table_name()}
-            SET deleted_at = NULL,
-                updated_at = '{now.strftime('%Y-%m-%d %H:%M:%S')}',
-                updated_by = '{restored_by}'
-            WHERE {self.primary_key} = '{record_id}'
-            AND deleted_at IS NOT NULL
-        """
-
         logger.info(f"Restoring record {record_id} in {self.table_name}")
-        return self._execute_acid_write(query)
+
+        if self.use_proxy:
+            result = self._make_proxy_request(
+                f'/update/{self._get_full_table_name()}',
+                method='POST',
+                data={
+                    'where': {self.primary_key: record_id},
+                    'data': {'deleted_at': None, 'updated_by': restored_by}
+                }
+            )
+            logger.info(f"Restored via proxy: {result.get('elapsed_ms')}ms")
+            return True
+        else:
+            now = datetime.now()
+            query = f"""
+                UPDATE {self._get_full_table_name()}
+                SET deleted_at = NULL,
+                    updated_at = '{now.strftime('%Y-%m-%d %H:%M:%S')}',
+                    updated_by = '{restored_by}'
+                WHERE {self.primary_key} = '{record_id}'
+                AND deleted_at IS NOT NULL
+            """
+            return self._execute_acid_write(query)
 
     def hard_delete(self, record_id: str) -> bool:
         """
         Permanently delete a record (use with caution).
-        Uses Hive for ACID writes.
 
         Args:
             record_id: Primary key value
@@ -302,10 +465,22 @@ class HiveBaseRepository(ABC):
         Returns:
             True if successful, False otherwise
         """
-        query = f"""
-            DELETE FROM {self._get_full_table_name()}
-            WHERE {self.primary_key} = '{record_id}'
-        """
-
         logger.warning(f"Hard deleting record {record_id} from {self.table_name}")
+
+        if self.use_proxy:
+            result = self._make_proxy_request(
+                f'/delete/{self._get_full_table_name()}',
+                method='POST',
+                data={
+                    'where': {self.primary_key: record_id},
+                    'soft_delete': False
+                }
+            )
+            logger.info(f"Hard deleted via proxy: {result.get('elapsed_ms')}ms")
+            return True
+        else:
+            query = f"""
+                DELETE FROM {self._get_full_table_name()}
+                WHERE {self.primary_key} = '{record_id}'
+            """
         return self._execute_acid_write(query)

@@ -103,6 +103,9 @@ class Config:
     # Enable audit logging
     AUDIT_ENABLED = os.environ.get('AUDIT_ENABLED', 'true').lower() == 'true'
 
+    # YARN Queue for resource allocation (use EOD_Queue for less resources)
+    YARN_QUEUE = os.environ.get('HIVE_YARN_QUEUE', 'EOD_Queue')
+
 
 config = Config()
 
@@ -410,12 +413,20 @@ def execute_beeline(sql: str, database: str = None,
     # Escape double quotes in SQL for shell
     sql_escaped = sql.replace('"', '\\"')
 
+    # Prepend YARN queue setting to SQL for write operations
+    # This ensures jobs use the EOD_Queue with fewer resources
+    if config.YARN_QUEUE:
+        queue_setting = f"SET mapreduce.job.queuename={config.YARN_QUEUE}; SET tez.queue.name={config.YARN_QUEUE}; "
+        sql_with_queue = queue_setting + sql_escaped
+    else:
+        sql_with_queue = sql_escaped
+
     # Build beeline command
     cmd = (
         f'export JAVA_HOME="{config.JAVA_HOME}" && '
         f'export PATH="$JAVA_HOME/bin:$PATH" && '
         f'beeline -u "{jdbc_url}" '
-        f'-e "{sql_escaped}" '
+        f'-e "{sql_with_queue}" '
         f'--silent=true '
         f'--outputformat={output_format} '
         f'--showHeader=true '

@@ -2,6 +2,7 @@
 Portfolio Repository for Hive Managed Tables
 
 Handles CRUD operations for portfolio_hive table with ORC format.
+Supports both direct Hive connection and REST proxy modes.
 """
 
 import logging
@@ -15,7 +16,7 @@ class PortfolioHiveRepository(HiveBaseRepository):
     """
     Repository for portfolio_hive managed table.
 
-    Table: gmp_cis.portfolio_hive
+    Table: mrw_ima.portfolio_hive (or gmp_cis.portfolio_hive for local)
     Format: ORC with SNAPPY compression
     """
 
@@ -45,6 +46,13 @@ class PortfolioHiveRepository(HiveBaseRepository):
             'deleted_at'
         ]
 
+    def _execute_query(self, query: str) -> List[Dict[str, Any]]:
+        """Execute a SELECT query using appropriate connection mode."""
+        if self.use_proxy:
+            return self._execute_proxy_query(query)
+        else:
+            return self.conn_manager.execute_query(query)
+
     def find_by_code(self, code: str) -> Optional[Dict[str, Any]]:
         """
         Find portfolio by code.
@@ -60,7 +68,7 @@ class PortfolioHiveRepository(HiveBaseRepository):
             WHERE portfolio_code = '{code}'
             AND deleted_at IS NULL
         """
-        results = self.conn_manager.execute_query(query)
+        results = self._execute_query(query)
         return results[0] if results else None
 
     def find_by_status(self, status: str) -> List[Dict[str, Any]]:
@@ -77,9 +85,8 @@ class PortfolioHiveRepository(HiveBaseRepository):
             SELECT * FROM {self._get_full_table_name()}
             WHERE status = '{status}'
             AND deleted_at IS NULL
-            ORDER BY portfolio_name
         """
-        return self.conn_manager.execute_query(query)
+        return self._execute_query(query)
 
     def find_by_type(self, portfolio_type: str) -> List[Dict[str, Any]]:
         """
@@ -95,9 +102,8 @@ class PortfolioHiveRepository(HiveBaseRepository):
             SELECT * FROM {self._get_full_table_name()}
             WHERE portfolio_type = '{portfolio_type}'
             AND deleted_at IS NULL
-            ORDER BY portfolio_name
         """
-        return self.conn_manager.execute_query(query)
+        return self._execute_query(query)
 
     def find_by_manager(self, manager_name: str) -> List[Dict[str, Any]]:
         """
@@ -113,9 +119,8 @@ class PortfolioHiveRepository(HiveBaseRepository):
             SELECT * FROM {self._get_full_table_name()}
             WHERE LOWER(manager_name) LIKE LOWER('%{manager_name}%')
             AND deleted_at IS NULL
-            ORDER BY portfolio_name
         """
-        return self.conn_manager.execute_query(query)
+        return self._execute_query(query)
 
     def search(self, search_term: str) -> List[Dict[str, Any]]:
         """
@@ -136,9 +141,8 @@ class PortfolioHiveRepository(HiveBaseRepository):
                 OR LOWER(description) LIKE '%{term}%'
             )
             AND deleted_at IS NULL
-            ORDER BY portfolio_name
         """
-        return self.conn_manager.execute_query(query)
+        return self._execute_query(query)
 
     def get_portfolio_dropdown(self) -> List[Dict[str, str]]:
         """
@@ -152,13 +156,12 @@ class PortfolioHiveRepository(HiveBaseRepository):
             FROM {self._get_full_table_name()}
             WHERE status = 'ACTIVE'
             AND deleted_at IS NULL
-            ORDER BY portfolio_name
         """
-        results = self.conn_manager.execute_query(query)
+        results = self._execute_query(query)
         return [
             {
-                'id': r['portfolio_id'],
-                'name': f"{r['portfolio_name']} ({r['portfolio_code']})"
+                'id': r.get('portfolio_id', ''),
+                'name': f"{r.get('portfolio_name', '')} ({r.get('portfolio_code', '')})"
             }
             for r in results
         ]
@@ -179,3 +182,7 @@ class PortfolioHiveRepository(HiveBaseRepository):
             'status': status,
             'updated_by': updated_by
         })
+
+
+# Singleton instance
+portfolio_hive_repository = PortfolioHiveRepository()
