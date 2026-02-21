@@ -90,6 +90,24 @@ def main():
     # Set CIS_ENV to 'work' for CML/Cloudera configuration
     os.environ.setdefault("CIS_ENV", "work")
 
+    # ==================== REST Proxy Configuration ====================
+    # Enable REST proxy mode for Hive operations (bypasses direct Hive connections)
+    # This is required in CML where glibc/SASL issues prevent direct connections
+    os.environ.setdefault("USE_REST_PROXY", "true")
+
+    # REST Proxy URL - Flask app running on edge node
+    # Change this to your edge node IP/hostname where app_v2.py is running
+    os.environ.setdefault("HIVE_PROXY_URL", "http://172.29.22.185:5000")
+
+    # Database name for Hive operations
+    os.environ.setdefault("HIVE_DATABASE", "mrw_ima")
+
+    # Optional: API key for proxy authentication (if configured on proxy)
+    # os.environ.setdefault("HIVE_PROXY_API_KEY", "your-api-key")
+
+    # Timeout for proxy requests (seconds)
+    os.environ.setdefault("HIVE_TIMEOUT", "300")
+
     # Kerberos config (from env)
     keytab = os.environ.get("KRB5_KTNAME") or "/home/cdsw/CIS/secrets/qwntmwsg.keytab"
     principal = os.environ.get("KRB5_PRINCIPAL") or "qwntmwsg@TST.UOBNET.COM"
@@ -141,6 +159,11 @@ def main():
     print(f"Worker class           = {worker_class}")
     print(f"Threads                = {threads}")
     print(f"Keep-alive             = {keepalive}")
+    print("--- REST Proxy Configuration ---")
+    print(f"USE_REST_PROXY         = {os.environ.get('USE_REST_PROXY')}")
+    print(f"HIVE_PROXY_URL         = {os.environ.get('HIVE_PROXY_URL')}")
+    print(f"HIVE_DATABASE          = {os.environ.get('HIVE_DATABASE')}")
+    print(f"HIVE_TIMEOUT           = {os.environ.get('HIVE_TIMEOUT')}")
 
     run([
         "gunicorn",
