@@ -105,7 +105,8 @@ class HybridConnectionManager:
                 'HOST': impala_config.get('HOST', 'localhost'),
                 'PORT': int(impala_config.get('PORT', 21050)),
                 'DATABASE': impala_config.get('DATABASE', 'gmp_cis'),
-                'AUTH': impala_config.get('AUTH', 'GSSAPI'),
+                # Support both AUTH and AUTH_MECHANISM keys
+                'AUTH': impala_config.get('AUTH_MECHANISM', impala_config.get('AUTH', 'GSSAPI')),
                 'USERNAME': impala_config.get('USERNAME', ''),
                 'PASSWORD': impala_config.get('PASSWORD', ''),
                 'TIMEOUT': int(impala_config.get('TIMEOUT', 120)),
