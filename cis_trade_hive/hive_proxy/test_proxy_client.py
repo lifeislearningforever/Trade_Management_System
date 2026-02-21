@@ -165,63 +165,54 @@ def test_select_query():
         return False
 
 
+# Store test record ID for UPDATE/DELETE tests
+TEST_RECORD_ID = None
+
+
 def test_insert_query():
     """Test 6: Execute an INSERT query (into Hive ACID table)."""
+    global TEST_RECORD_ID
     print("\n" + "=" * 60)
     print("TEST 6: INSERT Query (Hive ACID Table)")
     print("=" * 60)
 
     # Use timestamp for unique ID
     timestamp = int(time.time() * 1000)
-
-    # Insert into portfolio_hive table (Hive ACID table in mrw_ima)
-    # First, let's check the table schema
-    print(f"  Checking {TEST_DATABASE}.{TEST_TABLE} schema...")
-
-    # Get table schema first
-    schema_status, schema_result = make_request('/query', method='POST', data={
-        'sql': f"DESCRIBE {TEST_DATABASE}.{TEST_TABLE}",
-        'database': TEST_DATABASE,
-        'timeout': 60
-    })
-
-    if schema_status == 200 and schema_result.get('success'):
-        data = schema_result.get('data', [])
-        # Handle both dict and string formats
-        if data:
-            if isinstance(data[0], dict):
-                cols = [col.get('col_name', str(col)) for col in data[:5]]
-            else:
-                cols = [str(col) for col in data[:5]]
-            print(f"  Table columns: {cols}")
+    TEST_RECORD_ID = f'TEST_{timestamp}'
 
     # Insert a test record matching portfolio_hive schema
     query = f"""
     INSERT INTO {TEST_DATABASE}.{TEST_TABLE}
     (portfolio_id, portfolio_name, portfolio_code, portfolio_type, currency, manager_name, description, status, created_at, created_by, updated_at, updated_by, deleted_at)
     VALUES
-    ('TEST_{timestamp}', 'REST Proxy Test', 'PROXY001', 'TEST', 'USD', 'Proxy Tester', 'Test from REST Proxy', 'DRAFT', CURRENT_TIMESTAMP, 'proxy_test', NULL, NULL, NULL)
+    ('{TEST_RECORD_ID}', 'REST Proxy Test', 'PROXY001', 'TEST', 'USD', 'Proxy Tester', 'Test from REST Proxy', 'DRAFT', CURRENT_TIMESTAMP, 'proxy_test', NULL, NULL, NULL)
     """
 
-    print(f"  Query: INSERT INTO {TEST_TABLE} (test record)")
+    print(f"  Query: INSERT INTO {TEST_TABLE}")
+    print(f"  Record ID: {TEST_RECORD_ID}")
+    start_time = time.time()
 
+    # Increased timeout to 300 seconds (5 min) for Hive ACID operations
     status, result = make_request('/execute', method='POST', data={
         'sql': query.strip(),
         'database': TEST_DATABASE,
-        'timeout': 120
-    })
+        'timeout': 300
+    }, timeout=310)
+
+    total_time = (time.time() - start_time) * 1000
 
     if status == 200 and result.get('success'):
         elapsed = result.get('elapsed_ms', 0)
         print(f"  SUCCESS!")
-        print(f"  Elapsed: {elapsed}ms")
+        print(f"  Server time: {elapsed}ms")
+        print(f"  Total time: {total_time:.0f}ms")
 
         # Verify the insert
-        verify_query = f"SELECT * FROM {TEST_DATABASE}.{TEST_TABLE} WHERE portfolio_id = 'TEST_{timestamp}'"
+        verify_query = f"SELECT * FROM {TEST_DATABASE}.{TEST_TABLE} WHERE portfolio_id = '{TEST_RECORD_ID}'"
         status2, result2 = make_request('/query', method='POST', data={
             'sql': verify_query,
             'database': TEST_DATABASE
-        })
+        }, timeout=120)
 
         if status2 == 200 and result2.get('rows', 0) > 0:
             print(f"  Verified: Record found in database")
@@ -229,13 +220,127 @@ def test_insert_query():
         return True
     else:
         print(f"  FAILED: {result}")
+        print(f"  Total time: {total_time:.0f}ms")
+        return False
+
+
+def test_update_query():
+    """Test 7: Execute an UPDATE query (Hive ACID table)."""
+    global TEST_RECORD_ID
+    print("\n" + "=" * 60)
+    print("TEST 7: UPDATE Query (Hive ACID Table)")
+    print("=" * 60)
+
+    if not TEST_RECORD_ID:
+        print("  SKIP: No test record to update (INSERT failed)")
+        return False
+
+    # Update the test record
+    query = f"""
+    UPDATE {TEST_DATABASE}.{TEST_TABLE}
+    SET status = 'APPROVED',
+        description = 'Updated by REST Proxy test',
+        updated_at = CURRENT_TIMESTAMP,
+        updated_by = 'proxy_update_test'
+    WHERE portfolio_id = '{TEST_RECORD_ID}'
+    """
+
+    print(f"  Query: UPDATE {TEST_TABLE} SET status='APPROVED'")
+    print(f"  Record ID: {TEST_RECORD_ID}")
+    start_time = time.time()
+
+    status, result = make_request('/execute', method='POST', data={
+        'sql': query.strip(),
+        'database': TEST_DATABASE,
+        'timeout': 300
+    }, timeout=310)
+
+    total_time = (time.time() - start_time) * 1000
+
+    if status == 200 and result.get('success'):
+        elapsed = result.get('elapsed_ms', 0)
+        print(f"  SUCCESS!")
+        print(f"  Server time: {elapsed}ms")
+        print(f"  Total time: {total_time:.0f}ms")
+
+        # Verify the update
+        verify_query = f"SELECT status, updated_by FROM {TEST_DATABASE}.{TEST_TABLE} WHERE portfolio_id = '{TEST_RECORD_ID}'"
+        status2, result2 = make_request('/query', method='POST', data={
+            'sql': verify_query,
+            'database': TEST_DATABASE
+        }, timeout=120)
+
+        if status2 == 200 and result2.get('rows', 0) > 0:
+            data = result2.get('data', [])
+            if data:
+                print(f"  Verified: {data[0]}")
+
+        return True
+    else:
+        print(f"  FAILED: {result}")
+        print(f"  Total time: {total_time:.0f}ms")
+        return False
+
+
+def test_delete_query():
+    """Test 8: Execute a DELETE query (Hive ACID table)."""
+    global TEST_RECORD_ID
+    print("\n" + "=" * 60)
+    print("TEST 8: DELETE Query (Hive ACID Table)")
+    print("=" * 60)
+
+    if not TEST_RECORD_ID:
+        print("  SKIP: No test record to delete (INSERT failed)")
+        return False
+
+    # Delete the test record
+    query = f"""
+    DELETE FROM {TEST_DATABASE}.{TEST_TABLE}
+    WHERE portfolio_id = '{TEST_RECORD_ID}'
+    """
+
+    print(f"  Query: DELETE FROM {TEST_TABLE}")
+    print(f"  Record ID: {TEST_RECORD_ID}")
+    start_time = time.time()
+
+    status, result = make_request('/execute', method='POST', data={
+        'sql': query.strip(),
+        'database': TEST_DATABASE,
+        'timeout': 300
+    }, timeout=310)
+
+    total_time = (time.time() - start_time) * 1000
+
+    if status == 200 and result.get('success'):
+        elapsed = result.get('elapsed_ms', 0)
+        print(f"  SUCCESS!")
+        print(f"  Server time: {elapsed}ms")
+        print(f"  Total time: {total_time:.0f}ms")
+
+        # Verify the delete
+        verify_query = f"SELECT COUNT(*) as cnt FROM {TEST_DATABASE}.{TEST_TABLE} WHERE portfolio_id = '{TEST_RECORD_ID}'"
+        status2, result2 = make_request('/query', method='POST', data={
+            'sql': verify_query,
+            'database': TEST_DATABASE
+        }, timeout=120)
+
+        if status2 == 200:
+            data = result2.get('data', [])
+            if data:
+                cnt = data[0].get('cnt', data[0]) if isinstance(data[0], dict) else data[0]
+                print(f"  Verified: Record count = {cnt} (should be 0)")
+
+        return True
+    else:
+        print(f"  FAILED: {result}")
+        print(f"  Total time: {total_time:.0f}ms")
         return False
 
 
 def test_batch_queries():
-    """Test 7: Execute batch queries on Hive ACID tables."""
+    """Test 9: Execute batch queries on Hive ACID tables."""
     print("\n" + "=" * 60)
-    print("TEST 7: Batch Queries (Hive ACID Tables)")
+    print("TEST 9: Batch Queries (Hive ACID Tables)")
     print("=" * 60)
 
     queries = [
@@ -285,6 +390,8 @@ def main():
         'tables': test_list_tables(),
         'select': test_select_query(),
         'insert': test_insert_query(),
+        'update': test_update_query(),
+        'delete': test_delete_query(),
         'batch': test_batch_queries(),
     }
 
