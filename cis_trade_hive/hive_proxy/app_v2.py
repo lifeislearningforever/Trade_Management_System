@@ -358,6 +358,23 @@ def validate_table_name(full_table_name: str) -> Tuple[str, str]:
     return database, table
 
 
+def find_original_column_name(column_map_original: Dict, col_name_lower: str, default: str) -> str:
+    """
+    Find the original column name from the schema using case-insensitive lookup.
+    Returns the original case column name or the default if not found.
+    """
+    if not column_map_original:
+        return default
+    for k in column_map_original.keys():
+        if k is not None:
+            try:
+                if str(k).lower() == col_name_lower:
+                    return k
+            except (TypeError, AttributeError):
+                continue
+    return default
+
+
 # =============================================================================
 # Beeline Execution
 # =============================================================================
@@ -588,12 +605,23 @@ def get_table_schema(database: str, table: str, force_refresh: bool = False) -> 
                 data_type = 'string'
 
         # Skip empty rows, partition info, and header markers
+        if col_name is None or col_name == '':
+            continue
+
+        # Ensure col_name is a string
+        try:
+            col_name = str(col_name).strip()
+        except (TypeError, AttributeError):
+            continue
+
         if not col_name:
             continue
+
         if col_name.startswith('#') or col_name.startswith('|'):
             continue
         # Skip header row values
-        if col_name.lower() in ('', 'col_name', 'name', 'column_name', 'field'):
+        col_name_lower = col_name.lower()
+        if col_name_lower in ('', 'col_name', 'name', 'column_name', 'field'):
             continue
         # Skip partition markers
         if col_name.startswith('# ') or 'Partition' in col_name:
@@ -902,7 +930,7 @@ def dynamic_insert(table_name: str):
             formatted_value = format_value_for_hive(value, col_type)
 
             # Use the original column name for SQL (preserve case)
-            original_col = next((k for k in column_map_original.keys() if k.lower() == safe_col_lower), safe_col)
+            original_col = find_original_column_name(column_map_original, safe_col_lower, safe_col)
             columns.append(original_col)
             values.append(formatted_value)
 
@@ -1025,8 +1053,9 @@ def dynamic_update(table_name: str):
 
         # Try case-insensitive pk lookup
         if not pk_value and pk_col:
+            pk_col_lower = str(pk_col).lower() if pk_col else ''
             for key, val in where_clause.items():
-                if key.lower() == pk_col.lower():
+                if key and str(key).lower() == pk_col_lower:
                     pk_value = val
                     break
 
@@ -1050,7 +1079,7 @@ def dynamic_update(table_name: str):
             formatted_value = format_value_for_hive(value, col_type)
 
             # Use original column name for SQL
-            original_col = next((k for k in column_map_original.keys() if k.lower() == safe_col_lower), safe_col)
+            original_col = find_original_column_name(column_map_original, safe_col_lower, safe_col)
             set_clauses.append(f"{original_col} = {formatted_value}")
 
         if not set_clauses:
@@ -1070,7 +1099,7 @@ def dynamic_update(table_name: str):
             formatted_value = format_value_for_hive(value, col_type)
 
             # Use original column name for SQL
-            original_col = next((k for k in column_map_original.keys() if k.lower() == safe_col_lower), safe_col)
+            original_col = find_original_column_name(column_map_original, safe_col_lower, safe_col)
             where_parts.append(f"{original_col} = {formatted_value}")
 
         sql = f"""
@@ -1179,8 +1208,9 @@ def dynamic_delete(table_name: str):
 
         # Try case-insensitive pk lookup
         if not pk_value and pk_col:
+            pk_col_lower = str(pk_col).lower() if pk_col else ''
             for key, val in where_clause.items():
-                if key.lower() == pk_col.lower():
+                if key and str(key).lower() == pk_col_lower:
                     pk_value = val
                     break
 
@@ -1201,7 +1231,7 @@ def dynamic_delete(table_name: str):
             formatted_value = format_value_for_hive(value, col_type)
 
             # Use original column name for SQL
-            original_col = next((k for k in column_map_original.keys() if k.lower() == safe_col_lower), safe_col)
+            original_col = find_original_column_name(column_map_original, safe_col_lower, safe_col)
             where_parts.append(f"{original_col} = {formatted_value}")
 
         # Soft delete or hard delete (case-insensitive check)
@@ -1210,14 +1240,14 @@ def dynamic_delete(table_name: str):
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             # Get original column names
-            original_soft_del_col = next((k for k in column_map_original.keys() if k.lower() == soft_delete_col_lower), soft_delete_column)
+            original_soft_del_col = find_original_column_name(column_map_original, soft_delete_col_lower, soft_delete_column)
             set_clauses = [f"{original_soft_del_col} = '{now}'"]
 
             if 'updated_at' in column_map:
-                original_updated_at = next((k for k in column_map_original.keys() if k.lower() == 'updated_at'), 'updated_at')
+                original_updated_at = find_original_column_name(column_map_original, 'updated_at', 'updated_at')
                 set_clauses.append(f"{original_updated_at} = '{now}'")
             if 'updated_by' in column_map:
-                original_updated_by = next((k for k in column_map_original.keys() if k.lower() == 'updated_by'), 'updated_by')
+                original_updated_by = find_original_column_name(column_map_original, 'updated_by', 'updated_by')
                 set_clauses.append(f"{original_updated_by} = '{deleted_by}'")
 
             sql = f"""
@@ -1514,7 +1544,7 @@ def debug_sql():
                 if safe_col_lower in column_map:
                     col_type = column_map[safe_col_lower]
                     formatted_value = format_value_for_hive(value, col_type)
-                    original_col = next((k for k in column_map_original.keys() if k.lower() == safe_col_lower), safe_col)
+                    original_col = find_original_column_name(column_map_original, safe_col_lower, safe_col)
                     columns.append(original_col)
                     values.append(formatted_value)
 
@@ -1528,7 +1558,7 @@ def debug_sql():
                 if safe_col_lower in column_map:
                     col_type = column_map[safe_col_lower]
                     formatted_value = format_value_for_hive(value, col_type)
-                    original_col = next((k for k in column_map_original.keys() if k.lower() == safe_col_lower), safe_col)
+                    original_col = find_original_column_name(column_map_original, safe_col_lower, safe_col)
                     set_clauses.append(f"{original_col} = {formatted_value}")
 
             where_parts = []
@@ -1537,7 +1567,7 @@ def debug_sql():
                 safe_col_lower = safe_col.lower()
                 col_type = column_map.get(safe_col_lower, 'string')
                 formatted_value = format_value_for_hive(value, col_type)
-                original_col = next((k for k in column_map_original.keys() if k.lower() == safe_col_lower), safe_col)
+                original_col = find_original_column_name(column_map_original, safe_col_lower, safe_col)
                 where_parts.append(f"{original_col} = {formatted_value}")
 
             sql = f"UPDATE {database}.{table} SET {', '.join(set_clauses)} WHERE {' AND '.join(where_parts)}"
