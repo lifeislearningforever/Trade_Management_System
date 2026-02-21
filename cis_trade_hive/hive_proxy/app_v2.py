@@ -157,7 +157,9 @@ class SchemaCache:
         with self.lock:
             if key in self.cache:
                 entry = self.cache[key]
-                if time.time() - entry['cached_at'] < self.ttl:
+                cached_at = entry.get('cached_at')
+                # Check if cached_at exists and is valid
+                if cached_at is not None and (time.time() - cached_at) < self.ttl:
                     return entry
                 else:
                     del self.cache[key]
@@ -520,9 +522,9 @@ def get_table_schema(database: str, table: str, force_refresh: bool = False) -> 
         data_type = None
 
         if isinstance(row, dict):
-            # Get all keys from the dict
-            keys = list(row.keys())
-            values = list(row.values())
+            # Get all keys from the dict (filter out None keys)
+            keys = [k for k in row.keys() if k is not None]
+            values = [v for v in row.values()]
 
             # DESCRIBE output in CSV2 format typically has headers like:
             # 'col_name', 'data_type', 'comment'
@@ -534,29 +536,42 @@ def get_table_schema(database: str, table: str, force_refresh: bool = False) -> 
                 data_type_keys = ['data_type', 'type', 'datatype', 'column_type']
 
                 for key in keys:
-                    key_lower = key.lower().strip()
+                    if key is None:
+                        continue
+                    try:
+                        key_lower = str(key).lower().strip()
+                    except (AttributeError, TypeError):
+                        continue
+
                     # Check for column name key
                     if any(k in key_lower for k in col_name_keys):
-                        col_name = str(row[key]).strip() if row[key] else None
+                        val = row.get(key)
+                        col_name = str(val).strip() if val is not None else None
                     # Check for data type key
                     elif any(k in key_lower for k in data_type_keys):
-                        data_type = str(row[key]).strip() if row[key] else None
+                        val = row.get(key)
+                        data_type = str(val).strip() if val is not None else None
 
                 # If still not found by key names, use positional (first=name, second=type)
                 if not col_name and values:
-                    first_val = str(values[0]).strip() if values[0] else None
-                    # Make sure it looks like a column name (not empty, not a header)
-                    if first_val and first_val.lower() not in ('col_name', 'name', 'column_name', ''):
-                        col_name = first_val
+                    first_val = values[0]
+                    if first_val is not None:
+                        first_val_str = str(first_val).strip()
+                        # Make sure it looks like a column name (not empty, not a header)
+                        if first_val_str and first_val_str.lower() not in ('col_name', 'name', 'column_name', ''):
+                            col_name = first_val_str
 
                 if not data_type and len(values) > 1:
-                    second_val = str(values[1]).strip() if values[1] else None
-                    if second_val and second_val.lower() not in ('data_type', 'type', ''):
-                        data_type = second_val
+                    second_val = values[1]
+                    if second_val is not None:
+                        second_val_str = str(second_val).strip()
+                        if second_val_str and second_val_str.lower() not in ('data_type', 'type', ''):
+                            data_type = second_val_str
 
             elif len(keys) == 1:
                 # Single column - probably just column name
-                col_name = str(values[0]).strip() if values else None
+                first_val = values[0] if values else None
+                col_name = str(first_val).strip() if first_val is not None else None
                 data_type = 'string'
 
         elif isinstance(row, str):
