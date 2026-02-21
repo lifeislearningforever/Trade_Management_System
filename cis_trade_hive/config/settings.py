@@ -152,13 +152,19 @@ if CIS_ENV == 'work':
     }
 
     # HIVE Configuration (for ACID WRITES - INSERT, UPDATE, DELETE)
-    # Connection: beeline -u "jdbc:hive2://<host>:10000/;principal=hive/_HOST@REALM"
+    # Settings based on working Cloudera DataViz connection:
+    # - Connection mode: Binary
+    # - Socket type: Normal (no SSL)
+    # - Authentication: Kerberos
+    # - Kerberos service name: hive
+    # - Socket Timeout: 60 seconds
     HIVE_CONFIG = {
         'HOST': os.environ.get('HIVE_HOST', 'lxmrwtsgv0m2.sg.uobnet.com'),
         'PORT': int(os.environ.get('HIVE_PORT', '10000')),
         'DATABASE': os.environ.get('HIVE_DB', 'mrw_ima'),
         'AUTH': os.environ.get('HIVE_AUTH', 'GSSAPI'),
-        'TIMEOUT': int(os.environ.get('HIVE_TIMEOUT', '120000')),
+        'USE_SSL': False,  # Normal socket, not SSL (per DataViz config)
+        'TIMEOUT': int(os.environ.get('HIVE_TIMEOUT', '60')),  # 60 seconds (per DataViz)
         'POOL_SIZE': int(os.environ.get('HIVE_POOL_SIZE', '10')),
         'KERBEROS_SERVICE_NAME': os.environ.get('HIVE_KERBEROS_SERVICE_NAME', 'hive'),
     }

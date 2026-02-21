@@ -243,7 +243,15 @@ class HybridConnectionManager:
     # ==================== HIVE CONNECTIONS (WRITES) ====================
 
     def _create_hive_connection(self, database: Optional[str] = None):
-        """Create a new Hive connection for ACID writes using impyla."""
+        """
+        Create a new Hive connection for ACID writes using impyla.
+
+        Connection settings based on working Cloudera DataViz config:
+        - Connection mode: Binary
+        - Socket type: Normal (no SSL)
+        - Authentication: Kerberos (GSSAPI)
+        - Kerberos service name: hive
+        """
         if not IMPYLA_AVAILABLE:
             logger.warning("Hive connection requested but impyla not available")
             return None
@@ -252,19 +260,23 @@ class HybridConnectionManager:
             db_name = database or self._hive_config['DATABASE']
             auth_mechanism = self._hive_config['AUTH_MECHANISM']
 
+            # Base connection parameters matching Cloudera DataViz settings
             conn_params = {
                 'host': self._hive_config['HOST'],
                 'port': self._hive_config['PORT'],
                 'database': db_name,
                 'timeout': self._hive_config['TIMEOUT'],
                 'auth_mechanism': auth_mechanism,
+                'use_ssl': False,  # Normal socket, not SSL (matching DataViz)
             }
 
             # Kerberos authentication
             if auth_mechanism == 'GSSAPI':
                 conn_params['kerberos_service_name'] = self._hive_config['KERBEROS_SERVICE_NAME']
-                if self._hive_config['USE_SSL']:
-                    conn_params['use_ssl'] = True
+
+            logger.info(f"Connecting to Hive: {conn_params['host']}:{conn_params['port']} "
+                       f"db={db_name} auth={auth_mechanism} "
+                       f"krb_service={conn_params.get('kerberos_service_name', 'N/A')}")
 
             connection = impyla_connect(**conn_params)
             connection._created_at = time.time()
@@ -276,6 +288,8 @@ class HybridConnectionManager:
 
         except Exception as e:
             logger.error(f"Failed to create Hive connection: {str(e)}")
+            logger.error(f"Connection params: host={self._hive_config['HOST']} "
+                        f"port={self._hive_config['PORT']} auth={auth_mechanism}")
             return None
 
     def _validate_hive_connection(self, connection) -> bool:
