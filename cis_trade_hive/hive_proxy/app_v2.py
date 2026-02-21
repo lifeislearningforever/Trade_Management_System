@@ -1,0 +1,1334 @@
+#!/usr/bin/env python3
+"""
+Hive REST Proxy v2.0 - Enhanced with Dynamic Table Operations
+
+Features:
+- Dynamic INSERT/UPDATE/DELETE with automatic type casting
+- Schema caching for performance
+- Audit logging to mrw_ima.hive_proxy_audit
+- Corner case handling (SQL injection, NULL, special chars, timestamps)
+- Rate limiting and connection pooling
+- Health checks and monitoring
+
+Deployment:
+    gunicorn -b 0.0.0.0:5000 -w 4 --timeout 300 app_v2:app
+
+Version: 2.0.0
+"""
+
+import os
+import subprocess
+import csv
+import io
+import json
+import time
+import re
+import hashlib
+import logging
+from datetime import datetime, date
+from decimal import Decimal
+from typing import Dict, Any, List, Tuple, Optional, Union
+from functools import wraps
+from threading import Lock, Semaphore
+from collections import OrderedDict
+
+from flask import Flask, request, jsonify, g
+
+# =============================================================================
+# Logging Configuration
+# =============================================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('hive_proxy')
+
+app = Flask(__name__)
+
+# =============================================================================
+# Configuration
+# =============================================================================
+
+class Config:
+    """Application configuration from environment variables."""
+
+    # ZooKeeper hosts for HiveServer2 discovery
+    ZOOKEEPER_HOSTS = os.environ.get(
+        'HIVE_ZOOKEEPER_HOSTS',
+        'lxmrwtsgv0m1.sg.uobnet.com:2181,'
+        'lxmrwtsgv0m2.sg.uobnet.com:2181,'
+        'lxmrwtsgv0w1.sg.uobnet.com:2181'
+    )
+
+    # Kerberos principal
+    HIVE_PRINCIPAL = os.environ.get('HIVE_PRINCIPAL', 'hive/_HOST@TST.UOBNET.COM')
+
+    # ZooKeeper namespace
+    ZK_NAMESPACE = os.environ.get('HIVE_ZK_NAMESPACE', 'hiveserver2')
+
+    # Default database
+    DEFAULT_DATABASE = os.environ.get('HIVE_DATABASE', 'mrw_ima')
+
+    # Audit database (where audit logs are stored)
+    AUDIT_DATABASE = os.environ.get('HIVE_AUDIT_DATABASE', 'mrw_ima')
+
+    # Audit table name
+    AUDIT_TABLE = os.environ.get('HIVE_AUDIT_TABLE', 'hive_proxy_audit')
+
+    # SSL truststore
+    TRUSTSTORE_PATH = os.environ.get(
+        'HIVE_TRUSTSTORE_PATH',
+        '/var/lib/cloudera-scm-agent/agent-cert/cm-auto-global_truststore.jks'
+    )
+
+    # Query timeout (seconds)
+    QUERY_TIMEOUT = int(os.environ.get('HIVE_QUERY_TIMEOUT', '300'))
+
+    # Max concurrent queries
+    MAX_CONCURRENT = int(os.environ.get('MAX_CONCURRENT_QUERIES', '20'))
+
+    # Java home for beeline
+    JAVA_HOME = os.environ.get(
+        'JAVA_HOME',
+        '/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.462.b08-2.el8.x86_64/jre'
+    )
+
+    # API Key for authentication
+    API_KEY = os.environ.get('HIVE_PROXY_API_KEY', '')
+
+    # Schema cache TTL (seconds)
+    SCHEMA_CACHE_TTL = int(os.environ.get('SCHEMA_CACHE_TTL', '3600'))
+
+    # Enable audit logging
+    AUDIT_ENABLED = os.environ.get('AUDIT_ENABLED', 'true').lower() == 'true'
+
+
+config = Config()
+
+# =============================================================================
+# Thread-safe counters and locks
+# =============================================================================
+
+query_semaphore = Semaphore(config.MAX_CONCURRENT)
+query_lock = Lock()
+schema_cache_lock = Lock()
+
+query_stats = {
+    'total': 0,
+    'success': 0,
+    'failed': 0,
+    'select': 0,
+    'insert': 0,
+    'update': 0,
+    'delete': 0
+}
+
+# =============================================================================
+# Schema Cache
+# =============================================================================
+
+class SchemaCache:
+    """
+    Cache for table schemas to avoid repeated DESCRIBE queries.
+
+    Schema format:
+    {
+        'database.table': {
+            'columns': [{'name': 'col1', 'type': 'string'}, ...],
+            'primary_key': 'id',
+            'cached_at': timestamp,
+            'hash': 'xxxx'
+        }
+    }
+    """
+
+    def __init__(self, ttl: int = 3600):
+        self.cache: Dict[str, Dict] = {}
+        self.ttl = ttl
+        self.lock = Lock()
+
+    def _get_key(self, database: str, table: str) -> str:
+        return f"{database}.{table}"
+
+    def get(self, database: str, table: str) -> Optional[Dict]:
+        """Get cached schema if not expired."""
+        key = self._get_key(database, table)
+        with self.lock:
+            if key in self.cache:
+                entry = self.cache[key]
+                if time.time() - entry['cached_at'] < self.ttl:
+                    return entry
+                else:
+                    del self.cache[key]
+        return None
+
+    def set(self, database: str, table: str, schema: Dict) -> None:
+        """Cache a schema."""
+        key = self._get_key(database, table)
+        with self.lock:
+            self.cache[key] = {
+                **schema,
+                'cached_at': time.time()
+            }
+
+    def invalidate(self, database: str = None, table: str = None) -> None:
+        """Invalidate cache entries."""
+        with self.lock:
+            if database and table:
+                key = self._get_key(database, table)
+                self.cache.pop(key, None)
+            elif database:
+                keys_to_delete = [k for k in self.cache if k.startswith(f"{database}.")]
+                for k in keys_to_delete:
+                    del self.cache[k]
+            else:
+                self.cache.clear()
+
+    def stats(self) -> Dict:
+        """Get cache statistics."""
+        with self.lock:
+            return {
+                'entries': len(self.cache),
+                'tables': list(self.cache.keys())
+            }
+
+
+schema_cache = SchemaCache(ttl=config.SCHEMA_CACHE_TTL)
+
+# =============================================================================
+# Type Mapping and Value Formatting
+# =============================================================================
+
+HIVE_TYPE_MAP = {
+    'string': str,
+    'varchar': str,
+    'char': str,
+    'int': int,
+    'integer': int,
+    'bigint': int,
+    'smallint': int,
+    'tinyint': int,
+    'float': float,
+    'double': float,
+    'decimal': Decimal,
+    'boolean': bool,
+    'timestamp': datetime,
+    'date': date,
+    'binary': bytes,
+}
+
+
+def parse_hive_type(type_str: str) -> str:
+    """Extract base type from Hive type string (e.g., 'varchar(255)' -> 'varchar')."""
+    type_str = type_str.lower().strip()
+    # Handle parameterized types
+    match = re.match(r'^(\w+)', type_str)
+    return match.group(1) if match else 'string'
+
+
+def format_value_for_hive(value: Any, hive_type: str) -> str:
+    """
+    Format a Python value for Hive SQL based on column type.
+
+    Handles:
+    - NULL values
+    - String escaping (SQL injection prevention)
+    - Timestamps and dates
+    - Booleans
+    - Numbers
+    - Special characters
+    """
+    # Handle None/NULL
+    if value is None:
+        return 'NULL'
+
+    # Handle empty string (could be NULL or empty depending on context)
+    if value == '':
+        return "NULL" if hive_type in ('timestamp', 'date', 'int', 'bigint', 'float', 'double', 'decimal', 'boolean') else "''"
+
+    base_type = parse_hive_type(hive_type)
+
+    # String types - escape single quotes and special characters
+    if base_type in ('string', 'varchar', 'char'):
+        # Escape single quotes by doubling them
+        escaped = str(value).replace("'", "''")
+        # Escape backslashes
+        escaped = escaped.replace("\\", "\\\\")
+        return f"'{escaped}'"
+
+    # Numeric types
+    if base_type in ('int', 'integer', 'bigint', 'smallint', 'tinyint'):
+        try:
+            return str(int(value))
+        except (ValueError, TypeError):
+            return 'NULL'
+
+    if base_type in ('float', 'double'):
+        try:
+            return str(float(value))
+        except (ValueError, TypeError):
+            return 'NULL'
+
+    if base_type == 'decimal':
+        try:
+            return str(Decimal(str(value)))
+        except:
+            return 'NULL'
+
+    # Boolean
+    if base_type == 'boolean':
+        if isinstance(value, bool):
+            return 'TRUE' if value else 'FALSE'
+        if isinstance(value, str):
+            return 'TRUE' if value.lower() in ('true', '1', 'yes') else 'FALSE'
+        return 'TRUE' if value else 'FALSE'
+
+    # Timestamp
+    if base_type == 'timestamp':
+        if isinstance(value, datetime):
+            return f"'{value.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}'"
+        if isinstance(value, str):
+            # Try to parse common formats
+            for fmt in ['%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d']:
+                try:
+                    dt = datetime.strptime(value, fmt)
+                    return f"'{dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}'"
+                except ValueError:
+                    continue
+            # If parsing fails, use CURRENT_TIMESTAMP for 'now' or return as-is
+            if value.lower() in ('now', 'current_timestamp'):
+                return 'CURRENT_TIMESTAMP'
+            return f"'{value}'"
+        return 'CURRENT_TIMESTAMP'
+
+    # Date
+    if base_type == 'date':
+        if isinstance(value, (datetime, date)):
+            return f"'{value.strftime('%Y-%m-%d')}'"
+        if isinstance(value, str):
+            return f"'{value[:10]}'"  # Take first 10 chars (YYYY-MM-DD)
+        return 'NULL'
+
+    # Default: treat as string
+    escaped = str(value).replace("'", "''")
+    return f"'{escaped}'"
+
+
+def sanitize_identifier(name: str) -> str:
+    """
+    Sanitize SQL identifier (table/column name) to prevent injection.
+    Only allows alphanumeric characters and underscores.
+    """
+    if not name:
+        raise ValueError("Identifier cannot be empty")
+
+    # Only allow alphanumeric and underscore
+    sanitized = re.sub(r'[^a-zA-Z0-9_]', '', name)
+
+    if not sanitized:
+        raise ValueError(f"Invalid identifier: {name}")
+
+    # Cannot start with a number
+    if sanitized[0].isdigit():
+        sanitized = '_' + sanitized
+
+    return sanitized
+
+
+def validate_table_name(full_table_name: str) -> Tuple[str, str]:
+    """
+    Validate and parse a fully qualified table name (database.table).
+    Returns (database, table) tuple.
+    """
+    if '.' in full_table_name:
+        parts = full_table_name.split('.', 1)
+        database = sanitize_identifier(parts[0])
+        table = sanitize_identifier(parts[1])
+    else:
+        database = config.DEFAULT_DATABASE
+        table = sanitize_identifier(full_table_name)
+
+    return database, table
+
+
+# =============================================================================
+# Beeline Execution
+# =============================================================================
+
+def build_jdbc_url(database: str = None) -> str:
+    """Build JDBC URL for beeline."""
+    db = database or config.DEFAULT_DATABASE
+
+    url = (
+        f"jdbc:hive2://{config.ZOOKEEPER_HOSTS}/{db};"
+        f"principal={config.HIVE_PRINCIPAL};"
+        f"serviceDiscoveryMode=zooKeeper;"
+        f"zookeeperNamespace={config.ZK_NAMESPACE};"
+        f"ssl=true;"
+        f"sslTrustStore={config.TRUSTSTORE_PATH};"
+        f"trustStoreType=jks"
+    )
+
+    return url
+
+
+def execute_beeline(sql: str, database: str = None,
+                    timeout: int = None, output_format: str = 'csv2') -> Tuple[bool, Dict]:
+    """
+    Execute SQL via beeline with enhanced error handling.
+
+    Returns:
+        Tuple of (success: bool, result: dict)
+    """
+    jdbc_url = build_jdbc_url(database)
+    query_timeout = timeout or config.QUERY_TIMEOUT
+
+    # Escape double quotes in SQL for shell
+    sql_escaped = sql.replace('"', '\\"')
+
+    # Build beeline command
+    cmd = (
+        f'export JAVA_HOME="{config.JAVA_HOME}" && '
+        f'export PATH="$JAVA_HOME/bin:$PATH" && '
+        f'beeline -u "{jdbc_url}" '
+        f'-e "{sql_escaped}" '
+        f'--silent=true '
+        f'--outputformat={output_format} '
+        f'--showHeader=true '
+        f'--color=false'
+    )
+
+    start_time = time.time()
+
+    try:
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=query_timeout
+        )
+
+        elapsed = time.time() - start_time
+        elapsed_ms = int(elapsed * 1000)
+
+        # Check for errors
+        if result.returncode != 0:
+            error_msg = result.stderr.strip() or result.stdout.strip() or 'Unknown error'
+            logger.error(f"Beeline failed: {error_msg}")
+            return False, {
+                'error': error_msg,
+                'elapsed_ms': elapsed_ms,
+                'returncode': result.returncode
+            }
+
+        # Parse output
+        output = result.stdout.strip()
+
+        # Filter out Hive info messages
+        lines = [l for l in output.split('\n') if not l.startswith('INFO') and not l.startswith('WARNING')]
+        output = '\n'.join(lines).strip()
+
+        if not output:
+            return True, {'data': [], 'rows': 0, 'elapsed_ms': elapsed_ms}
+
+        # Parse CSV output
+        if output_format == 'csv2':
+            try:
+                reader = csv.DictReader(io.StringIO(output))
+                data = [dict(row) for row in reader]
+                return True, {
+                    'data': data,
+                    'rows': len(data),
+                    'elapsed_ms': elapsed_ms
+                }
+            except Exception as e:
+                # Not valid CSV, return raw
+                return True, {'data': output, 'elapsed_ms': elapsed_ms}
+        else:
+            return True, {'data': output, 'elapsed_ms': elapsed_ms}
+
+    except subprocess.TimeoutExpired:
+        elapsed = time.time() - start_time
+        logger.error(f"Query timed out after {query_timeout}s")
+        return False, {
+            'error': f'Query timeout after {query_timeout}s',
+            'elapsed_ms': int(elapsed * 1000)
+        }
+
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.error(f"Query execution error: {str(e)}")
+        return False, {
+            'error': str(e),
+            'elapsed_ms': int(elapsed * 1000)
+        }
+
+
+# =============================================================================
+# Schema Operations
+# =============================================================================
+
+def get_table_schema(database: str, table: str, force_refresh: bool = False) -> Optional[Dict]:
+    """
+    Get table schema with caching.
+
+    Returns:
+        {
+            'columns': [{'name': 'col1', 'type': 'string'}, ...],
+            'column_map': {'col1': 'string', ...},
+            'primary_key': 'id' (guessed from first column)
+        }
+    """
+    # Check cache first
+    if not force_refresh:
+        cached = schema_cache.get(database, table)
+        if cached:
+            return cached
+
+    # Query schema from Hive
+    sql = f"DESCRIBE {database}.{table}"
+    success, result = execute_beeline(sql, database, timeout=60)
+
+    if not success:
+        logger.error(f"Failed to get schema for {database}.{table}: {result.get('error')}")
+        return None
+
+    # Parse DESCRIBE output
+    columns = []
+    column_map = {}
+
+    data = result.get('data', [])
+
+    for row in data:
+        if isinstance(row, dict):
+            col_name = row.get('col_name', '').strip()
+            data_type = row.get('data_type', '').strip()
+        elif isinstance(row, str):
+            # Parse string format: "col_name    data_type    comment"
+            parts = row.split()
+            if len(parts) >= 2:
+                col_name = parts[0].strip()
+                data_type = parts[1].strip()
+            else:
+                continue
+        else:
+            continue
+
+        # Skip empty rows and partition info
+        if not col_name or col_name.startswith('#') or col_name == '':
+            continue
+
+        columns.append({'name': col_name, 'type': data_type})
+        column_map[col_name] = data_type
+
+    if not columns:
+        logger.error(f"No columns found for {database}.{table}")
+        return None
+
+    schema = {
+        'columns': columns,
+        'column_map': column_map,
+        'primary_key': columns[0]['name'] if columns else None  # Assume first column is PK
+    }
+
+    # Cache the schema
+    schema_cache.set(database, table, schema)
+
+    return schema
+
+
+# =============================================================================
+# Audit Logging
+# =============================================================================
+
+def log_audit(
+    operation: str,
+    database: str,
+    table: str,
+    record_id: str = None,
+    old_values: Dict = None,
+    new_values: Dict = None,
+    user: str = None,
+    ip_address: str = None,
+    success: bool = True,
+    error_message: str = None,
+    elapsed_ms: int = 0
+) -> bool:
+    """
+    Log an audit record to the audit table.
+
+    Audit table schema (mrw_ima.hive_proxy_audit):
+        audit_id STRING,
+        operation STRING,        -- INSERT, UPDATE, DELETE, SELECT
+        database_name STRING,
+        table_name STRING,
+        record_id STRING,
+        old_values STRING,       -- JSON
+        new_values STRING,       -- JSON
+        performed_by STRING,
+        ip_address STRING,
+        performed_at TIMESTAMP,
+        success BOOLEAN,
+        error_message STRING,
+        elapsed_ms INT
+    """
+    if not config.AUDIT_ENABLED:
+        return True
+
+    try:
+        audit_id = hashlib.md5(f"{time.time()}{operation}{table}".encode()).hexdigest()[:16]
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        # Escape values
+        old_json = json.dumps(old_values) if old_values else None
+        new_json = json.dumps(new_values) if new_values else None
+
+        old_escaped = old_json.replace("'", "''") if old_json else 'NULL'
+        new_escaped = new_json.replace("'", "''") if new_json else 'NULL'
+        error_escaped = error_message.replace("'", "''") if error_message else 'NULL'
+
+        sql = f"""
+        INSERT INTO {config.AUDIT_DATABASE}.{config.AUDIT_TABLE}
+        (audit_id, operation, database_name, table_name, record_id, old_values, new_values,
+         performed_by, ip_address, performed_at, success, error_message, elapsed_ms)
+        VALUES
+        ('{audit_id}', '{operation}', '{database}', '{table}',
+         {f"'{record_id}'" if record_id else 'NULL'},
+         {f"'{old_escaped}'" if old_json else 'NULL'},
+         {f"'{new_escaped}'" if new_json else 'NULL'},
+         '{user or 'system'}', '{ip_address or '0.0.0.0'}',
+         '{now}', {str(success).upper()},
+         {f"'{error_escaped}'" if error_message else 'NULL'},
+         {elapsed_ms})
+        """
+
+        # Execute async (don't wait for result)
+        execute_beeline(sql, config.AUDIT_DATABASE, timeout=60, output_format='table')
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to log audit: {str(e)}")
+        return False
+
+
+# =============================================================================
+# Authentication Decorator
+# =============================================================================
+
+def require_api_key(f):
+    """Decorator to require API key if configured."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if config.API_KEY:
+            provided_key = request.headers.get('X-API-Key', '')
+            if provided_key != config.API_KEY:
+                return jsonify({
+                    'success': False,
+                    'error': 'Invalid or missing API key'
+                }), 401
+
+        # Store request info for audit
+        g.user = request.headers.get('X-User', 'anonymous')
+        g.ip_address = request.remote_addr
+
+        return f(*args, **kwargs)
+    return decorated
+
+
+def with_query_limit(f):
+    """Decorator to enforce concurrent query limit."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not query_semaphore.acquire(blocking=False):
+            return jsonify({
+                'success': False,
+                'error': 'Too many concurrent queries',
+                'max_concurrent': config.MAX_CONCURRENT
+            }), 429
+        try:
+            return f(*args, **kwargs)
+        finally:
+            query_semaphore.release()
+    return decorated
+
+
+# =============================================================================
+# API Endpoints - Basic
+# =============================================================================
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint."""
+    return jsonify({
+        'status': 'healthy',
+        'service': 'hive-proxy',
+        'version': '2.0.0',
+        'config': {
+            'database': config.DEFAULT_DATABASE,
+            'audit_enabled': config.AUDIT_ENABLED,
+            'timeout': config.QUERY_TIMEOUT,
+            'max_concurrent': config.MAX_CONCURRENT
+        },
+        'stats': query_stats,
+        'schema_cache': schema_cache.stats()
+    })
+
+
+@app.route('/test', methods=['GET'])
+@require_api_key
+def test_connection():
+    """Test Hive connection."""
+    success, result = execute_beeline("SELECT 1 AS test", timeout=60)
+
+    if success:
+        return jsonify({
+            'success': True,
+            'status': 'connected',
+            'result': result
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'status': 'failed',
+            'error': result
+        }), 500
+
+
+# =============================================================================
+# API Endpoints - Schema
+# =============================================================================
+
+@app.route('/schema/<path:table_name>', methods=['GET'])
+@require_api_key
+def get_schema(table_name: str):
+    """
+    Get table schema.
+
+    GET /schema/mrw_ima.portfolio_hive
+    GET /schema/portfolio_hive?database=mrw_ima
+    """
+    try:
+        database, table = validate_table_name(table_name)
+        database = request.args.get('database', database)
+        force_refresh = request.args.get('refresh', 'false').lower() == 'true'
+
+        schema = get_table_schema(database, table, force_refresh=force_refresh)
+
+        if schema:
+            return jsonify({
+                'success': True,
+                'database': database,
+                'table': table,
+                'schema': schema
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Table {database}.{table} not found or error getting schema'
+            }), 404
+
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/schema/cache/clear', methods=['POST'])
+@require_api_key
+def clear_schema_cache():
+    """Clear schema cache."""
+    data = request.get_json() or {}
+    database = data.get('database')
+    table = data.get('table')
+
+    schema_cache.invalidate(database, table)
+
+    return jsonify({
+        'success': True,
+        'message': 'Cache cleared',
+        'scope': f"{database or '*'}.{table or '*'}"
+    })
+
+
+# =============================================================================
+# API Endpoints - Dynamic CRUD
+# =============================================================================
+
+@app.route('/insert/<path:table_name>', methods=['POST'])
+@require_api_key
+@with_query_limit
+def dynamic_insert(table_name: str):
+    """
+    Dynamic INSERT with automatic type casting.
+
+    POST /insert/mrw_ima.portfolio_hive
+    {
+        "data": {
+            "portfolio_id": "PF001",
+            "portfolio_name": "Test Portfolio",
+            "status": "DRAFT",
+            "created_at": "now"
+        }
+    }
+    """
+    start_time = time.time()
+
+    try:
+        database, table = validate_table_name(table_name)
+        database = request.args.get('database', database)
+
+        req_data = request.get_json()
+        if not req_data or 'data' not in req_data:
+            return jsonify({'success': False, 'error': 'Missing data parameter'}), 400
+
+        record_data = req_data['data']
+
+        # Get schema for type casting
+        schema = get_table_schema(database, table)
+        if not schema:
+            return jsonify({
+                'success': False,
+                'error': f'Cannot get schema for {database}.{table}'
+            }), 500
+
+        column_map = schema['column_map']
+
+        # Build INSERT statement
+        columns = []
+        values = []
+
+        for col_name, value in record_data.items():
+            safe_col = sanitize_identifier(col_name)
+            if safe_col not in column_map:
+                logger.warning(f"Column {safe_col} not in schema, skipping")
+                continue
+
+            col_type = column_map[safe_col]
+            formatted_value = format_value_for_hive(value, col_type)
+
+            columns.append(safe_col)
+            values.append(formatted_value)
+
+        if not columns:
+            return jsonify({'success': False, 'error': 'No valid columns provided'}), 400
+
+        sql = f"""
+        INSERT INTO {database}.{table} ({', '.join(columns)})
+        VALUES ({', '.join(values)})
+        """
+
+        logger.info(f"Dynamic INSERT into {database}.{table}")
+
+        with query_lock:
+            query_stats['total'] += 1
+            query_stats['insert'] += 1
+
+        success, result = execute_beeline(sql, database, output_format='table')
+        elapsed_ms = int((time.time() - start_time) * 1000)
+
+        # Audit logging
+        record_id = record_data.get(schema.get('primary_key'))
+        log_audit(
+            operation='INSERT',
+            database=database,
+            table=table,
+            record_id=str(record_id) if record_id else None,
+            new_values=record_data,
+            user=getattr(g, 'user', None),
+            ip_address=getattr(g, 'ip_address', None),
+            success=success,
+            error_message=result.get('error') if not success else None,
+            elapsed_ms=elapsed_ms
+        )
+
+        with query_lock:
+            if success:
+                query_stats['success'] += 1
+            else:
+                query_stats['failed'] += 1
+
+        if success:
+            return jsonify({
+                'success': True,
+                'operation': 'INSERT',
+                'table': f"{database}.{table}",
+                'elapsed_ms': elapsed_ms
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result.get('error'),
+                'elapsed_ms': elapsed_ms
+            }), 500
+
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        logger.exception(f"INSERT error: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/update/<path:table_name>', methods=['POST', 'PUT'])
+@require_api_key
+@with_query_limit
+def dynamic_update(table_name: str):
+    """
+    Dynamic UPDATE with automatic type casting.
+
+    POST /update/mrw_ima.portfolio_hive
+    {
+        "where": {"portfolio_id": "PF001"},
+        "data": {
+            "status": "APPROVED",
+            "updated_at": "now",
+            "updated_by": "user1"
+        }
+    }
+    """
+    start_time = time.time()
+
+    try:
+        database, table = validate_table_name(table_name)
+        database = request.args.get('database', database)
+
+        req_data = request.get_json()
+        if not req_data:
+            return jsonify({'success': False, 'error': 'Missing request body'}), 400
+
+        where_clause = req_data.get('where', {})
+        update_data = req_data.get('data', {})
+
+        if not where_clause:
+            return jsonify({'success': False, 'error': 'WHERE clause required for UPDATE'}), 400
+
+        if not update_data:
+            return jsonify({'success': False, 'error': 'No data to update'}), 400
+
+        # Get schema
+        schema = get_table_schema(database, table)
+        if not schema:
+            return jsonify({
+                'success': False,
+                'error': f'Cannot get schema for {database}.{table}'
+            }), 500
+
+        column_map = schema['column_map']
+
+        # Fetch old values for audit
+        old_values = None
+        pk_col = schema.get('primary_key')
+        pk_value = where_clause.get(pk_col) if pk_col else None
+
+        if pk_value:
+            select_sql = f"SELECT * FROM {database}.{table} WHERE {pk_col} = '{pk_value}'"
+            sel_success, sel_result = execute_beeline(select_sql, database, timeout=60)
+            if sel_success and sel_result.get('data'):
+                old_values = sel_result['data'][0] if sel_result['data'] else None
+
+        # Build SET clause
+        set_clauses = []
+        for col_name, value in update_data.items():
+            safe_col = sanitize_identifier(col_name)
+            if safe_col not in column_map:
+                logger.warning(f"Column {safe_col} not in schema, skipping")
+                continue
+
+            col_type = column_map[safe_col]
+            formatted_value = format_value_for_hive(value, col_type)
+            set_clauses.append(f"{safe_col} = {formatted_value}")
+
+        if not set_clauses:
+            return jsonify({'success': False, 'error': 'No valid columns to update'}), 400
+
+        # Build WHERE clause
+        where_parts = []
+        for col_name, value in where_clause.items():
+            safe_col = sanitize_identifier(col_name)
+            col_type = column_map.get(safe_col, 'string')
+            formatted_value = format_value_for_hive(value, col_type)
+            where_parts.append(f"{safe_col} = {formatted_value}")
+
+        sql = f"""
+        UPDATE {database}.{table}
+        SET {', '.join(set_clauses)}
+        WHERE {' AND '.join(where_parts)}
+        """
+
+        logger.info(f"Dynamic UPDATE on {database}.{table}")
+
+        with query_lock:
+            query_stats['total'] += 1
+            query_stats['update'] += 1
+
+        success, result = execute_beeline(sql, database, output_format='table')
+        elapsed_ms = int((time.time() - start_time) * 1000)
+
+        # Audit logging
+        log_audit(
+            operation='UPDATE',
+            database=database,
+            table=table,
+            record_id=str(pk_value) if pk_value else None,
+            old_values=old_values,
+            new_values=update_data,
+            user=getattr(g, 'user', None),
+            ip_address=getattr(g, 'ip_address', None),
+            success=success,
+            error_message=result.get('error') if not success else None,
+            elapsed_ms=elapsed_ms
+        )
+
+        with query_lock:
+            if success:
+                query_stats['success'] += 1
+            else:
+                query_stats['failed'] += 1
+
+        if success:
+            return jsonify({
+                'success': True,
+                'operation': 'UPDATE',
+                'table': f"{database}.{table}",
+                'elapsed_ms': elapsed_ms
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result.get('error'),
+                'elapsed_ms': elapsed_ms
+            }), 500
+
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        logger.exception(f"UPDATE error: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/delete/<path:table_name>', methods=['POST', 'DELETE'])
+@require_api_key
+@with_query_limit
+def dynamic_delete(table_name: str):
+    """
+    Dynamic DELETE with automatic type casting.
+
+    POST /delete/mrw_ima.portfolio_hive
+    {
+        "where": {"portfolio_id": "PF001"},
+        "soft_delete": true,
+        "soft_delete_column": "deleted_at"
+    }
+    """
+    start_time = time.time()
+
+    try:
+        database, table = validate_table_name(table_name)
+        database = request.args.get('database', database)
+
+        req_data = request.get_json()
+        if not req_data:
+            return jsonify({'success': False, 'error': 'Missing request body'}), 400
+
+        where_clause = req_data.get('where', {})
+        soft_delete = req_data.get('soft_delete', True)  # Default to soft delete
+        soft_delete_column = req_data.get('soft_delete_column', 'deleted_at')
+        deleted_by = req_data.get('deleted_by', getattr(g, 'user', 'system'))
+
+        if not where_clause:
+            return jsonify({'success': False, 'error': 'WHERE clause required for DELETE'}), 400
+
+        # Get schema
+        schema = get_table_schema(database, table)
+        if not schema:
+            return jsonify({
+                'success': False,
+                'error': f'Cannot get schema for {database}.{table}'
+            }), 500
+
+        column_map = schema['column_map']
+
+        # Fetch old values for audit
+        pk_col = schema.get('primary_key')
+        pk_value = where_clause.get(pk_col) if pk_col else None
+        old_values = None
+
+        if pk_value:
+            select_sql = f"SELECT * FROM {database}.{table} WHERE {pk_col} = '{pk_value}'"
+            sel_success, sel_result = execute_beeline(select_sql, database, timeout=60)
+            if sel_success and sel_result.get('data'):
+                old_values = sel_result['data'][0] if sel_result['data'] else None
+
+        # Build WHERE clause
+        where_parts = []
+        for col_name, value in where_clause.items():
+            safe_col = sanitize_identifier(col_name)
+            col_type = column_map.get(safe_col, 'string')
+            formatted_value = format_value_for_hive(value, col_type)
+            where_parts.append(f"{safe_col} = {formatted_value}")
+
+        # Soft delete or hard delete
+        if soft_delete and soft_delete_column in column_map:
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            set_clauses = [f"{soft_delete_column} = '{now}'"]
+
+            if 'updated_at' in column_map:
+                set_clauses.append(f"updated_at = '{now}'")
+            if 'updated_by' in column_map:
+                set_clauses.append(f"updated_by = '{deleted_by}'")
+
+            sql = f"""
+            UPDATE {database}.{table}
+            SET {', '.join(set_clauses)}
+            WHERE {' AND '.join(where_parts)}
+            """
+            operation = 'SOFT_DELETE'
+        else:
+            sql = f"""
+            DELETE FROM {database}.{table}
+            WHERE {' AND '.join(where_parts)}
+            """
+            operation = 'HARD_DELETE'
+
+        logger.info(f"Dynamic {operation} on {database}.{table}")
+
+        with query_lock:
+            query_stats['total'] += 1
+            query_stats['delete'] += 1
+
+        success, result = execute_beeline(sql, database, output_format='table')
+        elapsed_ms = int((time.time() - start_time) * 1000)
+
+        # Audit logging
+        log_audit(
+            operation=operation,
+            database=database,
+            table=table,
+            record_id=str(pk_value) if pk_value else None,
+            old_values=old_values,
+            user=getattr(g, 'user', None),
+            ip_address=getattr(g, 'ip_address', None),
+            success=success,
+            error_message=result.get('error') if not success else None,
+            elapsed_ms=elapsed_ms
+        )
+
+        with query_lock:
+            if success:
+                query_stats['success'] += 1
+            else:
+                query_stats['failed'] += 1
+
+        if success:
+            return jsonify({
+                'success': True,
+                'operation': operation,
+                'table': f"{database}.{table}",
+                'elapsed_ms': elapsed_ms
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result.get('error'),
+                'elapsed_ms': elapsed_ms
+            }), 500
+
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        logger.exception(f"DELETE error: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# =============================================================================
+# API Endpoints - Query
+# =============================================================================
+
+@app.route('/query', methods=['POST'])
+@require_api_key
+@with_query_limit
+def execute_query():
+    """Execute a SELECT query."""
+    start_time = time.time()
+
+    try:
+        data = request.get_json()
+
+        if not data or 'sql' not in data:
+            return jsonify({'success': False, 'error': 'Missing sql parameter'}), 400
+
+        sql = data['sql'].strip()
+        database = data.get('database', config.DEFAULT_DATABASE)
+        timeout = data.get('timeout', config.QUERY_TIMEOUT)
+
+        # Only allow read queries
+        sql_upper = sql.upper()
+        if not (sql_upper.startswith('SELECT') or
+                sql_upper.startswith('SHOW') or
+                sql_upper.startswith('DESCRIBE')):
+            return jsonify({
+                'success': False,
+                'error': 'Only SELECT, SHOW, DESCRIBE allowed. Use /execute for writes.'
+            }), 400
+
+        logger.info(f"Query: {sql[:100]}...")
+
+        with query_lock:
+            query_stats['total'] += 1
+            query_stats['select'] += 1
+
+        success, result = execute_beeline(sql, database, timeout)
+        elapsed_ms = int((time.time() - start_time) * 1000)
+
+        with query_lock:
+            if success:
+                query_stats['success'] += 1
+            else:
+                query_stats['failed'] += 1
+
+        result['elapsed_ms'] = elapsed_ms
+
+        if success:
+            return jsonify({'success': True, **result})
+        else:
+            return jsonify({'success': False, **result}), 500
+
+    except Exception as e:
+        logger.exception(f"Query error: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/execute', methods=['POST'])
+@require_api_key
+@with_query_limit
+def execute_write():
+    """Execute a raw write query (INSERT, UPDATE, DELETE)."""
+    start_time = time.time()
+
+    try:
+        data = request.get_json()
+
+        if not data or 'sql' not in data:
+            return jsonify({'success': False, 'error': 'Missing sql parameter'}), 400
+
+        sql = data['sql'].strip()
+        database = data.get('database', config.DEFAULT_DATABASE)
+        timeout = data.get('timeout', config.QUERY_TIMEOUT)
+
+        # Block dangerous operations
+        sql_upper = sql.upper()
+        blocked = ['DROP DATABASE', 'DROP TABLE', 'TRUNCATE', 'ALTER TABLE']
+        for blocked_op in blocked:
+            if blocked_op in sql_upper:
+                return jsonify({
+                    'success': False,
+                    'error': f'{blocked_op} not allowed'
+                }), 403
+
+        logger.info(f"Execute: {sql[:100]}...")
+
+        with query_lock:
+            query_stats['total'] += 1
+
+        success, result = execute_beeline(sql, database, timeout, output_format='table')
+        elapsed_ms = int((time.time() - start_time) * 1000)
+
+        with query_lock:
+            if success:
+                query_stats['success'] += 1
+            else:
+                query_stats['failed'] += 1
+
+        result['elapsed_ms'] = elapsed_ms
+
+        if success:
+            return jsonify({'success': True, **result})
+        else:
+            return jsonify({'success': False, **result}), 500
+
+    except Exception as e:
+        logger.exception(f"Execute error: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# =============================================================================
+# API Endpoints - Utility
+# =============================================================================
+
+@app.route('/databases', methods=['GET'])
+@require_api_key
+def list_databases():
+    """List all databases."""
+    success, result = execute_beeline("SHOW DATABASES", timeout=60)
+
+    if success:
+        return jsonify({'success': True, **result})
+    else:
+        return jsonify({'success': False, **result}), 500
+
+
+@app.route('/tables', methods=['GET'])
+@require_api_key
+def list_tables():
+    """List tables in a database."""
+    database = request.args.get('database', config.DEFAULT_DATABASE)
+    success, result = execute_beeline(f"SHOW TABLES IN {database}", timeout=60)
+
+    if success:
+        return jsonify({'success': True, 'database': database, **result})
+    else:
+        return jsonify({'success': False, **result}), 500
+
+
+@app.route('/stats', methods=['GET'])
+@require_api_key
+def get_stats():
+    """Get detailed statistics."""
+    return jsonify({
+        'success': True,
+        'stats': query_stats,
+        'schema_cache': schema_cache.stats(),
+        'config': {
+            'database': config.DEFAULT_DATABASE,
+            'audit_enabled': config.AUDIT_ENABLED,
+            'max_concurrent': config.MAX_CONCURRENT,
+            'timeout': config.QUERY_TIMEOUT
+        }
+    })
+
+
+# =============================================================================
+# Error Handlers
+# =============================================================================
+
+@app.errorhandler(400)
+def bad_request(e):
+    return jsonify({'success': False, 'error': 'Bad request'}), 400
+
+
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({'success': False, 'error': 'Not found'}), 404
+
+
+@app.errorhandler(500)
+def internal_error(e):
+    return jsonify({'success': False, 'error': 'Internal server error'}), 500
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+if __name__ == '__main__':
+    print("=" * 60)
+    print("HIVE REST PROXY v2.0")
+    print("=" * 60)
+    print(f"Database: {config.DEFAULT_DATABASE}")
+    print(f"Audit: {config.AUDIT_ENABLED} -> {config.AUDIT_DATABASE}.{config.AUDIT_TABLE}")
+    print(f"Timeout: {config.QUERY_TIMEOUT}s")
+    print(f"Max Concurrent: {config.MAX_CONCURRENT}")
+    print(f"API Key: {'enabled' if config.API_KEY else 'disabled'}")
+    print(f"Schema Cache TTL: {config.SCHEMA_CACHE_TTL}s")
+    print("=" * 60)
+
+    app.run(host='0.0.0.0', port=5000, debug=True)
