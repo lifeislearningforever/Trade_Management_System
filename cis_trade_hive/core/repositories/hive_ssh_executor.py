@@ -118,8 +118,13 @@ class HiveSSHExecutor:
         """Run beeline command via SSH."""
         jdbc_url = self._build_jdbc_url(database) if database else self._jdbc_url
 
-        # Build beeline command
+        # Set JAVA_HOME to system Java (fix for edge node Java path issues)
+        java_home = os.environ.get('HIVE_SSH_JAVA_HOME', '/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.462.b08-2.el8.x86_64')
+
+        # Build beeline command with correct JAVA_HOME
         beeline_cmd = (
+            f'export JAVA_HOME={java_home} && '
+            f'export PATH=$JAVA_HOME/bin:$PATH && '
             f'beeline -u "{jdbc_url}" '
             f'-e "{query}" '
             f'--silent=true '
