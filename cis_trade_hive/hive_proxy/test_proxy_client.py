@@ -30,8 +30,9 @@ except ImportError:
 PROXY_URL = os.environ.get('HIVE_PROXY_URL', 'http://localhost:5000')
 API_KEY = os.environ.get('HIVE_PROXY_API_KEY', '')
 
-# Test database
-TEST_DATABASE = 'gmp_cis'
+# Test database - use mrw_ima with Hive ACID tables (not Kudu)
+TEST_DATABASE = os.environ.get('HIVE_TEST_DATABASE', 'mrw_ima')
+TEST_TABLE = os.environ.get('HIVE_TEST_TABLE', 'portfolio_hive')
 
 
 def make_request(endpoint: str, method: str = 'GET', data: dict = None, timeout: int = 30):
@@ -136,12 +137,12 @@ def test_list_tables():
 
 
 def test_select_query():
-    """Test 5: Execute a SELECT query."""
+    """Test 5: Execute a SELECT query on Hive ACID table."""
     print("\n" + "=" * 60)
-    print("TEST 5: SELECT Query")
+    print("TEST 5: SELECT Query (Hive ACID Table)")
     print("=" * 60)
 
-    query = f"SELECT * FROM {TEST_DATABASE}.cis_user LIMIT 5"
+    query = f"SELECT * FROM {TEST_DATABASE}.{TEST_TABLE} LIMIT 5"
     print(f"  Query: {query}")
 
     status, result = make_request('/query', method='POST', data={
@@ -165,25 +166,37 @@ def test_select_query():
 
 
 def test_insert_query():
-    """Test 6: Execute an INSERT query (into test table)."""
+    """Test 6: Execute an INSERT query (into Hive ACID table)."""
     print("\n" + "=" * 60)
-    print("TEST 6: INSERT Query (Write Test)")
+    print("TEST 6: INSERT Query (Hive ACID Table)")
     print("=" * 60)
 
-    # Use a sequence to get unique ID
+    # Use timestamp for unique ID
     timestamp = int(time.time() * 1000)
 
-    # First, try to insert into cis_audit_log (safe for testing)
+    # Insert into portfolio_hive table (Hive ACID table in mrw_ima)
+    # First, let's check the table schema
+    print(f"  Checking {TEST_DATABASE}.{TEST_TABLE} schema...")
+
+    # Get table schema first
+    schema_status, schema_result = make_request('/query', method='POST', data={
+        'sql': f"DESCRIBE {TEST_DATABASE}.{TEST_TABLE}",
+        'database': TEST_DATABASE,
+        'timeout': 60
+    })
+
+    if schema_status == 200 and schema_result.get('success'):
+        print(f"  Table columns: {[col.get('col_name', col) for col in schema_result.get('data', [])[:5]]}")
+
+    # Insert a test record - adjust columns based on actual table schema
     query = f"""
-    INSERT INTO {TEST_DATABASE}.cis_audit_log
-    (log_id, entity_type, entity_id, action, performed_by, performed_at,
-     old_values, new_values, ip_address, user_agent, session_id, additional_info)
+    INSERT INTO {TEST_DATABASE}.{TEST_TABLE}
+    (portfolio_id, portfolio_name, status, created_by, created_at)
     VALUES
-    ('TEST_{timestamp}', 'SYSTEM', 'PROXY_TEST', 'TEST', 'proxy_test',
-     CURRENT_TIMESTAMP, NULL, NULL, '127.0.0.1', 'HiveProxyTest', NULL, 'REST Proxy test')
+    ('TEST_{timestamp}', 'REST Proxy Test Portfolio', 'DRAFT', 'proxy_test', CURRENT_TIMESTAMP)
     """
 
-    print(f"  Query: INSERT INTO cis_audit_log (test record)")
+    print(f"  Query: INSERT INTO {TEST_TABLE} (test record)")
 
     status, result = make_request('/execute', method='POST', data={
         'sql': query.strip(),
@@ -197,7 +210,7 @@ def test_insert_query():
         print(f"  Elapsed: {elapsed}ms")
 
         # Verify the insert
-        verify_query = f"SELECT * FROM {TEST_DATABASE}.cis_audit_log WHERE log_id = 'TEST_{timestamp}'"
+        verify_query = f"SELECT * FROM {TEST_DATABASE}.{TEST_TABLE} WHERE portfolio_id = 'TEST_{timestamp}'"
         status2, result2 = make_request('/query', method='POST', data={
             'sql': verify_query,
             'database': TEST_DATABASE
@@ -213,15 +226,14 @@ def test_insert_query():
 
 
 def test_batch_queries():
-    """Test 7: Execute batch queries."""
+    """Test 7: Execute batch queries on Hive ACID tables."""
     print("\n" + "=" * 60)
-    print("TEST 7: Batch Queries")
+    print("TEST 7: Batch Queries (Hive ACID Tables)")
     print("=" * 60)
 
     queries = [
-        {'sql': f'SELECT COUNT(*) as cnt FROM {TEST_DATABASE}.cis_user', 'type': 'read'},
-        {'sql': f'SELECT COUNT(*) as cnt FROM {TEST_DATABASE}.cis_portfolio', 'type': 'read'},
-        {'sql': f'SELECT COUNT(*) as cnt FROM {TEST_DATABASE}.cis_trade', 'type': 'read'},
+        {'sql': f'SELECT COUNT(*) as cnt FROM {TEST_DATABASE}.{TEST_TABLE}', 'type': 'read'},
+        {'sql': f'SHOW TABLES IN {TEST_DATABASE}', 'type': 'read'},
     ]
 
     print(f"  Executing {len(queries)} queries in batch...")
@@ -257,6 +269,7 @@ def main():
     print(f"Proxy URL: {PROXY_URL}")
     print(f"API Key: {'configured' if API_KEY else 'not set'}")
     print(f"Database: {TEST_DATABASE}")
+    print(f"Test Table: {TEST_TABLE} (Hive ACID)")
 
     results = {
         'health': test_health(),
