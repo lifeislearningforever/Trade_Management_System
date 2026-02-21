@@ -1,22 +1,30 @@
 """
-Hive Configuration for POC
+Hive Configuration for POC (DEPRECATED)
 
-Separate configuration for Hive managed tables with ORC format.
-Connects to local HiveServer2 for ACID transactions.
+This module is deprecated. Configuration is now managed in:
+- config/settings.py (HIVE_CONFIG, IMPALA_CONFIG)
+- core/repositories/hybrid_connection.py
+
+Connection routing:
+- Reads: Impala (fast)
+- Writes: Hive (ACID)
+
+For backward compatibility, this re-exports the HIVE_CONFIG from settings.
 """
 
-import os
+import logging
+from django.conf import settings
 
-# Hive POC Configuration - Local HiveServer2
-HIVE_POC_CONFIG = {
-    'HOST': os.environ.get('HIVE_POC_HOST', 'localhost'),
-    'PORT': int(os.environ.get('HIVE_POC_PORT', '10000')),
-    'DATABASE': os.environ.get('HIVE_POC_DB', 'gmp_cis'),
-    'AUTH': os.environ.get('HIVE_POC_AUTH', 'NONE'),
-    'USERNAME': os.environ.get('HIVE_POC_USERNAME', ''),
-    'PASSWORD': os.environ.get('HIVE_POC_PASSWORD', ''),
-    'TIMEOUT': int(os.environ.get('HIVE_POC_TIMEOUT', '60')),
-}
+logger = logging.getLogger('hive_poc')
+logger.warning("hive_poc.hive_config is deprecated. Use django.conf.settings.HIVE_CONFIG instead.")
 
-# Connection string for reference
-# jdbc:hive2://localhost:10000/gmp_cis
+# Re-export for backward compatibility
+HIVE_POC_CONFIG = getattr(settings, 'HIVE_CONFIG', {
+    'HOST': 'localhost',
+    'PORT': 10000,
+    'DATABASE': 'gmp_cis',
+    'AUTH': 'NONE',
+    'USERNAME': '',
+    'PASSWORD': '',
+    'TIMEOUT': 60,
+})
