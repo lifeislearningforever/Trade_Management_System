@@ -120,13 +120,13 @@ class HiveSSHExecutor:
 
         # Set JAVA_HOME to the JRE directory so beeline finds java at $JAVA_HOME/bin/java
         # Actual java: /usr/lib/jvm/java-1.8.0-openjdk-1.8.0.462.b08-2.el8.x86_64/jre/bin/java
-        # So JAVA_HOME should point to the jre folder
         java_home = os.environ.get('HIVE_SSH_JAVA_HOME', '/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.462.b08-2.el8.x86_64/jre')
 
-        # Build beeline command with correct JAVA_HOME
+        # Build beeline command - unset any existing JAVA_HOME first, then set correct one
         beeline_cmd = (
-            f'export JAVA_HOME={java_home} && '
-            f'export PATH=$JAVA_HOME/bin:$PATH && '
+            f'unset JAVA_HOME; '
+            f'export JAVA_HOME="{java_home}" && '
+            f'export PATH="$JAVA_HOME/bin:/usr/bin:$PATH" && '
             f'beeline -u "{jdbc_url}" '
             f'-e "{query}" '
             f'--silent=true '
