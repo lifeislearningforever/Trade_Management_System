@@ -195,12 +195,12 @@ def test_insert_query():
                 cols = [str(col) for col in data[:5]]
             print(f"  Table columns: {cols}")
 
-    # Insert a test record - adjust columns based on actual table schema
+    # Insert a test record matching portfolio_hive schema
     query = f"""
     INSERT INTO {TEST_DATABASE}.{TEST_TABLE}
-    (portfolio_id, portfolio_name, status, created_by, created_at)
+    (portfolio_id, portfolio_name, portfolio_code, portfolio_type, currency, manager_name, description, status, created_at, created_by, updated_at, updated_by, deleted_at)
     VALUES
-    ('TEST_{timestamp}', 'REST Proxy Test Portfolio', 'DRAFT', 'proxy_test', CURRENT_TIMESTAMP)
+    ('TEST_{timestamp}', 'REST Proxy Test', 'PROXY001', 'TEST', 'USD', 'Proxy Tester', 'Test from REST Proxy', 'DRAFT', CURRENT_TIMESTAMP, 'proxy_test', NULL, NULL, NULL)
     """
 
     print(f"  Query: INSERT INTO {TEST_TABLE} (test record)")
