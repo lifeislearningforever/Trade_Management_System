@@ -5,222 +5,154 @@ CML (Cloudera Machine Learning) Application Entry Point
 This script serves as the entry point for deploying the CIS Trade Hive
 Django application as a CML Project Application.
 
+Features:
+- Kerberos authentication with automatic ticket renewal
+- Hybrid connection: Impala (reads) + Hive (writes)
+- Gunicorn WSGI server with configurable workers/threads
+
 CML Application Configuration:
 - Script: config/cml_app.py
-- Subdomain: cis-trade-hive (or your preferred subdomain)
-- Description: CIS Trade Management System
+- Subdomain: cis-trade-hive
 
 Environment Variables (set in CML Project Settings):
-- HIVE_HOST: HiveServer2 hostname (e.g., your-cloudera-host)
-- HIVE_PORT: HiveServer2 port (default: 10000)
-- HIVE_DB: Database name (default: gmp_cis)
-- HIVE_AUTH: Authentication method (NONE, LDAP, KERBEROS)
-- HIVE_USERNAME: Hive username
-- HIVE_PASSWORD: Hive password
-- DJANGO_SECRET_KEY: Django secret key for production
-- DJANGO_DEBUG: Set to 'false' for production
-- DJANGO_ALLOWED_HOSTS: Comma-separated list of allowed hosts
+- CIS_ENV: Set to 'work' for CML/Cloudera environment
+- KRB5_KTNAME: Kerberos keytab path
+- KRB5_PRINCIPAL: Kerberos principal
+- KRB5CCNAME: Kerberos credential cache
 
-Usage:
-    CML will execute this script to start the application.
-    The application will be accessible via the CML application URL.
+Impala/Hive are configured via IMPALA_CONFIG and HIVE_CONFIG in settings.py
 """
 
 import os
 import sys
 import subprocess
-import logging
+import threading
+import time
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-
-def setup_virtual_environment():
-    """
-    Set up and activate virtual environment for CML.
-    CML provides a Python runtime, but we ensure dependencies are installed.
-    """
-    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    venv_dir = os.path.join(project_dir, '.venv')
-    requirements_file = os.path.join(project_dir, 'requirements.txt')
-
-    # Check if virtual environment exists, if not create it
-    if not os.path.exists(venv_dir):
-        logger.info("Creating virtual environment...")
-        subprocess.run([sys.executable, '-m', 'venv', venv_dir], check=True)
-        logger.info("Virtual environment created successfully")
-
-    # Determine the pip executable path
-    if sys.platform == 'win32':
-        pip_executable = os.path.join(venv_dir, 'Scripts', 'pip')
-        python_executable = os.path.join(venv_dir, 'Scripts', 'python')
-    else:
-        pip_executable = os.path.join(venv_dir, 'bin', 'pip')
-        python_executable = os.path.join(venv_dir, 'bin', 'python')
-
-    # Install/upgrade pip
-    logger.info("Upgrading pip...")
-    subprocess.run([python_executable, '-m', 'pip', 'install', '--upgrade', 'pip'], check=True)
-
-    # Install requirements
-    if os.path.exists(requirements_file):
-        logger.info("Installing dependencies from requirements.txt...")
-        subprocess.run([pip_executable, 'install', '-r', requirements_file], check=True)
-        logger.info("Dependencies installed successfully")
-    else:
-        logger.warning(f"requirements.txt not found at {requirements_file}")
-
-    return python_executable
+# === CML Application Launcher ===
+WORKDIR = os.environ.get("WORKDIR", "/home/cdsw/CIS/")
+DJANGO_SETTINGS = os.environ.get("DJANGO_SETTINGS_MODULE", "config.settings")
+COLLECT_STATIC = os.environ.get("DJANGO_COLLECT_STATIC", "0") in ("1", "true", "True")
+print(os.environ.get("USER_OWNER"))
+print(os.environ.get("CDSW_USERNAME"))
 
 
-def setup_environment_variables():
-    """
-    Set up environment variables for CML deployment.
-    These can be overridden by CML project environment variables.
-    """
-    # Get CML-specific environment variables
-    cml_app_port = os.environ.get('CDSW_APP_PORT', '8080')
-    cml_domain = os.environ.get('CDSW_DOMAIN', '')
-
-    # Set Django-specific environment variables with CML defaults
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
-    os.environ.setdefault('DJANGO_DEBUG', 'false')  # Production default
-    os.environ.setdefault('DJANGO_SECRET_KEY', os.environ.get('DJANGO_SECRET_KEY', 'cml-production-secret-key-change-me'))
-
-    # Build allowed hosts for CML
-    allowed_hosts = ['localhost', '127.0.0.1', '0.0.0.0']
-    if cml_domain:
-        allowed_hosts.append(cml_domain)
-        allowed_hosts.append(f'*.{cml_domain}')
-    existing_hosts = os.environ.get('DJANGO_ALLOWED_HOSTS', '')
-    if existing_hosts:
-        allowed_hosts.extend(existing_hosts.split(','))
-    os.environ['DJANGO_ALLOWED_HOSTS'] = ','.join(set(allowed_hosts))
-
-    # Hive configuration defaults for Cloudera
-    os.environ.setdefault('HIVE_HOST', os.environ.get('HIVE_HOST', 'localhost'))
-    os.environ.setdefault('HIVE_PORT', os.environ.get('HIVE_PORT', '10000'))
-    os.environ.setdefault('HIVE_DB', os.environ.get('HIVE_DB', 'gmp_cis'))
-    os.environ.setdefault('HIVE_AUTH', os.environ.get('HIVE_AUTH', 'NONE'))
-
-    logger.info(f"CML App Port: {cml_app_port}")
-    logger.info(f"CML Domain: {cml_domain}")
-    logger.info(f"Hive Host: {os.environ.get('HIVE_HOST')}")
-    logger.info(f"Hive Port: {os.environ.get('HIVE_PORT')}")
-    logger.info(f"Hive Database: {os.environ.get('HIVE_DB')}")
-
-    return cml_app_port
+def run(cmd, env=None, check=True):
+    """Run a command and optionally check return code."""
+    print(f"$ {' '.join(cmd)}")
+    result = subprocess.run(cmd, env=env)
+    if check and result.returncode != 0:
+        sys.exit(result.returncode)
+    return result.returncode
 
 
-def collect_static_files(python_executable, project_dir):
-    """
-    Collect static files for production deployment.
-    """
-    manage_py = os.path.join(project_dir, 'manage.py')
-    if os.path.exists(manage_py):
-        logger.info("Collecting static files...")
-        try:
-            subprocess.run(
-                [python_executable, manage_py, 'collectstatic', '--noinput'],
-                check=True,
-                cwd=project_dir
-            )
-            logger.info("Static files collected successfully")
-        except subprocess.CalledProcessError as e:
-            logger.warning(f"Failed to collect static files: {e}")
+def kinit_with_keytab(keytab, principal, cache=None):
+    """Initialize Kerberos ticket using keytab."""
+    env = os.environ.copy()
+    if cache:
+        env["KRB5CCNAME"] = cache
+    print(f"==> kinit -kt {keytab} {principal}")
+    rc = subprocess.run(["kinit", "-kt", keytab, principal], env=env).returncode
+    if rc != 0:
+        print("ERROR: kinit failed. Verify keytab, principal, and krb5.conf.")
+        sys.exit(rc)
+    subprocess.run(["klist"], env=env)
+    return rc
 
 
-def run_migrations(python_executable, project_dir):
-    """
-    Run database migrations if needed.
-    Note: This project uses Hive, so Django migrations are minimal.
-    """
-    manage_py = os.path.join(project_dir, 'manage.py')
-    if os.path.exists(manage_py):
-        logger.info("Running database migrations...")
-        try:
-            subprocess.run(
-                [python_executable, manage_py, 'migrate', '--noinput'],
-                check=True,
-                cwd=project_dir
-            )
-            logger.info("Migrations completed successfully")
-        except subprocess.CalledProcessError as e:
-            logger.warning(f"Migration warning (may be expected for Hive-only setup): {e}")
+def start_kerberos_renewal_loop(keytab, principal, interval_sec=3600, cache=None):
+    """Start a background thread to renew Kerberos ticket periodically."""
+    def _renew():
+        env = os.environ.copy()
+        if cache:
+            env["KRB5CCNAME"] = cache
+        while True:
+            r = subprocess.run(["kinit", "-R"], env=env)
+            if r.returncode != 0:
+                print("Renewal failed; re-acquiring ticket via keytab...")
+                subprocess.run(["kinit", "-kt", keytab, principal], env=env)
+            time.sleep(interval_sec)
 
-
-def start_gunicorn_server(python_executable, project_dir, port):
-    """
-    Start the Gunicorn WSGI server for production.
-    """
-    # Determine the gunicorn executable
-    venv_dir = os.path.join(project_dir, '.venv')
-    if sys.platform == 'win32':
-        gunicorn_executable = os.path.join(venv_dir, 'Scripts', 'gunicorn')
-    else:
-        gunicorn_executable = os.path.join(venv_dir, 'bin', 'gunicorn')
-
-    # Gunicorn configuration
-    workers = int(os.environ.get('GUNICORN_WORKERS', '4'))
-    threads = int(os.environ.get('GUNICORN_THREADS', '4'))
-    timeout = int(os.environ.get('GUNICORN_TIMEOUT', '120'))
-
-    gunicorn_cmd = [
-        gunicorn_executable,
-        'config.wsgi:application',
-        '--bind', f'0.0.0.0:{port}',
-        '--workers', str(workers),
-        '--threads', str(threads),
-        '--timeout', str(timeout),
-        '--access-logfile', '-',
-        '--error-logfile', '-',
-        '--capture-output',
-        '--enable-stdio-inheritance',
-    ]
-
-    logger.info(f"Starting Gunicorn server on port {port}...")
-    logger.info(f"Workers: {workers}, Threads: {threads}, Timeout: {timeout}s")
-    logger.info(f"Command: {' '.join(gunicorn_cmd)}")
-
-    # Start Gunicorn (this will block and run the server)
-    os.chdir(project_dir)
-    os.execv(gunicorn_executable, gunicorn_cmd)
+    t = threading.Thread(target=_renew, daemon=True)
+    t.start()
 
 
 def main():
-    """
-    Main entry point for CML application deployment.
-    """
-    logger.info("=" * 60)
-    logger.info("CIS Trade Hive - CML Application Startup")
-    logger.info("=" * 60)
+    """Main entry point for CML application deployment."""
+    if WORKDIR:
+        os.chdir(WORKDIR)
 
-    # Get project directory
-    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    logger.info(f"Project directory: {project_dir}")
+    # Set Django environment
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", DJANGO_SETTINGS)
+    os.environ.setdefault("DJANGO_DEBUG", "True")
+    os.environ.setdefault("DJANGO_ALLOWED_HOSTS", "*")
 
-    # Change to project directory
-    os.chdir(project_dir)
+    # Set CIS_ENV to 'work' for CML/Cloudera configuration
+    os.environ.setdefault("CIS_ENV", "work")
 
-    # Setup environment variables
-    port = setup_environment_variables()
+    # Kerberos config (from env)
+    keytab = os.environ.get("KRB5_KTNAME") or "/home/cdsw/CIS/secrets/qwntmwsg.keytab"
+    principal = os.environ.get("KRB5_PRINCIPAL") or "qwntmwsg@TST.UOBNET.COM"
+    cache = os.environ.get("KRB5CCNAME") or "FILE:/home/cdsw/CIS/krb5/krb5cc"
 
-    # Setup virtual environment and install dependencies
-    python_executable = setup_virtual_environment()
+    # Obtain Kerberos TGT up-front (before commands that hit Impala/Hive)
+    kinit_with_keytab(keytab, principal, cache=cache)
+    start_kerberos_renewal_loop(keytab, principal, interval_sec=3600, cache=cache)
 
-    # Collect static files
-    collect_static_files(python_executable, project_dir)
+    python_exec = sys.executable
 
-    # Run migrations (optional for Hive-only setup)
-    run_migrations(python_executable, project_dir)
+    # Run Django management commands
+    run([python_exec, "manage.py", "migrate"])
+    try:
+        run([python_exec, "manage.py", "setup_roles"], check=False)
+    except Exception:
+        print("setup_roles command not found; continuing...")
 
-    # Start the server
-    start_gunicorn_server(python_executable, project_dir, port)
+    try:
+        run([python_exec, "manage.py", "create_hive_tables"], check=False)
+    except Exception:
+        print("create_hive_tables failed or not available; continuing...")
+
+    if COLLECT_STATIC:
+        os.environ.setdefault("DJANGO_COLLECTSTATIC", "1")
+        run([python_exec, "manage.py", "collectstatic", "--noinput"], check=True)
+
+    # Gunicorn configuration
+    port = os.environ.get("CDSW_APP_PORT") or os.environ.get("PORT", "8080")
+    bind = f"127.0.0.1:{os.environ.get('CDSW_APP_PORT', port)}"
+    workers = os.environ.get("WORKERS") or str(8)
+    timeout = os.environ.get("TIMEOUT", "120")
+    worker_class = os.environ.get("WORKER_CLASS", "gthread")
+    threads = os.environ.get("THREADS", "8")
+    keepalive = os.environ.get("KEEPALIVE", "5")
+
+    print("=== Runtime Configuration ===")
+    print(f"DJANGO_SETTINGS_MODULE = {os.environ['DJANGO_SETTINGS_MODULE']}")
+    print(f"DJANGO_DEBUG           = {os.environ.get('DJANGO_DEBUG')}")
+    print(f"DJANGO_ALLOWED_HOSTS   = {os.environ.get('DJANGO_ALLOWED_HOSTS')}")
+    print(f"CIS_ENV                = {os.environ.get('CIS_ENV')}")
+    print(f"Collect_static         = {COLLECT_STATIC}")
+    print(f"Gunicorn bind          = {bind}")
+    print(f"Workers                = {workers}")
+    print(f"Timeout                = {timeout}")
+    print(f"KRB5_KTNAME            = {keytab}")
+    print(f"KRB5_PRINCIPAL         = {principal}")
+    print(f"KRB5CCNAME             = {cache}")
+    print(f"Worker class           = {worker_class}")
+    print(f"Threads                = {threads}")
+    print(f"Keep-alive             = {keepalive}")
+
+    run([
+        "gunicorn",
+        "--bind", bind,
+        "--workers", workers,
+        "--worker-class", worker_class,
+        "--threads", threads,
+        "--keep-alive", keepalive,
+        "--timeout", timeout,
+        f"{DJANGO_SETTINGS.rsplit('.', 1)[0]}.wsgi:application",
+    ])
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
