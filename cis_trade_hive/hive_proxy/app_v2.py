@@ -481,7 +481,8 @@ def get_table_schema(database: str, table: str, force_refresh: bool = False) -> 
     Returns:
         {
             'columns': [{'name': 'col1', 'type': 'string'}, ...],
-            'column_map': {'col1': 'string', ...},
+            'column_map': {'col1': 'string', ...},  # lowercase keys for case-insensitive lookup
+            'column_map_original': {'col1': 'string', ...},  # original case
             'primary_key': 'id' (guessed from first column)
         }
     """
@@ -501,28 +502,62 @@ def get_table_schema(database: str, table: str, force_refresh: bool = False) -> 
 
     # Parse DESCRIBE output
     columns = []
-    column_map = {}
+    column_map = {}  # lowercase keys
+    column_map_original = {}  # original case
 
     data = result.get('data', [])
-    logger.info(f"Schema data type: {type(data)}, length: {len(data) if isinstance(data, list) else 'N/A'}")
+    logger.info(f"Schema data for {database}.{table}: type={type(data)}, length={len(data) if isinstance(data, list) else 'N/A'}")
+
+    # Log first few rows to understand format
+    if data and isinstance(data, list):
+        for i, row in enumerate(data[:3]):
+            logger.info(f"  Row {i}: {row} (type: {type(row).__name__})")
+            if isinstance(row, dict):
+                logger.info(f"    Keys: {list(row.keys())}")
 
     for row in data:
         col_name = None
         data_type = None
 
         if isinstance(row, dict):
-            # Try different possible key names from beeline CSV output
-            col_name = (row.get('col_name') or row.get('name') or
-                       row.get('column_name') or row.get('field') or
-                       list(row.values())[0] if row else None)
-            data_type = (row.get('data_type') or row.get('type') or
-                        row.get('column_type') or
-                        list(row.values())[1] if len(row) > 1 else 'string')
+            # Get all keys from the dict
+            keys = list(row.keys())
+            values = list(row.values())
 
-            if col_name:
-                col_name = str(col_name).strip()
-            if data_type:
-                data_type = str(data_type).strip()
+            # DESCRIBE output in CSV2 format typically has headers like:
+            # 'col_name', 'data_type', 'comment'
+            # But could also be: 'name', 'type' or numbered
+
+            if len(keys) >= 2:
+                # Try multiple key patterns to find column name and type
+                col_name_keys = ['col_name', 'name', 'field', 'column_name', 'column']
+                data_type_keys = ['data_type', 'type', 'datatype', 'column_type']
+
+                for key in keys:
+                    key_lower = key.lower().strip()
+                    # Check for column name key
+                    if any(k in key_lower for k in col_name_keys):
+                        col_name = str(row[key]).strip() if row[key] else None
+                    # Check for data type key
+                    elif any(k in key_lower for k in data_type_keys):
+                        data_type = str(row[key]).strip() if row[key] else None
+
+                # If still not found by key names, use positional (first=name, second=type)
+                if not col_name and values:
+                    first_val = str(values[0]).strip() if values[0] else None
+                    # Make sure it looks like a column name (not empty, not a header)
+                    if first_val and first_val.lower() not in ('col_name', 'name', 'column_name', ''):
+                        col_name = first_val
+
+                if not data_type and len(values) > 1:
+                    second_val = str(values[1]).strip() if values[1] else None
+                    if second_val and second_val.lower() not in ('data_type', 'type', ''):
+                        data_type = second_val
+
+            elif len(keys) == 1:
+                # Single column - probably just column name
+                col_name = str(values[0]).strip() if values else None
+                data_type = 'string'
 
         elif isinstance(row, str):
             # Parse string format: "col_name    data_type    comment"
@@ -542,11 +577,23 @@ def get_table_schema(database: str, table: str, force_refresh: bool = False) -> 
             continue
         if col_name.startswith('#') or col_name.startswith('|'):
             continue
-        if col_name.lower() in ('', 'col_name', 'name', 'column_name'):
+        # Skip header row values
+        if col_name.lower() in ('', 'col_name', 'name', 'column_name', 'field'):
+            continue
+        # Skip partition markers
+        if col_name.startswith('# ') or 'Partition' in col_name:
             continue
 
+        # Clean up column name (remove table prefix if present)
+        if '.' in col_name:
+            col_name = col_name.split('.')[-1]
+
+        # Store with both original case and lowercase for lookup
         columns.append({'name': col_name, 'type': data_type or 'string'})
-        column_map[col_name] = data_type or 'string'
+        column_map[col_name.lower()] = data_type or 'string'
+        column_map_original[col_name] = data_type or 'string'
+
+    logger.info(f"Parsed {len(columns)} columns for {database}.{table}: {[c['name'] for c in columns[:5]]}{'...' if len(columns) > 5 else ''}")
 
     if not columns:
         logger.error(f"No columns found for {database}.{table}. Raw data: {data[:3] if data else 'empty'}")
@@ -554,7 +601,8 @@ def get_table_schema(database: str, table: str, force_refresh: bool = False) -> 
 
     schema = {
         'columns': columns,
-        'column_map': column_map,
+        'column_map': column_map,  # lowercase keys for case-insensitive lookup
+        'column_map_original': column_map_original,  # original case
         'primary_key': columns[0]['name'] if columns else None  # Assume first column is PK
     }
 
@@ -816,26 +864,41 @@ def dynamic_insert(table_name: str):
                 'error': f'Cannot get schema for {database}.{table}'
             }), 500
 
-        column_map = schema['column_map']
+        column_map = schema['column_map']  # lowercase keys
+        column_map_original = schema.get('column_map_original', column_map)
 
         # Build INSERT statement
         columns = []
         values = []
 
+        logger.debug(f"Schema column_map keys: {list(column_map.keys())}")
+        logger.debug(f"Input data keys: {list(record_data.keys())}")
+
         for col_name, value in record_data.items():
             safe_col = sanitize_identifier(col_name)
-            if safe_col not in column_map:
-                logger.warning(f"Column {safe_col} not in schema, skipping")
+            safe_col_lower = safe_col.lower()
+
+            # Case-insensitive lookup
+            if safe_col_lower not in column_map:
+                logger.warning(f"Column '{safe_col}' not in schema (available: {list(column_map.keys())[:5]}...), skipping")
                 continue
 
-            col_type = column_map[safe_col]
+            col_type = column_map[safe_col_lower]
             formatted_value = format_value_for_hive(value, col_type)
 
-            columns.append(safe_col)
+            # Use the original column name for SQL (preserve case)
+            original_col = next((k for k in column_map_original.keys() if k.lower() == safe_col_lower), safe_col)
+            columns.append(original_col)
             values.append(formatted_value)
 
         if not columns:
-            return jsonify({'success': False, 'error': 'No valid columns provided'}), 400
+            logger.error(f"No valid columns! Input keys: {list(record_data.keys())}, Schema keys: {list(column_map.keys())}")
+            return jsonify({
+                'success': False,
+                'error': 'No valid columns provided',
+                'input_columns': list(record_data.keys()),
+                'schema_columns': list(column_map.keys())[:10]
+            }), 400
 
         sql = f"""
         INSERT INTO {database}.{table} ({', '.join(columns)})
@@ -937,12 +1000,20 @@ def dynamic_update(table_name: str):
                 'error': f'Cannot get schema for {database}.{table}'
             }), 500
 
-        column_map = schema['column_map']
+        column_map = schema['column_map']  # lowercase keys
+        column_map_original = schema.get('column_map_original', column_map)
 
         # Fetch old values for audit
         old_values = None
         pk_col = schema.get('primary_key')
         pk_value = where_clause.get(pk_col) if pk_col else None
+
+        # Try case-insensitive pk lookup
+        if not pk_value and pk_col:
+            for key, val in where_clause.items():
+                if key.lower() == pk_col.lower():
+                    pk_value = val
+                    break
 
         if pk_value:
             select_sql = f"SELECT * FROM {database}.{table} WHERE {pk_col} = '{pk_value}'"
@@ -950,28 +1021,42 @@ def dynamic_update(table_name: str):
             if sel_success and sel_result.get('data'):
                 old_values = sel_result['data'][0] if sel_result['data'] else None
 
-        # Build SET clause
+        # Build SET clause with case-insensitive lookup
         set_clauses = []
         for col_name, value in update_data.items():
             safe_col = sanitize_identifier(col_name)
-            if safe_col not in column_map:
-                logger.warning(f"Column {safe_col} not in schema, skipping")
+            safe_col_lower = safe_col.lower()
+
+            if safe_col_lower not in column_map:
+                logger.warning(f"Column '{safe_col}' not in schema, skipping")
                 continue
 
-            col_type = column_map[safe_col]
+            col_type = column_map[safe_col_lower]
             formatted_value = format_value_for_hive(value, col_type)
-            set_clauses.append(f"{safe_col} = {formatted_value}")
+
+            # Use original column name for SQL
+            original_col = next((k for k in column_map_original.keys() if k.lower() == safe_col_lower), safe_col)
+            set_clauses.append(f"{original_col} = {formatted_value}")
 
         if not set_clauses:
-            return jsonify({'success': False, 'error': 'No valid columns to update'}), 400
+            return jsonify({
+                'success': False,
+                'error': 'No valid columns to update',
+                'input_columns': list(update_data.keys()),
+                'schema_columns': list(column_map.keys())[:10]
+            }), 400
 
-        # Build WHERE clause
+        # Build WHERE clause with case-insensitive lookup
         where_parts = []
         for col_name, value in where_clause.items():
             safe_col = sanitize_identifier(col_name)
-            col_type = column_map.get(safe_col, 'string')
+            safe_col_lower = safe_col.lower()
+            col_type = column_map.get(safe_col_lower, 'string')
             formatted_value = format_value_for_hive(value, col_type)
-            where_parts.append(f"{safe_col} = {formatted_value}")
+
+            # Use original column name for SQL
+            original_col = next((k for k in column_map_original.keys() if k.lower() == safe_col_lower), safe_col)
+            where_parts.append(f"{original_col} = {formatted_value}")
 
         sql = f"""
         UPDATE {database}.{table}
@@ -1070,11 +1155,20 @@ def dynamic_delete(table_name: str):
                 'error': f'Cannot get schema for {database}.{table}'
             }), 500
 
-        column_map = schema['column_map']
+        column_map = schema['column_map']  # lowercase keys
+        column_map_original = schema.get('column_map_original', column_map)
 
         # Fetch old values for audit
         pk_col = schema.get('primary_key')
         pk_value = where_clause.get(pk_col) if pk_col else None
+
+        # Try case-insensitive pk lookup
+        if not pk_value and pk_col:
+            for key, val in where_clause.items():
+                if key.lower() == pk_col.lower():
+                    pk_value = val
+                    break
+
         old_values = None
 
         if pk_value:
@@ -1083,23 +1177,33 @@ def dynamic_delete(table_name: str):
             if sel_success and sel_result.get('data'):
                 old_values = sel_result['data'][0] if sel_result['data'] else None
 
-        # Build WHERE clause
+        # Build WHERE clause with case-insensitive lookup
         where_parts = []
         for col_name, value in where_clause.items():
             safe_col = sanitize_identifier(col_name)
-            col_type = column_map.get(safe_col, 'string')
+            safe_col_lower = safe_col.lower()
+            col_type = column_map.get(safe_col_lower, 'string')
             formatted_value = format_value_for_hive(value, col_type)
-            where_parts.append(f"{safe_col} = {formatted_value}")
 
-        # Soft delete or hard delete
-        if soft_delete and soft_delete_column in column_map:
+            # Use original column name for SQL
+            original_col = next((k for k in column_map_original.keys() if k.lower() == safe_col_lower), safe_col)
+            where_parts.append(f"{original_col} = {formatted_value}")
+
+        # Soft delete or hard delete (case-insensitive check)
+        soft_delete_col_lower = soft_delete_column.lower()
+        if soft_delete and soft_delete_col_lower in column_map:
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            set_clauses = [f"{soft_delete_column} = '{now}'"]
+
+            # Get original column names
+            original_soft_del_col = next((k for k in column_map_original.keys() if k.lower() == soft_delete_col_lower), soft_delete_column)
+            set_clauses = [f"{original_soft_del_col} = '{now}'"]
 
             if 'updated_at' in column_map:
-                set_clauses.append(f"updated_at = '{now}'")
+                original_updated_at = next((k for k in column_map_original.keys() if k.lower() == 'updated_at'), 'updated_at')
+                set_clauses.append(f"{original_updated_at} = '{now}'")
             if 'updated_by' in column_map:
-                set_clauses.append(f"updated_by = '{deleted_by}'")
+                original_updated_by = next((k for k in column_map_original.keys() if k.lower() == 'updated_by'), 'updated_by')
+                set_clauses.append(f"{original_updated_by} = '{deleted_by}'")
 
             sql = f"""
             UPDATE {database}.{table}
@@ -1383,17 +1487,20 @@ def debug_sql():
                 'error': f'Cannot get schema for {database}.{table}'
             }), 500
 
-        column_map = schema['column_map']
+        column_map = schema['column_map']  # lowercase keys
+        column_map_original = schema.get('column_map_original', column_map)
 
         if operation == 'insert':
             columns = []
             values = []
             for col_name, value in data.items():
                 safe_col = sanitize_identifier(col_name)
-                if safe_col in column_map:
-                    col_type = column_map[safe_col]
+                safe_col_lower = safe_col.lower()
+                if safe_col_lower in column_map:
+                    col_type = column_map[safe_col_lower]
                     formatted_value = format_value_for_hive(value, col_type)
-                    columns.append(safe_col)
+                    original_col = next((k for k in column_map_original.keys() if k.lower() == safe_col_lower), safe_col)
+                    columns.append(original_col)
                     values.append(formatted_value)
 
             sql = f"INSERT INTO {database}.{table} ({', '.join(columns)}) VALUES ({', '.join(values)})"
@@ -1402,17 +1509,21 @@ def debug_sql():
             set_clauses = []
             for col_name, value in data.items():
                 safe_col = sanitize_identifier(col_name)
-                if safe_col in column_map:
-                    col_type = column_map[safe_col]
+                safe_col_lower = safe_col.lower()
+                if safe_col_lower in column_map:
+                    col_type = column_map[safe_col_lower]
                     formatted_value = format_value_for_hive(value, col_type)
-                    set_clauses.append(f"{safe_col} = {formatted_value}")
+                    original_col = next((k for k in column_map_original.keys() if k.lower() == safe_col_lower), safe_col)
+                    set_clauses.append(f"{original_col} = {formatted_value}")
 
             where_parts = []
             for col_name, value in where.items():
                 safe_col = sanitize_identifier(col_name)
-                col_type = column_map.get(safe_col, 'string')
+                safe_col_lower = safe_col.lower()
+                col_type = column_map.get(safe_col_lower, 'string')
                 formatted_value = format_value_for_hive(value, col_type)
-                where_parts.append(f"{safe_col} = {formatted_value}")
+                original_col = next((k for k in column_map_original.keys() if k.lower() == safe_col_lower), safe_col)
+                where_parts.append(f"{original_col} = {formatted_value}")
 
             sql = f"UPDATE {database}.{table} SET {', '.join(set_clauses)} WHERE {' AND '.join(where_parts)}"
 
