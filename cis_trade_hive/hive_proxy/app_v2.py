@@ -471,7 +471,18 @@ def execute_beeline(sql: str, database: str = None,
         if output_format == 'csv2':
             try:
                 reader = csv.DictReader(io.StringIO(output))
-                data = [dict(row) for row in reader]
+                data = []
+                for row in reader:
+                    # Strip table prefixes from column names (e.g., 'table.column' -> 'column')
+                    clean_row = {}
+                    for key, value in row.items():
+                        # Remove table prefix if present (e.g., 'portfolio_hive.portfolio_id' -> 'portfolio_id')
+                        if key and '.' in key:
+                            clean_key = key.split('.')[-1]
+                        else:
+                            clean_key = key
+                        clean_row[clean_key] = value
+                    data.append(clean_row)
                 return True, {
                     'data': data,
                     'rows': len(data),
@@ -897,6 +908,7 @@ def with_query_limit(f):
 def health_check():
     """Health check endpoint."""
     return jsonify({
+        'success': True,  # Required for hybrid_connection.py compatibility
         'status': 'healthy',
         'service': 'hive-proxy',
         'version': '2.0.0',
@@ -904,7 +916,8 @@ def health_check():
             'database': config.DEFAULT_DATABASE,
             'audit_enabled': config.AUDIT_ENABLED,
             'timeout': config.QUERY_TIMEOUT,
-            'max_concurrent': config.MAX_CONCURRENT
+            'max_concurrent': config.MAX_CONCURRENT,
+            'yarn_queue': config.YARN_QUEUE
         },
         'stats': query_stats,
         'schema_cache': schema_cache.stats()
