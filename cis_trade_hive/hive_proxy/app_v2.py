@@ -289,6 +289,10 @@ def format_value_for_hive(value: Any, hive_type: str) -> str:
         if isinstance(value, datetime):
             return f"'{value.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}'"
         if isinstance(value, str):
+            value_lower = value.lower().strip()
+            # Handle 'now' and 'current_timestamp' keywords
+            if value_lower in ('now', 'current_timestamp', 'current'):
+                return 'CURRENT_TIMESTAMP'
             # Try to parse common formats
             for fmt in ['%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d']:
                 try:
@@ -296,10 +300,10 @@ def format_value_for_hive(value: Any, hive_type: str) -> str:
                     return f"'{dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}'"
                 except ValueError:
                     continue
-            # If parsing fails, use CURRENT_TIMESTAMP for 'now' or return as-is
-            if value.lower() in ('now', 'current_timestamp'):
-                return 'CURRENT_TIMESTAMP'
-            return f"'{value}'"
+            # Return as-is if can't parse
+            escaped = value.replace("'", "''")
+            return f"'{escaped}'"
+        # For other types, use current timestamp
         return 'CURRENT_TIMESTAMP'
 
     # Date
@@ -489,7 +493,7 @@ def get_table_schema(database: str, table: str, force_refresh: bool = False) -> 
 
     # Query schema from Hive
     sql = f"DESCRIBE {database}.{table}"
-    success, result = execute_beeline(sql, database, timeout=60)
+    success, result = execute_beeline(sql, database, timeout=120)
 
     if not success:
         logger.error(f"Failed to get schema for {database}.{table}: {result.get('error')}")
@@ -500,31 +504,52 @@ def get_table_schema(database: str, table: str, force_refresh: bool = False) -> 
     column_map = {}
 
     data = result.get('data', [])
+    logger.info(f"Schema data type: {type(data)}, length: {len(data) if isinstance(data, list) else 'N/A'}")
 
     for row in data:
+        col_name = None
+        data_type = None
+
         if isinstance(row, dict):
-            col_name = row.get('col_name', '').strip()
-            data_type = row.get('data_type', '').strip()
+            # Try different possible key names from beeline CSV output
+            col_name = (row.get('col_name') or row.get('name') or
+                       row.get('column_name') or row.get('field') or
+                       list(row.values())[0] if row else None)
+            data_type = (row.get('data_type') or row.get('type') or
+                        row.get('column_type') or
+                        list(row.values())[1] if len(row) > 1 else 'string')
+
+            if col_name:
+                col_name = str(col_name).strip()
+            if data_type:
+                data_type = str(data_type).strip()
+
         elif isinstance(row, str):
             # Parse string format: "col_name    data_type    comment"
+            row = row.strip()
+            if not row:
+                continue
             parts = row.split()
             if len(parts) >= 2:
                 col_name = parts[0].strip()
                 data_type = parts[1].strip()
-            else:
-                continue
-        else:
+            elif len(parts) == 1:
+                col_name = parts[0].strip()
+                data_type = 'string'
+
+        # Skip empty rows, partition info, and header markers
+        if not col_name:
+            continue
+        if col_name.startswith('#') or col_name.startswith('|'):
+            continue
+        if col_name.lower() in ('', 'col_name', 'name', 'column_name'):
             continue
 
-        # Skip empty rows and partition info
-        if not col_name or col_name.startswith('#') or col_name == '':
-            continue
-
-        columns.append({'name': col_name, 'type': data_type})
-        column_map[col_name] = data_type
+        columns.append({'name': col_name, 'type': data_type or 'string'})
+        column_map[col_name] = data_type or 'string'
 
     if not columns:
-        logger.error(f"No columns found for {database}.{table}")
+        logger.error(f"No columns found for {database}.{table}. Raw data: {data[:3] if data else 'empty'}")
         return None
 
     schema = {
@@ -1294,6 +1319,116 @@ def get_stats():
             'timeout': config.QUERY_TIMEOUT
         }
     })
+
+
+@app.route('/debug/describe/<path:table_name>', methods=['GET'])
+@require_api_key
+def debug_describe(table_name: str):
+    """
+    Debug endpoint to see raw DESCRIBE output.
+    GET /debug/describe/mrw_ima.portfolio_hive
+    """
+    try:
+        database, table = validate_table_name(table_name)
+        database = request.args.get('database', database)
+
+        sql = f"DESCRIBE {database}.{table}"
+        success, result = execute_beeline(sql, database, timeout=120)
+
+        if success:
+            return jsonify({
+                'success': True,
+                'database': database,
+                'table': table,
+                'raw_result': result,
+                'data_type': str(type(result.get('data'))),
+                'first_row_type': str(type(result.get('data', [None])[0])) if result.get('data') else 'N/A'
+            })
+        else:
+            return jsonify({'success': False, 'error': result.get('error')}), 500
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/debug/sql', methods=['POST'])
+@require_api_key
+def debug_sql():
+    """
+    Debug endpoint to generate SQL without executing.
+    POST /debug/sql
+    {
+        "operation": "insert",
+        "table": "mrw_ima.portfolio_hive",
+        "data": {"portfolio_id": "TEST", "status": "DRAFT"}
+    }
+    """
+    try:
+        req_data = request.get_json()
+        operation = req_data.get('operation', 'insert')
+        table_name = req_data.get('table')
+        data = req_data.get('data', {})
+        where = req_data.get('where', {})
+
+        if not table_name:
+            return jsonify({'success': False, 'error': 'Missing table parameter'}), 400
+
+        database, table = validate_table_name(table_name)
+
+        # Get schema
+        schema = get_table_schema(database, table)
+        if not schema:
+            return jsonify({
+                'success': False,
+                'error': f'Cannot get schema for {database}.{table}'
+            }), 500
+
+        column_map = schema['column_map']
+
+        if operation == 'insert':
+            columns = []
+            values = []
+            for col_name, value in data.items():
+                safe_col = sanitize_identifier(col_name)
+                if safe_col in column_map:
+                    col_type = column_map[safe_col]
+                    formatted_value = format_value_for_hive(value, col_type)
+                    columns.append(safe_col)
+                    values.append(formatted_value)
+
+            sql = f"INSERT INTO {database}.{table} ({', '.join(columns)}) VALUES ({', '.join(values)})"
+
+        elif operation == 'update':
+            set_clauses = []
+            for col_name, value in data.items():
+                safe_col = sanitize_identifier(col_name)
+                if safe_col in column_map:
+                    col_type = column_map[safe_col]
+                    formatted_value = format_value_for_hive(value, col_type)
+                    set_clauses.append(f"{safe_col} = {formatted_value}")
+
+            where_parts = []
+            for col_name, value in where.items():
+                safe_col = sanitize_identifier(col_name)
+                col_type = column_map.get(safe_col, 'string')
+                formatted_value = format_value_for_hive(value, col_type)
+                where_parts.append(f"{safe_col} = {formatted_value}")
+
+            sql = f"UPDATE {database}.{table} SET {', '.join(set_clauses)} WHERE {' AND '.join(where_parts)}"
+
+        else:
+            sql = f"SELECT * FROM {database}.{table} LIMIT 1"
+
+        return jsonify({
+            'success': True,
+            'operation': operation,
+            'table': f"{database}.{table}",
+            'schema': schema,
+            'generated_sql': sql
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # =============================================================================
