@@ -45,41 +45,22 @@ JDBC_URL = (
 
 print(f"JDBC URL:\n{JDBC_URL}\n")
 
-# Find Hive JDBC driver
-HIVE_JDBC_PATHS = [
-    "/opt/cloudera/parcels/CDH/jars/hive-jdbc-*.jar",
-    "/opt/cloudera/parcels/CDH/lib/hive/lib/hive-jdbc-*.jar",
-    "/app/cloudera/parcels/CDH/jars/hive-jdbc-*.jar",
-    "/usr/lib/hive/lib/hive-jdbc-*.jar",
-]
+# Cloudera CDH JAR directory
+CDH_JAR_DIR = "/app/cloudera/parcels/CDH/jars"
 
 import glob
-jdbc_driver = None
-for pattern in HIVE_JDBC_PATHS:
-    matches = glob.glob(pattern)
-    if matches:
-        jdbc_driver = matches[0]
-        break
 
-if not jdbc_driver:
-    print("Searching for Hive JDBC driver...")
-    result = subprocess.run(
-        ["find", "/opt", "/app", "/usr", "-name", "hive-jdbc-*.jar", "-type", "f"],
-        capture_output=True, text=True, timeout=30
-    )
-    if result.stdout.strip():
-        jdbc_driver = result.stdout.strip().split('\n')[0]
+# Find specific Hive JDBC driver
+jdbc_pattern = os.path.join(CDH_JAR_DIR, "hive-jdbc-3.1.3000*.jar")
+jdbc_matches = glob.glob(jdbc_pattern)
 
-if jdbc_driver:
+if jdbc_matches:
+    # Use the standalone jar if available, otherwise regular
+    standalone = [j for j in jdbc_matches if 'standalone' in j]
+    jdbc_driver = standalone[0] if standalone else jdbc_matches[0]
     print(f"Found JDBC driver: {jdbc_driver}")
 else:
-    print("ERROR: Hive JDBC driver not found!")
-    print("Looking for any hive jars...")
-    result = subprocess.run(
-        ["find", "/opt", "/app", "-name", "hive*.jar", "-type", "f"],
-        capture_output=True, text=True, timeout=30
-    )
-    print(result.stdout[:2000] if result.stdout else "No jars found")
+    print(f"ERROR: Hive JDBC driver not found in {CDH_JAR_DIR}")
     sys.exit(1)
 
 # Test with JayDeBeApi
@@ -91,34 +72,44 @@ try:
     import jaydebeapi
     import jpype
 
-    # Get all required JARs
-    jar_dir = os.path.dirname(jdbc_driver)
-    required_jars = glob.glob(os.path.join(jar_dir, "*.jar"))
+    # Get all required JARs from CDH directory
+    all_jars = glob.glob(os.path.join(CDH_JAR_DIR, "*.jar"))
+    print(f"Loading {len(all_jars)} JARs from {CDH_JAR_DIR}")
 
     # Start JVM if not already started
     if not jpype.isJVMStarted():
-        jpype.startJVM(classpath=required_jars)
+        # Set JAVA_HOME if needed
+        java_home = os.environ.get('JAVA_HOME', '/usr/lib/jvm/java-11-openjdk')
+        jvm_path = jpype.getDefaultJVMPath()
+        print(f"Starting JVM: {jvm_path}")
+        jpype.startJVM(jvm_path, classpath=all_jars, convertStrings=True)
 
-    # Connect
+    print("JVM started successfully")
+
+    # Connect using Kerberos (no username/password needed)
+    print(f"\nConnecting to Hive...")
     conn = jaydebeapi.connect(
         "org.apache.hive.jdbc.HiveDriver",
         JDBC_URL,
-        ["", ""],  # username, password (empty for Kerberos)
+        ["", ""],  # empty for Kerberos auth
         jdbc_driver
     )
+    print("Connected!")
 
     cursor = conn.cursor()
     cursor.execute("SELECT 1")
     result = cursor.fetchone()
-    print(f"SUCCESS! Result: {result}")
+    print(f"SUCCESS! SELECT 1 = {result}")
 
     # Try to show databases
+    print("\nListing databases...")
     cursor.execute("SHOW DATABASES")
     databases = cursor.fetchall()
-    print(f"\nDatabases: {[db[0] for db in databases[:10]]}")
+    print(f"Databases: {[db[0] for db in databases[:10]]}")
 
     cursor.close()
     conn.close()
+    print("\nConnection closed successfully")
 
 except ImportError as e:
     print(f"JayDeBeApi not installed: {e}")
