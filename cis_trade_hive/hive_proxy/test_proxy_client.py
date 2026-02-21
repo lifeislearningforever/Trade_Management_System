@@ -186,7 +186,14 @@ def test_insert_query():
     })
 
     if schema_status == 200 and schema_result.get('success'):
-        print(f"  Table columns: {[col.get('col_name', col) for col in schema_result.get('data', [])[:5]]}")
+        data = schema_result.get('data', [])
+        # Handle both dict and string formats
+        if data:
+            if isinstance(data[0], dict):
+                cols = [col.get('col_name', str(col)) for col in data[:5]]
+            else:
+                cols = [str(col) for col in data[:5]]
+            print(f"  Table columns: {cols}")
 
     # Insert a test record - adjust columns based on actual table schema
     query = f"""
