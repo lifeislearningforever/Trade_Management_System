@@ -1,11 +1,15 @@
 """
 Hybrid Connection Manager for CML (Cloudera Machine Learning)
 
-Uses impyla for BOTH Impala and Hive connections (more reliable in Cloudera):
-- Impala: Fast reads (SELECT queries) - port 21050
-- Hive: ACID writes (INSERT, UPDATE, DELETE) - port 10000
+Architecture:
+- Impala: Fast reads (SELECT queries) via impyla - port 21050
+- Hive: ACID writes (INSERT, UPDATE, DELETE) via beeline subprocess
 
-Both use Kerberos (GSSAPI) authentication via impyla + pure-sasl.
+The Hive connection uses beeline CLI because:
+1. HiveServer2 uses ZooKeeper for service discovery
+2. SSL with truststore is required
+3. Direct Python libraries (impyla, pyhive) fail with TSocket errors
+4. Beeline uses JDBC which handles all this properly
 
 Requirements:
     pip install pure-sasl thrift-sasl impyla
@@ -19,13 +23,7 @@ Configuration (settings.py):
         'KERBEROS_SERVICE_NAME': 'impala',
     }
 
-    HIVE_CONFIG = {
-        'HOST': 'hive-host',
-        'PORT': 10000,
-        'DATABASE': 'mrw_ima',
-        'AUTH': 'GSSAPI',
-        'KERBEROS_SERVICE_NAME': 'hive',
-    }
+    # Hive uses beeline with ZooKeeper - see hive_beeline_executor.py
 """
 
 import logging
@@ -39,13 +37,21 @@ from django.conf import settings
 
 logger = logging.getLogger('core')
 
-# Try importing impyla (used for both Impala and Hive)
+# Try importing impyla (used for Impala reads)
 try:
     from impala.dbapi import connect as impyla_connect
     IMPYLA_AVAILABLE = True
 except ImportError:
     IMPYLA_AVAILABLE = False
-    logger.warning("impyla not available. Database features will be disabled.")
+    logger.warning("impyla not available. Impala read features will be disabled.")
+
+# Import beeline executor for Hive writes
+try:
+    from core.repositories.hive_beeline_executor import hive_executor
+    BEELINE_AVAILABLE = True
+except ImportError:
+    BEELINE_AVAILABLE = False
+    logger.warning("HiveBeelineExecutor not available. Hive write features will be disabled.")
 
 
 class HybridConnectionManager:
@@ -466,7 +472,32 @@ class HybridConnectionManager:
 
     def execute_write(self, query: str, params: Optional[List] = None,
                      database: Optional[str] = None, use_mr_engine: bool = True) -> bool:
-        """Execute a WRITE query (INSERT, UPDATE, DELETE) via Hive (ACID)."""
+        """
+        Execute a WRITE query (INSERT, UPDATE, DELETE) via Hive.
+
+        Uses beeline subprocess for reliable ZooKeeper-based connection.
+        Falls back to direct impyla connection if beeline not available.
+        """
+        # Format query with params if provided
+        if params:
+            # Simple parameter substitution (for %s style params)
+            try:
+                formatted_query = query % tuple(
+                    f"'{p}'" if isinstance(p, str) else str(p) for p in params
+                )
+            except Exception:
+                formatted_query = query
+        else:
+            formatted_query = query
+
+        # Try beeline first (recommended for Cloudera with ZooKeeper)
+        if BEELINE_AVAILABLE:
+            try:
+                return hive_executor.execute_write(formatted_query, database=database)
+            except Exception as e:
+                logger.warning(f"Beeline write failed, trying direct connection: {str(e)}")
+
+        # Fallback to direct impyla connection
         connection = None
         cursor = None
         try:
@@ -482,20 +513,16 @@ class HybridConnectionManager:
                 try:
                     cursor.execute("SET hive.execution.engine=mr")
                 except Exception:
-                    # Ignore if setting fails (might not be needed)
                     pass
 
-            if params:
-                cursor.execute(query, params)
-            else:
-                cursor.execute(query)
+            cursor.execute(formatted_query)
 
             logger.debug("Hive write query executed successfully")
             return True
 
         except Exception as e:
             logger.error(f"Failed to execute write query: {str(e)}")
-            logger.error(f"Query: {query}")
+            logger.error(f"Query: {formatted_query[:200]}...")
             return False
         finally:
             if cursor:
@@ -558,9 +585,9 @@ class HybridConnectionManager:
 
     def test_connection(self) -> Dict[str, bool]:
         """Test both Impala and Hive connections."""
-        results = {'impala': False, 'hive': False}
+        results = {'impala': False, 'hive': False, 'hive_method': 'none'}
 
-        # Test Impala
+        # Test Impala (via impyla)
         if IMPYLA_AVAILABLE:
             try:
                 with self.get_read_cursor() as cursor:
@@ -572,14 +599,27 @@ class HybridConnectionManager:
             except Exception as e:
                 logger.error(f"Impala connection test failed: {str(e)}")
 
-        # Test Hive
-        if IMPYLA_AVAILABLE:
+        # Test Hive (via beeline - preferred)
+        if BEELINE_AVAILABLE:
+            try:
+                results['hive'] = hive_executor.test_connection()
+                results['hive_method'] = 'beeline'
+                if results['hive']:
+                    logger.info(f"Hive connection test (beeline): SUCCESS")
+                else:
+                    logger.error(f"Hive connection test (beeline): FAILED")
+            except Exception as e:
+                logger.error(f"Hive beeline test failed: {str(e)}")
+
+        # Fallback: Test Hive via direct impyla (usually fails in Cloudera)
+        if not results['hive'] and IMPYLA_AVAILABLE:
             try:
                 with self.get_write_cursor() as cursor:
                     if cursor:
                         cursor.execute("SELECT 1")
                         result = cursor.fetchone()
                         results['hive'] = result is not None
+                        results['hive_method'] = 'impyla'
                         logger.info(f"Hive connection test: SUCCESS")
             except Exception as e:
                 logger.error(f"Hive connection test failed: {str(e)}")
