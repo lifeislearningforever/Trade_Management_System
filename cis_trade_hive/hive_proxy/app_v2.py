@@ -511,7 +511,7 @@ def get_table_schema(database: str, table: str, force_refresh: bool = False) -> 
         if cached:
             return cached
 
-    # Query schema from Hive
+    # Query schema from Hive - use dsv format for easier parsing
     sql = f"DESCRIBE {database}.{table}"
     success, result = execute_beeline(sql, database, timeout=120)
 
@@ -527,12 +527,98 @@ def get_table_schema(database: str, table: str, force_refresh: bool = False) -> 
     data = result.get('data', [])
     logger.info(f"Schema data for {database}.{table}: type={type(data)}, length={len(data) if isinstance(data, list) else 'N/A'}")
 
-    # Log first few rows to understand format
+    # Check if data is a raw string (table format output)
+    if isinstance(data, str):
+        logger.info(f"Schema output is raw string, parsing table format...")
+        # Parse table format output like:
+        # |  col_name  |  data_type  |  comment  |
+        # | portfolio_id | string | |
+        lines = data.strip().split('\n')
+        for line in lines:
+            line = line.strip()
+            # Skip empty lines and border lines (+----- or |-----)
+            if not line or line.startswith('+') or line.startswith('|-'):
+                continue
+            # Skip lines that are just dashes
+            if set(line.replace(' ', '')) <= {'+', '-', '|'}:
+                continue
+
+            # Parse pipe-delimited format: | col_name | data_type | comment |
+            if '|' in line:
+                parts = [p.strip() for p in line.split('|') if p.strip()]
+                if len(parts) >= 2:
+                    col_name = parts[0].strip()
+                    data_type = parts[1].strip()
+
+                    # Skip header row
+                    if col_name.lower() in ('col_name', 'name', 'column_name', 'field'):
+                        continue
+                    # Skip empty or border chars
+                    if not col_name or col_name.startswith('-') or col_name.startswith('+'):
+                        continue
+
+                    columns.append({'name': col_name, 'type': data_type or 'string'})
+                    column_map[col_name.lower()] = data_type or 'string'
+                    column_map_original[col_name] = data_type or 'string'
+                    logger.debug(f"  Parsed column: {col_name} -> {data_type}")
+
+        logger.info(f"Parsed {len(columns)} columns from table format for {database}.{table}")
+
+        if columns:
+            schema = {
+                'columns': columns,
+                'column_map': column_map,
+                'column_map_original': column_map_original,
+                'primary_key': columns[0]['name'] if columns else None
+            }
+            schema_cache.set(database, table, schema)
+            return schema
+
+    # Log first few rows to understand format (for list data)
     if data and isinstance(data, list):
         for i, row in enumerate(data[:3]):
             logger.info(f"  Row {i}: {row} (type: {type(row).__name__})")
             if isinstance(row, dict):
                 logger.info(f"    Keys: {list(row.keys())}")
+
+        # Check if the CSV parsing failed and returned table format data
+        # This happens when dict keys contain table border chars like '+---------+'
+        if data and isinstance(data[0], dict):
+            first_keys = list(data[0].keys())
+            if first_keys and any('+' in str(k) or str(k).startswith('-') for k in first_keys if k):
+                logger.info("Detected failed CSV parse with table format, re-parsing...")
+                # Re-parse from the values which contain the actual table rows
+                table_lines = []
+                for row in data:
+                    for val in row.values():
+                        if val and isinstance(val, str):
+                            table_lines.append(val)
+                # Parse as table format
+                for line in table_lines:
+                    line = line.strip()
+                    if not line or line.startswith('+') or set(line.replace(' ', '')) <= {'+', '-', '|'}:
+                        continue
+                    if '|' in line:
+                        parts = [p.strip() for p in line.split('|') if p.strip()]
+                        if len(parts) >= 2:
+                            col_name = parts[0].strip()
+                            data_type = parts[1].strip()
+                            if col_name.lower() not in ('col_name', 'name', 'column_name', 'field', ''):
+                                if not col_name.startswith('-') and not col_name.startswith('+'):
+                                    columns.append({'name': col_name, 'type': data_type or 'string'})
+                                    column_map[col_name.lower()] = data_type or 'string'
+                                    column_map_original[col_name] = data_type or 'string'
+
+                if columns:
+                    logger.info(f"Parsed {len(columns)} columns from re-parsed table format")
+                    schema = {
+                        'columns': columns,
+                        'column_map': column_map,
+                        'column_map_original': column_map_original,
+                        'primary_key': columns[0]['name'] if columns else None
+                    }
+                    schema_cache.set(database, table, schema)
+                    return schema
 
     for row in data:
         col_name = None
@@ -542,6 +628,11 @@ def get_table_schema(database: str, table: str, force_refresh: bool = False) -> 
             # Get all keys from the dict (filter out None keys)
             keys = [k for k in row.keys() if k is not None]
             values = [v for v in row.values()]
+
+            # Check if keys contain table borders (failed CSV parse)
+            if keys and any('+' in str(k) or str(k).startswith('-') for k in keys if k):
+                # Skip this row, it's a border line
+                continue
 
             # DESCRIBE output in CSV2 format typically has headers like:
             # 'col_name', 'data_type', 'comment'
@@ -592,17 +683,34 @@ def get_table_schema(database: str, table: str, force_refresh: bool = False) -> 
                 data_type = 'string'
 
         elif isinstance(row, str):
-            # Parse string format: "col_name    data_type    comment"
+            # Parse string format - could be:
+            # 1. Pipe-delimited: "| col_name | data_type | comment |"
+            # 2. Space-separated: "col_name    data_type    comment"
             row = row.strip()
             if not row:
                 continue
-            parts = row.split()
-            if len(parts) >= 2:
-                col_name = parts[0].strip()
-                data_type = parts[1].strip()
-            elif len(parts) == 1:
-                col_name = parts[0].strip()
-                data_type = 'string'
+            # Skip border lines
+            if row.startswith('+') or row.startswith('|-') or set(row.replace(' ', '')) <= {'+', '-', '|'}:
+                continue
+
+            # Parse pipe-delimited format: | col_name | data_type | comment |
+            if '|' in row:
+                parts = [p.strip() for p in row.split('|') if p.strip()]
+                if len(parts) >= 2:
+                    col_name = parts[0].strip()
+                    data_type = parts[1].strip()
+                elif len(parts) == 1:
+                    col_name = parts[0].strip()
+                    data_type = 'string'
+            else:
+                # Space-separated format
+                parts = row.split()
+                if len(parts) >= 2:
+                    col_name = parts[0].strip()
+                    data_type = parts[1].strip()
+                elif len(parts) == 1:
+                    col_name = parts[0].strip()
+                    data_type = 'string'
 
         # Skip empty rows, partition info, and header markers
         if col_name is None or col_name == '':
