@@ -26,6 +26,7 @@ Configuration (settings.py):
     # Hive uses beeline with ZooKeeper - see hive_beeline_executor.py
 """
 
+import os
 import logging
 import threading
 import time
@@ -51,7 +52,15 @@ try:
     BEELINE_AVAILABLE = True
 except ImportError:
     BEELINE_AVAILABLE = False
-    logger.warning("HiveBeelineExecutor not available. Hive write features will be disabled.")
+    logger.warning("HiveBeelineExecutor not available.")
+
+# Import REST Proxy client for Hive writes (best option for CML)
+try:
+    from core.repositories.hive_proxy_client import HiveProxyClient
+    PROXY_AVAILABLE = True
+except ImportError:
+    PROXY_AVAILABLE = False
+    logger.info("HiveProxyClient not available.")
 
 
 class HybridConnectionManager:
@@ -122,6 +131,18 @@ class HybridConnectionManager:
             # Thread pool for async writes
             self._async_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix='hybrid_async_')
             self._async_futures = []
+
+            # REST Proxy client (best option for CML where native libs don't work)
+            self._proxy_client = None
+            proxy_url = os.environ.get('HIVE_PROXY_URL', '')
+            if PROXY_AVAILABLE and proxy_url:
+                self._proxy_client = HiveProxyClient(
+                    base_url=proxy_url,
+                    api_key=os.environ.get('HIVE_PROXY_API_KEY', ''),
+                    database=self._hive_config['DATABASE'],
+                    timeout=self._hive_config['TIMEOUT']
+                )
+                logger.info(f"Hive Proxy Client initialized: {proxy_url}")
 
             self._initialized = True
             logger.info(
@@ -475,8 +496,10 @@ class HybridConnectionManager:
         """
         Execute a WRITE query (INSERT, UPDATE, DELETE) via Hive.
 
-        Uses beeline subprocess for reliable ZooKeeper-based connection.
-        Falls back to direct impyla connection if beeline not available.
+        Priority order:
+        1. REST Proxy (best for CML - no native library issues)
+        2. Beeline subprocess (good for edge node)
+        3. Direct impyla connection (fallback)
         """
         # Format query with params if provided
         if params:
@@ -490,7 +513,16 @@ class HybridConnectionManager:
         else:
             formatted_query = query
 
-        # Try beeline first (recommended for Cloudera with ZooKeeper)
+        # Option 1: Try REST Proxy first (best for CML)
+        if self._proxy_client:
+            try:
+                result = self._proxy_client.execute_write(formatted_query, database=database)
+                logger.debug("Hive write via REST Proxy successful")
+                return result
+            except Exception as e:
+                logger.warning(f"REST Proxy write failed, trying beeline: {str(e)}")
+
+        # Option 2: Try beeline (for edge node or local)
         if BEELINE_AVAILABLE:
             try:
                 return hive_executor.execute_write(formatted_query, database=database)
@@ -599,8 +631,20 @@ class HybridConnectionManager:
             except Exception as e:
                 logger.error(f"Impala connection test failed: {str(e)}")
 
-        # Test Hive (via beeline - preferred)
-        if BEELINE_AVAILABLE:
+        # Test Hive via REST Proxy (preferred for CML)
+        if self._proxy_client:
+            try:
+                results['hive'] = self._proxy_client.test_connection()
+                results['hive_method'] = 'rest_proxy'
+                if results['hive']:
+                    logger.info(f"Hive connection test (REST Proxy): SUCCESS")
+                else:
+                    logger.error(f"Hive connection test (REST Proxy): FAILED")
+            except Exception as e:
+                logger.error(f"Hive REST Proxy test failed: {str(e)}")
+
+        # Test Hive via beeline (if proxy not available)
+        if not results['hive'] and BEELINE_AVAILABLE:
             try:
                 results['hive'] = hive_executor.test_connection()
                 results['hive_method'] = 'beeline'
@@ -670,6 +714,10 @@ class HybridConnectionManager:
                 'active': self._hive_connection_count,
                 'max': self._hive_config['POOL_SIZE'],
                 'available': IMPYLA_AVAILABLE,
+            },
+            'proxy': {
+                'url': os.environ.get('HIVE_PROXY_URL', 'not configured'),
+                'available': self._proxy_client is not None,
             },
             'async_pending': len([f for f in self._async_futures if not f.done()]),
         }
