@@ -78,10 +78,50 @@ try:
 
     # Start JVM if not already started
     if not jpype.isJVMStarted():
-        # Set JAVA_HOME if needed
-        java_home = os.environ.get('JAVA_HOME', '/usr/lib/jvm/java-11-openjdk')
-        jvm_path = jpype.getDefaultJVMPath()
-        print(f"Starting JVM: {jvm_path}")
+        # Auto-detect JAVA_HOME
+        java_home = os.environ.get('JAVA_HOME')
+
+        if not java_home:
+            # Try to find from readlink
+            result = subprocess.run(["readlink", "-f", "/usr/bin/java"],
+                                   capture_output=True, text=True)
+            if result.returncode == 0:
+                java_bin = result.stdout.strip()  # e.g., /usr/lib/jvm/.../jre/bin/java
+                # Go up from bin/java to get JAVA_HOME
+                if '/jre/bin/java' in java_bin:
+                    java_home = java_bin.replace('/jre/bin/java', '')
+                elif '/bin/java' in java_bin:
+                    java_home = java_bin.replace('/bin/java', '')
+
+        if not java_home:
+            # Fallback paths
+            for path in [
+                '/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.462.b08-2.el8.x86_64',
+                '/usr/lib/jvm/java-11-openjdk',
+                '/usr/lib/jvm/java-1.8.0-openjdk',
+            ]:
+                if os.path.exists(path):
+                    java_home = path
+                    break
+
+        os.environ['JAVA_HOME'] = java_home
+        print(f"JAVA_HOME: {java_home}")
+
+        # Find libjvm.so
+        jvm_path = None
+        for pattern in [
+            f"{java_home}/jre/lib/amd64/server/libjvm.so",
+            f"{java_home}/lib/server/libjvm.so",
+            f"{java_home}/jre/lib/server/libjvm.so",
+        ]:
+            if os.path.exists(pattern):
+                jvm_path = pattern
+                break
+
+        if not jvm_path:
+            jvm_path = jpype.getDefaultJVMPath()
+
+        print(f"JVM path: {jvm_path}")
         jpype.startJVM(jvm_path, classpath=all_jars, convertStrings=True)
 
     print("JVM started successfully")
