@@ -2,10 +2,12 @@
 Django==5.2.9
 django-extensions==4.1
 
-# Database - Hive Connection
+# Database - Hybrid Connection (Impala reads + Hive writes)
+# Uses pure-sasl (pure Python) instead of sasl (C library) for CML compatibility
 PyMySQL==1.1.1
 PyHive==0.7.0
-#sasl==0.3.1
+impyla==0.19.0
+pure-sasl==0.6.2
 thrift==0.16.0
 thrift-sasl==0.4.3
 

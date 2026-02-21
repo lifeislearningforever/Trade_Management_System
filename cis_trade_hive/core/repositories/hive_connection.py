@@ -394,8 +394,14 @@ class HiveConnectionManager:
         return len(self._async_futures)
 
 
-# Global instance
-hive_manager = HiveConnectionManager()
+# Global instance - use hybrid manager if available (CML), else fallback to Hive-only
+try:
+    from core.repositories.hybrid_connection import hybrid_manager
+    hive_manager = hybrid_manager
+    logger.info("Using HybridConnectionManager (Impala reads + Hive writes)")
+except ImportError:
+    hive_manager = HiveConnectionManager()
+    logger.info("Using HiveConnectionManager (Hive-only mode)")
 
 
 # Query Cache

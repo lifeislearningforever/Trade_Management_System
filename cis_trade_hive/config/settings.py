@@ -102,25 +102,43 @@ DATABASES = {
     },
 }
 
-# Hive Configuration (Local HiveServer2 with ORC + ACID)
-# Connection: beeline -u "jdbc:hive2://localhost:10000" -n prakashhosalli -p '0987!Adhira'
+# =============================================================================
+# IMPALA Configuration (for FAST READS)
+# Uses Kerberos (GSSAPI) authentication in CML
+# Connection: impala-shell -i <host>:21050 -k
+# =============================================================================
+IMPALA_CONFIG = {
+    'HOST': os.environ.get('IMPALA_HOST', 'localhost'),
+    'PORT': int(os.environ.get('IMPALA_PORT', '21050')),
+    'DATABASE': os.environ.get('IMPALA_DB', os.environ.get('HIVE_DB', 'gmp_cis')),
+    'AUTH': os.environ.get('IMPALA_AUTH', 'GSSAPI'),  # GSSAPI (Kerberos), LDAP, or NOSASL
+    'USERNAME': os.environ.get('IMPALA_USERNAME', ''),
+    'PASSWORD': os.environ.get('IMPALA_PASSWORD', ''),
+    'TIMEOUT': int(os.environ.get('IMPALA_TIMEOUT', '120')),
+    'POOL_SIZE': int(os.environ.get('IMPALA_POOL_SIZE', '10')),
+    'USE_SSL': os.environ.get('IMPALA_USE_SSL', 'true').lower() == 'true',
+    'KERBEROS_SERVICE_NAME': os.environ.get('IMPALA_KERBEROS_SERVICE_NAME', 'impala'),
+}
+
+# =============================================================================
+# HIVE Configuration (for ACID WRITES - INSERT, UPDATE, DELETE)
+# Uses Kerberos (GSSAPI) authentication in CML
+# Connection: beeline -u "jdbc:hive2://<host>:10000/;principal=hive/_HOST@REALM"
+# =============================================================================
 HIVE_CONFIG = {
     'HOST': os.environ.get('HIVE_HOST', 'localhost'),
     'PORT': int(os.environ.get('HIVE_PORT', '10000')),
     'DATABASE': os.environ.get('HIVE_DB', 'gmp_cis'),
-    'AUTH': os.environ.get('HIVE_AUTH', 'NONE'),
-    'USERNAME': os.environ.get('HIVE_USERNAME', 'prakashhosalli'),
-    'PASSWORD': os.environ.get('HIVE_PASSWORD', '0987!Adhira'),
-    'TIMEOUT': int(os.environ.get('HIVE_TIMEOUT', '60')),
-    'POOL_SIZE': int(os.environ.get('HIVE_POOL_SIZE', '20')),
+    'AUTH': os.environ.get('HIVE_AUTH', 'GSSAPI'),  # GSSAPI (Kerberos), LDAP, or NONE
+    'USERNAME': os.environ.get('HIVE_USERNAME', ''),
+    'PASSWORD': os.environ.get('HIVE_PASSWORD', ''),
+    'TIMEOUT': int(os.environ.get('HIVE_TIMEOUT', '120')),
+    'POOL_SIZE': int(os.environ.get('HIVE_POOL_SIZE', '10')),
+    'KERBEROS_SERVICE_NAME': os.environ.get('HIVE_KERBEROS_SERVICE_NAME', 'hive'),
 }
 
-# Backward compatibility - keep IMPALA_CONFIG pointing to HIVE_CONFIG
-IMPALA_CONFIG = HIVE_CONFIG
-
-# Impala Connection Pool Configuration
-# Increased from 10 to 35 to support Gunicorn workers (4 workers x 4 threads + margin)
-IMPALA_POOL_SIZE = int(os.environ.get('IMPALA_POOL_SIZE', '35'))
+# Legacy setting for backward compatibility
+IMPALA_POOL_SIZE = IMPALA_CONFIG['POOL_SIZE']
 
 # Async Audit Queue Configuration
 # Enables non-blocking audit logging for production performance
