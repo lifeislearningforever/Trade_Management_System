@@ -2,24 +2,25 @@
 Hybrid Connection Manager for CML (Cloudera Machine Learning)
 
 Architecture:
-- Impala: Fast reads (SELECT queries) via impyla - port 21050
-- Hive: ACID writes (INSERT, UPDATE, DELETE) via beeline subprocess
-- REST Proxy: All operations via REST API (best for CML with glibc issues)
+- Impala: Fast reads (SELECT queries) via impyla - port 21050 (ALWAYS used for reads)
+- Hive/REST Proxy: ACID writes (INSERT, UPDATE, DELETE)
 
 Connection Modes (controlled by USE_REST_PROXY env var):
-1. USE_REST_PROXY=true: All operations go through REST proxy on edge node
-2. USE_REST_PROXY=false (default): Direct Impala/Hive connections
+1. USE_REST_PROXY=true: Impala for reads, REST Proxy for writes
+2. USE_REST_PROXY=false (default): Impala for reads, Direct Hive for writes
 
-The REST Proxy mode is required in CML because:
-1. CML Docker containers have old glibc that breaks native SASL
-2. Kerberos/GSSAPI authentication fails with TSocket errors
-3. REST proxy on edge node handles all authentication
+The REST Proxy mode for WRITES is required in CML because:
+1. CML Docker containers have old glibc that breaks native SASL for Hive
+2. Kerberos/GSSAPI authentication fails with TSocket errors on Hive
+3. REST proxy on edge node handles all Hive authentication
+
+IMPORTANT: Impala reads work fine in CML (different auth mechanism)
 
 Requirements:
     pip install pure-sasl thrift-sasl impyla requests
 
 Configuration (settings.py or environment):
-    USE_REST_PROXY=true
+    USE_REST_PROXY=true      # Only affects WRITES
     HIVE_PROXY_URL=http://edge-node:5000
     HIVE_DATABASE=mrw_ima
 """
@@ -35,40 +36,39 @@ from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger('core')
 
-# Check if REST proxy mode is enabled
+# Check if REST proxy mode is enabled (for WRITES only)
 USE_REST_PROXY = os.environ.get('USE_REST_PROXY', 'false').lower() == 'true'
 HIVE_PROXY_URL = os.environ.get('HIVE_PROXY_URL', '')
 HIVE_DATABASE = os.environ.get('HIVE_DATABASE', 'mrw_ima')
 HIVE_TIMEOUT = int(os.environ.get('HIVE_TIMEOUT', '300'))
 
-# REST proxy client (using requests library)
+# REST proxy client (using requests library) - for WRITES only
 REQUESTS_AVAILABLE = False
 if USE_REST_PROXY:
     try:
         import requests
         REQUESTS_AVAILABLE = True
-        logger.info(f"REST Proxy mode enabled: {HIVE_PROXY_URL}")
+        logger.info(f"REST Proxy mode enabled for WRITES: {HIVE_PROXY_URL}")
     except ImportError:
         logger.error("requests library not available for REST proxy mode")
 
-# Try importing impyla (used for Impala reads when not in proxy mode)
+# ALWAYS try to import impyla - Impala is ALWAYS used for reads
 IMPYLA_AVAILABLE = False
-if not USE_REST_PROXY:
-    try:
-        from impala.dbapi import connect as impyla_connect
-        IMPYLA_AVAILABLE = True
-    except ImportError:
-        logger.warning("impyla not available. Impala read features will be disabled.")
+try:
+    from impala.dbapi import connect as impyla_connect
+    IMPYLA_AVAILABLE = True
+    logger.info("Impala (impyla) available for READS")
+except ImportError:
+    logger.warning("impyla not available. Impala read features will be disabled.")
 
-    # Import beeline executor for Hive writes
+# Import beeline executor for Hive writes (fallback when not using proxy)
+BEELINE_AVAILABLE = False
+if not USE_REST_PROXY:
     try:
         from core.repositories.hive_beeline_executor import hive_executor
         BEELINE_AVAILABLE = True
     except ImportError:
-        BEELINE_AVAILABLE = False
         logger.warning("HiveBeelineExecutor not available.")
-else:
-    BEELINE_AVAILABLE = False
 
 # Try importing Django settings (may not be available during startup)
 try:
@@ -107,27 +107,14 @@ class HybridConnectionManager:
 
     def __init__(self):
         if not hasattr(self, '_initialized'):
-            # Check if using REST proxy mode
+            # Check if using REST proxy mode (for WRITES only)
             self._use_proxy = USE_REST_PROXY
             self._proxy_url = HIVE_PROXY_URL
             self._proxy_timeout = HIVE_TIMEOUT
             self._proxy_database = HIVE_DATABASE
             self._proxy_session = None
 
-            if self._use_proxy:
-                # REST Proxy mode - no direct connections needed
-                logger.info(
-                    f"Hybrid connection manager initialized (REST PROXY MODE):\n"
-                    f"  Proxy URL: {self._proxy_url}\n"
-                    f"  Database: {self._proxy_database}\n"
-                    f"  Timeout: {self._proxy_timeout}s"
-                )
-                self._initialized = True
-                self._async_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix='hybrid_async_')
-                self._async_futures = []
-                return
-
-            # Direct connection mode - read config from Django settings
+            # ALWAYS initialize Impala config - Impala is ALWAYS used for reads
             impala_config = getattr(settings, 'IMPALA_CONFIG', {}) if DJANGO_AVAILABLE else {}
             self._impala_config = {
                 'HOST': impala_config.get('HOST', 'localhost'),
@@ -140,6 +127,34 @@ class HybridConnectionManager:
                 'KERBEROS_SERVICE_NAME': impala_config.get('KERBEROS_SERVICE_NAME', 'impala'),
             }
 
+            # Impala pool for reads (ALWAYS available)
+            self._impala_pool = Queue(maxsize=self._impala_config['POOL_SIZE'])
+            self._impala_pool_lock = threading.Lock()
+            self._impala_connection_count = 0
+            self._connection_timeout = 3600  # 1 hour
+
+            # Thread pool for async writes
+            self._async_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix='hybrid_async_')
+            self._async_futures = []
+
+            if self._use_proxy:
+                # REST Proxy mode for WRITES - Impala still used for reads
+                self._hive_config = None
+                self._hive_pool = None
+                self._hive_pool_lock = None
+                self._hive_connection_count = 0
+
+                self._initialized = True
+                logger.info(
+                    f"Hybrid connection manager initialized (HYBRID MODE):\n"
+                    f"  Impala (reads): {self._impala_config['HOST']}:{self._impala_config['PORT']} "
+                    f"[{self._impala_config['AUTH_MECHANISM']}]\n"
+                    f"  REST Proxy (writes): {self._proxy_url}\n"
+                    f"  Database: {self._proxy_database}"
+                )
+                return
+
+            # Direct connection mode - also initialize Hive for writes
             hive_config = getattr(settings, 'HIVE_CONFIG', {}) if DJANGO_AVAILABLE else {}
             self._hive_config = {
                 'HOST': hive_config.get('HOST', 'localhost'),
@@ -152,20 +167,10 @@ class HybridConnectionManager:
                 'KERBEROS_SERVICE_NAME': hive_config.get('KERBEROS_SERVICE_NAME', 'hive'),
             }
 
-            # Separate pools for Impala (reads) and Hive (writes)
-            self._impala_pool = Queue(maxsize=self._impala_config['POOL_SIZE'])
+            # Hive pool for writes (direct mode only)
             self._hive_pool = Queue(maxsize=self._hive_config['POOL_SIZE'])
-
-            self._impala_pool_lock = threading.Lock()
             self._hive_pool_lock = threading.Lock()
-
-            self._impala_connection_count = 0
             self._hive_connection_count = 0
-            self._connection_timeout = 3600  # 1 hour
-
-            # Thread pool for async writes
-            self._async_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix='hybrid_async_')
-            self._async_futures = []
 
             self._initialized = True
             logger.info(
@@ -481,12 +486,12 @@ class HybridConnectionManager:
 
     @contextmanager
     def get_read_cursor(self, database: Optional[str] = None):
-        """Context manager for Impala cursor (reads). Not available in proxy mode."""
-        if self._use_proxy:
-            logger.warning("get_read_cursor called in proxy mode - use execute_query instead")
-            yield None
-            return
+        """
+        Context manager for Impala cursor (reads).
 
+        ALWAYS uses Impala for reads regardless of USE_REST_PROXY setting.
+        REST Proxy is only for writes.
+        """
         connection = None
         cursor = None
         try:
@@ -495,14 +500,8 @@ class HybridConnectionManager:
                 cursor = connection.cursor()
                 yield cursor
             else:
-                # Fallback to Hive if Impala not available
-                logger.warning("Impala not available, falling back to Hive for read")
-                connection = self.get_hive_connection(database)
-                if connection:
-                    cursor = connection.cursor()
-                    yield cursor
-                else:
-                    yield None
+                logger.warning("Impala connection not available for read")
+                yield None
         finally:
             if cursor:
                 try:
@@ -510,10 +509,7 @@ class HybridConnectionManager:
                 except Exception:
                     pass
             if connection:
-                if getattr(connection, '_conn_type', '') == 'impala':
-                    self.return_impala_connection(connection)
-                else:
-                    self.return_hive_connection(connection)
+                self.return_impala_connection(connection)
 
     @contextmanager
     def get_write_cursor(self, database: Optional[str] = None):
@@ -553,10 +549,10 @@ class HybridConnectionManager:
     def execute_query(self, query: str, params: Optional[List] = None,
                      database: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        Execute a READ query.
+        Execute a READ query via Impala (ALWAYS).
 
-        In REST Proxy mode: Uses REST API for reads
-        In Direct mode: Uses Impala for fast reads
+        Reads ALWAYS go through Impala for speed, regardless of USE_REST_PROXY setting.
+        REST Proxy is only used for WRITES.
         """
         # Format query with params if provided
         if params:
@@ -569,20 +565,15 @@ class HybridConnectionManager:
         else:
             formatted_query = query
 
-        # REST Proxy mode - use proxy for reads
-        if self._use_proxy:
-            try:
-                return self._proxy_execute_query(formatted_query, database or self._proxy_database)
-            except Exception as e:
-                logger.error(f"REST Proxy query failed: {str(e)}")
-                logger.error(f"Query: {formatted_query[:200]}...")
-                return []
-
-        # Direct mode - use Impala for fast reads
+        # ALWAYS use Impala for reads (fast)
         try:
             with self.get_read_cursor(database) as cursor:
                 if cursor is None:
-                    logger.error("No cursor available for read query")
+                    logger.error("No Impala cursor available for read query")
+                    # Fallback to REST proxy only if Impala is not available
+                    if self._use_proxy and REQUESTS_AVAILABLE:
+                        logger.warning("Falling back to REST proxy for read")
+                        return self._proxy_execute_query(formatted_query, database or self._proxy_database)
                     return []
 
                 cursor.execute(formatted_query)
@@ -594,8 +585,15 @@ class HybridConnectionManager:
                 return []
 
         except Exception as e:
-            logger.error(f"Failed to execute read query: {str(e)}")
+            logger.error(f"Impala read query failed: {str(e)}")
             logger.error(f"Query: {formatted_query[:200]}...")
+            # Fallback to REST proxy only if Impala fails
+            if self._use_proxy and REQUESTS_AVAILABLE:
+                logger.warning("Falling back to REST proxy for read after Impala failure")
+                try:
+                    return self._proxy_execute_query(formatted_query, database or self._proxy_database)
+                except Exception as proxy_e:
+                    logger.error(f"REST Proxy fallback also failed: {str(proxy_e)}")
             return []
 
     def _proxy_execute_write(self, sql: str, database: str = None,
@@ -742,30 +740,15 @@ class HybridConnectionManager:
     # ==================== UTILITY METHODS ====================
 
     def test_connection(self) -> Dict[str, bool]:
-        """Test both Impala and Hive connections."""
-        results = {'impala': False, 'hive': False, 'hive_method': 'none', 'mode': 'direct'}
+        """Test Impala (reads) and Hive/Proxy (writes) connections."""
+        results = {
+            'impala': False,
+            'hive': False,
+            'hive_method': 'none',
+            'mode': 'hybrid' if self._use_proxy else 'direct'
+        }
 
-        # REST Proxy mode - test via proxy endpoints
-        if self._use_proxy:
-            results['mode'] = 'rest_proxy'
-            try:
-                # Test health endpoint first
-                health_result = self._proxy_request('/health', method='GET')
-                if health_result.get('success'):
-                    results['hive'] = True
-                    results['hive_method'] = 'rest_proxy'
-                    logger.info("REST Proxy connection test: SUCCESS (health check)")
-
-                    # Also test a simple query
-                    query_result = self._proxy_execute_query("SELECT 1 as test_col")
-                    if query_result:
-                        results['impala'] = True  # Proxy handles reads too
-                        logger.info("REST Proxy query test: SUCCESS")
-            except Exception as e:
-                logger.error(f"REST Proxy connection test failed: {str(e)}")
-            return results
-
-        # Direct mode - Test Impala (via impyla)
+        # ALWAYS test Impala (used for reads regardless of proxy mode)
         if IMPYLA_AVAILABLE:
             try:
                 with self.get_read_cursor() as cursor:
@@ -773,12 +756,26 @@ class HybridConnectionManager:
                         cursor.execute("SELECT 1")
                         result = cursor.fetchone()
                         results['impala'] = result is not None
-                        logger.info("Impala connection test: SUCCESS")
+                        if results['impala']:
+                            logger.info("Impala connection test: SUCCESS")
+                        else:
+                            logger.error("Impala connection test: FAILED (no result)")
             except Exception as e:
                 logger.error(f"Impala connection test failed: {str(e)}")
 
-        # Test Hive via beeline
-        if BEELINE_AVAILABLE:
+        # Test write connection based on mode
+        if self._use_proxy:
+            # REST Proxy mode for writes
+            try:
+                health_result = self._proxy_request('/health', method='GET')
+                if health_result.get('success'):
+                    results['hive'] = True
+                    results['hive_method'] = 'rest_proxy'
+                    logger.info("REST Proxy connection test: SUCCESS (health check)")
+            except Exception as e:
+                logger.error(f"REST Proxy connection test failed: {str(e)}")
+        elif BEELINE_AVAILABLE:
+            # Direct mode - test Hive via beeline
             try:
                 results['hive'] = hive_executor.test_connection()
                 results['hive_method'] = 'beeline'
@@ -805,26 +802,18 @@ class HybridConnectionManager:
         return results
 
     def get_tables(self, database: Optional[str] = None) -> List[str]:
-        """Get list of tables."""
-        db = database or (self._proxy_database if self._use_proxy else None)
-
-        # REST Proxy mode
-        if self._use_proxy:
-            try:
-                results = self._proxy_execute_query("SHOW TABLES", db)
-                # Handle different result formats
-                if results:
-                    first_key = list(results[0].keys())[0] if results[0] else 'tab_name'
-                    return [row.get(first_key, '') for row in results]
-                return []
-            except Exception as e:
-                logger.error(f"Failed to get tables via proxy: {str(e)}")
-                return []
-
-        # Direct mode - use Impala for speed
+        """Get list of tables (via Impala)."""
+        # ALWAYS use Impala for reads
         try:
             with self.get_read_cursor(database) as cursor:
                 if cursor is None:
+                    # Fallback to REST proxy if Impala not available
+                    if self._use_proxy and REQUESTS_AVAILABLE:
+                        db = database or self._proxy_database
+                        results = self._proxy_execute_query("SHOW TABLES", db)
+                        if results:
+                            first_key = list(results[0].keys())[0] if results[0] else 'tab_name'
+                            return [row.get(first_key, '') for row in results]
                     return []
                 cursor.execute("SHOW TABLES")
                 return [row[0] for row in cursor.fetchall()]
@@ -833,22 +822,15 @@ class HybridConnectionManager:
             return []
 
     def describe_table(self, table_name: str, database: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Get table schema information."""
-        db = database or (self._proxy_database if self._use_proxy else None)
-
-        # REST Proxy mode
-        if self._use_proxy:
-            try:
-                query = f"DESCRIBE {table_name}"
-                return self._proxy_execute_query(query, db)
-            except Exception as e:
-                logger.error(f"Failed to describe table {table_name} via proxy: {str(e)}")
-                return []
-
-        # Direct mode
+        """Get table schema information (via Impala)."""
+        # ALWAYS use Impala for reads
         try:
             with self.get_read_cursor(database) as cursor:
                 if cursor is None:
+                    # Fallback to REST proxy if Impala not available
+                    if self._use_proxy and REQUESTS_AVAILABLE:
+                        query = f"DESCRIBE {table_name}"
+                        return self._proxy_execute_query(query, database or self._proxy_database)
                     return []
                 cursor.execute(f"DESCRIBE {table_name}")
                 columns = [desc[0].split('.')[-1] for desc in cursor.description]
@@ -860,18 +842,27 @@ class HybridConnectionManager:
 
     def get_pool_stats(self) -> Dict[str, Any]:
         """Get connection pool statistics."""
-        # REST Proxy mode - different stats
+        # Hybrid mode - Impala for reads, REST Proxy for writes
         if self._use_proxy:
             return {
-                'mode': 'rest_proxy',
+                'mode': 'hybrid',
+                'impala': {
+                    'host': self._impala_config['HOST'],
+                    'port': self._impala_config['PORT'],
+                    'auth': self._impala_config['AUTH_MECHANISM'],
+                    'active': self._impala_connection_count,
+                    'max': self._impala_config['POOL_SIZE'],
+                    'available': IMPYLA_AVAILABLE,
+                    'purpose': 'reads',
+                },
                 'proxy': {
                     'url': self._proxy_url,
                     'database': self._proxy_database,
                     'timeout': self._proxy_timeout,
                     'available': REQUESTS_AVAILABLE,
+                    'purpose': 'writes',
                 },
-                'impala': {'available': False, 'reason': 'Using REST proxy'},
-                'hive': {'available': False, 'reason': 'Using REST proxy'},
+                'hive': {'available': False, 'reason': 'Using REST proxy for writes'},
                 'async_pending': len([f for f in self._async_futures if not f.done()]),
             }
 
