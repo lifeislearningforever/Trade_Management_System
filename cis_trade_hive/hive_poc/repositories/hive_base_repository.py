@@ -4,14 +4,12 @@ Base Repository for Hive Managed Tables
 Provides common CRUD operations for Hive tables with ORC format.
 Implements soft delete using deleted_at timestamp.
 
-Supports two connection modes (controlled by USE_REST_PROXY env var):
-1. Direct Connection (default for local): Uses HybridConnectionManager
-   - Impala: Fast reads (SELECT queries)
-   - Hive: ACID writes (INSERT, UPDATE, DELETE)
+Connection Architecture:
+- READS: Always use HybridConnectionManager (Impala) for fast reads
+- WRITES: Use REST Proxy when USE_REST_PROXY=true, otherwise direct Hive
 
-2. REST Proxy (for CML environments): Uses HiveProxyRepository
-   - All operations via REST API to edge node
-   - Required when direct Hive/Impala connections fail
+The REST Proxy is only needed for WRITES in CML environments where
+direct Hive connections fail due to glibc/SASL issues.
 """
 
 import os
@@ -22,27 +20,31 @@ from abc import ABC, abstractmethod
 
 logger = logging.getLogger('hive_poc')
 
-# Check if we should use REST proxy (for CML environments)
+# Check if we should use REST proxy for WRITES (CML environments)
 USE_REST_PROXY = os.environ.get('USE_REST_PROXY', 'false').lower() == 'true'
 HIVE_PROXY_URL = os.environ.get('HIVE_PROXY_URL', 'http://localhost:5000')
 
+# ALWAYS import hybrid_manager for reads (Impala)
+try:
+    from core.repositories.hybrid_connection import hybrid_manager
+    HYBRID_MANAGER_AVAILABLE = True
+except ImportError:
+    hybrid_manager = None
+    HYBRID_MANAGER_AVAILABLE = False
+    logger.warning("hybrid_manager not available - reads will fail")
+
+# Import requests for REST proxy writes
+REQUESTS_AVAILABLE = False
 if USE_REST_PROXY:
-    logger.info(f"Using REST Proxy mode: {HIVE_PROXY_URL}")
-    # Import requests for REST proxy
+    logger.info(f"Using REST Proxy for WRITES: {HIVE_PROXY_URL}")
+    logger.info("Using Impala (via hybrid_manager) for READS")
     try:
         import requests
         REQUESTS_AVAILABLE = True
     except ImportError:
-        REQUESTS_AVAILABLE = False
         logger.error("requests library not available for REST proxy - pip install requests")
 else:
-    logger.info("Using direct Hive/Impala connection mode")
-    # Import hybrid connection manager from core
-    try:
-        from core.repositories.hybrid_connection import hybrid_manager
-    except ImportError:
-        hybrid_manager = None
-        logger.warning("hybrid_manager not available")
+    logger.info("Using direct Hive/Impala connection mode (no proxy)")
 
 
 class HiveBaseRepository(ABC):
@@ -51,23 +53,26 @@ class HiveBaseRepository(ABC):
 
     Features:
     - CRUD operations on Hive ACID tables with ORC format
-    - Supports both direct connection and REST proxy modes
+    - READS: Always via Impala (hybrid_manager) for speed
+    - WRITES: REST Proxy when USE_REST_PROXY=true, else direct Hive
     - Soft delete support via deleted_at timestamp
     - Query builder patterns for consistency
     """
 
     def __init__(self):
-        self.use_proxy = USE_REST_PROXY
+        self.use_proxy_for_writes = USE_REST_PROXY
         self.database = os.environ.get('HIVE_DATABASE', 'mrw_ima')
 
-        if self.use_proxy:
+        # ALWAYS use hybrid_manager for reads (Impala)
+        self.conn_manager = hybrid_manager
+
+        # REST proxy config for writes only
+        if self.use_proxy_for_writes:
             self.proxy_url = HIVE_PROXY_URL
             self.api_key = os.environ.get('HIVE_PROXY_API_KEY', '')
             self.timeout = int(os.environ.get('HIVE_TIMEOUT', '300'))
             self._session = None
-            self.conn_manager = None
         else:
-            self.conn_manager = hybrid_manager
             self._session = None
 
     @property
@@ -107,13 +112,13 @@ class HiveBaseRepository(ABC):
         else:
             return str(value)
 
-    # ==================== REST PROXY METHODS ====================
+    # ==================== REST PROXY METHODS (for WRITES only) ====================
 
     @property
     def session(self) -> 'requests.Session':
-        """Get or create HTTP session for REST proxy."""
-        if not self.use_proxy:
-            raise RuntimeError("REST proxy not enabled")
+        """Get or create HTTP session for REST proxy writes."""
+        if not self.use_proxy_for_writes:
+            raise RuntimeError("REST proxy not enabled for writes")
 
         if self._session is None:
             import requests
@@ -164,10 +169,11 @@ class HiveBaseRepository(ABC):
         return result.get('data', [])
 
     # ==================== READ OPERATIONS ====================
+    # ALL reads go through Impala (via conn_manager) for speed
 
     def find_all(self, include_deleted: bool = False, limit: int = None) -> List[Dict[str, Any]]:
         """
-        Find all records from the table.
+        Find all records from the table (via Impala).
 
         Args:
             include_deleted: If True, include soft-deleted records
@@ -185,14 +191,12 @@ class HiveBaseRepository(ABC):
             {limit_clause}
         """
 
-        if self.use_proxy:
-            return self._execute_proxy_query(query)
-        else:
-            return self.conn_manager.execute_query(query)
+        # ALWAYS use Impala for reads
+        return self.conn_manager.execute_query(query)
 
     def find_by_id(self, record_id: str, include_deleted: bool = False) -> Optional[Dict[str, Any]]:
         """
-        Find a record by primary key.
+        Find a record by primary key (via Impala).
 
         Args:
             record_id: Primary key value
@@ -210,16 +214,13 @@ class HiveBaseRepository(ABC):
             {where_clause}
         """
 
-        if self.use_proxy:
-            results = self._execute_proxy_query(query)
-        else:
-            results = self.conn_manager.execute_query(query)
-
+        # ALWAYS use Impala for reads
+        results = self.conn_manager.execute_query(query)
         return results[0] if results else None
 
     def count(self, include_deleted: bool = False) -> int:
         """
-        Count records in the table.
+        Count records in the table (via Impala).
 
         Args:
             include_deleted: If True, include soft-deleted records
@@ -230,10 +231,8 @@ class HiveBaseRepository(ABC):
         where_clause = "" if include_deleted else "WHERE deleted_at IS NULL"
         query = f"SELECT COUNT(*) as cnt FROM {self._get_full_table_name()} {where_clause}"
 
-        if self.use_proxy:
-            results = self._execute_proxy_query(query)
-        else:
-            results = self.conn_manager.execute_query(query)
+        # ALWAYS use Impala for reads
+        results = self.conn_manager.execute_query(query)
 
         if results:
             row = results[0]
@@ -242,7 +241,7 @@ class HiveBaseRepository(ABC):
 
     def exists(self, record_id: str) -> bool:
         """
-        Check if a record exists (not soft-deleted).
+        Check if a record exists (via Impala).
 
         Args:
             record_id: Primary key value
@@ -257,16 +256,13 @@ class HiveBaseRepository(ABC):
             LIMIT 1
         """
 
-        if self.use_proxy:
-            results = self._execute_proxy_query(query)
-        else:
-            results = self.conn_manager.execute_query(query)
-
+        # ALWAYS use Impala for reads
+        results = self.conn_manager.execute_query(query)
         return len(results) > 0
 
     def find_deleted(self) -> List[Dict[str, Any]]:
         """
-        Find all soft-deleted records.
+        Find all soft-deleted records (via Impala).
 
         Returns:
             List of soft-deleted records
@@ -276,10 +272,8 @@ class HiveBaseRepository(ABC):
             WHERE deleted_at IS NOT NULL
         """
 
-        if self.use_proxy:
-            return self._execute_proxy_query(query)
-        else:
-            return self.conn_manager.execute_query(query)
+        # ALWAYS use Impala for reads
+        return self.conn_manager.execute_query(query)
 
     # ==================== WRITE OPERATIONS ====================
 
@@ -287,7 +281,7 @@ class HiveBaseRepository(ABC):
         """
         Execute a write query via Hive for ACID support (direct connection mode only).
         """
-        if self.use_proxy:
+        if self.use_proxy_for_writes:
             raise RuntimeError("Use proxy-specific methods for writes in proxy mode")
         return self.conn_manager.execute_write(query, use_mr_engine=True)
 
@@ -324,8 +318,8 @@ class HiveBaseRepository(ABC):
 
         logger.info(f"Creating record in {self.table_name}")
 
-        if self.use_proxy:
-            # Use REST proxy
+        if self.use_proxy_for_writes:
+            # Use REST proxy for writes
             proxy_data = self._convert_datetime_to_string(data)
             result = self._make_proxy_request(
                 f'/insert/{self._get_full_table_name()}',
@@ -335,7 +329,7 @@ class HiveBaseRepository(ABC):
             logger.info(f"Created record via proxy: {result.get('elapsed_ms')}ms")
             return True
         else:
-            # Direct connection mode
+            # Direct Hive connection for writes
             columns = list(data.keys())
             values = [self._format_value(data[col]) for col in columns]
 
@@ -359,7 +353,7 @@ class HiveBaseRepository(ABC):
         data['updated_at'] = datetime.now()
         logger.info(f"Updating record {record_id} in {self.table_name}")
 
-        if self.use_proxy:
+        if self.use_proxy_for_writes:
             proxy_data = self._convert_datetime_to_string(data)
             result = self._make_proxy_request(
                 f'/update/{self._get_full_table_name()}',
@@ -394,7 +388,7 @@ class HiveBaseRepository(ABC):
         """
         logger.info(f"Soft deleting record {record_id} from {self.table_name}")
 
-        if self.use_proxy:
+        if self.use_proxy_for_writes:
             result = self._make_proxy_request(
                 f'/delete/{self._get_full_table_name()}',
                 method='POST',
@@ -432,7 +426,7 @@ class HiveBaseRepository(ABC):
         """
         logger.info(f"Restoring record {record_id} in {self.table_name}")
 
-        if self.use_proxy:
+        if self.use_proxy_for_writes:
             result = self._make_proxy_request(
                 f'/update/{self._get_full_table_name()}',
                 method='POST',
@@ -467,7 +461,7 @@ class HiveBaseRepository(ABC):
         """
         logger.warning(f"Hard deleting record {record_id} from {self.table_name}")
 
-        if self.use_proxy:
+        if self.use_proxy_for_writes:
             result = self._make_proxy_request(
                 f'/delete/{self._get_full_table_name()}',
                 method='POST',
@@ -483,4 +477,4 @@ class HiveBaseRepository(ABC):
                 DELETE FROM {self._get_full_table_name()}
                 WHERE {self.primary_key} = '{record_id}'
             """
-        return self._execute_acid_write(query)
+            return self._execute_acid_write(query)

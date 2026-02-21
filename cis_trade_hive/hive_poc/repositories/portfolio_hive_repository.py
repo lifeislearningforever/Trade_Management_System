@@ -47,11 +47,9 @@ class PortfolioHiveRepository(HiveBaseRepository):
         ]
 
     def _execute_query(self, query: str) -> List[Dict[str, Any]]:
-        """Execute a SELECT query using appropriate connection mode."""
-        if self.use_proxy:
-            return self._execute_proxy_query(query)
-        else:
-            return self.conn_manager.execute_query(query)
+        """Execute a SELECT query via Impala (always)."""
+        # ALWAYS use Impala for reads
+        return self.conn_manager.execute_query(query)
 
     def find_by_code(self, code: str) -> Optional[Dict[str, Any]]:
         """
