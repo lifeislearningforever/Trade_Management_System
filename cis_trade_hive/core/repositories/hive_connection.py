@@ -11,7 +11,7 @@ Features:
 - Thread-safe implementation
 - Async write support for audit/history operations
 
-Connection: beeline -u "jdbc:hive2://localhost:10000" -n prakashhosalli -p '0987!Adhira'
+Connection: beeline -u "jdbc:hive2://localhost:10000" -n $USER
 """
 
 import logging
@@ -65,8 +65,8 @@ class HiveConnectionManager:
                 'PORT': 10000,
                 'DATABASE': 'gmp_cis',
                 'AUTH': 'NONE',
-                'USERNAME': 'prakashhosalli',
-                'PASSWORD': '0987!Adhira',
+                'USERNAME': '',
+                'PASSWORD': '',
             })
 
             # Pool size from settings, default to 20 for Hive

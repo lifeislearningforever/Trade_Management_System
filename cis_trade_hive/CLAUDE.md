@@ -69,7 +69,7 @@ hiveserver2 &
 python manage.py test_hive
 
 # Create all Hive tables
-beeline -u "jdbc:hive2://localhost:10000" -n prakashhosalli -p '0987!Adhira' \
+beeline -u "jdbc:hive2://localhost:10000" -n $USER \
   -f sql/hive_ddl/create_all_tables.sql
 
 # Run development server
@@ -160,10 +160,10 @@ Status flow: `DRAFT → PENDING_APPROVAL → APPROVED/REJECTED → ACTIVE → IN
 
 ```bash
 # Hive Operations
-beeline -u "jdbc:hive2://localhost:10000" -n prakashhosalli -p '0987!Adhira'
+beeline -u "jdbc:hive2://localhost:10000" -n $USER
 
 # Create tables
-beeline -u "jdbc:hive2://localhost:10000" -n prakashhosalli -p '0987!Adhira' \
+beeline -u "jdbc:hive2://localhost:10000" -n $USER \
   -f sql/hive_ddl/create_all_tables.sql
 
 # Test Hive connection
@@ -215,17 +215,22 @@ HIVE_HOST=localhost
 HIVE_PORT=10000
 HIVE_DB=gmp_cis
 HIVE_AUTH=NONE
-HIVE_USERNAME=prakashhosalli
-HIVE_PASSWORD=0987!Adhira
+HIVE_USERNAME=your-username
+HIVE_PASSWORD=your-password
 HIVE_POOL_SIZE=10
 HIVE_TIMEOUT=120
 
-# Hive - Cloudera (work/prod)
+# Hive - Cloudera (work/prod with Kerberos)
 # HIVE_HOST=your-cloudera-host
 # HIVE_PORT=10000
-# HIVE_AUTH=LDAP  # or KERBEROS
-# HIVE_USERNAME=your-username
-# HIVE_PASSWORD=your-password
+# HIVE_AUTH=GSSAPI
+# HIVE_KERBEROS_SERVICE_NAME=hive
+
+# Impala - Cloudera (work/prod with Kerberos)
+# IMPALA_HOST=your-impala-host
+# IMPALA_PORT=21050
+# IMPALA_AUTH=GSSAPI
+# IMPALA_KERBEROS_SERVICE_NAME=impala
 ```
 
 ## URL Patterns
@@ -353,7 +358,7 @@ pgrep -f HiveServer2
 hiveserver2 &
 
 # Test connection with beeline
-beeline -u "jdbc:hive2://localhost:10000" -n prakashhosalli -p '0987!Adhira' \
+beeline -u "jdbc:hive2://localhost:10000" -n $USER \
   -e "SHOW DATABASES"
 ```
 
@@ -374,7 +379,7 @@ SET hive.execution.engine=mr;
 **Table doesn't exist:**
 ```bash
 # Create all tables
-beeline -u "jdbc:hive2://localhost:10000" -n prakashhosalli -p '0987!Adhira' \
+beeline -u "jdbc:hive2://localhost:10000" -n $USER \
   -f sql/hive_ddl/create_all_tables.sql
 
 # Verify tables exist
