@@ -1,46 +1,31 @@
 """
 Hybrid Connection Manager for CML (Cloudera Machine Learning)
 
-Uses:
-- Impala (via impyla + pure-sasl) for FAST READS
-- Hive (via pyhive + pure-sasl) for ACID WRITES (INSERT, UPDATE, DELETE)
+Uses impyla for BOTH Impala and Hive connections (more reliable in Cloudera):
+- Impala: Fast reads (SELECT queries) - port 21050
+- Hive: ACID writes (INSERT, UPDATE, DELETE) - port 10000
 
-Both use Kerberos (GSSAPI) authentication - no native C library dependencies.
+Both use Kerberos (GSSAPI) authentication via impyla + pure-sasl.
 
 Requirements:
-    pip install pure-sasl thrift-sasl pyhive impyla
+    pip install pure-sasl thrift-sasl impyla
 
 Configuration (settings.py):
     IMPALA_CONFIG = {
         'HOST': 'impala-host',
         'PORT': 21050,
         'DATABASE': 'gmp_cis',
-        'AUTH': 'GSSAPI',  # Kerberos
+        'AUTH_MECHANISM': 'GSSAPI',
         'KERBEROS_SERVICE_NAME': 'impala',
-        ...
     }
 
     HIVE_CONFIG = {
         'HOST': 'hive-host',
         'PORT': 10000,
-        'DATABASE': 'gmp_cis',
-        'AUTH': 'GSSAPI',  # Kerberos
+        'DATABASE': 'mrw_ima',
+        'AUTH': 'GSSAPI',
         'KERBEROS_SERVICE_NAME': 'hive',
-        ...
     }
-
-Environment Variables (CML):
-    # Impala (reads)
-    IMPALA_HOST=your-impala-host
-    IMPALA_PORT=21050
-    IMPALA_AUTH=GSSAPI
-    IMPALA_KERBEROS_SERVICE_NAME=impala
-
-    # Hive (writes)
-    HIVE_HOST=your-hive-host
-    HIVE_PORT=10000
-    HIVE_AUTH=GSSAPI
-    HIVE_KERBEROS_SERVICE_NAME=hive
 """
 
 import logging
@@ -54,33 +39,25 @@ from django.conf import settings
 
 logger = logging.getLogger('core')
 
-# Try importing impyla for Impala reads
+# Try importing impyla (used for both Impala and Hive)
 try:
-    from impala.dbapi import connect as impala_connect
+    from impala.dbapi import connect as impyla_connect
     IMPYLA_AVAILABLE = True
 except ImportError:
     IMPYLA_AVAILABLE = False
-    logger.warning("impyla not available. Impala read features will be disabled.")
-
-# Try importing pyhive for Hive writes
-try:
-    from pyhive import hive
-    PYHIVE_AVAILABLE = True
-except ImportError:
-    PYHIVE_AVAILABLE = False
-    logger.warning("PyHive not available. Hive write features will be disabled.")
+    logger.warning("impyla not available. Database features will be disabled.")
 
 
 class HybridConnectionManager:
     """
     Hybrid Connection Manager for CML environments.
 
-    Reads configuration from separate IMPALA_CONFIG and HIVE_CONFIG in settings.py.
-    Both use Kerberos (GSSAPI) authentication via pure-sasl.
+    Uses impyla for both Impala (reads) and Hive (writes) connections.
+    This is more reliable than pyhive in Cloudera environments.
 
     Features:
     - Impala for fast reads (via impyla)
-    - Hive for ACID writes (via pyhive)
+    - Hive for ACID writes (via impyla connecting to HiveServer2)
     - Kerberos authentication without native SASL libraries
     - Separate connection pools for each
     - Connection validation and recycling
@@ -105,10 +82,7 @@ class HybridConnectionManager:
                 'HOST': impala_config.get('HOST', 'localhost'),
                 'PORT': int(impala_config.get('PORT', 21050)),
                 'DATABASE': impala_config.get('DATABASE', 'gmp_cis'),
-                # Support both AUTH and AUTH_MECHANISM keys
-                'AUTH': impala_config.get('AUTH_MECHANISM', impala_config.get('AUTH', 'GSSAPI')),
-                'USERNAME': impala_config.get('USERNAME', ''),
-                'PASSWORD': impala_config.get('PASSWORD', ''),
+                'AUTH_MECHANISM': impala_config.get('AUTH_MECHANISM', impala_config.get('AUTH', 'GSSAPI')),
                 'TIMEOUT': int(impala_config.get('TIMEOUT', 120)),
                 'POOL_SIZE': int(impala_config.get('POOL_SIZE', 10)),
                 'USE_SSL': impala_config.get('USE_SSL', True),
@@ -121,11 +95,10 @@ class HybridConnectionManager:
                 'HOST': hive_config.get('HOST', 'localhost'),
                 'PORT': int(hive_config.get('PORT', 10000)),
                 'DATABASE': hive_config.get('DATABASE', 'gmp_cis'),
-                'AUTH': hive_config.get('AUTH', 'GSSAPI'),
-                'USERNAME': hive_config.get('USERNAME', ''),
-                'PASSWORD': hive_config.get('PASSWORD', ''),
+                'AUTH_MECHANISM': hive_config.get('AUTH', 'GSSAPI'),
                 'TIMEOUT': int(hive_config.get('TIMEOUT', 120)),
                 'POOL_SIZE': int(hive_config.get('POOL_SIZE', 10)),
+                'USE_SSL': hive_config.get('USE_SSL', False),
                 'KERBEROS_SERVICE_NAME': hive_config.get('KERBEROS_SERVICE_NAME', 'hive'),
             }
 
@@ -146,49 +119,40 @@ class HybridConnectionManager:
 
             self._initialized = True
             logger.info(
-                f"Hybrid connection manager initialized:\n"
+                f"Hybrid connection manager initialized (using impyla for both):\n"
                 f"  Impala (reads): {self._impala_config['HOST']}:{self._impala_config['PORT']} "
-                f"[{self._impala_config['AUTH']}]\n"
+                f"[{self._impala_config['AUTH_MECHANISM']}]\n"
                 f"  Hive (writes): {self._hive_config['HOST']}:{self._hive_config['PORT']} "
-                f"[{self._hive_config['AUTH']}]"
+                f"[{self._hive_config['AUTH_MECHANISM']}]"
             )
 
     # ==================== IMPALA CONNECTIONS (READS) ====================
 
     def _create_impala_connection(self, database: Optional[str] = None):
-        """Create a new Impala connection for reads using Kerberos."""
+        """Create a new Impala connection for reads using impyla."""
         if not IMPYLA_AVAILABLE:
             logger.warning("Impala connection requested but impyla not available")
             return None
 
         try:
             db_name = database or self._impala_config['DATABASE']
-            auth_mechanism = self._impala_config['AUTH']
+            auth_mechanism = self._impala_config['AUTH_MECHANISM']
 
             conn_params = {
                 'host': self._impala_config['HOST'],
                 'port': self._impala_config['PORT'],
                 'database': db_name,
                 'timeout': self._impala_config['TIMEOUT'],
+                'auth_mechanism': auth_mechanism,
             }
 
-            # Authentication setup
+            # Kerberos authentication
             if auth_mechanism == 'GSSAPI':
-                # Kerberos authentication
-                conn_params['auth_mechanism'] = 'GSSAPI'
                 conn_params['kerberos_service_name'] = self._impala_config['KERBEROS_SERVICE_NAME']
                 if self._impala_config['USE_SSL']:
                     conn_params['use_ssl'] = True
-            elif auth_mechanism == 'LDAP':
-                # LDAP authentication
-                conn_params['auth_mechanism'] = 'LDAP'
-                conn_params['user'] = self._impala_config['USERNAME']
-                conn_params['password'] = self._impala_config['PASSWORD']
-            else:
-                # No authentication (local dev)
-                conn_params['auth_mechanism'] = 'NOSASL'
 
-            connection = impala_connect(**conn_params)
+            connection = impyla_connect(**conn_params)
             connection._created_at = time.time()
             connection._database = db_name
             connection._conn_type = 'impala'
@@ -279,38 +243,30 @@ class HybridConnectionManager:
     # ==================== HIVE CONNECTIONS (WRITES) ====================
 
     def _create_hive_connection(self, database: Optional[str] = None):
-        """Create a new Hive connection for ACID writes using Kerberos."""
-        if not PYHIVE_AVAILABLE:
-            logger.warning("Hive connection requested but PyHive not available")
+        """Create a new Hive connection for ACID writes using impyla."""
+        if not IMPYLA_AVAILABLE:
+            logger.warning("Hive connection requested but impyla not available")
             return None
 
         try:
             db_name = database or self._hive_config['DATABASE']
-            auth_mechanism = self._hive_config['AUTH']
+            auth_mechanism = self._hive_config['AUTH_MECHANISM']
 
             conn_params = {
                 'host': self._hive_config['HOST'],
                 'port': self._hive_config['PORT'],
                 'database': db_name,
+                'timeout': self._hive_config['TIMEOUT'],
+                'auth_mechanism': auth_mechanism,
             }
 
-            # Authentication setup
+            # Kerberos authentication
             if auth_mechanism == 'GSSAPI':
-                # Kerberos authentication
-                conn_params['auth'] = 'KERBEROS'
                 conn_params['kerberos_service_name'] = self._hive_config['KERBEROS_SERVICE_NAME']
-            elif auth_mechanism == 'LDAP':
-                # LDAP authentication
-                conn_params['auth'] = 'LDAP'
-                conn_params['username'] = self._hive_config['USERNAME']
-                conn_params['password'] = self._hive_config['PASSWORD']
-            else:
-                # No authentication (local dev)
-                conn_params['auth'] = 'NONE'
-                if self._hive_config['USERNAME']:
-                    conn_params['username'] = self._hive_config['USERNAME']
+                if self._hive_config['USE_SSL']:
+                    conn_params['use_ssl'] = True
 
-            connection = hive.Connection(**conn_params)
+            connection = impyla_connect(**conn_params)
             connection._created_at = time.time()
             connection._database = db_name
             connection._conn_type = 'hive'
@@ -340,7 +296,7 @@ class HybridConnectionManager:
 
     def get_hive_connection(self, database: Optional[str] = None):
         """Get a Hive connection for writes."""
-        if not PYHIVE_AVAILABLE:
+        if not IMPYLA_AVAILABLE:
             return None
 
         # Try to get from pool
@@ -507,9 +463,13 @@ class HybridConnectionManager:
 
             cursor = connection.cursor()
 
-            # Set MapReduce engine for ACID operations
+            # Set MapReduce engine for ACID operations (if needed)
             if use_mr_engine:
-                cursor.execute("SET hive.execution.engine=mr")
+                try:
+                    cursor.execute("SET hive.execution.engine=mr")
+                except Exception:
+                    # Ignore if setting fails (might not be needed)
+                    pass
 
             if params:
                 cursor.execute(query, params)
@@ -599,7 +559,7 @@ class HybridConnectionManager:
                 logger.error(f"Impala connection test failed: {str(e)}")
 
         # Test Hive
-        if PYHIVE_AVAILABLE:
+        if IMPYLA_AVAILABLE:
             try:
                 with self.get_write_cursor() as cursor:
                     if cursor:
@@ -644,7 +604,7 @@ class HybridConnectionManager:
             'impala': {
                 'host': self._impala_config['HOST'],
                 'port': self._impala_config['PORT'],
-                'auth': self._impala_config['AUTH'],
+                'auth': self._impala_config['AUTH_MECHANISM'],
                 'active': self._impala_connection_count,
                 'max': self._impala_config['POOL_SIZE'],
                 'available': IMPYLA_AVAILABLE,
@@ -652,10 +612,10 @@ class HybridConnectionManager:
             'hive': {
                 'host': self._hive_config['HOST'],
                 'port': self._hive_config['PORT'],
-                'auth': self._hive_config['AUTH'],
+                'auth': self._hive_config['AUTH_MECHANISM'],
                 'active': self._hive_connection_count,
                 'max': self._hive_config['POOL_SIZE'],
-                'available': PYHIVE_AVAILABLE,
+                'available': IMPYLA_AVAILABLE,
             },
             'async_pending': len([f for f in self._async_futures if not f.done()]),
         }
@@ -665,6 +625,5 @@ class HybridConnectionManager:
 hybrid_manager = HybridConnectionManager()
 
 # Backward compatibility aliases
-# Existing code using hive_manager or impala_manager will work without changes
 hive_manager = hybrid_manager
 impala_manager = hybrid_manager

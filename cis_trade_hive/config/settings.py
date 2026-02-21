@@ -129,7 +129,7 @@ if CIS_ENV == 'work':
     # HIVE Configuration (for ACID WRITES - INSERT, UPDATE, DELETE)
     # Connection: beeline -u "jdbc:hive2://<host>:10000/;principal=hive/_HOST@REALM"
     HIVE_CONFIG = {
-        'HOST': os.environ.get('HIVE_HOST', 'lxmrwsgv0m2.sg.uobnet.com'),
+        'HOST': os.environ.get('HIVE_HOST', 'lxmrwtsgv0m2.sg.uobnet.com'),
         'PORT': int(os.environ.get('HIVE_PORT', '10000')),
         'DATABASE': os.environ.get('HIVE_DB', 'mrw_ima'),
         'AUTH': os.environ.get('HIVE_AUTH', 'GSSAPI'),

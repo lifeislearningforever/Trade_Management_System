@@ -20,7 +20,7 @@ print("=" * 60)
 # Configuration
 IMPALA_HOST = os.environ.get('IMPALA_HOST', 'lxmrwsgv0d1.sg.uobnet.com')
 IMPALA_PORT = int(os.environ.get('IMPALA_PORT', '21050'))
-HIVE_HOST = os.environ.get('HIVE_HOST', 'lxmrwsgv0m2.sg.uobnet.com')
+HIVE_HOST = os.environ.get('HIVE_HOST', 'lxmrwtsgv0m2.sg.uobnet.com')
 HIVE_PORT = int(os.environ.get('HIVE_PORT', '10000'))
 DATABASE = os.environ.get('HIVE_DB', 'mrw_ima')
 
