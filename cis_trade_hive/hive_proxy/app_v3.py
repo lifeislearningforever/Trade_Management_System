@@ -58,9 +58,15 @@ class Config:
     HIVE_HOST = os.environ.get('HIVE_HOST', 'lxmrwtsgv0m1.sg.uobnet.com')
     HIVE_PORT = int(os.environ.get('HIVE_PORT', '10000'))
 
-    # Kerberos authentication
-    HIVE_AUTH = os.environ.get('HIVE_AUTH', 'KERBEROS')
+    # Authentication mode: KERBEROS, GSSAPI, LDAP, CUSTOM, NOSASL, NONE
+    # GSSAPI uses the same Kerberos but via different library
+    # NOSASL/NONE for local testing without authentication
+    HIVE_AUTH = os.environ.get('HIVE_AUTH', 'GSSAPI')
     KERBEROS_SERVICE_NAME = os.environ.get('KERBEROS_SERVICE_NAME', 'hive')
+
+    # For LDAP/CUSTOM auth
+    HIVE_USERNAME = os.environ.get('HIVE_USERNAME', '')
+    HIVE_PASSWORD = os.environ.get('HIVE_PASSWORD', '')
 
     # Default database
     DEFAULT_DATABASE = os.environ.get('HIVE_DATABASE', 'mrw_ima')
@@ -96,6 +102,8 @@ config = Config()
 
 # Try importing PyHive
 PYHIVE_AVAILABLE = False
+KERBEROS_AVAILABLE = False
+
 try:
     from pyhive import hive
     from thrift.transport.TTransport import TTransportException
@@ -103,6 +111,17 @@ try:
     logger.info("PyHive available - using persistent connections")
 except ImportError as e:
     logger.warning(f"PyHive not available: {e}. Will fall back to beeline.")
+
+# Check for Kerberos support
+try:
+    import sasl
+    import thrift_sasl
+    KERBEROS_AVAILABLE = True
+    logger.info("SASL/Kerberos libraries available")
+except ImportError as e:
+    logger.warning(f"SASL/Kerberos not available: {e}")
+    logger.warning("For Kerberos auth, install: pip install sasl thrift-sasl pykerberos")
+    logger.warning("Will use NOSASL if Kerberos auth fails")
 
 # Fallback imports for beeline
 import subprocess
@@ -136,14 +155,64 @@ class HiveConnectionPool:
 
         try:
             logger.info(f"Creating new Hive connection to {config.HIVE_HOST}:{config.HIVE_PORT}")
+            logger.info(f"Auth mode: {config.HIVE_AUTH}")
 
-            conn = hive.Connection(
-                host=config.HIVE_HOST,
-                port=config.HIVE_PORT,
-                auth=config.HIVE_AUTH,
-                kerberos_service_name=config.KERBEROS_SERVICE_NAME,
-                database=config.DEFAULT_DATABASE,
-            )
+            # Build connection parameters based on auth mode
+            conn_params = {
+                'host': config.HIVE_HOST,
+                'port': config.HIVE_PORT,
+                'database': config.DEFAULT_DATABASE,
+            }
+
+            auth_mode = config.HIVE_AUTH.upper()
+
+            if auth_mode in ('KERBEROS', 'GSSAPI'):
+                # Kerberos/GSSAPI authentication
+                # Requires: pip install sasl thrift-sasl pykerberos
+                # And valid Kerberos ticket: kinit -kt keytab principal
+                conn_params['auth'] = 'KERBEROS'
+                conn_params['kerberos_service_name'] = config.KERBEROS_SERVICE_NAME
+                logger.info(f"Using Kerberos auth with service: {config.KERBEROS_SERVICE_NAME}")
+
+            elif auth_mode == 'LDAP':
+                # LDAP authentication
+                conn_params['auth'] = 'LDAP'
+                conn_params['username'] = config.HIVE_USERNAME
+                conn_params['password'] = config.HIVE_PASSWORD
+                logger.info(f"Using LDAP auth with user: {config.HIVE_USERNAME}")
+
+            elif auth_mode == 'CUSTOM':
+                # Custom authentication
+                conn_params['auth'] = 'CUSTOM'
+                conn_params['username'] = config.HIVE_USERNAME
+                conn_params['password'] = config.HIVE_PASSWORD
+                logger.info(f"Using CUSTOM auth with user: {config.HIVE_USERNAME}")
+
+            elif auth_mode in ('NOSASL', 'NONE'):
+                # No authentication (for local testing)
+                conn_params['auth'] = 'NOSASL'
+                logger.info("Using NOSASL (no authentication)")
+
+            else:
+                # Default to NOSASL if unknown
+                logger.warning(f"Unknown auth mode '{auth_mode}', defaulting to NOSASL")
+                conn_params['auth'] = 'NOSASL'
+
+            # Try to connect
+            try:
+                conn = hive.Connection(**conn_params)
+            except Exception as e:
+                # If Kerberos fails and not already NOSASL, try NOSASL as fallback
+                if conn_params.get('auth') != 'NOSASL' and 'SASL' in str(e):
+                    logger.warning(f"Kerberos auth failed: {e}")
+                    logger.warning("Falling back to NOSASL authentication")
+                    conn_params['auth'] = 'NOSASL'
+                    conn_params.pop('kerberos_service_name', None)
+                    conn_params.pop('username', None)
+                    conn_params.pop('password', None)
+                    conn = hive.Connection(**conn_params)
+                else:
+                    raise
 
             # Set execution engine and queue on new connection
             cursor = conn.cursor()
@@ -160,6 +229,10 @@ class HiveConnectionPool:
 
         except Exception as e:
             logger.error(f"Failed to create Hive connection: {e}")
+            logger.error("Troubleshooting:")
+            logger.error("  1. For Kerberos: kinit -kt /path/to/keytab principal@REALM")
+            logger.error("  2. Install: pip install sasl thrift-sasl pykerberos")
+            logger.error("  3. Or set HIVE_AUTH=NOSASL for no authentication")
             return None
 
     def _validate_connection(self, conn) -> bool:
