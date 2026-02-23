@@ -1,0 +1,27 @@
+# CML glibc Test - Requirements
+# ==============================
+#
+# These are the dependencies for testing glibc/SASL connectivity issues
+# in CML Docker containers.
+
+# Flask for CML application
+flask>=2.0.0
+
+# HTTP client for REST Proxy communication
+requests>=2.25.0
+urllib3>=1.26.0
+
+# PyHive for direct connection testing (will fail in CML due to glibc)
+# Uncomment to test the error
+# pyhive>=0.7.0
+# thrift>=0.16.0
+# thrift-sasl>=0.4.0
+# sasl>=0.3.1
+
+# impyla for direct Impala connection testing (will also fail)
+# Uncomment to test the error
+# impyla>=0.18.0
+
+# Note: The direct connection libraries (pyhive, impyla, sasl) will fail
+# in CML containers due to glibc version mismatch with native SASL libraries.
+# The solution is to use REST Proxy (app_v2.py) on the edge node.
