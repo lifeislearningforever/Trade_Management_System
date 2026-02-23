@@ -91,11 +91,13 @@ class KuduBenchmark:
     TABLES = {
         'portfolio': {
             'table': 'cis_portfolio',
-            'pk': 'portfolio_id',
+            'pk': 'name',
             'insert_cols': [
-                'portfolio_id', 'portfolio_short_name', 'portfolio_name',
-                'portfolio_type', 'currency', 'base_currency', 'manager_name',
-                'status', 'is_active', 'created_at', 'created_by'
+                'name', 'description', 'currency', 'manager', 'portfolio_client',
+                'cash_balance', 'cost_centre_code', 'corp_code', 'account_group',
+                'portfolio_group', 'report_group', 'entity_group', 'revaluation_status',
+                'src_system', 'status', 'is_active', 'created_by', 'created_at',
+                'updated_by', 'updated_at'
             ],
         },
         'trade': {
@@ -145,17 +147,26 @@ class KuduBenchmark:
 
         if table_key == 'portfolio':
             return {
-                'portfolio_id': test_id,
-                'portfolio_short_name': f'BM_{test_id[-6:]}',
-                'portfolio_name': f'Benchmark Portfolio {test_id}',
-                'portfolio_type': 'EQUITY',
+                'name': test_id,
+                'description': f'Benchmark Portfolio {test_id}',
                 'currency': 'USD',
-                'base_currency': 'USD',
-                'manager_name': 'Benchmark Test',
+                'manager': 'Benchmark Test',
+                'portfolio_client': 'BENCH_CLIENT',
+                'cash_balance': '0',
+                'cost_centre_code': 'CC001',
+                'corp_code': 'CORP001',
+                'account_group': 'AG001',
+                'portfolio_group': 'PG001',
+                'report_group': 'RG001',
+                'entity_group': 'EG001',
+                'revaluation_status': 'PENDING',
+                'src_system': 'BENCHMARK',
                 'status': 'DRAFT',
                 'is_active': True,
-                'created_at': now.strftime('%Y-%m-%d %H:%M:%S'),
                 'created_by': 'benchmark',
+                'created_at': now.strftime('%Y-%m-%d %H:%M:%S'),
+                'updated_by': 'benchmark',
+                'updated_at': now.strftime('%Y-%m-%d %H:%M:%S'),
             }
         elif table_key == 'trade':
             return {
@@ -246,7 +257,7 @@ class KuduBenchmark:
 
         start = time.perf_counter()
         try:
-            success = impala_manager.execute_write(query)
+            success = impala_manager.execute_write(query, database=self.database)
             elapsed = (time.perf_counter() - start) * 1000
 
             result = BenchmarkResult(
@@ -288,7 +299,7 @@ class KuduBenchmark:
 
         start = time.perf_counter()
         try:
-            success = impala_manager.execute_write(query)
+            success = impala_manager.execute_write(query, database=self.database)
             elapsed = (time.perf_counter() - start) * 1000
 
             result = BenchmarkResult(
@@ -321,7 +332,7 @@ class KuduBenchmark:
 
         start = time.perf_counter()
         try:
-            success = impala_manager.execute_write(query)
+            success = impala_manager.execute_write(query, database=self.database)
             elapsed = (time.perf_counter() - start) * 1000
 
             result = BenchmarkResult(
@@ -353,7 +364,7 @@ class KuduBenchmark:
 
         start = time.perf_counter()
         try:
-            results = impala_manager.execute_query(query)
+            results = impala_manager.execute_query(query, database=self.database)
             elapsed = (time.perf_counter() - start) * 1000
 
             result = BenchmarkResult(
@@ -464,7 +475,7 @@ class KuduBenchmark:
                 values = [self._format_value(data.get(col)) for col in columns]
                 table_name = f"{self.database}.{self.TABLES[table_key]['table']}"
                 query = f"UPSERT INTO {table_name} ({', '.join(columns)}) VALUES ({', '.join(values)})"
-                impala_manager.execute_write(query)
+                impala_manager.execute_write(query, database=self.database)
             print(f"done ({time.perf_counter() - prep_start:.2f}s)")
 
             # UPDATE benchmark
