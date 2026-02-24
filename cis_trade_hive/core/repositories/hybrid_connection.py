@@ -738,10 +738,15 @@ class HybridConnectionManager:
                 self.return_hive_connection(connection)
 
     def _initialize_session(self, cursor, use_tez: bool = True):
-        """Initialize Hive session with Tez engine and optimizations."""
+        """Initialize Hive session with Tez engine and optimizations.
+
+        Note: Always uses Tez engine regardless of use_tez parameter when
+        HIVE_ALWAYS_USE_TEZ is True (default). This ensures optimal performance.
+        """
         try:
-            # Set execution engine
-            engine = self._execution_engine if use_tez else 'mr'
+            # Always use Tez engine when ALWAYS_USE_TEZ is configured (default: True)
+            # This overrides the use_tez parameter to ensure Tez is always used
+            engine = 'tez' if self._always_use_tez else (self._execution_engine if use_tez else 'mr')
             cursor.execute(f"SET hive.execution.engine={engine}")
 
             # Apply additional initialization statements

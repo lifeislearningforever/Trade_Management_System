@@ -263,8 +263,18 @@ class HiveConnectionManager:
             return []
 
     def execute_write(self, query: str, params: Optional[List] = None,
-                     database: Optional[str] = None, use_mr_engine: bool = True) -> bool:
-        """Execute a write query (INSERT, UPDATE, DELETE) for ACID tables."""
+                     database: Optional[str] = None, use_tez_engine: bool = True) -> bool:
+        """Execute a write query (INSERT, UPDATE, DELETE) for ACID tables.
+
+        Args:
+            query: SQL INSERT/UPDATE/DELETE query
+            params: Optional parameters for query formatting
+            database: Database name (optional)
+            use_tez_engine: Use Tez execution engine (default: True for faster writes)
+
+        Returns:
+            True if write succeeded, False otherwise
+        """
         if not HIVE_AVAILABLE:
             logger.warning("Cannot execute write: PyHive not available")
             return False
@@ -278,9 +288,9 @@ class HiveConnectionManager:
 
             cursor = connection.cursor()
 
-            # Set MapReduce engine for ACID operations
-            if use_mr_engine:
-                cursor.execute("SET hive.execution.engine=mr")
+            # Always use Tez engine for faster ACID operations
+            # Tez is significantly faster than MapReduce for single-row operations
+            cursor.execute("SET hive.execution.engine=tez")
 
             if params:
                 cursor.execute(query, params)

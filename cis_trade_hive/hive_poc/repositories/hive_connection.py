@@ -455,10 +455,15 @@ class HiveConnectionManager:
                 self.return_hive_connection(pooled)
 
     def _initialize_session(self, cursor):
-        """Initialize Hive session with Tez engine and optimizations."""
+        """Initialize Hive session with Tez engine and optimizations.
+
+        Note: Always uses Tez engine regardless of EXECUTION_ENGINE config when
+        ALWAYS_USE_TEZ is True (default). This ensures optimal performance.
+        """
         try:
-            # Set execution engine to Tez
-            cursor.execute(f"SET hive.execution.engine={self._perf_config['EXECUTION_ENGINE']}")
+            # Always use Tez when ALWAYS_USE_TEZ is configured (default: True)
+            engine = 'tez' if self._config.get('ALWAYS_USE_TEZ', True) else self._perf_config['EXECUTION_ENGINE']
+            cursor.execute(f"SET hive.execution.engine={engine}")
 
             # Apply additional initialization statements
             for stmt in self._config.get('INIT_STATEMENTS', []):
