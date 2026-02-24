@@ -2,19 +2,43 @@
 Hive POC Views
 
 Simple views for demonstrating CRUD operations with Hive Managed Tables.
+Supports both traditional form submissions and AJAX requests with progress modal.
 """
 
 import logging
+import time
 from datetime import datetime, date
 from decimal import Decimal
 from django.shortcuts import render, redirect
 from django.contrib import messages
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.urls import reverse
 
 from .services.portfolio_hive_service import PortfolioHiveService, PortfolioDTO
 from .services.trade_hive_service import TradeHiveService, TradeDTO
 
 logger = logging.getLogger('hive_poc')
+
+
+def is_ajax(request: HttpRequest) -> bool:
+    """Check if request is an AJAX request."""
+    return request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+
+
+def json_response(success: bool, message: str, redirect_url: str = None,
+                  elapsed_ms: float = None, errors: dict = None) -> JsonResponse:
+    """Create a standardized JSON response for AJAX requests."""
+    data = {
+        'success': success,
+        'message': message,
+    }
+    if redirect_url:
+        data['redirect_url'] = redirect_url
+    if elapsed_ms is not None:
+        data['elapsed_ms'] = elapsed_ms
+    if errors:
+        data['errors'] = errors
+    return JsonResponse(data)
 
 
 # =============================================================================
@@ -63,6 +87,8 @@ def portfolio_create(request: HttpRequest) -> HttpResponse:
     service = PortfolioHiveService()
 
     if request.method == 'POST':
+        start_time = time.time()
+
         dto = PortfolioDTO(
             portfolio_name=request.POST.get('portfolio_name', ''),
             portfolio_code=request.POST.get('portfolio_code', '').upper(),
@@ -76,7 +102,25 @@ def portfolio_create(request: HttpRequest) -> HttpResponse:
         )
 
         result = service.create(dto)
+        elapsed_ms = (time.time() - start_time) * 1000
 
+        if is_ajax(request):
+            if result['success']:
+                return json_response(
+                    success=True,
+                    message=result['message'],
+                    redirect_url=reverse('hive_poc:portfolio_list'),
+                    elapsed_ms=elapsed_ms
+                )
+            else:
+                return json_response(
+                    success=False,
+                    message='Validation failed',
+                    errors=result.get('errors', {}),
+                    elapsed_ms=elapsed_ms
+                )
+
+        # Traditional form submission
         if result['success']:
             messages.success(request, result['message'])
             return redirect('hive_poc:portfolio_list')
@@ -98,10 +142,14 @@ def portfolio_edit(request: HttpRequest, portfolio_id: str) -> HttpResponse:
     portfolio = service.get_by_id(portfolio_id)
 
     if not portfolio:
+        if is_ajax(request):
+            return json_response(success=False, message='Portfolio not found')
         messages.error(request, 'Portfolio not found')
         return redirect('hive_poc:portfolio_list')
 
     if request.method == 'POST':
+        start_time = time.time()
+
         dto = PortfolioDTO(
             portfolio_name=request.POST.get('portfolio_name', ''),
             portfolio_code=request.POST.get('portfolio_code', '').upper(),
@@ -114,7 +162,25 @@ def portfolio_edit(request: HttpRequest, portfolio_id: str) -> HttpResponse:
         )
 
         result = service.update(portfolio_id, dto)
+        elapsed_ms = (time.time() - start_time) * 1000
 
+        if is_ajax(request):
+            if result['success']:
+                return json_response(
+                    success=True,
+                    message=result['message'],
+                    redirect_url=reverse('hive_poc:portfolio_list'),
+                    elapsed_ms=elapsed_ms
+                )
+            else:
+                return json_response(
+                    success=False,
+                    message='Validation failed',
+                    errors=result.get('errors', {}),
+                    elapsed_ms=elapsed_ms
+                )
+
+        # Traditional form submission
         if result['success']:
             messages.success(request, result['message'])
             return redirect('hive_poc:portfolio_list')
@@ -197,6 +263,8 @@ def trade_create(request: HttpRequest) -> HttpResponse:
     portfolio_service = PortfolioHiveService()
 
     if request.method == 'POST':
+        start_time = time.time()
+
         # Parse dates
         trade_date_str = request.POST.get('trade_date', '')
         settlement_date_str = request.POST.get('settlement_date', '')
@@ -244,7 +312,25 @@ def trade_create(request: HttpRequest) -> HttpResponse:
         )
 
         result = trade_service.create(dto)
+        elapsed_ms = (time.time() - start_time) * 1000
 
+        if is_ajax(request):
+            if result['success']:
+                return json_response(
+                    success=True,
+                    message=result['message'],
+                    redirect_url=reverse('hive_poc:trade_list'),
+                    elapsed_ms=elapsed_ms
+                )
+            else:
+                return json_response(
+                    success=False,
+                    message='Validation failed',
+                    errors=result.get('errors', {}),
+                    elapsed_ms=elapsed_ms
+                )
+
+        # Traditional form submission
         if result['success']:
             messages.success(request, result['message'])
             return redirect('hive_poc:trade_list')
@@ -269,10 +355,14 @@ def trade_edit(request: HttpRequest, trade_id: str) -> HttpResponse:
     trade = trade_service.get_by_id(trade_id)
 
     if not trade:
+        if is_ajax(request):
+            return json_response(success=False, message='Trade not found')
         messages.error(request, 'Trade not found')
         return redirect('hive_poc:trade_list')
 
     if request.method == 'POST':
+        start_time = time.time()
+
         # Parse dates
         trade_date_str = request.POST.get('trade_date', '')
         settlement_date_str = request.POST.get('settlement_date', '')
@@ -319,7 +409,25 @@ def trade_edit(request: HttpRequest, trade_id: str) -> HttpResponse:
         )
 
         result = trade_service.update(trade_id, dto)
+        elapsed_ms = (time.time() - start_time) * 1000
 
+        if is_ajax(request):
+            if result['success']:
+                return json_response(
+                    success=True,
+                    message=result['message'],
+                    redirect_url=reverse('hive_poc:trade_list'),
+                    elapsed_ms=elapsed_ms
+                )
+            else:
+                return json_response(
+                    success=False,
+                    message='Validation failed',
+                    errors=result.get('errors', {}),
+                    elapsed_ms=elapsed_ms
+                )
+
+        # Traditional form submission
         if result['success']:
             messages.success(request, result['message'])
             return redirect('hive_poc:trade_list')

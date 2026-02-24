@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token }}">
     <title>{% block title %}Hive POC{% endblock %} - Hive Managed Tables</title>
     <!-- Bootstrap 5 CSS from CDN -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -30,6 +31,43 @@
         .stat-card.trades { border-left-color: #198754; }
         .stat-card.deleted { border-left-color: #dc3545; }
         .stat-number { font-size: 2rem; font-weight: 700; }
+
+        /* Progress Modal Styles */
+        .progress-modal .modal-body {
+            padding: 2rem;
+            text-align: center;
+        }
+        .progress-modal .spinner-border {
+            width: 3rem;
+            height: 3rem;
+        }
+        .progress-modal .progress-status {
+            margin-top: 1rem;
+            font-size: 1.1rem;
+            color: #495057;
+        }
+        .progress-modal .progress-detail {
+            font-size: 0.9rem;
+            color: #6c757d;
+            margin-top: 0.5rem;
+        }
+        .progress-modal .elapsed-time {
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: #868e96;
+            margin-top: 1rem;
+        }
+        .progress-modal .progress-bar-container {
+            margin-top: 1.5rem;
+        }
+        .progress-modal .success-icon {
+            font-size: 3rem;
+            color: #198754;
+        }
+        .progress-modal .error-icon {
+            font-size: 3rem;
+            color: #dc3545;
+        }
     </style>
 </head>
 <body>
@@ -70,6 +108,7 @@
                     </li>
                 </ul>
                 <span class="navbar-text">
+                    <span class="badge bg-success">Tez Engine</span>
                     <span class="badge bg-info">ORC Format</span>
                     <span class="badge bg-warning text-dark">Managed Tables</span>
                 </span>
@@ -92,12 +131,203 @@
 
     <footer class="mt-5 py-3 bg-light">
         <div class="container text-center text-muted">
-            <small>Hive POC - Managed Tables with ORC Format | Soft Delete Support</small>
+            <small>Hive POC - Managed Tables with ORC Format | Tez Engine | Soft Delete Support</small>
         </div>
     </footer>
 
+    <!-- Progress Modal -->
+    <div class="modal fade progress-modal" id="progressModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header border-0">
+                    <h5 class="modal-title" id="progressModalTitle">Processing...</h5>
+                </div>
+                <div class="modal-body">
+                    <!-- Spinner (shown during processing) -->
+                    <div id="progressSpinner">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <div class="progress-status" id="progressStatus">Saving to Hive...</div>
+                        <div class="progress-detail" id="progressDetail">Using Tez execution engine</div>
+                        <div class="progress-bar-container">
+                            <div class="progress" style="height: 4px;">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                     role="progressbar" style="width: 100%"></div>
+                            </div>
+                        </div>
+                        <div class="elapsed-time" id="elapsedTime">Elapsed: 0.0s</div>
+                    </div>
+
+                    <!-- Success State -->
+                    <div id="progressSuccess" style="display: none;">
+                        <div class="success-icon">&#10004;</div>
+                        <div class="progress-status text-success" id="successMessage">Operation completed successfully!</div>
+                        <div class="progress-detail" id="successDetail"></div>
+                    </div>
+
+                    <!-- Error State -->
+                    <div id="progressError" style="display: none;">
+                        <div class="error-icon">&#10006;</div>
+                        <div class="progress-status text-danger" id="errorMessage">Operation failed</div>
+                        <div class="progress-detail" id="errorDetail"></div>
+                    </div>
+                </div>
+                <div class="modal-footer border-0" id="progressModalFooter" style="display: none;">
+                    <button type="button" class="btn btn-primary" id="progressModalClose" data-bs-dismiss="modal">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Bootstrap 5 JS Bundle from CDN -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Hive Operations JavaScript -->
+    <script>
+    /**
+     * Hive Operations Manager
+     * Handles AJAX form submissions with progress modal
+     */
+    const HiveOperations = {
+        modal: null,
+        startTime: null,
+        timerInterval: null,
+
+        init() {
+            this.modal = new bootstrap.Modal(document.getElementById('progressModal'));
+            this.attachFormHandlers();
+        },
+
+        attachFormHandlers() {
+            // Attach to all forms with data-ajax="true" attribute
+            document.querySelectorAll('form[data-ajax="true"]').forEach(form => {
+                form.addEventListener('submit', (e) => this.handleFormSubmit(e, form));
+            });
+        },
+
+        handleFormSubmit(e, form) {
+            e.preventDefault();
+
+            const formData = new FormData(form);
+            const action = form.getAttribute('action') || window.location.href;
+            const method = form.getAttribute('method') || 'POST';
+            const operationType = form.getAttribute('data-operation') || 'save';
+            const entityType = form.getAttribute('data-entity') || 'record';
+
+            // Show progress modal
+            this.showProgress(operationType, entityType);
+
+            // Get CSRF token
+            const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value ||
+                             document.querySelector('meta[name="csrf-token"]')?.content;
+
+            // Submit via AJAX
+            fetch(action, {
+                method: method.toUpperCase(),
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRFToken': csrfToken
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                this.stopTimer();
+                if (data.success) {
+                    this.showSuccess(data.message, data.elapsed_ms);
+                    // Redirect after delay
+                    setTimeout(() => {
+                        if (data.redirect_url) {
+                            window.location.href = data.redirect_url;
+                        } else {
+                            this.modal.hide();
+                        }
+                    }, 1500);
+                } else {
+                    this.showError(data.message || 'Operation failed', data.errors);
+                }
+            })
+            .catch(error => {
+                this.stopTimer();
+                this.showError('Network error: ' + error.message);
+            });
+        },
+
+        showProgress(operation, entity) {
+            // Reset modal state
+            document.getElementById('progressSpinner').style.display = 'block';
+            document.getElementById('progressSuccess').style.display = 'none';
+            document.getElementById('progressError').style.display = 'none';
+            document.getElementById('progressModalFooter').style.display = 'none';
+
+            // Set title and status
+            const titles = {
+                'create': `Creating ${entity}...`,
+                'save': `Saving ${entity}...`,
+                'update': `Updating ${entity}...`,
+                'delete': `Deleting ${entity}...`
+            };
+            document.getElementById('progressModalTitle').textContent = titles[operation] || 'Processing...';
+            document.getElementById('progressStatus').textContent = `${titles[operation] || 'Processing...'} in Hive`;
+            document.getElementById('progressDetail').textContent = 'Using Tez execution engine for optimal performance';
+
+            // Start timer
+            this.startTime = performance.now();
+            this.timerInterval = setInterval(() => {
+                const elapsed = (performance.now() - this.startTime) / 1000;
+                document.getElementById('elapsedTime').textContent = `Elapsed: ${elapsed.toFixed(1)}s`;
+            }, 100);
+
+            // Show modal
+            this.modal.show();
+        },
+
+        showSuccess(message, elapsedMs) {
+            document.getElementById('progressSpinner').style.display = 'none';
+            document.getElementById('progressSuccess').style.display = 'block';
+            document.getElementById('progressError').style.display = 'none';
+            document.getElementById('progressModalFooter').style.display = 'flex';
+
+            document.getElementById('progressModalTitle').textContent = 'Success';
+            document.getElementById('successMessage').textContent = message || 'Operation completed successfully!';
+
+            if (elapsedMs) {
+                document.getElementById('successDetail').textContent = `Completed in ${elapsedMs.toFixed(0)}ms`;
+            }
+        },
+
+        showError(message, errors) {
+            document.getElementById('progressSpinner').style.display = 'none';
+            document.getElementById('progressSuccess').style.display = 'none';
+            document.getElementById('progressError').style.display = 'block';
+            document.getElementById('progressModalFooter').style.display = 'flex';
+
+            document.getElementById('progressModalTitle').textContent = 'Error';
+            document.getElementById('errorMessage').textContent = message || 'Operation failed';
+
+            if (errors && Object.keys(errors).length > 0) {
+                const errorList = Object.entries(errors)
+                    .map(([field, error]) => `${field}: ${error}`)
+                    .join('<br>');
+                document.getElementById('errorDetail').innerHTML = errorList;
+            }
+        },
+
+        stopTimer() {
+            if (this.timerInterval) {
+                clearInterval(this.timerInterval);
+                this.timerInterval = null;
+            }
+        }
+    };
+
+    // Initialize on DOM ready
+    document.addEventListener('DOMContentLoaded', () => {
+        HiveOperations.init();
+    });
+    </script>
+
     {% block extra_js %}{% endblock %}
 </body>
 </html>

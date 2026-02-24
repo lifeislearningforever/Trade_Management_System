@@ -3,7 +3,7 @@ Hybrid Connection Manager for CML (Cloudera Machine Learning)
 
 Architecture:
 - Impala: Fast reads (SELECT queries) via impyla - port 21050 (ALWAYS used for reads)
-- Hive/REST Proxy: ACID writes (INSERT, UPDATE, DELETE)
+- Hive/REST Proxy: ACID writes (INSERT, UPDATE, DELETE) with Tez engine
 
 Connection Modes (controlled by USE_REST_PROXY env var):
 1. USE_REST_PROXY=true: Impala for reads, REST Proxy for writes
@@ -16,6 +16,12 @@ The REST Proxy mode for WRITES is required in CML because:
 
 IMPORTANT: Impala reads work fine in CML (different auth mechanism)
 
+Performance Optimization:
+- Tez execution engine for fast writes (SET hive.execution.engine=tez)
+- Connection pooling with configurable age-out
+- Session initialization with optimization flags
+- Async write support for non-blocking operations
+
 Requirements:
     pip install pure-sasl thrift-sasl impyla requests
 
@@ -23,6 +29,7 @@ Configuration (settings.py or environment):
     USE_REST_PROXY=true      # Only affects WRITES
     HIVE_PROXY_URL=http://edge-node:5000
     HIVE_DATABASE=mrw_ima
+    HIVE_EXECUTION_ENGINE=tez  # or mr for MapReduce
 """
 
 import os
@@ -41,6 +48,20 @@ USE_REST_PROXY = os.environ.get('USE_REST_PROXY', 'false').lower() == 'true'
 HIVE_PROXY_URL = os.environ.get('HIVE_PROXY_URL', '')
 HIVE_DATABASE = os.environ.get('HIVE_DATABASE', 'mrw_ima')
 HIVE_TIMEOUT = int(os.environ.get('HIVE_TIMEOUT', '300'))
+
+# Execution engine (tez is faster than mr for most operations)
+HIVE_EXECUTION_ENGINE = os.environ.get('HIVE_EXECUTION_ENGINE', 'tez')
+HIVE_ALWAYS_USE_TEZ = os.environ.get('HIVE_ALWAYS_USE_TEZ', 'true').lower() == 'true'
+
+# Connection pool settings
+HIVE_CONNECTION_MAX_AGE = int(os.environ.get('HIVE_CONNECTION_MAX_AGE', '3600'))  # 1 hour
+HIVE_POOL_MIN_SIZE = int(os.environ.get('HIVE_POOL_MIN_SIZE', '2'))
+
+# Session initialization statements for Tez optimization
+HIVE_INIT_STATEMENTS = [
+    f"SET hive.execution.engine={HIVE_EXECUTION_ENGINE}",
+    # Additional optimizations can be added here
+]
 
 # REST proxy client (using requests library) - for WRITES only
 REQUESTS_AVAILABLE = False
@@ -131,7 +152,15 @@ class HybridConnectionManager:
             self._impala_pool = Queue(maxsize=self._impala_config['POOL_SIZE'])
             self._impala_pool_lock = threading.Lock()
             self._impala_connection_count = 0
-            self._connection_timeout = 3600  # 1 hour
+            self._connection_timeout = HIVE_CONNECTION_MAX_AGE
+
+            # Execution engine configuration
+            self._execution_engine = HIVE_EXECUTION_ENGINE
+            self._always_use_tez = HIVE_ALWAYS_USE_TEZ
+            self._init_statements = HIVE_INIT_STATEMENTS
+
+            # Track initialized connections
+            self._initialized_connections = set()
 
             # Thread pool for async writes
             self._async_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix='hybrid_async_')
@@ -617,15 +646,26 @@ class HybridConnectionManager:
             raise
 
     def execute_write(self, query: str, params: Optional[List] = None,
-                     database: Optional[str] = None, use_mr_engine: bool = True) -> bool:
+                     database: Optional[str] = None, use_tez_engine: bool = True) -> bool:
         """
-        Execute a WRITE query (INSERT, UPDATE, DELETE) via Hive.
+        Execute a WRITE query (INSERT, UPDATE, DELETE) via Hive with Tez engine.
 
         In REST Proxy mode: Uses REST API with YARN queue support
         In Direct mode: Priority order:
             1. Beeline subprocess (good for edge node)
             2. Direct impyla connection (fallback)
+
+        Args:
+            query: SQL INSERT/UPDATE/DELETE query
+            params: Optional parameters for query formatting
+            database: Database name (optional)
+            use_tez_engine: Use Tez execution engine (default: True for faster writes)
+
+        Returns:
+            True if write succeeded, False otherwise
         """
+        start_time = time.time()
+
         # Format query with params if provided
         if params:
             # Simple parameter substitution (for %s style params)
@@ -637,6 +677,13 @@ class HybridConnectionManager:
                 formatted_query = query
         else:
             formatted_query = query
+
+        # Enforce Tez engine if configured
+        if self._always_use_tez:
+            formatted_query = formatted_query.replace(
+                'hive.execution.engine=mr',
+                f'hive.execution.engine={self._execution_engine}'
+            )
 
         # REST Proxy mode - use proxy for all writes
         if self._use_proxy:
@@ -664,20 +711,21 @@ class HybridConnectionManager:
 
             cursor = connection.cursor()
 
-            # Set MapReduce engine for ACID operations (if needed)
-            if use_mr_engine:
-                try:
-                    cursor.execute("SET hive.execution.engine=mr")
-                except Exception:
-                    pass
+            # Initialize session with Tez engine if not already done
+            conn_id = id(connection)
+            if conn_id not in self._initialized_connections:
+                self._initialize_session(cursor, use_tez_engine)
+                self._initialized_connections.add(conn_id)
 
             cursor.execute(formatted_query)
 
-            logger.debug("Hive write query executed successfully")
+            elapsed_ms = (time.time() - start_time) * 1000
+            logger.debug(f"Hive write query executed successfully ({elapsed_ms:.0f}ms)")
             return True
 
         except Exception as e:
-            logger.error(f"Failed to execute write query: {str(e)}")
+            elapsed_ms = (time.time() - start_time) * 1000
+            logger.error(f"Failed to execute write query ({elapsed_ms:.0f}ms): {str(e)}")
             logger.error(f"Query: {formatted_query[:200]}...")
             return False
         finally:
@@ -688,6 +736,26 @@ class HybridConnectionManager:
                     pass
             if connection:
                 self.return_hive_connection(connection)
+
+    def _initialize_session(self, cursor, use_tez: bool = True):
+        """Initialize Hive session with Tez engine and optimizations."""
+        try:
+            # Set execution engine
+            engine = self._execution_engine if use_tez else 'mr'
+            cursor.execute(f"SET hive.execution.engine={engine}")
+
+            # Apply additional initialization statements
+            for stmt in self._init_statements:
+                try:
+                    # Skip engine statement as we already set it
+                    if 'execution.engine' not in stmt:
+                        cursor.execute(stmt)
+                except Exception as e:
+                    logger.debug(f"Init statement failed (non-critical): {stmt} - {e}")
+
+            logger.debug(f"Session initialized with {engine} engine")
+        except Exception as e:
+            logger.warning(f"Session initialization failed: {e}")
 
     # ==================== ASYNC WRITES ====================
 
