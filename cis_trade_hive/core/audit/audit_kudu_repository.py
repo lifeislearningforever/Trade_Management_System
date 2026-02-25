@@ -426,9 +426,10 @@ class AuditLogKuduRepository:
             where_clause = " AND ".join(where_clauses) if where_clauses else "1=1"
 
             # Build query with ORDER BY (Impala supports it)
+            # Use full database.table name for proper table resolution
             query = f"""
             SELECT *
-            FROM {AuditLogKuduRepository.GENERAL_AUDIT_TABLE}
+            FROM {ImpalaAuditConnection.DATABASE}.{AuditLogKuduRepository.GENERAL_AUDIT_TABLE}
             WHERE {where_clause}
             ORDER BY audit_timestamp DESC
             LIMIT {limit}
@@ -457,7 +458,7 @@ class AuditLogKuduRepository:
         try:
             query = f"""
             SELECT *
-            FROM {AuditLogKuduRepository.GENERAL_AUDIT_TABLE}
+            FROM {ImpalaAuditConnection.DATABASE}.{AuditLogKuduRepository.GENERAL_AUDIT_TABLE}
             WHERE entity_type = '{entity_type}'
             AND entity_id = '{entity_id}'
             ORDER BY audit_timestamp DESC
@@ -499,7 +500,7 @@ class AuditLogKuduRepository:
 
             query = f"""
             SELECT *
-            FROM {AuditLogKuduRepository.UDF_AUDIT_TABLE}
+            FROM {ImpalaAuditConnection.DATABASE}.{AuditLogKuduRepository.UDF_AUDIT_TABLE}
             WHERE {where_clause}
             ORDER BY audit_timestamp DESC
             LIMIT {limit}
@@ -544,7 +545,7 @@ class AuditLogKuduRepository:
 
             query = f"""
             SELECT *
-            FROM {AuditLogKuduRepository.UDF_VALUE_AUDIT_TABLE}
+            FROM {ImpalaAuditConnection.DATABASE}.{AuditLogKuduRepository.UDF_VALUE_AUDIT_TABLE}
             WHERE {where_clause}
             ORDER BY audit_timestamp DESC
             LIMIT {limit}
