@@ -352,6 +352,7 @@ def portfolio_create(request):
             if not success:
                 raise Exception("Failed to create portfolio")
 
+            import json
             audit_log_kudu_repository.log_action(
                 user_id=user_info['user_id'],
                 username=user_info['username'],
@@ -361,8 +362,10 @@ def portfolio_create(request):
                 entity_id=portfolio_name,
                 entity_name=portfolio_name,
                 action_description=f"Created portfolio: {portfolio_name} (INITIAL status)",
+                new_value=json.dumps(data, default=str),
                 request_method='POST',
                 request_path=request.path,
+                request_params=json.dumps(dict(request.POST)) if request.POST else None,
                 ip_address=request.META.get('REMOTE_ADDR'),
                 user_agent=request.META.get('HTTP_USER_AGENT', ''),
                 status='SUCCESS'
@@ -444,6 +447,21 @@ def portfolio_edit(request, portfolio_name):
                 'accounting_section': request.POST.get('accounting_section', ''),
             }
 
+            # Track changes for audit log
+            import json
+            changed_fields = []
+            old_values = {}
+            new_values = {}
+            for key, new_val in data.items():
+                old_val = portfolio.get(key, '')
+                # Convert to string for comparison
+                old_str = str(old_val) if old_val is not None else ''
+                new_str = str(new_val) if new_val is not None else ''
+                if old_str != new_str:
+                    changed_fields.append(key)
+                    old_values[key] = old_str
+                    new_values[key] = new_str
+
             success = portfolio_hive_repository.update_portfolio(
                 portfolio_name, data, user_info['username']
             )
@@ -460,8 +478,12 @@ def portfolio_edit(request, portfolio_name):
                 entity_id=portfolio_name,
                 entity_name=portfolio_name,
                 action_description=f'Updated portfolio: {portfolio_name} (status set to MODIFIED)',
+                field_name=', '.join(changed_fields) if changed_fields else None,
+                old_value=json.dumps(old_values) if old_values else None,
+                new_value=json.dumps(new_values) if new_values else None,
                 request_method='POST',
                 request_path=request.path,
+                request_params=json.dumps(dict(request.POST)) if request.POST else None,
                 ip_address=request.META.get('REMOTE_ADDR'),
                 user_agent=request.META.get('HTTP_USER_AGENT', ''),
                 status='SUCCESS'
