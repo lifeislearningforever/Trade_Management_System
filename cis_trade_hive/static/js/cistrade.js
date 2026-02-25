@@ -390,3 +390,310 @@ function getCellValue(cell, sortType) {
 document.addEventListener('DOMContentLoaded', function() {
     initSortableTables();
 });
+
+
+/**
+ * =====================================================
+ * Generic AJAX Form Submission with Progress Popup
+ * =====================================================
+ * A reusable system for submitting forms with visual feedback.
+ * Can be extended to any module (Trade, Portfolio, Security, etc.)
+ *
+ * Usage:
+ * 1. Add class 'ajax-form' to your form
+ * 2. Add data attributes:
+ *    - data-operation="create|update|delete" (required)
+ *    - data-entity="Trade|Portfolio|Security" (required)
+ *    - data-redirect-url="/trade/list/" (optional, for redirect after success)
+ *    - data-stay-on-page="true" (optional, to stay on page after success)
+ *
+ * Example:
+ * <form class="ajax-form" method="POST" action="/trade/create/"
+ *       data-operation="create" data-entity="Trade"
+ *       data-redirect-url="/trade/list/">
+ *   ...
+ * </form>
+ */
+
+// Operation messages configuration (can be extended for other modules)
+const CisOperationMessages = {
+    create: {
+        processing: 'Creating {entity}...',
+        success: '{entity} created successfully!',
+        error: 'Failed to create {entity}'
+    },
+    update: {
+        processing: 'Updating {entity}...',
+        success: '{entity} updated successfully!',
+        error: 'Failed to update {entity}'
+    },
+    delete: {
+        processing: 'Deleting {entity}...',
+        success: '{entity} deleted successfully!',
+        error: 'Failed to delete {entity}'
+    },
+    submit: {
+        processing: 'Submitting {entity} for validation...',
+        success: '{entity} submitted for validation!',
+        error: 'Failed to submit {entity}'
+    },
+    validate: {
+        processing: 'Validating {entity}...',
+        success: '{entity} validated successfully!',
+        error: 'Failed to validate {entity}'
+    },
+    settle: {
+        processing: 'Settling {entity}...',
+        success: '{entity} settled successfully!',
+        error: 'Failed to settle {entity}'
+    },
+    cancel: {
+        processing: 'Cancelling {entity}...',
+        success: '{entity} cancelled!',
+        error: 'Failed to cancel {entity}'
+    }
+};
+
+/**
+ * Show operation popup with spinner
+ * @param {string} message - The message to display
+ * @param {string} type - 'processing', 'success', or 'error'
+ */
+function showOperationPopup(message, type = 'processing') {
+    // Remove any existing popup
+    hideOperationPopup();
+
+    const popup = document.createElement('div');
+    popup.id = 'cis-operation-popup';
+    popup.className = 'cis-operation-popup';
+
+    let iconHtml = '';
+    let bgClass = '';
+
+    switch (type) {
+        case 'processing':
+            iconHtml = `<div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                            <span class="visually-hidden">Processing...</span>
+                        </div>`;
+            bgClass = '';
+            break;
+        case 'success':
+            iconHtml = `<div class="cis-popup-icon cis-popup-success">
+                            <i class="bi bi-check-circle-fill"></i>
+                        </div>`;
+            bgClass = 'cis-popup-success-bg';
+            break;
+        case 'error':
+            iconHtml = `<div class="cis-popup-icon cis-popup-error">
+                            <i class="bi bi-x-circle-fill"></i>
+                        </div>`;
+            bgClass = 'cis-popup-error-bg';
+            break;
+    }
+
+    popup.innerHTML = `
+        <div class="cis-popup-overlay"></div>
+        <div class="cis-popup-content ${bgClass}">
+            ${iconHtml}
+            <p class="cis-popup-message">${message}</p>
+        </div>
+    `;
+
+    document.body.appendChild(popup);
+
+    // Add styles if not already added
+    if (!document.getElementById('cis-operation-popup-styles')) {
+        const styles = document.createElement('style');
+        styles.id = 'cis-operation-popup-styles';
+        styles.textContent = `
+            .cis-operation-popup {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                z-index: 10000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .cis-popup-overlay {
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.5);
+                backdrop-filter: blur(2px);
+            }
+            .cis-popup-content {
+                position: relative;
+                background: white;
+                padding: 2.5rem 3rem;
+                border-radius: 12px;
+                text-align: center;
+                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+                min-width: 300px;
+                max-width: 400px;
+                animation: cisPopupIn 0.3s ease-out;
+            }
+            @keyframes cisPopupIn {
+                from {
+                    opacity: 0;
+                    transform: scale(0.9) translateY(-20px);
+                }
+                to {
+                    opacity: 1;
+                    transform: scale(1) translateY(0);
+                }
+            }
+            .cis-popup-message {
+                margin: 1.5rem 0 0 0;
+                font-size: 1.1rem;
+                font-weight: 500;
+                color: #333;
+            }
+            .cis-popup-icon {
+                font-size: 4rem;
+                line-height: 1;
+            }
+            .cis-popup-success .bi {
+                color: #28a745;
+            }
+            .cis-popup-error .bi {
+                color: #dc3545;
+            }
+            .cis-popup-success-bg {
+                border-top: 4px solid #28a745;
+            }
+            .cis-popup-error-bg {
+                border-top: 4px solid #dc3545;
+            }
+        `;
+        document.head.appendChild(styles);
+    }
+
+    return popup;
+}
+
+/**
+ * Hide operation popup
+ */
+function hideOperationPopup() {
+    const popup = document.getElementById('cis-operation-popup');
+    if (popup) {
+        popup.remove();
+    }
+}
+
+/**
+ * Get operation message with entity name substituted
+ * @param {string} operation - The operation type (create, update, delete, etc.)
+ * @param {string} messageType - 'processing', 'success', or 'error'
+ * @param {string} entity - The entity name (Trade, Portfolio, etc.)
+ */
+function getOperationMessage(operation, messageType, entity) {
+    const messages = CisOperationMessages[operation] || CisOperationMessages.create;
+    const template = messages[messageType] || messages.processing;
+    return template.replace('{entity}', entity);
+}
+
+/**
+ * Initialize AJAX form handling
+ */
+function initAjaxForms() {
+    const forms = document.querySelectorAll('form.ajax-form');
+
+    forms.forEach(function(form) {
+        form.addEventListener('submit', function(event) {
+            event.preventDefault();
+
+            const operation = form.getAttribute('data-operation') || 'create';
+            const entity = form.getAttribute('data-entity') || 'Record';
+            const redirectUrl = form.getAttribute('data-redirect-url');
+            const stayOnPage = form.getAttribute('data-stay-on-page') === 'true';
+
+            // Show processing popup
+            showOperationPopup(getOperationMessage(operation, 'processing', entity), 'processing');
+
+            // Get form data
+            const formData = new FormData(form);
+
+            // Submit via AJAX
+            fetch(form.action, {
+                method: form.method || 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(function(response) {
+                return response.json().then(function(data) {
+                    return { ok: response.ok, data: data };
+                }).catch(function() {
+                    // If not JSON, check if redirect (successful form submission)
+                    if (response.ok || response.redirected) {
+                        return { ok: true, data: { success: true } };
+                    }
+                    return { ok: false, data: { error: 'Server error' } };
+                });
+            })
+            .then(function(result) {
+                if (result.ok && (result.data.success !== false)) {
+                    // Success
+                    showOperationPopup(getOperationMessage(operation, 'success', entity), 'success');
+
+                    setTimeout(function() {
+                        hideOperationPopup();
+                        if (redirectUrl && !stayOnPage) {
+                            window.location.href = redirectUrl;
+                        } else if (result.data.redirect_url) {
+                            window.location.href = result.data.redirect_url;
+                        } else if (!stayOnPage) {
+                            // Reload current page if no redirect specified
+                            window.location.reload();
+                        }
+                    }, 1500);
+                } else {
+                    // Error
+                    const errorMsg = result.data.error || result.data.message || getOperationMessage(operation, 'error', entity);
+                    showOperationPopup(errorMsg, 'error');
+
+                    setTimeout(function() {
+                        hideOperationPopup();
+                    }, 3000);
+                }
+            })
+            .catch(function(error) {
+                console.error('Form submission error:', error);
+                showOperationPopup(getOperationMessage(operation, 'error', entity), 'error');
+
+                setTimeout(function() {
+                    hideOperationPopup();
+                }, 3000);
+            });
+        });
+    });
+}
+
+/**
+ * Helper function to manually trigger operation popup (for non-AJAX forms)
+ * Usage: Call this before form.submit() for standard forms
+ *
+ * @param {string} operation - The operation type
+ * @param {string} entity - The entity name
+ * @param {HTMLFormElement} form - The form element
+ */
+function submitWithPopup(operation, entity, form) {
+    showOperationPopup(getOperationMessage(operation, 'processing', entity), 'processing');
+
+    // Allow the popup to render before form submits
+    setTimeout(function() {
+        form.submit();
+    }, 100);
+}
+
+// Initialize AJAX forms when DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+    initAjaxForms();
+});

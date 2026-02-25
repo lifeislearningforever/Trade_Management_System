@@ -1,0 +1,14 @@
+Method,Name,Error,Occurrences
+POST,Equity Price Create,CatchResponseError('Create failed: 403'),18
+POST,CRUD: FX Rate Create,HTTPError('403 Client Error: Forbidden for url: CRUD: FX Rate Create'),4
+POST,CRUD: Equity Price Create,HTTPError('403 Client Error: Forbidden for url: CRUD: Equity Price Create'),10
+POST,UDF Create,CatchResponseError('Create failed: 403'),6
+POST,CRUD: Counterparty Create,HTTPError('403 Client Error: Forbidden for url: CRUD: Counterparty Create'),4
+POST,Security Create,CatchResponseError('Create failed: 403'),22
+GET,Auto Login,HTTPError('500 Server Error: Internal Server Error for url: Auto Login'),50
+POST,Counterparty Create,CatchResponseError('Create failed: 403'),14
+POST,Trade Create,CatchResponseError('Create failed: 403'),47
+POST,Portfolio Create,CatchResponseError('Create failed: 403'),34
+POST,CRUD: Trade Create,HTTPError('403 Client Error: Forbidden for url: CRUD: Trade Create'),7
+POST,FX Rate Create,CatchResponseError('Create failed: 403'),20
+POST,CRUD: Security Create,HTTPError('403 Client Error: Forbidden for url: CRUD: Security Create'),7

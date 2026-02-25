@@ -947,6 +947,26 @@ $(document).ready(function() {
 
     // Initialize all dropdowns using the global CISSelect2 utility
     CISSelect2.initByIds(allDropdownIds);
+
+    // Add operation popup on form submit
+    $('#tradeForm').on('submit', function(e) {
+        // Check form validity first
+        if (!this.checkValidity()) {
+            e.preventDefault();
+            e.stopPropagation();
+            $(this).addClass('was-validated');
+            return false;
+        }
+
+        // Show the operation popup
+        var operation = '{% if is_edit %}update{% else %}create{% endif %}';
+        var entity = 'Trade';
+        submitWithPopup(operation, entity, this);
+
+        // Prevent default - let submitWithPopup handle submission
+        e.preventDefault();
+        return false;
+    });
 });
 </script>
 {% endblock %}

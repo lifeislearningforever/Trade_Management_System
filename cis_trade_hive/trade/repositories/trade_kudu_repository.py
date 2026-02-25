@@ -433,7 +433,7 @@ class TradeKuduRepository:
             success = impala_manager.execute_write(query, database=self.DATABASE)
 
             if success:
-                # Insert history record
+                # Insert history record (synchronous for reliability)
                 self.insert_trade_history(
                     trade_id=trade_id,
                     deal_number=deal_number,
@@ -442,7 +442,8 @@ class TradeKuduRepository:
                     new_status=self.STATUS_INITIAL,
                     changes={},
                     comments='Trade created',
-                    performed_by=created_by
+                    performed_by=created_by,
+                    async_write=False  # Sync write for history reliability
                 )
                 logger.info(f"Created trade {trade_id} ({deal_number}) with INITIAL status")
 
@@ -554,7 +555,7 @@ class TradeKuduRepository:
             success = impala_manager.execute_write(query, database=self.DATABASE)
 
             if success:
-                # Insert history record
+                # Insert history record (synchronous for reliability)
                 self.insert_trade_history(
                     trade_id=trade_id,
                     deal_number=current_trade.get('deal_number', ''),
@@ -563,7 +564,8 @@ class TradeKuduRepository:
                     new_status=self.STATUS_MODIFIED,
                     changes=changes,
                     comments='Trade updated',
-                    performed_by=updated_by
+                    performed_by=updated_by,
+                    async_write=False  # Sync write for history reliability
                 )
                 logger.info(f"Updated trade {trade_id}, status set to MODIFIED")
 
@@ -606,7 +608,8 @@ class TradeKuduRepository:
                     new_status=self.STATUS_CANCELLED,
                     changes={},
                     comments=f'Trade soft deleted. Reason: {reason}',
-                    performed_by=deleted_by
+                    performed_by=deleted_by,
+                    async_write=False  # Sync write for history reliability
                 )
                 logger.info(f"Soft deleted trade {trade_id}")
 
@@ -654,7 +657,8 @@ class TradeKuduRepository:
                     new_status=self.STATUS_PENDING_VALIDATION,
                     changes={},
                     comments='Submitted for validation',
-                    performed_by=submitted_by
+                    performed_by=submitted_by,
+                    async_write=False  # Sync write for history reliability
                 )
                 logger.info(f"Trade {trade_id} submitted for validation")
 
@@ -704,7 +708,8 @@ class TradeKuduRepository:
                     new_status=self.STATUS_VALIDATED,
                     changes={},
                     comments=comments or 'Trade validated',
-                    performed_by=validated_by
+                    performed_by=validated_by,
+                    async_write=False  # Sync write for history reliability
                 )
                 logger.info(f"Trade {trade_id} validated")
 
@@ -749,7 +754,8 @@ class TradeKuduRepository:
                     new_status=self.STATUS_CANCELLED,
                     changes={},
                     comments=f'Trade rejected. Reason: {reason}',
-                    performed_by=rejected_by
+                    performed_by=rejected_by,
+                    async_write=False  # Sync write for history reliability
                 )
                 logger.info(f"Trade {trade_id} rejected")
 
@@ -795,7 +801,8 @@ class TradeKuduRepository:
                     new_status=self.STATUS_SETTLED,
                     changes={},
                     comments=comments or 'Trade settled',
-                    performed_by=settled_by
+                    performed_by=settled_by,
+                    async_write=False  # Sync write for history reliability
                 )
                 logger.info(f"Trade {trade_id} settled")
 
