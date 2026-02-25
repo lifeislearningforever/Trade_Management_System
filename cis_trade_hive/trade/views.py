@@ -451,8 +451,10 @@ def trade_create(request, trade_type=None):
                 entity_id=str(trade_id),
                 entity_name=f"{trade_data['trade_type']} - {trade_data['security_label']}",
                 action_description=f"Created {trade_data['trade_type']} trade for {trade_data['security_label']} (INITIAL status)",
+                new_value=json.dumps(trade_data, default=str),
                 request_method='POST',
                 request_path=request.path,
+                request_params=json.dumps(dict(request.POST)) if request.POST else None,
                 ip_address=request.META.get('REMOTE_ADDR'),
                 user_agent=request.META.get('HTTP_USER_AGENT', ''),
                 status='SUCCESS'
@@ -556,6 +558,20 @@ def trade_edit(request, trade_id):
             updated_data['security_label'] = trade_data.get('security_label', '')
             updated_data['trade_type'] = trade_data.get('trade_type', '')
 
+            # Track changes for audit log
+            changed_fields = []
+            old_values = {}
+            new_values = {}
+            for key, new_val in updated_data.items():
+                old_val = trade_data.get(key, '')
+                # Convert to string for comparison
+                old_str = str(old_val) if old_val is not None else ''
+                new_str = str(new_val) if new_val is not None else ''
+                if old_str != new_str:
+                    changed_fields.append(key)
+                    old_values[key] = old_str
+                    new_values[key] = new_str
+
             success = trade_kudu_repository.update_trade(trade_id, updated_data, user_info['username'])
 
             if not success:
@@ -570,8 +586,12 @@ def trade_edit(request, trade_id):
                 entity_id=str(trade_id),
                 entity_name=trade_data.get('deal_number', ''),
                 action_description=f'Updated trade {trade_id} (status set to MODIFIED)',
+                field_name=', '.join(changed_fields) if changed_fields else None,
+                old_value=json.dumps(old_values) if old_values else None,
+                new_value=json.dumps(new_values) if new_values else None,
                 request_method='POST',
                 request_path=request.path,
+                request_params=json.dumps(dict(request.POST)) if request.POST else None,
                 ip_address=request.META.get('REMOTE_ADDR'),
                 user_agent=request.META.get('HTTP_USER_AGENT', ''),
                 status='SUCCESS'
@@ -759,17 +779,32 @@ def trade_cancel(request, trade_id):
         if not success:
             raise Exception('Failed to cancel trade')
 
+        # Prepare old values for audit (key trade details before cancellation)
+        old_values = {
+            'trade_type': trade_data.get('trade_type', ''),
+            'portfolio_short_name': trade_data.get('portfolio_short_name', ''),
+            'security_label': trade_data.get('security_label', ''),
+            'quantity': str(trade_data.get('quantity', '')),
+            'price': str(trade_data.get('price', '')),
+            'total_amount': str(trade_data.get('total_amount', '')),
+            'status': trade_data.get('status', ''),
+        }
+
         audit_log_kudu_repository.log_action(
             user_id=user_info['user_id'],
             username=user_info['username'],
             user_email=user_info['user_email'],
-            action_type='CANCEL',
+            action_type='DELETE',
             entity_type='TRADE',
             entity_id=str(trade_id),
             entity_name=trade_data.get('deal_number', ''),
-            action_description=f'Cancelled trade: {trade_data.get("deal_number", "")}',
+            action_description=f'Cancelled/Deleted trade: {trade_data.get("deal_number", "")}' + (f'. Reason: {reason}' if reason else ''),
+            field_name='status',
+            old_value=json.dumps(old_values),
+            new_value=json.dumps({'status': 'CANCELLED', 'cancel_reason': reason}),
             request_method='POST',
             request_path=request.path,
+            request_params=json.dumps(dict(request.POST)) if request.POST else None,
             ip_address=request.META.get('REMOTE_ADDR'),
             user_agent=request.META.get('HTTP_USER_AGENT', ''),
             status='SUCCESS'
