@@ -9,16 +9,14 @@ Implements Maker-Checker workflow with statuses:
   - CANCELLED: Rejected/Cancelled
   - SETTLED: Final active state (settlement complete)
 
-Audit Logging:
-  All create, update, and status change operations are logged to cis_audit_log table.
+Note: Audit logging is handled by the views layer (portfolio/views.py),
+      not in this repository, to avoid duplicate audit entries.
 """
 
 from typing import List, Dict, Any, Optional
 import logging
-import json
 from datetime import datetime
 from core.repositories.impala_connection import impala_manager
-from core.audit.audit_kudu_repository import audit_log_kudu_repository
 
 logger = logging.getLogger(__name__)
 
@@ -254,40 +252,10 @@ class PortfolioHiveRepository:
             success = impala_manager.execute_write(query, database=PortfolioHiveRepository.DATABASE)
             if success:
                 logger.info(f"Created portfolio {portfolio_data.get('name')} with INITIAL status")
-                # Audit log for CREATE
-                audit_log_kudu_repository.log_action(
-                    user_id=created_by,
-                    username=created_by,
-                    action_type='CREATE',
-                    entity_type='PORTFOLIO',
-                    entity_id=portfolio_data.get('name'),
-                    entity_name=portfolio_data.get('name'),
-                    action_description=f"Created portfolio {portfolio_data.get('name')} with status INITIAL",
-                    new_value=json.dumps(portfolio_data, default=str),
-                    request_method='POST',
-                    status='SUCCESS',
-                    module_name='portfolio.repositories',
-                    function_name='insert_portfolio'
-                )
             return success
 
         except Exception as e:
             logger.error(f"Error inserting portfolio into Kudu: {str(e)}")
-            # Log failed attempt
-            audit_log_kudu_repository.log_action(
-                user_id=created_by,
-                username=created_by,
-                action_type='CREATE',
-                entity_type='PORTFOLIO',
-                entity_id=portfolio_data.get('name'),
-                entity_name=portfolio_data.get('name'),
-                action_description=f"Failed to create portfolio {portfolio_data.get('name')}",
-                error_message=str(e),
-                request_method='POST',
-                status='FAILURE',
-                module_name='portfolio.repositories',
-                function_name='insert_portfolio'
-            )
             return False
 
     @staticmethod
@@ -325,39 +293,10 @@ class PortfolioHiveRepository:
             success = impala_manager.execute_write(query, database=PortfolioHiveRepository.DATABASE)
             if success:
                 logger.info(f"Updated portfolio {portfolio_name}, status set to MODIFIED")
-                # Audit log for UPDATE
-                audit_log_kudu_repository.log_action(
-                    user_id=updated_by,
-                    username=updated_by,
-                    action_type='UPDATE',
-                    entity_type='PORTFOLIO',
-                    entity_id=portfolio_name,
-                    entity_name=portfolio_name,
-                    action_description=f"Updated portfolio {portfolio_name}, status set to MODIFIED",
-                    new_value=json.dumps(portfolio_data, default=str),
-                    request_method='POST',
-                    status='SUCCESS',
-                    module_name='portfolio.repositories',
-                    function_name='update_portfolio'
-                )
             return success
 
         except Exception as e:
             logger.error(f"Error updating portfolio: {str(e)}")
-            audit_log_kudu_repository.log_action(
-                user_id=updated_by,
-                username=updated_by,
-                action_type='UPDATE',
-                entity_type='PORTFOLIO',
-                entity_id=portfolio_name,
-                entity_name=portfolio_name,
-                action_description=f"Failed to update portfolio {portfolio_name}",
-                error_message=str(e),
-                request_method='POST',
-                status='FAILURE',
-                module_name='portfolio.repositories',
-                function_name='update_portfolio'
-            )
             return False
 
     @staticmethod
@@ -383,22 +322,6 @@ class PortfolioHiveRepository:
             success = impala_manager.execute_write(query, database=PortfolioHiveRepository.DATABASE)
             if success:
                 logger.info(f"Portfolio {portfolio_code} submitted for validation by {submitted_by}")
-                audit_log_kudu_repository.log_action(
-                    user_id=submitted_by,
-                    username=submitted_by,
-                    action_type='SUBMIT',
-                    entity_type='PORTFOLIO',
-                    entity_id=portfolio_code,
-                    entity_name=portfolio_code,
-                    action_description=f"Submitted portfolio {portfolio_code} for validation",
-                    old_value='INITIAL/MODIFIED',
-                    new_value='PENDING_VALIDATION',
-                    field_name='status',
-                    request_method='POST',
-                    status='SUCCESS',
-                    module_name='portfolio.repositories',
-                    function_name='submit_for_validation'
-                )
             return success
 
         except Exception as e:
@@ -429,22 +352,6 @@ class PortfolioHiveRepository:
             success = impala_manager.execute_write(query, database=PortfolioHiveRepository.DATABASE)
             if success:
                 logger.info(f"Portfolio {portfolio_code} validated by {validated_by}")
-                audit_log_kudu_repository.log_action(
-                    user_id=validated_by,
-                    username=validated_by,
-                    action_type='VALIDATE',
-                    entity_type='PORTFOLIO',
-                    entity_id=portfolio_code,
-                    entity_name=portfolio_code,
-                    action_description=f"Validated portfolio {portfolio_code}" + (f" - {comments}" if comments else ""),
-                    old_value='PENDING_VALIDATION',
-                    new_value='VALIDATED',
-                    field_name='status',
-                    request_method='POST',
-                    status='SUCCESS',
-                    module_name='portfolio.repositories',
-                    function_name='validate_portfolio'
-                )
             return success
 
         except Exception as e:
@@ -476,22 +383,6 @@ class PortfolioHiveRepository:
             success = impala_manager.execute_write(query, database=PortfolioHiveRepository.DATABASE)
             if success:
                 logger.info(f"Portfolio {portfolio_code} settled by {settled_by}")
-                audit_log_kudu_repository.log_action(
-                    user_id=settled_by,
-                    username=settled_by,
-                    action_type='SETTLE',
-                    entity_type='PORTFOLIO',
-                    entity_id=portfolio_code,
-                    entity_name=portfolio_code,
-                    action_description=f"Settled portfolio {portfolio_code}" + (f" - {comments}" if comments else ""),
-                    old_value='VALIDATED',
-                    new_value='SETTLED',
-                    field_name='status',
-                    request_method='POST',
-                    status='SUCCESS',
-                    module_name='portfolio.repositories',
-                    function_name='settle_portfolio'
-                )
             return success
 
         except Exception as e:
@@ -524,21 +415,6 @@ class PortfolioHiveRepository:
             success = impala_manager.execute_write(query, database=PortfolioHiveRepository.DATABASE)
             if success:
                 logger.info(f"Portfolio {portfolio_code} cancelled by {cancelled_by}")
-                audit_log_kudu_repository.log_action(
-                    user_id=cancelled_by,
-                    username=cancelled_by,
-                    action_type='CANCEL',
-                    entity_type='PORTFOLIO',
-                    entity_id=portfolio_code,
-                    entity_name=portfolio_code,
-                    action_description=f"Cancelled portfolio {portfolio_code}" + (f" - Reason: {reason}" if reason else ""),
-                    new_value='CANCELLED',
-                    field_name='status',
-                    request_method='POST',
-                    status='SUCCESS',
-                    module_name='portfolio.repositories',
-                    function_name='cancel_portfolio'
-                )
             return success
 
         except Exception as e:
@@ -569,22 +445,6 @@ class PortfolioHiveRepository:
             success = impala_manager.execute_write(query, database=PortfolioHiveRepository.DATABASE)
             if success:
                 logger.info(f"Portfolio {portfolio_code} reactivated by {reactivated_by}")
-                audit_log_kudu_repository.log_action(
-                    user_id=reactivated_by,
-                    username=reactivated_by,
-                    action_type='REACTIVATE',
-                    entity_type='PORTFOLIO',
-                    entity_id=portfolio_code,
-                    entity_name=portfolio_code,
-                    action_description=f"Reactivated portfolio {portfolio_code}" + (f" - {comments}" if comments else ""),
-                    old_value='CANCELLED',
-                    new_value='INITIAL',
-                    field_name='status',
-                    request_method='POST',
-                    status='SUCCESS',
-                    module_name='portfolio.repositories',
-                    function_name='reactivate_portfolio'
-                )
             return success
 
         except Exception as e:

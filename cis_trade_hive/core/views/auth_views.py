@@ -262,18 +262,16 @@ def require_permission(permission: str, access_level: str = 'READ'):
 def auto_login_tmp3rc(request: HttpRequest) -> HttpResponse:
     """
     Auto-login helper for TMP3RC user (for testing/development).
-    Only creates audit log on ACTUAL login, not when session already exists.
 
-    Rate limiting: Only logs LOGIN audit once per session to prevent flooding.
+    Note: AUTO_LOGIN events are NOT logged to audit table to prevent flooding.
+    Only manual LOGIN/LOGOUT events are audited.
     """
-    # If already logged in, just redirect to dashboard WITHOUT logging
+    # If already logged in, just redirect to dashboard
     if request.session.get('user_login'):
         logger.debug(f"User {request.session.get('user_name')} already logged in, redirecting to dashboard")
         return redirect('dashboard')
 
     try:
-        import time
-
         acl_repo = get_acl_repository()
         logger.info("ACL Repository created successfully")
 
@@ -293,35 +291,9 @@ def auto_login_tmp3rc(request: HttpRequest) -> HttpResponse:
             request.session['user_group_name'] = group['name'] if group else 'Unknown'
             request.session['user_permissions'] = permission_map
 
-            # Rate limiting: Check last login audit timestamp
-            current_time = int(time.time())
-            last_login_audit = request.session.get('last_login_audit_time', 0)
-            time_since_last_audit = current_time - last_login_audit
-
-            # Only log if more than 60 seconds since last LOGIN audit (prevents flooding)
-            if time_since_last_audit > 60:
-                # Log auto-login to Kudu audit (ONLY on actual new login)
-                audit_log_kudu_repository.log_action(
-                    user_id=str(user['cis_user_id']),
-                    username=user['login'],
-                    user_email=user['email'] or '',
-                    action_type='LOGIN',
-                    entity_type='AUTH',
-                    entity_name='Auto-Login',
-                    entity_id='AUTO_LOGIN',
-                    action_description=f"Auto-login successful for {user['name']} ({user['login']})",
-                    request_method=request.method,
-                    request_path=request.path,
-                    ip_address=request.META.get('REMOTE_ADDR'),
-                    user_agent=request.META.get('HTTP_USER_AGENT', ''),
-                    status='SUCCESS'
-                )
-
-                # Update last login audit timestamp
-                request.session['last_login_audit_time'] = current_time
-                logger.info(f"Auto-login successful for {user['name']} - LOGIN audit logged")
-            else:
-                logger.info(f"Auto-login successful for {user['name']} - LOGIN audit skipped (last audit {time_since_last_audit}s ago)")
+            # Note: AUTO_LOGIN is NOT logged to audit table to prevent flooding
+            # Only manual LOGIN/LOGOUT through LoginView are audited
+            logger.info(f"Auto-login successful for {user['name']} ({user['login']}) - no audit entry created")
 
             return redirect('dashboard')
 
