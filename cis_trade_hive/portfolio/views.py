@@ -309,9 +309,10 @@ def portfolio_create(request):
             if not portfolio_name:
                 raise ValidationError("Portfolio name is required")
 
-            existing = portfolio_hive_repository.get_portfolio_by_code(portfolio_name)
+            # Case-insensitive check for existing portfolio
+            existing = portfolio_hive_repository.get_portfolio_by_code_case_insensitive(portfolio_name)
             if existing:
-                raise ValidationError(f"Portfolio '{portfolio_name}' already exists")
+                raise ValidationError(f"Portfolio '{portfolio_name}' already exists (case-insensitive match with '{existing.get('name', portfolio_name)}')")
 
             # Get form data
             corp_code = request.POST.get('corp_code', '').strip()

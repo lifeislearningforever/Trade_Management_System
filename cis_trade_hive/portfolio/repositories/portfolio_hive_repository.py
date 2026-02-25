@@ -207,6 +207,23 @@ class PortfolioHiveRepository:
             return None
 
     @staticmethod
+    def get_portfolio_by_code_case_insensitive(portfolio_code: str) -> Optional[Dict[str, Any]]:
+        """Get portfolio by code/name from Kudu (case-insensitive match)."""
+        try:
+            portfolio_code_escaped = portfolio_code.replace("'", "''")
+            query = f"""
+            SELECT *
+            FROM {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
+            WHERE LOWER(`name`) = LOWER('{portfolio_code_escaped}')
+            LIMIT 1
+            """
+            results = impala_manager.execute_query(query, database=PortfolioHiveRepository.DATABASE)
+            return results[0] if results else None
+        except Exception as e:
+            logger.error(f"Error getting portfolio by code (case-insensitive) from Kudu: {str(e)}")
+            return None
+
+    @staticmethod
     def insert_portfolio(portfolio_data: dict, created_by: str) -> bool:
         """
         Insert a new portfolio into Kudu with INITIAL status.

@@ -1,7 +1,8 @@
 """
 Lookup Table Kudu Repository
 
-Dynamically discovers and manages any tables containing 'lookup' in their name.
+Dynamically discovers and manages any tables containing 'lut' in their name.
+Excludes tables with '_rep' prefix or suffix (report tables).
 Pure Kudu/Impala implementation - no Django ORM.
 """
 
@@ -26,14 +27,15 @@ class LookupKuduRepository:
 
     def discover_lookup_tables(self) -> List[Dict[str, Any]]:
         """
-        Discover all tables containing 'lookup' in their name.
+        Discover all tables containing 'lut' in their name.
+        Excludes tables with '_rep' prefix or suffix (report tables).
 
         Returns:
             List of table metadata with name, columns, row count
         """
         try:
-            # Get all tables with 'lookup' in name
-            query = f"SHOW TABLES IN {self.database} LIKE '*lookup*'"
+            # Get all tables with 'lut' in name (lookup tables)
+            query = f"SHOW TABLES IN {self.database} LIKE '*lut*'"
             results = impala_manager.execute_query(query)
 
             tables = []
@@ -41,11 +43,17 @@ class LookupKuduRepository:
                 for row in results:
                     table_name = row.get('name', row.get('NAME', ''))
                     if table_name:
+                        # Exclude tables with '_rep' prefix or suffix (report tables)
+                        table_name_lower = table_name.lower()
+                        if table_name_lower.startswith('rep_') or table_name_lower.endswith('_rep'):
+                            logger.debug(f"Skipping report table: {table_name}")
+                            continue
+
                         table_info = self.get_table_info(table_name)
                         if table_info:
                             tables.append(table_info)
 
-            logger.info(f"Discovered {len(tables)} lookup tables")
+            logger.info(f"Discovered {len(tables)} lookup tables (lut)")
             return sorted(tables, key=lambda x: x.get('table_name', ''))
 
         except Exception as e:
@@ -385,12 +393,14 @@ class LookupKuduRepository:
         """Convert table name to display name."""
         # Remove common prefixes
         name = table_name
-        for prefix in ('cis_', 'gmp_', 'ref_'):
+        for prefix in ('cis_', 'gmp_', 'ref_', 'lut_'):
             if name.lower().startswith(prefix):
                 name = name[len(prefix):]
 
-        # Remove _lookup suffix
-        if name.lower().endswith('_lookup'):
+        # Remove _lut or _lookup suffix
+        if name.lower().endswith('_lut'):
+            name = name[:-4]
+        elif name.lower().endswith('_lookup'):
             name = name[:-7]
 
         # Convert to title case
