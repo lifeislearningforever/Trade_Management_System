@@ -492,23 +492,31 @@ class TradeKuduRepository:
             set_clauses = []
             changes = {}
 
-            # Updatable fields
-            updatable_fields = [
+            # Updatable fields - grouped by type
+            string_fields = [
                 'currency_code', 'trade_status', 'trade_date', 'settle_date',
-                'quantity', 'face_value', 'lot', 'price',
-                'commission', 'accrued_interest', 'sec_fee',
-                'other_charges', 'total_amount',
                 'open_close_position', 'extension', 'brokers', 'broker_name',
                 'gl_fund_type', 'gl_cost_centre', 'gl_account_code',
                 'contract_ref', 'fd_receipt', 'org_pur_date',
-                'open_fx_rate', 'curr_dealing', 'open_dealing',
-                'input_tax_oth', 'qty_entitled',
-                'selling_rule', 'cash_balance', 'custodian', 'amor_accr_method',
+                'selling_rule', 'custodian', 'amor_accr_method',
                 'remarks', 'counterparty',
                 'udf_fund_type', 'udf_section_31_26', 'udf_sub_custodian',
-                'udf_disclosure_req', 'udf_counter_pledged', 'udf_revision_code',
-                'udf_uobn_uobn_hk', 'udf_income_exp_type', 'udf_currency_hedge'
+                'udf_revision_code', 'udf_uobn_uobn_hk', 'udf_income_exp_type'
             ]
+
+            # Decimal fields - must NOT be quoted (decimal(20,6))
+            decimal_fields = [
+                'quantity', 'face_value', 'lot', 'price',
+                'commission', 'accrued_interest', 'sec_fee',
+                'other_charges', 'total_amount',
+                'open_fx_rate', 'curr_dealing', 'open_dealing',
+                'input_tax_oth', 'qty_entitled', 'cash_balance'
+            ]
+
+            # Boolean fields
+            boolean_fields = ['udf_disclosure_req', 'udf_counter_pledged', 'udf_currency_hedge']
+
+            updatable_fields = string_fields + decimal_fields + boolean_fields
 
             for field in updatable_fields:
                 if field in trade_data:
@@ -518,9 +526,14 @@ class TradeKuduRepository:
                     if str(new_value) != str(old_value):
                         changes[field] = {'old': old_value, 'new': new_value}
 
-                        if field in ['udf_disclosure_req', 'udf_counter_pledged', 'udf_currency_hedge']:
+                        if field in boolean_fields:
                             set_clauses.append(f"{field} = {str(new_value).lower()}")
+                        elif field in decimal_fields:
+                            # Decimal fields must NOT be quoted - use to_decimal for proper NULL/value handling
+                            decimal_val = self.to_decimal(new_value, default=0)
+                            set_clauses.append(f"{field} = {decimal_val}")
                         else:
+                            # String fields - use escape_value (quoted)
                             set_clauses.append(f"{field} = {self.escape_value(new_value)}")
 
             # Always update status and audit fields
