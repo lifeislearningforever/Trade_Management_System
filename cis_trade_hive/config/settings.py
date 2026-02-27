@@ -104,6 +104,7 @@ DATABASES = {
 }
 
 # Impala Configuration (Local Environment - Docker with Kudu)
+# Used for Kudu table operations via Impala (port 21050)
 IMPALA_CONFIG = {
     'HOST': os.environ.get('IMPALA_HOST', 'localhost'),
     'PORT': int(os.environ.get('IMPALA_PORT', '21050')),
@@ -112,10 +113,24 @@ IMPALA_CONFIG = {
     'USERNAME': os.environ.get('IMPALA_USERNAME', ''),
     'PASSWORD': os.environ.get('IMPALA_PASSWORD', ''),
     'TIMEOUT': int(os.environ.get('IMPALA_TIMEOUT', '60')),
+    'POOL_SIZE': int(os.environ.get('IMPALA_POOL_SIZE', '10')),
 }
 
-# Backward compatibility - keep HIVE_CONFIG pointing to IMPALA_CONFIG
-HIVE_CONFIG = IMPALA_CONFIG
+# Hive Configuration (HiveServer2 - port 10000)
+# Used for external table operations via HiveServer2
+# Uses impyla library (same as Impala) but connects to HiveServer2
+HIVE_CONFIG = {
+    'HOST': os.environ.get('HIVE_HOST', os.environ.get('IMPALA_HOST', 'localhost')),
+    'PORT': int(os.environ.get('HIVE_PORT', '10000')),
+    'DATABASE': os.environ.get('HIVE_DB', os.environ.get('IMPALA_DB', 'gmp_cis')),
+    'AUTH': os.environ.get('HIVE_AUTH', os.environ.get('IMPALA_AUTH', 'NOSASL')),
+    'USERNAME': os.environ.get('HIVE_USERNAME', os.environ.get('IMPALA_USERNAME', '')),
+    'PASSWORD': os.environ.get('HIVE_PASSWORD', os.environ.get('IMPALA_PASSWORD', '')),
+    'TIMEOUT': int(os.environ.get('HIVE_TIMEOUT', '120')),
+    'POOL_SIZE': int(os.environ.get('HIVE_POOL_SIZE', '10')),
+    'USE_SSL': os.environ.get('HIVE_USE_SSL', 'false').lower() == 'true',
+    'KERBEROS_SERVICE_NAME': os.environ.get('HIVE_KERBEROS_SERVICE_NAME', 'hive'),
+}
 
 # Impala Connection Pool Configuration
 # Increased from 10 to 35 to support Gunicorn workers (4 workers x 4 threads + margin)
