@@ -56,6 +56,9 @@ urlpatterns = [
 
     # Hive POC - Managed Tables with ORC
     path('hive-poc/', include('hive_poc.urls')),
+
+    # File Upload & Hive External Table Ingestion
+    path('upload/', include('upload.urls')),
 ]
 
 # Serve static files in development

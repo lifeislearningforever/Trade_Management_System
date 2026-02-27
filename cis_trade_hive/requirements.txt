@@ -31,3 +31,8 @@ python-dotenv==1.0.1
 # Additional utilities
 whitenoise==6.7.0
 gunicorn==22.0.0
+
+# File Upload & Processing
+chardet>=5.0.0           # Character encoding detection
+openpyxl>=3.1.0          # Excel file support (.xlsx)
+pyarrow>=14.0.0          # Parquet file support

@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'trade.apps.TradeConfig',
     'lookup',
     'hive_poc.apps.HivePocConfig',  # Hive POC - Managed Tables with ORC
+    'upload.apps.UploadConfig',  # File Upload & Hive External Table Ingestion
 ]
 
 MIDDLEWARE = [
@@ -153,6 +154,17 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 # Media files
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+# File Upload Settings
+FILE_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024  # 100 MB
+DATA_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024  # 100 MB
+FILE_UPLOAD_HANDLERS = [
+    'django.core.files.uploadhandler.MemoryFileUploadHandler',
+    'django.core.files.uploadhandler.TemporaryFileUploadHandler',
+]
+
+# Upload temporary directory
+UPLOAD_TEMP_DIR = BASE_DIR / 'media' / 'uploads' / 'temp'
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
@@ -266,6 +278,11 @@ LOGGING = {
             'propagate': False,
         },
         'audit': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'upload': {
             'handlers': ['console', 'file'],
             'level': 'INFO',
             'propagate': False,

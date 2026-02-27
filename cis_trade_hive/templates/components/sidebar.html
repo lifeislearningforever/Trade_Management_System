@@ -184,6 +184,12 @@
                     <span>User Defined Fields</span>
                 </a>
             </li>
+            <li class="nav-item">
+                <a class="nav-link {% if 'upload' in request.path %}active{% endif %}" href="{% url 'upload:list' %}">
+                    <i class="bi bi-cloud-upload"></i>
+                    <span>File Upload</span>
+                </a>
+            </li>
         </ul>
 
         <!-- System Section -->
