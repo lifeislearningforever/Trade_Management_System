@@ -1023,16 +1023,34 @@ class UploadService:
             source_id = datasource_config.get('source_id', '')
             source_cols = [col['name'] for col in intake_columns]
 
-            # Build target columns (source columns + additional columns)
-            target_cols = source_cols + ['src_id', 'src_system', 'data_cat', 'data_frq', 'processing_date']
+            # Get target table columns to ensure we match exactly
+            target_table_info = datasource_repository.get_table_info(target_table, self.repository.DATABASE)
+            target_table_cols = [col['name'] for col in target_table_info.get('columns', [])]
 
-            # Build SELECT part
-            select_parts = [f"`{col}`" for col in source_cols]
-            select_parts.append(f"'{source_id}' as src_id")
-            select_parts.append("'cis' as src_system")
-            select_parts.append("'sta' as data_cat")
-            select_parts.append("'adhoc' as data_frq")
-            select_parts.append(f"'{processing_date}' as processing_date")
+            # Build SELECT part - match target table column order exactly
+            # Additional columns that we add during ingestion
+            additional_cols_map = {
+                'src_id': f"'{source_id}'",
+                'src_system': "'cis'",
+                'sub_system': "''",  # Empty string for sub_system
+                'data_cat': "'sta'",
+                'data_frq': "'adhoc'",
+                'processing_date': f"'{processing_date}'"
+            }
+
+            select_parts = []
+            for target_col in target_table_cols:
+                col_lower = target_col.lower()
+                if col_lower in additional_cols_map:
+                    select_parts.append(f"{additional_cols_map[col_lower]} as `{target_col}`")
+                elif col_lower in [c.lower() for c in source_cols]:
+                    # Find the matching source column (case-insensitive)
+                    matching_col = next((c for c in source_cols if c.lower() == col_lower), target_col)
+                    select_parts.append(f"`{matching_col}`")
+                else:
+                    # Column not in source or additional - use empty string
+                    select_parts.append(f"'' as `{target_col}`")
+                    logger.warning(f"Column '{target_col}' not found in source data, using empty string")
 
             insert_query = f"""
             INSERT INTO TABLE {self.repository.DATABASE}.{target_table}
@@ -1207,13 +1225,25 @@ class UploadService:
             Tuple of (success, message)
         """
         from core.repositories.hybrid_connection import hybrid_manager
+        from .datasource_repository import datasource_repository
 
         try:
             source_id = datasource_config.get('source_id', '')
             col_names = [col['name'] for col in intake_columns]
 
-            # All target columns including metadata
-            all_cols = col_names + ['src_id', 'src_system', 'data_cat', 'data_frq', 'processing_date']
+            # Get target table columns to ensure we match exactly
+            target_table_info = datasource_repository.get_table_info(target_table, self.repository.DATABASE)
+            target_table_cols = [col['name'] for col in target_table_info.get('columns', [])]
+
+            # Additional columns map
+            additional_cols_map = {
+                'src_id': source_id,
+                'src_system': 'cis',
+                'sub_system': '',  # Empty string for sub_system
+                'data_cat': 'sta',
+                'data_frq': 'adhoc',
+                'processing_date': processing_date
+            }
 
             # Build INSERT statement with VALUES
             rows_inserted = 0
@@ -1225,25 +1255,27 @@ class UploadService:
 
                 for row in batch:
                     row_values = []
-                    for col_name in col_names:
-                        val = row.get(col_name, '')
-                        # Escape single quotes
-                        escaped_val = str(val).replace("'", "''") if val else ''
-                        row_values.append(f"'{escaped_val}'")
-
-                    # Add metadata columns
-                    row_values.append(f"'{source_id}'")  # src_id
-                    row_values.append("'cis'")  # src_system
-                    row_values.append("'sta'")  # data_cat
-                    row_values.append("'adhoc'")  # data_frq
-                    row_values.append(f"'{processing_date}'")  # processing_date
+                    for target_col in target_table_cols:
+                        col_lower = target_col.lower()
+                        if col_lower in additional_cols_map:
+                            val = additional_cols_map[col_lower]
+                            escaped_val = str(val).replace("'", "''") if val else ''
+                            row_values.append(f"'{escaped_val}'")
+                        elif col_lower in [c.lower() for c in col_names]:
+                            # Find matching source column
+                            matching_col = next((c for c in col_names if c.lower() == col_lower), None)
+                            val = row.get(matching_col, '') if matching_col else ''
+                            escaped_val = str(val).replace("'", "''") if val else ''
+                            row_values.append(f"'{escaped_val}'")
+                        else:
+                            row_values.append("''")
 
                     values_list.append(f"({', '.join(row_values)})")
 
                 if values_list:
                     insert_query = f"""
                     INSERT INTO TABLE {self.repository.DATABASE}.{target_table}
-                    ({', '.join([f'`{c}`' for c in all_cols])})
+                    ({', '.join([f'`{c}`' for c in target_table_cols])})
                     VALUES {', '.join(values_list)}
                     """
 
