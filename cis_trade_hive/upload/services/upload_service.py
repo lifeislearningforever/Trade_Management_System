@@ -250,18 +250,21 @@ class FileValidationService:
             # Infer column types
             result.columns = self._infer_column_types(header_row, data_rows[:100])
 
-            # Generate sample data
+            # Generate sample data using cleaned column names from schema
+            # IMPORTANT: Use the cleaned names from result.columns to match the template
+            cleaned_col_names = [col['name'] for col in result.columns]
             result.sample_data = []
             for row in data_rows[:self.MAX_PREVIEW_ROWS]:
-                if len(row) == len(header_row):
-                    result.sample_data.append(dict(zip(header_row, row)))
-                elif len(row) < len(header_row):
-                    # Pad short rows
-                    padded = row + [''] * (len(header_row) - len(row))
-                    result.sample_data.append(dict(zip(header_row, padded)))
-                else:
-                    # Truncate long rows (with warning)
-                    result.sample_data.append(dict(zip(header_row, row[:len(header_row)])))
+                row_dict = {}
+                for idx, col_name in enumerate(cleaned_col_names):
+                    if idx < len(row):
+                        row_dict[col_name] = row[idx]
+                    else:
+                        row_dict[col_name] = ''
+                result.sample_data.append(row_dict)
+
+                # Track inconsistent column counts
+                if len(row) > len(cleaned_col_names):
                     if "inconsistent column count" not in str(result.warnings):
                         result.warnings.append(f"Some rows have inconsistent column count")
 
@@ -473,15 +476,16 @@ class FileValidationService:
             str_rows = [[str(cell) if cell is not None else '' for cell in row] for row in data_rows[:100]]
             result.columns = self._infer_column_types(header_row, str_rows)
 
-            # Generate sample data
+            # Generate sample data using cleaned column names from schema
+            cleaned_col_names = [col['name'] for col in result.columns]
             result.sample_data = []
             for row in data_rows[:self.MAX_PREVIEW_ROWS]:
                 row_dict = {}
-                for i, header in enumerate(header_row):
+                for i, col_name in enumerate(cleaned_col_names):
                     if i < len(row):
-                        row_dict[header] = str(row[i]) if row[i] is not None else ''
+                        row_dict[col_name] = str(row[i]) if row[i] is not None else ''
                     else:
-                        row_dict[header] = ''
+                        row_dict[col_name] = ''
                 result.sample_data.append(row_dict)
 
             wb.close()
@@ -506,17 +510,21 @@ class FileValidationService:
 
             # Get schema
             result.columns = []
+            col_name_map = {}  # Map original -> cleaned names
             for field in table.schema:
                 hive_type = self._arrow_to_hive_type(str(field.type))
+                cleaned_name = self._clean_column_name(field.name)
+                col_name_map[field.name] = cleaned_name
                 result.columns.append({
-                    'name': self._clean_column_name(field.name),
+                    'name': cleaned_name,
                     'original_name': field.name,
                     'type': hive_type,
                     'nullable': field.nullable
                 })
 
-            # Sample data
+            # Sample data - rename columns to match cleaned schema names
             df = table.slice(0, min(self.MAX_PREVIEW_ROWS, table.num_rows)).to_pandas()
+            df = df.rename(columns=col_name_map)
             result.sample_data = df.to_dict('records')
 
         except ImportError:
@@ -870,20 +878,26 @@ class UploadService:
 
         return result
 
+    # HDFS temp location for staging files
+    HDFS_STAGING_PATH = '/mrw/cis/staging'
+
     def ingest_to_target_table(
         self,
         upload_id: str,
         datasource_config: Dict[str, Any],
         updated_by: str,
-        processing_date: str = None
+        processing_date: str = None,
+        temp_file_path: str = None,
+        sample_data: List[Dict[str, Any]] = None
     ) -> Tuple[bool, str]:
         """
         Ingest uploaded file to pre-defined target table using datasource config.
 
         This method:
-        1. Creates staging external table for uploaded file
-        2. Reads processing_date from HDFS /mrw/cis/MRA_PC_DATE.txt
-        3. Inserts data into target table with additional columns:
+        1. Uploads local file to HDFS /mrw/cis/staging/ if temp_file_path provided
+        2. Creates staging external table for uploaded file
+        3. Reads processing_date from HDFS /mrw/cis/MRA_PC_DATE.txt
+        4. Inserts data into target table with additional columns:
            - src_id (from datasource.source_id)
            - src_system = 'cis'
            - data_cat = 'sta'
@@ -895,18 +909,22 @@ class UploadService:
             datasource_config: Configuration from cis_datasource_mng
             updated_by: User performing ingestion
             processing_date: Override processing date (optional)
+            temp_file_path: Local file path for session-based uploads
+            sample_data: Sample data from session (used if file not available)
 
         Returns:
             Tuple of (success, message)
         """
         try:
-            # Get upload record
+            # Get upload record (may be None for session uploads)
             upload = self.repository.get_upload_by_id(upload_id)
-            if not upload:
-                return False, "Upload not found"
 
-            # Update status to ingesting
-            self.repository.update_status(upload_id, UploadKuduRepository.STATUS_INGESTING, updated_by)
+            # For session uploads, we won't have a database record
+            is_session_upload = upload is None
+
+            if not is_session_upload:
+                # Update status to ingesting
+                self.repository.update_status(upload_id, UploadKuduRepository.STATUS_INGESTING, updated_by)
 
             # Get target table from datasource config
             target_table = datasource_config.get('target_table')
@@ -945,24 +963,35 @@ class UploadService:
             if not intake_columns:
                 return False, "No columns defined in datasource configuration or target table"
 
-            # Get HDFS path - from upload or from target table location
-            hdfs_path = upload.get('hdfs_path', '')
+            # HDFS staging path under /mrw/cis/staging/
+            hdfs_staging_dir = f"{self.HDFS_STAGING_PATH}/{staging_table}"
 
-            if not hdfs_path:
-                # Try to get location from target table and use a staging subdirectory
-                target_table_info = datasource_repository.get_table_info(target_table, self.repository.DATABASE)
-                target_location = target_table_info.get('location', '')
+            # Upload local file to HDFS if temp_file_path is provided
+            if temp_file_path and os.path.exists(temp_file_path):
+                logger.info(f"Uploading local file to HDFS: {temp_file_path} -> {hdfs_staging_dir}")
+                hdfs_upload_success = self._upload_file_to_hdfs(temp_file_path, hdfs_staging_dir)
+                if not hdfs_upload_success:
+                    return False, "Failed to upload file to HDFS"
+                hdfs_path = hdfs_staging_dir
+            else:
+                # Try to get HDFS path from upload record
+                hdfs_path = upload.get('hdfs_path', '') if upload else ''
 
-                if target_location:
-                    # Use a staging subdirectory under the target table's parent location
-                    # e.g., /user/hive/warehouse/gmp_cis.db/ -> /user/hive/warehouse/gmp_cis.db/staging/
-                    import os
-                    parent_dir = os.path.dirname(target_location.rstrip('/'))
-                    hdfs_path = f"{parent_dir}/staging/{staging_table}"
-                    logger.info(f"Using staging HDFS path: {hdfs_path}")
-
-            if not hdfs_path:
-                return False, "No HDFS path available. Please upload file to HDFS first."
+                if not hdfs_path:
+                    # No file available - try to use sample_data with INSERT VALUES
+                    if sample_data:
+                        logger.info("No HDFS file available, using INSERT VALUES with sample data")
+                        return self._ingest_using_insert_values(
+                            target_table=target_table,
+                            datasource_config=datasource_config,
+                            intake_columns=intake_columns,
+                            sample_data=sample_data,
+                            processing_date=processing_date,
+                            updated_by=updated_by,
+                            upload_id=upload_id,
+                            is_session_upload=is_session_upload
+                        )
+                    return False, "No file available for ingestion. Please re-upload the file."
 
             # Build column definitions (all STRING)
             col_defs = ', '.join([f"`{col['name']}` STRING" for col in intake_columns])
@@ -979,11 +1008,15 @@ class UploadService:
             TBLPROPERTIES ('skip.header.line.count'='{'1' if has_header else '0'}')
             """
 
+            logger.info(f"Creating staging table: {staging_table}")
+            logger.debug(f"Staging DDL: {create_staging_query}")
+
             # Use Hive connection for external table DDL
             staging_success = hybrid_manager.hive_write(create_staging_query, database=self.repository.DATABASE)
 
             if not staging_success:
-                self.repository.update_status(upload_id, UploadKuduRepository.STATUS_FAILED, updated_by, "Failed to create staging table")
+                if not is_session_upload:
+                    self.repository.update_status(upload_id, UploadKuduRepository.STATUS_FAILED, updated_by, "Failed to create staging table")
                 return False, "Failed to create staging table"
 
             # Build and execute insert query with additional columns
@@ -1008,15 +1041,19 @@ class UploadService:
             FROM {self.repository.DATABASE}.{staging_table}
             """
 
+            logger.info(f"Inserting data from staging to target: {target_table}")
+            logger.debug(f"Insert query: {insert_query}")
+
             # Use Hive connection for INSERT into external table
             insert_success = hybrid_manager.hive_write(insert_query, database=self.repository.DATABASE)
 
             if insert_success:
-                # Update upload record (via Kudu/Impala)
-                self.repository.update_upload(upload_id, {
-                    'status': UploadKuduRepository.STATUS_COMPLETED,
-                    'target_table_name': target_table,
-                }, updated_by)
+                # Update upload record (via Kudu/Impala) - only if not session upload
+                if not is_session_upload:
+                    self.repository.update_upload(upload_id, {
+                        'status': UploadKuduRepository.STATUS_COMPLETED,
+                        'target_table_name': target_table,
+                    }, updated_by)
 
                 # Get row count using Hive connection
                 row_count = 0
@@ -1036,19 +1073,199 @@ class UploadService:
                         f"DROP TABLE IF EXISTS {self.repository.DATABASE}.{staging_table}",
                         database=self.repository.DATABASE
                     )
+                    logger.info(f"Dropped staging table: {staging_table}")
                 except Exception as e:
                     logger.warning(f"Could not drop staging table: {e}")
 
+                # Clean up HDFS staging directory
+                self._cleanup_hdfs_staging(hdfs_path)
+
+                # Clean up local temp file
+                if temp_file_path and os.path.exists(temp_file_path):
+                    try:
+                        os.remove(temp_file_path)
+                        logger.info(f"Removed local temp file: {temp_file_path}")
+                    except Exception as e:
+                        logger.warning(f"Could not remove temp file: {e}")
+
                 return True, f"Successfully ingested {row_count} rows to {target_table} with processing_date={processing_date}"
             else:
-                self.repository.update_status(upload_id, UploadKuduRepository.STATUS_FAILED, updated_by, "Failed to insert data")
+                if not is_session_upload:
+                    self.repository.update_status(upload_id, UploadKuduRepository.STATUS_FAILED, updated_by, "Failed to insert data")
                 # Clean up staging table
-                self.repository.drop_external_table(staging_table)
+                try:
+                    hybrid_manager.hive_write(
+                        f"DROP TABLE IF EXISTS {self.repository.DATABASE}.{staging_table}",
+                        database=self.repository.DATABASE
+                    )
+                except Exception:
+                    pass
                 return False, "Failed to insert data to target table"
 
         except Exception as e:
             logger.error(f"Metadata-driven ingestion error: {str(e)}")
-            self.repository.update_status(upload_id, UploadKuduRepository.STATUS_FAILED, updated_by, str(e))
+            if not is_session_upload:
+                self.repository.update_status(upload_id, UploadKuduRepository.STATUS_FAILED, updated_by, str(e))
+            return False, f"Ingestion error: {str(e)}"
+
+    def _upload_file_to_hdfs(self, local_path: str, hdfs_dir: str) -> bool:
+        """
+        Upload a local file to HDFS.
+
+        Args:
+            local_path: Path to local file
+            hdfs_dir: HDFS directory to upload to
+
+        Returns:
+            True if successful, False otherwise
+        """
+        import subprocess
+
+        try:
+            # Create HDFS directory
+            mkdir_cmd = ['hdfs', 'dfs', '-mkdir', '-p', hdfs_dir]
+            result = subprocess.run(mkdir_cmd, capture_output=True, text=True, timeout=60)
+            if result.returncode != 0:
+                logger.error(f"Failed to create HDFS directory: {result.stderr}")
+                return False
+
+            # Upload file to HDFS
+            put_cmd = ['hdfs', 'dfs', '-put', '-f', local_path, hdfs_dir]
+            result = subprocess.run(put_cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode != 0:
+                logger.error(f"Failed to upload file to HDFS: {result.stderr}")
+                return False
+
+            logger.info(f"Successfully uploaded {local_path} to {hdfs_dir}")
+            return True
+
+        except subprocess.TimeoutExpired:
+            logger.error("HDFS upload timed out")
+            return False
+        except FileNotFoundError:
+            logger.error("hdfs command not found - HDFS client not installed")
+            return False
+        except Exception as e:
+            logger.error(f"HDFS upload error: {str(e)}")
+            return False
+
+    def _cleanup_hdfs_staging(self, hdfs_path: str) -> bool:
+        """
+        Clean up HDFS staging directory.
+
+        Args:
+            hdfs_path: HDFS path to clean up
+
+        Returns:
+            True if successful, False otherwise
+        """
+        import subprocess
+
+        try:
+            # Only clean up if path is under staging directory
+            if self.HDFS_STAGING_PATH not in hdfs_path:
+                return True
+
+            rm_cmd = ['hdfs', 'dfs', '-rm', '-r', '-f', hdfs_path]
+            result = subprocess.run(rm_cmd, capture_output=True, text=True, timeout=60)
+            if result.returncode == 0:
+                logger.info(f"Cleaned up HDFS staging: {hdfs_path}")
+                return True
+            else:
+                logger.warning(f"Could not clean up HDFS staging: {result.stderr}")
+                return False
+
+        except Exception as e:
+            logger.warning(f"HDFS cleanup error: {e}")
+            return False
+
+    def _ingest_using_insert_values(
+        self,
+        target_table: str,
+        datasource_config: Dict[str, Any],
+        intake_columns: List[Dict[str, str]],
+        sample_data: List[Dict[str, Any]],
+        processing_date: str,
+        updated_by: str,
+        upload_id: str,
+        is_session_upload: bool = False
+    ) -> Tuple[bool, str]:
+        """
+        Ingest data using INSERT VALUES statements (fallback when no file available).
+
+        Args:
+            target_table: Target table name
+            datasource_config: Datasource configuration
+            intake_columns: Column definitions
+            sample_data: Data rows to insert
+            processing_date: Processing date
+            updated_by: User performing ingestion
+            upload_id: Upload ID
+            is_session_upload: Whether this is a session-based upload
+
+        Returns:
+            Tuple of (success, message)
+        """
+        from core.repositories.hybrid_connection import hybrid_manager
+
+        try:
+            source_id = datasource_config.get('source_id', '')
+            col_names = [col['name'] for col in intake_columns]
+
+            # All target columns including metadata
+            all_cols = col_names + ['src_id', 'src_system', 'data_cat', 'data_frq', 'processing_date']
+
+            # Build INSERT statement with VALUES
+            rows_inserted = 0
+            batch_size = 100  # Insert in batches
+
+            for i in range(0, len(sample_data), batch_size):
+                batch = sample_data[i:i + batch_size]
+                values_list = []
+
+                for row in batch:
+                    row_values = []
+                    for col_name in col_names:
+                        val = row.get(col_name, '')
+                        # Escape single quotes
+                        escaped_val = str(val).replace("'", "''") if val else ''
+                        row_values.append(f"'{escaped_val}'")
+
+                    # Add metadata columns
+                    row_values.append(f"'{source_id}'")  # src_id
+                    row_values.append("'cis'")  # src_system
+                    row_values.append("'sta'")  # data_cat
+                    row_values.append("'adhoc'")  # data_frq
+                    row_values.append(f"'{processing_date}'")  # processing_date
+
+                    values_list.append(f"({', '.join(row_values)})")
+
+                if values_list:
+                    insert_query = f"""
+                    INSERT INTO TABLE {self.repository.DATABASE}.{target_table}
+                    ({', '.join([f'`{c}`' for c in all_cols])})
+                    VALUES {', '.join(values_list)}
+                    """
+
+                    success = hybrid_manager.hive_write(insert_query, database=self.repository.DATABASE)
+                    if success:
+                        rows_inserted += len(batch)
+                    else:
+                        logger.error(f"Failed to insert batch at offset {i}")
+
+            if rows_inserted > 0:
+                if not is_session_upload:
+                    self.repository.update_upload(upload_id, {
+                        'status': UploadKuduRepository.STATUS_COMPLETED,
+                        'target_table_name': target_table,
+                    }, updated_by)
+
+                return True, f"Successfully ingested {rows_inserted} rows to {target_table} with processing_date={processing_date}"
+            else:
+                return False, "No rows were inserted"
+
+        except Exception as e:
+            logger.error(f"INSERT VALUES ingestion error: {str(e)}")
             return False, f"Ingestion error: {str(e)}"
 
     def get_all_datasource_configs(self) -> List[Dict[str, Any]]:

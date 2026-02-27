@@ -170,7 +170,19 @@ def upload_create(request):
                     else:
                         # Table doesn't exist - use session fallback
                         import uuid
+                        import tempfile
                         upload_id = f"TEMP-{uuid.uuid4().hex[:12].upper()}"
+
+                        # Save file to temp directory for later HDFS upload
+                        temp_dir = os.path.join(settings.BASE_DIR, 'temp_uploads')
+                        os.makedirs(temp_dir, exist_ok=True)
+                        temp_file_path = os.path.join(temp_dir, f"{upload_id}_{file_name}")
+
+                        # Save the file content
+                        uploaded_file.seek(0)
+                        with open(temp_file_path, 'wb') as f:
+                            for chunk in uploaded_file.chunks():
+                                f.write(chunk)
 
                         # Store in session with datasource config info
                         request.session[f'upload_{upload_id}'] = {
@@ -190,6 +202,7 @@ def upload_create(request):
                             'created_by': user_info['username'],
                             'target_table_name': datasource_config.get('target_table', ''),
                             'datasource_config': datasource_config,  # Store for preview
+                            'temp_file_path': temp_file_path,  # Path to saved file
                         }
 
                         messages.warning(request, 'Upload table not available. Data stored temporarily in session.')
@@ -213,6 +226,17 @@ def upload_create(request):
                     import uuid
                     upload_id = f"TEMP-{uuid.uuid4().hex[:12].upper()}"
 
+                    # Save file to temp directory for later HDFS upload
+                    temp_dir = os.path.join(settings.BASE_DIR, 'temp_uploads')
+                    os.makedirs(temp_dir, exist_ok=True)
+                    temp_file_path = os.path.join(temp_dir, f"{upload_id}_{file_name}")
+
+                    # Save the file content
+                    uploaded_file.seek(0)
+                    with open(temp_file_path, 'wb') as f:
+                        for chunk in uploaded_file.chunks():
+                            f.write(chunk)
+
                     # Store in session
                     request.session[f'upload_{upload_id}'] = {
                         'upload_id': upload_id,
@@ -229,6 +253,7 @@ def upload_create(request):
                         'sample_data_json': validation_result.sample_data,
                         'status': 'VALIDATED',
                         'created_by': user_info['username'],
+                        'temp_file_path': temp_file_path,  # Path to saved file
                     }
 
                     messages.warning(request, 'Upload table not available. Data stored temporarily in session.')
@@ -455,7 +480,10 @@ def upload_ingest(request, upload_id: str):
 
         if use_datasource_ingestion:
             # Metadata-driven ingestion using cis_datasource_mng
-            datasource_config = upload_service.get_datasource_config(file_name)
+            # Check stored datasource_config first (for session uploads)
+            datasource_config = upload.get('datasource_config') if is_session_upload else None
+            if not datasource_config:
+                datasource_config = upload_service.get_datasource_config(file_name)
 
             if not datasource_config:
                 messages.error(request, f'No datasource configuration found for "{file_name}"')
@@ -464,13 +492,28 @@ def upload_ingest(request, upload_id: str):
             # Get optional processing date override
             processing_date = request.POST.get('processing_date', '').strip()
 
+            # Get temp file path and sample data for session uploads
+            temp_file_path = upload.get('temp_file_path') if is_session_upload else None
+            sample_data = None
+            if is_session_upload:
+                sample_data_json = upload.get('sample_data_json', [])
+                sample_data = sample_data_json if isinstance(sample_data_json, list) else json.loads(sample_data_json)
+
             # Perform metadata-driven ingestion
             success, message = upload_service.ingest_to_target_table(
                 upload_id=upload_id,
                 datasource_config=datasource_config,
                 updated_by=user_info['username'],
-                processing_date=processing_date if processing_date else None
+                processing_date=processing_date if processing_date else None,
+                temp_file_path=temp_file_path,
+                sample_data=sample_data
             )
+
+            # Clean up session data on success
+            if success and is_session_upload:
+                session_key = f'upload_{upload_id}'
+                if session_key in request.session:
+                    del request.session[session_key]
         else:
             # Standard ingestion - create new external table
             table_name = request.POST.get('table_name', '').strip()
