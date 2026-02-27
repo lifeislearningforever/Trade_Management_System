@@ -815,22 +815,34 @@ class UploadService:
                 result.errors.append("No data rows found")
                 return result
 
-            # Use intake_columns from datasource config (all STRING)
+            # Get file header row for column names
+            file_header = rows[0] if has_header else [f'col_{i+1}' for i in range(len(rows[0]))]
+            data_rows = rows[1:] if has_header else rows
+
+            # Use intake_columns from datasource config OR file header
             if intake_columns:
-                result.columns = intake_columns
-                result.column_count = len(intake_columns)
+                # Ensure column count matches file
+                if len(intake_columns) == len(file_header):
+                    result.columns = intake_columns
+                else:
+                    # Column count mismatch - use file header with STRING type
+                    logger.warning(
+                        f"intake_columns count ({len(intake_columns)}) != file header count ({len(file_header)}). "
+                        f"Using file header."
+                    )
+                    result.columns = [
+                        {'name': self.validation_service._clean_column_name(h), 'type': 'STRING'}
+                        for h in file_header
+                    ]
+                result.column_count = len(result.columns)
             else:
                 # Fall back to detection - but force STRING for external tables
-                header_row = rows[0] if has_header else [f'col_{i+1}' for i in range(len(rows[0]))]
-                data_rows = rows[1:] if has_header else rows
-                # Force STRING type for external table ingestion
                 result.columns = self.validation_service._infer_column_types(
-                    header_row, data_rows[:100], force_string=True
+                    file_header, data_rows[:100], force_string=True
                 )
                 result.column_count = len(result.columns)
 
             # Count rows
-            data_rows = rows[1:] if has_header else rows
             result.row_count = len(data_rows)
 
             # Set properties
@@ -838,12 +850,17 @@ class UploadService:
             result.delimiter = separator
             result.has_header = has_header
 
-            # Generate sample data
+            # Generate sample data using actual column names from result.columns
             header_names = [col['name'] for col in result.columns]
             result.sample_data = []
             for row in data_rows[:self.validation_service.MAX_PREVIEW_ROWS]:
-                if len(row) >= len(header_names):
-                    result.sample_data.append(dict(zip(header_names, row[:len(header_names)])))
+                row_dict = {}
+                for idx, col_name in enumerate(header_names):
+                    if idx < len(row):
+                        row_dict[col_name] = row[idx]
+                    else:
+                        row_dict[col_name] = ''
+                result.sample_data.append(row_dict)
 
             result.is_valid = True
 

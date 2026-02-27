@@ -363,9 +363,15 @@ def upload_preview(request, upload_id: str):
         'VALIDATION_FAILED',
     ]
 
+    # Ensure all columns have STRING type for metadata-driven uploads
+    if datasource_config:
+        for col in schema:
+            col['type'] = 'STRING'
+
     context = {
         'upload': upload,
         'schema': schema,
+        'schema_json': json.dumps(schema),  # For JavaScript
         'sample_data': sample_data[:20],  # Limit preview rows
         'hive_types': hive_types,
         'datasource_config': datasource_config,

@@ -408,7 +408,7 @@
 <script>
 $(document).ready(function() {
     const uploadId = "{{ upload.upload_id }}";
-    const originalSchema = {{ schema|safe }};
+    const originalSchema = {{ schema_json|safe }};
 
     // Save Schema Changes
     $('#saveSchemaBtn').on('click', function() {
