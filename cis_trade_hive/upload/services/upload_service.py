@@ -979,8 +979,8 @@ class UploadService:
 
                 if not hdfs_path:
                     # No file available - try to use sample_data with INSERT VALUES
-                    if sample_data:
-                        logger.info("No HDFS file available, using INSERT VALUES with sample data")
+                    if sample_data or temp_file_path:
+                        logger.info("No HDFS file available, using INSERT VALUES")
                         return self._ingest_using_insert_values(
                             target_table=target_table,
                             datasource_config=datasource_config,
@@ -989,7 +989,8 @@ class UploadService:
                             processing_date=processing_date,
                             updated_by=updated_by,
                             upload_id=upload_id,
-                            is_session_upload=is_session_upload
+                            is_session_upload=is_session_upload,
+                            temp_file_path=temp_file_path
                         )
                     return False, "No file available for ingestion. Please re-upload the file."
 
@@ -1009,7 +1010,7 @@ class UploadService:
             """
 
             logger.info(f"Creating staging table: {staging_table}")
-            logger.debug(f"Staging DDL: {create_staging_query}")
+            logger.info(f"Staging DDL: {create_staging_query}")
 
             # Use Hive connection for external table DDL
             staging_success = hybrid_manager.hive_write(create_staging_query, database=self.repository.DATABASE)
@@ -1018,6 +1019,45 @@ class UploadService:
                 if not is_session_upload:
                     self.repository.update_status(upload_id, UploadKuduRepository.STATUS_FAILED, updated_by, "Failed to create staging table")
                 return False, "Failed to create staging table"
+
+            # Verify staging table has data
+            staging_count_result = hybrid_manager.hive_read(
+                f"SELECT COUNT(*) as cnt FROM {self.repository.DATABASE}.{staging_table}",
+                database=self.repository.DATABASE
+            )
+            staging_row_count = staging_count_result[0].get('cnt', 0) if staging_count_result else 0
+            logger.info(f"Staging table {staging_table} has {staging_row_count} rows")
+
+            if staging_row_count == 0:
+                # Staging table is empty - file not in HDFS or wrong location
+                logger.error(f"Staging table is empty. HDFS path: {hdfs_path}")
+                # Try to list files in HDFS path
+                import subprocess
+                try:
+                    ls_result = subprocess.run(['hdfs', 'dfs', '-ls', hdfs_path], capture_output=True, text=True, timeout=30)
+                    logger.info(f"HDFS ls {hdfs_path}: {ls_result.stdout}")
+                    if ls_result.returncode != 0:
+                        logger.error(f"HDFS ls error: {ls_result.stderr}")
+                except Exception as e:
+                    logger.error(f"Could not list HDFS path: {e}")
+
+                # Fall back to INSERT VALUES if we have sample_data or temp_file_path
+                if sample_data or temp_file_path:
+                    logger.info(f"Falling back to INSERT VALUES (sample_data: {len(sample_data) if sample_data else 0} rows, file: {temp_file_path})")
+                    # Drop empty staging table
+                    hybrid_manager.hive_write(f"DROP TABLE IF EXISTS {self.repository.DATABASE}.{staging_table}", database=self.repository.DATABASE)
+                    return self._ingest_using_insert_values(
+                        target_table=target_table,
+                        datasource_config=datasource_config,
+                        intake_columns=intake_columns,
+                        sample_data=sample_data if sample_data else [],
+                        processing_date=processing_date,
+                        updated_by=updated_by,
+                        upload_id=upload_id,
+                        is_session_upload=is_session_upload,
+                        temp_file_path=temp_file_path
+                    )
+                return False, f"Staging table is empty. Check if file exists at HDFS path: {hdfs_path}"
 
             # Build and execute insert query with additional columns
             source_id = datasource_config.get('source_id', '')
@@ -1206,7 +1246,8 @@ class UploadService:
         processing_date: str,
         updated_by: str,
         upload_id: str,
-        is_session_upload: bool = False
+        is_session_upload: bool = False,
+        temp_file_path: str = None
     ) -> Tuple[bool, str]:
         """
         Ingest data using INSERT VALUES statements (fallback when no file available).
@@ -1215,10 +1256,12 @@ class UploadService:
             target_table: Target table name
             datasource_config: Datasource configuration
             intake_columns: Column definitions
-            sample_data: Data rows to insert
+            sample_data: Data rows to insert (used if temp_file_path not available)
             processing_date: Processing date
             updated_by: User performing ingestion
             upload_id: Upload ID
+            is_session_upload: Whether this is a session-based upload
+            temp_file_path: Path to local temp file (if available, reads full file)
             is_session_upload: Whether this is a session-based upload
 
         Returns:
@@ -1226,10 +1269,13 @@ class UploadService:
         """
         from core.repositories.hybrid_connection import hybrid_manager
         from .datasource_repository import datasource_repository
+        import csv
 
         try:
             source_id = datasource_config.get('source_id', '')
             col_names = [col['name'] for col in intake_columns]
+            separator = datasource_config.get('separator', ',')
+            has_header = str(datasource_config.get('header', 'true')).lower() == 'true'
 
             # Get target table columns to ensure we match exactly
             target_table_info = datasource_repository.get_table_info(target_table, self.repository.DATABASE)
@@ -1245,12 +1291,55 @@ class UploadService:
                 'processing_date': processing_date
             }
 
+            # If temp_file_path exists, read full file instead of using sample_data
+            all_data = sample_data
+            if temp_file_path and os.path.exists(temp_file_path):
+                logger.info(f"Reading full file from {temp_file_path} for INSERT VALUES")
+                try:
+                    all_data = []
+                    with open(temp_file_path, 'r', encoding='utf-8', errors='replace') as f:
+                        # Detect delimiter
+                        delim = separator if separator else ','
+                        if delim == '|':
+                            reader = csv.reader(f, delimiter='|')
+                        elif delim == '\t':
+                            reader = csv.reader(f, delimiter='\t')
+                        else:
+                            reader = csv.reader(f, delimiter=delim)
+
+                        rows = list(reader)
+                        if has_header and len(rows) > 0:
+                            header_row = rows[0]
+                            data_rows = rows[1:]
+                        else:
+                            header_row = col_names
+                            data_rows = rows
+
+                        # Convert to list of dicts
+                        for row in data_rows:
+                            if len(row) >= len(header_row):
+                                row_dict = {}
+                                for idx, col in enumerate(col_names):
+                                    if idx < len(row):
+                                        row_dict[col] = row[idx]
+                                    else:
+                                        row_dict[col] = ''
+                                all_data.append(row_dict)
+
+                    logger.info(f"Read {len(all_data)} rows from file")
+                except Exception as e:
+                    logger.error(f"Failed to read file {temp_file_path}: {e}")
+                    # Fall back to sample_data
+                    all_data = sample_data
+
+            logger.info(f"Ingesting {len(all_data)} rows using INSERT VALUES")
+
             # Build INSERT statement with VALUES
             rows_inserted = 0
             batch_size = 100  # Insert in batches
 
-            for i in range(0, len(sample_data), batch_size):
-                batch = sample_data[i:i + batch_size]
+            for i in range(0, len(all_data), batch_size):
+                batch = all_data[i:i + batch_size]
                 values_list = []
 
                 for row in batch:
