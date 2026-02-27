@@ -167,6 +167,34 @@ def upload_create(request):
 
                         messages.success(request, f'File "{file_name}" validated using datasource config. Target: {datasource_config.get("target_table", "")}')
                         return redirect('upload:preview', upload_id=upload_id)
+                    else:
+                        # Table doesn't exist - use session fallback
+                        import uuid
+                        upload_id = f"TEMP-{uuid.uuid4().hex[:12].upper()}"
+
+                        # Store in session with datasource config info
+                        request.session[f'upload_{upload_id}'] = {
+                            'upload_id': upload_id,
+                            'file_name': file_name,
+                            'file_size': validation_result.file_size,
+                            'file_type': validation_result.file_type,
+                            'row_count': validation_result.row_count,
+                            'column_count': validation_result.column_count,
+                            'delimiter': validation_result.delimiter,
+                            'has_header': validation_result.has_header,
+                            'encoding': validation_result.encoding,
+                            'description': description,
+                            'schema_json': validation_result.columns,
+                            'sample_data_json': validation_result.sample_data,
+                            'status': 'VALIDATED',
+                            'created_by': user_info['username'],
+                            'target_table_name': datasource_config.get('target_table', ''),
+                            'datasource_config': datasource_config,  # Store for preview
+                        }
+
+                        messages.warning(request, 'Upload table not available. Data stored temporarily in session.')
+                        messages.success(request, f'File "{file_name}" validated using datasource config. Target: {datasource_config.get("target_table", "")}')
+                        return redirect('upload:preview', upload_id=upload_id)
                 else:
                     for error in validation_result.errors:
                         messages.error(request, error)
@@ -586,7 +614,28 @@ def api_validate_file(request):
             return JsonResponse({'valid': False, 'error': 'No file provided'})
 
         uploaded_file = request.FILES['file']
-        result = validation_service.validate_file(uploaded_file, uploaded_file.name)
+        file_name = uploaded_file.name
+
+        # Check for datasource configuration
+        datasource_config = upload_service.get_datasource_config(file_name)
+
+        # If datasource config found, use it for validation
+        if datasource_config:
+            result = upload_service.validate_with_datasource_config(
+                file_obj=uploaded_file,
+                file_name=file_name,
+                datasource_config=datasource_config
+            )
+            # Include datasource config info in response
+            ds_info = {
+                'source_id': datasource_config.get('source_id', ''),
+                'source_name': datasource_config.get('source_name', ''),
+                'target_table': datasource_config.get('target_table', ''),
+                'separator': datasource_config.get('separator', ','),
+            }
+        else:
+            result = validation_service.validate_file(uploaded_file, file_name)
+            ds_info = None
 
         return JsonResponse({
             'valid': result.is_valid,
@@ -601,6 +650,7 @@ def api_validate_file(request):
             'columns': result.columns,
             'sample_data': result.sample_data[:5],  # First 5 rows for preview
             'file_size': result.file_size,
+            'datasource_config': ds_info,
         })
 
     except Exception as e:

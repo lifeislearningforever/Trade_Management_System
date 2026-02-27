@@ -163,7 +163,10 @@ class DatasourceRepository:
         """
         Parse intake_columns from datasource configuration.
 
-        The intake_columns field is a MAP<STRING, STRING> with column name -> type mapping.
+        The intake_columns field can be:
+        - A comma-separated string of column names: "col1,col2,col3"
+        - A MAP<STRING, STRING> with column name -> type mapping
+        - A JSON string
 
         Args:
             datasource: Datasource configuration dict
@@ -172,27 +175,37 @@ class DatasourceRepository:
             List of column definitions: [{'name': 'col_name', 'type': 'STRING'}, ...]
         """
         columns = []
-        intake_columns = datasource.get('intake_columns', {})
+        intake_columns = datasource.get('intake_columns', '')
 
         if isinstance(intake_columns, dict):
+            # MAP type from Hive - column name -> type mapping
             for col_name, col_type in intake_columns.items():
                 columns.append({
-                    'name': col_name,
+                    'name': col_name.strip(),
                     'type': col_type.upper() if col_type else 'STRING'
                 })
-        elif isinstance(intake_columns, str):
-            # Try to parse as JSON if it's a string
+        elif isinstance(intake_columns, str) and intake_columns:
+            # First try to parse as JSON
             try:
                 import json
                 col_map = json.loads(intake_columns)
                 if isinstance(col_map, dict):
                     for col_name, col_type in col_map.items():
                         columns.append({
-                            'name': col_name,
+                            'name': col_name.strip(),
                             'type': col_type.upper() if col_type else 'STRING'
                         })
-            except:
+                    return columns
+            except (json.JSONDecodeError, TypeError):
                 pass
+
+            # Parse as comma-separated column names (all STRING type)
+            col_names = [c.strip() for c in intake_columns.split(',') if c.strip()]
+            for col_name in col_names:
+                columns.append({
+                    'name': col_name,
+                    'type': 'STRING'
+                })
 
         return columns
 

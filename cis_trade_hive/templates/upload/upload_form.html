@@ -104,6 +104,22 @@
                             </div>
                         </div>
 
+                        <!-- Datasource Config Option (shown when matching config found) -->
+                        <div id="datasourceConfigOption" class="mb-4 d-none">
+                            <div class="alert alert-success">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="useDatasourceConfig"
+                                           name="use_datasource_config" value="true" checked>
+                                    <label class="form-check-label" for="useDatasourceConfig">
+                                        <strong><i class="bi bi-database-check"></i> Use Datasource Configuration</strong>
+                                    </label>
+                                </div>
+                                <div class="mt-2 small" id="datasourceConfigInfo">
+                                    <!-- Will be populated by JS -->
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Description -->
                         <div class="mb-4">
                             <label for="description" class="form-label">Description (Optional)</label>
@@ -365,12 +381,25 @@ $(document).ready(function() {
             let columnsHtml = '';
             data.columns.forEach(function(col) {
                 columnsHtml += '<span class="badge bg-secondary me-1 mb-1">' +
-                              col.name + ' <small>(' + col.hive_type + ')</small></span>';
+                              col.name + ' <small>(' + (col.type || col.hive_type || 'STRING') + ')</small></span>';
             });
             $('#columnsList').html(columnsHtml);
         }
 
         validationDetails.removeClass('d-none');
+
+        // Show datasource config option if found
+        if (data.datasource_config) {
+            let configInfo = '<strong>Target Table:</strong> ' + (data.datasource_config.target_table || 'N/A');
+            configInfo += '<br><strong>Separator:</strong> <code>' + (data.datasource_config.separator || ',') + '</code>';
+            if (data.datasource_config.source_id) {
+                configInfo += '<br><strong>Source ID:</strong> ' + data.datasource_config.source_id;
+            }
+            $('#datasourceConfigInfo').html(configInfo);
+            $('#datasourceConfigOption').removeClass('d-none');
+        } else {
+            $('#datasourceConfigOption').addClass('d-none');
+        }
 
         // Show sample data preview
         if (data.sample_data && data.sample_data.length > 0 && data.columns) {
@@ -426,6 +455,7 @@ $(document).ready(function() {
         validationStatus.addClass('d-none');
         validationDetails.addClass('d-none');
         samplePreviewCard.addClass('d-none');
+        $('#datasourceConfigOption').addClass('d-none');
         uploadBtn.prop('disabled', true);
     }
 
