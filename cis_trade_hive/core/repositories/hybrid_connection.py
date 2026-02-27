@@ -617,9 +617,11 @@ class HiveConnectionHandler(IConnectionReader, IConnectionWriter, IConnectionPoo
             cursor = pooled.connection.cursor()
 
             # Set Tez execution engine and YARN queue for performance
-            cursor.execute("SET hive.execution.engine=tez")
-            cursor.execute(f"SET tez.queue.name={self.YARN_QUEUE}")
-            cursor.execute(f"SET mapreduce.job.queuename={self.YARN_QUEUE}")
+            try:
+                cursor.execute("SET hive.execution.engine=tez")
+                cursor.execute(f"SET tez.queue.name={self.YARN_QUEUE}")
+            except Exception as e:
+                logger.warning(f"Could not set Tez settings, using defaults: {e}")
 
             if params:
                 cursor.execute(query, params)
@@ -665,18 +667,13 @@ class HiveConnectionHandler(IConnectionReader, IConnectionWriter, IConnectionPoo
             cursor = pooled.connection.cursor()
 
             # Set Tez execution engine and YARN queue for performance
-            cursor.execute("SET hive.execution.engine=tez")
-            cursor.execute(f"SET tez.queue.name={self.YARN_QUEUE}")
-            cursor.execute(f"SET mapreduce.job.queuename={self.YARN_QUEUE}")
+            try:
+                cursor.execute("SET hive.execution.engine=tez")
+                cursor.execute(f"SET tez.queue.name={self.YARN_QUEUE}")
+            except Exception as e:
+                logger.warning(f"Could not set Tez settings, using defaults: {e}")
 
-            # Additional Tez optimizations
-            cursor.execute("SET hive.tez.container.size=4096")
-            cursor.execute("SET hive.tez.java.opts=-Xmx3276m")
-            cursor.execute("SET hive.auto.convert.join=true")
-            cursor.execute("SET hive.vectorized.execution.enabled=true")
-            cursor.execute("SET hive.vectorized.execution.reduce.enabled=true")
-
-            logger.info(f"Executing Hive write with Tez engine on {self.YARN_QUEUE} queue")
+            logger.info(f"Executing Hive write on {self.YARN_QUEUE} queue")
 
             if params:
                 cursor.execute(query, params)

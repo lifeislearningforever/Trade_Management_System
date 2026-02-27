@@ -963,36 +963,44 @@ class UploadService:
             if not intake_columns:
                 return False, "No columns defined in datasource configuration or target table"
 
+            # For session uploads with local temp file, use INSERT VALUES directly
+            # This avoids HDFS staging issues and is more reliable
+            if temp_file_path and os.path.exists(temp_file_path):
+                logger.info(f"Using INSERT VALUES with local file: {temp_file_path}")
+                return self._ingest_using_insert_values(
+                    target_table=target_table,
+                    datasource_config=datasource_config,
+                    intake_columns=intake_columns,
+                    sample_data=sample_data if sample_data else [],
+                    processing_date=processing_date,
+                    updated_by=updated_by,
+                    upload_id=upload_id,
+                    is_session_upload=is_session_upload,
+                    temp_file_path=temp_file_path
+                )
+
+            # Try to get HDFS path from upload record (for non-session uploads)
+            hdfs_path = upload.get('hdfs_path', '') if upload else ''
+
+            if not hdfs_path:
+                # No HDFS path and no temp file - use sample_data if available
+                if sample_data:
+                    logger.info("No file available, using INSERT VALUES with sample_data")
+                    return self._ingest_using_insert_values(
+                        target_table=target_table,
+                        datasource_config=datasource_config,
+                        intake_columns=intake_columns,
+                        sample_data=sample_data,
+                        processing_date=processing_date,
+                        updated_by=updated_by,
+                        upload_id=upload_id,
+                        is_session_upload=is_session_upload,
+                        temp_file_path=None
+                    )
+                return False, "No file available for ingestion. Please re-upload the file."
+
             # HDFS staging path under /mrw/cis/staging/
             hdfs_staging_dir = f"{self.HDFS_STAGING_PATH}/{staging_table}"
-
-            # Upload local file to HDFS if temp_file_path is provided
-            if temp_file_path and os.path.exists(temp_file_path):
-                logger.info(f"Uploading local file to HDFS: {temp_file_path} -> {hdfs_staging_dir}")
-                hdfs_upload_success = self._upload_file_to_hdfs(temp_file_path, hdfs_staging_dir)
-                if not hdfs_upload_success:
-                    return False, "Failed to upload file to HDFS"
-                hdfs_path = hdfs_staging_dir
-            else:
-                # Try to get HDFS path from upload record
-                hdfs_path = upload.get('hdfs_path', '') if upload else ''
-
-                if not hdfs_path:
-                    # No file available - try to use sample_data with INSERT VALUES
-                    if sample_data or temp_file_path:
-                        logger.info("No HDFS file available, using INSERT VALUES")
-                        return self._ingest_using_insert_values(
-                            target_table=target_table,
-                            datasource_config=datasource_config,
-                            intake_columns=intake_columns,
-                            sample_data=sample_data,
-                            processing_date=processing_date,
-                            updated_by=updated_by,
-                            upload_id=upload_id,
-                            is_session_upload=is_session_upload,
-                            temp_file_path=temp_file_path
-                        )
-                    return False, "No file available for ingestion. Please re-upload the file."
 
             # Build column definitions (all STRING)
             col_defs = ', '.join([f"`{col['name']}` STRING" for col in intake_columns])
