@@ -427,7 +427,16 @@ def upload_ingest(request, upload_id: str):
        data_cat, data_frq, processing_date)
     """
     user_info = get_user_info(request)
+
+    # First try to get from database
     upload = upload_service.get_upload_by_id(upload_id)
+
+    # If not found, check session (for temporary storage when table doesn't exist)
+    is_session_upload = False
+    if not upload:
+        session_key = f'upload_{upload_id}'
+        upload = request.session.get(session_key)
+        is_session_upload = True
 
     if not upload:
         messages.error(request, 'Upload not found')
