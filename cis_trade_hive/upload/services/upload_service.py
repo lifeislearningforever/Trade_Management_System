@@ -889,6 +889,9 @@ class UploadService:
             has_header = str(datasource_config.get('header', 'true')).lower() == 'true'
             skip_lines = int(datasource_config.get('no_of_skip_line', 0) or 0)
 
+            # Use Hive connection for external table operations
+            from hive_poc.repositories.hive_connection import hive_manager
+
             # Create staging table name
             staging_table = f"stg_upload_{upload_id.replace('-', '_').lower()}"
 
@@ -897,18 +900,27 @@ class UploadService:
             if not intake_columns:
                 return False, "No columns defined in datasource configuration"
 
-            # Create staging external table
+            # Create staging external table using Hive
             hdfs_path = upload.get('hdfs_path', '')
-            column_defs = [{'name': col['name'], 'type': col.get('type', 'STRING')} for col in intake_columns]
+            if not hdfs_path:
+                return False, "No HDFS path available for uploaded file"
 
-            staging_success = self.repository.create_external_table(
-                table_name=staging_table,
-                columns=column_defs,
-                hdfs_path=hdfs_path,
-                file_format='csv',
-                delimiter=separator,
-                has_header=has_header
+            # Build column definitions (all STRING)
+            col_defs = ', '.join([f"`{col['name']}` STRING" for col in intake_columns])
+
+            # Build CREATE EXTERNAL TABLE statement
+            create_staging_query = f"""
+            CREATE EXTERNAL TABLE IF NOT EXISTS {self.repository.DATABASE}.{staging_table} (
+                {col_defs}
             )
+            ROW FORMAT DELIMITED
+            FIELDS TERMINATED BY '{separator}'
+            STORED AS TEXTFILE
+            LOCATION '{hdfs_path}'
+            TBLPROPERTIES ('skip.header.line.count'='{'1' if has_header else '0'}')
+            """
+
+            staging_success = hive_manager.execute_write(create_staging_query, database=self.repository.DATABASE)
 
             if not staging_success:
                 self.repository.update_status(upload_id, UploadKuduRepository.STATUS_FAILED, updated_by, "Failed to create staging table")
@@ -930,15 +942,13 @@ class UploadService:
             select_parts.append(f"'{processing_date}' as processing_date")
 
             insert_query = f"""
-            INSERT INTO {self.repository.DATABASE}.{target_table}
-            ({', '.join([f'`{c}`' for c in target_cols])})
+            INSERT INTO TABLE {self.repository.DATABASE}.{target_table}
             SELECT
                 {', '.join(select_parts)}
             FROM {self.repository.DATABASE}.{staging_table}
             """
 
-            from core.repositories.impala_connection import impala_manager
-            insert_success = impala_manager.execute_write(insert_query, database=self.repository.DATABASE)
+            insert_success = hive_manager.execute_write(insert_query, database=self.repository.DATABASE)
 
             if insert_success:
                 # Update upload record
@@ -947,14 +957,26 @@ class UploadService:
                     'target_table_name': target_table,
                 }, updated_by)
 
-                # Get row count
-                row_count = self.repository.get_table_row_count(target_table)
+                # Get row count using Hive connection
+                row_count = 0
+                try:
+                    count_result = hive_manager.execute_query(
+                        f"SELECT COUNT(*) as cnt FROM {self.repository.DATABASE}.{target_table}",
+                        database=self.repository.DATABASE
+                    )
+                    if count_result:
+                        row_count = count_result[0].get('cnt', 0)
+                except Exception as e:
+                    logger.warning(f"Could not get row count: {e}")
 
-                # Clean up staging table
-                self.repository.drop_external_table(staging_table)
-
-                # Refresh target table metadata
-                impala_manager.execute_write(f"INVALIDATE METADATA {self.repository.DATABASE}.{target_table}", database=self.repository.DATABASE)
+                # Clean up staging table using Hive
+                try:
+                    hive_manager.execute_write(
+                        f"DROP TABLE IF EXISTS {self.repository.DATABASE}.{staging_table}",
+                        database=self.repository.DATABASE
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not drop staging table: {e}")
 
                 return True, f"Successfully ingested {row_count} rows to {target_table} with processing_date={processing_date}"
             else:
