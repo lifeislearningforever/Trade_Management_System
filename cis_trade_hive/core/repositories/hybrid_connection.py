@@ -597,58 +597,107 @@ class HiveConnectionHandler(IConnectionReader, IConnectionWriter, IConnectionPoo
             if pooled:
                 self.return_connection(pooled)
 
+    # YARN queue for Hive queries - use EOQ_QUEUE for better performance
+    YARN_QUEUE = 'EOQ_QUEUE'
+
     def execute_query(self, query: str, params: Optional[List] = None,
                       database: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Execute a read query via Hive."""
+        """Execute a read query via Hive with Tez engine."""
         if not self._hive_available:
             logger.warning("Cannot execute query: Hive not available")
             return []
 
+        pooled = None
+        cursor = None
         try:
-            with self.get_cursor(database) as cursor:
-                if cursor is None:
-                    return []
-
-                if params:
-                    cursor.execute(query, params)
-                else:
-                    cursor.execute(query)
-
-                if cursor.description:
-                    columns = [desc[0].split('.')[-1] for desc in cursor.description]
-                    rows = cursor.fetchall()
-                    return [dict(zip(columns, row)) for row in rows]
+            pooled = self.get_connection(database)
+            if pooled is None:
                 return []
+
+            cursor = pooled.connection.cursor()
+
+            # Set Tez execution engine and YARN queue for performance
+            cursor.execute("SET hive.execution.engine=tez")
+            cursor.execute(f"SET tez.queue.name={self.YARN_QUEUE}")
+            cursor.execute(f"SET mapreduce.job.queuename={self.YARN_QUEUE}")
+
+            if params:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
+
+            if cursor.description:
+                columns = [desc[0].split('.')[-1] for desc in cursor.description]
+                rows = cursor.fetchall()
+                return [dict(zip(columns, row)) for row in rows]
+            return []
 
         except Exception as e:
             logger.error(f"Hive query failed: {e}")
             logger.error(f"Query: {query[:200]}...")
             return []
+        finally:
+            if cursor:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+            if pooled:
+                self.return_connection(pooled)
 
     def execute_write(self, query: str, params: Optional[List] = None,
                       database: Optional[str] = None) -> bool:
-        """Execute a write query via Hive (for external tables)."""
+        """Execute a write query via Hive (for external tables).
+
+        Uses Tez execution engine and EOQ_QUEUE for optimal performance.
+        """
         if not self._hive_available:
             logger.warning("Cannot execute write: Hive not available")
             return False
 
+        pooled = None
+        cursor = None
         try:
-            with self.get_cursor(database) as cursor:
-                if cursor is None:
-                    return False
+            pooled = self.get_connection(database)
+            if pooled is None:
+                return False
 
-                if params:
-                    cursor.execute(query, params)
-                else:
-                    cursor.execute(query)
+            cursor = pooled.connection.cursor()
 
-                logger.debug("Hive write executed successfully")
-                return True
+            # Set Tez execution engine and YARN queue for performance
+            cursor.execute("SET hive.execution.engine=tez")
+            cursor.execute(f"SET tez.queue.name={self.YARN_QUEUE}")
+            cursor.execute(f"SET mapreduce.job.queuename={self.YARN_QUEUE}")
+
+            # Additional Tez optimizations
+            cursor.execute("SET hive.tez.container.size=4096")
+            cursor.execute("SET hive.tez.java.opts=-Xmx3276m")
+            cursor.execute("SET hive.auto.convert.join=true")
+            cursor.execute("SET hive.vectorized.execution.enabled=true")
+            cursor.execute("SET hive.vectorized.execution.reduce.enabled=true")
+
+            logger.info(f"Executing Hive write with Tez engine on {self.YARN_QUEUE} queue")
+
+            if params:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
+
+            logger.info("Hive write executed successfully")
+            return True
 
         except Exception as e:
             logger.error(f"Hive write failed: {e}")
             logger.error(f"Query: {query[:200]}...")
             return False
+        finally:
+            if cursor:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+            if pooled:
+                self.return_connection(pooled)
 
     def test_connection(self) -> bool:
         """Test if Hive connection is available."""
