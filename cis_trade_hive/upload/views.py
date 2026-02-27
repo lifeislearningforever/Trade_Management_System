@@ -333,8 +333,13 @@ def upload_preview(request, upload_id: str):
             sample_data = upload.get('sample_data_json')
 
     # Check for datasource configuration
-    file_name = upload.get('file_name', '')
-    datasource_config = upload_service.get_datasource_config(file_name)
+    # First check if stored in session (from metadata-driven upload)
+    datasource_config = upload.get('datasource_config') if is_session_upload else None
+
+    # If not in session, look up by filename
+    if not datasource_config:
+        file_name = upload.get('file_name', '')
+        datasource_config = upload_service.get_datasource_config(file_name)
 
     # Get processing date from HDFS
     processing_date = None

@@ -74,8 +74,8 @@ class UploadKuduRepository:
         return str(val)
 
     @staticmethod
-    def to_decimal(val: Any, default: float = 0) -> str:
-        """Convert value to decimal string for SQL (no quotes)."""
+    def to_bigint(val: Any, default: int = 0) -> str:
+        """Convert value to BIGINT string for SQL (no quotes)."""
         if val is None or val == '':
             return str(default)
         try:
@@ -83,8 +83,23 @@ class UploadKuduRepository:
                 val = val.strip()
                 if val == '':
                     return str(default)
-                return str(float(val))
-            return str(float(val))
+                return str(int(float(val)))
+            return str(int(val))
+        except (ValueError, TypeError):
+            return str(default)
+
+    @staticmethod
+    def to_int(val: Any, default: int = 0) -> str:
+        """Convert value to INT string for SQL (no quotes)."""
+        if val is None or val == '':
+            return str(default)
+        try:
+            if isinstance(val, str):
+                val = val.strip()
+                if val == '':
+                    return str(default)
+                return str(int(float(val)))
+            return str(int(val))
         except (ValueError, TypeError):
             return str(default)
 
@@ -220,11 +235,11 @@ class UploadKuduRepository:
                 self.escape_value(upload_data.get('file_name')),
                 self.escape_value(upload_data.get('original_file_name', upload_data.get('file_name'))),
                 self.escape_value(upload_data.get('file_path', '')),
-                self.to_decimal(upload_data.get('file_size', 0)),
+                self.to_bigint(upload_data.get('file_size', 0)),
                 self.escape_value(upload_data.get('file_type', '')),
                 self.escape_value(upload_data.get('mime_type', '')),
-                self.to_decimal(upload_data.get('row_count', 0)),
-                self.to_decimal(upload_data.get('column_count', 0)),
+                self.to_int(upload_data.get('row_count', 0)),
+                self.to_int(upload_data.get('column_count', 0)),
                 self.escape_value(upload_data.get('delimiter', ',')),
                 str(upload_data.get('has_header', True)).lower(),
                 self.escape_value(upload_data.get('encoding', 'UTF-8')),
@@ -278,8 +293,11 @@ class UploadKuduRepository:
             # Reserved keyword fields that need backticks
             reserved_keyword_fields = ['encoding']
 
-            # Numeric fields
-            numeric_fields = ['file_size', 'row_count', 'column_count']
+            # Numeric fields (BIGINT)
+            bigint_fields = ['file_size']
+
+            # Numeric fields (INT)
+            int_fields = ['row_count', 'column_count']
 
             # Boolean fields
             boolean_fields = ['has_header', 'is_deleted']
@@ -295,9 +313,13 @@ class UploadKuduRepository:
                 if field in update_data:
                     set_clauses.append(f"`{field}` = {self.escape_value(update_data[field])}")
 
-            for field in numeric_fields:
+            for field in bigint_fields:
                 if field in update_data:
-                    set_clauses.append(f"`{field}` = {self.to_decimal(update_data[field])}")
+                    set_clauses.append(f"`{field}` = {self.to_bigint(update_data[field])}")
+
+            for field in int_fields:
+                if field in update_data:
+                    set_clauses.append(f"`{field}` = {self.to_int(update_data[field])}")
 
             for field in boolean_fields:
                 if field in update_data:

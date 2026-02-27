@@ -71,8 +71,47 @@
     </div>
 
     <div class="row">
-        <!-- Schema Editor -->
+        <!-- Schema Display -->
         <div class="col-lg-8">
+            {% if datasource_config %}
+            <!-- Metadata-driven mode: Read-only schema -->
+            <div class="card">
+                <div class="card-header bg-success text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-check-circle"></i> Schema (from Datasource Config)
+                    </h5>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0" id="schemaTable">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width: 50px;">#</th>
+                                    <th>Column Name</th>
+                                    <th style="width: 180px;">Data Type</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for column in schema %}
+                                <tr>
+                                    <td class="text-muted">{{ forloop.counter }}</td>
+                                    <td><code>{{ column.name }}</code></td>
+                                    <td><span class="badge bg-info">{{ column.type|default:"STRING" }}</span></td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="3" class="text-center text-muted py-4">
+                                        No schema defined in datasource config
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% else %}
+            <!-- Standard mode: Editable schema -->
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="card-title mb-0">
@@ -106,7 +145,7 @@
                                         <select class="form-select form-select-sm column-type">
                                             {% for hive_type in hive_types %}
                                             <option value="{{ hive_type }}"
-                                                    {% if column.hive_type == hive_type %}selected{% endif %}>
+                                                    {% if column.type == hive_type %}selected{% endif %}>
                                                 {{ hive_type }}
                                             </option>
                                             {% endfor %}
@@ -140,6 +179,7 @@
                     </div>
                 </div>
             </div>
+            {% endif %}
 
             <!-- Data Preview -->
             <div class="card mt-4">
@@ -150,6 +190,7 @@
                     </h5>
                 </div>
                 <div class="card-body p-0">
+                    {% if sample_data %}
                     <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
                         <table class="table table-sm table-striped mb-0">
                             <thead class="table-light sticky-top">
@@ -170,16 +211,15 @@
                                     </td>
                                     {% endfor %}
                                 </tr>
-                                {% empty %}
-                                <tr>
-                                    <td colspan="{{ schema|length|add:1 }}" class="text-center text-muted py-4">
-                                        No data to preview
-                                    </td>
-                                </tr>
                                 {% endfor %}
                             </tbody>
                         </table>
                     </div>
+                    {% else %}
+                    <div class="text-center text-muted py-4">
+                        <i class="bi bi-exclamation-circle"></i> No data to preview
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -187,11 +227,11 @@
         <!-- Ingestion Settings -->
         <div class="col-lg-4">
             {% if datasource_config %}
-            <!-- Datasource Configuration Found -->
-            <div class="card mb-3 border-success">
+            <!-- Metadata-driven mode: Only show datasource ingestion option -->
+            <div class="card border-success">
                 <div class="card-header bg-success text-white">
                     <h5 class="card-title mb-0">
-                        <i class="bi bi-check-circle"></i> Datasource Configuration Found
+                        <i class="bi bi-check-circle"></i> Metadata-Driven Ingestion
                     </h5>
                 </div>
                 <div class="card-body">
@@ -200,23 +240,29 @@
                         <div class="fw-bold">{{ datasource_config.source_id }}</div>
                     </div>
                     <div class="mb-2">
-                        <small class="text-muted">Target Table</small>
-                        <div><code>gmp_cis.{{ datasource_config.target_table }}</code></div>
+                        <small class="text-muted">Target Table (Pre-defined)</small>
+                        <div><code class="fs-6">gmp_cis.{{ datasource_config.target_table }}</code></div>
+                    </div>
+                    <div class="mb-2">
+                        <small class="text-muted">Separator</small>
+                        <div><code>{{ datasource_config.separator|default:"|" }}</code></div>
                     </div>
                     <div class="mb-2">
                         <small class="text-muted">Processing Date (from HDFS)</small>
-                        <div class="fw-bold text-primary">{{ processing_date }}</div>
+                        <div class="fw-bold text-primary">{{ processing_date|default:"Not available" }}</div>
                     </div>
                     <div class="mb-3">
-                        <small class="text-muted">Additional Columns</small>
-                        <div class="small">
-                            <span class="badge bg-secondary me-1">src_id</span>
-                            <span class="badge bg-secondary me-1">src_system=cis</span>
-                            <span class="badge bg-secondary me-1">data_cat=sta</span>
-                            <span class="badge bg-secondary me-1">data_frq=adhoc</span>
-                            <span class="badge bg-secondary">processing_date</span>
+                        <small class="text-muted">Additional Columns (auto-added)</small>
+                        <div class="small mt-1">
+                            <span class="badge bg-secondary me-1 mb-1">src_id</span>
+                            <span class="badge bg-secondary me-1 mb-1">src_system=cis</span>
+                            <span class="badge bg-secondary me-1 mb-1">data_cat=sta</span>
+                            <span class="badge bg-secondary me-1 mb-1">data_frq=adhoc</span>
+                            <span class="badge bg-primary mb-1">processing_date</span>
                         </div>
                     </div>
+
+                    <hr>
 
                     <form method="post" action="{% url 'upload:ingest' upload.upload_id %}" id="datasourceIngestForm">
                         {% csrf_token %}
@@ -224,9 +270,12 @@
                         <input type="hidden" name="processing_date" value="{{ processing_date }}">
 
                         {% if can_ingest %}
-                        <button type="submit" class="btn btn-success w-100">
-                            <i class="bi bi-database-add"></i> Ingest to {{ datasource_config.target_table }}
+                        <button type="submit" class="btn btn-success btn-lg w-100">
+                            <i class="bi bi-database-add"></i> Ingest to Target Table
                         </button>
+                        <small class="text-muted d-block text-center mt-2">
+                            Data will be inserted into <code>{{ datasource_config.target_table }}</code>
+                        </small>
                         {% else %}
                         <button type="button" class="btn btn-secondary w-100" disabled>
                             Cannot Ingest ({{ upload.status }})
@@ -236,18 +285,35 @@
                 </div>
             </div>
 
-            <div class="text-center text-muted my-3">
-                <span class="badge bg-light text-dark">OR</span>
+            <!-- Info card for metadata-driven mode -->
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-info-circle"></i> About Metadata-Driven Ingestion
+                    </h5>
+                </div>
+                <div class="card-body small">
+                    <p class="mb-2">
+                        This file matches a <strong>datasource configuration</strong> in the system.
+                    </p>
+                    <ul class="mb-0 ps-3">
+                        <li>Schema is predefined - no editing needed</li>
+                        <li>Target table already exists</li>
+                        <li>Metadata columns will be auto-added</li>
+                        <li>Processing date read from HDFS</li>
+                    </ul>
+                </div>
             </div>
-            {% endif %}
 
+            {% else %}
+            <!-- Standard mode: Show custom ingestion options -->
             <form id="ingestForm" method="post" action="{% url 'upload:ingest' upload.upload_id %}">
                 {% csrf_token %}
 
                 <div class="card">
                     <div class="card-header">
                         <h5 class="card-title mb-0">
-                            <i class="bi bi-gear"></i> {% if datasource_config %}Custom Ingestion{% else %}Ingestion Settings{% endif %}
+                            <i class="bi bi-gear"></i> Ingestion Settings
                         </h5>
                     </div>
                     <div class="card-body">
@@ -295,8 +361,8 @@
                         <!-- Actions -->
                         <div class="d-grid gap-2">
                             {% if can_ingest %}
-                            <button type="submit" class="btn btn-{% if datasource_config %}outline-{% endif %}success" id="ingestBtn">
-                                <i class="bi bi-database-add"></i> Create New External Table
+                            <button type="submit" class="btn btn-success" id="ingestBtn">
+                                <i class="bi bi-database-add"></i> Create External Table
                             </button>
                             {% else %}
                             <button type="button" class="btn btn-secondary" disabled>
@@ -315,14 +381,10 @@
                 <div class="card mt-3">
                     <div class="card-header">
                         <h5 class="card-title mb-0">
-                            <i class="bi bi-info-circle"></i> {% if datasource_config %}Ingestion Modes{% else %}Hive External Table{% endif %}
+                            <i class="bi bi-info-circle"></i> Hive External Table
                         </h5>
                     </div>
                     <div class="card-body small">
-                        {% if datasource_config %}
-                        <p class="mb-2"><strong>Recommended:</strong> Use datasource config to ingest into predefined table with additional metadata columns.</p>
-                        <p class="mb-2"><strong>Custom:</strong> Create a new external table with your own schema.</p>
-                        {% else %}
                         <p class="mb-2">
                             An <strong>external table</strong> will be created in Hive pointing to your uploaded data file.
                         </p>
@@ -332,10 +394,10 @@
                             <li>Schema can be altered later</li>
                             <li>Supports Impala queries</li>
                         </ul>
-                        {% endif %}
                     </div>
                 </div>
             </form>
+            {% endif %}
         </div>
     </div>
 </div>
