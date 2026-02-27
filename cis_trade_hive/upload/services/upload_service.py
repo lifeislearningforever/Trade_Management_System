@@ -288,22 +288,35 @@ class FileValidationService:
         # If most look like names, consider it a header
         return name_like >= len(first_row) * 0.7
 
-    def _infer_column_types(self, headers: List[str], sample_rows: List[List[str]]) -> List[Dict[str, str]]:
-        """Infer Hive column types from sample data."""
+    def _infer_column_types(self, headers: List[str], sample_rows: List[List[str]],
+                              force_string: bool = False) -> List[Dict[str, str]]:
+        """
+        Infer Hive column types from sample data.
+
+        Args:
+            headers: List of column header names
+            sample_rows: Sample data rows for type inference
+            force_string: If True, all columns will be STRING type (for external tables)
+
+        Returns:
+            List of column definitions with name, type, nullable
+        """
         columns = []
 
         for i, header in enumerate(headers):
             col_name = self._clean_column_name(header)
             col_type = 'STRING'  # Default type
 
-            # Collect non-empty values from this column
-            values = []
-            for row in sample_rows:
-                if i < len(row) and row[i].strip():
-                    values.append(row[i].strip())
+            # Only infer type if not forcing STRING
+            if not force_string:
+                # Collect non-empty values from this column
+                values = []
+                for row in sample_rows:
+                    if i < len(row) and row[i].strip():
+                        values.append(row[i].strip())
 
-            if values:
-                col_type = self._infer_type(values)
+                if values:
+                    col_type = self._infer_type(values)
 
             columns.append({
                 'name': col_name,
@@ -802,15 +815,18 @@ class UploadService:
                 result.errors.append("No data rows found")
                 return result
 
-            # Use intake_columns from datasource config
+            # Use intake_columns from datasource config (all STRING)
             if intake_columns:
                 result.columns = intake_columns
                 result.column_count = len(intake_columns)
             else:
-                # Fall back to detection
+                # Fall back to detection - but force STRING for external tables
                 header_row = rows[0] if has_header else [f'col_{i+1}' for i in range(len(rows[0]))]
                 data_rows = rows[1:] if has_header else rows
-                result.columns = self.validation_service._infer_column_types(header_row, data_rows[:100])
+                # Force STRING type for external table ingestion
+                result.columns = self.validation_service._infer_column_types(
+                    header_row, data_rows[:100], force_string=True
+                )
                 result.column_count = len(result.columns)
 
             # Count rows
@@ -889,8 +905,8 @@ class UploadService:
             has_header = str(datasource_config.get('header', 'true')).lower() == 'true'
             skip_lines = int(datasource_config.get('no_of_skip_line', 0) or 0)
 
-            # Use Hive connection for external table operations
-            from hive_poc.repositories.hive_connection import hive_manager
+            # Use Hybrid connection - Hive for external table operations
+            from core.repositories.hybrid_connection import hybrid_manager
 
             # Create staging table name
             staging_table = f"stg_upload_{upload_id.replace('-', '_').lower()}"
@@ -920,7 +936,8 @@ class UploadService:
             TBLPROPERTIES ('skip.header.line.count'='{'1' if has_header else '0'}')
             """
 
-            staging_success = hive_manager.execute_write(create_staging_query, database=self.repository.DATABASE)
+            # Use Hive connection for external table DDL
+            staging_success = hybrid_manager.hive_write(create_staging_query, database=self.repository.DATABASE)
 
             if not staging_success:
                 self.repository.update_status(upload_id, UploadKuduRepository.STATUS_FAILED, updated_by, "Failed to create staging table")
@@ -948,10 +965,11 @@ class UploadService:
             FROM {self.repository.DATABASE}.{staging_table}
             """
 
-            insert_success = hive_manager.execute_write(insert_query, database=self.repository.DATABASE)
+            # Use Hive connection for INSERT into external table
+            insert_success = hybrid_manager.hive_write(insert_query, database=self.repository.DATABASE)
 
             if insert_success:
-                # Update upload record
+                # Update upload record (via Kudu/Impala)
                 self.repository.update_upload(upload_id, {
                     'status': UploadKuduRepository.STATUS_COMPLETED,
                     'target_table_name': target_table,
@@ -960,7 +978,7 @@ class UploadService:
                 # Get row count using Hive connection
                 row_count = 0
                 try:
-                    count_result = hive_manager.execute_query(
+                    count_result = hybrid_manager.hive_read(
                         f"SELECT COUNT(*) as cnt FROM {self.repository.DATABASE}.{target_table}",
                         database=self.repository.DATABASE
                     )
@@ -971,7 +989,7 @@ class UploadService:
 
                 # Clean up staging table using Hive
                 try:
-                    hive_manager.execute_write(
+                    hybrid_manager.hive_write(
                         f"DROP TABLE IF EXISTS {self.repository.DATABASE}.{staging_table}",
                         database=self.repository.DATABASE
                     )
