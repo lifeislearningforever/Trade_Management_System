@@ -914,12 +914,38 @@ class UploadService:
             # Get columns from datasource config
             intake_columns = datasource_repository.parse_intake_columns(datasource_config)
             if not intake_columns:
-                return False, "No columns defined in datasource configuration"
+                # Try to get columns from target table
+                target_table_info = datasource_repository.get_table_info(target_table, self.repository.DATABASE)
+                if target_table_info.get('columns'):
+                    # Filter out the additional columns we add
+                    additional_cols = {'src_id', 'src_system', 'data_cat', 'data_frq', 'processing_date'}
+                    intake_columns = [
+                        {'name': col['name'], 'type': 'STRING'}
+                        for col in target_table_info['columns']
+                        if col['name'].lower() not in additional_cols
+                    ]
 
-            # Create staging external table using Hive
+            if not intake_columns:
+                return False, "No columns defined in datasource configuration or target table"
+
+            # Get HDFS path - from upload or from target table location
             hdfs_path = upload.get('hdfs_path', '')
+
             if not hdfs_path:
-                return False, "No HDFS path available for uploaded file"
+                # Try to get location from target table and use a staging subdirectory
+                target_table_info = datasource_repository.get_table_info(target_table, self.repository.DATABASE)
+                target_location = target_table_info.get('location', '')
+
+                if target_location:
+                    # Use a staging subdirectory under the target table's parent location
+                    # e.g., /user/hive/warehouse/gmp_cis.db/ -> /user/hive/warehouse/gmp_cis.db/staging/
+                    import os
+                    parent_dir = os.path.dirname(target_location.rstrip('/'))
+                    hdfs_path = f"{parent_dir}/staging/{staging_table}"
+                    logger.info(f"Using staging HDFS path: {hdfs_path}")
+
+            if not hdfs_path:
+                return False, "No HDFS path available. Please upload file to HDFS first."
 
             # Build column definitions (all STRING)
             col_defs = ', '.join([f"`{col['name']}` STRING" for col in intake_columns])

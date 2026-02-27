@@ -245,6 +245,120 @@ class DatasourceRepository:
             logger.error(f"Error getting target table columns: {str(e)}")
             return []
 
+    def get_table_hdfs_location(self, table_name: str, database: str = None) -> Optional[str]:
+        """
+        Get HDFS location of a Hive external table using DESCRIBE FORMATTED.
+
+        Args:
+            table_name: Name of the table
+            database: Database name (default: gmp_cis)
+
+        Returns:
+            HDFS location path or None if not found
+        """
+        try:
+            db = database or self.DATABASE
+            query = f"DESCRIBE FORMATTED {db}.{table_name}"
+            results = impala_manager.execute_query(query, database=db)
+
+            if results:
+                for row in results:
+                    # Look for Location row - format varies by Hive version
+                    # Could be: {'name': 'Location:', 'type': 'hdfs://...'}
+                    # Or: {'col_name': 'Location:', 'data_type': '', 'comment': 'hdfs://...'}
+                    row_str = str(row).lower()
+                    if 'location' in row_str:
+                        # Extract HDFS path from the row
+                        for key, value in row.items():
+                            if value and isinstance(value, str):
+                                value = value.strip()
+                                if value.startswith('hdfs://') or value.startswith('/'):
+                                    logger.info(f"Found HDFS location for {table_name}: {value}")
+                                    return value
+
+            logger.warning(f"Could not find HDFS location for table {table_name}")
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting table HDFS location: {str(e)}")
+            return None
+
+    def get_table_info(self, table_name: str, database: str = None) -> Dict[str, Any]:
+        """
+        Get comprehensive table information including columns and HDFS location.
+
+        Args:
+            table_name: Name of the table
+            database: Database name (default: gmp_cis)
+
+        Returns:
+            Dict with 'columns', 'location', 'table_type' etc.
+        """
+        try:
+            db = database or self.DATABASE
+            info = {
+                'table_name': table_name,
+                'database': db,
+                'columns': [],
+                'location': None,
+                'table_type': None,
+                'input_format': None,
+                'output_format': None,
+                'serde': None,
+            }
+
+            # Get DESCRIBE FORMATTED output
+            query = f"DESCRIBE FORMATTED {db}.{table_name}"
+            results = impala_manager.execute_query(query, database=db)
+
+            if not results:
+                return info
+
+            # Parse the formatted output
+            in_columns_section = True
+            for row in results:
+                # Get values - handle different column names
+                col1 = row.get('name', row.get('col_name', '')).strip() if row.get('name', row.get('col_name')) else ''
+                col2 = row.get('type', row.get('data_type', '')).strip() if row.get('type', row.get('data_type')) else ''
+                col3 = row.get('comment', '').strip() if row.get('comment') else ''
+
+                # Empty row or separator
+                if not col1 or col1.startswith('#'):
+                    if '# Detailed Table Information' in col1 or '# Storage Information' in col1:
+                        in_columns_section = False
+                    continue
+
+                # Parse columns (before detailed info section)
+                if in_columns_section and col1 and not col1.startswith('#'):
+                    info['columns'].append({
+                        'name': col1,
+                        'type': col2.upper() if col2 else 'STRING'
+                    })
+                    continue
+
+                # Parse table properties
+                col1_lower = col1.lower()
+                if 'location' in col1_lower:
+                    # Location value could be in col2 or col3
+                    loc = col2 if col2 and (col2.startswith('hdfs://') or col2.startswith('/')) else col3
+                    if loc and (loc.startswith('hdfs://') or loc.startswith('/')):
+                        info['location'] = loc
+                elif 'table type' in col1_lower:
+                    info['table_type'] = col2 or col3
+                elif 'inputformat' in col1_lower:
+                    info['input_format'] = col2 or col3
+                elif 'outputformat' in col1_lower:
+                    info['output_format'] = col2 or col3
+                elif 'serde' in col1_lower and 'library' in col1_lower:
+                    info['serde'] = col2 or col3
+
+            logger.info(f"Table info for {table_name}: location={info['location']}, type={info['table_type']}")
+            return info
+
+        except Exception as e:
+            logger.error(f"Error getting table info: {str(e)}")
+            return {'table_name': table_name, 'database': database or self.DATABASE, 'columns': [], 'location': None}
+
     def build_insert_query_with_defaults(
         self,
         datasource: Dict[str, Any],
