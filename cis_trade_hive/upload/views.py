@@ -354,6 +354,15 @@ def upload_preview(request, upload_id: str):
         'DATE', 'TIMESTAMP'
     ]
 
+    # Determine if ingestion is allowed
+    upload_status = upload.get('status', '')
+    can_ingest = upload_status in [
+        'VALIDATED',
+        UploadKuduRepository.STATUS_VALIDATED,
+        UploadKuduRepository.STATUS_VALIDATION_FAILED,  # Allow retry
+        'VALIDATION_FAILED',
+    ]
+
     context = {
         'upload': upload,
         'schema': schema,
@@ -361,10 +370,8 @@ def upload_preview(request, upload_id: str):
         'hive_types': hive_types,
         'datasource_config': datasource_config,
         'processing_date': processing_date,
-        'can_ingest': upload.get('status') in [
-            UploadKuduRepository.STATUS_VALIDATED,
-            UploadKuduRepository.STATUS_VALIDATION_FAILED  # Allow retry
-        ],
+        'can_ingest': can_ingest,
+        'is_session_upload': is_session_upload,
     }
 
     return render(request, 'upload/upload_preview.html', context)

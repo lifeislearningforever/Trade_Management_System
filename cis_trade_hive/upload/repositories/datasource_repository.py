@@ -168,6 +168,9 @@ class DatasourceRepository:
         - A MAP<STRING, STRING> with column name -> type mapping
         - A JSON string
 
+        Note: All columns are returned as STRING type since Hive external tables
+        typically use STRING for all columns.
+
         Args:
             datasource: Datasource configuration dict
 
@@ -178,11 +181,11 @@ class DatasourceRepository:
         intake_columns = datasource.get('intake_columns', '')
 
         if isinstance(intake_columns, dict):
-            # MAP type from Hive - column name -> type mapping
-            for col_name, col_type in intake_columns.items():
+            # MAP type from Hive - extract column names only, all STRING type
+            for col_name in intake_columns.keys():
                 columns.append({
                     'name': col_name.strip(),
-                    'type': col_type.upper() if col_type else 'STRING'
+                    'type': 'STRING'  # All columns are STRING in external table
                 })
         elif isinstance(intake_columns, str) and intake_columns:
             # First try to parse as JSON
@@ -190,10 +193,10 @@ class DatasourceRepository:
                 import json
                 col_map = json.loads(intake_columns)
                 if isinstance(col_map, dict):
-                    for col_name, col_type in col_map.items():
+                    for col_name in col_map.keys():
                         columns.append({
                             'name': col_name.strip(),
-                            'type': col_type.upper() if col_type else 'STRING'
+                            'type': 'STRING'  # All columns are STRING in external table
                         })
                     return columns
             except (json.JSONDecodeError, TypeError):
