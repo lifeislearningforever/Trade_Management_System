@@ -107,6 +107,10 @@ def upload_create(request):
     Upload new file with validation.
     GET: Show upload form
     POST: Process file upload and validate
+
+    Supports two modes:
+    1. Standard upload - auto-detect schema
+    2. Metadata-driven upload - use cis_datasource_mng config
     """
     user_info = get_user_info(request)
 
@@ -120,56 +124,110 @@ def upload_create(request):
             uploaded_file = request.FILES['file']
             file_name = uploaded_file.name
             description = request.POST.get('description', '').strip()
+            use_datasource_config = request.POST.get('use_datasource_config', '') == 'true'
 
-            # Validate and create upload record
-            upload_id, validation_result = upload_service.validate_and_create_upload(
-                file_obj=uploaded_file,
-                file_name=file_name,
-                description=description,
-                created_by=user_info['username']
-            )
+            # Check if datasource config exists for this file
+            datasource_config = upload_service.get_datasource_config(file_name)
 
-            if upload_id:
-                # Log audit
-                audit_log_kudu_repository.log_action(
-                    user_id=user_info['user_id'],
-                    username=user_info['username'],
-                    user_email=user_info['user_email'],
-                    action_type='CREATE',
-                    entity_type='FILE_UPLOAD',
-                    entity_id=upload_id,
-                    entity_name=file_name,
-                    action_description=f"Uploaded file: {file_name} ({validation_result.row_count} rows, {validation_result.column_count} columns)",
-                    new_value=json.dumps({
+            if datasource_config and use_datasource_config:
+                # Use metadata-driven validation
+                validation_result = upload_service.validate_with_datasource_config(
+                    file_obj=uploaded_file,
+                    file_name=file_name,
+                    datasource_config=datasource_config
+                )
+
+                if validation_result.is_valid:
+                    # Create upload record with datasource config
+                    upload_data = {
                         'file_name': file_name,
+                        'original_file_name': file_name,
                         'file_size': validation_result.file_size,
                         'file_type': validation_result.file_type,
                         'row_count': validation_result.row_count,
-                        'column_count': validation_result.column_count
-                    }),
-                    request_method='POST',
-                    request_path=request.path,
-                    ip_address=request.META.get('REMOTE_ADDR'),
-                    user_agent=request.META.get('HTTP_USER_AGENT', ''),
-                    status='SUCCESS'
+                        'column_count': validation_result.column_count,
+                        'delimiter': validation_result.delimiter,
+                        'has_header': validation_result.has_header,
+                        'encoding': validation_result.encoding,
+                        'description': description,
+                        'schema': validation_result.columns,
+                        'sample_data': validation_result.sample_data,
+                        'target_table_name': datasource_config.get('target_table', ''),
+                    }
+
+                    from .repositories.upload_kudu_repository import upload_kudu_repository
+                    upload_id = upload_kudu_repository.create_upload(upload_data, user_info['username'])
+
+                    if upload_id:
+                        # Store datasource_id for later use
+                        upload_kudu_repository.update_upload(upload_id, {
+                            'status': 'VALIDATED',
+                            'description': f"{description}\n[Datasource: {datasource_config.get('source_id', '')}]"
+                        }, user_info['username'])
+
+                        messages.success(request, f'File "{file_name}" validated using datasource config. Target: {datasource_config.get("target_table", "")}')
+                        return redirect('upload:preview', upload_id=upload_id)
+                else:
+                    for error in validation_result.errors:
+                        messages.error(request, error)
+            else:
+                # Standard upload - auto-detect schema
+                upload_id, validation_result = upload_service.validate_and_create_upload(
+                    file_obj=uploaded_file,
+                    file_name=file_name,
+                    description=description,
+                    created_by=user_info['username']
                 )
 
-                messages.success(request, f'File "{file_name}" uploaded and validated successfully!')
-                return redirect('upload:preview', upload_id=upload_id)
-            else:
-                # Validation failed
-                for error in validation_result.errors:
-                    messages.error(request, error)
-                for warning in validation_result.warnings:
-                    messages.warning(request, warning)
+                if upload_id:
+                    # Log audit
+                    audit_log_kudu_repository.log_action(
+                        user_id=user_info['user_id'],
+                        username=user_info['username'],
+                        user_email=user_info['user_email'],
+                        action_type='CREATE',
+                        entity_type='FILE_UPLOAD',
+                        entity_id=upload_id,
+                        entity_name=file_name,
+                        action_description=f"Uploaded file: {file_name} ({validation_result.row_count} rows, {validation_result.column_count} columns)",
+                        new_value=json.dumps({
+                            'file_name': file_name,
+                            'file_size': validation_result.file_size,
+                            'file_type': validation_result.file_type,
+                            'row_count': validation_result.row_count,
+                            'column_count': validation_result.column_count
+                        }),
+                        request_method='POST',
+                        request_path=request.path,
+                        ip_address=request.META.get('REMOTE_ADDR'),
+                        user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                        status='SUCCESS'
+                    )
+
+                    # Check if datasource config exists (but wasn't used)
+                    if datasource_config:
+                        messages.info(request, f'Datasource configuration found for "{file_name}". You can use metadata-driven ingestion.')
+
+                    messages.success(request, f'File "{file_name}" uploaded and validated successfully!')
+                    return redirect('upload:preview', upload_id=upload_id)
+                else:
+                    # Validation failed
+                    for error in validation_result.errors:
+                        messages.error(request, error)
+                    for warning in validation_result.warnings:
+                        messages.warning(request, warning)
 
         except Exception as e:
             messages.error(request, f'Upload error: {str(e)}')
+
+    # Get available datasource configs for dropdown
+    datasource_configs = upload_service.get_all_datasource_configs()
 
     context = {
         'supported_formats': ', '.join(FileValidationService.SUPPORTED_EXTENSIONS.keys()),
         'max_file_size': FileValidationService.MAX_FILE_SIZE,
         'max_file_size_mb': FileValidationService.MAX_FILE_SIZE // (1024 * 1024),
+        'datasource_configs': datasource_configs,
     }
 
     return render(request, 'upload/upload_form.html', context)
@@ -206,6 +264,16 @@ def upload_preview(request, upload_id: str):
     except json.JSONDecodeError:
         sample_data = []
 
+    # Check for datasource configuration
+    file_name = upload.get('file_name', '')
+    datasource_config = upload_service.get_datasource_config(file_name)
+
+    # Get processing date from HDFS
+    processing_date = None
+    if datasource_config:
+        from .repositories.datasource_repository import datasource_repository
+        processing_date = datasource_repository.get_processing_date()
+
     # Available Hive types for schema editing
     hive_types = [
         'STRING', 'BIGINT', 'INT', 'SMALLINT', 'TINYINT',
@@ -218,6 +286,8 @@ def upload_preview(request, upload_id: str):
         'schema': schema,
         'sample_data': sample_data[:20],  # Limit preview rows
         'hive_types': hive_types,
+        'datasource_config': datasource_config,
+        'processing_date': processing_date,
         'can_ingest': upload.get('status') in [
             UploadKuduRepository.STATUS_VALIDATED,
             UploadKuduRepository.STATUS_VALIDATION_FAILED  # Allow retry
@@ -269,6 +339,12 @@ def upload_update_schema(request, upload_id: str):
 def upload_ingest(request, upload_id: str):
     """
     Ingest uploaded file to Hive external table.
+
+    Supports two modes:
+    1. Standard ingestion - create new external table
+    2. Metadata-driven ingestion - use cis_datasource_mng config to insert
+       into existing target table with additional columns (src_id, src_system,
+       data_cat, data_frq, processing_date)
     """
     user_info = get_user_info(request)
     upload = upload_service.get_upload_by_id(upload_id)
@@ -278,24 +354,47 @@ def upload_ingest(request, upload_id: str):
         return redirect('upload:list')
 
     try:
-        # Get custom table name if provided
-        table_name = request.POST.get('table_name', '').strip()
+        # Check if metadata-driven ingestion is requested
+        use_datasource_ingestion = request.POST.get('use_datasource_ingestion', '') == 'true'
+        file_name = upload.get('file_name', '')
 
-        # Parse schema from form
-        schema_json = upload.get('schema_json', '[]')
-        columns = json.loads(schema_json) if isinstance(schema_json, str) else schema_json
+        if use_datasource_ingestion:
+            # Metadata-driven ingestion using cis_datasource_mng
+            datasource_config = upload_service.get_datasource_config(file_name)
 
-        # Get HDFS path (in production, file would be copied to HDFS)
-        hdfs_path = upload.get('hdfs_path', '')
+            if not datasource_config:
+                messages.error(request, f'No datasource configuration found for "{file_name}"')
+                return redirect('upload:preview', upload_id=upload_id)
 
-        # Perform ingestion
-        success, message = upload_service.ingest_to_hive(
-            upload_id=upload_id,
-            table_name=table_name if table_name else None,
-            columns=columns,
-            file_path=hdfs_path,
-            updated_by=user_info['username']
-        )
+            # Get optional processing date override
+            processing_date = request.POST.get('processing_date', '').strip()
+
+            # Perform metadata-driven ingestion
+            success, message = upload_service.ingest_to_target_table(
+                upload_id=upload_id,
+                datasource_config=datasource_config,
+                updated_by=user_info['username'],
+                processing_date=processing_date if processing_date else None
+            )
+        else:
+            # Standard ingestion - create new external table
+            table_name = request.POST.get('table_name', '').strip()
+
+            # Parse schema from form
+            schema_json = upload.get('schema_json', '[]')
+            columns = json.loads(schema_json) if isinstance(schema_json, str) else schema_json
+
+            # Get HDFS path (in production, file would be copied to HDFS)
+            hdfs_path = upload.get('hdfs_path', '')
+
+            # Perform standard ingestion
+            success, message = upload_service.ingest_to_hive(
+                upload_id=upload_id,
+                table_name=table_name if table_name else None,
+                columns=columns,
+                file_path=hdfs_path,
+                updated_by=user_info['username']
+            )
 
         if success:
             # Log audit
@@ -306,7 +405,7 @@ def upload_ingest(request, upload_id: str):
                 action_type='INGEST',
                 entity_type='FILE_UPLOAD',
                 entity_id=upload_id,
-                entity_name=upload.get('file_name', ''),
+                entity_name=file_name,
                 action_description=message,
                 request_method='POST',
                 request_path=request.path,

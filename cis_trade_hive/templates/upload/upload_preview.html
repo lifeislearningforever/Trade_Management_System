@@ -186,13 +186,68 @@
 
         <!-- Ingestion Settings -->
         <div class="col-lg-4">
+            {% if datasource_config %}
+            <!-- Datasource Configuration Found -->
+            <div class="card mb-3 border-success">
+                <div class="card-header bg-success text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-check-circle"></i> Datasource Configuration Found
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-2">
+                        <small class="text-muted">Source ID</small>
+                        <div class="fw-bold">{{ datasource_config.source_id }}</div>
+                    </div>
+                    <div class="mb-2">
+                        <small class="text-muted">Target Table</small>
+                        <div><code>gmp_cis.{{ datasource_config.target_table }}</code></div>
+                    </div>
+                    <div class="mb-2">
+                        <small class="text-muted">Processing Date (from HDFS)</small>
+                        <div class="fw-bold text-primary">{{ processing_date }}</div>
+                    </div>
+                    <div class="mb-3">
+                        <small class="text-muted">Additional Columns</small>
+                        <div class="small">
+                            <span class="badge bg-secondary me-1">src_id</span>
+                            <span class="badge bg-secondary me-1">src_system=cis</span>
+                            <span class="badge bg-secondary me-1">data_cat=sta</span>
+                            <span class="badge bg-secondary me-1">data_frq=adhoc</span>
+                            <span class="badge bg-secondary">processing_date</span>
+                        </div>
+                    </div>
+
+                    <form method="post" action="{% url 'upload:ingest' upload.upload_id %}" id="datasourceIngestForm">
+                        {% csrf_token %}
+                        <input type="hidden" name="use_datasource_ingestion" value="true">
+                        <input type="hidden" name="processing_date" value="{{ processing_date }}">
+
+                        {% if can_ingest %}
+                        <button type="submit" class="btn btn-success w-100">
+                            <i class="bi bi-database-add"></i> Ingest to {{ datasource_config.target_table }}
+                        </button>
+                        {% else %}
+                        <button type="button" class="btn btn-secondary w-100" disabled>
+                            Cannot Ingest ({{ upload.status }})
+                        </button>
+                        {% endif %}
+                    </form>
+                </div>
+            </div>
+
+            <div class="text-center text-muted my-3">
+                <span class="badge bg-light text-dark">OR</span>
+            </div>
+            {% endif %}
+
             <form id="ingestForm" method="post" action="{% url 'upload:ingest' upload.upload_id %}">
                 {% csrf_token %}
 
                 <div class="card">
                     <div class="card-header">
                         <h5 class="card-title mb-0">
-                            <i class="bi bi-gear"></i> Ingestion Settings
+                            <i class="bi bi-gear"></i> {% if datasource_config %}Custom Ingestion{% else %}Ingestion Settings{% endif %}
                         </h5>
                     </div>
                     <div class="card-body">
@@ -240,8 +295,8 @@
                         <!-- Actions -->
                         <div class="d-grid gap-2">
                             {% if can_ingest %}
-                            <button type="submit" class="btn btn-success" id="ingestBtn">
-                                <i class="bi bi-database-add"></i> Create Hive Table & Ingest
+                            <button type="submit" class="btn btn-{% if datasource_config %}outline-{% endif %}success" id="ingestBtn">
+                                <i class="bi bi-database-add"></i> Create New External Table
                             </button>
                             {% else %}
                             <button type="button" class="btn btn-secondary" disabled>
@@ -260,10 +315,14 @@
                 <div class="card mt-3">
                     <div class="card-header">
                         <h5 class="card-title mb-0">
-                            <i class="bi bi-info-circle"></i> Hive External Table
+                            <i class="bi bi-info-circle"></i> {% if datasource_config %}Ingestion Modes{% else %}Hive External Table{% endif %}
                         </h5>
                     </div>
                     <div class="card-body small">
+                        {% if datasource_config %}
+                        <p class="mb-2"><strong>Recommended:</strong> Use datasource config to ingest into predefined table with additional metadata columns.</p>
+                        <p class="mb-2"><strong>Custom:</strong> Create a new external table with your own schema.</p>
+                        {% else %}
                         <p class="mb-2">
                             An <strong>external table</strong> will be created in Hive pointing to your uploaded data file.
                         </p>
@@ -273,6 +332,7 @@
                             <li>Schema can be altered later</li>
                             <li>Supports Impala queries</li>
                         </ul>
+                        {% endif %}
                     </div>
                 </div>
             </form>

@@ -190,10 +190,11 @@ class UploadKuduRepository:
             target_table = self.generate_table_name(upload_data.get('file_name', 'upload'))
 
             # Build column and value lists
+            # Note: 'encoding' is a reserved keyword in Impala, use backticks
             columns = [
                 'upload_id', 'file_name', 'original_file_name', 'file_path',
                 'file_size', 'file_type', 'mime_type', 'row_count', 'column_count',
-                'delimiter', 'has_header', 'encoding', 'description',
+                'delimiter', 'has_header', '`encoding`', 'description',
                 'target_table_name', 'target_database', 'hdfs_path',
                 'schema_json', 'sample_data_json', 'validation_errors_json',
                 'status', 'is_deleted',
@@ -253,12 +254,15 @@ class UploadKuduRepository:
 
             set_clauses = []
 
-            # String fields
+            # String fields (encoding needs backticks as it's a reserved keyword)
             string_fields = [
                 'file_name', 'file_path', 'file_type', 'mime_type',
-                'delimiter', 'encoding', 'description', 'status',
+                'delimiter', 'description', 'status',
                 'target_table_name', 'target_database', 'hdfs_path'
             ]
+
+            # Reserved keyword fields that need backticks
+            reserved_keyword_fields = ['encoding']
 
             # Numeric fields
             numeric_fields = ['file_size', 'row_count', 'column_count']
@@ -270,6 +274,10 @@ class UploadKuduRepository:
             json_fields = ['schema_json', 'sample_data_json', 'validation_errors_json']
 
             for field in string_fields:
+                if field in update_data:
+                    set_clauses.append(f"`{field}` = {self.escape_value(update_data[field])}")
+
+            for field in reserved_keyword_fields:
                 if field in update_data:
                     set_clauses.append(f"`{field}` = {self.escape_value(update_data[field])}")
 

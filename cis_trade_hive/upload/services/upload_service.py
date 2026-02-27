@@ -22,6 +22,7 @@ from dataclasses import dataclass, asdict, field
 from datetime import datetime
 
 from ..repositories.upload_kudu_repository import upload_kudu_repository, UploadKuduRepository
+from ..repositories.datasource_repository import datasource_repository
 
 logger = logging.getLogger('upload')
 
@@ -716,3 +717,257 @@ class UploadService:
             ('xls', 'Excel (xls)'),
             ('parquet', 'Parquet'),
         ]
+
+    # =========================================================================
+    # METADATA-DRIVEN INGESTION (using cis_datasource_mng)
+    # =========================================================================
+
+    def get_datasource_config(self, file_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Get datasource configuration for a file from cis_datasource_mng.
+
+        Args:
+            file_name: Name of the uploaded file
+
+        Returns:
+            Datasource configuration dict or None if not found
+        """
+        return datasource_repository.get_datasource_by_name(file_name)
+
+    def validate_with_datasource_config(
+        self,
+        file_obj,
+        file_name: str,
+        datasource_config: Dict[str, Any]
+    ) -> FileValidationResult:
+        """
+        Validate file using datasource configuration from cis_datasource_mng.
+
+        Uses predefined separator, columns, and skip lines from metadata.
+
+        Args:
+            file_obj: File object
+            file_name: File name
+            datasource_config: Configuration from cis_datasource_mng
+
+        Returns:
+            FileValidationResult with validation status
+        """
+        result = FileValidationResult()
+
+        try:
+            # Get file properties from datasource config
+            separator = datasource_config.get('separator', ',')
+            skip_lines = int(datasource_config.get('no_of_skip_line', 0) or 0)
+            has_header = str(datasource_config.get('header', 'true')).lower() == 'true'
+
+            # Get predefined columns
+            intake_columns = datasource_repository.parse_intake_columns(datasource_config)
+
+            # Read file content
+            file_obj.seek(0)
+            content = file_obj.read()
+            result.file_size = len(content)
+
+            if result.file_size == 0:
+                result.errors.append("File is empty")
+                return result
+
+            if result.file_size > self.validation_service.MAX_FILE_SIZE:
+                result.errors.append(f"File size exceeds maximum allowed")
+                return result
+
+            # Detect encoding
+            result.encoding = self.validation_service._detect_encoding(content)
+
+            # Decode and parse
+            text_content = content.decode(result.encoding, errors='replace')
+            lines = text_content.splitlines()
+
+            # Skip initial lines if configured
+            if skip_lines > 0:
+                lines = lines[skip_lines:]
+
+            if not lines:
+                result.errors.append("File contains no data after skipping lines")
+                return result
+
+            # Parse CSV with configured separator
+            import csv
+            import io
+            reader = csv.reader(io.StringIO('\n'.join(lines)), delimiter=separator)
+            rows = list(reader)
+
+            if not rows:
+                result.errors.append("No data rows found")
+                return result
+
+            # Use intake_columns from datasource config
+            if intake_columns:
+                result.columns = intake_columns
+                result.column_count = len(intake_columns)
+            else:
+                # Fall back to detection
+                header_row = rows[0] if has_header else [f'col_{i+1}' for i in range(len(rows[0]))]
+                data_rows = rows[1:] if has_header else rows
+                result.columns = self.validation_service._infer_column_types(header_row, data_rows[:100])
+                result.column_count = len(result.columns)
+
+            # Count rows
+            data_rows = rows[1:] if has_header else rows
+            result.row_count = len(data_rows)
+
+            # Set properties
+            result.file_type = 'csv'
+            result.delimiter = separator
+            result.has_header = has_header
+
+            # Generate sample data
+            header_names = [col['name'] for col in result.columns]
+            result.sample_data = []
+            for row in data_rows[:self.validation_service.MAX_PREVIEW_ROWS]:
+                if len(row) >= len(header_names):
+                    result.sample_data.append(dict(zip(header_names, row[:len(header_names)])))
+
+            result.is_valid = True
+
+        except Exception as e:
+            logger.error(f"Validation with datasource config error: {str(e)}")
+            result.errors.append(f"Validation error: {str(e)}")
+
+        return result
+
+    def ingest_to_target_table(
+        self,
+        upload_id: str,
+        datasource_config: Dict[str, Any],
+        updated_by: str,
+        processing_date: str = None
+    ) -> Tuple[bool, str]:
+        """
+        Ingest uploaded file to pre-defined target table using datasource config.
+
+        This method:
+        1. Creates staging external table for uploaded file
+        2. Reads processing_date from HDFS /mrw/cis/MRA_PC_DATE.txt
+        3. Inserts data into target table with additional columns:
+           - src_id (from datasource.source_id)
+           - src_system = 'cis'
+           - data_cat = 'sta'
+           - data_frq = 'adhoc'
+           - processing_date (from MRA_PC_DATE.txt)
+
+        Args:
+            upload_id: Upload record ID
+            datasource_config: Configuration from cis_datasource_mng
+            updated_by: User performing ingestion
+            processing_date: Override processing date (optional)
+
+        Returns:
+            Tuple of (success, message)
+        """
+        try:
+            # Get upload record
+            upload = self.repository.get_upload_by_id(upload_id)
+            if not upload:
+                return False, "Upload not found"
+
+            # Update status to ingesting
+            self.repository.update_status(upload_id, UploadKuduRepository.STATUS_INGESTING, updated_by)
+
+            # Get target table from datasource config
+            target_table = datasource_config.get('target_table')
+            if not target_table:
+                return False, "No target_table defined in datasource configuration"
+
+            # Get processing date from HDFS if not provided
+            if not processing_date:
+                processing_date = datasource_repository.get_processing_date()
+
+            # Get file properties
+            separator = datasource_config.get('separator', ',')
+            has_header = str(datasource_config.get('header', 'true')).lower() == 'true'
+            skip_lines = int(datasource_config.get('no_of_skip_line', 0) or 0)
+
+            # Create staging table name
+            staging_table = f"stg_upload_{upload_id.replace('-', '_').lower()}"
+
+            # Get columns from datasource config
+            intake_columns = datasource_repository.parse_intake_columns(datasource_config)
+            if not intake_columns:
+                return False, "No columns defined in datasource configuration"
+
+            # Create staging external table
+            hdfs_path = upload.get('hdfs_path', '')
+            column_defs = [{'name': col['name'], 'type': col.get('type', 'STRING')} for col in intake_columns]
+
+            staging_success = self.repository.create_external_table(
+                table_name=staging_table,
+                columns=column_defs,
+                hdfs_path=hdfs_path,
+                file_format='csv',
+                delimiter=separator,
+                has_header=has_header
+            )
+
+            if not staging_success:
+                self.repository.update_status(upload_id, UploadKuduRepository.STATUS_FAILED, updated_by, "Failed to create staging table")
+                return False, "Failed to create staging table"
+
+            # Build and execute insert query with additional columns
+            source_id = datasource_config.get('source_id', '')
+            source_cols = [col['name'] for col in intake_columns]
+
+            # Build target columns (source columns + additional columns)
+            target_cols = source_cols + ['src_id', 'src_system', 'data_cat', 'data_frq', 'processing_date']
+
+            # Build SELECT part
+            select_parts = [f"`{col}`" for col in source_cols]
+            select_parts.append(f"'{source_id}' as src_id")
+            select_parts.append("'cis' as src_system")
+            select_parts.append("'sta' as data_cat")
+            select_parts.append("'adhoc' as data_frq")
+            select_parts.append(f"'{processing_date}' as processing_date")
+
+            insert_query = f"""
+            INSERT INTO {self.repository.DATABASE}.{target_table}
+            ({', '.join([f'`{c}`' for c in target_cols])})
+            SELECT
+                {', '.join(select_parts)}
+            FROM {self.repository.DATABASE}.{staging_table}
+            """
+
+            from core.repositories.impala_connection import impala_manager
+            insert_success = impala_manager.execute_write(insert_query, database=self.repository.DATABASE)
+
+            if insert_success:
+                # Update upload record
+                self.repository.update_upload(upload_id, {
+                    'status': UploadKuduRepository.STATUS_COMPLETED,
+                    'target_table_name': target_table,
+                }, updated_by)
+
+                # Get row count
+                row_count = self.repository.get_table_row_count(target_table)
+
+                # Clean up staging table
+                self.repository.drop_external_table(staging_table)
+
+                # Refresh target table metadata
+                impala_manager.execute_write(f"INVALIDATE METADATA {self.repository.DATABASE}.{target_table}", database=self.repository.DATABASE)
+
+                return True, f"Successfully ingested {row_count} rows to {target_table} with processing_date={processing_date}"
+            else:
+                self.repository.update_status(upload_id, UploadKuduRepository.STATUS_FAILED, updated_by, "Failed to insert data")
+                # Clean up staging table
+                self.repository.drop_external_table(staging_table)
+                return False, "Failed to insert data to target table"
+
+        except Exception as e:
+            logger.error(f"Metadata-driven ingestion error: {str(e)}")
+            self.repository.update_status(upload_id, UploadKuduRepository.STATUS_FAILED, updated_by, str(e))
+            return False, f"Ingestion error: {str(e)}"
+
+    def get_all_datasource_configs(self) -> List[Dict[str, Any]]:
+        """Get all datasource configurations for dropdown."""
+        return datasource_repository.get_all_datasources()
