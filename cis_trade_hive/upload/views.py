@@ -12,6 +12,7 @@ Implements:
 
 import json
 import os
+import logging
 from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
@@ -22,6 +23,8 @@ from django.conf import settings
 from core.audit.audit_kudu_repository import audit_log_kudu_repository
 from .services.upload_service import UploadService, FileValidationService
 from .repositories.upload_kudu_repository import UploadKuduRepository
+
+logger = logging.getLogger('upload')
 
 # Initialize services
 upload_service = UploadService()
@@ -383,10 +386,17 @@ def upload_preview(request, upload_id: str):
     upload_status = upload.get('status', '')
     can_ingest = upload_status in [
         'VALIDATED',
+        'PENDING',  # Allow pending for metadata-driven uploads
         UploadKuduRepository.STATUS_VALIDATED,
+        UploadKuduRepository.STATUS_PENDING,  # Allow pending
         UploadKuduRepository.STATUS_VALIDATION_FAILED,  # Allow retry
         'VALIDATION_FAILED',
     ]
+
+    # For metadata-driven uploads with datasource config, always allow ingestion
+    if datasource_config and not can_ingest:
+        can_ingest = True
+        logger.info(f"Allowing ingestion for metadata-driven upload: {upload_id}")
 
     # Ensure all columns have STRING type for metadata-driven uploads
     if datasource_config:
