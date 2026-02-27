@@ -179,6 +179,34 @@ def upload_create(request):
                     created_by=user_info['username']
                 )
 
+                # If table doesn't exist, store in session as fallback
+                if not upload_id and validation_result.is_valid:
+                    # Generate temporary ID
+                    import uuid
+                    upload_id = f"TEMP-{uuid.uuid4().hex[:12].upper()}"
+
+                    # Store in session
+                    request.session[f'upload_{upload_id}'] = {
+                        'upload_id': upload_id,
+                        'file_name': file_name,
+                        'file_size': validation_result.file_size,
+                        'file_type': validation_result.file_type,
+                        'row_count': validation_result.row_count,
+                        'column_count': validation_result.column_count,
+                        'delimiter': validation_result.delimiter,
+                        'has_header': validation_result.has_header,
+                        'encoding': validation_result.encoding,
+                        'description': description,
+                        'schema_json': validation_result.columns,
+                        'sample_data_json': validation_result.sample_data,
+                        'status': 'VALIDATED',
+                        'created_by': user_info['username'],
+                    }
+
+                    messages.warning(request, 'Upload table not available. Data stored temporarily in session.')
+                    messages.success(request, f'File "{file_name}" validated successfully!')
+                    return redirect('upload:preview', upload_id=upload_id)
+
                 if upload_id:
                     # Log audit
                     audit_log_kudu_repository.log_action(
@@ -241,7 +269,15 @@ def upload_preview(request, upload_id: str):
     """
     Preview uploaded file and edit schema before ingestion.
     """
+    # First try to get from database
     upload = upload_service.get_upload_by_id(upload_id)
+
+    # If not found, check session (for temporary storage when table doesn't exist)
+    is_session_upload = False
+    if not upload:
+        session_key = f'upload_{upload_id}'
+        upload = request.session.get(session_key)
+        is_session_upload = True
 
     if not upload:
         raise Http404("Upload not found")
@@ -254,15 +290,19 @@ def upload_preview(request, upload_id: str):
         schema_json = upload.get('schema_json', '[]')
         if schema_json:
             schema = json.loads(schema_json) if isinstance(schema_json, str) else schema_json
-    except json.JSONDecodeError:
-        schema = []
+    except (json.JSONDecodeError, TypeError):
+        # If it's already a list (from session), use it directly
+        if isinstance(upload.get('schema_json'), list):
+            schema = upload.get('schema_json')
 
     try:
         sample_json = upload.get('sample_data_json', '[]')
         if sample_json:
             sample_data = json.loads(sample_json) if isinstance(sample_json, str) else sample_json
-    except json.JSONDecodeError:
-        sample_data = []
+    except (json.JSONDecodeError, TypeError):
+        # If it's already a list (from session), use it directly
+        if isinstance(upload.get('sample_data_json'), list):
+            sample_data = upload.get('sample_data_json')
 
     # Check for datasource configuration
     file_name = upload.get('file_name', '')

@@ -115,6 +115,15 @@ class UploadKuduRepository:
     # UPLOAD CRUD OPERATIONS
     # =========================================================================
 
+    def table_exists(self) -> bool:
+        """Check if the upload table exists."""
+        try:
+            query = f"SHOW TABLES IN {self.DATABASE} LIKE '{self.TABLE_NAME}'"
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            return bool(results)
+        except Exception:
+            return False
+
     def get_all_uploads(
         self,
         limit: int = 100,
@@ -127,6 +136,11 @@ class UploadKuduRepository:
         Retrieve all uploads with optional filters.
         """
         try:
+            # Check if table exists first
+            if not self.table_exists():
+                logger.warning(f"Table {self.DATABASE}.{self.TABLE_NAME} does not exist. Please create it using sql/ddl/21_file_upload_table.sql")
+                return []
+
             where_clauses = []
 
             if not include_deleted:
@@ -494,6 +508,20 @@ class UploadKuduRepository:
     def get_upload_statistics(self) -> Dict[str, Any]:
         """Get upload statistics for dashboard."""
         try:
+            # Check if table exists first
+            if not self.table_exists():
+                logger.warning(f"Table {self.DATABASE}.{self.TABLE_NAME} does not exist")
+                return {
+                    'total_uploads': 0,
+                    'pending': 0,
+                    'completed': 0,
+                    'failed': 0,
+                    'total_size_bytes': 0,
+                    'total_rows': 0,
+                    'status_breakdown': {},
+                    'file_type_breakdown': {}
+                }
+
             query = f"""
             SELECT
                 status,

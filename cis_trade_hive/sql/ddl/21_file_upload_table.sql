@@ -14,8 +14,9 @@ CREATE TABLE IF NOT EXISTS gmp_cis.cis_file_upload (
     file_path STRING,
     hdfs_path STRING,
     file_type STRING,
+    mime_type STRING,
     file_size BIGINT,
-    encoding STRING,
+    `encoding` STRING,
     delimiter STRING,
     has_header BOOLEAN,
     row_count INT,
@@ -25,12 +26,13 @@ CREATE TABLE IF NOT EXISTS gmp_cis.cis_file_upload (
     validation_errors_json STRING,
     status STRING,
     target_table_name STRING,
+    target_database STRING,
     description STRING,
+    is_deleted BOOLEAN DEFAULT false,
     created_by STRING,
     created_at TIMESTAMP,
     updated_by STRING,
     updated_at TIMESTAMP,
-    deleted_at TIMESTAMP,
     PRIMARY KEY (upload_id)
 )
 PARTITION BY HASH(upload_id) PARTITIONS 4
