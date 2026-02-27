@@ -963,10 +963,27 @@ class UploadService:
             if not intake_columns:
                 return False, "No columns defined in datasource configuration or target table"
 
-            # For session uploads with local temp file, use INSERT VALUES directly
-            # This avoids HDFS staging issues and is more reliable
+            # Use INSERT VALUES directly - more reliable than HDFS staging
+            # Check for temp file first, then fall back to sample_data
+            local_file = None
             if temp_file_path and os.path.exists(temp_file_path):
-                logger.info(f"Using INSERT VALUES with local file: {temp_file_path}")
+                local_file = temp_file_path
+                logger.info(f"Using INSERT VALUES with local file: {local_file}")
+            elif sample_data:
+                logger.info(f"Using INSERT VALUES with sample_data ({len(sample_data)} rows)")
+            else:
+                # Try to get sample data from upload record
+                upload_sample = upload.get('sample_data_json', []) if upload else []
+                if upload_sample:
+                    if isinstance(upload_sample, str):
+                        import json as json_module
+                        sample_data = json_module.loads(upload_sample)
+                    else:
+                        sample_data = upload_sample
+                    logger.info(f"Using INSERT VALUES with upload sample_data ({len(sample_data)} rows)")
+
+            # If we have either a local file or sample_data, use INSERT VALUES
+            if local_file or sample_data:
                 return self._ingest_using_insert_values(
                     target_table=target_table,
                     datasource_config=datasource_config,
@@ -976,197 +993,10 @@ class UploadService:
                     updated_by=updated_by,
                     upload_id=upload_id,
                     is_session_upload=is_session_upload,
-                    temp_file_path=temp_file_path
+                    temp_file_path=local_file
                 )
 
-            # Try to get HDFS path from upload record (for non-session uploads)
-            hdfs_path = upload.get('hdfs_path', '') if upload else ''
-
-            if not hdfs_path:
-                # No HDFS path and no temp file - use sample_data if available
-                if sample_data:
-                    logger.info("No file available, using INSERT VALUES with sample_data")
-                    return self._ingest_using_insert_values(
-                        target_table=target_table,
-                        datasource_config=datasource_config,
-                        intake_columns=intake_columns,
-                        sample_data=sample_data,
-                        processing_date=processing_date,
-                        updated_by=updated_by,
-                        upload_id=upload_id,
-                        is_session_upload=is_session_upload,
-                        temp_file_path=None
-                    )
-                return False, "No file available for ingestion. Please re-upload the file."
-
-            # HDFS staging path under /mrw/cis/staging/
-            hdfs_staging_dir = f"{self.HDFS_STAGING_PATH}/{staging_table}"
-
-            # Build column definitions (all STRING)
-            col_defs = ', '.join([f"`{col['name']}` STRING" for col in intake_columns])
-
-            # Build CREATE EXTERNAL TABLE statement
-            create_staging_query = f"""
-            CREATE EXTERNAL TABLE IF NOT EXISTS {self.repository.DATABASE}.{staging_table} (
-                {col_defs}
-            )
-            ROW FORMAT DELIMITED
-            FIELDS TERMINATED BY '{separator}'
-            STORED AS TEXTFILE
-            LOCATION '{hdfs_path}'
-            TBLPROPERTIES ('skip.header.line.count'='{'1' if has_header else '0'}')
-            """
-
-            logger.info(f"Creating staging table: {staging_table}")
-            logger.info(f"Staging DDL: {create_staging_query}")
-
-            # Use Hive connection for external table DDL
-            staging_success = hybrid_manager.hive_write(create_staging_query, database=self.repository.DATABASE)
-
-            if not staging_success:
-                if not is_session_upload:
-                    self.repository.update_status(upload_id, UploadKuduRepository.STATUS_FAILED, updated_by, "Failed to create staging table")
-                return False, "Failed to create staging table"
-
-            # Verify staging table has data
-            staging_count_result = hybrid_manager.hive_read(
-                f"SELECT COUNT(*) as cnt FROM {self.repository.DATABASE}.{staging_table}",
-                database=self.repository.DATABASE
-            )
-            staging_row_count = staging_count_result[0].get('cnt', 0) if staging_count_result else 0
-            logger.info(f"Staging table {staging_table} has {staging_row_count} rows")
-
-            if staging_row_count == 0:
-                # Staging table is empty - file not in HDFS or wrong location
-                logger.error(f"Staging table is empty. HDFS path: {hdfs_path}")
-                # Try to list files in HDFS path
-                import subprocess
-                try:
-                    ls_result = subprocess.run(['hdfs', 'dfs', '-ls', hdfs_path], capture_output=True, text=True, timeout=30)
-                    logger.info(f"HDFS ls {hdfs_path}: {ls_result.stdout}")
-                    if ls_result.returncode != 0:
-                        logger.error(f"HDFS ls error: {ls_result.stderr}")
-                except Exception as e:
-                    logger.error(f"Could not list HDFS path: {e}")
-
-                # Fall back to INSERT VALUES if we have sample_data or temp_file_path
-                if sample_data or temp_file_path:
-                    logger.info(f"Falling back to INSERT VALUES (sample_data: {len(sample_data) if sample_data else 0} rows, file: {temp_file_path})")
-                    # Drop empty staging table
-                    hybrid_manager.hive_write(f"DROP TABLE IF EXISTS {self.repository.DATABASE}.{staging_table}", database=self.repository.DATABASE)
-                    return self._ingest_using_insert_values(
-                        target_table=target_table,
-                        datasource_config=datasource_config,
-                        intake_columns=intake_columns,
-                        sample_data=sample_data if sample_data else [],
-                        processing_date=processing_date,
-                        updated_by=updated_by,
-                        upload_id=upload_id,
-                        is_session_upload=is_session_upload,
-                        temp_file_path=temp_file_path
-                    )
-                return False, f"Staging table is empty. Check if file exists at HDFS path: {hdfs_path}"
-
-            # Build and execute insert query with additional columns
-            source_id = datasource_config.get('source_id', '')
-            source_cols = [col['name'] for col in intake_columns]
-
-            # Get target table columns to ensure we match exactly
-            target_table_info = datasource_repository.get_table_info(target_table, self.repository.DATABASE)
-            target_table_cols = [col['name'] for col in target_table_info.get('columns', [])]
-
-            # Build SELECT part - match target table column order exactly
-            # Additional columns that we add during ingestion
-            additional_cols_map = {
-                'src_id': f"'{source_id}'",
-                'src_system': "'cis'",
-                'sub_system': "''",  # Empty string for sub_system
-                'data_cat': "'sta'",
-                'data_frq': "'adhoc'",
-                'processing_date': f"'{processing_date}'"
-            }
-
-            select_parts = []
-            for target_col in target_table_cols:
-                col_lower = target_col.lower()
-                if col_lower in additional_cols_map:
-                    select_parts.append(f"{additional_cols_map[col_lower]} as `{target_col}`")
-                elif col_lower in [c.lower() for c in source_cols]:
-                    # Find the matching source column (case-insensitive)
-                    matching_col = next((c for c in source_cols if c.lower() == col_lower), target_col)
-                    select_parts.append(f"`{matching_col}`")
-                else:
-                    # Column not in source or additional - use empty string
-                    select_parts.append(f"'' as `{target_col}`")
-                    logger.warning(f"Column '{target_col}' not found in source data, using empty string")
-
-            insert_query = f"""
-            INSERT INTO TABLE {self.repository.DATABASE}.{target_table}
-            SELECT
-                {', '.join(select_parts)}
-            FROM {self.repository.DATABASE}.{staging_table}
-            """
-
-            logger.info(f"Inserting data from staging to target: {target_table}")
-            logger.debug(f"Insert query: {insert_query}")
-
-            # Use Hive connection for INSERT into external table
-            insert_success = hybrid_manager.hive_write(insert_query, database=self.repository.DATABASE)
-
-            if insert_success:
-                # Update upload record (via Kudu/Impala) - only if not session upload
-                if not is_session_upload:
-                    self.repository.update_upload(upload_id, {
-                        'status': UploadKuduRepository.STATUS_COMPLETED,
-                        'target_table_name': target_table,
-                    }, updated_by)
-
-                # Get row count using Hive connection
-                row_count = 0
-                try:
-                    count_result = hybrid_manager.hive_read(
-                        f"SELECT COUNT(*) as cnt FROM {self.repository.DATABASE}.{target_table}",
-                        database=self.repository.DATABASE
-                    )
-                    if count_result:
-                        row_count = count_result[0].get('cnt', 0)
-                except Exception as e:
-                    logger.warning(f"Could not get row count: {e}")
-
-                # Clean up staging table using Hive
-                try:
-                    hybrid_manager.hive_write(
-                        f"DROP TABLE IF EXISTS {self.repository.DATABASE}.{staging_table}",
-                        database=self.repository.DATABASE
-                    )
-                    logger.info(f"Dropped staging table: {staging_table}")
-                except Exception as e:
-                    logger.warning(f"Could not drop staging table: {e}")
-
-                # Clean up HDFS staging directory
-                self._cleanup_hdfs_staging(hdfs_path)
-
-                # Clean up local temp file
-                if temp_file_path and os.path.exists(temp_file_path):
-                    try:
-                        os.remove(temp_file_path)
-                        logger.info(f"Removed local temp file: {temp_file_path}")
-                    except Exception as e:
-                        logger.warning(f"Could not remove temp file: {e}")
-
-                return True, f"Successfully ingested {row_count} rows to {target_table} with processing_date={processing_date}"
-            else:
-                if not is_session_upload:
-                    self.repository.update_status(upload_id, UploadKuduRepository.STATUS_FAILED, updated_by, "Failed to insert data")
-                # Clean up staging table
-                try:
-                    hybrid_manager.hive_write(
-                        f"DROP TABLE IF EXISTS {self.repository.DATABASE}.{staging_table}",
-                        database=self.repository.DATABASE
-                    )
-                except Exception:
-                    pass
-                return False, "Failed to insert data to target table"
+            return False, "No file or sample data available for ingestion. Please re-upload the file."
 
         except Exception as e:
             logger.error(f"Metadata-driven ingestion error: {str(e)}")
