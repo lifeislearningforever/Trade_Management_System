@@ -1106,7 +1106,7 @@ class UploadService:
             Tuple of (success, message)
         """
         from core.repositories.hybrid_connection import hybrid_manager
-        from .datasource_repository import datasource_repository
+        from ..repositories.datasource_repository import datasource_repository
         import csv
 
         try:
