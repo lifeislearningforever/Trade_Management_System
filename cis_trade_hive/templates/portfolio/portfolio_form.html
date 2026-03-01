@@ -132,11 +132,85 @@
                         </select>
                     </div>
                     <div class="col-md-4 mb-4">
+                        <label for="desk_head" class="form-label">Desk Head</label>
+                        <select class="form-select" id="desk_head" name="desk_head">
+                            <option value="">Select Desk Head</option>
+                            {% for dh in dropdown_options.desk_heads %}
+                                <option value="{{ dh }}" {% if portfolio.desk_head == dh %}selected{% endif %}>
+                                    {{ dh }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4 mb-4">
+                        <label for="portfolio_owner" class="form-label">Portfolio Owner</label>
+                        <input type="text" class="form-control" id="portfolio_owner" name="portfolio_owner"
+                               value="{{ portfolio.portfolio_owner|default:'' }}"
+                               maxlength="200"
+                               placeholder="Portfolio owner name">
+                    </div>
+                    <div class="col-md-4 mb-4">
                         <label for="portfolio_client" class="form-label">Client</label>
                         <input type="text" class="form-control" id="portfolio_client" name="portfolio_client"
                                value="{{ portfolio.portfolio_client|default:'' }}"
                                maxlength="100"
                                placeholder="Client name">
+                    </div>
+                    <div class="col-md-4 mb-4">
+                        <label for="country" class="form-label">Country</label>
+                        <select class="form-select" id="country" name="country">
+                            <option value="">Select Country</option>
+                            {% for ctry in dropdown_options.countries %}
+                                <option value="{{ ctry.code }}" {% if portfolio.country == ctry.code %}selected{% endif %}>
+                                    {{ ctry.name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4 mb-4">
+                        <label for="closure_date" class="form-label">Closure Date</label>
+                        <input type="date" class="form-control" id="closure_date" name="closure_date"
+                               value="{{ portfolio.closure_date|default:'' }}">
+                        <div class="form-text">
+                            <i class="bi bi-info-circle"></i> Date when the portfolio will be closed
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Classification -->
+                <div class="row mb-5">
+                    <div class="col-12">
+                        <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
+                            <i class="bi bi-tags"></i> Classification
+                        </h5>
+                    </div>
+                    <div class="col-md-3 mb-4">
+                        <label for="entity" class="form-label">Entity</label>
+                        <input type="text" class="form-control" id="entity" name="entity"
+                               value="{{ portfolio.entity|default:'' }}"
+                               maxlength="100"
+                               placeholder="Entity name">
+                    </div>
+                    <div class="col-md-3 mb-4">
+                        <label for="business_line" class="form-label">Business Line</label>
+                        <input type="text" class="form-control" id="business_line" name="business_line"
+                               value="{{ portfolio.business_line|default:'' }}"
+                               maxlength="100"
+                               placeholder="Business line">
+                    </div>
+                    <div class="col-md-3 mb-4">
+                        <label for="investment_type" class="form-label">Investment Type</label>
+                        <input type="text" class="form-control" id="investment_type" name="investment_type"
+                               value="{{ portfolio.investment_type|default:'' }}"
+                               maxlength="100"
+                               placeholder="Investment type">
+                    </div>
+                    <div class="col-md-3 mb-4">
+                        <label for="branch_code" class="form-label">Branch Code</label>
+                        <input type="text" class="form-control" id="branch_code" name="branch_code"
+                               value="{{ portfolio.branch_code|default:'' }}"
+                               maxlength="20"
+                               placeholder="Branch code">
                     </div>
                 </div>
 
@@ -230,6 +304,14 @@
                                value="{% if portfolio.status == 'INITIAL' %}Initial{% elif portfolio.status == 'MODIFIED' %}Modified{% elif portfolio.status == 'PENDING_VALIDATION' %}Pending Approval{% elif portfolio.status == 'VALIDATED' %}Active{% elif portfolio.status == 'SETTLED' %}Active{% elif portfolio.status == 'CANCELLED' %}Cancelled{% else %}{{ portfolio.status }}{% endif %}" readonly>
                         <div class="form-text">
                             <i class="bi bi-info-circle"></i> Status is managed by the Four-Eyes workflow
+                        </div>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="created_at" class="form-label">Creation Date</label>
+                        <input type="text" class="form-control" id="created_at"
+                               value="{{ portfolio.created_at|default:'-' }}" readonly>
+                        <div class="form-text">
+                            <i class="bi bi-info-circle"></i> Date when the portfolio was created
                         </div>
                     </div>
                     {% else %}
@@ -342,6 +424,8 @@ $(document).ready(function() {
         'currency',
         // Management
         'manager',
+        'desk_head',
+        'country',
         // Accounting
         'accounting_section',
         'revaluation_status',

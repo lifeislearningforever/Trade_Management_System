@@ -101,6 +101,10 @@
                                 <th class="sortable" data-sort-type="text" style="min-width: 180px;">Portfolio Name</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 200px;">Portfolio Description</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 100px;">Currency</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 100px;">Entity</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 120px;">Business Line</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 130px;">Investment Type</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 100px;">Branch Code</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 130px;">Revaluation</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 130px;">Account Group</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 120px;">Entity Group</th>
@@ -108,11 +112,14 @@
                                 <th class="sortable" data-sort-type="text" style="min-width: 140px;">Portfolio Group</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 100px;">Corp Code</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 120px;">Cost Centre</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 100px;">Country</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 130px;">Desk Head</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Portfolio Owner</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 150px;">Manager</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 150px;">Client</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 130px;">Status</th>
-                                <th class="sortable" data-sort-type="date" style="min-width: 140px;">Created At</th>
-                                <th class="sortable" data-sort-type="date" style="min-width: 140px;">Updated At</th>
+                                <th class="sortable" data-sort-type="date" style="min-width: 110px;">Created At</th>
+                                <th class="sortable" data-sort-type="date" style="min-width: 120px;">Closure Date</th>
                                 <th class="sticky-action-column" style="min-width: 200px;">Actions</th>
                             </tr>
                         </thead>
@@ -135,6 +142,10 @@
                                 <td>
                                     <span class="badge badge-info">{{ portfolio.currency }}</span>
                                 </td>
+                                <td>{{ portfolio.entity|default:"-" }}</td>
+                                <td>{{ portfolio.business_line|default:"-" }}</td>
+                                <td>{{ portfolio.investment_type|default:"-" }}</td>
+                                <td>{{ portfolio.branch_code|default:"-" }}</td>
                                 <td>{{ portfolio.revaluation_status|default:"-" }}</td>
                                 <td>{{ portfolio.account_group|default:"-" }}</td>
                                 <td>{{ portfolio.entity_group|default:"-" }}</td>
@@ -142,6 +153,9 @@
                                 <td>{{ portfolio.portfolio_group|default:"-" }}</td>
                                 <td>{{ portfolio.corp_code|default:"-" }}</td>
                                 <td>{{ portfolio.cost_centre_code|default:"-" }}</td>
+                                <td>{{ portfolio.country|default:"-" }}</td>
+                                <td>{{ portfolio.desk_head|default:"-" }}</td>
+                                <td>{{ portfolio.portfolio_owner|default:"-" }}</td>
                                 <td>{{ portfolio.manager|default:"-" }}</td>
                                 <td>{{ portfolio.portfolio_client|default:"-" }}</td>
                                 <td>
@@ -161,8 +175,8 @@
                                         <span class="badge badge-secondary">{{ portfolio.status|default:"-" }}</span>
                                     {% endif %}
                                 </td>
-                                <td style="font-size: 0.85rem;">{{ portfolio.created_at|default:"-" }}</td>
-                                <td style="font-size: 0.85rem;">{{ portfolio.updated_at|default:"-" }}</td>
+                                <td style="font-size: 0.85rem;">{{ portfolio.created_at_formatted|default:"-" }}</td>
+                                <td style="font-size: 0.85rem;">{{ portfolio.closure_date_formatted|default:"-" }}</td>
                                 <td class="sticky-action-column">
                                     <div class="btn-group btn-group-sm" role="group">
                                         <a href="{% url 'portfolio:detail' portfolio.name %}" class="btn btn-sm btn-outline-primary" title="View Details">

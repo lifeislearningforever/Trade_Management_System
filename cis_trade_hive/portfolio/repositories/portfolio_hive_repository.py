@@ -88,7 +88,9 @@ class PortfolioHiveRepository:
                    `account_group`, `portfolio_group`, `report_group`, `entity_group`,
                    `revaluation_status`, `is_active`, `created_at`, `updated_at`, `updated_by`,
                    `src_system`, `submitted_by`, `submitted_at`, `validated_by`, `validated_at`,
-                   `settled_by`, `settled_at`, `cancelled_by`, `cancelled_at`, `cancel_reason`
+                   `settled_by`, `settled_at`, `cancelled_by`, `cancelled_at`, `cancel_reason`,
+                   `entity`, `business_line`, `investment_type`, `branch_code`,
+                   `desk_head`, `portfolio_owner`, `closure_date`, `country`
             FROM {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
             WHERE {where_clause}
             ORDER BY CASE WHEN UPPER(src_system) = 'CIS' THEN 0 ELSE 1 END, `name`
@@ -240,7 +242,9 @@ class PortfolioHiveRepository:
              `cash_balance`, `cost_centre_code`, `corp_code`, `account_group`,
              `portfolio_group`, `report_group`, `entity_group`, `status`,
              `is_active`, `revaluation_status`, `accounting_section`, `src_system`,
-             `created_by`, `created_at`, `updated_by`, `updated_at`)
+             `created_by`, `created_at`, `updated_by`, `updated_at`,
+             `entity`, `business_line`, `investment_type`, `branch_code`,
+             `desk_head`, `portfolio_owner`, `closure_date`, `country`)
             VALUES (
                 {escape(portfolio_data.get('name'))},
                 {escape(portfolio_data.get('description', ''))},
@@ -262,7 +266,15 @@ class PortfolioHiveRepository:
                 {escape(created_by)},
                 '{timestamp}',
                 {escape(created_by)},
-                '{timestamp}'
+                '{timestamp}',
+                {escape(portfolio_data.get('entity', ''))},
+                {escape(portfolio_data.get('business_line', ''))},
+                {escape(portfolio_data.get('investment_type', ''))},
+                {escape(portfolio_data.get('branch_code', ''))},
+                {escape(portfolio_data.get('desk_head', ''))},
+                {escape(portfolio_data.get('portfolio_owner', ''))},
+                {escape(portfolio_data.get('closure_date', ''))},
+                {escape(portfolio_data.get('country', ''))}
             )
             """
 
@@ -301,6 +313,14 @@ class PortfolioHiveRepository:
                 `entity_group` = {escape(portfolio_data.get('entity_group', ''))},
                 `revaluation_status` = {escape(portfolio_data.get('revaluation_status', ''))},
                 `accounting_section` = {escape(portfolio_data.get('accounting_section', ''))},
+                `entity` = {escape(portfolio_data.get('entity', ''))},
+                `business_line` = {escape(portfolio_data.get('business_line', ''))},
+                `investment_type` = {escape(portfolio_data.get('investment_type', ''))},
+                `branch_code` = {escape(portfolio_data.get('branch_code', ''))},
+                `desk_head` = {escape(portfolio_data.get('desk_head', ''))},
+                `portfolio_owner` = {escape(portfolio_data.get('portfolio_owner', ''))},
+                `closure_date` = {escape(portfolio_data.get('closure_date', ''))},
+                `country` = {escape(portfolio_data.get('country', ''))},
                 `status` = '{PortfolioHiveRepository.STATUS_MODIFIED}',
                 `updated_by` = {escape(updated_by)},
                 `updated_at` = '{timestamp}'

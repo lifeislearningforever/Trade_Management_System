@@ -59,11 +59,26 @@ class PortfolioWrapper:
         self.revaluation_status = data.get('revaluation_status', '')
         self.accounting_section = data.get('accounting_section', '')
 
+        # New fields
+        self.entity = data.get('entity', '')
+        self.business_line = data.get('business_line', '')
+        self.investment_type = data.get('investment_type', '')
+        self.branch_code = data.get('branch_code', '')
+        self.desk_head = data.get('desk_head', '')
+        self.portfolio_owner = data.get('portfolio_owner', '')
+        self.closure_date = data.get('closure_date', '')
+        self.country = data.get('country', '')
+
         # Audit fields
         self.created_by = data.get('created_by', '-')
         self.created_at = data.get('created_at', '')
         self.updated_at = data.get('updated_at', '')
         self.updated_by = data.get('updated_by', '-')
+
+        # Format created_at and updated_at as dd-mm-yyyy
+        self.created_at_formatted = self._format_date(data.get('created_at', ''))
+        self.updated_at_formatted = self._format_date(data.get('updated_at', ''))
+        self.closure_date_formatted = self._format_date(data.get('closure_date', ''))
 
         # Workflow fields
         self.submitted_by = data.get('submitted_by', '')
@@ -80,6 +95,28 @@ class PortfolioWrapper:
 
         # Generate ID for URLs
         self.id = abs(hash(data.get('name', '') + str(index))) % 1000000
+
+    def _format_date(self, date_str):
+        """Format date string to dd-mm-yyyy format."""
+        if not date_str:
+            return ''
+        try:
+            from datetime import datetime
+            # Handle various date formats
+            if isinstance(date_str, str):
+                # Try YYYY-MM-DD HH:MM:SS format
+                if ' ' in date_str:
+                    date_part = date_str.split(' ')[0]
+                else:
+                    date_part = date_str
+                if '-' in date_part:
+                    parts = date_part.split('-')
+                    if len(parts) == 3 and len(parts[0]) == 4:
+                        # YYYY-MM-DD format
+                        return f"{parts[2]}-{parts[1]}-{parts[0]}"
+            return date_str
+        except Exception:
+            return date_str
 
 
 def get_user_info(request):
@@ -341,6 +378,15 @@ def portfolio_create(request):
                 'entity_group': request.POST.get('entity_group', ''),
                 'revaluation_status': request.POST.get('revaluation_status', ''),
                 'accounting_section': request.POST.get('accounting_section', ''),
+                # New fields
+                'entity': request.POST.get('entity', ''),
+                'business_line': request.POST.get('business_line', ''),
+                'investment_type': request.POST.get('investment_type', ''),
+                'branch_code': request.POST.get('branch_code', ''),
+                'desk_head': request.POST.get('desk_head', ''),
+                'portfolio_owner': request.POST.get('portfolio_owner', ''),
+                'closure_date': request.POST.get('closure_date', ''),
+                'country': request.POST.get('country', ''),
             }
 
             if not data.get('currency'):
@@ -446,6 +492,15 @@ def portfolio_edit(request, portfolio_name):
                 'entity_group': request.POST.get('entity_group', ''),
                 'revaluation_status': request.POST.get('revaluation_status', ''),
                 'accounting_section': request.POST.get('accounting_section', ''),
+                # New fields
+                'entity': request.POST.get('entity', ''),
+                'business_line': request.POST.get('business_line', ''),
+                'investment_type': request.POST.get('investment_type', ''),
+                'branch_code': request.POST.get('branch_code', ''),
+                'desk_head': request.POST.get('desk_head', ''),
+                'portfolio_owner': request.POST.get('portfolio_owner', ''),
+                'closure_date': request.POST.get('closure_date', ''),
+                'country': request.POST.get('country', ''),
             }
 
             # Track changes for audit log

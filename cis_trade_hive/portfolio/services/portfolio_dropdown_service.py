@@ -37,6 +37,7 @@ class PortfolioDropdownRepository:
     DATABASE = 'gmp_cis'
     UDF_FIELD_TABLE = 'cis_udf_field'  # Simplified UDF table (ONLY table for UDF field definitions)
     CURRENCY_TABLE = 'gmp_cis_sta_dly_currency'
+    COUNTRY_TABLE = 'gmp_cis_sta_dly_country'
 
     @staticmethod
     def get_active_udf_fields(object_type: str = 'PORTFOLIO') -> List[Dict[str, Any]]:
@@ -158,6 +159,34 @@ class PortfolioDropdownRepository:
 
         except Exception as e:
             logger.error(f"Error fetching currencies: {str(e)}")
+            return []
+
+    @staticmethod
+    def get_countries() -> List[Dict[str, str]]:
+        """
+        Get list of countries from Hive external table.
+
+        Returns:
+            List of dicts with 'code' (label) and 'name' (full_name)
+        """
+        try:
+            query = f"""
+            SELECT `label`, `full_name`
+            FROM {PortfolioDropdownRepository.DATABASE}.{PortfolioDropdownRepository.COUNTRY_TABLE}
+            WHERE `label` IS NOT NULL AND `label` != ''
+            ORDER BY `full_name`
+            """
+            results = impala_manager.execute_query(query, database=PortfolioDropdownRepository.DATABASE)
+            return [
+                {
+                    'code': r.get('label'),
+                    'name': r.get('full_name', r.get('label'))
+                }
+                for r in results if r.get('label')
+            ] if results else []
+
+        except Exception as e:
+            logger.error(f"Error fetching countries: {str(e)}")
             return []
 
 
@@ -391,6 +420,42 @@ class PortfolioDropdownService:
         self._log_dropdown_fetch('currency', len(currencies), user)
         return currencies
 
+    def get_countries(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """
+        Get country options from Hive external table.
+
+        Args:
+            user: Username for audit logging
+
+        Returns:
+            List of dicts with 'code' and 'name'
+        """
+        countries = self.repository.get_countries()
+        self._log_dropdown_fetch('country', len(countries), user)
+        return countries
+
+    def get_desk_heads(self, user: str = 'SYSTEM') -> List[str]:
+        """
+        Get desk head options from UDF system.
+
+        Fetches from cis_udf_field where field_name = 'Head of Desk'.
+        The actual desk head names are stored in field_value column.
+
+        Args:
+            user: Username for audit logging
+
+        Returns:
+            List of desk head names
+        """
+        try:
+            results = PortfolioDropdownRepository.get_dropdown_options_by_field_name('Head of Desk', 'PORTFOLIO')
+            desk_heads = [r.get('field_value') for r in results if r.get('field_value')]
+            self._log_dropdown_fetch('desk_head', len(desk_heads), user)
+            return desk_heads
+        except Exception as e:
+            logger.error(f"Error fetching desk_heads: {str(e)}")
+            return []
+
     # ========================================================================
     # AGGREGATE METHODS
     # ========================================================================
@@ -420,6 +485,8 @@ class PortfolioDropdownService:
             'revaluation_statuses': self.get_revaluation_statuses(user),
             'accounting_sections': self.get_accounting_sections(user),
             'currencies': self.get_currencies(user),
+            'countries': self.get_countries(user),
+            'desk_heads': self.get_desk_heads(user),
         }
 
     def get_udf_field_metadata(self, entity_type: str = 'PORTFOLIO') -> List[Dict[str, Any]]:
