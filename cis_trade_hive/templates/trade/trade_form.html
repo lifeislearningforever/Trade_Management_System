@@ -1292,6 +1292,35 @@ $(document).ready(function() {
             return false;
         }
 
+        // Ensure broker charges are calculated before submission
+        var broker = $('#brokers').val();
+        var quantity = parseFloat($('#quantity').val()) || 0;
+        var price = parseFloat($('#price').val()) || 0;
+
+        // If broker is selected and we have quantity/price, verify charges are set
+        if (broker && quantity > 0 && price > 0) {
+            var totalCharges = parseFloat($('#total_calculated_charges').val()) || 0;
+            var chargesAutoCalc = $('#charges_auto_calculated').val();
+
+            console.log('Form submit - Broker:', broker, 'Total Charges:', totalCharges, 'Auto-calc:', chargesAutoCalc);
+
+            // If charges haven't been calculated yet (still 0 and not auto-calculated), calculate them now
+            if (totalCharges === 0 && chargesAutoCalc !== 'true') {
+                e.preventDefault();
+                console.log('Charges not calculated - calculating now before submit...');
+
+                // Calculate charges synchronously using fetch with async/await pattern
+                calculateBrokerChargesSync(function() {
+                    // After charges are calculated, submit the form
+                    console.log('Charges calculated, submitting form...');
+                    var operation = '{% if is_edit %}update{% else %}create{% endif %}';
+                    var entity = 'Trade';
+                    submitWithPopup(operation, entity, document.getElementById('tradeForm'));
+                });
+                return false;
+            }
+        }
+
         // Show the operation popup
         var operation = '{% if is_edit %}update{% else %}create{% endif %}';
         var entity = 'Trade';
@@ -1302,5 +1331,104 @@ $(document).ready(function() {
         return false;
     });
 });
+
+// Synchronous version of calculateBrokerCharges with callback
+function calculateBrokerChargesSync(callback) {
+    const brokersField = document.getElementById('brokers');
+    const quantityField = document.getElementById('quantity');
+    const priceField = document.getElementById('price');
+    const tradeTypeField = document.getElementById('trade_type');
+    const exchangeField = document.getElementById('charge_exchange');
+
+    if (!brokersField || !quantityField || !priceField) {
+        console.log('Required form fields not found');
+        if (callback) callback();
+        return;
+    }
+
+    const broker = brokersField.value;
+    const quantity = parseFloat(quantityField.value) || 0;
+    const price = parseFloat(priceField.value) || 0;
+    const tradeType = tradeTypeField ? tradeTypeField.value : 'BUY';
+    const exchange = exchangeField ? exchangeField.value : '';
+
+    if (!broker || quantity <= 0 || price <= 0) {
+        if (callback) callback();
+        return;
+    }
+
+    let url = `/trade/api/calculate-charges/?broker=${encodeURIComponent(broker)}&quantity=${quantity}&price=${price}&trade_type=${tradeType}`;
+    if (exchange) {
+        url += `&exchange=${encodeURIComponent(exchange)}`;
+    }
+
+    console.log('Sync fetch for charges:', url);
+
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            console.log('Sync charge calculation result:', data);
+
+            if (data.error || !data.charges || data.charges.length === 0) {
+                console.log('No charges found or error');
+                if (callback) callback();
+                return;
+            }
+
+            // Update hidden fields with calculated values
+            let calculatedCommission = 0;
+            let calculatedClearingFee = 0;
+            let calculatedTradingFee = 0;
+            let calculatedGst = 0;
+            let calculatedOtherFees = 0;
+
+            data.charges.forEach(function(charge) {
+                const feeTypeLower = charge.fee_type.toLowerCase();
+                if (feeTypeLower.includes('brokerage')) {
+                    calculatedCommission += charge.calculated_fee;
+                } else if (feeTypeLower.includes('clearing')) {
+                    calculatedClearingFee += charge.calculated_fee;
+                } else if (feeTypeLower.includes('trading')) {
+                    calculatedTradingFee += charge.calculated_fee;
+                } else if (feeTypeLower.includes('gst')) {
+                    calculatedGst += charge.calculated_fee;
+                } else {
+                    calculatedOtherFees += charge.calculated_fee;
+                }
+            });
+
+            // Set hidden field values
+            document.getElementById('calculated_commission').value = calculatedCommission.toFixed(2);
+            document.getElementById('calculated_clearing_fee').value = calculatedClearingFee.toFixed(2);
+            document.getElementById('calculated_trading_fee').value = calculatedTradingFee.toFixed(2);
+            document.getElementById('calculated_gst').value = calculatedGst.toFixed(2);
+            document.getElementById('calculated_other_fees').value = calculatedOtherFees.toFixed(2);
+            document.getElementById('total_calculated_charges').value = data.total_charges.toFixed(2);
+            document.getElementById('charges_auto_calculated').value = 'true';
+
+            // Set charge metadata
+            if (data.charges.length > 0) {
+                const firstCharge = data.charges[0];
+                document.getElementById('charge_fee_type').value = firstCharge.fee_type;
+                document.getElementById('hidden_charge_exchange').value = firstCharge.exchange || '';
+                document.getElementById('charge_country').value = firstCharge.country_of_exchange || '';
+                document.getElementById('charge_fee_rule').value = firstCharge.fee_rule;
+                document.getElementById('charge_fee_value').value = firstCharge.fee_value;
+            }
+
+            // Also update commission field
+            const commissionField = document.getElementById('commission');
+            if (commissionField) {
+                commissionField.value = data.total_charges.toFixed(2);
+            }
+
+            console.log('Hidden fields updated - Total charges:', data.total_charges);
+
+            if (callback) callback();
+        })
+        .catch(error => {
+            console.error('Error in sync charge calculation:', error);
+            if (callback) callback();
+        });
 </script>
 {% endblock %}
