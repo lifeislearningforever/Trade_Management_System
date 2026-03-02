@@ -1118,17 +1118,19 @@ function calculateBrokerCharges() {
     const chargesTbody = document.getElementById('charges_tbody');
     const brokerChargeInfo = document.getElementById('broker_charge_info');
 
-    // Check if charge display elements exist
-    if (!noBrokerMsg) {
-        console.log('no_broker_selected_msg element not found');
-        return;
-    }
+    // Log element status (don't return - continue even if display elements missing)
+    console.log('Display elements found:', {
+        noBrokerMsg: !!noBrokerMsg,
+        chargesContainer: !!chargesContainer,
+        chargesTbody: !!chargesTbody,
+        brokerChargeInfo: !!brokerChargeInfo
+    });
 
     if (!broker) {
         // No broker selected
         console.log('No broker selected - showing message');
-        noBrokerMsg.style.display = 'block';
-        chargesContainer.style.display = 'none';
+        if (noBrokerMsg) noBrokerMsg.style.display = 'block';
+        if (chargesContainer) chargesContainer.style.display = 'none';
         if (brokerChargeInfo) brokerChargeInfo.textContent = '';
         resetChargeFields();
         return;
@@ -1137,9 +1139,11 @@ function calculateBrokerCharges() {
     if (quantity <= 0 || price <= 0) {
         // Need quantity and price to calculate
         console.log('Quantity or price not set - quantity:', quantity, 'price:', price);
-        noBrokerMsg.innerHTML = '<i class="bi bi-info-circle"></i> Enter quantity and price to calculate charges.';
-        noBrokerMsg.style.display = 'block';
-        chargesContainer.style.display = 'none';
+        if (noBrokerMsg) {
+            noBrokerMsg.innerHTML = '<i class="bi bi-info-circle"></i> Enter quantity and price to calculate charges.';
+            noBrokerMsg.style.display = 'block';
+        }
+        if (chargesContainer) chargesContainer.style.display = 'none';
         return;
     }
 
@@ -1159,28 +1163,36 @@ function calculateBrokerCharges() {
             console.log('Broker charges API response:', data);
 
             if (data.error) {
-                noBrokerMsg.innerHTML = `<i class="bi bi-exclamation-circle"></i> ${data.error}`;
-                noBrokerMsg.style.display = 'block';
-                chargesContainer.style.display = 'none';
+                console.log('API returned error:', data.error);
+                if (noBrokerMsg) {
+                    noBrokerMsg.innerHTML = `<i class="bi bi-exclamation-circle"></i> ${data.error}`;
+                    noBrokerMsg.style.display = 'block';
+                }
+                if (chargesContainer) chargesContainer.style.display = 'none';
                 return;
             }
 
             const charges = data.charges || [];
             if (charges.length === 0) {
-                noBrokerMsg.innerHTML = `<i class="bi bi-info-circle"></i> No charge rules found for broker: "${broker}". Check cis_trade_charge_lut table.`;
-                noBrokerMsg.style.display = 'block';
-                chargesContainer.style.display = 'none';
+                console.log('No charges found for broker:', broker);
+                if (noBrokerMsg) {
+                    noBrokerMsg.innerHTML = `<i class="bi bi-info-circle"></i> No charge rules found for broker: "${broker}". Check cis_trade_charge_lut table.`;
+                    noBrokerMsg.style.display = 'block';
+                }
+                if (chargesContainer) chargesContainer.style.display = 'none';
                 if (brokerChargeInfo) brokerChargeInfo.textContent = 'No charges configured';
                 resetChargeFields();
                 return;
             }
 
+            console.log('Found', charges.length, 'charges for broker');
+
             // Hide no broker message, show charges table
-            noBrokerMsg.style.display = 'none';
-            chargesContainer.style.display = 'block';
+            if (noBrokerMsg) noBrokerMsg.style.display = 'none';
+            if (chargesContainer) chargesContainer.style.display = 'block';
 
             // Clear and populate charges table
-            chargesTbody.innerHTML = '';
+            if (chargesTbody) chargesTbody.innerHTML = '';
             let calculatedCommission = 0;  // Brokerage Fee
             let calculatedClearingFee = 0;  // Clearing Fee
             let calculatedTradingFee = 0;  // Trading Fee
@@ -1208,7 +1220,7 @@ function calculateBrokerCharges() {
                     <td>${feeDisplay}</td>
                     <td class="text-end fw-bold">${charge.calculated_fee.toFixed(2)}</td>
                 `;
-                chargesTbody.appendChild(row);
+                if (chargesTbody) chargesTbody.appendChild(row);
 
                 // Sum up by fee type (matches cis_trade_charge_lut fee_type values)
                 const feeTypeLower = charge.fee_type.toLowerCase();
