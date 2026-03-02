@@ -191,9 +191,37 @@ class TradeDropdownService:
 
     def get_brokers(self) -> List[Dict[str, Any]]:
         """
-        Get broker options from cis_party table where is_broker=true.
-        Falls back to lookup table if party query fails.
+        Get broker options - first from cis_trade_charge_lut (for charge calculation),
+        then from cis_party table for additional brokers.
         """
+        brokers = []
+        seen_brokers = set()
+
+        # First, get brokers from cis_trade_charge_lut (these have charges configured)
+        try:
+            query = f"""
+            SELECT DISTINCT broker
+            FROM {self.DATABASE}.cis_trade_charge_lut
+            WHERE broker IS NOT NULL AND broker != ''
+            ORDER BY broker
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            if results:
+                for r in results:
+                    broker = r.get('broker', '')
+                    if broker and broker not in seen_brokers:
+                        brokers.append({
+                            'value': broker,
+                            'label': broker,
+                            'country': '',
+                            'has_charges': True
+                        })
+                        seen_brokers.add(broker)
+                logger.debug(f"Loaded {len(brokers)} brokers from cis_trade_charge_lut")
+        except Exception as e:
+            logger.warning(f"Could not load brokers from cis_trade_charge_lut: {str(e)}")
+
+        # Then add brokers from cis_party table
         try:
             query = f"""
             SELECT party_short_name as value,
@@ -208,31 +236,31 @@ class TradeDropdownService:
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
             if results:
-                logger.debug(f"Loaded {len(results)} brokers from cis_party table")
-                return [
-                    {
-                        'value': r.get('value', ''),
-                        'label': f"{r.get('label', '')} ({r.get('value', '')})" if r.get('label') != r.get('value') else r.get('value', ''),
-                        'country': r.get('country', '')
-                    }
-                    for r in results
-                ]
+                for r in results:
+                    value = r.get('value', '')
+                    label = r.get('label', '')
+                    if value and value not in seen_brokers:
+                        brokers.append({
+                            'value': value,
+                            'label': f"{label} ({value})" if label != value else value,
+                            'country': r.get('country', ''),
+                            'has_charges': False
+                        })
+                        seen_brokers.add(value)
         except Exception as e:
             logger.warning(f"Could not load brokers from cis_party: {str(e)}")
 
-        # Fallback to lookup table
-        options = self._execute_lookup_query(
-            'cis_broker_lookup', 'broker_code', 'broker_name'
-        )
-        if not options:
-            options = [
-                {'value': 'GS', 'label': 'Goldman Sachs'},
-                {'value': 'MS', 'label': 'Morgan Stanley'},
-                {'value': 'JPM', 'label': 'JP Morgan'},
-                {'value': 'UBS', 'label': 'UBS'},
-                {'value': 'CITI', 'label': 'Citibank'},
+        if not brokers:
+            # Fallback defaults
+            brokers = [
+                {'value': 'GS', 'label': 'Goldman Sachs', 'has_charges': False},
+                {'value': 'MS', 'label': 'Morgan Stanley', 'has_charges': False},
+                {'value': 'JPM', 'label': 'JP Morgan', 'has_charges': False},
+                {'value': 'UBS', 'label': 'UBS', 'has_charges': False},
+                {'value': 'CITI', 'label': 'Citibank', 'has_charges': False},
             ]
-        return options
+
+        return brokers
 
     def get_gl_fund_types(self) -> List[Dict[str, Any]]:
         """Get GL fund type options from UDF field table."""
@@ -873,6 +901,7 @@ class TradeDropdownService:
                 escaped_exchange = exchange.replace("'", "''")
                 exchange_filter = f"AND (exchange = '{escaped_exchange}' OR exchange IS NULL)"
 
+            # Try exact match first, then LIKE match for partial broker names
             query = f"""
             SELECT
                 fee_type,
@@ -882,14 +911,14 @@ class TradeDropdownService:
                 fee_rule,
                 fee_value
             FROM {self.DATABASE}.cis_trade_charge_lut
-            WHERE broker = '{escaped_broker}'
+            WHERE (broker = '{escaped_broker}' OR broker LIKE '{escaped_broker}%' OR '{escaped_broker}' LIKE CONCAT(broker, '%'))
               {exchange_filter}
             ORDER BY fee_type
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
 
             if results:
-                logger.debug(f"Loaded {len(results)} charges for broker {broker}")
+                logger.info(f"Loaded {len(results)} charges for broker {broker}")
                 return [
                     {
                         'broker': r.get('broker', ''),
@@ -901,6 +930,8 @@ class TradeDropdownService:
                     }
                     for r in results
                 ]
+            else:
+                logger.warning(f"No charges found for broker: {broker}")
             return []
 
         except Exception as e:
