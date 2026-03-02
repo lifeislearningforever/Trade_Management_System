@@ -968,9 +968,12 @@ function loadExchanges() {
 const brokersEl = document.getElementById('brokers');
 if (brokersEl) {
     brokersEl.addEventListener('change', function() {
+        console.log('=== BROKER CHANGED ===');
+        console.log('Selected broker:', this.value);
         calculateBrokerCharges();
     });
 }
+console.log('Broker element found:', !!brokersEl);
 
 // Exchange dropdown change handler - recalculate charges
 const chargeExchangeEl = document.getElementById('charge_exchange');
@@ -992,6 +995,8 @@ if (chargeExchangeEl) {
 
 // Calculate broker charges based on broker, quantity, price
 function calculateBrokerCharges() {
+    console.log('=== calculateBrokerCharges() CALLED ===');
+
     const brokersField = document.getElementById('brokers');
     const quantityField = document.getElementById('quantity');
     const priceField = document.getElementById('price');
@@ -1000,7 +1005,10 @@ function calculateBrokerCharges() {
 
     // Check if required elements exist
     if (!brokersField || !quantityField || !priceField) {
-        console.log('Required form fields not found');
+        console.log('ERROR: Required form fields not found');
+        console.log('  brokersField:', !!brokersField);
+        console.log('  quantityField:', !!quantityField);
+        console.log('  priceField:', !!priceField);
         return;
     }
 
@@ -1009,6 +1017,13 @@ function calculateBrokerCharges() {
     const price = parseFloat(priceField.value) || 0;
     const tradeType = tradeTypeField ? tradeTypeField.value : 'BUY';
     const exchange = exchangeField ? exchangeField.value : '';
+
+    console.log('Input values:');
+    console.log('  broker:', broker);
+    console.log('  quantity:', quantity);
+    console.log('  price:', price);
+    console.log('  tradeType:', tradeType);
+    console.log('  exchange:', exchange);
 
     const noBrokerMsg = document.getElementById('no_broker_selected_msg');
     const chargesContainer = document.getElementById('charges_table_container');
@@ -1024,6 +1039,7 @@ function calculateBrokerCharges() {
 
     if (!broker) {
         // No broker selected
+        console.log('No broker selected - showing message');
         noBrokerMsg.style.display = 'block';
         chargesContainer.style.display = 'none';
         if (brokerChargeInfo) brokerChargeInfo.textContent = '';
@@ -1033,11 +1049,14 @@ function calculateBrokerCharges() {
 
     if (quantity <= 0 || price <= 0) {
         // Need quantity and price to calculate
+        console.log('Quantity or price not set - quantity:', quantity, 'price:', price);
         noBrokerMsg.innerHTML = '<i class="bi bi-info-circle"></i> Enter quantity and price to calculate charges.';
         noBrokerMsg.style.display = 'block';
         chargesContainer.style.display = 'none';
         return;
     }
+
+    console.log('All conditions met - calling API...');
 
     // Fetch calculated charges from API
     let url = `/trade/api/calculate-charges/?broker=${encodeURIComponent(broker)}&quantity=${quantity}&price=${price}&trade_type=${tradeType}`;
@@ -1123,6 +1142,14 @@ function calculateBrokerCharges() {
             // Update total
             totalChargesEl.textContent = data.total_charges.toFixed(2);
 
+            console.log('=== UPDATING HIDDEN FIELDS ===');
+            console.log('  calculatedCommission:', calculatedCommission);
+            console.log('  calculatedClearingFee:', calculatedClearingFee);
+            console.log('  calculatedTradingFee:', calculatedTradingFee);
+            console.log('  calculatedGst:', calculatedGst);
+            console.log('  calculatedOtherFees:', calculatedOtherFees);
+            console.log('  total_charges:', data.total_charges);
+
             // Update hidden fields (matches cis_trade columns)
             document.getElementById('calculated_commission').value = calculatedCommission.toFixed(2);
             document.getElementById('calculated_clearing_fee').value = calculatedClearingFee.toFixed(2);
@@ -1131,6 +1158,8 @@ function calculateBrokerCharges() {
             document.getElementById('calculated_other_fees').value = calculatedOtherFees.toFixed(2);
             document.getElementById('total_calculated_charges').value = data.total_charges.toFixed(2);
             document.getElementById('charges_auto_calculated').value = 'true';
+
+            console.log('Hidden fields updated successfully');
 
             // Set first charge details to hidden fields
             if (charges.length > 0) {
@@ -1297,12 +1326,28 @@ $(document).ready(function() {
         var quantity = parseFloat($('#quantity').val()) || 0;
         var price = parseFloat($('#price').val()) || 0;
 
+        console.log('=== FORM SUBMIT ===');
+        console.log('Broker:', broker);
+        console.log('Quantity:', quantity);
+        console.log('Price:', price);
+
+        // Debug: Show all charge hidden field values
+        console.log('=== HIDDEN FIELD VALUES ===');
+        console.log('calculated_commission:', $('#calculated_commission').val());
+        console.log('calculated_clearing_fee:', $('#calculated_clearing_fee').val());
+        console.log('calculated_trading_fee:', $('#calculated_trading_fee').val());
+        console.log('calculated_gst:', $('#calculated_gst').val());
+        console.log('calculated_other_fees:', $('#calculated_other_fees').val());
+        console.log('total_calculated_charges:', $('#total_calculated_charges').val());
+        console.log('charges_auto_calculated:', $('#charges_auto_calculated').val());
+        console.log('charge_fee_type:', $('#charge_fee_type').val());
+
         // If broker is selected and we have quantity/price, verify charges are set
         if (broker && quantity > 0 && price > 0) {
             var totalCharges = parseFloat($('#total_calculated_charges').val()) || 0;
             var chargesAutoCalc = $('#charges_auto_calculated').val();
 
-            console.log('Form submit - Broker:', broker, 'Total Charges:', totalCharges, 'Auto-calc:', chargesAutoCalc);
+            console.log('Form submit check - Broker:', broker, 'Total Charges:', totalCharges, 'Auto-calc:', chargesAutoCalc);
 
             // If charges haven't been calculated yet (still 0 and not auto-calculated), calculate them now
             if (totalCharges === 0 && chargesAutoCalc !== 'true') {
