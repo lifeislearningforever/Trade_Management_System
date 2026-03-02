@@ -1048,14 +1048,14 @@ function calculateBrokerCharges() {
             charges.forEach(function(charge) {
                 const row = document.createElement('tr');
 
-                // Format fee value display
+                // Format fee value display based on fee_rule (Percent or Flat)
                 let feeDisplay = '';
-                if (charge.fee_rule === 'PERCENTAGE') {
-                    feeDisplay = (charge.fee_value * 100).toFixed(4) + '%';
-                } else if (charge.fee_rule === 'PER_SHARE') {
-                    feeDisplay = charge.currency + ' ' + charge.fee_value + '/share';
+                if (charge.fee_rule.toLowerCase() === 'percent') {
+                    feeDisplay = charge.fee_value.toFixed(2) + '%';
+                } else if (charge.fee_rule.toLowerCase() === 'flat') {
+                    feeDisplay = charge.fee_value.toFixed(2) + ' (Flat)';
                 } else {
-                    feeDisplay = charge.currency + ' ' + charge.fee_value;
+                    feeDisplay = charge.fee_value.toFixed(2);
                 }
 
                 row.innerHTML = `
@@ -1064,25 +1064,24 @@ function calculateBrokerCharges() {
                     <td>${charge.country_of_exchange || '-'}</td>
                     <td>${charge.fee_rule}</td>
                     <td>${feeDisplay}</td>
-                    <td class="text-end fw-bold">${charge.currency} ${charge.calculated_fee.toFixed(2)}</td>
+                    <td class="text-end fw-bold">${charge.calculated_fee.toFixed(2)}</td>
                 `;
                 chargesTbody.appendChild(row);
 
                 // Sum up by fee type for hidden fields
-                switch (charge.fee_type) {
-                    case 'COMMISSION':
-                        calculatedCommission += charge.calculated_fee;
-                        break;
-                    case 'STAMP_DUTY':
-                        calculatedStampDuty += charge.calculated_fee;
-                        break;
-                    case 'CLEARING_FEE':
-                        calculatedClearingFee += charge.calculated_fee;
-                        break;
-                    case 'EXCHANGE_FEE':
-                    case 'SEC_FEE':
-                        calculatedExchangeFee += charge.calculated_fee;
-                        break;
+                const feeTypeLower = charge.fee_type.toLowerCase();
+                if (feeTypeLower.includes('brokerage') || feeTypeLower.includes('commission')) {
+                    calculatedCommission += charge.calculated_fee;
+                } else if (feeTypeLower.includes('clearing')) {
+                    calculatedClearingFee += charge.calculated_fee;
+                } else if (feeTypeLower.includes('trading') || feeTypeLower.includes('exchange')) {
+                    calculatedExchangeFee += charge.calculated_fee;
+                } else if (feeTypeLower.includes('gst') || feeTypeLower.includes('tax')) {
+                    // GST/Tax goes to other charges
+                    calculatedStampDuty += charge.calculated_fee;
+                } else {
+                    // FFP/SGX SI FEE and others
+                    calculatedExchangeFee += charge.calculated_fee;
                 }
             });
 
