@@ -17,12 +17,15 @@ Workflow:
 """
 
 import json
+import logging
 from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from django.http import HttpResponse, Http404, JsonResponse
 from django.views.decorators.http import require_http_methods
 import csv
+
+logger = logging.getLogger(__name__)
 
 from core.audit.audit_kudu_repository import audit_log_kudu_repository
 from trade.repositories.trade_kudu_repository import trade_kudu_repository, TradeKuduRepository
@@ -1181,6 +1184,10 @@ def api_calculate_charges(request):
         trade_type=trade_type,
         exchange=exchange if exchange else None
     )
+
+    # Log the result for debugging
+    logger.info(f"Calculate charges API: broker={broker}, qty={qty}, price={prc}")
+    logger.info(f"Calculate charges result: charges_count={len(result.get('charges', []))}, total={result.get('total_charges', 0)}")
 
     return JsonResponse(result)
 
