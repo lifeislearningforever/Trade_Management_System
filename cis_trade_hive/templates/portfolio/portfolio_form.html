@@ -81,13 +81,29 @@
                         </div>
                     </div>
                     <div class="col-md-4 mb-4">
+                        <label for="cash_balance_list" class="form-label">Cash Balance List</label>
+                        <select class="form-select" id="cash_balance_list" name="cash_balance_list">
+                            <option value="">Select Cash Balance List</option>
+                            {% for cbl in dropdown_options.cash_balance_lists %}
+                                <option value="{{ cbl }}" {% if portfolio.cash_balance_list == cbl %}selected{% endif %}>
+                                    {{ cbl }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4 mb-4">
                         <label for="cash_balance" class="form-label">Cash Balance</label>
-                        <div class="input-group">
-                            <span class="input-group-text"><i class="bi bi-currency-dollar"></i></span>
-                            <input type="number" class="form-control" id="cash_balance" name="cash_balance"
-                                   value="{{ portfolio.cash_balance|default:'0' }}"
-                                   step="0.01" placeholder="0.00">
-                        </div>
+                        <input type="text" class="form-control" id="cash_balance" name="cash_balance"
+                               value="{{ portfolio.cash_balance|default:'' }}"
+                               maxlength="50"
+                               placeholder="Enter cash balance">
+                    </div>
+                    <div class="col-md-4 mb-4">
+                        <label for="branch_code" class="form-label">Branch Code</label>
+                        <input type="text" class="form-control" id="branch_code" name="branch_code"
+                               value="{{ portfolio.branch_code|default:'' }}"
+                               maxlength="20"
+                               placeholder="Branch code">
                     </div>
                     <div class="col-md-4 mb-4">
                         <label for="corp_code" class="form-label">Corp Code</label>
@@ -184,33 +200,26 @@
                             <i class="bi bi-tags"></i> Classification
                         </h5>
                     </div>
-                    <div class="col-md-3 mb-4">
+                    <div class="col-md-4 mb-4">
                         <label for="entity" class="form-label">Entity</label>
                         <input type="text" class="form-control" id="entity" name="entity"
                                value="{{ portfolio.entity|default:'' }}"
                                maxlength="100"
                                placeholder="Entity name">
                     </div>
-                    <div class="col-md-3 mb-4">
+                    <div class="col-md-4 mb-4">
                         <label for="business_line" class="form-label">Business Line</label>
                         <input type="text" class="form-control" id="business_line" name="business_line"
                                value="{{ portfolio.business_line|default:'' }}"
                                maxlength="100"
                                placeholder="Business line">
                     </div>
-                    <div class="col-md-3 mb-4">
+                    <div class="col-md-4 mb-4">
                         <label for="investment_type" class="form-label">Investment Type</label>
                         <input type="text" class="form-control" id="investment_type" name="investment_type"
                                value="{{ portfolio.investment_type|default:'' }}"
                                maxlength="100"
                                placeholder="Investment type">
-                    </div>
-                    <div class="col-md-3 mb-4">
-                        <label for="branch_code" class="form-label">Branch Code</label>
-                        <input type="text" class="form-control" id="branch_code" name="branch_code"
-                               value="{{ portfolio.branch_code|default:'' }}"
-                               maxlength="20"
-                               placeholder="Branch code">
                     </div>
                 </div>
 
@@ -422,6 +431,7 @@ $(document).ready(function() {
     var allDropdownIds = [
         // Financial Information
         'currency',
+        'cash_balance_list',
         // Management
         'manager',
         'desk_head',

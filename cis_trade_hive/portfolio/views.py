@@ -68,6 +68,7 @@ class PortfolioWrapper:
         self.portfolio_owner = data.get('portfolio_owner', '')
         self.closure_date = data.get('closure_date', '')
         self.country = data.get('country', '')
+        self.cash_balance_list = data.get('cash_balance_list', '')
 
         # Audit fields
         self.created_by = data.get('created_by', '-')
@@ -387,6 +388,7 @@ def portfolio_create(request):
                 'portfolio_owner': request.POST.get('portfolio_owner', ''),
                 'closure_date': request.POST.get('closure_date', ''),
                 'country': request.POST.get('country', ''),
+                'cash_balance_list': request.POST.get('cash_balance_list', ''),
             }
 
             if not data.get('currency'):
@@ -501,6 +503,7 @@ def portfolio_edit(request, portfolio_name):
                 'portfolio_owner': request.POST.get('portfolio_owner', ''),
                 'closure_date': request.POST.get('closure_date', ''),
                 'country': request.POST.get('country', ''),
+                'cash_balance_list': request.POST.get('cash_balance_list', ''),
             }
 
             # Track changes for audit log

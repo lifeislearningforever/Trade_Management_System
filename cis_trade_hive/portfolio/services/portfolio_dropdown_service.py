@@ -434,6 +434,28 @@ class PortfolioDropdownService:
             logger.error(f"Error fetching desk_heads: {str(e)}")
             return []
 
+    def get_cash_balance_lists(self, user: str = 'SYSTEM') -> List[str]:
+        """
+        Get cash balance list options from UDF system.
+
+        Fetches from cis_udf_field where field_name = 'Cash Balance List'.
+        The actual values are stored in field_value column.
+
+        Args:
+            user: Username for audit logging
+
+        Returns:
+            List of cash balance list names
+        """
+        try:
+            results = PortfolioDropdownRepository.get_dropdown_options_by_field_name('Cash Balance List', 'PORTFOLIO')
+            cash_balance_lists = [r.get('field_value') for r in results if r.get('field_value')]
+            self._log_dropdown_fetch('cash_balance_list', len(cash_balance_lists), user)
+            return cash_balance_lists
+        except Exception as e:
+            logger.error(f"Error fetching cash_balance_lists: {str(e)}")
+            return []
+
     # ========================================================================
     # AGGREGATE METHODS
     # ========================================================================
@@ -465,6 +487,7 @@ class PortfolioDropdownService:
             'currencies': self.get_currencies(user),
             'countries': self.get_countries(user),
             'desk_heads': self.get_desk_heads(user),
+            'cash_balance_lists': self.get_cash_balance_lists(user),
         }
 
     def get_udf_field_metadata(self, entity_type: str = 'PORTFOLIO') -> List[Dict[str, Any]]:
