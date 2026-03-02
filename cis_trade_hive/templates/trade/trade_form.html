@@ -253,81 +253,39 @@
                     </div>
                 </div>
 
-                <!-- Quantity & Pricing (merged from Pricing tab) -->
+                <!-- Quantity & Pricing -->
                 <div class="card mb-4">
                     <div class="card-header">
-                        <h5 class="card-title mb-0"><i class="bi bi-calculator"></i> Quantity & Pricing</h5>
+                        <h5 class="card-title mb-0"><i class="bi bi-calculator"></i> Quantity & Price</h5>
                     </div>
                     <div class="card-body">
                         <div class="row g-3">
-                            <div class="col-md-3">
+                            <div class="col-md-2">
                                 <label class="form-label">Quantity <span class="text-danger">*</span></label>
                                 <input type="number" class="form-control" name="quantity" id="quantity"
                                        step="0.01" value="{{ trade.quantity|default:'' }}" required>
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-md-2">
                                 <label class="form-label">Face Value</label>
                                 <input type="number" class="form-control" name="face_value" id="face_value"
                                        step="0.01" value="{{ trade.face_value|default:'' }}">
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-md-2">
                                 <label class="form-label">Lot</label>
                                 <input type="number" class="form-control" name="lot" id="lot"
                                        step="1" value="{{ trade.lot|default:'' }}">
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-md-2">
                                 <label class="form-label">Price <span class="text-danger">*</span></label>
                                 <input type="number" class="form-control" name="price" id="price"
                                        step="0.0001" value="{{ trade.price|default:'' }}" required>
                             </div>
-                        </div>
-
-                        <hr class="my-4">
-                        <h6><i class="bi bi-receipt"></i> Broker Charges <small class="text-muted">(Auto-calculated from broker lookup)</small></h6>
-
-                        <!-- Broker Charges Section - auto-populated based on broker selection -->
-                        <div id="broker_charges_section" class="mb-4">
-                            <div class="alert alert-info" id="no_broker_selected_msg">
-                                <i class="bi bi-info-circle"></i> Select a broker above to view applicable charges.
+                            <div class="col-md-2">
+                                <label class="form-label">Gross Amount</label>
+                                <input type="number" class="form-control bg-light" id="gross_amount"
+                                       step="0.01" value="" readonly>
+                                <small class="text-muted">Qty × Price</small>
                             </div>
-
-                            <!-- Charges table - populated via JavaScript -->
-                            <div id="charges_table_container" style="display: none;">
-                                <table class="table table-sm table-bordered" id="charges_table">
-                                    <thead class="table-light">
-                                        <tr>
-                                            <th>Fee Type</th>
-                                            <th>Exchange</th>
-                                            <th>Country</th>
-                                            <th>Rule</th>
-                                            <th>Rate/Value</th>
-                                            <th>Calculated</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="charges_tbody">
-                                    </tbody>
-                                    <tfoot class="table-light">
-                                        <tr>
-                                            <th colspan="5" class="text-end">Total Broker Charges:</th>
-                                            <th id="total_broker_charges">0.00</th>
-                                        </tr>
-                                    </tfoot>
-                                </table>
-                            </div>
-
-                            <!-- Hidden fields to store charge data (matches cis_trade columns) -->
-                            <input type="hidden" name="charge_fee_type" id="charge_fee_type" value="{{ trade.charge_fee_type|default:'' }}">
-                            <input type="hidden" name="hidden_charge_exchange" id="hidden_charge_exchange" value="{{ trade.charge_exchange|default:'' }}">
-                            <input type="hidden" name="charge_country" id="charge_country" value="{{ trade.charge_country|default:'' }}">
-                            <input type="hidden" name="charge_fee_rule" id="charge_fee_rule" value="{{ trade.charge_fee_rule|default:'' }}">
-                            <input type="hidden" name="charge_fee_value" id="charge_fee_value" value="{{ trade.charge_fee_value|default:'0' }}">
-                            <input type="hidden" name="calculated_commission" id="calculated_commission" value="{{ trade.calculated_commission|default:'0' }}">
-                            <input type="hidden" name="calculated_clearing_fee" id="calculated_clearing_fee" value="{{ trade.calculated_clearing_fee|default:'0' }}">
-                            <input type="hidden" name="calculated_trading_fee" id="calculated_trading_fee" value="{{ trade.calculated_trading_fee|default:'0' }}">
-                            <input type="hidden" name="calculated_gst" id="calculated_gst" value="{{ trade.calculated_gst|default:'0' }}">
-                            <input type="hidden" name="calculated_other_fees" id="calculated_other_fees" value="{{ trade.calculated_other_fees|default:'0' }}">
-                            <input type="hidden" name="total_calculated_charges" id="total_calculated_charges" value="{{ trade.total_calculated_charges|default:'0' }}">
-                            <input type="hidden" name="charges_auto_calculated" id="charges_auto_calculated" value="false">
                         </div>
 
                         <hr class="my-4">
@@ -340,11 +298,6 @@
                                        step="0.01" value="{{ trade.commission|default:'0' }}">
                             </div>
                             <div class="col-md-2">
-                                <label class="form-label">Accrued Interest</label>
-                                <input type="number" class="form-control" name="accrued_interest" id="accrued_interest"
-                                       step="0.01" value="{{ trade.accrued_interest|default:'0' }}">
-                            </div>
-                            <div class="col-md-2">
                                 <label class="form-label">SEC Fee</label>
                                 <input type="number" class="form-control" name="sec_fee" id="sec_fee"
                                        step="0.01" value="{{ trade.sec_fee|default:'0' }}">
@@ -354,15 +307,99 @@
                                 <input type="number" class="form-control" name="other_charges" id="other_charges"
                                        step="0.01" value="{{ trade.other_charges|default:'0' }}">
                             </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Accrued Interest</label>
+                                <input type="number" class="form-control" name="accrued_interest" id="accrued_interest"
+                                       step="0.01" value="{{ trade.accrued_interest|default:'0' }}">
+                            </div>
                             <div class="col-md-4">
                                 <label class="form-label">Total Amount</label>
-                                <input type="number" class="form-control fw-bold" name="total_amount" id="total_amount"
+                                <input type="number" class="form-control fw-bold bg-light" name="total_amount" id="total_amount"
                                        step="0.01" value="{{ trade.total_amount|default:'' }}" readonly>
-                                <button type="button" class="btn btn-sm btn-outline-primary mt-1" onclick="calculateTotal()">
-                                    <i class="bi bi-calculator"></i> Calculate
-                                </button>
+                                <small class="text-muted">Gross + Commission + SEC Fee + Other Charges</small>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Broker Charges Section -->
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0"><i class="bi bi-receipt"></i> Broker Charges</h5>
+                        <div>
+                            <span id="broker_charge_info" class="text-muted small me-2"></span>
+                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="calculateBrokerCharges()">
+                                <i class="bi bi-arrow-repeat"></i> Recalculate
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info mb-3" id="no_broker_selected_msg">
+                            <i class="bi bi-info-circle"></i> Select a broker and enter quantity/price to auto-calculate charges. You can also enter values manually.
+                        </div>
+
+                        <!-- Charges table - shows lookup data -->
+                        <div id="charges_table_container" style="display: none;" class="mb-3">
+                            <h6 class="text-muted">Lookup Rates</h6>
+                            <table class="table table-sm table-bordered" id="charges_table">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Fee Type</th>
+                                        <th>Exchange</th>
+                                        <th>Country</th>
+                                        <th>Rule</th>
+                                        <th>Rate/Value</th>
+                                        <th>Calculated</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="charges_tbody">
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Editable charge fields -->
+                        <div class="row g-3">
+                            <div class="col-md-2">
+                                <label class="form-label">Brokerage Fee</label>
+                                <input type="number" class="form-control" name="calculated_commission" id="calculated_commission"
+                                       step="0.01" value="{{ trade.calculated_commission|default:'0' }}" onchange="updateTotalCharges()">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Clearing Fee</label>
+                                <input type="number" class="form-control" name="calculated_clearing_fee" id="calculated_clearing_fee"
+                                       step="0.01" value="{{ trade.calculated_clearing_fee|default:'0' }}" onchange="updateTotalCharges()">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Trading Fee</label>
+                                <input type="number" class="form-control" name="calculated_trading_fee" id="calculated_trading_fee"
+                                       step="0.01" value="{{ trade.calculated_trading_fee|default:'0' }}" onchange="updateTotalCharges()">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">GST</label>
+                                <input type="number" class="form-control" name="calculated_gst" id="calculated_gst"
+                                       step="0.01" value="{{ trade.calculated_gst|default:'0' }}" onchange="updateTotalCharges()">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">FFP/SGX SI FEE</label>
+                                <input type="number" class="form-control" name="calculated_other_fees" id="calculated_other_fees"
+                                       step="0.01" value="{{ trade.calculated_other_fees|default:'0' }}" onchange="updateTotalCharges()">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Total Charges</label>
+                                <input type="number" class="form-control fw-bold bg-light" name="total_calculated_charges" id="total_calculated_charges"
+                                       step="0.01" value="{{ trade.total_calculated_charges|default:'0' }}" readonly>
+                            </div>
+                        </div>
+
+                        <!-- Hidden fields for charge metadata -->
+                        <input type="hidden" name="charge_fee_type" id="charge_fee_type" value="{{ trade.charge_fee_type|default:'' }}">
+                        <input type="hidden" name="hidden_charge_exchange" id="hidden_charge_exchange" value="{{ trade.charge_exchange|default:'' }}">
+                        <input type="hidden" name="charge_country" id="charge_country" value="{{ trade.charge_country|default:'' }}">
+                        <input type="hidden" name="charge_fee_rule" id="charge_fee_rule" value="{{ trade.charge_fee_rule|default:'' }}">
+                        <input type="hidden" name="charge_fee_value" id="charge_fee_value" value="{{ trade.charge_fee_value|default:'0' }}">
+                        <input type="hidden" name="charges_auto_calculated" id="charges_auto_calculated" value="false">
+                    </div>
+                </div>
 
                         <hr class="my-4">
                         <h6>FX & Dealing</h6>
@@ -851,24 +888,57 @@ function checkPosition() {
         });
 }
 
-// Calculate total amount
-function calculateTotal() {
+// Calculate Gross Amount (Quantity × Price)
+function calculateGrossAmount() {
     const quantity = parseFloat(document.getElementById('quantity').value) || 0;
     const price = parseFloat(document.getElementById('price').value) || 0;
+    const grossAmount = quantity * price;
+
+    const grossAmountField = document.getElementById('gross_amount');
+    if (grossAmountField) {
+        grossAmountField.value = grossAmount.toFixed(2);
+    }
+
+    return grossAmount;
+}
+
+// Calculate total amount: Gross Amount + Commission + SEC Fee + Other Charges
+function calculateTotal() {
+    const grossAmount = calculateGrossAmount();
     const commission = parseFloat(document.getElementById('commission').value) || 0;
     const secFee = parseFloat(document.getElementById('sec_fee').value) || 0;
     const otherCharges = parseFloat(document.getElementById('other_charges').value) || 0;
 
     const tradeType = document.getElementById('trade_type').value;
-    let total = quantity * price;
+    let total = grossAmount;
 
     if (tradeType === 'BUY') {
-        total = total + commission + secFee + otherCharges;
+        total = grossAmount + commission + secFee + otherCharges;
     } else if (tradeType === 'SELL') {
-        total = total - commission - secFee - otherCharges;
+        total = grossAmount - commission - secFee - otherCharges;
+    } else {
+        total = grossAmount + commission + secFee + otherCharges;
     }
 
     document.getElementById('total_amount').value = total.toFixed(2);
+}
+
+// Update total broker charges when individual charge fields change
+function updateTotalCharges() {
+    const brokerageFee = parseFloat(document.getElementById('calculated_commission').value) || 0;
+    const clearingFee = parseFloat(document.getElementById('calculated_clearing_fee').value) || 0;
+    const tradingFee = parseFloat(document.getElementById('calculated_trading_fee').value) || 0;
+    const gst = parseFloat(document.getElementById('calculated_gst').value) || 0;
+    const otherFees = parseFloat(document.getElementById('calculated_other_fees').value) || 0;
+
+    const totalCharges = brokerageFee + clearingFee + tradingFee + gst + otherFees;
+    document.getElementById('total_calculated_charges').value = totalCharges.toFixed(2);
+
+    // Also update commission field with total broker charges
+    document.getElementById('commission').value = totalCharges.toFixed(2);
+
+    // Recalculate total amount
+    calculateTotal();
 }
 
 // Trade type change handler
@@ -878,7 +948,18 @@ document.getElementById('trade_type').addEventListener('change', function() {
 
 // Auto-calculate on input change
 ['quantity', 'price', 'commission', 'sec_fee', 'other_charges'].forEach(function(fieldId) {
-    document.getElementById(fieldId).addEventListener('input', calculateTotal);
+    const el = document.getElementById(fieldId);
+    if (el) {
+        el.addEventListener('input', calculateTotal);
+    }
+});
+
+// Auto-calculate gross amount on quantity/price change
+['quantity', 'price'].forEach(function(fieldId) {
+    const el = document.getElementById(fieldId);
+    if (el) {
+        el.addEventListener('input', calculateGrossAmount);
+    }
 });
 
 // Form validation
@@ -919,6 +1000,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (brokerEl && brokerEl.value) {
         calculateBrokerCharges();
     }
+
+    // Calculate gross amount and total on page load (for edit mode)
+    calculateGrossAmount();
+    calculateTotal();
 });
 
 // =========================================================================
