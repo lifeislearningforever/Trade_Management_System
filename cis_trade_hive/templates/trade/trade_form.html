@@ -317,7 +317,7 @@
 
                             <!-- Hidden fields to store charge data (matches cis_trade columns) -->
                             <input type="hidden" name="charge_fee_type" id="charge_fee_type" value="{{ trade.charge_fee_type|default:'' }}">
-                            <input type="hidden" name="charge_exchange" id="hidden_charge_exchange" value="{{ trade.charge_exchange|default:'' }}">
+                            <input type="hidden" name="hidden_charge_exchange" id="hidden_charge_exchange" value="{{ trade.charge_exchange|default:'' }}">
                             <input type="hidden" name="charge_country" id="charge_country" value="{{ trade.charge_country|default:'' }}">
                             <input type="hidden" name="charge_fee_rule" id="charge_fee_rule" value="{{ trade.charge_fee_rule|default:'' }}">
                             <input type="hidden" name="charge_fee_value" id="charge_fee_value" value="{{ trade.charge_fee_value|default:'0' }}">

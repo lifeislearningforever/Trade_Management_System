@@ -103,6 +103,20 @@ class TradeWrapper:
         self.udf_income_exp_type = data.get('udf_income_exp_type', '')
         self.udf_currency_hedge = data.get('udf_currency_hedge', False)
 
+        # Broker charge fields (auto-calculated from cis_trade_charge_lut)
+        self.charge_fee_type = data.get('charge_fee_type', '')
+        self.charge_exchange = data.get('charge_exchange', '')
+        self.charge_country = data.get('charge_country', '')
+        self.charge_fee_rule = data.get('charge_fee_rule', '')
+        self.charge_fee_value = data.get('charge_fee_value', 0)
+        self.calculated_commission = data.get('calculated_commission', 0)
+        self.calculated_clearing_fee = data.get('calculated_clearing_fee', 0)
+        self.calculated_trading_fee = data.get('calculated_trading_fee', 0)
+        self.calculated_gst = data.get('calculated_gst', 0)
+        self.calculated_other_fees = data.get('calculated_other_fees', 0)
+        self.total_calculated_charges = data.get('total_calculated_charges', 0)
+        self.charges_auto_calculated = data.get('charges_auto_calculated', False)
+
         # Workflow status
         self.status = data.get('status', 'INITIAL')
         self.is_active = data.get('is_active', False)
@@ -421,6 +435,19 @@ def trade_create(request, trade_type=None):
                 'udf_uobn_uobn_hk': request.POST.get('udf_uobn_uobn_hk', ''),
                 'udf_income_exp_type': request.POST.get('udf_income_exp_type', ''),
                 'udf_currency_hedge': request.POST.get('udf_currency_hedge', '') == 'on',
+                # Broker charge fields (auto-calculated from cis_trade_charge_lut)
+                'charge_fee_type': request.POST.get('charge_fee_type', ''),
+                'charge_exchange': request.POST.get('hidden_charge_exchange', '') or request.POST.get('charge_exchange', ''),
+                'charge_country': request.POST.get('charge_country', ''),
+                'charge_fee_rule': request.POST.get('charge_fee_rule', ''),
+                'charge_fee_value': request.POST.get('charge_fee_value', 0),
+                'calculated_commission': request.POST.get('calculated_commission', 0),
+                'calculated_clearing_fee': request.POST.get('calculated_clearing_fee', 0),
+                'calculated_trading_fee': request.POST.get('calculated_trading_fee', 0),
+                'calculated_gst': request.POST.get('calculated_gst', 0),
+                'calculated_other_fees': request.POST.get('calculated_other_fees', 0),
+                'total_calculated_charges': request.POST.get('total_calculated_charges', 0),
+                'charges_auto_calculated': request.POST.get('charges_auto_calculated', 'false') == 'true',
             }
 
             # Validate trade data (includes Portfolio, Security, Counterparty validation)
@@ -551,6 +578,19 @@ def trade_edit(request, trade_id):
                 'udf_uobn_uobn_hk': request.POST.get('udf_uobn_uobn_hk', ''),
                 'udf_income_exp_type': request.POST.get('udf_income_exp_type', ''),
                 'udf_currency_hedge': request.POST.get('udf_currency_hedge', '') == 'on',
+                # Broker charge fields (auto-calculated from cis_trade_charge_lut)
+                'charge_fee_type': request.POST.get('charge_fee_type', ''),
+                'charge_exchange': request.POST.get('hidden_charge_exchange', '') or request.POST.get('charge_exchange', ''),
+                'charge_country': request.POST.get('charge_country', ''),
+                'charge_fee_rule': request.POST.get('charge_fee_rule', ''),
+                'charge_fee_value': request.POST.get('charge_fee_value', 0),
+                'calculated_commission': request.POST.get('calculated_commission', 0),
+                'calculated_clearing_fee': request.POST.get('calculated_clearing_fee', 0),
+                'calculated_trading_fee': request.POST.get('calculated_trading_fee', 0),
+                'calculated_gst': request.POST.get('calculated_gst', 0),
+                'calculated_other_fees': request.POST.get('calculated_other_fees', 0),
+                'total_calculated_charges': request.POST.get('total_calculated_charges', 0),
+                'charges_auto_calculated': request.POST.get('charges_auto_calculated', 'false') == 'true',
             }
 
             # Keep portfolio and security from original (can't change)
