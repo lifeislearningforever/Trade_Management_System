@@ -1077,6 +1077,83 @@ def api_currencies(request):
     return JsonResponse({'results': currencies})
 
 
+@require_http_methods(["GET"])
+def api_get_broker_charges(request):
+    """
+    API: Get all active charges for a broker.
+    Used to display charge breakdown in the trade form.
+    """
+    broker = request.GET.get('broker', '').strip()
+    exchange = request.GET.get('exchange', '').strip()
+
+    if not broker:
+        return JsonResponse({'error': 'Broker is required', 'charges': []})
+
+    charges = trade_dropdown_service.get_broker_charges(
+        broker=broker,
+        exchange=exchange if exchange else None
+    )
+
+    return JsonResponse({
+        'broker': broker,
+        'charges': charges,
+        'count': len(charges)
+    })
+
+
+@require_http_methods(["GET"])
+def api_calculate_charges(request):
+    """
+    API: Calculate trade charges based on broker, quantity, and price.
+    Returns detailed breakdown of all applicable fees.
+    """
+    broker = request.GET.get('broker', '').strip()
+    quantity = request.GET.get('quantity', '0')
+    price = request.GET.get('price', '0')
+    trade_type = request.GET.get('trade_type', 'BUY').strip()
+    exchange = request.GET.get('exchange', '').strip()
+
+    if not broker:
+        return JsonResponse({
+            'error': 'Broker is required',
+            'charges': [],
+            'total_charges': 0,
+            'trade_value': 0,
+            'grand_total': 0
+        })
+
+    try:
+        qty = float(quantity) if quantity else 0
+        prc = float(price) if price else 0
+    except ValueError:
+        return JsonResponse({
+            'error': 'Invalid quantity or price',
+            'charges': [],
+            'total_charges': 0,
+            'trade_value': 0,
+            'grand_total': 0
+        })
+
+    result = trade_dropdown_service.calculate_trade_charges(
+        broker=broker,
+        quantity=qty,
+        price=prc,
+        trade_type=trade_type,
+        exchange=exchange if exchange else None
+    )
+
+    return JsonResponse(result)
+
+
+@require_http_methods(["GET"])
+def api_get_exchanges(request):
+    """
+    API: Get list of exchanges from charge lookup table.
+    """
+    exchanges = trade_dropdown_service.get_exchanges()
+    return JsonResponse({'results': exchanges})
+
+
 # ==========================================================================
 # POSITION VIEWS - DISABLED
 # ==========================================================================

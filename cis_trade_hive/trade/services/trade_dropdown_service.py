@@ -838,6 +838,203 @@ class TradeDropdownService:
 
         return {'price': 0, 'found': False}
 
+    # =========================================================================
+    # TRADE CHARGE METHODS
+    # =========================================================================
+
+    def get_broker_charges(self, broker: str, exchange: str = None) -> List[Dict[str, Any]]:
+        """
+        Get all active charges for a specific broker from cis_trade_charge_lut.
+
+        Args:
+            broker: Broker short name (e.g., 'GS', 'MS', 'DBS')
+            exchange: Optional exchange filter (e.g., 'SGX', 'NYSE')
+
+        Returns:
+            List of charge rules for the broker
+        """
+        if not broker:
+            return []
+
+        try:
+            exchange_filter = ""
+            if exchange:
+                exchange_filter = f"AND exchange = '{exchange}'"
+
+            query = f"""
+            SELECT
+                charge_id,
+                broker,
+                fee_type,
+                exchange,
+                country_of_exchange,
+                fee_rule,
+                fee_value,
+                min_fee,
+                max_fee,
+                currency,
+                description
+            FROM {self.DATABASE}.cis_trade_charge_lut
+            WHERE broker = '{broker}'
+              AND is_active = true
+              AND (effective_from IS NULL OR effective_from <= CURRENT_DATE())
+              AND (effective_to IS NULL OR effective_to >= CURRENT_DATE())
+              {exchange_filter}
+            ORDER BY display_order, fee_type
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+
+            if results:
+                logger.debug(f"Loaded {len(results)} charges for broker {broker}")
+                return [
+                    {
+                        'charge_id': r.get('charge_id'),
+                        'broker': r.get('broker', ''),
+                        'fee_type': r.get('fee_type', ''),
+                        'exchange': r.get('exchange', ''),
+                        'country_of_exchange': r.get('country_of_exchange', ''),
+                        'fee_rule': r.get('fee_rule', ''),
+                        'fee_value': float(r.get('fee_value', 0) or 0),
+                        'min_fee': float(r.get('min_fee', 0) or 0),
+                        'max_fee': float(r.get('max_fee', 0) or 0),
+                        'currency': r.get('currency', ''),
+                        'description': r.get('description', '')
+                    }
+                    for r in results
+                ]
+            return []
+
+        except Exception as e:
+            logger.warning(f"Error getting broker charges for {broker}: {str(e)}")
+            return []
+
+    def calculate_trade_charges(
+        self,
+        broker: str,
+        quantity: float,
+        price: float,
+        trade_type: str = 'BUY',
+        exchange: str = None
+    ) -> Dict[str, Any]:
+        """
+        Calculate all applicable charges for a trade based on broker lookup.
+
+        Args:
+            broker: Broker short name
+            quantity: Trade quantity
+            price: Trade price per unit
+            trade_type: BUY or SELL (some charges like stamp duty apply only to BUY)
+            exchange: Optional exchange filter
+
+        Returns:
+            Dictionary with calculated charges:
+            {
+                'charges': [list of individual charges],
+                'total_charges': sum of all charges,
+                'trade_value': quantity * price,
+                'grand_total': trade_value + total_charges (BUY) or trade_value - total_charges (SELL)
+            }
+        """
+        trade_value = float(quantity) * float(price)
+        charges = self.get_broker_charges(broker, exchange)
+
+        calculated_charges = []
+        total_charges = 0.0
+
+        for charge in charges:
+            fee_type = charge.get('fee_type', '')
+            fee_rule = charge.get('fee_rule', '')
+            fee_value = charge.get('fee_value', 0)
+            min_fee = charge.get('min_fee', 0)
+            max_fee = charge.get('max_fee', 0)
+
+            # Skip stamp duty for SELL trades (typically only applies to BUY)
+            if fee_type == 'STAMP_DUTY' and trade_type.upper() == 'SELL':
+                continue
+
+            # Calculate fee based on rule
+            calculated_fee = 0.0
+
+            if fee_rule == 'PERCENTAGE':
+                calculated_fee = trade_value * fee_value
+                # Apply min/max constraints
+                if min_fee > 0 and calculated_fee < min_fee:
+                    calculated_fee = min_fee
+                if max_fee > 0 and calculated_fee > max_fee:
+                    calculated_fee = max_fee
+
+            elif fee_rule == 'FLAT':
+                calculated_fee = fee_value
+
+            elif fee_rule == 'PER_SHARE':
+                calculated_fee = float(quantity) * fee_value
+                # Apply min/max constraints
+                if min_fee > 0 and calculated_fee < min_fee:
+                    calculated_fee = min_fee
+                if max_fee > 0 and calculated_fee > max_fee:
+                    calculated_fee = max_fee
+
+            elif fee_rule == 'TIERED':
+                # For tiered, fee_value might represent a tier lookup
+                # Simplified: use percentage for now
+                calculated_fee = trade_value * fee_value
+
+            calculated_charges.append({
+                'fee_type': fee_type,
+                'fee_rule': fee_rule,
+                'fee_value': fee_value,
+                'exchange': charge.get('exchange', ''),
+                'country_of_exchange': charge.get('country_of_exchange', ''),
+                'calculated_fee': round(calculated_fee, 2),
+                'currency': charge.get('currency', ''),
+                'description': charge.get('description', '')
+            })
+
+            total_charges += calculated_fee
+
+        # Calculate grand total based on trade type
+        if trade_type.upper() == 'BUY':
+            grand_total = trade_value + total_charges
+        else:
+            grand_total = trade_value - total_charges
+
+        return {
+            'broker': broker,
+            'charges': calculated_charges,
+            'total_charges': round(total_charges, 2),
+            'trade_value': round(trade_value, 2),
+            'grand_total': round(grand_total, 2),
+            'trade_type': trade_type.upper()
+        }
+
+    def get_exchanges(self) -> List[Dict[str, Any]]:
+        """
+        Get distinct exchanges from the charge lookup table.
+        """
+        try:
+            query = f"""
+            SELECT DISTINCT exchange, country_of_exchange
+            FROM {self.DATABASE}.cis_trade_charge_lut
+            WHERE is_active = true
+            ORDER BY exchange
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+
+            if results:
+                return [
+                    {
+                        'value': r.get('exchange', ''),
+                        'label': f"{r.get('exchange', '')} ({r.get('country_of_exchange', '')})",
+                        'country': r.get('country_of_exchange', '')
+                    }
+                    for r in results if r.get('exchange')
+                ]
+            return []
+
+        except Exception as e:
+            logger.warning(f"Error getting exchanges: {str(e)}")
+            return []
+
 
 # Singleton instance
 trade_dropdown_service = TradeDropdownService()

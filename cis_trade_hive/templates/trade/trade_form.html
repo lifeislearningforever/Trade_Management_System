@@ -202,6 +202,56 @@
                             </div>
                         </div>
 
+                        <hr class="my-4">
+                        <h6><i class="bi bi-building"></i> Broker & Custodian</h6>
+
+                        <div class="row g-3">
+                            <!-- Broker (moved from GL & Broker tab) -->
+                            <div class="col-md-3">
+                                <label class="form-label">Broker</label>
+                                <select class="form-select" name="brokers" id="brokers">
+                                    <option value="">Select Broker</option>
+                                    {% for b in dropdown_options.brokers %}
+                                    <option value="{{ b.value }}"
+                                        {% if trade.brokers == b.value %}selected{% endif %}
+                                        data-country="{{ b.country }}">
+                                        {{ b.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                                <small class="text-muted" id="broker_charge_info"></small>
+                            </div>
+
+                            <!-- Custodian (moved from GL & Broker tab) -->
+                            <div class="col-md-3">
+                                <label class="form-label">Custodian</label>
+                                <select class="form-select" name="custodian" id="custodian">
+                                    <option value="">Select Custodian</option>
+                                    {% for cust in dropdown_options.custodians %}
+                                    <option value="{{ cust.value }}"
+                                        {% if trade.custodian == cust.value %}selected{% endif %}>
+                                        {{ cust.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                            <!-- Exchange -->
+                            <div class="col-md-3">
+                                <label class="form-label">Exchange</label>
+                                <select class="form-select" name="charge_exchange" id="charge_exchange">
+                                    <option value="">Select Exchange</option>
+                                </select>
+                            </div>
+
+                            <!-- Broker Name (optional text) -->
+                            <div class="col-md-3">
+                                <label class="form-label">Broker Name</label>
+                                <input type="text" class="form-control" name="broker_name" id="broker_name"
+                                       value="{{ trade.broker_name|default:'' }}" placeholder="Optional">
+                            </div>
+                        </div>
+
                         <!-- Position Info (for Sell trades) -->
                         <div id="position_info_section" class="alert alert-info mt-3" style="display: none;">
                             <i class="bi bi-info-circle"></i>
@@ -237,6 +287,52 @@
                                 <input type="number" class="form-control" name="price" id="price"
                                        step="0.0001" value="{{ trade.price|default:'' }}" required>
                             </div>
+                        </div>
+
+                        <hr class="my-4">
+                        <h6><i class="bi bi-receipt"></i> Broker Charges <small class="text-muted">(Auto-calculated from broker lookup)</small></h6>
+
+                        <!-- Broker Charges Section - auto-populated based on broker selection -->
+                        <div id="broker_charges_section" class="mb-4">
+                            <div class="alert alert-info" id="no_broker_selected_msg">
+                                <i class="bi bi-info-circle"></i> Select a broker above to view applicable charges.
+                            </div>
+
+                            <!-- Charges table - populated via JavaScript -->
+                            <div id="charges_table_container" style="display: none;">
+                                <table class="table table-sm table-bordered" id="charges_table">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Fee Type</th>
+                                            <th>Exchange</th>
+                                            <th>Country</th>
+                                            <th>Rule</th>
+                                            <th>Rate/Value</th>
+                                            <th>Calculated</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="charges_tbody">
+                                    </tbody>
+                                    <tfoot class="table-light">
+                                        <tr>
+                                            <th colspan="5" class="text-end">Total Broker Charges:</th>
+                                            <th id="total_broker_charges">0.00</th>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+
+                            <!-- Hidden fields to store charge data -->
+                            <input type="hidden" name="charge_fee_type" id="charge_fee_type" value="{{ trade.charge_fee_type|default:'' }}">
+                            <input type="hidden" name="charge_country" id="charge_country" value="{{ trade.charge_country|default:'' }}">
+                            <input type="hidden" name="charge_fee_rule" id="charge_fee_rule" value="{{ trade.charge_fee_rule|default:'' }}">
+                            <input type="hidden" name="charge_fee_value" id="charge_fee_value" value="{{ trade.charge_fee_value|default:'0' }}">
+                            <input type="hidden" name="calculated_commission" id="calculated_commission" value="{{ trade.calculated_commission|default:'0' }}">
+                            <input type="hidden" name="calculated_stamp_duty" id="calculated_stamp_duty" value="{{ trade.calculated_stamp_duty|default:'0' }}">
+                            <input type="hidden" name="calculated_clearing_fee" id="calculated_clearing_fee" value="{{ trade.calculated_clearing_fee|default:'0' }}">
+                            <input type="hidden" name="calculated_exchange_fee" id="calculated_exchange_fee" value="{{ trade.calculated_exchange_fee|default:'0' }}">
+                            <input type="hidden" name="total_calculated_charges" id="total_calculated_charges" value="{{ trade.total_calculated_charges|default:'0' }}">
+                            <input type="hidden" name="charges_auto_calculated" id="charges_auto_calculated" value="false">
                         </div>
 
                         <hr class="my-4">
@@ -306,11 +402,11 @@
             <div class="tab-pane fade" id="gl" role="tabpanel">
                 <div class="card mb-4">
                     <div class="card-header">
-                        <h5 class="card-title mb-0">GL, Broker & Settlement</h5>
+                        <h5 class="card-title mb-0">GL & Settlement</h5>
                     </div>
                     <div class="card-body">
                         <div class="row g-3">
-                            <div class="col-md-3">
+                            <div class="col-md-4">
                                 <label class="form-label">Open/Close Position</label>
                                 <select class="form-select" name="open_close_position" id="open_close_position">
                                     <option value="">Select</option>
@@ -322,7 +418,7 @@
                                     {% endfor %}
                                 </select>
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-md-4">
                                 <label class="form-label">Extension</label>
                                 <select class="form-select" name="extension" id="extension">
                                     <option value="">Select</option>
@@ -334,22 +430,17 @@
                                     {% endfor %}
                                 </select>
                             </div>
-                            <div class="col-md-3">
-                                <label class="form-label">Broker</label>
-                                <select class="form-select" name="brokers" id="brokers">
-                                    <option value="">Select Broker</option>
-                                    {% for b in dropdown_options.brokers %}
-                                    <option value="{{ b.value }}"
-                                        {% if trade.brokers == b.value %}selected{% endif %}>
-                                        {{ b.label }}
+                            <div class="col-md-4">
+                                <label class="form-label">Selling Rule</label>
+                                <select class="form-select" name="selling_rule" id="selling_rule">
+                                    <option value="">Select</option>
+                                    {% for sr in dropdown_options.selling_rules %}
+                                    <option value="{{ sr.value }}"
+                                        {% if trade.selling_rule == sr.value %}selected{% endif %}>
+                                        {{ sr.label }}
                                     </option>
                                     {% endfor %}
                                 </select>
-                            </div>
-                            <div class="col-md-3">
-                                <label class="form-label">Broker Name</label>
-                                <input type="text" class="form-control" name="broker_name" id="broker_name"
-                                       value="{{ trade.broker_name|default:'' }}">
                             </div>
                         </div>
 
@@ -399,31 +490,7 @@
                         <h6>Settlement</h6>
 
                         <div class="row g-3">
-                            <div class="col-md-3">
-                                <label class="form-label">Custodian</label>
-                                <select class="form-select" name="custodian" id="custodian">
-                                    <option value="">Select</option>
-                                    {% for cust in dropdown_options.custodians %}
-                                    <option value="{{ cust.value }}"
-                                        {% if trade.custodian == cust.value %}selected{% endif %}>
-                                        {{ cust.label }}
-                                    </option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div class="col-md-3">
-                                <label class="form-label">Selling Rule</label>
-                                <select class="form-select" name="selling_rule" id="selling_rule">
-                                    <option value="">Select</option>
-                                    {% for sr in dropdown_options.selling_rules %}
-                                    <option value="{{ sr.value }}"
-                                        {% if trade.selling_rule == sr.value %}selected{% endif %}>
-                                        {{ sr.label }}
-                                    </option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div class="col-md-3">
+                            <div class="col-md-4">
                                 <label class="form-label">Amor/Accr Method</label>
                                 <select class="form-select" name="amor_accr_method" id="amor_accr_method">
                                     <option value="">Select</option>
@@ -435,10 +502,13 @@
                                     {% endfor %}
                                 </select>
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-md-4">
                                 <label class="form-label">Cash Balance</label>
                                 <input type="number" class="form-control" name="cash_balance" id="cash_balance"
                                        step="0.01" value="{{ trade.cash_balance|default:'' }}">
+                            </div>
+                            <div class="col-md-4">
+                                <!-- Placeholder for additional settlement fields -->
                             </div>
                         </div>
 
@@ -845,7 +915,237 @@ document.addEventListener('DOMContentLoaded', function() {
     if (securityEl && securityEl.value) {
         autoPopulateCurrencyFromSecurity();
     }
+
+    // Load exchanges dropdown
+    loadExchanges();
+
+    // If editing and broker is already set, load charges
+    const brokerEl = document.getElementById('brokers');
+    if (brokerEl && brokerEl.value) {
+        calculateBrokerCharges();
+    }
 });
+
+// =========================================================================
+// BROKER CHARGE CALCULATION
+// =========================================================================
+
+// Load exchanges dropdown from API
+function loadExchanges() {
+    fetch('/trade/api/exchanges/')
+        .then(response => response.json())
+        .then(data => {
+            const exchangeEl = document.getElementById('charge_exchange');
+            if (exchangeEl && data.results) {
+                // Keep the first empty option
+                const currentValue = exchangeEl.value;
+                exchangeEl.innerHTML = '<option value="">Select Exchange</option>';
+                data.results.forEach(function(ex) {
+                    const option = document.createElement('option');
+                    option.value = ex.value;
+                    option.textContent = ex.label;
+                    option.dataset.country = ex.country;
+                    if (ex.value === currentValue) {
+                        option.selected = true;
+                    }
+                    exchangeEl.appendChild(option);
+                });
+            }
+        })
+        .catch(error => {
+            console.log('Could not load exchanges:', error);
+        });
+}
+
+// Broker dropdown change handler - fetch and calculate charges
+document.getElementById('brokers').addEventListener('change', function() {
+    calculateBrokerCharges();
+});
+
+// Exchange dropdown change handler - recalculate charges
+document.getElementById('charge_exchange').addEventListener('change', function() {
+    calculateBrokerCharges();
+});
+
+// Recalculate charges when quantity or price changes
+['quantity', 'price'].forEach(function(fieldId) {
+    const el = document.getElementById(fieldId);
+    if (el) {
+        el.addEventListener('input', function() {
+            calculateBrokerCharges();
+        });
+    }
+});
+
+// Calculate broker charges based on broker, quantity, price
+function calculateBrokerCharges() {
+    const broker = document.getElementById('brokers').value;
+    const quantity = parseFloat(document.getElementById('quantity').value) || 0;
+    const price = parseFloat(document.getElementById('price').value) || 0;
+    const tradeType = document.getElementById('trade_type').value || 'BUY';
+    const exchange = document.getElementById('charge_exchange').value;
+
+    const noBrokerMsg = document.getElementById('no_broker_selected_msg');
+    const chargesContainer = document.getElementById('charges_table_container');
+    const chargesTbody = document.getElementById('charges_tbody');
+    const totalChargesEl = document.getElementById('total_broker_charges');
+    const brokerChargeInfo = document.getElementById('broker_charge_info');
+
+    if (!broker) {
+        // No broker selected
+        noBrokerMsg.style.display = 'block';
+        chargesContainer.style.display = 'none';
+        brokerChargeInfo.textContent = '';
+        resetChargeFields();
+        return;
+    }
+
+    if (quantity <= 0 || price <= 0) {
+        // Need quantity and price to calculate
+        noBrokerMsg.innerHTML = '<i class="bi bi-info-circle"></i> Enter quantity and price to calculate charges.';
+        noBrokerMsg.style.display = 'block';
+        chargesContainer.style.display = 'none';
+        return;
+    }
+
+    // Fetch calculated charges from API
+    let url = `/trade/api/calculate-charges/?broker=${encodeURIComponent(broker)}&quantity=${quantity}&price=${price}&trade_type=${tradeType}`;
+    if (exchange) {
+        url += `&exchange=${encodeURIComponent(exchange)}`;
+    }
+
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                noBrokerMsg.innerHTML = `<i class="bi bi-exclamation-circle"></i> ${data.error}`;
+                noBrokerMsg.style.display = 'block';
+                chargesContainer.style.display = 'none';
+                return;
+            }
+
+            const charges = data.charges || [];
+            if (charges.length === 0) {
+                noBrokerMsg.innerHTML = '<i class="bi bi-info-circle"></i> No charge rules found for this broker.';
+                noBrokerMsg.style.display = 'block';
+                chargesContainer.style.display = 'none';
+                brokerChargeInfo.textContent = 'No charges configured';
+                resetChargeFields();
+                return;
+            }
+
+            // Hide no broker message, show charges table
+            noBrokerMsg.style.display = 'none';
+            chargesContainer.style.display = 'block';
+
+            // Clear and populate charges table
+            chargesTbody.innerHTML = '';
+            let calculatedCommission = 0;
+            let calculatedStampDuty = 0;
+            let calculatedClearingFee = 0;
+            let calculatedExchangeFee = 0;
+
+            charges.forEach(function(charge) {
+                const row = document.createElement('tr');
+
+                // Format fee value display
+                let feeDisplay = '';
+                if (charge.fee_rule === 'PERCENTAGE') {
+                    feeDisplay = (charge.fee_value * 100).toFixed(4) + '%';
+                } else if (charge.fee_rule === 'PER_SHARE') {
+                    feeDisplay = charge.currency + ' ' + charge.fee_value + '/share';
+                } else {
+                    feeDisplay = charge.currency + ' ' + charge.fee_value;
+                }
+
+                row.innerHTML = `
+                    <td><span class="badge bg-secondary">${charge.fee_type}</span></td>
+                    <td>${charge.exchange || '-'}</td>
+                    <td>${charge.country_of_exchange || '-'}</td>
+                    <td>${charge.fee_rule}</td>
+                    <td>${feeDisplay}</td>
+                    <td class="text-end fw-bold">${charge.currency} ${charge.calculated_fee.toFixed(2)}</td>
+                `;
+                chargesTbody.appendChild(row);
+
+                // Sum up by fee type for hidden fields
+                switch (charge.fee_type) {
+                    case 'COMMISSION':
+                        calculatedCommission += charge.calculated_fee;
+                        break;
+                    case 'STAMP_DUTY':
+                        calculatedStampDuty += charge.calculated_fee;
+                        break;
+                    case 'CLEARING_FEE':
+                        calculatedClearingFee += charge.calculated_fee;
+                        break;
+                    case 'EXCHANGE_FEE':
+                    case 'SEC_FEE':
+                        calculatedExchangeFee += charge.calculated_fee;
+                        break;
+                }
+            });
+
+            // Update total
+            totalChargesEl.textContent = data.total_charges.toFixed(2);
+
+            // Update hidden fields
+            document.getElementById('calculated_commission').value = calculatedCommission.toFixed(2);
+            document.getElementById('calculated_stamp_duty').value = calculatedStampDuty.toFixed(2);
+            document.getElementById('calculated_clearing_fee').value = calculatedClearingFee.toFixed(2);
+            document.getElementById('calculated_exchange_fee').value = calculatedExchangeFee.toFixed(2);
+            document.getElementById('total_calculated_charges').value = data.total_charges.toFixed(2);
+            document.getElementById('charges_auto_calculated').value = 'true';
+
+            // Set first charge details to hidden fields
+            if (charges.length > 0) {
+                const firstCharge = charges[0];
+                document.getElementById('charge_fee_type').value = firstCharge.fee_type;
+                document.getElementById('charge_country').value = firstCharge.country_of_exchange || '';
+                document.getElementById('charge_fee_rule').value = firstCharge.fee_rule;
+                document.getElementById('charge_fee_value').value = firstCharge.fee_value;
+            }
+
+            // Update broker charge info
+            brokerChargeInfo.textContent = `${charges.length} charge(s) - Total: ${data.total_charges.toFixed(2)}`;
+            brokerChargeInfo.className = 'text-success small';
+
+            // Auto-fill commission field with calculated commission
+            const commissionField = document.getElementById('commission');
+            if (commissionField && calculatedCommission > 0) {
+                commissionField.value = calculatedCommission.toFixed(2);
+            }
+
+            // Auto-fill SEC fee with exchange/SEC fees
+            const secFeeField = document.getElementById('sec_fee');
+            if (secFeeField && calculatedExchangeFee > 0) {
+                secFeeField.value = calculatedExchangeFee.toFixed(2);
+            }
+
+            // Recalculate total
+            calculateTotal();
+        })
+        .catch(error => {
+            console.error('Error calculating charges:', error);
+            noBrokerMsg.innerHTML = '<i class="bi bi-exclamation-circle"></i> Error loading charges.';
+            noBrokerMsg.style.display = 'block';
+            chargesContainer.style.display = 'none';
+        });
+}
+
+// Reset charge hidden fields
+function resetChargeFields() {
+    document.getElementById('charge_fee_type').value = '';
+    document.getElementById('charge_country').value = '';
+    document.getElementById('charge_fee_rule').value = '';
+    document.getElementById('charge_fee_value').value = '0';
+    document.getElementById('calculated_commission').value = '0';
+    document.getElementById('calculated_stamp_duty').value = '0';
+    document.getElementById('calculated_clearing_fee').value = '0';
+    document.getElementById('calculated_exchange_fee').value = '0';
+    document.getElementById('total_calculated_charges').value = '0';
+    document.getElementById('charges_auto_calculated').value = 'false';
+}
 
 // =========================================================================
 // SECURITY-CURRENCY CASCADING DROPDOWN (Security first, Currency auto-fills)

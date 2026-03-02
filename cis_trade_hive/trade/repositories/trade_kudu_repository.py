@@ -356,6 +356,12 @@ class TradeKuduRepository:
                 'udf_fund_type', 'udf_section_31_26', 'udf_sub_custodian',
                 'udf_disclosure_req', 'udf_counter_pledged', 'udf_revision_code',
                 'udf_uobn_uobn_hk', 'udf_income_exp_type', 'udf_currency_hedge',
+                # Charge columns
+                'charge_fee_type', 'charge_exchange', 'charge_country',
+                'charge_fee_rule', 'charge_fee_value',
+                'calculated_commission', 'calculated_stamp_duty',
+                'calculated_clearing_fee', 'calculated_exchange_fee',
+                'total_calculated_charges', 'charges_auto_calculated',
                 'status', 'is_active', 'is_deleted', 'src_system',
                 'created_by', 'created_at', 'updated_by', 'updated_at'
             ]
@@ -414,6 +420,18 @@ class TradeKuduRepository:
                 self.escape_value(trade_data.get('udf_uobn_uobn_hk', '')),
                 self.escape_value(trade_data.get('udf_income_exp_type', '')),
                 str(trade_data.get('udf_currency_hedge', False)).lower(),
+                # Charge values
+                self.escape_value(trade_data.get('charge_fee_type', '')),
+                self.escape_value(trade_data.get('charge_exchange', '')),
+                self.escape_value(trade_data.get('charge_country', '')),
+                self.escape_value(trade_data.get('charge_fee_rule', '')),
+                self.to_decimal(trade_data.get('charge_fee_value'), 0),
+                self.to_decimal(trade_data.get('calculated_commission'), 0),
+                self.to_decimal(trade_data.get('calculated_stamp_duty'), 0),
+                self.to_decimal(trade_data.get('calculated_clearing_fee'), 0),
+                self.to_decimal(trade_data.get('calculated_exchange_fee'), 0),
+                self.to_decimal(trade_data.get('total_calculated_charges'), 0),
+                str(trade_data.get('charges_auto_calculated', False)).lower(),
                 f"'{self.STATUS_INITIAL}'",
                 'false',  # is_active (not yet settled)
                 'false',  # is_deleted
@@ -502,7 +520,9 @@ class TradeKuduRepository:
                 'selling_rule', 'custodian', 'amor_accr_method',
                 'remarks', 'counterparty',
                 'udf_fund_type', 'udf_section_31_26', 'udf_sub_custodian',
-                'udf_revision_code', 'udf_uobn_uobn_hk', 'udf_income_exp_type'
+                'udf_revision_code', 'udf_uobn_uobn_hk', 'udf_income_exp_type',
+                # Charge string fields
+                'charge_fee_type', 'charge_exchange', 'charge_country', 'charge_fee_rule'
             ]
 
             # Decimal fields - must NOT be quoted (decimal(20,6))
@@ -511,11 +531,14 @@ class TradeKuduRepository:
                 'commission', 'accrued_interest', 'sec_fee',
                 'other_charges', 'total_amount',
                 'open_fx_rate', 'curr_dealing', 'open_dealing',
-                'input_tax_oth', 'qty_entitled', 'cash_balance'
+                'input_tax_oth', 'qty_entitled', 'cash_balance',
+                # Charge decimal fields
+                'charge_fee_value', 'calculated_commission', 'calculated_stamp_duty',
+                'calculated_clearing_fee', 'calculated_exchange_fee', 'total_calculated_charges'
             ]
 
             # Boolean fields
-            boolean_fields = ['udf_disclosure_req', 'udf_counter_pledged', 'udf_currency_hedge']
+            boolean_fields = ['udf_disclosure_req', 'udf_counter_pledged', 'udf_currency_hedge', 'charges_auto_calculated']
 
             updatable_fields = string_fields + decimal_fields + boolean_fields
 
