@@ -44,15 +44,17 @@ class PortfolioDropdownRepository:
         """
         Get all active UDF fields for a given object type.
 
+        Schema: cis_udf_field (object_type, field_name, field_value, is_active, created_by, created_at, updated_by, updated_at)
+
         Args:
             object_type: Object type to filter by (default: PORTFOLIO)
 
         Returns:
-            List of UDF field dictionaries with udf_id, field_name, field_value
+            List of UDF field dictionaries with field_name, field_value
         """
         try:
             query = f"""
-            SELECT udf_id, object_type, field_name, field_value, is_active
+            SELECT object_type, field_name, field_value, is_active
             FROM {PortfolioDropdownRepository.DATABASE}.{PortfolioDropdownRepository.UDF_FIELD_TABLE}
             WHERE object_type = '{object_type}'
               AND is_active = true
@@ -68,39 +70,15 @@ class PortfolioDropdownRepository:
             return []
 
     @staticmethod
-    def get_dropdown_options_for_field(udf_id: int) -> List[str]:
-        """
-        Get dropdown option values for a specific UDF field from legacy table.
-
-        Args:
-            udf_id: UDF field ID
-
-        Returns:
-            List of option values
-        """
-        try:
-            query = f"""
-            SELECT option_value
-            FROM {PortfolioDropdownRepository.DATABASE}.{PortfolioDropdownRepository.UDF_OPTION_TABLE}
-            WHERE udf_id = {udf_id}
-              AND is_active = true
-            ORDER BY display_order, option_value
-            """
-            results = impala_manager.execute_query(query, database=PortfolioDropdownRepository.DATABASE)
-            return [r.get('option_value') for r in results if r.get('option_value')] if results else []
-
-        except Exception as e:
-            logger.error(f"Error fetching options for UDF ID {udf_id}: {str(e)}")
-            return []
-
-    @staticmethod
     def get_dropdown_options_by_field_name(field_name: str, object_type: str = 'PORTFOLIO') -> List[Dict[str, Any]]:
         """
         Get dropdown options for a field by its field_name (definition).
 
         Schema: cis_udf_field table where:
-        - field_name is the field definition (e.g., 'Portfolio Manager') - Admin creates this
-        - field_value contains the actual dropdown values (e.g., 'John Doe') - Users add these
+        - object_type: Entity type (PORTFOLIO, TRADE, etc.)
+        - field_name: The field definition (e.g., 'Portfolio Manager')
+        - field_value: The actual dropdown values (e.g., 'John Doe')
+        - is_active: Boolean flag
         - Records with empty field_value are DEFINITIONS, non-empty are VALUES
 
         Args:
@@ -114,7 +92,7 @@ class PortfolioDropdownRepository:
             escaped_field = field_name.replace("'", "''")
             # Only get VALUE records (where field_value is NOT empty)
             query = f"""
-            SELECT udf_id, field_name, field_value, is_active
+            SELECT field_name, field_value, is_active
             FROM {PortfolioDropdownRepository.DATABASE}.{PortfolioDropdownRepository.UDF_FIELD_TABLE}
             WHERE object_type = '{object_type}'
               AND field_name = '{escaped_field}'
