@@ -401,9 +401,12 @@
                     </div>
                 </div>
 
-                        <hr class="my-4">
-                        <h6>FX & Dealing</h6>
-
+                <!-- FX & Dealing Card -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="bi bi-currency-exchange"></i> FX & Dealing</h5>
+                    </div>
+                    <div class="card-body">
                         <div class="row g-3">
                             <div class="col-md-3">
                                 <label class="form-label">Open FX Rate</label>
@@ -1113,12 +1116,11 @@ function calculateBrokerCharges() {
     const noBrokerMsg = document.getElementById('no_broker_selected_msg');
     const chargesContainer = document.getElementById('charges_table_container');
     const chargesTbody = document.getElementById('charges_tbody');
-    const totalChargesEl = document.getElementById('total_broker_charges');
     const brokerChargeInfo = document.getElementById('broker_charge_info');
 
     // Check if charge display elements exist
-    if (!noBrokerMsg || !chargesContainer) {
-        console.log('Charge display elements not found');
+    if (!noBrokerMsg) {
+        console.log('no_broker_selected_msg element not found');
         return;
     }
 
@@ -1224,10 +1226,7 @@ function calculateBrokerCharges() {
                 }
             });
 
-            // Update total
-            totalChargesEl.textContent = data.total_charges.toFixed(2);
-
-            console.log('=== UPDATING HIDDEN FIELDS ===');
+            console.log('=== UPDATING CHARGE FIELDS ===');
             console.log('  calculatedCommission:', calculatedCommission);
             console.log('  calculatedClearingFee:', calculatedClearingFee);
             console.log('  calculatedTradingFee:', calculatedTradingFee);
@@ -1395,6 +1394,19 @@ $(document).ready(function() {
 
     // Initialize all dropdowns using the global CISSelect2 utility
     CISSelect2.initByIds(allDropdownIds);
+
+    // Add Select2 change event for broker dropdown to trigger charge calculation
+    $('#brokers').on('select2:select', function(e) {
+        console.log('=== BROKER SELECT2 CHANGED ===');
+        console.log('Selected broker:', $(this).val());
+        calculateBrokerCharges();
+    });
+
+    // Also trigger on quantity/price change (using jQuery for consistency)
+    $('#quantity, #price').on('change input', function() {
+        console.log('Quantity/Price changed, recalculating charges...');
+        calculateBrokerCharges();
+    });
 
     // Add operation popup on form submit
     $('#tradeForm').on('submit', function(e) {
