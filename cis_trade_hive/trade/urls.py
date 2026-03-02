@@ -70,4 +70,5 @@ urlpatterns = [
     path('api/broker-charges/', views.api_get_broker_charges, name='api_get_broker_charges'),
     path('api/calculate-charges/', views.api_calculate_charges, name='api_calculate_charges'),
     path('api/exchanges/', views.api_get_exchanges, name='api_get_exchanges'),
+    path('api/debug-charge-lut/', views.api_debug_charge_lut, name='api_debug_charge_lut'),
 ]

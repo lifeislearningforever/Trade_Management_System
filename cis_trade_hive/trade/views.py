@@ -1194,6 +1194,30 @@ def api_get_exchanges(request):
     return JsonResponse({'results': exchanges})
 
 
+@require_http_methods(["GET"])
+def api_debug_charge_lut(request):
+    """
+    API: Debug endpoint to show all brokers in charge lookup table.
+    Use this to verify broker names match between cis_party and cis_trade_charge_lut.
+    """
+    broker_param = request.GET.get('broker', '').strip()
+
+    # Get all brokers in lookup table
+    brokers_in_lut = trade_dropdown_service.get_brokers_from_charge_lut()
+
+    # If a broker is specified, show matching results
+    matching_charges = []
+    if broker_param:
+        matching_charges = trade_dropdown_service.get_broker_charges(broker_param)
+
+    return JsonResponse({
+        'brokers_in_lookup_table': [b.get('value', '') for b in brokers_in_lut],
+        'searched_broker': broker_param,
+        'matching_charges': matching_charges,
+        'match_count': len(matching_charges)
+    })
+
+
 # ==========================================================================
 # POSITION VIEWS - DISABLED
 # ==========================================================================

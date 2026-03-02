@@ -1045,9 +1045,13 @@ function calculateBrokerCharges() {
         url += `&exchange=${encodeURIComponent(exchange)}`;
     }
 
+    console.log('Fetching broker charges from:', url);
+
     fetch(url)
         .then(response => response.json())
         .then(data => {
+            console.log('Broker charges API response:', data);
+
             if (data.error) {
                 noBrokerMsg.innerHTML = `<i class="bi bi-exclamation-circle"></i> ${data.error}`;
                 noBrokerMsg.style.display = 'block';
@@ -1057,10 +1061,10 @@ function calculateBrokerCharges() {
 
             const charges = data.charges || [];
             if (charges.length === 0) {
-                noBrokerMsg.innerHTML = '<i class="bi bi-info-circle"></i> No charge rules found for this broker.';
+                noBrokerMsg.innerHTML = `<i class="bi bi-info-circle"></i> No charge rules found for broker: "${broker}". Check cis_trade_charge_lut table.`;
                 noBrokerMsg.style.display = 'block';
                 chargesContainer.style.display = 'none';
-                brokerChargeInfo.textContent = 'No charges configured';
+                if (brokerChargeInfo) brokerChargeInfo.textContent = 'No charges configured';
                 resetChargeFields();
                 return;
             }

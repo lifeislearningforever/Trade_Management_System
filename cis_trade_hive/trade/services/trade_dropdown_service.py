@@ -846,8 +846,8 @@ class TradeDropdownService:
         """
         Get all charges for a specific broker from cis_trade_charge_lut.
 
-        Uses exact match on broker name (party_short_name from cis_party
-        should match broker in cis_trade_charge_lut).
+        Uses flexible matching on broker name to handle variations between
+        cis_party.party_short_name and cis_trade_charge_lut.broker.
 
         Table structure (6 columns):
         - fee_type: Brokerage Fee, FFP/SGX SI FEE, GST, Clearing Fee, Trading Fee
@@ -858,7 +858,7 @@ class TradeDropdownService:
         - fee_value: Fee amount (percentage as whole number e.g., 1.0 for 1%, or flat amount)
 
         Args:
-            broker: Broker name (exact match)
+            broker: Broker name (flexible match - tries exact, then LIKE)
             exchange: Optional exchange filter (e.g., 'SGX')
 
         Returns:
@@ -870,13 +870,15 @@ class TradeDropdownService:
         try:
             # Escape broker name for SQL
             escaped_broker = broker.replace("'", "''")
+            # Also create a base name without special chars for LIKE matching
+            base_broker = escaped_broker.replace('*', '%').replace('?', '_')
 
             exchange_filter = ""
             if exchange:
                 escaped_exchange = exchange.replace("'", "''")
                 exchange_filter = f"AND (exchange = '{escaped_exchange}' OR exchange IS NULL)"
 
-            # Exact match on broker name
+            # Try flexible matching: exact OR LIKE (handles * wildcards, case differences)
             query = f"""
             SELECT
                 fee_type,
@@ -886,11 +888,16 @@ class TradeDropdownService:
                 fee_rule,
                 fee_value
             FROM {self.DATABASE}.cis_trade_charge_lut
-            WHERE broker = '{escaped_broker}'
+            WHERE (
+                broker = '{escaped_broker}'
+                OR UPPER(broker) = UPPER('{escaped_broker}')
+                OR broker LIKE '{base_broker}'
+                OR UPPER(broker) LIKE UPPER('{base_broker}')
+            )
               {exchange_filter}
             ORDER BY fee_type
             """
-            logger.info(f"Broker charge query for: {broker}")
+            logger.info(f"Broker charge query for: {broker} (base: {base_broker})")
             results = impala_manager.execute_query(query, database=self.DATABASE)
 
             if results:
