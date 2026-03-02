@@ -356,11 +356,11 @@ class TradeKuduRepository:
                 'udf_fund_type', 'udf_section_31_26', 'udf_sub_custodian',
                 'udf_disclosure_req', 'udf_counter_pledged', 'udf_revision_code',
                 'udf_uobn_uobn_hk', 'udf_income_exp_type', 'udf_currency_hedge',
-                # Charge columns
+                # Charge columns (matches cis_trade_charge_lut structure)
                 'charge_fee_type', 'charge_exchange', 'charge_country',
                 'charge_fee_rule', 'charge_fee_value',
-                'calculated_commission', 'calculated_stamp_duty',
-                'calculated_clearing_fee', 'calculated_exchange_fee',
+                'calculated_commission', 'calculated_clearing_fee',
+                'calculated_trading_fee', 'calculated_gst', 'calculated_other_fees',
                 'total_calculated_charges', 'charges_auto_calculated',
                 'status', 'is_active', 'is_deleted', 'src_system',
                 'created_by', 'created_at', 'updated_by', 'updated_at'
@@ -420,16 +420,17 @@ class TradeKuduRepository:
                 self.escape_value(trade_data.get('udf_uobn_uobn_hk', '')),
                 self.escape_value(trade_data.get('udf_income_exp_type', '')),
                 str(trade_data.get('udf_currency_hedge', False)).lower(),
-                # Charge values
+                # Charge values (matches cis_trade_charge_lut fee types)
                 self.escape_value(trade_data.get('charge_fee_type', '')),
                 self.escape_value(trade_data.get('charge_exchange', '')),
                 self.escape_value(trade_data.get('charge_country', '')),
                 self.escape_value(trade_data.get('charge_fee_rule', '')),
                 self.to_decimal(trade_data.get('charge_fee_value'), 0),
-                self.to_decimal(trade_data.get('calculated_commission'), 0),
-                self.to_decimal(trade_data.get('calculated_stamp_duty'), 0),
-                self.to_decimal(trade_data.get('calculated_clearing_fee'), 0),
-                self.to_decimal(trade_data.get('calculated_exchange_fee'), 0),
+                self.to_decimal(trade_data.get('calculated_commission'), 0),  # Brokerage Fee
+                self.to_decimal(trade_data.get('calculated_clearing_fee'), 0),  # Clearing Fee
+                self.to_decimal(trade_data.get('calculated_trading_fee'), 0),  # Trading Fee
+                self.to_decimal(trade_data.get('calculated_gst'), 0),  # GST
+                self.to_decimal(trade_data.get('calculated_other_fees'), 0),  # FFP/SGX SI FEE, etc.
                 self.to_decimal(trade_data.get('total_calculated_charges'), 0),
                 str(trade_data.get('charges_auto_calculated', False)).lower(),
                 f"'{self.STATUS_INITIAL}'",
@@ -532,9 +533,10 @@ class TradeKuduRepository:
                 'other_charges', 'total_amount',
                 'open_fx_rate', 'curr_dealing', 'open_dealing',
                 'input_tax_oth', 'qty_entitled', 'cash_balance',
-                # Charge decimal fields
-                'charge_fee_value', 'calculated_commission', 'calculated_stamp_duty',
-                'calculated_clearing_fee', 'calculated_exchange_fee', 'total_calculated_charges'
+                # Charge decimal fields (matches cis_trade_charge_lut fee types)
+                'charge_fee_value', 'calculated_commission', 'calculated_clearing_fee',
+                'calculated_trading_fee', 'calculated_gst', 'calculated_other_fees',
+                'total_calculated_charges'
             ]
 
             # Boolean fields
