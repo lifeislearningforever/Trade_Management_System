@@ -927,11 +927,21 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Load exchanges dropdown from API
 function loadExchanges() {
+    const exchangeEl = document.getElementById('charge_exchange');
+    if (!exchangeEl) {
+        console.log('Exchange dropdown not found');
+        return;
+    }
+
     fetch('/trade/api/exchanges/')
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('API returned ' + response.status);
+            }
+            return response.json();
+        })
         .then(data => {
-            const exchangeEl = document.getElementById('charge_exchange');
-            if (exchangeEl && data.results) {
+            if (data.results) {
                 // Keep the first empty option
                 const currentValue = exchangeEl.value;
                 exchangeEl.innerHTML = '<option value="">Select Exchange</option>';
@@ -949,18 +959,26 @@ function loadExchanges() {
         })
         .catch(error => {
             console.log('Could not load exchanges:', error);
+            // Add default exchange options
+            exchangeEl.innerHTML = '<option value="">Select Exchange</option><option value="SGX">SGX (SG)</option>';
         });
 }
 
 // Broker dropdown change handler - fetch and calculate charges
-document.getElementById('brokers').addEventListener('change', function() {
-    calculateBrokerCharges();
-});
+const brokersEl = document.getElementById('brokers');
+if (brokersEl) {
+    brokersEl.addEventListener('change', function() {
+        calculateBrokerCharges();
+    });
+}
 
 // Exchange dropdown change handler - recalculate charges
-document.getElementById('charge_exchange').addEventListener('change', function() {
-    calculateBrokerCharges();
-});
+const chargeExchangeEl = document.getElementById('charge_exchange');
+if (chargeExchangeEl) {
+    chargeExchangeEl.addEventListener('change', function() {
+        calculateBrokerCharges();
+    });
+}
 
 // Recalculate charges when quantity or price changes
 ['quantity', 'price'].forEach(function(fieldId) {
@@ -974,11 +992,23 @@ document.getElementById('charge_exchange').addEventListener('change', function()
 
 // Calculate broker charges based on broker, quantity, price
 function calculateBrokerCharges() {
-    const broker = document.getElementById('brokers').value;
-    const quantity = parseFloat(document.getElementById('quantity').value) || 0;
-    const price = parseFloat(document.getElementById('price').value) || 0;
-    const tradeType = document.getElementById('trade_type').value || 'BUY';
-    const exchange = document.getElementById('charge_exchange').value;
+    const brokersField = document.getElementById('brokers');
+    const quantityField = document.getElementById('quantity');
+    const priceField = document.getElementById('price');
+    const tradeTypeField = document.getElementById('trade_type');
+    const exchangeField = document.getElementById('charge_exchange');
+
+    // Check if required elements exist
+    if (!brokersField || !quantityField || !priceField) {
+        console.log('Required form fields not found');
+        return;
+    }
+
+    const broker = brokersField.value;
+    const quantity = parseFloat(quantityField.value) || 0;
+    const price = parseFloat(priceField.value) || 0;
+    const tradeType = tradeTypeField ? tradeTypeField.value : 'BUY';
+    const exchange = exchangeField ? exchangeField.value : '';
 
     const noBrokerMsg = document.getElementById('no_broker_selected_msg');
     const chargesContainer = document.getElementById('charges_table_container');
@@ -986,11 +1016,17 @@ function calculateBrokerCharges() {
     const totalChargesEl = document.getElementById('total_broker_charges');
     const brokerChargeInfo = document.getElementById('broker_charge_info');
 
+    // Check if charge display elements exist
+    if (!noBrokerMsg || !chargesContainer) {
+        console.log('Charge display elements not found');
+        return;
+    }
+
     if (!broker) {
         // No broker selected
         noBrokerMsg.style.display = 'block';
         chargesContainer.style.display = 'none';
-        brokerChargeInfo.textContent = '';
+        if (brokerChargeInfo) brokerChargeInfo.textContent = '';
         resetChargeFields();
         return;
     }
