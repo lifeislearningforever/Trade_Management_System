@@ -223,6 +223,65 @@
                 </div>
             </div>
 
+            <!-- Broker Charges Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-receipt"></i> Broker Charges
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Broker</label>
+                            <div class="fw-bold">{{ trade.brokers|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Exchange</label>
+                            <div>{{ trade.charge_exchange|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Country</label>
+                            <div>{{ trade.charge_country|default:"-" }}</div>
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Brokerage Fee</label>
+                            <div class="fw-bold">{{ trade.calculated_commission|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Clearing Fee</label>
+                            <div>{{ trade.calculated_clearing_fee|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Trading Fee</label>
+                            <div>{{ trade.calculated_trading_fee|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">GST</label>
+                            <div>{{ trade.calculated_gst|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Other Fees</label>
+                            <div>{{ trade.calculated_other_fees|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Total Charges</label>
+                            <div class="fw-bold fs-5 text-primary">{{ trade.total_calculated_charges|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                    </div>
+                    {% if trade.charges_auto_calculated %}
+                    <div class="alert alert-success py-2 mb-0">
+                        <i class="bi bi-check-circle"></i> Charges auto-calculated from broker lookup
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
             <!-- GL & Broker Card -->
             <div class="card mb-4">
                 <div class="card-header">
@@ -233,8 +292,8 @@
                 <div class="card-body">
                     <div class="row">
                         <div class="col-md-4 mb-3">
-                            <label class="form-label text-muted">Broker</label>
-                            <div>{{ trade.broker_name|default:trade.brokers|default:"-" }}</div>
+                            <label class="form-label text-muted">Custodian</label>
+                            <div>{{ trade.custodian|default:"-" }}</div>
                         </div>
                         <div class="col-md-4 mb-3">
                             <label class="form-label text-muted">GL Fund Type</label>
@@ -251,12 +310,11 @@
                             <div>{{ trade.gl_account_code|default:"-" }}</div>
                         </div>
                         <div class="col-md-4 mb-3">
-                            <label class="form-label text-muted">Custodian</label>
-                            <div>{{ trade.custodian|default:"-" }}</div>
-                        </div>
-                        <div class="col-md-4 mb-3">
                             <label class="form-label text-muted">Selling Rule</label>
                             <div>{{ trade.selling_rule|default:"-" }}</div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <!-- Empty for alignment -->
                         </div>
                     </div>
                 </div>
