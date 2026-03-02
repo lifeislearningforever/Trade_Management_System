@@ -317,6 +317,7 @@
 
                             <!-- Hidden fields to store charge data (matches cis_trade columns) -->
                             <input type="hidden" name="charge_fee_type" id="charge_fee_type" value="{{ trade.charge_fee_type|default:'' }}">
+                            <input type="hidden" name="charge_exchange" id="hidden_charge_exchange" value="{{ trade.charge_exchange|default:'' }}">
                             <input type="hidden" name="charge_country" id="charge_country" value="{{ trade.charge_country|default:'' }}">
                             <input type="hidden" name="charge_fee_rule" id="charge_fee_rule" value="{{ trade.charge_fee_rule|default:'' }}">
                             <input type="hidden" name="charge_fee_value" id="charge_fee_value" value="{{ trade.charge_fee_value|default:'0' }}">
@@ -1095,6 +1096,7 @@ function calculateBrokerCharges() {
             if (charges.length > 0) {
                 const firstCharge = charges[0];
                 document.getElementById('charge_fee_type').value = firstCharge.fee_type;
+                document.getElementById('hidden_charge_exchange').value = firstCharge.exchange || '';
                 document.getElementById('charge_country').value = firstCharge.country_of_exchange || '';
                 document.getElementById('charge_fee_rule').value = firstCharge.fee_rule;
                 document.getElementById('charge_fee_value').value = firstCharge.fee_value;
@@ -1104,16 +1106,10 @@ function calculateBrokerCharges() {
             brokerChargeInfo.textContent = `${charges.length} charge(s) - Total: ${data.total_charges.toFixed(2)}`;
             brokerChargeInfo.className = 'text-success small';
 
-            // Auto-fill commission field with calculated commission
+            // Auto-fill commission field with total calculated charges
             const commissionField = document.getElementById('commission');
-            if (commissionField && calculatedCommission > 0) {
-                commissionField.value = calculatedCommission.toFixed(2);
-            }
-
-            // Auto-fill SEC fee with exchange/SEC fees
-            const secFeeField = document.getElementById('sec_fee');
-            if (secFeeField && calculatedExchangeFee > 0) {
-                secFeeField.value = calculatedExchangeFee.toFixed(2);
+            if (commissionField) {
+                commissionField.value = data.total_charges.toFixed(2);
             }
 
             // Recalculate total
@@ -1130,6 +1126,7 @@ function calculateBrokerCharges() {
 // Reset charge hidden fields (matches cis_trade columns)
 function resetChargeFields() {
     document.getElementById('charge_fee_type').value = '';
+    document.getElementById('hidden_charge_exchange').value = '';
     document.getElementById('charge_country').value = '';
     document.getElementById('charge_fee_rule').value = '';
     document.getElementById('charge_fee_value').value = '0';
@@ -1140,6 +1137,8 @@ function resetChargeFields() {
     document.getElementById('calculated_other_fees').value = '0';
     document.getElementById('total_calculated_charges').value = '0';
     document.getElementById('charges_auto_calculated').value = 'false';
+    // Also reset commission field
+    document.getElementById('commission').value = '0';
 }
 
 // =========================================================================

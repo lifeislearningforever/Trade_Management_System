@@ -846,11 +846,8 @@ class TradeDropdownService:
         """
         Get all charges for a specific broker from cis_trade_charge_lut.
 
-        The broker parameter comes from cis_party (party_short_name), but
-        cis_trade_charge_lut may have full broker name. We search using:
-        1. Exact match on broker
-        2. LIKE match (broker starts with or contains the value)
-        3. Also lookup party_full_name from cis_party and match against that
+        Uses exact match on broker name (party_short_name from cis_party
+        should match broker in cis_trade_charge_lut).
 
         Table structure (6 columns):
         - fee_type: Brokerage Fee, FFP/SGX SI FEE, GST, Clearing Fee, Trading Fee
@@ -861,7 +858,7 @@ class TradeDropdownService:
         - fee_value: Fee amount (percentage as whole number e.g., 1.0 for 1%, or flat amount)
 
         Args:
-            broker: Broker short name from cis_party
+            broker: Broker name (exact match)
             exchange: Optional exchange filter (e.g., 'SGX')
 
         Returns:
@@ -874,35 +871,12 @@ class TradeDropdownService:
             # Escape broker name for SQL
             escaped_broker = broker.replace("'", "''")
 
-            # First, get the full name from cis_party if available
-            broker_full_name = None
-            try:
-                party_query = f"""
-                SELECT party_full_name
-                FROM {self.DATABASE}.cis_party
-                WHERE party_short_name = '{escaped_broker}'
-                LIMIT 1
-                """
-                party_results = impala_manager.execute_query(party_query, database=self.DATABASE)
-                if party_results and party_results[0].get('party_full_name'):
-                    broker_full_name = party_results[0]['party_full_name'].replace("'", "''")
-            except Exception as e:
-                logger.debug(f"Could not get party full name: {e}")
-
             exchange_filter = ""
             if exchange:
                 escaped_exchange = exchange.replace("'", "''")
                 exchange_filter = f"AND (exchange = '{escaped_exchange}' OR exchange IS NULL)"
 
-            # Build broker match condition - check short name, full name, and LIKE patterns
-            broker_conditions = [f"broker = '{escaped_broker}'"]
-            broker_conditions.append(f"broker LIKE '%{escaped_broker}%'")
-            if broker_full_name:
-                broker_conditions.append(f"broker = '{broker_full_name}'")
-                broker_conditions.append(f"broker LIKE '%{broker_full_name}%'")
-
-            broker_match = " OR ".join(broker_conditions)
-
+            # Exact match on broker name
             query = f"""
             SELECT
                 fee_type,
@@ -912,11 +886,11 @@ class TradeDropdownService:
                 fee_rule,
                 fee_value
             FROM {self.DATABASE}.cis_trade_charge_lut
-            WHERE ({broker_match})
+            WHERE broker = '{escaped_broker}'
               {exchange_filter}
             ORDER BY fee_type
             """
-            logger.debug(f"Broker charge query: {query}")
+            logger.info(f"Broker charge query for: {broker}")
             results = impala_manager.execute_query(query, database=self.DATABASE)
 
             if results:
@@ -933,7 +907,7 @@ class TradeDropdownService:
                     for r in results
                 ]
             else:
-                logger.warning(f"No charges found for broker: {broker} (full_name: {broker_full_name})")
+                logger.warning(f"No charges found for broker: {broker}")
             return []
 
         except Exception as e:
