@@ -2,23 +2,23 @@
 -- AMS Street Source Tables DDL (1-5)
 -- Source System: AMS_STREET
 -- Format: Parquet external tables
+-- Note: All columns are STRING datatype (ingestion standard)
 -- ============================================================================
 
 -- ============================================================================
 -- AMS_STREET_1: AMS Multi Discretionary Fund
--- Fields: Portfolio, Security Name, ISIN, Price, Units, Country Code, trade_date
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.gmp_cis_sta_dly_ams_multi_dis_cif (
- src_id              STRING,
-    src_system          STRING,
-    sub_system          STRING,
-    data_cat            STRING,
-    data_frq            STRING,
+    src_id                  STRING,
+    src_system              STRING,
+    sub_system              STRING,
+    data_cat                STRING,
+    data_frq                STRING,
     portfolio               STRING,
     security_name           STRING,
     isin                    STRING,
-    price                   DECIMAL(18,6),
-    units                   DECIMAL(18,4),
+    price                   STRING,
+    units                   STRING,
     country_code            STRING
 )
 COMMENT 'AMS Street Source 1 - AMS Multi Discretionary Fund'
@@ -30,18 +30,17 @@ STORED AS PARQUET
 
 -- ============================================================================
 -- AMS_STREET_2: AMS Multiple Holdings Daily
--- Fields: Portfolio Code, Security Name, ISIN, Quantity, AC_No, Country Code, trade_date
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.gmp_cis_sta_dly_ams_multi_hold (
- src_id              STRING,
-    src_system          STRING,
-    sub_system          STRING,
-    data_cat            STRING,
-    data_frq            STRING,
+    src_id                  STRING,
+    src_system              STRING,
+    sub_system              STRING,
+    data_cat                STRING,
+    data_frq                STRING,
     portfolio_code          STRING,
     security_name           STRING,
     isin                    STRING,
-    quantity                DECIMAL(18,4),
+    quantity                STRING,
     ac_no                   STRING,
     country_code            STRING,
     trade_date              STRING
@@ -54,21 +53,14 @@ STORED AS PARQUET
 ;
 
 -- ============================================================================
--- AMS_STREET_3: AMS ICEQ Month End (First variant)
--- Fields: Portfolio Code, Sub-Portfolio/Reserved, Security Name (Long),
---         Country Name, Security Currency, Asset Class, Listing Status,
---         Quantity, Pct/Ratio, Cost Unit Price (Local), Market Unit Price (Local),
---         Cost Value (Local), Market Value (Local), Cost Value (Base),
---         Market Value (Base), Unrealized P/L (Local), Unrealized P/L (Base),
---         ISIN, FX Rate, Portfolio Code, Flag, Valuation Date,
---         Reporting Currency, Padding/Reserved, settled_date
+-- AMS_STREET_3: AMS ICEQ Daily
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.gmp_cis_sta_dly_stat_street_ams_iceq (
- src_id              STRING,
-    src_system          STRING,
-    sub_system          STRING,
-    data_cat            STRING,
-    data_frq            STRING,
+    src_id                      STRING,
+    src_system                  STRING,
+    sub_system                  STRING,
+    data_cat                    STRING,
+    data_frq                    STRING,
     portfolio_code              STRING,
     sub_portfolio_reserved      STRING,
     security_name_long          STRING,
@@ -76,18 +68,18 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.gmp_cis_sta_dly_stat_street_ams_iceq
     security_currency           STRING,
     asset_class                 STRING,
     listing_status              STRING,
-    quantity                    DECIMAL(18,4),
-    pct_ratio_reserved          DECIMAL(10,6),
-    cost_unit_price_local       DECIMAL(18,6),
-    market_unit_price_local     DECIMAL(18,6),
-    cost_value_local            DECIMAL(18,4),
-    market_value_local          DECIMAL(18,4),
-    cost_value_base             DECIMAL(18,4),
-    market_value_base           DECIMAL(18,4),
-    unrealized_pl_local         DECIMAL(18,4),
-    unrealized_pl_base          DECIMAL(18,4),
+    quantity                    STRING,
+    pct_ratio_reserved          STRING,
+    cost_unit_price_local       STRING,
+    market_unit_price_local     STRING,
+    cost_value_local            STRING,
+    market_value_local          STRING,
+    cost_value_base             STRING,
+    market_value_base           STRING,
+    unrealized_pl_local         STRING,
+    unrealized_pl_base          STRING,
     isin                        STRING,
-    fx_rate_base_local          DECIMAL(18,8),
+    fx_rate_base_local          STRING,
     portfolio_code_2            STRING,
     flag_reserved               STRING,
     valuation_date              STRING,
@@ -95,7 +87,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.gmp_cis_sta_dly_stat_street_ams_iceq
     padding_reserved            STRING,
     settled_date                STRING
 )
-COMMENT 'AMS Street Source 3 - AMS ICEQ Month End (Variant 1)'
+COMMENT 'AMS Street Source 3 - AMS ICEQ Daily'
 PARTITIONED BY (
     processing_date     STRING
 )
@@ -103,14 +95,14 @@ STORED AS PARQUET
 ;
 
 -- ============================================================================
--- AMS_STREET_4: AMS ICEQ Month End (Second variant - same structure as 3)
+-- AMS_STREET_4: AMS ICEQ Month End
 -- ============================================================================
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.gmp_cis_sta_dly_stat_street_ams_iceq_end (
- src_id              STRING,
-    src_system          STRING,
-    sub_system          STRING,
-    data_cat            STRING,
-    data_frq            STRING,
+CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.gmp_cis_sta_mthly_stat_street_ams_iceq_end (
+    src_id                      STRING,
+    src_system                  STRING,
+    sub_system                  STRING,
+    data_cat                    STRING,
+    data_frq                    STRING,
     portfolio_code              STRING,
     sub_portfolio_reserved      STRING,
     security_name_long          STRING,
@@ -118,18 +110,18 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.gmp_cis_sta_dly_stat_street_ams_iceq
     security_currency           STRING,
     asset_class                 STRING,
     listing_status              STRING,
-    quantity                    DECIMAL(18,4),
-    pct_ratio_reserved          DECIMAL(10,6),
-    cost_unit_price_local       DECIMAL(18,6),
-    market_unit_price_local     DECIMAL(18,6),
-    cost_value_local            DECIMAL(18,4),
-    market_value_local          DECIMAL(18,4),
-    cost_value_base             DECIMAL(18,4),
-    market_value_base           DECIMAL(18,4),
-    unrealized_pl_local         DECIMAL(18,4),
-    unrealized_pl_base          DECIMAL(18,4),
+    quantity                    STRING,
+    pct_ratio_reserved          STRING,
+    cost_unit_price_local       STRING,
+    market_unit_price_local     STRING,
+    cost_value_local            STRING,
+    market_value_local          STRING,
+    cost_value_base             STRING,
+    market_value_base           STRING,
+    unrealized_pl_local         STRING,
+    unrealized_pl_base          STRING,
     isin                        STRING,
-    fx_rate_base_local          DECIMAL(18,8),
+    fx_rate_base_local          STRING,
     portfolio_code_2            STRING,
     flag_reserved               STRING,
     valuation_date              STRING,
@@ -137,7 +129,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.gmp_cis_sta_dly_stat_street_ams_iceq
     padding_reserved            STRING,
     settled_date                STRING
 )
-COMMENT 'AMS Street Source 4 - AMS ICEQ Month End (Variant 2)'
+COMMENT 'AMS Street Source 4 - AMS ICEQ Month End'
 PARTITIONED BY (
     processing_date     STRING
 )
@@ -145,60 +137,44 @@ STORED AS PARQUET
 ;
 
 -- ============================================================================
--- AMS_STREET_5: AMS S31 UOI
--- Fields: Ticker, Security Desc, Portfolio, Fund Type, Quoted Unquoted,
---         Quantity Units, CCY, Product Type, Ctry of Exchange,
---         Ctry Incorporation, Total Cost (FC), Mkt Value (FC),
---         Unrealised P/L (FC), Total Cost (SGD), Mkt Value (SGD),
---         Unrealised P/L (SGD), FX Rate, Issue Indicator, ISO Code,
---         MAS 6Digit Code, GL Fund Type, MajorStake Indicate,
---         Stake Holdings, Unit Cost, Market Price, trade_date
+-- AMS_STREET_5: AMS S31 UOI Daily Limit
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.gmp_cis_sta_dly_stat_street_ams_daily_limit (
- src_id              STRING,
-    src_system          STRING,
-    sub_system          STRING,
-    data_cat            STRING,
-    data_frq            STRING,
-    ticker                      STRING,
-    security_desc               STRING,
-    portfolio                   STRING,
-    fund_type                   STRING,
-    quoted_unquoted             STRING,
-    quantity_units              DECIMAL(18,4),
-    ccy                         STRING,
-    product_type                STRING,
-    ctry_of_exchange            STRING,
-    ctry_incorporation          STRING,
-    total_cost_fc               DECIMAL(18,4),
-    mkt_value_fc                DECIMAL(18,4),
-    unrealised_pl_fc            DECIMAL(18,4),
-    total_cost_sgd              DECIMAL(18,4),
-    mkt_value_sgd               DECIMAL(18,4),
-    unrealised_pl_sgd           DECIMAL(18,4),
-    fx_rate                     DECIMAL(18,8),
-    issue_indicator             STRING,
-    iso_code                    STRING,
-    mas_6digit_code             STRING,
-    gl_fund_type                STRING,
-    majorstake_indicate         STRING,
-    stake_holdings              DECIMAL(10,6),
-    unit_cost                   DECIMAL(18,6),
-    market_price                DECIMAL(18,6),
-    trade_date                  STRING
+    src_id                  STRING,
+    src_system              STRING,
+    sub_system              STRING,
+    data_cat                STRING,
+    data_frq                STRING,
+    ticker                  STRING,
+    security_desc           STRING,
+    portfolio               STRING,
+    fund_type               STRING,
+    quoted_unquoted         STRING,
+    quantity_units          STRING,
+    ccy                     STRING,
+    product_type            STRING,
+    ctry_of_exchange        STRING,
+    ctry_incorporation      STRING,
+    total_cost_fc           STRING,
+    mkt_value_fc            STRING,
+    unrealised_pl_fc        STRING,
+    total_cost_sgd          STRING,
+    mkt_value_sgd           STRING,
+    unrealised_pl_sgd       STRING,
+    fx_rate                 STRING,
+    issue_indicator         STRING,
+    iso_code                STRING,
+    mas_6digit_code         STRING,
+    gl_fund_type            STRING,
+    majorstake_indicate     STRING,
+    stake_holdings          STRING,
+    unit_cost               STRING,
+    market_price            STRING,
+    trade_date              STRING
 )
-COMMENT 'AMS Street Source 5 - AMS S31 UOI'
+COMMENT 'AMS Street Source 5 - AMS S31 UOI Daily Limit'
 PARTITIONED BY (
     processing_date     STRING
 )
 STORED AS PARQUET
 ;
-
--- ============================================================================
--- Repair partitions after data load
--- ============================================================================
--- MSCK REPAIR TABLE gmp_cis.ams_street_1;
--- MSCK REPAIR TABLE gmp_cis.ams_street_2;
--- MSCK REPAIR TABLE gmp_cis.ams_street_3;
--- MSCK REPAIR TABLE gmp_cis.ams_street_4;
--- MSCK REPAIR TABLE gmp_cis.ams_street_5;
