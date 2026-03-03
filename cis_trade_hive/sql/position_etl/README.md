@@ -6,32 +6,49 @@ ETL pipeline to transform 10 source Hive external tables into a unified `positio
 
 | Component | Description |
 |-----------|-------------|
-| **Source Tables** | 10 Hive external tables (Parquet format) |
+| **Source Tables** | 10 Hive external tables (Parquet format, STRING datatypes) |
 | **Target Table** | `gmp_cis.position_master` |
 | **Format** | Parquet with SNAPPY compression |
 | **Partitions** | `src_id`, `processing_date` |
 
-## Source Systems
+## Source Tables
 
 ### USER_UPLOAD (src_system='USER_UPLOAD')
 
-| Table | Description | Key Mappings |
-|-------|-------------|--------------|
-| `user_upload_1` | Basic Position Data | Portfolio, ISIN, Quantity, Exchange |
-| `user_upload_2` | Holdings with Country | Portfolio, Security, Country, Holdings % |
-| `user_upload_3` | Account Position | Account/Portfolio, ISIN, Quantity |
-| `user_upload_4` | Position with Valuation | Full security details, Cost FC/LC, P&L |
-| `user_upload_5` | Complete Position | All fields including MAS codes, BWCIF |
+| Table Name | position_basis | Description |
+|------------|----------------|-------------|
+| `cis_user_sta_adhoc_position_1` | **trade_date** | Basic Position Data |
+| `cis_user_sta_adhoc_position_2` | **trade_date** | Holdings with Country |
+| `cis_user_sta_adhoc_position_3` | **trade_date** | Account Position |
+| `cis_user_sta_adhoc_position_4` | **settled_date** | Position with Valuation |
+| `cis_user_sta_adhoc_position_5` | **settled_date** | Complete Position (most comprehensive) |
 
 ### AMS_STREET (src_system='AMS_STREET')
 
-| Table | Description | Key Mappings |
-|-------|-------------|--------------|
-| `ams_street_1` | Multi Discretionary Fund | Portfolio, Security, Price, Units |
-| `ams_street_2` | Multiple Holdings Daily | Portfolio, Security, Quantity |
-| `ams_street_3` | ICEQ Month End (v1) | Full valuation with P&L |
-| `ams_street_4` | ICEQ Month End (v2) | Full valuation with P&L |
-| `ams_street_5` | S31 UOI | Portfolio, Cost, Market Value, MAS codes |
+| Table Name | position_basis | Description |
+|------------|----------------|-------------|
+| `gmp_cis_sta_dly_ams_multi_dis_cif` | **trade_date** | Multi Discretionary Fund |
+| `gmp_cis_sta_dly_ams_multi_hold` | **trade_date** | Multiple Holdings Daily |
+| `gmp_cis_sta_dly_stat_street_ams_daily_limit` | **trade_date** | S31 UOI Daily Limit |
+| `gmp_cis_sta_dly_stat_street_ams_iceq` | **trade_date** | ICEQ Daily |
+| `gmp_cis_sta_mthly_stat_street_ams_iceq_end` | **settled_date** | ICEQ Month End |
+
+## Position Basis Mapping
+
+The `position_basis` column in `position_master` is populated from either `trade_date` or `settled_date` depending on the source table:
+
+| Source | position_basis Source Field |
+|--------|----------------------------|
+| cis_user_sta_adhoc_position_1 | trade_date |
+| cis_user_sta_adhoc_position_2 | trade_date |
+| cis_user_sta_adhoc_position_3 | trade_date |
+| cis_user_sta_adhoc_position_4 | settled_date |
+| cis_user_sta_adhoc_position_5 | settled_date |
+| gmp_cis_sta_dly_ams_multi_dis_cif | trade_date |
+| gmp_cis_sta_dly_ams_multi_hold | trade_date |
+| gmp_cis_sta_dly_stat_street_ams_daily_limit | trade_date |
+| gmp_cis_sta_dly_stat_street_ams_iceq | trade_date |
+| gmp_cis_sta_mthly_stat_street_ams_iceq_end | settled_date |
 
 ## Files
 
@@ -55,7 +72,7 @@ sql/position_etl/
 beeline -u "jdbc:hive2://localhost:10000" -n user \
   -f sql/position_etl/01_position_master_ddl.sql
 
-# Create source tables
+# Create source tables (if not exists)
 beeline -u "jdbc:hive2://localhost:10000" -n user \
   -f sql/position_etl/02_user_upload_source_ddl.sql
 
@@ -98,9 +115,7 @@ beeline -u "jdbc:hive2://localhost:10000" -n user \
   -f sql/position_etl/04_position_master_etl_hive.sql
 ```
 
-## Field Mapping Summary
-
-### Position Master Target Schema
+## Position Master Target Schema
 
 | Category | Fields |
 |----------|--------|
@@ -118,17 +133,17 @@ beeline -u "jdbc:hive2://localhost:10000" -n user \
 | **ETL** | etl_insert_ts, etl_batch_id |
 | **Partitions** | src_id, processing_date |
 
-### Source to Target Mapping (Key Fields)
+## Source to Target Mapping (Key Fields)
 
 | Master Field | USER_UPLOAD Sources | AMS_STREET Sources |
 |--------------|--------------------|--------------------|
-| `portfolio` | Portfolio, Portfolio_Name, Account_name | Portfolio, Portfolio_Code |
-| `isin` | ISIN_Code, ISIN | ISIN |
-| `quantity` | Quantity_Today, Qty_Held, Shares_outstanding_total | Units, Quantity, Quantity_Units |
-| `market_price` | Market_Price_unit_FC | Price, Market_Unit_Price_Local, Market_Price |
-| `cost_fc` | COST_FC | Cost_Value_Local, Total_Cost_FC |
-| `cost_lc` | COST_LC | Cost_Value_Base, Total_Cost_SGD |
-| `position_basis` | trade_date, settled_date | trade_date, settled_date |
+| `portfolio` | portfolio, portfolio_name, account_name | portfolio, portfolio_code |
+| `isin` | isin_code, isin | isin |
+| `quantity` | quantity_today, qty_held, shares_outstanding_total, quantity | units, quantity, quantity_units |
+| `market_price` | market_price_unit_fc | price, market_unit_price_local, market_price |
+| `cost_fc` | cost_fc | cost_value_local, total_cost_fc |
+| `cost_lc` | cost_lc | cost_value_base, total_cost_sgd |
+| `position_basis` | trade_date OR settled_date | trade_date OR settled_date |
 
 ## Partition Strategy
 
@@ -156,16 +171,23 @@ GROUP BY etl_batch_id
 ORDER BY MIN(etl_insert_ts) DESC
 LIMIT 5;
 
--- Sample data
-SELECT portfolio, isin, quantity, market_price, cost_fc, src_system, source_table
+-- Sample data with position_basis
+SELECT portfolio, isin, quantity, position_basis, src_system, source_table
 FROM gmp_cis.position_master
 WHERE processing_date = '03032026'
 LIMIT 10;
+
+-- Check position_basis distribution
+SELECT source_table, position_basis, COUNT(*) AS cnt
+FROM gmp_cis.position_master
+WHERE processing_date = '03032026'
+GROUP BY source_table, position_basis
+ORDER BY source_table;
 ```
 
 ## Notes
 
-1. **Yellow-highlighted fields** in the mapping images indicate fields that are NOT mapped to the master table (reserved/unused fields).
-2. The `position_basis` field captures either `trade_date` or `settled_date` depending on the source.
-3. All decimal fields use appropriate precision for financial calculations.
-4. ETL supports both append and overwrite modes for flexibility.
+1. **All source table columns are STRING datatype** - ingestion uses STRING for all fields.
+2. The `position_basis` field captures either `trade_date` or `settled_date` depending on the source table (see mapping table above).
+3. ETL supports both append and overwrite modes for flexibility.
+4. The PySpark ETL uses a configuration-driven approach for easy maintenance.

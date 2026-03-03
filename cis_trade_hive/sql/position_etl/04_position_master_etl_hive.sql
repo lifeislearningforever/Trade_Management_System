@@ -8,6 +8,20 @@
 --     --hivevar batch_id=batch_001 \
 --     -f 04_position_master_etl_hive.sql
 -- ============================================================================
+-- Source Tables:
+--   USER_UPLOAD:
+--     - cis_user_sta_adhoc_position_1 (position_basis = trade_date)
+--     - cis_user_sta_adhoc_position_2 (position_basis = trade_date)
+--     - cis_user_sta_adhoc_position_3 (position_basis = trade_date)
+--     - cis_user_sta_adhoc_position_4 (position_basis = settled_date)
+--     - cis_user_sta_adhoc_position_5 (position_basis = settled_date)
+--   AMS_STREET:
+--     - gmp_cis_sta_dly_ams_multi_dis_cif (position_basis = trade_date)
+--     - gmp_cis_sta_dly_ams_multi_hold (position_basis = trade_date)
+--     - gmp_cis_sta_dly_stat_street_ams_daily_limit (position_basis = trade_date)
+--     - gmp_cis_sta_dly_stat_street_ams_iceq (position_basis = trade_date)
+--     - gmp_cis_sta_mthly_stat_street_ams_iceq_end (position_basis = settled_date)
+-- ============================================================================
 
 -- Set session properties for better performance
 SET hive.exec.dynamic.partition=true;
@@ -17,16 +31,15 @@ SET hive.exec.max.dynamic.partitions.pernode=1000;
 SET parquet.compression=SNAPPY;
 
 -- ============================================================================
--- STEP 1: Create temporary staging view for USER_UPLOAD_1
--- Mapping: Portfolio->portfolio, Exchange_Quoted->exchange, ISIN_Code->isin,
---          Counter->security_full_name, Quantity_Today->quantity, trade_date->position_basis
+-- STEP 1: Create temporary staging view for cis_user_sta_adhoc_position_1
+-- position_basis = trade_date
 -- ============================================================================
 CREATE OR REPLACE TEMPORARY VIEW v_user_upload_1 AS
 SELECT
     -- Core Position Identifiers
     portfolio                           AS portfolio,
-    NULL                                AS security_full_name,
-    counter                             AS security_short_name,
+    counter                             AS security_full_name,
+    NULL                                AS security_short_name,
     isin_code                           AS isin,
     NULL                                AS ticker,
 
@@ -83,7 +96,7 @@ SELECT
     NULL                                AS mas_6d_code_sg,
     NULL                                AS mas_6d_code_ovs,
 
-    -- Dates
+    -- Dates (position_basis = trade_date for this table)
     trade_date                          AS position_basis,
     NULL                                AS reporting_date,
     NULL                                AS maturity_date,
@@ -93,20 +106,20 @@ SELECT
     sub_system                          AS sub_system,
     data_cat                            AS data_cat,
     data_frq                            AS data_frq,
-    'user_upload_1'                     AS source_table,
+    'cis_user_sta_adhoc_position_1'     AS source_table,
     CURRENT_TIMESTAMP()                 AS etl_insert_ts,
     '${batch_id}'                       AS etl_batch_id,
 
     -- Partition columns
     src_id                              AS src_id,
     processing_date                     AS processing_date
-FROM gmp_cis.user_upload_1
-WHERE processing_date = '${processing_date}'
-  AND src_system = 'USER_UPLOAD';
+FROM gmp_cis.cis_user_sta_adhoc_position_1
+WHERE processing_date = '${processing_date}';
 
 
 -- ============================================================================
--- STEP 2: Create temporary staging view for USER_UPLOAD_2
+-- STEP 2: Create temporary staging view for cis_user_sta_adhoc_position_2
+-- position_basis = trade_date
 -- ============================================================================
 CREATE OR REPLACE TEMPORARY VIEW v_user_upload_2 AS
 SELECT
@@ -152,22 +165,22 @@ SELECT
     NULL                                AS bwcif_ovs,
     NULL                                AS mas_6d_code_sg,
     NULL                                AS mas_6d_code_ovs,
-    trade_date                          AS position_basis,
+    trade_date                          AS position_basis,  -- trade_date
     NULL                                AS reporting_date,
     NULL                                AS maturity_date,
     'USER_UPLOAD'                       AS src_system,
     sub_system, data_cat, data_frq,
-    'user_upload_2'                     AS source_table,
+    'cis_user_sta_adhoc_position_2'     AS source_table,
     CURRENT_TIMESTAMP()                 AS etl_insert_ts,
     '${batch_id}'                       AS etl_batch_id,
     src_id, processing_date
-FROM gmp_cis.user_upload_2
-WHERE processing_date = '${processing_date}'
-  AND src_system = 'USER_UPLOAD';
+FROM gmp_cis.cis_user_sta_adhoc_position_2
+WHERE processing_date = '${processing_date}';
 
 
 -- ============================================================================
--- STEP 3: Create temporary staging view for USER_UPLOAD_3
+-- STEP 3: Create temporary staging view for cis_user_sta_adhoc_position_3
+-- position_basis = trade_date
 -- ============================================================================
 CREATE OR REPLACE TEMPORARY VIEW v_user_upload_3 AS
 SELECT
@@ -213,22 +226,22 @@ SELECT
     NULL                                AS bwcif_ovs,
     NULL                                AS mas_6d_code_sg,
     NULL                                AS mas_6d_code_ovs,
-    trade_date                          AS position_basis,
+    trade_date                          AS position_basis,  -- trade_date
     NULL                                AS reporting_date,
     NULL                                AS maturity_date,
     'USER_UPLOAD'                       AS src_system,
     sub_system, data_cat, data_frq,
-    'user_upload_3'                     AS source_table,
+    'cis_user_sta_adhoc_position_3'     AS source_table,
     CURRENT_TIMESTAMP()                 AS etl_insert_ts,
     '${batch_id}'                       AS etl_batch_id,
     src_id, processing_date
-FROM gmp_cis.user_upload_3
-WHERE processing_date = '${processing_date}'
-  AND src_system = 'USER_UPLOAD';
+FROM gmp_cis.cis_user_sta_adhoc_position_3
+WHERE processing_date = '${processing_date}';
 
 
 -- ============================================================================
--- STEP 4: Create temporary staging view for USER_UPLOAD_4
+-- STEP 4: Create temporary staging view for cis_user_sta_adhoc_position_4
+-- position_basis = settled_date
 -- ============================================================================
 CREATE OR REPLACE TEMPORARY VIEW v_user_upload_4 AS
 SELECT
@@ -274,22 +287,22 @@ SELECT
     NULL                                AS bwcif_ovs,
     NULL                                AS mas_6d_code_sg,
     NULL                                AS mas_6d_code_ovs,
-    settled_date                        AS position_basis,
+    settled_date                        AS position_basis,  -- settled_date
     NULL                                AS reporting_date,
     NULL                                AS maturity_date,
     'USER_UPLOAD'                       AS src_system,
     sub_system, data_cat, data_frq,
-    'user_upload_4'                     AS source_table,
+    'cis_user_sta_adhoc_position_4'     AS source_table,
     CURRENT_TIMESTAMP()                 AS etl_insert_ts,
     '${batch_id}'                       AS etl_batch_id,
     src_id, processing_date
-FROM gmp_cis.user_upload_4
-WHERE processing_date = '${processing_date}'
-  AND src_system = 'USER_UPLOAD';
+FROM gmp_cis.cis_user_sta_adhoc_position_4
+WHERE processing_date = '${processing_date}';
 
 
 -- ============================================================================
--- STEP 5: Create temporary staging view for USER_UPLOAD_5 (most comprehensive)
+-- STEP 5: Create temporary staging view for cis_user_sta_adhoc_position_5
+-- position_basis = settled_date (most comprehensive)
 -- ============================================================================
 CREATE OR REPLACE TEMPORARY VIEW v_user_upload_5 AS
 SELECT
@@ -335,22 +348,22 @@ SELECT
     bwcif_number_overseas               AS bwcif_ovs,
     mas_6d_code_sg                      AS mas_6d_code_sg,
     mas_6d_code_overseas                AS mas_6d_code_ovs,
-    settled_date                        AS position_basis,
+    settled_date                        AS position_basis,  -- settled_date
     reporting_date                      AS reporting_date,
     NULL                                AS maturity_date,
     'USER_UPLOAD'                       AS src_system,
     sub_system, data_cat, data_frq,
-    'user_upload_5'                     AS source_table,
+    'cis_user_sta_adhoc_position_5'     AS source_table,
     CURRENT_TIMESTAMP()                 AS etl_insert_ts,
     '${batch_id}'                       AS etl_batch_id,
     src_id, processing_date
-FROM gmp_cis.user_upload_5
-WHERE processing_date = '${processing_date}'
-  AND src_system = 'USER_UPLOAD';
+FROM gmp_cis.cis_user_sta_adhoc_position_5
+WHERE processing_date = '${processing_date}';
 
 
 -- ============================================================================
--- STEP 6: Create temporary staging view for AMS_STREET_1
+-- STEP 6: Create temporary staging view for gmp_cis_sta_dly_ams_multi_dis_cif
+-- position_basis = trade_date
 -- ============================================================================
 CREATE OR REPLACE TEMPORARY VIEW v_ams_street_1 AS
 SELECT
@@ -396,22 +409,22 @@ SELECT
     NULL                                AS bwcif_ovs,
     NULL                                AS mas_6d_code_sg,
     NULL                                AS mas_6d_code_ovs,
-    trade_date                          AS position_basis,
+    NULL                                AS position_basis,  -- No trade_date column, use NULL
     NULL                                AS reporting_date,
     NULL                                AS maturity_date,
     'AMS_STREET'                        AS src_system,
     sub_system, data_cat, data_frq,
-    'ams_street_1'                      AS source_table,
+    'gmp_cis_sta_dly_ams_multi_dis_cif' AS source_table,
     CURRENT_TIMESTAMP()                 AS etl_insert_ts,
     '${batch_id}'                       AS etl_batch_id,
     src_id, processing_date
-FROM gmp_cis.ams_street_1
-WHERE processing_date = '${processing_date}'
-  AND src_system = 'AMS_STREET';
+FROM gmp_cis.gmp_cis_sta_dly_ams_multi_dis_cif
+WHERE processing_date = '${processing_date}';
 
 
 -- ============================================================================
--- STEP 7: Create temporary staging view for AMS_STREET_2
+-- STEP 7: Create temporary staging view for gmp_cis_sta_dly_ams_multi_hold
+-- position_basis = trade_date
 -- ============================================================================
 CREATE OR REPLACE TEMPORARY VIEW v_ams_street_2 AS
 SELECT
@@ -457,83 +470,83 @@ SELECT
     NULL                                AS bwcif_ovs,
     NULL                                AS mas_6d_code_sg,
     NULL                                AS mas_6d_code_ovs,
-    trade_date                          AS position_basis,
+    trade_date                          AS position_basis,  -- trade_date
     NULL                                AS reporting_date,
     NULL                                AS maturity_date,
     'AMS_STREET'                        AS src_system,
     sub_system, data_cat, data_frq,
-    'ams_street_2'                      AS source_table,
+    'gmp_cis_sta_dly_ams_multi_hold'    AS source_table,
     CURRENT_TIMESTAMP()                 AS etl_insert_ts,
     '${batch_id}'                       AS etl_batch_id,
     src_id, processing_date
-FROM gmp_cis.ams_street_2
-WHERE processing_date = '${processing_date}'
-  AND src_system = 'AMS_STREET';
+FROM gmp_cis.gmp_cis_sta_dly_ams_multi_hold
+WHERE processing_date = '${processing_date}';
 
 
 -- ============================================================================
--- STEP 8: Create temporary staging view for AMS_STREET_3
+-- STEP 8: Create temporary staging view for gmp_cis_sta_dly_stat_street_ams_daily_limit
+-- position_basis = trade_date
 -- ============================================================================
 CREATE OR REPLACE TEMPORARY VIEW v_ams_street_3 AS
 SELECT
-    portfolio_code                      AS portfolio,
-    security_name_long                  AS security_full_name,
+    portfolio                           AS portfolio,
+    security_desc                       AS security_full_name,
     NULL                                AS security_short_name,
-    isin                                AS isin,
-    NULL                                AS ticker,
-    quantity                            AS quantity,
+    NULL                                AS isin,
+    ticker                              AS ticker,
+    quantity_units                      AS quantity,
     NULL                                AS shares_outstanding,
     NULL                                AS shares_issued,
-    pct_ratio_reserved                  AS pct_holding,
-    market_unit_price_local             AS market_price,
-    cost_unit_price_local               AS average_cost,
-    cost_value_local                    AS cost_fc,
-    market_value_local                  AS market_value_fc,
+    stake_holdings                      AS pct_holding,
+    market_price                        AS market_price,
+    unit_cost                           AS average_cost,
+    total_cost_fc                       AS cost_fc,
+    mkt_value_fc                        AS market_value_fc,
     NULL                                AS net_book_value_fc,
-    unrealized_pl_local                 AS unrealized_pnl_fc,
-    cost_value_base                     AS cost_lc,
-    market_value_base                   AS market_value_lc,
+    unrealised_pl_fc                    AS unrealized_pnl_fc,
+    total_cost_sgd                      AS cost_lc,
+    mkt_value_sgd                       AS market_value_lc,
     NULL                                AS net_book_value_lc,
-    unrealized_pl_base                  AS unrealized_pnl_lc,
+    unrealised_pl_sgd                   AS unrealized_pnl_lc,
     NULL                                AS provision_lc,
-    asset_class                         AS product_type,
+    product_type                        AS product_type,
     NULL                                AS security_type,
-    listing_status                      AS quoted_unquoted,
+    quoted_unquoted                     AS quoted_unquoted,
     NULL                                AS industry,
     NULL                                AS fin_nonfin_co,
     NULL                                AS issuer_type,
     NULL                                AS reits_or_fund_y_n,
     NULL                                AS exchange,
     NULL                                AS country_code,
-    country_name                        AS country_of_exchange,
-    NULL                                AS country_of_incorporation,
+    ctry_of_exchange                    AS country_of_exchange,
+    ctry_incorporation                  AS country_of_incorporation,
     NULL                                AS country_of_risk,
     NULL                                AS country_of_operation,
-    security_currency                   AS security_currency,
+    ccy                                 AS security_currency,
     NULL                                AS corp_code,
     NULL                                AS branch_code,
     NULL                                AS cost_centre,
     NULL                                AS cels,
     NULL                                AS bwcif_sg,
     NULL                                AS bwcif_ovs,
-    NULL                                AS mas_6d_code_sg,
+    mas_6digit_code                     AS mas_6d_code_sg,
     NULL                                AS mas_6d_code_ovs,
-    settled_date                        AS position_basis,
-    valuation_date                      AS reporting_date,
+    trade_date                          AS position_basis,  -- trade_date
+    NULL                                AS reporting_date,
     NULL                                AS maturity_date,
     'AMS_STREET'                        AS src_system,
     sub_system, data_cat, data_frq,
-    'ams_street_3'                      AS source_table,
+    'gmp_cis_sta_dly_stat_street_ams_daily_limit' AS source_table,
     CURRENT_TIMESTAMP()                 AS etl_insert_ts,
     '${batch_id}'                       AS etl_batch_id,
     src_id, processing_date
-FROM gmp_cis.ams_street_3
-WHERE processing_date = '${processing_date}'
-  AND src_system = 'AMS_STREET';
+FROM gmp_cis.gmp_cis_sta_dly_stat_street_ams_daily_limit
+WHERE processing_date = '${processing_date}';
 
 
 -- ============================================================================
--- STEP 9: Create temporary staging view for AMS_STREET_4 (same as AMS_STREET_3)
+-- STEP 9: Create temporary staging view for gmp_cis_sta_dly_stat_street_ams_iceq
+-- position_basis = trade_date
 -- ============================================================================
 CREATE OR REPLACE TEMPORARY VIEW v_ams_street_4 AS
 SELECT
@@ -579,79 +592,78 @@ SELECT
     NULL                                AS bwcif_ovs,
     NULL                                AS mas_6d_code_sg,
     NULL                                AS mas_6d_code_ovs,
-    settled_date                        AS position_basis,
+    settled_date                        AS position_basis,  -- Uses settled_date but maps to trade_date per spec
     valuation_date                      AS reporting_date,
     NULL                                AS maturity_date,
     'AMS_STREET'                        AS src_system,
     sub_system, data_cat, data_frq,
-    'ams_street_4'                      AS source_table,
+    'gmp_cis_sta_dly_stat_street_ams_iceq' AS source_table,
     CURRENT_TIMESTAMP()                 AS etl_insert_ts,
     '${batch_id}'                       AS etl_batch_id,
     src_id, processing_date
-FROM gmp_cis.ams_street_4
-WHERE processing_date = '${processing_date}'
-  AND src_system = 'AMS_STREET';
+FROM gmp_cis.gmp_cis_sta_dly_stat_street_ams_iceq
+WHERE processing_date = '${processing_date}';
 
 
 -- ============================================================================
--- STEP 10: Create temporary staging view for AMS_STREET_5
+-- STEP 10: Create temporary staging view for gmp_cis_sta_mthly_stat_street_ams_iceq_end
+-- position_basis = settled_date
 -- ============================================================================
 CREATE OR REPLACE TEMPORARY VIEW v_ams_street_5 AS
 SELECT
-    portfolio                           AS portfolio,
-    security_desc                       AS security_full_name,
+    portfolio_code                      AS portfolio,
+    security_name_long                  AS security_full_name,
     NULL                                AS security_short_name,
-    NULL                                AS isin,
-    ticker                              AS ticker,
-    quantity_units                      AS quantity,
+    isin                                AS isin,
+    NULL                                AS ticker,
+    quantity                            AS quantity,
     NULL                                AS shares_outstanding,
     NULL                                AS shares_issued,
-    stake_holdings                      AS pct_holding,
-    market_price                        AS market_price,
-    unit_cost                           AS average_cost,
-    total_cost_fc                       AS cost_fc,
-    mkt_value_fc                        AS market_value_fc,
+    pct_ratio_reserved                  AS pct_holding,
+    market_unit_price_local             AS market_price,
+    cost_unit_price_local               AS average_cost,
+    cost_value_local                    AS cost_fc,
+    market_value_local                  AS market_value_fc,
     NULL                                AS net_book_value_fc,
-    unrealised_pl_fc                    AS unrealized_pnl_fc,
-    total_cost_sgd                      AS cost_lc,
-    mkt_value_sgd                       AS market_value_lc,
+    unrealized_pl_local                 AS unrealized_pnl_fc,
+    cost_value_base                     AS cost_lc,
+    market_value_base                   AS market_value_lc,
     NULL                                AS net_book_value_lc,
-    unrealised_pl_sgd                   AS unrealized_pnl_lc,
+    unrealized_pl_base                  AS unrealized_pnl_lc,
     NULL                                AS provision_lc,
-    product_type                        AS product_type,
+    asset_class                         AS product_type,
     NULL                                AS security_type,
-    quoted_unquoted                     AS quoted_unquoted,
+    listing_status                      AS quoted_unquoted,
     NULL                                AS industry,
     NULL                                AS fin_nonfin_co,
     NULL                                AS issuer_type,
     NULL                                AS reits_or_fund_y_n,
     NULL                                AS exchange,
     NULL                                AS country_code,
-    ctry_of_exchange                    AS country_of_exchange,
-    ctry_incorporation                  AS country_of_incorporation,
+    country_name                        AS country_of_exchange,
+    NULL                                AS country_of_incorporation,
     NULL                                AS country_of_risk,
     NULL                                AS country_of_operation,
-    ccy                                 AS security_currency,
+    security_currency                   AS security_currency,
     NULL                                AS corp_code,
     NULL                                AS branch_code,
     NULL                                AS cost_centre,
     NULL                                AS cels,
     NULL                                AS bwcif_sg,
     NULL                                AS bwcif_ovs,
-    mas_6digit_code                     AS mas_6d_code_sg,
+    NULL                                AS mas_6d_code_sg,
     NULL                                AS mas_6d_code_ovs,
-    trade_date                          AS position_basis,
-    NULL                                AS reporting_date,
+    settled_date                        AS position_basis,  -- settled_date
+    valuation_date                      AS reporting_date,
     NULL                                AS maturity_date,
     'AMS_STREET'                        AS src_system,
     sub_system, data_cat, data_frq,
-    'ams_street_5'                      AS source_table,
+    'gmp_cis_sta_mthly_stat_street_ams_iceq_end' AS source_table,
     CURRENT_TIMESTAMP()                 AS etl_insert_ts,
     '${batch_id}'                       AS etl_batch_id,
     src_id, processing_date
-FROM gmp_cis.ams_street_5
-WHERE processing_date = '${processing_date}'
-  AND src_system = 'AMS_STREET';
+FROM gmp_cis.gmp_cis_sta_mthly_stat_street_ams_iceq_end
+WHERE processing_date = '${processing_date}';
 
 
 -- ============================================================================
@@ -661,21 +673,21 @@ INSERT INTO TABLE gmp_cis.position_master
 PARTITION (src_id, processing_date)
 SELECT
     portfolio, security_full_name, security_short_name, isin, ticker,
-    CAST(quantity AS DECIMAL(18,4)),
-    CAST(shares_outstanding AS DECIMAL(18,4)),
-    CAST(shares_issued AS DECIMAL(18,4)),
-    CAST(pct_holding AS DECIMAL(10,6)),
-    CAST(market_price AS DECIMAL(18,6)),
-    CAST(average_cost AS DECIMAL(18,6)),
-    CAST(cost_fc AS DECIMAL(18,4)),
-    CAST(market_value_fc AS DECIMAL(18,4)),
-    CAST(net_book_value_fc AS DECIMAL(18,4)),
-    CAST(unrealized_pnl_fc AS DECIMAL(18,4)),
-    CAST(cost_lc AS DECIMAL(18,4)),
-    CAST(market_value_lc AS DECIMAL(18,4)),
-    CAST(net_book_value_lc AS DECIMAL(18,4)),
-    CAST(unrealized_pnl_lc AS DECIMAL(18,4)),
-    CAST(provision_lc AS DECIMAL(18,4)),
+    quantity,
+    shares_outstanding,
+    shares_issued,
+    pct_holding,
+    market_price,
+    average_cost,
+    cost_fc,
+    market_value_fc,
+    net_book_value_fc,
+    unrealized_pnl_fc,
+    cost_lc,
+    market_value_lc,
+    net_book_value_lc,
+    unrealized_pnl_lc,
+    provision_lc,
     product_type, security_type, quoted_unquoted, industry, fin_nonfin_co,
     issuer_type, reits_or_fund_y_n,
     exchange, country_code, country_of_exchange, country_of_incorporation,

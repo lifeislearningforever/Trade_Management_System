@@ -9,86 +9,83 @@
 -- Fields: Portfolio, Client_Num, Exchange_Quoted, ISIN_Code, Counter,
 --         Quantity_Yesterday, Movement, Quantity_Today, trade_date
 -- ============================================================================
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.user_upload_1 (
+CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_1 (
+    src_id              STRING,
+    src_system          STRING,
+    sub_system          STRING,
+    data_cat            STRING,
+    data_frq            STRING,
     portfolio               STRING,
     client_num              STRING,
     exchange_quoted         STRING,
     isin_code               STRING,
     counter                 STRING,
-    quantity_yesterday      DECIMAL(18,4),
-    movement                DECIMAL(18,4),
-    quantity_today          DECIMAL(18,4),
+    quantity_yesterday      STRING,
+    movement                STRING,
+    quantity_today          STRING,
     trade_date              STRING
 )
 COMMENT 'User Upload Source 1 - Basic Position Data'
 PARTITIONED BY (
-    src_id              STRING,
-    processing_date     STRING,
-    src_system          STRING,
-    sub_system          STRING,
-    data_cat            STRING,
-    data_frq            STRING
+    processing_date     STRING
 )
 STORED AS PARQUET
-LOCATION '/data/gmp_cis/source/user_upload_1'
-TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
+;
 
 -- ============================================================================
 -- USER_UPLOAD_2: Portfolio Holdings with Country
 -- Fields: Portfolio_Name, Stock_Name, Security_Description, ISIN_Code,
 --         Qty_Held, Shares_Issued, Pct_Holding, Country, Country_ID, trade_date
 -- ============================================================================
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.user_upload_2 (
+CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_2 (
+ src_id              STRING,
+    src_system          STRING,
+    sub_system          STRING,
+    data_cat            STRING,
+    data_frq            STRING,
     portfolio_name          STRING,
     stock_name              STRING,
     security_description    STRING,
     isin_code               STRING,
-    qty_held                DECIMAL(18,4),
-    shares_issued           DECIMAL(18,4),
-    pct_holding             DECIMAL(10,6),
+    qty_held                STRING,
+    shares_issued           STRING,
+    pct_holding             STRING,
     country                 STRING,
     country_id              STRING,
     trade_date              STRING
 )
 COMMENT 'User Upload Source 2 - Portfolio Holdings with Country'
 PARTITIONED BY (
-    src_id              STRING,
-    processing_date     STRING,
-    src_system          STRING,
-    sub_system          STRING,
-    data_cat            STRING,
-    data_frq            STRING
+    processing_date     STRING
 )
 STORED AS PARQUET
-LOCATION '/data/gmp_cis/source/user_upload_2'
-TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
+;
 
 -- ============================================================================
 -- USER_UPLOAD_3: Account Position Data
 -- Fields: Account_name, Asset_description_short, ISIN, Shares_Par_value,
 --         Shares_outstanding_total, Country_of_listing_code, trade_date
 -- ============================================================================
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.user_upload_3 (
+CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_3 (
+ src_id              STRING,
+    src_system          STRING,
+    sub_system          STRING,
+    data_cat            STRING,
+    data_frq            STRING,
     account_name                STRING,
     asset_description_short     STRING,
     isin                        STRING,
-    shares_par_value            DECIMAL(18,4),
-    shares_outstanding_total    DECIMAL(18,4),
+    shares_par_value            STRING,
+    shares_outstanding_total    STRING,
     country_of_listing_code     STRING,
     trade_date                  STRING
 )
 COMMENT 'User Upload Source 3 - Account Position Data'
 PARTITIONED BY (
-    src_id              STRING,
-    processing_date     STRING,
-    src_system          STRING,
-    sub_system          STRING,
-    data_cat            STRING,
-    data_frq            STRING
+    processing_date     STRING
 )
 STORED AS PARQUET
-LOCATION '/data/gmp_cis/source/user_upload_3'
-TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
+;
 
 -- ============================================================================
 -- USER_UPLOAD_4: Comprehensive Position with Valuation
@@ -99,7 +96,12 @@ TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
 --         COUNTRY_OF_INCORPORATION, COUNTRY_OF_EXCHANGE, ISIN_CODE,
 --         TICKER_CODE, INDUSTRY, Financial_Non_Financial_Co, settled_date
 -- ============================================================================
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.user_upload_4 (
+CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_4 (
+ src_id              STRING,
+    src_system          STRING,
+    sub_system          STRING,
+    data_cat            STRING,
+    data_frq            STRING,
     portfolio                           STRING,
     security_full_name                  STRING,
     product_type                        STRING,
@@ -107,13 +109,13 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.user_upload_4 (
     gl_fund_type                        STRING,
     quoted_unquoted                     STRING,
     security_currency                   STRING,
-    quantity                            DECIMAL(18,4),
-    cost_fc                             DECIMAL(18,4),
-    net_book_value_fc                   DECIMAL(18,4),
+    quantity                            STRING,
+    cost_fc                             STRING,
+    net_book_value_fc                   STRING,
     local_currency_home_ccy             STRING,
-    cost_lc                             DECIMAL(18,4),
-    pct_holdings                        DECIMAL(10,6),
-    no_of_shares_issues_by_the_company  DECIMAL(18,4),
+    cost_lc                             STRING,
+    pct_holdings                        STRING,
+    no_of_shares_issues_by_the_company  STRING,
     country_of_incorporation            STRING,
     country_of_exchange                 STRING,
     isin_code                           STRING,
@@ -124,16 +126,10 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.user_upload_4 (
 )
 COMMENT 'User Upload Source 4 - Comprehensive Position with Valuation'
 PARTITIONED BY (
-    src_id              STRING,
-    processing_date     STRING,
-    src_system          STRING,
-    sub_system          STRING,
-    data_cat            STRING,
-    data_frq            STRING
+    processing_date     STRING
 )
 STORED AS PARQUET
-LOCATION '/data/gmp_cis/source/user_upload_4'
-TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
+;
 
 -- ============================================================================
 -- USER_UPLOAD_5: Full Position with P&L and MAS Codes
@@ -152,7 +148,12 @@ TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
 --         MAS_6D_CODE_Overseas, MATURITY_DATE, PORTIA_FUND_TYPE_CIS_INVESTMENT_TYPE,
 --         settled_date
 -- ============================================================================
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.user_upload_5 (
+CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_5 (
+ src_id              STRING,
+    src_system          STRING,
+    sub_system          STRING,
+    data_cat            STRING,
+    data_frq            STRING,
     reporting_date                      STRING,
     portfolio_name                      STRING,
     security_full_name                  STRING,
@@ -161,21 +162,21 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.user_upload_5 (
     gl_fund_type                        STRING,
     quoted_unquoted                     STRING,
     security_currency_fc                STRING,
-    quantity                            DECIMAL(18,4),
-    unit_avg_cost_unit_fc               DECIMAL(18,6),
-    market_price_unit_fc                DECIMAL(18,6),
-    cost_fc                             DECIMAL(18,4),
-    provision_fc                        DECIMAL(18,4),
-    unrealised_gain_loss_fc             DECIMAL(18,4),
-    net_book_value_fc                   DECIMAL(18,4),
-    market_value_fc                     DECIMAL(18,4),
+    quantity                            STRING,
+    unit_avg_cost_unit_fc               STRING,
+    market_price_unit_fc                STRING,
+    cost_fc                             STRING,
+    provision_fc                        STRING,
+    unrealised_gain_loss_fc             STRING,
+    net_book_value_fc                   STRING,
+    market_value_fc                     STRING,
     local_currency                      STRING,
-    cost_lc                             DECIMAL(18,4),
-    provision_lc                        DECIMAL(18,4),
-    unrealised_gain_loss_lc             DECIMAL(18,4),
-    net_book_value_lc                   DECIMAL(18,4),
-    market_value_lc                     DECIMAL(18,4),
-    fx_rate                             DECIMAL(18,8),
+    cost_lc                             STRING,
+    provision_lc                        STRING,
+    unrealised_gain_loss_lc             STRING,
+    net_book_value_lc                   STRING,
+    market_value_lc                     STRING,
+    fx_rate                             STRING,
     corp_code                           STRING,
     branch_code                         STRING,
     cost_centre                         STRING,
@@ -191,8 +192,8 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.user_upload_5 (
     issuer_type                         STRING,
     reits_or_fund_y_n                   STRING,
     industry                            STRING,
-    no_of_shares_issues_by_the_company  DECIMAL(18,4),
-    pct_holdings                        DECIMAL(10,6),
+    no_of_shares_issues_by_the_company  STRING,
+    pct_holdings                        STRING,
     cels_code                           STRING,
     bwcif_number_sg                     STRING,
     mas_6d_code_sg                      STRING,
@@ -204,17 +205,10 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.user_upload_5 (
 )
 COMMENT 'User Upload Source 5 - Full Position with P&L and MAS Codes'
 PARTITIONED BY (
-    src_id              STRING,
-    processing_date     STRING,
-    src_system          STRING,
-    sub_system          STRING,
-    data_cat            STRING,
-    data_frq            STRING
+    processing_date     STRING
 )
 STORED AS PARQUET
-LOCATION '/data/gmp_cis/source/user_upload_5'
-TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
-
+;
 -- ============================================================================
 -- Repair partitions after data load
 -- ============================================================================

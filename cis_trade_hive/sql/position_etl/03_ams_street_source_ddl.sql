@@ -8,33 +8,36 @@
 -- AMS_STREET_1: AMS Multi Discretionary Fund
 -- Fields: Portfolio, Security Name, ISIN, Price, Units, Country Code, trade_date
 -- ============================================================================
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.ams_street_1 (
+CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.gmp_cis_sta_dly_ams_multi_dis_cif (
+ src_id              STRING,
+    src_system          STRING,
+    sub_system          STRING,
+    data_cat            STRING,
+    data_frq            STRING,
     portfolio               STRING,
     security_name           STRING,
     isin                    STRING,
     price                   DECIMAL(18,6),
     units                   DECIMAL(18,4),
-    country_code            STRING,
-    trade_date              STRING
+    country_code            STRING
 )
 COMMENT 'AMS Street Source 1 - AMS Multi Discretionary Fund'
 PARTITIONED BY (
-    src_id              STRING,
-    processing_date     STRING,
-    src_system          STRING,
-    sub_system          STRING,
-    data_cat            STRING,
-    data_frq            STRING
+    processing_date     STRING
 )
 STORED AS PARQUET
-LOCATION '/data/gmp_cis/source/ams_street_1'
-TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
+;
 
 -- ============================================================================
 -- AMS_STREET_2: AMS Multiple Holdings Daily
 -- Fields: Portfolio Code, Security Name, ISIN, Quantity, AC_No, Country Code, trade_date
 -- ============================================================================
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.ams_street_2 (
+CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.gmp_cis_sta_dly_ams_multi_hold (
+ src_id              STRING,
+    src_system          STRING,
+    sub_system          STRING,
+    data_cat            STRING,
+    data_frq            STRING,
     portfolio_code          STRING,
     security_name           STRING,
     isin                    STRING,
@@ -45,16 +48,10 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.ams_street_2 (
 )
 COMMENT 'AMS Street Source 2 - AMS Multiple Holdings Daily'
 PARTITIONED BY (
-    src_id              STRING,
-    processing_date     STRING,
-    src_system          STRING,
-    sub_system          STRING,
-    data_cat            STRING,
-    data_frq            STRING
+    processing_date     STRING
 )
 STORED AS PARQUET
-LOCATION '/data/gmp_cis/source/ams_street_2'
-TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
+;
 
 -- ============================================================================
 -- AMS_STREET_3: AMS ICEQ Month End (First variant)
@@ -66,7 +63,12 @@ TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
 --         ISIN, FX Rate, Portfolio Code, Flag, Valuation Date,
 --         Reporting Currency, Padding/Reserved, settled_date
 -- ============================================================================
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.ams_street_3 (
+CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.gmp_cis_sta_dly_stat_street_ams_iceq (
+ src_id              STRING,
+    src_system          STRING,
+    sub_system          STRING,
+    data_cat            STRING,
+    data_frq            STRING,
     portfolio_code              STRING,
     sub_portfolio_reserved      STRING,
     security_name_long          STRING,
@@ -95,21 +97,20 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.ams_street_3 (
 )
 COMMENT 'AMS Street Source 3 - AMS ICEQ Month End (Variant 1)'
 PARTITIONED BY (
-    src_id              STRING,
-    processing_date     STRING,
-    src_system          STRING,
-    sub_system          STRING,
-    data_cat            STRING,
-    data_frq            STRING
+    processing_date     STRING
 )
 STORED AS PARQUET
-LOCATION '/data/gmp_cis/source/ams_street_3'
-TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
+;
 
 -- ============================================================================
 -- AMS_STREET_4: AMS ICEQ Month End (Second variant - same structure as 3)
 -- ============================================================================
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.ams_street_4 (
+CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.gmp_cis_sta_dly_stat_street_ams_iceq_end (
+ src_id              STRING,
+    src_system          STRING,
+    sub_system          STRING,
+    data_cat            STRING,
+    data_frq            STRING,
     portfolio_code              STRING,
     sub_portfolio_reserved      STRING,
     security_name_long          STRING,
@@ -138,16 +139,10 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.ams_street_4 (
 )
 COMMENT 'AMS Street Source 4 - AMS ICEQ Month End (Variant 2)'
 PARTITIONED BY (
-    src_id              STRING,
-    processing_date     STRING,
-    src_system          STRING,
-    sub_system          STRING,
-    data_cat            STRING,
-    data_frq            STRING
+    processing_date     STRING
 )
 STORED AS PARQUET
-LOCATION '/data/gmp_cis/source/ams_street_4'
-TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
+;
 
 -- ============================================================================
 -- AMS_STREET_5: AMS S31 UOI
@@ -159,7 +154,12 @@ TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
 --         MAS 6Digit Code, GL Fund Type, MajorStake Indicate,
 --         Stake Holdings, Unit Cost, Market Price, trade_date
 -- ============================================================================
-CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.ams_street_5 (
+CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.gmp_cis_sta_dly_stat_street_ams_daily_limit (
+ src_id              STRING,
+    src_system          STRING,
+    sub_system          STRING,
+    data_cat            STRING,
+    data_frq            STRING,
     ticker                      STRING,
     security_desc               STRING,
     portfolio                   STRING,
@@ -189,16 +189,10 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.ams_street_5 (
 )
 COMMENT 'AMS Street Source 5 - AMS S31 UOI'
 PARTITIONED BY (
-    src_id              STRING,
-    processing_date     STRING,
-    src_system          STRING,
-    sub_system          STRING,
-    data_cat            STRING,
-    data_frq            STRING
+    processing_date     STRING
 )
 STORED AS PARQUET
-LOCATION '/data/gmp_cis/source/ams_street_5'
-TBLPROPERTIES ('parquet.compression' = 'SNAPPY');
+;
 
 -- ============================================================================
 -- Repair partitions after data load
