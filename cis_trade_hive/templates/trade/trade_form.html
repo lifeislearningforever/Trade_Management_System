@@ -1420,6 +1420,50 @@ $(document).ready(function() {
         calculateBrokerCharges();
     });
 
+    // Add Select2 change event for security dropdown to trigger currency and price update
+    $('#security_label').on('select2:select', function(e) {
+        console.log('=== SECURITY SELECT2 CHANGED ===');
+        console.log('Selected security:', $(this).val());
+
+        // Auto-populate currency from selected security
+        autoPopulateCurrencyFromSecurity();
+
+        // Fetch and update price from API
+        const securityLabel = $(this).val();
+        const currencyEl = document.getElementById('currency_code');
+        const priceField = document.getElementById('price');
+        const securityInfo = document.getElementById('security_info');
+
+        if (securityLabel && currencyEl && currencyEl.value) {
+            console.log('Fetching equity price for security:', securityLabel, 'currency:', currencyEl.value);
+            fetch(`/trade/api/equity-price/?security=${encodeURIComponent(securityLabel)}&currency=${encodeURIComponent(currencyEl.value)}`)
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Equity price API response:', data);
+                    if (data.found && data.price > 0) {
+                        priceField.value = parseFloat(data.price).toFixed(4);
+                        if (securityInfo) {
+                            securityInfo.textContent = `Price: ${data.price} (${data.price_date || 'latest'})`;
+                            securityInfo.className = 'text-success small';
+                        }
+                        // Recalculate gross amount and total
+                        calculateGrossAmount();
+                        calculateTotal();
+                        // Also recalculate broker charges if broker is selected
+                        calculateBrokerCharges();
+                    } else {
+                        if (securityInfo) {
+                            securityInfo.textContent = 'No equity price found for this security';
+                            securityInfo.className = 'text-warning small';
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.log('Could not fetch equity price:', error);
+                });
+        }
+    });
+
     // Add operation popup on form submit
     $('#tradeForm').on('submit', function(e) {
         // Check form validity first
