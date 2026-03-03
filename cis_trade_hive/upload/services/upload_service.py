@@ -1088,7 +1088,14 @@ class UploadService:
         temp_file_path: str = None
     ) -> Tuple[bool, str]:
         """
-        Ingest data using INSERT VALUES statements (fallback when no file available).
+        Ingest data to Hive external Parquet table using staging table approach.
+
+        Since external Parquet tables don't support INSERT...VALUES directly,
+        we use a two-step approach:
+        1. Create a temporary staging table (managed, ORC format with ACID)
+        2. INSERT data into staging table using VALUES
+        3. INSERT INTO target_table SELECT FROM staging_table
+        4. Drop the staging table
 
         Args:
             target_table: Target table name
@@ -1100,7 +1107,6 @@ class UploadService:
             upload_id: Upload ID
             is_session_upload: Whether this is a session-based upload
             temp_file_path: Path to local temp file (if available, reads full file)
-            is_session_upload: Whether this is a session-based upload
 
         Returns:
             Tuple of (success, message)
@@ -1108,6 +1114,7 @@ class UploadService:
         from core.repositories.hybrid_connection import hybrid_manager
         from ..repositories.datasource_repository import datasource_repository
         import csv
+        import uuid
 
         try:
             source_id = datasource_config.get('source_id', '')
@@ -1119,20 +1126,33 @@ class UploadService:
             target_table_info = datasource_repository.get_table_info(target_table, self.repository.DATABASE)
             target_table_cols = [col['name'] for col in target_table_info.get('columns', [])]
 
-            # Additional columns map
+            # Determine src_system from datasource config or target table name
+            # USER_UPLOAD tables: cis_user_sta_adhoc_position_*
+            # AMS_STREET tables: gmp_cis_sta_*_ams_*
+            src_system = datasource_config.get('src_system', '')
+            if not src_system:
+                if 'ams' in target_table.lower() or target_table.lower().startswith('gmp_cis_sta'):
+                    src_system = 'AMS_STREET'
+                else:
+                    src_system = 'USER_UPLOAD'
+
+            sub_system = datasource_config.get('sub_system', '')
+            if not sub_system:
+                sub_system = 'user' if src_system == 'USER_UPLOAD' else 'ams'
+
+            # Additional columns map (excluding processing_date as it's a partition column)
             additional_cols_map = {
                 'src_id': source_id,
-                'src_system': 'cis',
-                'sub_system': '',  # Empty string for sub_system
-                'data_cat': 'sta',
-                'data_frq': 'adhoc',
-                'processing_date': processing_date
+                'src_system': src_system,
+                'sub_system': sub_system,
+                'data_cat': datasource_config.get('data_cat', 'sta'),
+                'data_frq': datasource_config.get('data_frq', 'adhoc'),
             }
 
             # If temp_file_path exists, read full file instead of using sample_data
             all_data = sample_data
             if temp_file_path and os.path.exists(temp_file_path):
-                logger.info(f"Reading full file from {temp_file_path} for INSERT VALUES")
+                logger.info(f"Reading full file from {temp_file_path} for ingestion")
                 try:
                     all_data = []
                     with open(temp_file_path, 'r', encoding='utf-8', errors='replace') as f:
@@ -1155,7 +1175,7 @@ class UploadService:
 
                         # Convert to list of dicts
                         for row in data_rows:
-                            if len(row) >= len(header_row):
+                            if len(row) > 0:  # Accept any non-empty row
                                 row_dict = {}
                                 for idx, col in enumerate(col_names):
                                     if idx < len(row):
@@ -1170,49 +1190,99 @@ class UploadService:
                     # Fall back to sample_data
                     all_data = sample_data
 
-            logger.info(f"Ingesting {len(all_data)} rows using INSERT VALUES")
+            if not all_data:
+                return False, "No data to insert"
 
-            # Build INSERT statement with VALUES
-            rows_inserted = 0
-            batch_size = 100  # Insert in batches
+            logger.info(f"Ingesting {len(all_data)} rows using staging table approach")
 
-            for i in range(0, len(all_data), batch_size):
-                batch = all_data[i:i + batch_size]
-                values_list = []
+            # Create unique staging table name
+            staging_table = f"stg_{upload_id.replace('-', '_')[:20]}_{int(datetime.now().timestamp())}"
 
-                for row in batch:
-                    row_values = []
-                    for target_col in target_table_cols:
-                        col_lower = target_col.lower()
-                        if col_lower in additional_cols_map:
-                            val = additional_cols_map[col_lower]
-                            escaped_val = str(val).replace("'", "''") if val else ''
-                            row_values.append(f"'{escaped_val}'")
-                        elif col_lower in [c.lower() for c in col_names]:
-                            # Find matching source column
-                            matching_col = next((c for c in col_names if c.lower() == col_lower), None)
-                            val = row.get(matching_col, '') if matching_col else ''
-                            escaped_val = str(val).replace("'", "''") if val else ''
-                            row_values.append(f"'{escaped_val}'")
+            # Build staging table DDL - managed table with ORC format and ACID support
+            # Include all target table columns EXCEPT processing_date (partition column)
+            staging_cols = [col for col in target_table_cols if col.lower() != 'processing_date']
+            staging_cols_ddl = ',\n    '.join([f"`{col}` STRING" for col in staging_cols])
+
+            create_staging_sql = f"""
+            CREATE TABLE IF NOT EXISTS {self.repository.DATABASE}.{staging_table} (
+                {staging_cols_ddl}
+            )
+            STORED AS ORC
+            TBLPROPERTIES ('transactional'='true')
+            """
+
+            logger.info(f"Creating staging table: {staging_table}")
+            if not hybrid_manager.hive_write(create_staging_sql, database=self.repository.DATABASE):
+                return False, "Failed to create staging table"
+
+            try:
+                # Insert data into staging table in batches
+                rows_inserted = 0
+                batch_size = 100
+
+                for i in range(0, len(all_data), batch_size):
+                    batch = all_data[i:i + batch_size]
+                    values_list = []
+
+                    for row in batch:
+                        row_values = []
+                        for staging_col in staging_cols:
+                            col_lower = staging_col.lower()
+                            if col_lower in additional_cols_map:
+                                val = additional_cols_map[col_lower]
+                                escaped_val = str(val).replace("'", "''") if val else ''
+                                row_values.append(f"'{escaped_val}'")
+                            elif col_lower in [c.lower() for c in col_names]:
+                                # Find matching source column
+                                matching_col = next((c for c in col_names if c.lower() == col_lower), None)
+                                val = row.get(matching_col, '') if matching_col else ''
+                                escaped_val = str(val).replace("'", "''") if val else ''
+                                row_values.append(f"'{escaped_val}'")
+                            else:
+                                row_values.append("''")
+
+                        values_list.append(f"({', '.join(row_values)})")
+
+                    if values_list:
+                        insert_staging_sql = f"""
+                        INSERT INTO TABLE {self.repository.DATABASE}.{staging_table}
+                        VALUES {', '.join(values_list)}
+                        """
+
+                        if hybrid_manager.hive_write(insert_staging_sql, database=self.repository.DATABASE):
+                            rows_inserted += len(batch)
+                            logger.info(f"Inserted batch {i//batch_size + 1}, total rows: {rows_inserted}")
                         else:
-                            row_values.append("''")
+                            logger.error(f"Failed to insert batch at offset {i}")
 
-                    values_list.append(f"({', '.join(row_values)})")
+                if rows_inserted == 0:
+                    return False, "No rows were inserted into staging table"
 
-                if values_list:
-                    insert_query = f"""
-                    INSERT INTO TABLE {self.repository.DATABASE}.{target_table}
-                    ({', '.join([f'`{c}`' for c in target_table_cols])})
-                    VALUES {', '.join(values_list)}
-                    """
+                # Now INSERT INTO target table SELECT FROM staging table with partition
+                # Use dynamic partitioning
+                set_dynamic_partition = """
+                SET hive.exec.dynamic.partition=true;
+                SET hive.exec.dynamic.partition.mode=nonstrict
+                """
 
-                    success = hybrid_manager.hive_write(insert_query, database=self.repository.DATABASE)
-                    if success:
-                        rows_inserted += len(batch)
-                    else:
-                        logger.error(f"Failed to insert batch at offset {i}")
+                # Execute SET commands separately
+                hybrid_manager.hive_write("SET hive.exec.dynamic.partition=true", database=self.repository.DATABASE)
+                hybrid_manager.hive_write("SET hive.exec.dynamic.partition.mode=nonstrict", database=self.repository.DATABASE)
 
-            if rows_inserted > 0:
+                # Build INSERT INTO target SELECT with partition column
+                select_cols = ', '.join([f"`{col}`" for col in staging_cols])
+                insert_target_sql = f"""
+                INSERT INTO TABLE {self.repository.DATABASE}.{target_table}
+                PARTITION (processing_date='{processing_date}')
+                SELECT {select_cols}
+                FROM {self.repository.DATABASE}.{staging_table}
+                """
+
+                logger.info(f"Inserting from staging to target table: {target_table}")
+                if not hybrid_manager.hive_write(insert_target_sql, database=self.repository.DATABASE):
+                    return False, f"Failed to insert data into target table {target_table}"
+
+                # Success - update status
                 if not is_session_upload:
                     self.repository.update_upload(upload_id, {
                         'status': UploadKuduRepository.STATUS_COMPLETED,
@@ -1220,11 +1290,18 @@ class UploadService:
                     }, updated_by)
 
                 return True, f"Successfully ingested {rows_inserted} rows to {target_table} with processing_date={processing_date}"
-            else:
-                return False, "No rows were inserted"
+
+            finally:
+                # Clean up staging table
+                drop_staging_sql = f"DROP TABLE IF EXISTS {self.repository.DATABASE}.{staging_table}"
+                try:
+                    hybrid_manager.hive_write(drop_staging_sql, database=self.repository.DATABASE)
+                    logger.info(f"Dropped staging table: {staging_table}")
+                except Exception as e:
+                    logger.warning(f"Failed to drop staging table {staging_table}: {e}")
 
         except Exception as e:
-            logger.error(f"INSERT VALUES ingestion error: {str(e)}")
+            logger.error(f"Staging table ingestion error: {str(e)}")
             return False, f"Ingestion error: {str(e)}"
 
     def get_all_datasource_configs(self) -> List[Dict[str, Any]]:

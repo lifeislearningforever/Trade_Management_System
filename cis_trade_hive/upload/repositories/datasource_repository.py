@@ -28,7 +28,8 @@ class DatasourceRepository:
     PROCESSING_DATE_FILE = '/mrw/cis/MRA_PC_DATE.txt'
 
     # Default values for additional columns
-    DEFAULT_SRC_SYSTEM = 'cis'
+    # USER_UPLOAD tables use 'USER_UPLOAD', AMS_STREET tables use 'AMS_STREET'
+    DEFAULT_SRC_SYSTEM = 'USER_UPLOAD'
     DEFAULT_SUB_SYSTEM = 'user'
     DEFAULT_DATA_CAT = 'sta'
     DEFAULT_DATA_FRQ = 'adhoc'
@@ -371,7 +372,7 @@ class DatasourceRepository:
 
         Maps source CSV columns to target table columns and adds:
         - src_id: from datasource.source_id
-        - src_system: 'cis'
+        - src_system: 'USER_UPLOAD' (default, or from datasource config)
         - data_cat: 'sta'
         - data_frq: 'adhoc'
         - processing_date: from MRA_PC_DATE.txt
