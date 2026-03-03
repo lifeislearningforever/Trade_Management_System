@@ -1088,21 +1088,20 @@ class UploadService:
         temp_file_path: str = None
     ) -> Tuple[bool, str]:
         """
-        Ingest data to Hive external Parquet table using staging table approach.
+        Ingest data to Hive external Parquet table using Impala INSERT OVERWRITE.
 
-        Since external Parquet tables don't support INSERT...VALUES directly,
-        we use a two-step approach:
-        1. Create a temporary staging table (managed, ORC format with ACID)
-        2. INSERT data into staging table using VALUES
-        3. INSERT INTO target_table SELECT FROM staging_table
-        4. Drop the staging table
+        For external Parquet tables with partitions:
+        1. Read data from file or sample_data
+        2. Delete existing partition data if exists (overwrite mode)
+        3. Use Impala INSERT INTO with partition clause
+        4. Refresh table metadata
 
         Args:
             target_table: Target table name
             datasource_config: Datasource configuration
             intake_columns: Column definitions
             sample_data: Data rows to insert (used if temp_file_path not available)
-            processing_date: Processing date
+            processing_date: Processing date (partition value)
             updated_by: User performing ingestion
             upload_id: Upload ID
             is_session_upload: Whether this is a session-based upload
@@ -1111,10 +1110,9 @@ class UploadService:
         Returns:
             Tuple of (success, message)
         """
-        from core.repositories.hybrid_connection import hybrid_manager
+        from core.repositories.impala_connection import impala_manager
         from ..repositories.datasource_repository import datasource_repository
         import csv
-        import uuid
 
         try:
             source_id = datasource_config.get('source_id', '')
@@ -1125,6 +1123,9 @@ class UploadService:
             # Get target table columns to ensure we match exactly
             target_table_info = datasource_repository.get_table_info(target_table, self.repository.DATABASE)
             target_table_cols = [col['name'] for col in target_table_info.get('columns', [])]
+
+            if not target_table_cols:
+                return False, f"Could not get column info for target table {target_table}"
 
             # Determine src_system from datasource config or target table name
             # USER_UPLOAD tables: cis_user_sta_adhoc_position_*
@@ -1149,33 +1150,25 @@ class UploadService:
                 'data_frq': datasource_config.get('data_frq', 'adhoc'),
             }
 
-            # If temp_file_path exists, read full file instead of using sample_data
-            all_data = sample_data
+            # Read data from file or use sample_data
+            all_data = sample_data or []
             if temp_file_path and os.path.exists(temp_file_path):
                 logger.info(f"Reading full file from {temp_file_path} for ingestion")
                 try:
                     all_data = []
                     with open(temp_file_path, 'r', encoding='utf-8', errors='replace') as f:
-                        # Detect delimiter
                         delim = separator if separator else ','
-                        if delim == '|':
-                            reader = csv.reader(f, delimiter='|')
-                        elif delim == '\t':
-                            reader = csv.reader(f, delimiter='\t')
-                        else:
-                            reader = csv.reader(f, delimiter=delim)
-
+                        reader = csv.reader(f, delimiter=delim)
                         rows = list(reader)
+
                         if has_header and len(rows) > 0:
-                            header_row = rows[0]
                             data_rows = rows[1:]
                         else:
-                            header_row = col_names
                             data_rows = rows
 
-                        # Convert to list of dicts
+                        # Convert to list of dicts using intake column names
                         for row in data_rows:
-                            if len(row) > 0:  # Accept any non-empty row
+                            if len(row) > 0:
                                 row_dict = {}
                                 for idx, col in enumerate(col_names):
                                     if idx < len(row):
@@ -1187,121 +1180,97 @@ class UploadService:
                     logger.info(f"Read {len(all_data)} rows from file")
                 except Exception as e:
                     logger.error(f"Failed to read file {temp_file_path}: {e}")
-                    # Fall back to sample_data
-                    all_data = sample_data
+                    all_data = sample_data or []
 
             if not all_data:
                 return False, "No data to insert"
 
-            logger.info(f"Ingesting {len(all_data)} rows using staging table approach")
+            logger.info(f"Ingesting {len(all_data)} rows to {target_table} partition={processing_date}")
 
-            # Create unique staging table name
-            staging_table = f"stg_{upload_id.replace('-', '_')[:20]}_{int(datetime.now().timestamp())}"
+            # Get non-partition columns (exclude processing_date)
+            non_partition_cols = [col for col in target_table_cols if col.lower() != 'processing_date']
 
-            # Build staging table DDL - managed table with ORC format and ACID support
-            # Include all target table columns EXCEPT processing_date (partition column)
-            staging_cols = [col for col in target_table_cols if col.lower() != 'processing_date']
-            staging_cols_ddl = ',\n    '.join([f"`{col}` STRING" for col in staging_cols])
-
-            create_staging_sql = f"""
-            CREATE TABLE IF NOT EXISTS {self.repository.DATABASE}.{staging_table} (
-                {staging_cols_ddl}
-            )
-            STORED AS ORC
-            TBLPROPERTIES ('transactional'='true')
+            # Step 1: Drop existing partition if exists (for overwrite behavior)
+            drop_partition_sql = f"""
+            ALTER TABLE {self.repository.DATABASE}.{target_table}
+            DROP IF EXISTS PARTITION (processing_date='{processing_date}')
             """
-
-            logger.info(f"Creating staging table: {staging_table}")
-            if not hybrid_manager.hive_write(create_staging_sql, database=self.repository.DATABASE):
-                return False, "Failed to create staging table"
-
             try:
-                # Insert data into staging table in batches
-                rows_inserted = 0
-                batch_size = 100
+                impala_manager.execute_write(drop_partition_sql, database=self.repository.DATABASE)
+                logger.info(f"Dropped existing partition processing_date='{processing_date}'")
+            except Exception as e:
+                logger.warning(f"Could not drop partition (may not exist): {e}")
 
-                for i in range(0, len(all_data), batch_size):
-                    batch = all_data[i:i + batch_size]
-                    values_list = []
+            # Step 2: Insert data in batches using INSERT INTO with partition
+            rows_inserted = 0
+            batch_size = 500  # Larger batches for better performance
 
-                    for row in batch:
-                        row_values = []
-                        for staging_col in staging_cols:
-                            col_lower = staging_col.lower()
-                            if col_lower in additional_cols_map:
-                                val = additional_cols_map[col_lower]
-                                escaped_val = str(val).replace("'", "''") if val else ''
-                                row_values.append(f"'{escaped_val}'")
-                            elif col_lower in [c.lower() for c in col_names]:
-                                # Find matching source column
-                                matching_col = next((c for c in col_names if c.lower() == col_lower), None)
-                                val = row.get(matching_col, '') if matching_col else ''
-                                escaped_val = str(val).replace("'", "''") if val else ''
-                                row_values.append(f"'{escaped_val}'")
-                            else:
-                                row_values.append("''")
+            for i in range(0, len(all_data), batch_size):
+                batch = all_data[i:i + batch_size]
+                values_list = []
 
-                        values_list.append(f"({', '.join(row_values)})")
-
-                    if values_list:
-                        insert_staging_sql = f"""
-                        INSERT INTO TABLE {self.repository.DATABASE}.{staging_table}
-                        VALUES {', '.join(values_list)}
-                        """
-
-                        if hybrid_manager.hive_write(insert_staging_sql, database=self.repository.DATABASE):
-                            rows_inserted += len(batch)
-                            logger.info(f"Inserted batch {i//batch_size + 1}, total rows: {rows_inserted}")
+                for row in batch:
+                    row_values = []
+                    for col in non_partition_cols:
+                        col_lower = col.lower()
+                        if col_lower in additional_cols_map:
+                            val = additional_cols_map[col_lower]
+                        elif col_lower in [c.lower() for c in col_names]:
+                            matching_col = next((c for c in col_names if c.lower() == col_lower), None)
+                            val = row.get(matching_col, '') if matching_col else ''
                         else:
-                            logger.error(f"Failed to insert batch at offset {i}")
+                            val = ''
 
-                if rows_inserted == 0:
-                    return False, "No rows were inserted into staging table"
+                        # Escape single quotes
+                        escaped_val = str(val).replace("'", "''") if val else ''
+                        row_values.append(f"'{escaped_val}'")
 
-                # Now INSERT INTO target table SELECT FROM staging table with partition
-                # Use dynamic partitioning
-                set_dynamic_partition = """
-                SET hive.exec.dynamic.partition=true;
-                SET hive.exec.dynamic.partition.mode=nonstrict
-                """
+                    values_list.append(f"({', '.join(row_values)})")
 
-                # Execute SET commands separately
-                hybrid_manager.hive_write("SET hive.exec.dynamic.partition=true", database=self.repository.DATABASE)
-                hybrid_manager.hive_write("SET hive.exec.dynamic.partition.mode=nonstrict", database=self.repository.DATABASE)
+                if values_list:
+                    # Build INSERT statement with partition
+                    col_list = ', '.join([f'`{col}`' for col in non_partition_cols])
+                    insert_sql = f"""
+                    INSERT INTO {self.repository.DATABASE}.{target_table}
+                    PARTITION (processing_date='{processing_date}')
+                    ({col_list})
+                    VALUES {', '.join(values_list)}
+                    """
 
-                # Build INSERT INTO target SELECT with partition column
-                select_cols = ', '.join([f"`{col}`" for col in staging_cols])
-                insert_target_sql = f"""
-                INSERT INTO TABLE {self.repository.DATABASE}.{target_table}
-                PARTITION (processing_date='{processing_date}')
-                SELECT {select_cols}
-                FROM {self.repository.DATABASE}.{staging_table}
-                """
+                    success = impala_manager.execute_write(insert_sql, database=self.repository.DATABASE)
+                    if success:
+                        rows_inserted += len(batch)
+                        logger.info(f"Inserted batch {i//batch_size + 1}, total rows: {rows_inserted}")
+                    else:
+                        logger.error(f"Failed to insert batch at offset {i}")
+                        return False, f"Failed to insert batch at offset {i}"
 
-                logger.info(f"Inserting from staging to target table: {target_table}")
-                if not hybrid_manager.hive_write(insert_target_sql, database=self.repository.DATABASE):
-                    return False, f"Failed to insert data into target table {target_table}"
+            if rows_inserted == 0:
+                return False, "No rows were inserted"
 
-                # Success - update status
-                if not is_session_upload:
-                    self.repository.update_upload(upload_id, {
-                        'status': UploadKuduRepository.STATUS_COMPLETED,
-                        'target_table_name': target_table,
-                    }, updated_by)
+            # Step 3: Refresh metadata
+            try:
+                impala_manager.execute_write(
+                    f"INVALIDATE METADATA {self.repository.DATABASE}.{target_table}",
+                    database=self.repository.DATABASE
+                )
+                logger.info(f"Refreshed metadata for {target_table}")
+            except Exception as e:
+                logger.warning(f"Could not refresh metadata: {e}")
 
-                return True, f"Successfully ingested {rows_inserted} rows to {target_table} with processing_date={processing_date}"
+            # Success - update status
+            if not is_session_upload:
+                self.repository.update_upload(upload_id, {
+                    'status': UploadKuduRepository.STATUS_COMPLETED,
+                    'target_table_name': target_table,
+                }, updated_by)
 
-            finally:
-                # Clean up staging table
-                drop_staging_sql = f"DROP TABLE IF EXISTS {self.repository.DATABASE}.{staging_table}"
-                try:
-                    hybrid_manager.hive_write(drop_staging_sql, database=self.repository.DATABASE)
-                    logger.info(f"Dropped staging table: {staging_table}")
-                except Exception as e:
-                    logger.warning(f"Failed to drop staging table {staging_table}: {e}")
+            return True, f"Successfully ingested {rows_inserted} rows to {target_table} with processing_date={processing_date}"
 
         except Exception as e:
-            logger.error(f"Staging table ingestion error: {str(e)}")
+            logger.error(f"Ingestion error: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False, f"Ingestion error: {str(e)}"
 
     def get_all_datasource_configs(self) -> List[Dict[str, Any]]:
