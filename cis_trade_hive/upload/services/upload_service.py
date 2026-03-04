@@ -1128,27 +1128,33 @@ class UploadService:
                 return False, f"Could not get column info for target table {target_table}"
 
             # Determine src_system from datasource config or target table name
-            # USER_UPLOAD tables: cis_user_sta_adhoc_position_*
-            # AMS_STREET tables: gmp_cis_sta_*_ams_*
+            # USER_UPLOAD tables: cis_user_sta_adhoc_position_* (contain 'user' in name)
+            # AMS_STREET tables: gmp_cis_sta_*_ams_* (contain 'ams' in name)
             src_system = datasource_config.get('src_system', '')
             if not src_system:
-                if 'ams' in target_table.lower() or target_table.lower().startswith('gmp_cis_sta'):
+                table_lower = target_table.lower()
+                if 'ams' in table_lower:
                     src_system = 'AMS_STREET'
-                else:
+                elif 'user' in table_lower or 'cis_user' in table_lower:
                     src_system = 'USER_UPLOAD'
+                else:
+                    src_system = 'USER_UPLOAD'  # Default
 
             sub_system = datasource_config.get('sub_system', '')
             if not sub_system:
                 sub_system = 'user' if src_system == 'USER_UPLOAD' else 'ams'
 
             # Additional columns map (excluding processing_date as it's a partition column)
+            # Use target_table name as src_id for traceability
             additional_cols_map = {
-                'src_id': source_id,
+                'src_id': target_table,  # Use table name as source identifier
                 'src_system': src_system,
                 'sub_system': sub_system,
                 'data_cat': datasource_config.get('data_cat', 'sta'),
                 'data_frq': datasource_config.get('data_frq', 'adhoc'),
             }
+
+            logger.info(f"Using src_system={src_system}, sub_system={sub_system} for {target_table}")
 
             # Read data from file or use sample_data
             all_data = sample_data or []
@@ -1190,16 +1196,28 @@ class UploadService:
             # Get non-partition columns (exclude processing_date)
             non_partition_cols = [col for col in target_table_cols if col.lower() != 'processing_date']
 
-            # Step 1: Drop existing partition if exists (for overwrite behavior)
-            drop_partition_sql = f"""
-            ALTER TABLE {self.repository.DATABASE}.{target_table}
-            DROP IF EXISTS PARTITION (processing_date='{processing_date}')
+            # Step 1: Delete existing data for this partition (overwrite behavior)
+            # For Hive external Parquet tables, use DELETE or INSERT OVERWRITE
+            # First try to delete existing records for this processing_date
+            delete_sql = f"""
+            DELETE FROM {self.repository.DATABASE}.{target_table}
+            WHERE processing_date = '{processing_date}'
             """
             try:
-                impala_manager.execute_write(drop_partition_sql, database=self.repository.DATABASE)
-                logger.info(f"Dropped existing partition processing_date='{processing_date}'")
+                impala_manager.execute_write(delete_sql, database=self.repository.DATABASE)
+                logger.info(f"Deleted existing data for processing_date='{processing_date}'")
             except Exception as e:
-                logger.warning(f"Could not drop partition (may not exist): {e}")
+                # DELETE may not work on external tables, try ALTER TABLE DROP PARTITION
+                logger.warning(f"DELETE failed (may be external table): {e}")
+                try:
+                    drop_partition_sql = f"""
+                    ALTER TABLE {self.repository.DATABASE}.{target_table}
+                    DROP IF EXISTS PARTITION (processing_date='{processing_date}')
+                    """
+                    impala_manager.execute_write(drop_partition_sql, database=self.repository.DATABASE)
+                    logger.info(f"Dropped partition processing_date='{processing_date}'")
+                except Exception as e2:
+                    logger.warning(f"Could not drop partition either: {e2}")
 
             # Step 2: Insert data in batches using INSERT INTO SELECT * FROM (UNION ALL)
             # Each SELECT must have column aliases to avoid "duplicated inline view column alias" error
