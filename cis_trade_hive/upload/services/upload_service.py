@@ -1229,7 +1229,8 @@ class UploadService:
 
                 if values_list:
                     # Build INSERT statement with partition
-                    col_list = ', '.join([f'`{col}`' for col in non_partition_cols])
+                    # Note: Impala uses regular identifiers (no backticks)
+                    col_list = ', '.join(non_partition_cols)
                     insert_sql = f"""
                     INSERT INTO {self.repository.DATABASE}.{target_table}
                     PARTITION (processing_date='{processing_date}')
