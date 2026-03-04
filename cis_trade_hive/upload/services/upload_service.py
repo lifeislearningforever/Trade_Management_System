@@ -1201,13 +1201,13 @@ class UploadService:
             except Exception as e:
                 logger.warning(f"Could not drop partition (may not exist): {e}")
 
-            # Step 2: Insert data in batches using INSERT INTO with partition
+            # Step 2: Insert data in batches using INSERT INTO SELECT UNION ALL
             rows_inserted = 0
-            batch_size = 500  # Larger batches for better performance
+            batch_size = 100  # Smaller batches for UNION ALL approach
 
             for i in range(0, len(all_data), batch_size):
                 batch = all_data[i:i + batch_size]
-                values_list = []
+                select_statements = []
 
                 for row in batch:
                     row_values = []
@@ -1225,17 +1225,16 @@ class UploadService:
                         escaped_val = str(val).replace("'", "''") if val else ''
                         row_values.append(f"'{escaped_val}'")
 
-                    values_list.append(f"({', '.join(row_values)})")
+                    # Build SELECT statement for this row
+                    select_statements.append(f"SELECT {', '.join(row_values)}")
 
-                if values_list:
-                    # Build INSERT statement with partition
-                    # Note: Impala uses regular identifiers (no backticks)
-                    col_list = ', '.join(non_partition_cols)
+                if select_statements:
+                    # Build INSERT INTO ... SELECT ... UNION ALL ...
+                    union_query = ' UNION ALL '.join(select_statements)
                     insert_sql = f"""
                     INSERT INTO {self.repository.DATABASE}.{target_table}
                     PARTITION (processing_date='{processing_date}')
-                    ({col_list})
-                    VALUES {', '.join(values_list)}
+                    {union_query}
                     """
 
                     success = impala_manager.execute_write(insert_sql, database=self.repository.DATABASE)
