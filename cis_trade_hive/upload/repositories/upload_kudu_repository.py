@@ -525,6 +525,178 @@ class UploadKuduRepository:
             return 0
 
     # =========================================================================
+    # RECONCILIATION
+    # =========================================================================
+
+    def get_reconciliation_data(
+        self,
+        table_name: str,
+        processing_date: str = None,
+        database: str = None
+    ) -> Dict[str, Any]:
+        """
+        Get reconciliation data for an uploaded file.
+
+        Args:
+            table_name: Target table name
+            processing_date: Processing date to filter by (optional)
+            database: Database name (default: gmp_cis)
+
+        Returns:
+            Dict with reconciliation metrics
+        """
+        try:
+            db = database or self.DATABASE
+            recon_data = {
+                'table_count': 0,
+                'processing_date': processing_date or '-',
+                'src_systems': [],
+                'duplicate_count': 0,
+                'null_key_count': 0,
+                'match_status': 'UNKNOWN',
+                'quality_checks': []
+            }
+
+            # Check if table exists
+            try:
+                check_query = f"SHOW TABLES IN {db} LIKE '{table_name}'"
+                check_result = impala_manager.execute_query(check_query, database=db)
+                if not check_result:
+                    logger.warning(f"Table {db}.{table_name} does not exist")
+                    return recon_data
+            except Exception:
+                return recon_data
+
+            # Build WHERE clause for processing_date if provided
+            where_clause = ""
+            if processing_date:
+                where_clause = f"WHERE processing_date = '{processing_date}'"
+
+            # 1. Get record count
+            try:
+                count_query = f"SELECT COUNT(*) as cnt FROM {db}.{table_name} {where_clause}"
+                count_result = impala_manager.execute_query(count_query, database=db)
+                if count_result:
+                    recon_data['table_count'] = int(count_result[0].get('cnt', 0))
+            except Exception as e:
+                logger.warning(f"Error getting record count: {str(e)}")
+
+            # 2. Get distinct src_systems
+            try:
+                src_query = f"SELECT DISTINCT src_system FROM {db}.{table_name} {where_clause}"
+                src_result = impala_manager.execute_query(src_query, database=db)
+                if src_result:
+                    recon_data['src_systems'] = [r.get('src_system', '') for r in src_result if r.get('src_system')]
+            except Exception as e:
+                logger.warning(f"Error getting src_systems: {str(e)}")
+
+            # 3. Get processing_date if not provided
+            if not processing_date:
+                try:
+                    date_query = f"SELECT DISTINCT processing_date FROM {db}.{table_name} LIMIT 5"
+                    date_result = impala_manager.execute_query(date_query, database=db)
+                    if date_result:
+                        dates = [r.get('processing_date', '') for r in date_result if r.get('processing_date')]
+                        recon_data['processing_date'] = ', '.join(dates) if dates else '-'
+                except Exception as e:
+                    logger.warning(f"Error getting processing_date: {str(e)}")
+
+            # 4. Check for duplicates (based on common key fields)
+            # Try portfolio + isin_code combination for position tables
+            try:
+                dup_query = f"""
+                SELECT COUNT(*) as dup_count FROM (
+                    SELECT portfolio, isin_code, COUNT(*) as cnt
+                    FROM {db}.{table_name}
+                    {where_clause}
+                    GROUP BY portfolio, isin_code
+                    HAVING COUNT(*) > 1
+                ) t
+                """
+                dup_result = impala_manager.execute_query(dup_query, database=db)
+                if dup_result:
+                    recon_data['duplicate_count'] = int(dup_result[0].get('dup_count', 0))
+            except Exception as e:
+                # Column might not exist in all tables
+                logger.debug(f"Duplicate check skipped: {str(e)}")
+
+            # 5. Check for null key fields
+            try:
+                null_query = f"""
+                SELECT COUNT(*) as null_count
+                FROM {db}.{table_name}
+                {where_clause}
+                {'AND' if where_clause else 'WHERE'} (portfolio IS NULL OR portfolio = '' OR isin_code IS NULL OR isin_code = '')
+                """
+                null_result = impala_manager.execute_query(null_query, database=db)
+                if null_result:
+                    recon_data['null_key_count'] = int(null_result[0].get('null_count', 0))
+            except Exception as e:
+                logger.debug(f"Null check skipped: {str(e)}")
+
+            # 6. Data quality checks
+            quality_checks = []
+
+            # Check: All records have src_system
+            try:
+                src_check_query = f"""
+                SELECT COUNT(*) as cnt FROM {db}.{table_name}
+                {where_clause}
+                {'AND' if where_clause else 'WHERE'} (src_system IS NULL OR src_system = '')
+                """
+                src_check_result = impala_manager.execute_query(src_check_query, database=db)
+                missing_src = int(src_check_result[0].get('cnt', 0)) if src_check_result else 0
+                quality_checks.append({
+                    'name': 'All records have src_system',
+                    'passed': missing_src == 0
+                })
+            except Exception:
+                pass
+
+            # Check: All records have processing_date
+            try:
+                date_check_query = f"""
+                SELECT COUNT(*) as cnt FROM {db}.{table_name}
+                WHERE processing_date IS NULL OR processing_date = ''
+                """
+                date_check_result = impala_manager.execute_query(date_check_query, database=db)
+                missing_date = int(date_check_result[0].get('cnt', 0)) if date_check_result else 0
+                quality_checks.append({
+                    'name': 'All records have processing_date',
+                    'passed': missing_date == 0
+                })
+            except Exception:
+                pass
+
+            # Check: No duplicate key combinations
+            quality_checks.append({
+                'name': 'No duplicate key combinations',
+                'passed': recon_data['duplicate_count'] == 0
+            })
+
+            # Check: No null key fields
+            quality_checks.append({
+                'name': 'No null/empty key fields',
+                'passed': recon_data['null_key_count'] == 0
+            })
+
+            recon_data['quality_checks'] = quality_checks
+
+            return recon_data
+
+        except Exception as e:
+            logger.error(f"Error getting reconciliation data: {str(e)}")
+            return {
+                'table_count': 0,
+                'processing_date': '-',
+                'src_systems': [],
+                'duplicate_count': 0,
+                'null_key_count': 0,
+                'match_status': 'ERROR',
+                'quality_checks': []
+            }
+
+    # =========================================================================
     # STATISTICS
     # =========================================================================
 

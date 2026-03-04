@@ -606,13 +606,43 @@ def upload_detail(request, upload_id: str):
     except:
         pass
 
-    # Get table preview if completed
+    # Get table preview and reconciliation data if completed
     table_preview = []
+    recon_data = None
     if upload.get('status') == UploadKuduRepository.STATUS_COMPLETED:
         table_name = upload.get('target_table_name')
         if table_name:
             from .repositories.upload_kudu_repository import upload_kudu_repository
             table_preview = upload_kudu_repository.get_table_preview(table_name, limit=10)
+
+            # Get reconciliation data
+            # Try to extract processing_date from description or use None
+            processing_date = None
+            description = upload.get('description', '')
+            if description:
+                # Look for processing_date pattern in description
+                import re
+                date_match = re.search(r'processing_date[=:\s]+(\d{8})', description)
+                if date_match:
+                    processing_date = date_match.group(1)
+
+            recon_data = upload_kudu_repository.get_reconciliation_data(
+                table_name=table_name,
+                processing_date=processing_date
+            )
+
+            # Determine match status based on source row count vs table count
+            source_row_count = upload.get('row_count', 0)
+            table_count = recon_data.get('table_count', 0)
+            if source_row_count and table_count:
+                if source_row_count == table_count:
+                    recon_data['match_status'] = 'MATCH'
+                else:
+                    recon_data['match_status'] = 'MISMATCH'
+            elif table_count > 0:
+                recon_data['match_status'] = 'MATCH'  # Data exists
+            else:
+                recon_data['match_status'] = 'UNKNOWN'
 
     context = {
         'upload': upload,
@@ -620,6 +650,7 @@ def upload_detail(request, upload_id: str):
         'sample_data': sample_data[:10],
         'validation_errors': validation_errors,
         'table_preview': table_preview,
+        'recon_data': recon_data,
         'can_edit': upload.get('status') in [
             UploadKuduRepository.STATUS_PENDING,
             UploadKuduRepository.STATUS_VALIDATED,
@@ -782,3 +813,56 @@ def api_table_preview(request, upload_id: str):
         'preview': preview,
         'row_count': len(preview),
     })
+
+
+@require_http_methods(["GET"])
+def api_reconciliation(request, upload_id: str):
+    """
+    API: Get reconciliation data for completed upload.
+    Used for refresh button in UI.
+    """
+    upload = upload_service.get_upload_by_id(upload_id)
+
+    if not upload:
+        return JsonResponse({'error': 'Upload not found'}, status=404)
+
+    if upload.get('status') != UploadKuduRepository.STATUS_COMPLETED:
+        return JsonResponse({'error': 'Upload not yet completed'}, status=400)
+
+    table_name = upload.get('target_table_name')
+    if not table_name:
+        return JsonResponse({'error': 'No target table'}, status=400)
+
+    # Get processing_date from request or description
+    processing_date = request.GET.get('processing_date', '').strip()
+    if not processing_date:
+        description = upload.get('description', '')
+        if description:
+            import re
+            date_match = re.search(r'processing_date[=:\s]+(\d{8})', description)
+            if date_match:
+                processing_date = date_match.group(1)
+
+    from .repositories.upload_kudu_repository import upload_kudu_repository
+    recon_data = upload_kudu_repository.get_reconciliation_data(
+        table_name=table_name,
+        processing_date=processing_date if processing_date else None
+    )
+
+    # Determine match status
+    source_row_count = upload.get('row_count', 0)
+    table_count = recon_data.get('table_count', 0)
+    if source_row_count and table_count:
+        if source_row_count == table_count:
+            recon_data['match_status'] = 'MATCH'
+        else:
+            recon_data['match_status'] = 'MISMATCH'
+    elif table_count > 0:
+        recon_data['match_status'] = 'MATCH'
+    else:
+        recon_data['match_status'] = 'UNKNOWN'
+
+    # Add source row count for comparison
+    recon_data['source_row_count'] = source_row_count
+
+    return JsonResponse(recon_data)

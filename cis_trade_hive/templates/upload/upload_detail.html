@@ -282,6 +282,118 @@
                 </div>
             </div>
             {% endif %}
+
+            <!-- Reconciliation Section (for completed uploads) -->
+            {% if upload.status == 'COMPLETED' and recon_data %}
+            <div class="card mb-4 border-info">
+                <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-clipboard-check"></i> Reconciliation
+                    </h5>
+                    <button class="btn btn-sm btn-light" id="refreshReconBtn" title="Refresh">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                </div>
+                <div class="card-body">
+                    <!-- Summary Stats -->
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-4">
+                            <div class="border rounded p-3 text-center {% if recon_data.match_status == 'MATCH' %}border-success{% else %}border-warning{% endif %}">
+                                <div class="small text-muted mb-1">Source File Rows</div>
+                                <h4 class="mb-0 fw-bold recon-source-count">{{ upload.row_count|default:0 }}</h4>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="border rounded p-3 text-center {% if recon_data.match_status == 'MATCH' %}border-success{% else %}border-warning{% endif %}">
+                                <div class="small text-muted mb-1">Table Records</div>
+                                <h4 class="mb-0 fw-bold recon-table-count">{{ recon_data.table_count|default:0 }}</h4>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="border rounded p-3 text-center">
+                                <div class="small text-muted mb-1">Status</div>
+                                {% if recon_data.match_status == 'MATCH' %}
+                                    <h4 class="mb-0 text-success recon-match-status"><i class="bi bi-check-circle-fill"></i> Match</h4>
+                                {% else %}
+                                    <h4 class="mb-0 text-warning recon-match-status"><i class="bi bi-exclamation-triangle-fill"></i> Mismatch</h4>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Detailed Metrics -->
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered mb-0">
+                            <tbody>
+                                <tr>
+                                    <td class="bg-light fw-semibold" style="width: 40%;">Target Table</td>
+                                    <td><code>{{ upload.target_table_name }}</code></td>
+                                </tr>
+                                <tr>
+                                    <td class="bg-light fw-semibold">Processing Date</td>
+                                    <td>{{ recon_data.processing_date|default:"-" }}</td>
+                                </tr>
+                                <tr>
+                                    <td class="bg-light fw-semibold">Source System</td>
+                                    <td class="recon-src-systems">
+                                        {% if recon_data.src_systems %}
+                                            {% for src in recon_data.src_systems %}
+                                                <span class="badge bg-secondary me-1">{{ src }}</span>
+                                            {% endfor %}
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="bg-light fw-semibold">Duplicate Records</td>
+                                    <td class="recon-duplicate-count">
+                                        {% if recon_data.duplicate_count > 0 %}
+                                            <span class="text-warning fw-bold">{{ recon_data.duplicate_count }}</span>
+                                        {% else %}
+                                            <span class="text-success">0</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="bg-light fw-semibold">Null/Empty Key Fields</td>
+                                    <td class="recon-null-key-count">
+                                        {% if recon_data.null_key_count > 0 %}
+                                            <span class="text-danger fw-bold">{{ recon_data.null_key_count }}</span>
+                                        {% else %}
+                                            <span class="text-success">0</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="bg-light fw-semibold">Last Ingestion</td>
+                                    <td>{{ upload.updated_at|default:upload.created_at }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Data Quality Checks -->
+                    {% if recon_data.quality_checks %}
+                    <div class="mt-3">
+                        <h6 class="text-muted mb-2"><i class="bi bi-shield-check"></i> Data Quality Checks</h6>
+                        <div class="list-group list-group-flush recon-quality-checks">
+                            {% for check in recon_data.quality_checks %}
+                            <div class="list-group-item d-flex justify-content-between align-items-center py-2 px-0 border-0">
+                                <span>{{ check.name }}</span>
+                                {% if check.passed %}
+                                    <span class="badge bg-success"><i class="bi bi-check"></i> Pass</span>
+                                {% else %}
+                                    <span class="badge bg-danger"><i class="bi bi-x"></i> Fail</span>
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
         </div>
 
         <!-- Sidebar -->
@@ -440,6 +552,79 @@ $(document).ready(function() {
         });
     });
 
+    // Refresh reconciliation button
+    $('#refreshReconBtn').on('click', function() {
+        const btn = $(this);
+        const icon = btn.find('i');
+
+        // Show loading state
+        btn.prop('disabled', true);
+        icon.addClass('spin');
+
+        $.get("{% url 'upload:api_reconciliation' upload.upload_id %}", function(data) {
+            // Update table count
+            $('.recon-table-count').text(data.table_count || 0);
+
+            // Update match status
+            const statusEl = $('.recon-match-status');
+            if (data.match_status === 'MATCH') {
+                statusEl.html('<i class="bi bi-check-circle-fill"></i> Match')
+                       .removeClass('text-warning text-danger')
+                       .addClass('text-success');
+            } else if (data.match_status === 'MISMATCH') {
+                statusEl.html('<i class="bi bi-exclamation-triangle-fill"></i> Mismatch')
+                       .removeClass('text-success text-danger')
+                       .addClass('text-warning');
+            } else {
+                statusEl.html('<i class="bi bi-question-circle-fill"></i> Unknown')
+                       .removeClass('text-success text-warning')
+                       .addClass('text-secondary');
+            }
+
+            // Update src_systems
+            const srcBadges = data.src_systems.map(s => `<span class="badge bg-secondary me-1">${s}</span>`).join('');
+            $('.recon-src-systems').html(srcBadges || '-');
+
+            // Update duplicate count
+            const dupEl = $('.recon-duplicate-count');
+            if (data.duplicate_count > 0) {
+                dupEl.html(`<span class="text-warning fw-bold">${data.duplicate_count}</span>`);
+            } else {
+                dupEl.html('<span class="text-success">0</span>');
+            }
+
+            // Update null key count
+            const nullEl = $('.recon-null-key-count');
+            if (data.null_key_count > 0) {
+                nullEl.html(`<span class="text-danger fw-bold">${data.null_key_count}</span>`);
+            } else {
+                nullEl.html('<span class="text-success">0</span>');
+            }
+
+            // Update quality checks
+            if (data.quality_checks && data.quality_checks.length > 0) {
+                let checksHtml = '';
+                data.quality_checks.forEach(function(check) {
+                    const badge = check.passed
+                        ? '<span class="badge bg-success"><i class="bi bi-check"></i> Pass</span>'
+                        : '<span class="badge bg-danger"><i class="bi bi-x"></i> Fail</span>';
+                    checksHtml += `<div class="list-group-item d-flex justify-content-between align-items-center py-2 px-0 border-0">
+                        <span>${check.name}</span>
+                        ${badge}
+                    </div>`;
+                });
+                $('.recon-quality-checks').html(checksHtml);
+            }
+
+        }).fail(function(xhr) {
+            alert('Failed to refresh reconciliation data: ' + (xhr.responseJSON?.error || 'Unknown error'));
+        }).always(function() {
+            // Reset button state
+            btn.prop('disabled', false);
+            icon.removeClass('spin');
+        });
+    });
+
     // Auto-refresh for ingesting status
     {% if upload.status == 'INGESTING' or upload.status == 'VALIDATING' %}
     setInterval(function() {
@@ -452,4 +637,13 @@ $(document).ready(function() {
     {% endif %}
 });
 </script>
+<style>
+.spin {
+    animation: spin 1s linear infinite;
+}
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+</style>
 {% endblock %}

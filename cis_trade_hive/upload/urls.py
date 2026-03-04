@@ -30,4 +30,5 @@ urlpatterns = [
     path('api/validate/', views.api_validate_file, name='api_validate'),
     path('api/<str:upload_id>/status/', views.api_upload_status, name='api_status'),
     path('api/<str:upload_id>/preview/', views.api_table_preview, name='api_preview'),
+    path('api/<str:upload_id>/reconciliation/', views.api_reconciliation, name='api_reconciliation'),
 ]
