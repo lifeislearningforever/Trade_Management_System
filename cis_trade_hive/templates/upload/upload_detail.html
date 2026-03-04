@@ -371,6 +371,19 @@
                                     </td>
                                 </tr>
                                 <tr>
+                                    <td class="bg-light fw-semibold">Duplicates Removed</td>
+                                    <td class="recon-duplicates-removed">
+                                        {% if upload.description and 'duplicates removed' in upload.description %}
+                                            <span class="text-info">
+                                                <i class="bi bi-info-circle"></i>
+                                                {{ upload.description }}
+                                            </span>
+                                        {% else %}
+                                            <span class="text-muted">None</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                <tr>
                                     <td class="bg-light fw-semibold">Last Ingestion</td>
                                     <td>{{ upload.updated_at|default:upload.created_at }}</td>
                                 </tr>

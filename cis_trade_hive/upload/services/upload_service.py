@@ -1224,7 +1224,15 @@ class UploadService:
             if not all_data:
                 return False, "No data to insert"
 
-            logger.info(f"Ingesting {len(all_data)} rows to {target_table} partition={processing_date}")
+            # Deduplicate data before insertion
+            original_count = len(all_data)
+            all_data, duplicate_count = self._deduplicate_data(all_data, col_names)
+            deduplicated_count = len(all_data)
+
+            if duplicate_count > 0:
+                logger.warning(f"Removed {duplicate_count} duplicate rows from {original_count} total rows")
+
+            logger.info(f"Ingesting {deduplicated_count} unique rows to {target_table} partition={processing_date}")
 
             # Get non-partition columns (exclude processing_date)
             non_partition_cols = [col for col in target_table_cols if col.lower() != 'processing_date']
@@ -1311,18 +1319,70 @@ SELECT * FROM (
 
             # Success - update status
             if not is_session_upload:
-                self.repository.update_upload(upload_id, {
+                # Include duplicate info in description for recon reference
+                update_data = {
                     'status': UploadKuduRepository.STATUS_COMPLETED,
                     'target_table_name': target_table,
-                }, updated_by)
+                    'row_count': rows_inserted,
+                }
+                if duplicate_count > 0:
+                    update_data['description'] = f"processing_date={processing_date}; {duplicate_count} duplicates removed"
+                self.repository.update_upload(upload_id, update_data, updated_by)
 
-            return True, f"Successfully ingested {rows_inserted} rows to {target_table} with processing_date={processing_date}"
+            # Build success message
+            success_msg = f"Successfully ingested {rows_inserted} rows to {target_table} with processing_date={processing_date}"
+            if duplicate_count > 0:
+                success_msg += f" ({duplicate_count} duplicate rows removed from source)"
+
+            return True, success_msg
 
         except Exception as e:
             logger.error(f"Ingestion error: {str(e)}")
             import traceback
             logger.error(traceback.format_exc())
             return False, f"Ingestion error: {str(e)}"
+
+    def _deduplicate_data(
+        self,
+        data: List[Dict[str, Any]],
+        key_columns: List[str]
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Remove duplicate rows from data.
+
+        Duplicates are identified by comparing all values in key_columns.
+        Only the first occurrence of each unique row is kept.
+
+        Args:
+            data: List of row dictionaries
+            key_columns: List of column names to use for duplicate detection
+
+        Returns:
+            Tuple of (deduplicated_data, duplicate_count)
+        """
+        if not data:
+            return data, 0
+
+        seen = set()
+        unique_data = []
+        duplicate_count = 0
+
+        for row in data:
+            # Create a tuple of values for comparison
+            # Use all key columns to identify duplicates
+            key_values = tuple(str(row.get(col, '')).strip() for col in key_columns)
+
+            if key_values not in seen:
+                seen.add(key_values)
+                unique_data.append(row)
+            else:
+                duplicate_count += 1
+                logger.debug(f"Duplicate row found: {key_values[:3]}...")  # Log first 3 values
+
+        if duplicate_count > 0:
+            logger.info(f"Deduplication: {len(data)} -> {len(unique_data)} rows ({duplicate_count} duplicates removed)")
+
+        return unique_data, duplicate_count
 
     def get_all_datasource_configs(self) -> List[Dict[str, Any]]:
         """Get all datasource configurations for dropdown."""
