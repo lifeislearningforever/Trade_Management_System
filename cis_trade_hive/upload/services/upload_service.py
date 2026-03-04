@@ -1196,30 +1196,12 @@ class UploadService:
             # Get non-partition columns (exclude processing_date)
             non_partition_cols = [col for col in target_table_cols if col.lower() != 'processing_date']
 
-            # Step 1: Delete existing data for this partition (overwrite behavior)
-            # For Hive external Parquet tables, use DELETE or INSERT OVERWRITE
-            # First try to delete existing records for this processing_date
-            delete_sql = f"""
-            DELETE FROM {self.repository.DATABASE}.{target_table}
-            WHERE processing_date = '{processing_date}'
-            """
-            try:
-                impala_manager.execute_write(delete_sql, database=self.repository.DATABASE)
-                logger.info(f"Deleted existing data for processing_date='{processing_date}'")
-            except Exception as e:
-                # DELETE may not work on external tables, try ALTER TABLE DROP PARTITION
-                logger.warning(f"DELETE failed (may be external table): {e}")
-                try:
-                    drop_partition_sql = f"""
-                    ALTER TABLE {self.repository.DATABASE}.{target_table}
-                    DROP IF EXISTS PARTITION (processing_date='{processing_date}')
-                    """
-                    impala_manager.execute_write(drop_partition_sql, database=self.repository.DATABASE)
-                    logger.info(f"Dropped partition processing_date='{processing_date}'")
-                except Exception as e2:
-                    logger.warning(f"Could not drop partition either: {e2}")
+            # Step 1: For Hive external Parquet tables, we use INSERT OVERWRITE
+            # which automatically replaces data in the partition
+            # No need to explicitly delete - INSERT OVERWRITE handles it
+            logger.info(f"Will use INSERT OVERWRITE for partition processing_date='{processing_date}'")
 
-            # Step 2: Insert data in batches using INSERT INTO SELECT * FROM (UNION ALL)
+            # Step 2: Insert data using INSERT OVERWRITE SELECT * FROM (UNION ALL)
             # Each SELECT must have column aliases to avoid "duplicated inline view column alias" error
             rows_inserted = 0
             batch_size = 50  # Smaller batches for stability
@@ -1251,17 +1233,28 @@ class UploadService:
                     select_statements.append(f"SELECT {', '.join(row_values)}")
 
                 if select_statements:
-                    # Build INSERT INTO table PARTITION SELECT * FROM (UNION ALL)
-                    # Column list not needed since SELECT has aliases matching table columns
+                    # Build INSERT statement with PARTITION
+                    # Use INSERT OVERWRITE for first batch to replace existing data
+                    # Use INSERT INTO for subsequent batches to append
                     union_query = '\nUNION ALL\n'.join(select_statements)
 
-                    insert_sql = f"""INSERT INTO {self.repository.DATABASE}.{target_table}
+                    if i == 0:
+                        # First batch: INSERT OVERWRITE to replace existing partition data
+                        insert_sql = f"""INSERT OVERWRITE {self.repository.DATABASE}.{target_table}
 PARTITION (processing_date='{processing_date}')
 SELECT * FROM (
 {union_query}
 ) t"""
+                        logger.info(f"Executing INSERT OVERWRITE batch 1 with {len(batch)} rows")
+                    else:
+                        # Subsequent batches: INSERT INTO to append
+                        insert_sql = f"""INSERT INTO {self.repository.DATABASE}.{target_table}
+PARTITION (processing_date='{processing_date}')
+SELECT * FROM (
+{union_query}
+) t"""
+                        logger.info(f"Executing INSERT INTO batch {i//batch_size + 1} with {len(batch)} rows")
 
-                    logger.info(f"Executing INSERT batch {i//batch_size + 1} with {len(batch)} rows")
                     success = impala_manager.execute_write(insert_sql, database=self.repository.DATABASE)
                     if success:
                         rows_inserted += len(batch)

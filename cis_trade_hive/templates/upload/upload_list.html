@@ -23,53 +23,77 @@
         </a>
     </div>
 
-    <!-- Statistics Cards -->
+    <!-- Statistics Cards - White background with colored accents -->
     <div class="row mb-4">
         <div class="col-md-3">
-            <div class="card stat-card border-0 shadow-sm">
-                <div class="card-body text-center py-4">
-                    <div class="d-inline-flex align-items-center justify-content-center rounded-circle mb-3"
-                         style="width: 60px; height: 60px; background-color: #e8f4fd;">
-                        <i class="bi bi-cloud-upload fs-4" style="color: #1976d2;"></i>
+            <div class="card border-0 shadow-sm" style="background: #ffffff;">
+                <div class="card-body py-4">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-shrink-0 me-3">
+                            <div class="d-flex align-items-center justify-content-center rounded"
+                                 style="width: 48px; height: 48px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                                <i class="bi bi-cloud-upload text-white fs-5"></i>
+                            </div>
+                        </div>
+                        <div class="flex-grow-1">
+                            <h3 class="fw-bold mb-0 text-dark">{{ stats.total_uploads }}</h3>
+                            <small class="text-muted">Total Uploads</small>
+                        </div>
                     </div>
-                    <h2 class="fw-bold mb-1" style="color: #1976d2;">{{ stats.total_uploads }}</h2>
-                    <p class="text-muted mb-0 small text-uppercase">Total Uploads</p>
                 </div>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="card stat-card border-0 shadow-sm">
-                <div class="card-body text-center py-4">
-                    <div class="d-inline-flex align-items-center justify-content-center rounded-circle mb-3"
-                         style="width: 60px; height: 60px; background-color: #fff8e1;">
-                        <i class="bi bi-hourglass-split fs-4" style="color: #f57c00;"></i>
+            <div class="card border-0 shadow-sm" style="background: #ffffff;">
+                <div class="card-body py-4">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-shrink-0 me-3">
+                            <div class="d-flex align-items-center justify-content-center rounded"
+                                 style="width: 48px; height: 48px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                                <i class="bi bi-hourglass-split text-white fs-5"></i>
+                            </div>
+                        </div>
+                        <div class="flex-grow-1">
+                            <h3 class="fw-bold mb-0 text-dark">{{ stats.pending }}</h3>
+                            <small class="text-muted">Pending</small>
+                        </div>
                     </div>
-                    <h2 class="fw-bold mb-1" style="color: #f57c00;">{{ stats.pending }}</h2>
-                    <p class="text-muted mb-0 small text-uppercase">Pending</p>
                 </div>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="card stat-card border-0 shadow-sm">
-                <div class="card-body text-center py-4">
-                    <div class="d-inline-flex align-items-center justify-content-center rounded-circle mb-3"
-                         style="width: 60px; height: 60px; background-color: #e8f5e9;">
-                        <i class="bi bi-check-circle fs-4" style="color: #388e3c;"></i>
+            <div class="card border-0 shadow-sm" style="background: #ffffff;">
+                <div class="card-body py-4">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-shrink-0 me-3">
+                            <div class="d-flex align-items-center justify-content-center rounded"
+                                 style="width: 48px; height: 48px; background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);">
+                                <i class="bi bi-check-circle text-white fs-5"></i>
+                            </div>
+                        </div>
+                        <div class="flex-grow-1">
+                            <h3 class="fw-bold mb-0 text-dark">{{ stats.completed }}</h3>
+                            <small class="text-muted">Completed</small>
+                        </div>
                     </div>
-                    <h2 class="fw-bold mb-1" style="color: #388e3c;">{{ stats.completed }}</h2>
-                    <p class="text-muted mb-0 small text-uppercase">Completed</p>
                 </div>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="card stat-card border-0 shadow-sm">
-                <div class="card-body text-center py-4">
-                    <div class="d-inline-flex align-items-center justify-content-center rounded-circle mb-3"
-                         style="width: 60px; height: 60px; background-color: #ffebee;">
-                        <i class="bi bi-x-circle fs-4" style="color: #d32f2f;"></i>
+            <div class="card border-0 shadow-sm" style="background: #ffffff;">
+                <div class="card-body py-4">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-shrink-0 me-3">
+                            <div class="d-flex align-items-center justify-content-center rounded"
+                                 style="width: 48px; height: 48px; background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);">
+                                <i class="bi bi-x-circle text-white fs-5"></i>
+                            </div>
+                        </div>
+                        <div class="flex-grow-1">
+                            <h3 class="fw-bold mb-0 text-dark">{{ stats.failed }}</h3>
+                            <small class="text-muted">Failed</small>
+                        </div>
                     </div>
-                    <h2 class="fw-bold mb-1" style="color: #d32f2f;">{{ stats.failed }}</h2>
-                    <p class="text-muted mb-0 small text-uppercase">Failed</p>
                 </div>
             </div>
         </div>
