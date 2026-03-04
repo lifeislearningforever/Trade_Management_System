@@ -48,34 +48,20 @@ class TradeDropdownServiceTestCase(TestCase):
             self.assertIsInstance(item['label'], str)
 
     # =========================================================================
-    # TRADE STATUSES TESTS
+    # TRADE STATUSES TESTS (Static list - no DB query)
     # =========================================================================
 
-    @patch('core.repositories.impala_connection.impala_manager.execute_query')
-    def test_get_trade_statuses_from_lookup(self, mock_execute):
-        """Test fetching trade statuses from lookup table"""
-        mock_execute.return_value = [
-            {'value': 'PENDING', 'label': 'Pending'},
-            {'value': 'CONFIRMED', 'label': 'Confirmed'}
-        ]
-
+    def test_get_trade_statuses(self):
+        """Test fetching trade statuses (static workflow statuses)"""
         result = self.service.get_trade_statuses()
 
-        self.assertEqual(len(result), 2)
-
-    @patch('core.repositories.impala_connection.impala_manager.execute_query')
-    def test_get_trade_statuses_fallback(self, mock_execute):
-        """Test trade statuses fallback when lookup fails"""
-        mock_execute.return_value = []
-
-        result = self.service.get_trade_statuses()
-
-        # Should return fallback defaults
+        # Should return static workflow statuses
         self.assertIsInstance(result, list)
-        self.assertGreater(len(result), 0)
+        self.assertEqual(len(result), 6)  # INITIAL, MODIFIED, PENDING_VALIDATION, VALIDATED, SETTLED, CANCELLED
         values = [s['value'] for s in result]
-        self.assertIn('PENDING', values)
+        self.assertIn('INITIAL', values)
         self.assertIn('SETTLED', values)
+        self.assertIn('PENDING_VALIDATION', values)
 
     # =========================================================================
     # PORTFOLIOS DROPDOWN TESTS
@@ -671,44 +657,9 @@ class TradeDropdownServiceTestCase(TestCase):
         self.assertEqual(len(result), 2)
 
     # =========================================================================
-    # _EXECUTE_LOOKUP_QUERY TESTS
+    # NOTE: _execute_lookup_query removed - lookup tables no longer used
+    # All dropdown options now use UDF field table with static fallbacks
     # =========================================================================
-
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_execute_lookup_query_success(self, mock_execute):
-        """Test _execute_lookup_query success"""
-        mock_execute.return_value = [
-            {'value': 'CODE1', 'label': 'Name One'},
-            {'value': 'CODE2', 'label': 'Name Two'}
-        ]
-
-        result = self.service._execute_lookup_query(
-            'cis_test_lookup', 'code_col', 'name_col'
-        )
-
-        self.assertEqual(len(result), 2)
-
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_execute_lookup_query_empty(self, mock_execute):
-        """Test _execute_lookup_query with no results"""
-        mock_execute.return_value = []
-
-        result = self.service._execute_lookup_query(
-            'cis_test_lookup', 'code_col', 'name_col'
-        )
-
-        self.assertEqual(result, [])
-
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_execute_lookup_query_exception(self, mock_execute):
-        """Test _execute_lookup_query handles exception"""
-        mock_execute.side_effect = Exception("Query error")
-
-        result = self.service._execute_lookup_query(
-            'cis_test_lookup', 'code_col', 'name_col'
-        )
-
-        self.assertEqual(result, [])
 
     # =========================================================================
     # CONSTANTS TESTS
@@ -724,36 +675,29 @@ class TradeDropdownServiceTestCase(TestCase):
 
 
 class TradeDropdownServiceFallbackTestCase(TestCase):
-    """Test cases for dropdown service fallback paths"""
+    """
+    Test cases for dropdown service fallback paths.
+
+    NOTE: Lookup tables have been removed. All dropdown options now use:
+    1. UDF field values from cis_udf_field
+    2. Static default values as fallback
+
+    This improves trade load/create/edit performance by eliminating
+    queries to non-existent lookup tables.
+    """
 
     def setUp(self):
         """Set up test data"""
         self.service = trade_dropdown_service
 
     # =========================================================================
-    # GL COST CENTRES FALLBACK TESTS
+    # TEST DEFAULT FALLBACKS (when UDF returns empty)
     # =========================================================================
 
     @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_gl_cost_centres_from_lookup(self, mock_execute, mock_udf_repo):
-        """Test GL cost centres falls back to lookup table"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = [
-            {'value': 'CC-100', 'label': 'Test Centre'}
-        ]
-
-        result = self.service.get_gl_cost_centres()
-
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['value'], 'CC-100')
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_gl_cost_centres_fallback_defaults(self, mock_execute, mock_udf_repo):
+    def test_get_gl_cost_centres_fallback_defaults(self, mock_udf_repo):
         """Test GL cost centres falls back to hardcoded defaults"""
         mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = []
 
         result = self.service.get_gl_cost_centres()
 
@@ -761,123 +705,10 @@ class TradeDropdownServiceFallbackTestCase(TestCase):
         values = [r['value'] for r in result]
         self.assertIn('CC-001', values)
 
-    # =========================================================================
-    # GL ACCOUNT CODES FALLBACK TESTS
-    # =========================================================================
-
     @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_gl_account_codes_from_lookup(self, mock_execute, mock_udf_repo):
-        """Test GL account codes falls back to lookup table"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = [
-            {'value': 'ACC-100', 'label': 'Test Account'}
-        ]
-
-        result = self.service.get_gl_account_codes()
-
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['value'], 'ACC-100')
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_gl_account_codes_fallback_defaults(self, mock_execute, mock_udf_repo):
-        """Test GL account codes falls back to hardcoded defaults"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = []
-
-        result = self.service.get_gl_account_codes()
-
-        self.assertEqual(len(result), 3)
-        values = [r['value'] for r in result]
-        self.assertIn('ACC-1001', values)
-
-    # =========================================================================
-    # SUB CUSTODIANS FALLBACK TESTS
-    # =========================================================================
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_sub_custodians_from_lookup(self, mock_execute, mock_udf_repo):
-        """Test sub custodians falls back to lookup table"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = [
-            {'value': 'SUB-100', 'label': 'Test Sub Custodian'}
-        ]
-
-        result = self.service.get_sub_custodians()
-
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['value'], 'SUB-100')
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_sub_custodians_fallback_defaults(self, mock_execute, mock_udf_repo):
-        """Test sub custodians falls back to hardcoded defaults"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = []
-
-        result = self.service.get_sub_custodians()
-
-        self.assertEqual(len(result), 3)
-        values = [r['value'] for r in result]
-        self.assertIn('DBS-SG', values)
-
-    # =========================================================================
-    # EXTENSIONS FALLBACK TESTS
-    # =========================================================================
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_extensions_from_lookup(self, mock_execute, mock_udf_repo):
-        """Test extensions falls back to lookup table"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = [
-            {'value': 'EXT-100', 'label': 'Test Extension'}
-        ]
-
-        result = self.service.get_extensions()
-
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['value'], 'EXT-100')
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_extensions_fallback_defaults(self, mock_execute, mock_udf_repo):
-        """Test extensions falls back to hardcoded defaults"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = []
-
-        result = self.service.get_extensions()
-
-        self.assertEqual(len(result), 3)
-        values = [r['value'] for r in result]
-        self.assertIn('NONE', values)
-
-    # =========================================================================
-    # FUND TYPES FALLBACK TESTS
-    # =========================================================================
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_fund_types_from_lookup(self, mock_execute, mock_udf_repo):
-        """Test fund types falls back to lookup table"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = [
-            {'value': 'FUND-100', 'label': 'Test Fund Type'}
-        ]
-
-        result = self.service.get_fund_types()
-
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['value'], 'FUND-100')
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_fund_types_fallback_defaults(self, mock_execute, mock_udf_repo):
+    def test_get_fund_types_fallback_defaults(self, mock_udf_repo):
         """Test fund types falls back to hardcoded defaults"""
         mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = []
 
         result = self.service.get_fund_types()
 
@@ -885,281 +716,58 @@ class TradeDropdownServiceFallbackTestCase(TestCase):
         values = [r['value'] for r in result]
         self.assertIn('EQUITY', values)
 
-    # =========================================================================
-    # INCOME/EXP TYPES FALLBACK TESTS
-    # =========================================================================
-
     @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_income_exp_types_from_lookup(self, mock_execute, mock_udf_repo):
-        """Test income/exp types falls back to lookup table"""
+    def test_get_selling_rules_fallback_defaults(self, mock_udf_repo):
+        """Test selling rules falls back to hardcoded defaults"""
         mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = [
-            {'value': 'INC-100', 'label': 'Test Income Type'}
-        ]
 
-        result = self.service.get_income_exp_types()
-
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['value'], 'INC-100')
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_income_exp_types_fallback_defaults(self, mock_execute, mock_udf_repo):
-        """Test income/exp types falls back to hardcoded defaults"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = []
-
-        result = self.service.get_income_exp_types()
+        result = self.service.get_selling_rules()
 
         self.assertEqual(len(result), 4)
         values = [r['value'] for r in result]
-        self.assertIn('TRADING', values)
-
-    # =========================================================================
-    # UOBN OPTIONS FALLBACK TESTS
-    # =========================================================================
+        self.assertIn('FIFO', values)
+        self.assertIn('WAVG', values)
 
     @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_uobn_options_from_lookup(self, mock_execute, mock_udf_repo):
-        """Test UOBN options falls back to lookup table"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = [
-            {'value': 'UOBN-100', 'label': 'Test UOBN'}
-        ]
-
-        result = self.service.get_uobn_options()
-
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['value'], 'UOBN-100')
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_uobn_options_fallback_defaults(self, mock_execute, mock_udf_repo):
-        """Test UOBN options falls back to hardcoded defaults"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = []
-
-        result = self.service.get_uobn_options()
-
-        self.assertEqual(len(result), 3)
-        values = [r['value'] for r in result]
-        self.assertIn('UOBN-SG', values)
-
-    # =========================================================================
-    # SECTION OPTIONS FALLBACK TESTS
-    # =========================================================================
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_section_options_from_lookup(self, mock_execute, mock_udf_repo):
-        """Test section options falls back to lookup table"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = [
-            {'value': 'SEC-100', 'label': 'Test Section'}
-        ]
-
-        result = self.service.get_section_options()
-
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['value'], 'SEC-100')
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_section_options_fallback_defaults(self, mock_execute, mock_udf_repo):
-        """Test section options falls back to hardcoded defaults"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = []
-
-        result = self.service.get_section_options()
-
-        self.assertEqual(len(result), 4)
-        values = [r['value'] for r in result]
-        self.assertIn('SEC_31', values)
-
-    # =========================================================================
-    # REVISION CODES FALLBACK TESTS
-    # =========================================================================
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_revision_codes_from_lookup(self, mock_execute, mock_udf_repo):
-        """Test revision codes falls back to lookup table"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = [
-            {'value': 'REV-100', 'label': 'Test Revision'}
-        ]
-
-        result = self.service.get_revision_codes()
-
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['value'], 'REV-100')
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_revision_codes_fallback_defaults(self, mock_execute, mock_udf_repo):
-        """Test revision codes falls back to hardcoded defaults"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = []
-
-        result = self.service.get_revision_codes()
-
-        self.assertEqual(len(result), 3)
-        values = [r['value'] for r in result]
-        self.assertIn('REV-001', values)
-
-    # =========================================================================
-    # AMORTISATION METHODS FALLBACK TESTS
-    # =========================================================================
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_amor_methods_from_lookup(self, mock_execute, mock_udf_repo):
-        """Test amortisation methods falls back to lookup table"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = [
-            {'value': 'AM-100', 'label': 'Test Amor Method'}
-        ]
-
-        result = self.service.get_amor_methods()
-
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['value'], 'AM-100')
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_amor_methods_fallback_defaults(self, mock_execute, mock_udf_repo):
-        """Test amortisation methods falls back to hardcoded defaults"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = []
-
-        result = self.service.get_amor_methods()
-
-        self.assertEqual(len(result), 4)
-        values = [r['value'] for r in result]
-        self.assertIn('STD', values)
-
-    # =========================================================================
-    # TRADE TYPE SPECIFIC - DELIVERY TYPES FALLBACK
-    # =========================================================================
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_delivery_types_from_lookup(self, mock_execute, mock_udf_repo):
-        """Test delivery types falls back to lookup table"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = [
-            {'value': 'DEL-100', 'label': 'Test Delivery Type'}
-        ]
-
-        result = self.service.get_delivery_types()
-
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['value'], 'DEL-100')
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_delivery_types_fallback_defaults(self, mock_execute, mock_udf_repo):
+    def test_get_delivery_types_fallback_defaults(self, mock_udf_repo):
         """Test delivery types falls back to hardcoded defaults"""
         mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = []
 
         result = self.service.get_delivery_types()
 
-        self.assertEqual(len(result), 4)
+        self.assertEqual(len(result), 3)
         values = [r['value'] for r in result]
         self.assertIn('TRANSFER', values)
 
-    # =========================================================================
-    # TRADE TYPE SPECIFIC - INCOME TYPES FALLBACK
-    # =========================================================================
-
     @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_income_types_from_lookup(self, mock_execute, mock_udf_repo):
-        """Test income types falls back to lookup table"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = [
-            {'value': 'INC-100', 'label': 'Test Income Type'}
-        ]
-
-        result = self.service.get_income_types()
-
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['value'], 'INC-100')
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_income_types_fallback_defaults(self, mock_execute, mock_udf_repo):
+    def test_get_income_types_fallback_defaults(self, mock_udf_repo):
         """Test income types falls back to hardcoded defaults"""
         mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = []
 
         result = self.service.get_income_types()
 
-        self.assertEqual(len(result), 5)
+        self.assertEqual(len(result), 3)
         values = [r['value'] for r in result]
         self.assertIn('DIVIDEND', values)
 
-    # =========================================================================
-    # TRADE TYPE SPECIFIC - SPLIT TYPES FALLBACK
-    # =========================================================================
-
     @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_split_types_from_lookup(self, mock_execute, mock_udf_repo):
-        """Test split types falls back to lookup table"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = [
-            {'value': 'SPL-100', 'label': 'Test Split Type'}
-        ]
-
-        result = self.service.get_split_types()
-
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['value'], 'SPL-100')
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_split_types_fallback_defaults(self, mock_execute, mock_udf_repo):
+    def test_get_split_types_fallback_defaults(self, mock_udf_repo):
         """Test split types falls back to hardcoded defaults"""
         mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = []
 
         result = self.service.get_split_types()
 
-        self.assertEqual(len(result), 4)
+        self.assertEqual(len(result), 3)
         values = [r['value'] for r in result]
         self.assertIn('STOCK_SPLIT', values)
 
-    # =========================================================================
-    # TRADE TYPE SPECIFIC - REDUCTION TYPES FALLBACK
-    # =========================================================================
-
     @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_reduction_types_from_lookup(self, mock_execute, mock_udf_repo):
-        """Test reduction types falls back to lookup table"""
-        mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = [
-            {'value': 'RED-100', 'label': 'Test Reduction Type'}
-        ]
-
-        result = self.service.get_reduction_types()
-
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['value'], 'RED-100')
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    @patch('trade.services.trade_dropdown_service.impala_manager.execute_query')
-    def test_get_reduction_types_fallback_defaults(self, mock_execute, mock_udf_repo):
+    def test_get_reduction_types_fallback_defaults(self, mock_udf_repo):
         """Test reduction types falls back to hardcoded defaults"""
         mock_udf_repo.get_field_values.return_value = []
-        mock_execute.return_value = []
 
         result = self.service.get_reduction_types()
 
-        self.assertEqual(len(result), 4)
+        self.assertEqual(len(result), 3)
         values = [r['value'] for r in result]
         self.assertIn('RETURN_CAPITAL', values)

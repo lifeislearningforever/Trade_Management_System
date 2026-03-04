@@ -1,15 +1,13 @@
 """
 Trade Dropdown Service
 
-Provides dropdown options for trade forms by querying:
-1. UDF field table (cis_udf_field) for configurable dropdown options
-2. Counterparty table for brokers/custodians
-3. Lookup tables as fallback
+Simplified service for trade form dropdowns:
+- Uses cis_udf_field for configurable dropdown options
+- Uses cis_party for brokers/custodians
+- Uses cis_portfolio, cis_security for entity lookups
+- No dependency on lookup tables (removed to improve performance)
 
-UDF Simplified Logic:
-- Object Type: TRADE
-- Field Name: The dropdown field (e.g., 'Fund Type', 'Selling Rule')
-- Field Value: The dropdown option values (created by admin/system)
+Required tables: cis_trade, cis_udf_field, cis_party, cis_portfolio, cis_security, cis_equity_price
 """
 
 import logging
@@ -55,7 +53,7 @@ class TradeDropdownService:
                     for r in results if r.get('field_value')
                 ]
         except Exception as e:
-            logger.warning(f"Could not load UDF options for {field_name}: {str(e)}")
+            logger.debug(f"UDF not found for {field_name}, using defaults")
         return []
 
     def get_all_dropdown_options(self) -> Dict[str, List[Dict[str, Any]]]:
@@ -73,11 +71,12 @@ class TradeDropdownService:
             'securities': self.get_securities(),
             'counterparties': self.get_counterparties(),
             'brokers': self.get_brokers(),
+            'custodians': self.get_custodians(),
+            # UDF-based options with simple defaults
             'gl_fund_types': self.get_gl_fund_types(),
             'gl_cost_centres': self.get_gl_cost_centres(),
             'gl_account_codes': self.get_gl_account_codes(),
             'selling_rules': self.get_selling_rules(),
-            'custodians': self.get_custodians(),
             'sub_custodians': self.get_sub_custodians(),
             'open_close_options': self.get_open_close_options(),
             'extensions': self.get_extensions(),
@@ -93,32 +92,14 @@ class TradeDropdownService:
             'reduction_types': self.get_reduction_types(),
         }
 
-    def _execute_lookup_query(self, table_name: str, value_col: str, label_col: str) -> List[Dict[str, Any]]:
-        """Execute query on lookup table and return options."""
-        try:
-            query = f"""
-            SELECT {value_col} as value, {label_col} as label
-            FROM {self.DATABASE}.{table_name}
-            WHERE is_active = true
-            ORDER BY display_order, {label_col}
-            """
-            results = impala_manager.execute_query(query, database=self.DATABASE)
-            return results if results else []
-        except Exception as e:
-            logger.warning(f"Could not load {table_name}: {str(e)}")
-            return []
-
     # =========================================================================
-    # TRADE TYPES
+    # TRADE TYPES & STATUSES (Static - No DB query)
     # =========================================================================
 
     def get_trade_types(self) -> List[Dict[str, Any]]:
         """
         Get trade type options.
-
-        Per SA feedback (2026-03-04):
-        - Removed: ADD_LONG, DELIVER_LONG, REDUCTION_BASIS, INCOME
-        - Kept: BUY, SELL only
+        Per SA feedback (2026-03-04): Only BUY and SELL
         """
         return [
             {'value': 'BUY', 'label': 'Buy'},
@@ -126,24 +107,18 @@ class TradeDropdownService:
         ]
 
     def get_trade_statuses(self) -> List[Dict[str, Any]]:
-        """Get trade status options from lookup table."""
-        options = self._execute_lookup_query(
-            'cis_trade_status_lookup', 'status_code', 'status_name'
-        )
-        if not options:
-            # Fallback defaults
-            options = [
-                {'value': 'PENDING', 'label': 'Pending'},
-                {'value': 'CONFIRMED', 'label': 'Confirmed'},
-                {'value': 'MATCHED', 'label': 'Matched'},
-                {'value': 'SETTLED', 'label': 'Settled'},
-                {'value': 'FAILED', 'label': 'Failed'},
-                {'value': 'CANCELLED', 'label': 'Cancelled'},
-            ]
-        return options
+        """Get trade status options (static list - workflow statuses)."""
+        return [
+            {'value': 'INITIAL', 'label': 'Initial'},
+            {'value': 'MODIFIED', 'label': 'Modified'},
+            {'value': 'PENDING_VALIDATION', 'label': 'Pending Validation'},
+            {'value': 'VALIDATED', 'label': 'Validated'},
+            {'value': 'SETTLED', 'label': 'Settled'},
+            {'value': 'CANCELLED', 'label': 'Cancelled'},
+        ]
 
     # =========================================================================
-    # REFERENCES (Portfolio, Security, Counterparty)
+    # ENTITY LOOKUPS (Portfolio, Security, Counterparty)
     # =========================================================================
 
     def get_portfolios(self, search: str = None) -> List[Dict[str, Any]]:
@@ -187,14 +162,11 @@ class TradeDropdownService:
         ]
 
     # =========================================================================
-    # BROKER & GL OPTIONS
+    # BROKER & CUSTODIAN (from cis_party table)
     # =========================================================================
 
     def get_brokers(self) -> List[Dict[str, Any]]:
-        """
-        Get broker options from cis_party table where is_broker=true.
-        Falls back to lookup table if party query fails.
-        """
+        """Get broker options from cis_party table where is_broker=true."""
         try:
             query = f"""
             SELECT party_short_name as value,
@@ -209,7 +181,6 @@ class TradeDropdownService:
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
             if results:
-                logger.debug(f"Loaded {len(results)} brokers from cis_party table")
                 return [
                     {
                         'value': r.get('value', ''),
@@ -219,109 +190,17 @@ class TradeDropdownService:
                     for r in results
                 ]
         except Exception as e:
-            logger.warning(f"Could not load brokers from cis_party: {str(e)}")
+            logger.debug(f"Could not load brokers: {str(e)}")
 
-        # Fallback to lookup table
-        options = self._execute_lookup_query(
-            'cis_broker_lookup', 'broker_code', 'broker_name'
-        )
-        if not options:
-            options = [
-                {'value': 'GS', 'label': 'Goldman Sachs'},
-                {'value': 'MS', 'label': 'Morgan Stanley'},
-                {'value': 'JPM', 'label': 'JP Morgan'},
-                {'value': 'UBS', 'label': 'UBS'},
-                {'value': 'CITI', 'label': 'Citibank'},
-            ]
-        return options
-
-    def get_gl_fund_types(self) -> List[Dict[str, Any]]:
-        """Get GL fund type options from UDF field table."""
-        # Try UDF first
-        options = self._get_udf_options('GL Fund Type')
-        if options:
-            return options
-
-        # Fallback to lookup table
-        options = self._execute_lookup_query(
-            'cis_gl_fund_type_lookup', 'fund_type_code', 'fund_type_name'
-        )
-        if not options:
-            options = [
-                {'value': 'TRADING', 'label': 'Trading Book'},
-                {'value': 'BANKING', 'label': 'Banking Book'},
-                {'value': 'INVESTMENT', 'label': 'Investment Book'},
-                {'value': 'HEDGE', 'label': 'Hedge Book'},
-            ]
-        return options
-
-    def get_gl_cost_centres(self) -> List[Dict[str, Any]]:
-        """Get GL cost centre options from UDF field table."""
-        # Try UDF first
-        options = self._get_udf_options('GL Cost Centre')
-        if options:
-            return options
-
-        # Fallback to lookup table
-        options = self._execute_lookup_query(
-            'cis_gl_cost_centre_lookup', 'cost_centre_code', 'cost_centre_name'
-        )
-        if not options:
-            options = [
-                {'value': 'CC-001', 'label': 'Treasury'},
-                {'value': 'CC-002', 'label': 'Investment Management'},
-                {'value': 'CC-003', 'label': 'Trading Desk'},
-            ]
-        return options
-
-    def get_gl_account_codes(self) -> List[Dict[str, Any]]:
-        """Get GL account code options from UDF field table."""
-        # Try UDF first
-        options = self._get_udf_options('GL Account Code')
-        if options:
-            return options
-
-        # Fallback to lookup table
-        options = self._execute_lookup_query(
-            'cis_gl_account_code_lookup', 'account_code', 'account_name'
-        )
-        if not options:
-            options = [
-                {'value': 'ACC-1001', 'label': 'Trading Securities'},
-                {'value': 'ACC-1002', 'label': 'Available for Sale'},
-                {'value': 'ACC-1003', 'label': 'Held to Maturity'},
-            ]
-        return options
-
-    # =========================================================================
-    # SELLING & CUSTODIAN OPTIONS
-    # =========================================================================
-
-    def get_selling_rules(self) -> List[Dict[str, Any]]:
-        """Get selling rule options from UDF field table."""
-        # Try UDF first
-        options = self._get_udf_options('Selling Rule')
-        if options:
-            return options
-
-        # Fallback to lookup table
-        options = self._execute_lookup_query(
-            'cis_selling_rule_lookup', 'rule_code', 'rule_name'
-        )
-        if not options:
-            options = [
-                {'value': 'FIFO', 'label': 'First In First Out'},
-                {'value': 'LIFO', 'label': 'Last In First Out'},
-                {'value': 'WAVG', 'label': 'Weighted Average'},
-                {'value': 'SPEC', 'label': 'Specific Identification'},
-            ]
-        return options
+        # Fallback defaults
+        return [
+            {'value': 'UOB KAY HIAN', 'label': 'UOB Kay Hian'},
+            {'value': 'DBS VICKERS', 'label': 'DBS Vickers'},
+            {'value': 'OCBC SECURITIES', 'label': 'OCBC Securities'},
+        ]
 
     def get_custodians(self) -> List[Dict[str, Any]]:
-        """
-        Get custodian options from cis_party table where is_custodian=true.
-        Falls back to lookup table if party query fails.
-        """
+        """Get custodian options from cis_party table where is_custodian=true."""
         try:
             query = f"""
             SELECT party_short_name as value,
@@ -336,7 +215,6 @@ class TradeDropdownService:
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
             if results:
-                logger.debug(f"Loaded {len(results)} custodians from cis_party table")
                 return [
                     {
                         'value': r.get('value', ''),
@@ -346,289 +224,217 @@ class TradeDropdownService:
                     for r in results
                 ]
         except Exception as e:
-            logger.warning(f"Could not load custodians from cis_party: {str(e)}")
+            logger.debug(f"Could not load custodians: {str(e)}")
 
-        # Fallback to lookup table
-        options = self._execute_lookup_query(
-            'cis_custodian_lookup', 'custodian_code', 'custodian_name'
-        )
-        if not options:
-            options = [
-                {'value': 'DBS', 'label': 'DBS Bank'},
-                {'value': 'SCB', 'label': 'Standard Chartered'},
-                {'value': 'CITI', 'label': 'Citibank'},
-                {'value': 'HSBC', 'label': 'HSBC'},
-            ]
-        return options
+        # Fallback defaults
+        return [
+            {'value': 'DBS', 'label': 'DBS Bank'},
+            {'value': 'SCB', 'label': 'Standard Chartered'},
+            {'value': 'CITI', 'label': 'Citibank'},
+            {'value': 'HSBC', 'label': 'HSBC'},
+        ]
+
+    # =========================================================================
+    # UDF-BASED OPTIONS (Try UDF first, then use defaults)
+    # =========================================================================
+
+    def get_gl_fund_types(self) -> List[Dict[str, Any]]:
+        """Get GL fund type options."""
+        options = self._get_udf_options('GL Fund Type')
+        if options:
+            return options
+        return [
+            {'value': 'TRADING', 'label': 'Trading Book'},
+            {'value': 'BANKING', 'label': 'Banking Book'},
+            {'value': 'INVESTMENT', 'label': 'Investment Book'},
+        ]
+
+    def get_gl_cost_centres(self) -> List[Dict[str, Any]]:
+        """Get GL cost centre options."""
+        options = self._get_udf_options('GL Cost Centre')
+        if options:
+            return options
+        return [
+            {'value': 'CC-001', 'label': 'Treasury'},
+            {'value': 'CC-002', 'label': 'Investment Management'},
+            {'value': 'CC-003', 'label': 'Trading Desk'},
+        ]
+
+    def get_gl_account_codes(self) -> List[Dict[str, Any]]:
+        """Get GL account code options."""
+        options = self._get_udf_options('GL Account Code')
+        if options:
+            return options
+        return [
+            {'value': 'ACC-1001', 'label': 'Trading Securities'},
+            {'value': 'ACC-1002', 'label': 'Available for Sale'},
+            {'value': 'ACC-1003', 'label': 'Held to Maturity'},
+        ]
+
+    def get_selling_rules(self) -> List[Dict[str, Any]]:
+        """Get selling rule options."""
+        options = self._get_udf_options('Selling Rule')
+        if options:
+            return options
+        return [
+            {'value': 'FIFO', 'label': 'First In First Out'},
+            {'value': 'LIFO', 'label': 'Last In First Out'},
+            {'value': 'WAVG', 'label': 'Weighted Average'},
+            {'value': 'SPEC', 'label': 'Specific Identification'},
+        ]
 
     def get_sub_custodians(self) -> List[Dict[str, Any]]:
-        """Get sub-custodian options from UDF field table."""
-        # Try UDF first
+        """Get sub-custodian options."""
         options = self._get_udf_options('Sub Custodian')
         if options:
             return options
-
-        # Fallback to lookup table
-        options = self._execute_lookup_query(
-            'cis_sub_custodian_lookup', 'sub_custodian_code', 'sub_custodian_name'
-        )
-        if not options:
-            options = [
-                {'value': 'DBS-SG', 'label': 'DBS Bank Singapore'},
-                {'value': 'SCB-SG', 'label': 'Standard Chartered SG'},
-                {'value': 'CITI-SG', 'label': 'Citibank Singapore'},
-            ]
-        return options
-
-    # =========================================================================
-    # UDF OPTIONS
-    # =========================================================================
+        return [
+            {'value': 'DBS-SG', 'label': 'DBS Bank Singapore'},
+            {'value': 'SCB-SG', 'label': 'Standard Chartered SG'},
+            {'value': 'CITI-SG', 'label': 'Citibank Singapore'},
+        ]
 
     def get_open_close_options(self) -> List[Dict[str, Any]]:
-        """Get open/close position options from UDF field table."""
-        # Try UDF first
+        """Get open/close position options."""
         options = self._get_udf_options('Open/Close Position')
         if options:
             return options
-
-        # Fallback defaults
         return [
             {'value': 'OPEN', 'label': 'Open'},
             {'value': 'CLOSE', 'label': 'Close'},
         ]
 
     def get_extensions(self) -> List[Dict[str, Any]]:
-        """Get extension options from UDF field table."""
-        # Try UDF first
+        """Get extension options."""
         options = self._get_udf_options('Extension')
         if options:
             return options
-
-        # Fallback to lookup table
-        options = self._execute_lookup_query(
-            'cis_extension_lookup', 'extension_code', 'extension_name'
-        )
-        if not options:
-            options = [
-                {'value': 'NONE', 'label': 'None'},
-                {'value': 'EXT-1D', 'label': '1 Day Extension'},
-                {'value': 'EXT-2D', 'label': '2 Day Extension'},
-            ]
-        return options
+        return [
+            {'value': 'NONE', 'label': 'None'},
+            {'value': 'EXT-1D', 'label': '1 Day Extension'},
+            {'value': 'EXT-2D', 'label': '2 Day Extension'},
+        ]
 
     def get_fund_types(self) -> List[Dict[str, Any]]:
-        """Get fund type UDF options from UDF field table."""
-        # Try UDF first
+        """Get fund type options."""
         options = self._get_udf_options('Fund Type')
         if options:
             return options
-
-        # Fallback to lookup table
-        options = self._execute_lookup_query(
-            'cis_fund_type_lookup', 'fund_type_code', 'fund_type_name'
-        )
-        if not options:
-            options = [
-                {'value': 'EQUITY', 'label': 'Equity'},
-                {'value': 'FIXED_INCOME', 'label': 'Fixed Income'},
-                {'value': 'MONEY_MARKET', 'label': 'Money Market'},
-                {'value': 'BALANCED', 'label': 'Balanced'},
-            ]
-        return options
+        return [
+            {'value': 'EQUITY', 'label': 'Equity'},
+            {'value': 'FIXED_INCOME', 'label': 'Fixed Income'},
+            {'value': 'MONEY_MARKET', 'label': 'Money Market'},
+            {'value': 'BALANCED', 'label': 'Balanced'},
+        ]
 
     def get_income_exp_types(self) -> List[Dict[str, Any]]:
-        """Get income/expense type UDF options from UDF field table."""
-        # Try UDF first
+        """Get income/expense type options."""
         options = self._get_udf_options('Income/Exp Type')
         if options:
             return options
-
-        # Fallback to lookup table
-        options = self._execute_lookup_query(
-            'cis_income_exp_type_lookup', 'type_code', 'type_name'
-        )
-        if not options:
-            options = [
-                {'value': 'TRADING', 'label': 'Trading'},
-                {'value': 'INVESTMENT', 'label': 'Investment'},
-                {'value': 'DIVIDEND', 'label': 'Dividend'},
-                {'value': 'INTEREST', 'label': 'Interest'},
-            ]
-        return options
+        return [
+            {'value': 'TRADING', 'label': 'Trading'},
+            {'value': 'INVESTMENT', 'label': 'Investment'},
+            {'value': 'DIVIDEND', 'label': 'Dividend'},
+            {'value': 'INTEREST', 'label': 'Interest'},
+        ]
 
     def get_uobn_options(self) -> List[Dict[str, Any]]:
-        """Get UOBN/UOBN-HK UDF options from UDF field table."""
-        # Try UDF first
+        """Get UOBN/UOBN-HK options."""
         options = self._get_udf_options('UOBN/UOBN-HK')
         if options:
             return options
-
-        # Fallback to lookup table
-        options = self._execute_lookup_query(
-            'cis_uobn_lookup', 'uobn_code', 'uobn_name'
-        )
-        if not options:
-            options = [
-                {'value': 'UOBN-SG', 'label': 'UOBN Singapore'},
-                {'value': 'UOBN-HK', 'label': 'UOBN Hong Kong'},
-                {'value': 'UOBN-MY', 'label': 'UOBN Malaysia'},
-            ]
-        return options
+        return [
+            {'value': 'UOBN-SG', 'label': 'UOBN Singapore'},
+            {'value': 'UOBN-HK', 'label': 'UOBN Hong Kong'},
+            {'value': 'UOBN-MY', 'label': 'UOBN Malaysia'},
+        ]
 
     def get_section_options(self) -> List[Dict[str, Any]]:
-        """Get Section 31/26 UDF options from UDF field table."""
-        # Try UDF first
+        """Get Section 31/26 options."""
         options = self._get_udf_options('Section 31/26')
         if options:
             return options
-
-        # Fallback to lookup table
-        options = self._execute_lookup_query(
-            'cis_section_lookup', 'section_code', 'section_name'
-        )
-        if not options:
-            options = [
-                {'value': 'SEC_31', 'label': 'Section 31'},
-                {'value': 'SEC_26', 'label': 'Section 26'},
-                {'value': 'BOTH', 'label': 'Both'},
-                {'value': 'NA', 'label': 'N/A'},
-            ]
-        return options
+        return [
+            {'value': 'SEC_31', 'label': 'Section 31'},
+            {'value': 'SEC_26', 'label': 'Section 26'},
+            {'value': 'BOTH', 'label': 'Both'},
+            {'value': 'NA', 'label': 'N/A'},
+        ]
 
     def get_revision_codes(self) -> List[Dict[str, Any]]:
-        """Get revision code UDF options from UDF field table."""
-        # Try UDF first
+        """Get revision code options."""
         options = self._get_udf_options('Revision Code')
         if options:
             return options
-
-        # Fallback to lookup table
-        options = self._execute_lookup_query(
-            'cis_revision_code_lookup', 'revision_code', 'revision_name'
-        )
-        if not options:
-            options = [
-                {'value': 'REV-001', 'label': 'Revision 001'},
-                {'value': 'REV-002', 'label': 'Revision 002'},
-                {'value': 'NA', 'label': 'N/A'},
-            ]
-        return options
+        return [
+            {'value': 'REV-001', 'label': 'Revision 001'},
+            {'value': 'REV-002', 'label': 'Revision 002'},
+            {'value': 'NA', 'label': 'N/A'},
+        ]
 
     def get_amor_methods(self) -> List[Dict[str, Any]]:
-        """Get amortisation method options from UDF field table."""
-        # Try UDF first
+        """Get amortisation method options."""
         options = self._get_udf_options('Amortisation Method')
         if options:
             return options
-
-        # Fallback to lookup table
-        options = self._execute_lookup_query(
-            'cis_amor_method_lookup', 'method_code', 'method_name'
-        )
-        if not options:
-            options = [
-                {'value': 'STD', 'label': 'Standard'},
-                {'value': 'EFF_INT', 'label': 'Effective Interest'},
-                {'value': 'STRAIGHT', 'label': 'Straight Line'},
-                {'value': 'NONE', 'label': 'None'},
-            ]
-        return options
-
-    # =========================================================================
-    # TRADE TYPE SPECIFIC OPTIONS
-    # =========================================================================
+        return [
+            {'value': 'STD', 'label': 'Standard'},
+            {'value': 'EFF_INT', 'label': 'Effective Interest'},
+            {'value': 'STRAIGHT', 'label': 'Straight Line'},
+            {'value': 'NONE', 'label': 'None'},
+        ]
 
     def get_delivery_types(self) -> List[Dict[str, Any]]:
-        """Get delivery type options for Deliver Long from UDF field table."""
-        # Try UDF first
+        """Get delivery type options."""
         options = self._get_udf_options('Delivery Type')
         if options:
             return options
-
-        # Fallback to lookup table
-        options = self._execute_lookup_query(
-            'cis_delivery_type_lookup', 'delivery_type_code', 'delivery_type_name'
-        )
-        if not options:
-            options = [
-                {'value': 'TRANSFER', 'label': 'Transfer'},
-                {'value': 'CORP_ACTION', 'label': 'Corporate Action'},
-                {'value': 'SETTLEMENT', 'label': 'Settlement'},
-                {'value': 'REDEMPTION', 'label': 'Redemption'},
-            ]
-        return options
+        return [
+            {'value': 'TRANSFER', 'label': 'Transfer'},
+            {'value': 'CORP_ACTION', 'label': 'Corporate Action'},
+            {'value': 'SETTLEMENT', 'label': 'Settlement'},
+        ]
 
     def get_income_types(self) -> List[Dict[str, Any]]:
-        """Get income type options for Income tab from UDF field table."""
-        # Try UDF first
+        """Get income type options."""
         options = self._get_udf_options('Income Type')
         if options:
             return options
-
-        # Fallback to lookup table
-        options = self._execute_lookup_query(
-            'cis_income_type_lookup', 'income_type_code', 'income_type_name'
-        )
-        if not options:
-            options = [
-                {'value': 'DIVIDEND', 'label': 'Dividend'},
-                {'value': 'STOCK_DIV', 'label': 'Stock Dividend'},
-                {'value': 'INTEREST', 'label': 'Interest'},
-                {'value': 'PREMIUM', 'label': 'Premium'},
-                {'value': 'DISTRIBUTION', 'label': 'Distribution'},
-            ]
-        return options
+        return [
+            {'value': 'DIVIDEND', 'label': 'Dividend'},
+            {'value': 'INTEREST', 'label': 'Interest'},
+            {'value': 'DISTRIBUTION', 'label': 'Distribution'},
+        ]
 
     def get_split_types(self) -> List[Dict[str, Any]]:
-        """Get split type options for Split Transaction from UDF field table."""
-        # Try UDF first
+        """Get split type options."""
         options = self._get_udf_options('Split Type')
         if options:
             return options
-
-        # Fallback to lookup table
-        options = self._execute_lookup_query(
-            'cis_split_type_lookup', 'split_type_code', 'split_type_name'
-        )
-        if not options:
-            options = [
-                {'value': 'STOCK_SPLIT', 'label': 'Stock Split'},
-                {'value': 'REVERSE_SPLIT', 'label': 'Reverse Split'},
-                {'value': 'LOT_SPLIT', 'label': 'Lot Split'},
-                {'value': 'BONUS_ISSUE', 'label': 'Bonus Issue'},
-            ]
-        return options
+        return [
+            {'value': 'STOCK_SPLIT', 'label': 'Stock Split'},
+            {'value': 'REVERSE_SPLIT', 'label': 'Reverse Split'},
+            {'value': 'BONUS_ISSUE', 'label': 'Bonus Issue'},
+        ]
 
     def get_reduction_types(self) -> List[Dict[str, Any]]:
-        """Get reduction type options for Reduction Basis from UDF field table."""
-        # Try UDF first
+        """Get reduction type options."""
         options = self._get_udf_options('Reduction Type')
         if options:
             return options
-
-        # Fallback to lookup table
-        options = self._execute_lookup_query(
-            'cis_reduction_type_lookup', 'reduction_type_code', 'reduction_type_name'
-        )
-        if not options:
-            options = [
-                {'value': 'RETURN_CAPITAL', 'label': 'Return of Capital'},
-                {'value': 'AMORTIZATION', 'label': 'Amortization'},
-                {'value': 'WRITEDOWN', 'label': 'Write-down'},
-                {'value': 'PARTIAL_REDEMP', 'label': 'Partial Redemption'},
-            ]
-        return options
-
+        return [
+            {'value': 'RETURN_CAPITAL', 'label': 'Return of Capital'},
+            {'value': 'AMORTIZATION', 'label': 'Amortization'},
+            {'value': 'WRITEDOWN', 'label': 'Write-down'},
+        ]
 
     # =========================================================================
-    # CURRENCY & PRICE METHODS (for cascading dropdown)
+    # CURRENCY & PRICE METHODS
     # =========================================================================
 
     def get_currencies(self) -> List[Dict[str, Any]]:
-        """
-        Get available currencies from both cis_security_kudu and cis_equity_price.
-        Returns combined unique currencies for the currency dropdown.
-        """
+        """Get available currencies from cis_security_kudu and cis_equity_price."""
         currencies_set = set()
 
         # Get currencies from cis_security_kudu
@@ -645,11 +451,10 @@ class TradeDropdownService:
                 for r in results:
                     if r.get('currency_code'):
                         currencies_set.add(r.get('currency_code'))
-                logger.debug(f"Loaded {len(results)} currencies from cis_security_kudu")
         except Exception as e:
-            logger.warning(f"Could not load currencies from cis_security_kudu: {str(e)}")
+            logger.debug(f"Could not load currencies from cis_security_kudu: {str(e)}")
 
-        # Get currencies from cis_equity_price (may have additional currencies)
+        # Get currencies from cis_equity_price
         try:
             query = f"""
             SELECT DISTINCT currency_code
@@ -663,64 +468,31 @@ class TradeDropdownService:
                 for r in results:
                     if r.get('currency_code'):
                         currencies_set.add(r.get('currency_code'))
-                logger.debug(f"Loaded {len(results)} currencies from cis_equity_price")
         except Exception as e:
-            logger.warning(f"Could not load currencies from cis_equity_price: {str(e)}")
+            logger.debug(f"Could not load currencies from cis_equity_price: {str(e)}")
 
-        # Convert to sorted list of dicts
         if currencies_set:
-            return [
-                {'value': c, 'label': c}
-                for c in sorted(currencies_set)
-            ]
+            return [{'value': c, 'label': c} for c in sorted(currencies_set)]
 
-        # Fallback to reference_data currencies
-        try:
-            query = f"""
-            SELECT currency_code, currency_name
-            FROM {self.DATABASE}.cis_currency
-            WHERE is_active = true
-            ORDER BY currency_code
-            LIMIT 50
-            """
-            results = impala_manager.execute_query(query, database=self.DATABASE)
-            if results:
-                return [
-                    {
-                        'value': r.get('currency_code', ''),
-                        'label': f"{r.get('currency_code', '')} - {r.get('currency_name', '')}"
-                    }
-                    for r in results if r.get('currency_code')
-                ]
-        except Exception as e:
-            logger.warning(f"Could not load currencies: {str(e)}")
-
-        # Final fallback
+        # Fallback
         return [
-            {'value': 'USD', 'label': 'USD - US Dollar'},
-            {'value': 'SGD', 'label': 'SGD - Singapore Dollar'},
-            {'value': 'EUR', 'label': 'EUR - Euro'},
-            {'value': 'GBP', 'label': 'GBP - British Pound'},
+            {'value': 'USD', 'label': 'USD'},
+            {'value': 'SGD', 'label': 'SGD'},
+            {'value': 'EUR', 'label': 'EUR'},
+            {'value': 'GBP', 'label': 'GBP'},
         ]
 
     def get_securities_by_currency(self, currency_code: str) -> List[Dict[str, Any]]:
-        """
-        Get securities filtered by currency code.
-        Combines securities from cis_security_kudu and cis_equity_price.
-        Price source: cis_equity_price only (cis_security_kudu price is ignored).
-        """
+        """Get securities filtered by currency code."""
         if not currency_code:
             return []
 
-        securities_dict = {}  # key: security_name, value: security data
+        securities_dict = {}
 
-        # First, get securities from cis_security_kudu (base data only, price set to 0)
+        # Get from cis_security_kudu
         try:
             query = f"""
-            SELECT
-                security_name,
-                isin,
-                exchange_code as market
+            SELECT security_name, isin, exchange_code as market
             FROM {self.DATABASE}.cis_security_kudu
             WHERE currency_code = '{currency_code}'
               AND (is_active = true OR is_active IS NULL)
@@ -728,7 +500,6 @@ class TradeDropdownService:
             LIMIT 500
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
-
             if results:
                 for r in results:
                     sec_name = r.get('security_name', '')
@@ -739,21 +510,14 @@ class TradeDropdownService:
                             'isin': r.get('isin', ''),
                             'price': 0,
                             'market': r.get('market', ''),
-                            'price_date': '',
-                            'source': 'security'
                         }
-                logger.debug(f"Loaded {len(results)} securities from cis_security_kudu for {currency_code}")
         except Exception as e:
-            logger.warning(f"Error loading from cis_security_kudu: {str(e)}")
+            logger.debug(f"Error loading from cis_security_kudu: {str(e)}")
 
-        # Then, overlay equity prices from cis_equity_price (only source for prices)
+        # Overlay prices from cis_equity_price
         try:
             query = f"""
-            SELECT
-                security_label,
-                isin,
-                main_closing_price as price,
-                price_date
+            SELECT security_label, isin, main_closing_price as price, price_date
             FROM {self.DATABASE}.cis_equity_price
             WHERE currency_code = '{currency_code}'
               AND (is_active = true OR is_active IS NULL)
@@ -761,66 +525,45 @@ class TradeDropdownService:
             LIMIT 500
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
-
             if results:
                 for r in results:
                     sec_label = r.get('security_label', '')
                     if sec_label:
                         equity_price = float(r.get('price', 0)) if r.get('price') else 0
                         if sec_label in securities_dict:
-                            # Update price from equity_price
                             if equity_price > 0:
                                 securities_dict[sec_label]['price'] = equity_price
-                                securities_dict[sec_label]['price_date'] = str(r.get('price_date', ''))
-                                securities_dict[sec_label]['source'] = 'equity_price'
                         else:
-                            # Add new security from equity_price
                             securities_dict[sec_label] = {
                                 'value': sec_label,
                                 'label': f"{sec_label} ({r.get('isin', '')})",
                                 'isin': r.get('isin', ''),
                                 'price': equity_price,
                                 'market': '',
-                                'price_date': str(r.get('price_date', '')),
-                                'source': 'equity_price'
                             }
-                logger.debug(f"Updated with {len(results)} prices from cis_equity_price for {currency_code}")
         except Exception as e:
-            logger.warning(f"Error loading from cis_equity_price: {str(e)}")
+            logger.debug(f"Error loading from cis_equity_price: {str(e)}")
 
-        # Convert to sorted list
-        result = sorted(securities_dict.values(), key=lambda x: x['value'])
-        logger.info(f"Total {len(result)} unique securities for currency {currency_code}")
-        return result
+        return sorted(securities_dict.values(), key=lambda x: x['value'])
 
     def get_equity_price(self, security_label: str, currency_code: str = None) -> Dict[str, Any]:
-        """
-        Get the latest closing price for a security from cis_equity_price only.
-        """
+        """Get the latest closing price for a security."""
         if not security_label:
             return {'price': 0, 'found': False}
 
-        currency_filter = ""
-        if currency_code:
-            currency_filter = f"AND currency_code = '{currency_code}'"
+        currency_filter = f"AND currency_code = '{currency_code}'" if currency_code else ""
 
         try:
             query = f"""
-            SELECT
-                security_label,
-                currency_code,
-                main_closing_price as price,
-                price_date,
-                isin
+            SELECT security_label, currency_code, main_closing_price as price, price_date, isin
             FROM {self.DATABASE}.cis_equity_price
             WHERE security_label = '{security_label}'
               AND (is_active = true OR is_active IS NULL)
               {currency_filter}
-            ORDER BY price_date DESC, price_timestamp DESC
+            ORDER BY price_date DESC
             LIMIT 1
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
-
             if results and len(results) > 0:
                 r = results[0]
                 price = float(r.get('price', 0)) if r.get('price') else 0
@@ -829,80 +572,38 @@ class TradeDropdownService:
                         'price': price,
                         'currency_code': r.get('currency_code', ''),
                         'price_date': str(r.get('price_date', '')),
-                        'market': '',
                         'isin': r.get('isin', ''),
-                        'source': 'equity_price',
                         'found': True
                     }
         except Exception as e:
-            logger.warning(f"Error getting price from cis_equity_price: {str(e)}")
+            logger.debug(f"Error getting price: {str(e)}")
 
         return {'price': 0, 'found': False}
 
     # =========================================================================
-    # TRADE CHARGE METHODS
+    # TRADE CHARGE METHODS (from cis_trade_charge_lut)
     # =========================================================================
 
     def get_broker_charges(self, broker: str, exchange: str = None) -> List[Dict[str, Any]]:
-        """
-        Get all charges for a specific broker from cis_trade_charge_lut.
-
-        Uses flexible matching on broker name to handle variations between
-        cis_party.party_short_name and cis_trade_charge_lut.broker.
-
-        Table structure (6 columns):
-        - fee_type: Brokerage Fee, FFP/SGX SI FEE, GST, Clearing Fee, Trading Fee
-        - broker: Broker name (e.g., 'UOB KAY HIAN PL*')
-        - exchange: Exchange code (e.g., 'SGX') or NULL
-        - country_of_exchange: Country code (e.g., 'SG') or NULL
-        - fee_rule: 'Percent' or 'Flat'
-        - fee_value: Fee amount (percentage as whole number e.g., 1.0 for 1%, or flat amount)
-
-        Args:
-            broker: Broker name (flexible match - tries exact, then LIKE)
-            exchange: Optional exchange filter (e.g., 'SGX')
-
-        Returns:
-            List of charge rules for the broker
-        """
+        """Get charges for a broker from cis_trade_charge_lut."""
         if not broker:
             return []
 
         try:
-            # Escape broker name for SQL
             escaped_broker = broker.replace("'", "''")
-            # Also create a base name without special chars for LIKE matching
             base_broker = escaped_broker.replace('*', '%').replace('?', '_')
+            exchange_filter = f"AND (exchange = '{exchange}' OR exchange IS NULL)" if exchange else ""
 
-            exchange_filter = ""
-            if exchange:
-                escaped_exchange = exchange.replace("'", "''")
-                exchange_filter = f"AND (exchange = '{escaped_exchange}' OR exchange IS NULL)"
-
-            # Try flexible matching: exact OR LIKE (handles * wildcards, case differences)
             query = f"""
-            SELECT
-                fee_type,
-                broker,
-                exchange,
-                country_of_exchange,
-                fee_rule,
-                fee_value
+            SELECT fee_type, broker, exchange, country_of_exchange, fee_rule, fee_value
             FROM {self.DATABASE}.cis_trade_charge_lut
-            WHERE (
-                broker = '{escaped_broker}'
-                OR UPPER(broker) = UPPER('{escaped_broker}')
-                OR broker LIKE '{base_broker}'
-                OR UPPER(broker) LIKE UPPER('{base_broker}')
-            )
+            WHERE (broker = '{escaped_broker}' OR UPPER(broker) = UPPER('{escaped_broker}')
+                   OR broker LIKE '{base_broker}' OR UPPER(broker) LIKE UPPER('{base_broker}'))
               {exchange_filter}
             ORDER BY fee_type
             """
-            logger.info(f"Broker charge query for: {broker} (base: {base_broker})")
             results = impala_manager.execute_query(query, database=self.DATABASE)
-
             if results:
-                logger.info(f"Loaded {len(results)} charges for broker {broker}")
                 return [
                     {
                         'broker': r.get('broker', ''),
@@ -914,39 +615,14 @@ class TradeDropdownService:
                     }
                     for r in results
                 ]
-            else:
-                logger.warning(f"No charges found for broker: {broker}")
-            return []
-
         except Exception as e:
-            logger.warning(f"Error getting broker charges for {broker}: {str(e)}")
-            return []
+            logger.debug(f"Error getting broker charges: {str(e)}")
 
-    def calculate_trade_charges(
-        self,
-        broker: str,
-        quantity: float,
-        price: float,
-        trade_type: str = 'BUY',
-        exchange: str = None
-    ) -> Dict[str, Any]:
-        """
-        Calculate all applicable charges for a trade based on broker lookup.
+        return []
 
-        Fee rules from cis_trade_charge_lut:
-        - 'Percent': fee_value is percentage (e.g., 1.0 means 1%, so divide by 100)
-        - 'Flat': fee_value is flat amount
-
-        Args:
-            broker: Broker name
-            quantity: Trade quantity
-            price: Trade price per unit
-            trade_type: BUY or SELL
-            exchange: Optional exchange filter
-
-        Returns:
-            Dictionary with calculated charges
-        """
+    def calculate_trade_charges(self, broker: str, quantity: float, price: float,
+                                trade_type: str = 'BUY', exchange: str = None) -> Dict[str, Any]:
+        """Calculate charges for a trade based on broker lookup."""
         trade_value = float(quantity) * float(price)
         charges = self.get_broker_charges(broker, exchange)
 
@@ -954,37 +630,26 @@ class TradeDropdownService:
         total_charges = 0.0
 
         for charge in charges:
-            fee_type = charge.get('fee_type', '')
             fee_rule = charge.get('fee_rule', '')
             fee_value = charge.get('fee_value', 0)
 
-            # Calculate fee based on rule
-            calculated_fee = 0.0
-
             if fee_rule.lower() == 'percent':
-                # fee_value is percentage (e.g., 1.0 = 1%, 0.5 = 0.5%)
-                # Convert to decimal by dividing by 100
                 calculated_fee = trade_value * (fee_value / 100)
-
             elif fee_rule.lower() == 'flat':
                 calculated_fee = fee_value
+            else:
+                calculated_fee = 0.0
 
             calculated_charges.append({
-                'fee_type': fee_type,
+                'fee_type': charge.get('fee_type', ''),
                 'fee_rule': fee_rule,
                 'fee_value': fee_value,
                 'exchange': charge.get('exchange', ''),
-                'country_of_exchange': charge.get('country_of_exchange', ''),
                 'calculated_fee': round(calculated_fee, 2)
             })
-
             total_charges += calculated_fee
 
-        # Calculate grand total based on trade type
-        if trade_type.upper() == 'BUY':
-            grand_total = trade_value + total_charges
-        else:
-            grand_total = trade_value - total_charges
+        grand_total = trade_value + total_charges if trade_type.upper() == 'BUY' else trade_value - total_charges
 
         return {
             'broker': broker,
@@ -996,9 +661,7 @@ class TradeDropdownService:
         }
 
     def get_exchanges(self) -> List[Dict[str, Any]]:
-        """
-        Get distinct exchanges from the charge lookup table.
-        """
+        """Get distinct exchanges from charge lookup table."""
         try:
             query = f"""
             SELECT DISTINCT exchange, country_of_exchange
@@ -1007,7 +670,6 @@ class TradeDropdownService:
             ORDER BY exchange
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
-
             if results:
                 return [
                     {
@@ -1017,16 +679,12 @@ class TradeDropdownService:
                     }
                     for r in results if r.get('exchange')
                 ]
-            return []
-
         except Exception as e:
-            logger.warning(f"Error getting exchanges: {str(e)}")
-            return []
+            logger.debug(f"Error getting exchanges: {str(e)}")
+        return []
 
     def get_brokers_from_charge_lut(self) -> List[Dict[str, Any]]:
-        """
-        Get distinct brokers from the charge lookup table.
-        """
+        """Get distinct brokers from charge lookup table."""
         try:
             query = f"""
             SELECT DISTINCT broker
@@ -1035,20 +693,12 @@ class TradeDropdownService:
             ORDER BY broker
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
-
             if results:
-                return [
-                    {
-                        'value': r.get('broker', ''),
-                        'label': r.get('broker', '')
-                    }
-                    for r in results if r.get('broker')
-                ]
-            return []
-
+                return [{'value': r.get('broker', ''), 'label': r.get('broker', '')}
+                        for r in results if r.get('broker')]
         except Exception as e:
-            logger.warning(f"Error getting brokers from charge LUT: {str(e)}")
-            return []
+            logger.debug(f"Error getting brokers from charge LUT: {str(e)}")
+        return []
 
 
 # Singleton instance
