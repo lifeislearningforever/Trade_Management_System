@@ -601,24 +601,97 @@ class UploadKuduRepository:
                 except Exception as e:
                     logger.warning(f"Error getting processing_date: {str(e)}")
 
-            # 4. Check for duplicates (based on common key fields)
-            # Try portfolio + isin_code combination for position tables
+            # 4. Check for duplicates - try multiple approaches
+            # Count actual duplicate rows (not just groups)
+            # If 3 identical rows exist, that's 2 duplicates (3 - 1 = 2 extra rows)
+            duplicate_found = False
+            recon_data['duplicate_groups'] = 0  # Number of groups with duplicates
+            recon_data['duplicate_rows'] = 0    # Total extra duplicate rows
+
+            # Approach 1: Full row duplicates (excluding system columns)
             try:
-                dup_query = f"""
-                SELECT COUNT(*) as dup_count FROM (
-                    SELECT portfolio, isin_code, COUNT(*) as cnt
-                    FROM {db}.{table_name}
-                    {where_clause}
-                    GROUP BY portfolio, isin_code
-                    HAVING COUNT(*) > 1
-                ) t
-                """
-                dup_result = impala_manager.execute_query(dup_query, database=db)
-                if dup_result:
-                    recon_data['duplicate_count'] = int(dup_result[0].get('dup_count', 0))
+                # Get column names from table (excluding system columns)
+                col_query = f"DESCRIBE {db}.{table_name}"
+                col_result = impala_manager.execute_query(col_query, database=db)
+                if col_result:
+                    # Exclude system columns from duplicate check
+                    system_cols = {'src_id', 'src_system', 'sub_system', 'data_cat', 'data_frq', 'processing_date'}
+                    data_cols = [r.get('name', r.get('col_name', '')) for r in col_result
+                                if r.get('name', r.get('col_name', '')) not in system_cols]
+
+                    if data_cols:
+                        cols_str = ', '.join(data_cols)
+                        # Count groups with duplicates AND total duplicate rows
+                        dup_query = f"""
+                        SELECT
+                            COUNT(*) as dup_groups,
+                            SUM(cnt - 1) as dup_rows
+                        FROM (
+                            SELECT {cols_str}, COUNT(*) as cnt
+                            FROM {db}.{table_name}
+                            {where_clause}
+                            GROUP BY {cols_str}
+                            HAVING COUNT(*) > 1
+                        ) t
+                        """
+                        dup_result = impala_manager.execute_query(dup_query, database=db)
+                        if dup_result:
+                            recon_data['duplicate_groups'] = int(dup_result[0].get('dup_groups', 0) or 0)
+                            recon_data['duplicate_rows'] = int(dup_result[0].get('dup_rows', 0) or 0)
+                            recon_data['duplicate_count'] = recon_data['duplicate_rows']  # For backward compatibility
+                            duplicate_found = True
+                            logger.info(f"Duplicate check (full row): {recon_data['duplicate_groups']} groups, {recon_data['duplicate_rows']} extra rows")
             except Exception as e:
-                # Column might not exist in all tables
-                logger.debug(f"Duplicate check skipped: {str(e)}")
+                logger.warning(f"Full row duplicate check failed: {str(e)}")
+
+            # Approach 2: Key-based duplicates (portfolio + isin_code + trade_date)
+            if not duplicate_found:
+                try:
+                    dup_query = f"""
+                    SELECT
+                        COUNT(*) as dup_groups,
+                        SUM(cnt - 1) as dup_rows
+                    FROM (
+                        SELECT portfolio, isin_code, trade_date, COUNT(*) as cnt
+                        FROM {db}.{table_name}
+                        {where_clause}
+                        GROUP BY portfolio, isin_code, trade_date
+                        HAVING COUNT(*) > 1
+                    ) t
+                    """
+                    dup_result = impala_manager.execute_query(dup_query, database=db)
+                    if dup_result:
+                        recon_data['duplicate_groups'] = int(dup_result[0].get('dup_groups', 0) or 0)
+                        recon_data['duplicate_rows'] = int(dup_result[0].get('dup_rows', 0) or 0)
+                        recon_data['duplicate_count'] = recon_data['duplicate_rows']
+                        duplicate_found = True
+                        logger.info(f"Duplicate check (key-based): {recon_data['duplicate_groups']} groups, {recon_data['duplicate_rows']} extra rows")
+                except Exception as e:
+                    logger.debug(f"Key-based duplicate check skipped: {str(e)}")
+
+            # Approach 3: Simple portfolio + isin_code duplicates
+            if not duplicate_found:
+                try:
+                    dup_query = f"""
+                    SELECT
+                        COUNT(*) as dup_groups,
+                        SUM(cnt - 1) as dup_rows
+                    FROM (
+                        SELECT portfolio, isin_code, COUNT(*) as cnt
+                        FROM {db}.{table_name}
+                        {where_clause}
+                        GROUP BY portfolio, isin_code
+                        HAVING COUNT(*) > 1
+                    ) t
+                    """
+                    dup_result = impala_manager.execute_query(dup_query, database=db)
+                    if dup_result:
+                        recon_data['duplicate_groups'] = int(dup_result[0].get('dup_groups', 0) or 0)
+                        recon_data['duplicate_rows'] = int(dup_result[0].get('dup_rows', 0) or 0)
+                        recon_data['duplicate_count'] = recon_data['duplicate_rows']
+                        logger.info(f"Duplicate check (simple): {recon_data['duplicate_groups']} groups, {recon_data['duplicate_rows']} extra rows")
+                except Exception as e:
+                    logger.debug(f"Simple duplicate check skipped: {str(e)}")
 
             # 5. Check for null key fields
             try:

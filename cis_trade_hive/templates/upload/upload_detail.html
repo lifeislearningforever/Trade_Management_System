@@ -346,10 +346,15 @@
                                     </td>
                                 </tr>
                                 <tr>
-                                    <td class="bg-light fw-semibold">Duplicate Records</td>
+                                    <td class="bg-light fw-semibold">Duplicate Rows</td>
                                     <td class="recon-duplicate-count">
-                                        {% if recon_data.duplicate_count > 0 %}
-                                            <span class="text-warning fw-bold">{{ recon_data.duplicate_count }}</span>
+                                        {% if recon_data.duplicate_rows > 0 or recon_data.duplicate_count > 0 %}
+                                            <span class="text-danger fw-bold">
+                                                {{ recon_data.duplicate_rows|default:recon_data.duplicate_count }} extra rows
+                                                {% if recon_data.duplicate_groups %}
+                                                    ({{ recon_data.duplicate_groups }} groups)
+                                                {% endif %}
+                                            </span>
                                         {% else %}
                                             <span class="text-success">0</span>
                                         {% endif %}
@@ -587,8 +592,14 @@ $(document).ready(function() {
 
             // Update duplicate count
             const dupEl = $('.recon-duplicate-count');
-            if (data.duplicate_count > 0) {
-                dupEl.html(`<span class="text-warning fw-bold">${data.duplicate_count}</span>`);
+            const dupRows = data.duplicate_rows || data.duplicate_count || 0;
+            const dupGroups = data.duplicate_groups || 0;
+            if (dupRows > 0) {
+                let dupText = `${dupRows} extra rows`;
+                if (dupGroups > 0) {
+                    dupText += ` (${dupGroups} groups)`;
+                }
+                dupEl.html(`<span class="text-danger fw-bold">${dupText}</span>`);
             } else {
                 dupEl.html('<span class="text-success">0</span>');
             }

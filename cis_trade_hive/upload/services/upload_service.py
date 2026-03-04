@@ -272,8 +272,41 @@ class FileValidationService:
             if result.row_count == 0:
                 result.warnings.append("File contains only header row, no data")
 
+            # Check for duplicate rows in source file
+            duplicate_count = self._count_duplicate_rows(data_rows)
+            if duplicate_count > 0:
+                result.warnings.append(f"Found {duplicate_count} duplicate row(s) in source file")
+
         except Exception as e:
             result.errors.append(f"CSV parsing error: {str(e)}")
+
+    def _count_duplicate_rows(self, rows: List[List[str]]) -> int:
+        """
+        Count duplicate rows in the data.
+
+        Args:
+            rows: List of data rows (each row is a list of values)
+
+        Returns:
+            Number of duplicate rows found
+        """
+        try:
+            # Convert rows to tuples for hashing
+            row_tuples = [tuple(row) for row in rows]
+            unique_rows = set(row_tuples)
+
+            # If unique count differs from total, we have duplicates
+            total_rows = len(row_tuples)
+            unique_count = len(unique_rows)
+            duplicate_count = total_rows - unique_count
+
+            if duplicate_count > 0:
+                logger.warning(f"Found {duplicate_count} duplicate rows in source file")
+
+            return duplicate_count
+        except Exception as e:
+            logger.error(f"Error counting duplicates: {str(e)}")
+            return 0
 
     def _detect_header(self, first_row: List[str], second_row: Optional[List[str]]) -> bool:
         """Detect if first row is a header."""
