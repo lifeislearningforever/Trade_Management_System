@@ -1202,7 +1202,7 @@ class UploadService:
                 logger.warning(f"Could not drop partition (may not exist): {e}")
 
             # Step 2: Insert data in batches using INSERT INTO SELECT * FROM (UNION ALL)
-            # Pattern: INSERT INTO table (cols) PARTITION (p) SELECT * FROM (SELECT ... UNION ALL SELECT ...)
+            # Each SELECT must have column aliases to avoid "duplicated inline view column alias" error
             rows_inserted = 0
             batch_size = 50  # Smaller batches for stability
 
@@ -1210,9 +1210,9 @@ class UploadService:
                 batch = all_data[i:i + batch_size]
                 select_statements = []
 
-                for row in batch:
+                for row_idx, row in enumerate(batch):
                     row_values = []
-                    for col in non_partition_cols:
+                    for col_idx, col in enumerate(non_partition_cols):
                         col_lower = col.lower()
                         if col_lower in additional_cols_map:
                             val = additional_cols_map[col_lower]
@@ -1224,21 +1224,20 @@ class UploadService:
 
                         # Escape single quotes and handle empty/null values
                         if val is None or val == '':
-                            row_values.append("''")
+                            row_values.append(f"'' AS {col}")
                         else:
                             escaped_val = str(val).replace("'", "''")
-                            row_values.append(f"'{escaped_val}'")
+                            row_values.append(f"'{escaped_val}' AS {col}")
 
-                    # Build SELECT statement for this row
+                    # Build SELECT statement for this row with column aliases
                     select_statements.append(f"SELECT {', '.join(row_values)}")
 
                 if select_statements:
-                    # Build INSERT INTO table (columns) PARTITION SELECT * FROM (UNION ALL)
-                    col_list = ', '.join(non_partition_cols)
+                    # Build INSERT INTO table PARTITION SELECT * FROM (UNION ALL)
+                    # Column list not needed since SELECT has aliases matching table columns
                     union_query = '\nUNION ALL\n'.join(select_statements)
 
                     insert_sql = f"""INSERT INTO {self.repository.DATABASE}.{target_table}
-({col_list})
 PARTITION (processing_date='{processing_date}')
 SELECT * FROM (
 {union_query}
