@@ -502,6 +502,9 @@ def upload_ingest(request, upload_id: str):
             # Get optional processing date override
             processing_date = request.POST.get('processing_date', '').strip()
 
+            # Get ingestion mode (overwrite or append)
+            ingestion_mode = request.POST.get('ingestion_mode', 'overwrite').strip()
+
             # Get temp file path and sample data for session uploads
             temp_file_path = upload.get('temp_file_path') if is_session_upload else None
             sample_data = None
@@ -516,7 +519,8 @@ def upload_ingest(request, upload_id: str):
                 updated_by=user_info['username'],
                 processing_date=processing_date if processing_date else None,
                 temp_file_path=temp_file_path,
-                sample_data=sample_data
+                sample_data=sample_data,
+                ingestion_mode=ingestion_mode
             )
 
             # Clean up session data on success

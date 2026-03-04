@@ -921,7 +921,8 @@ class UploadService:
         updated_by: str,
         processing_date: str = None,
         temp_file_path: str = None,
-        sample_data: List[Dict[str, Any]] = None
+        sample_data: List[Dict[str, Any]] = None,
+        ingestion_mode: str = 'overwrite'
     ) -> Tuple[bool, str]:
         """
         Ingest uploaded file to pre-defined target table using datasource config.
@@ -944,6 +945,7 @@ class UploadService:
             processing_date: Override processing date (optional)
             temp_file_path: Local file path for session-based uploads
             sample_data: Sample data from session (used if file not available)
+            ingestion_mode: 'overwrite' to replace existing data, 'append' to add to existing
 
         Returns:
             Tuple of (success, message)
@@ -1026,7 +1028,8 @@ class UploadService:
                     updated_by=updated_by,
                     upload_id=upload_id,
                     is_session_upload=is_session_upload,
-                    temp_file_path=local_file
+                    temp_file_path=local_file,
+                    ingestion_mode=ingestion_mode
                 )
 
             return False, "No file or sample data available for ingestion. Please re-upload the file."
@@ -1118,15 +1121,18 @@ class UploadService:
         updated_by: str,
         upload_id: str,
         is_session_upload: bool = False,
-        temp_file_path: str = None
+        temp_file_path: str = None,
+        ingestion_mode: str = 'overwrite'
     ) -> Tuple[bool, str]:
         """
-        Ingest data to Hive external Parquet table using Impala INSERT OVERWRITE.
+        Ingest data to Hive external Parquet table using Impala INSERT.
 
         For external Parquet tables with partitions:
         1. Read data from file or sample_data
-        2. Delete existing partition data if exists (overwrite mode)
-        3. Use Impala INSERT INTO with partition clause
+        2. Deduplicate rows
+        3. Based on ingestion_mode:
+           - 'overwrite': INSERT OVERWRITE to replace existing partition data
+           - 'append': INSERT INTO to add to existing partition data
         4. Refresh table metadata
 
         Args:
@@ -1139,6 +1145,7 @@ class UploadService:
             upload_id: Upload ID
             is_session_upload: Whether this is a session-based upload
             temp_file_path: Path to local temp file (if available, reads full file)
+            ingestion_mode: 'overwrite' to replace data, 'append' to add to existing
 
         Returns:
             Tuple of (success, message)
@@ -1232,7 +1239,7 @@ class UploadService:
             if duplicate_count > 0:
                 logger.warning(f"Removed {duplicate_count} duplicate rows from {original_count} total rows")
 
-            logger.info(f"Ingesting {deduplicated_count} unique rows to {target_table} partition={processing_date}")
+            logger.info(f"Ingesting {deduplicated_count} unique rows to {target_table} partition={processing_date} (mode={ingestion_mode})")
 
             # Get non-partition columns (exclude processing_date)
             non_partition_cols = [col for col in target_table_cols if col.lower() != 'processing_date']
@@ -1275,12 +1282,19 @@ class UploadService:
 
                 if select_statements:
                     # Build INSERT statement with PARTITION
-                    # Use INSERT OVERWRITE for first batch to replace existing data
-                    # Use INSERT INTO for subsequent batches to append
+                    # Mode determines whether to OVERWRITE or APPEND
                     union_query = '\nUNION ALL\n'.join(select_statements)
 
-                    if i == 0:
-                        # First batch: INSERT OVERWRITE to replace existing partition data
+                    if ingestion_mode == 'append':
+                        # APPEND mode: Always use INSERT INTO to add rows
+                        insert_sql = f"""INSERT INTO {self.repository.DATABASE}.{target_table}
+PARTITION (processing_date='{processing_date}')
+SELECT * FROM (
+{union_query}
+) t"""
+                        logger.info(f"Executing INSERT INTO (append) batch {i//batch_size + 1} with {len(batch)} rows")
+                    elif i == 0:
+                        # OVERWRITE mode - First batch: INSERT OVERWRITE to replace existing partition data
                         insert_sql = f"""INSERT OVERWRITE {self.repository.DATABASE}.{target_table}
 PARTITION (processing_date='{processing_date}')
 SELECT * FROM (
@@ -1288,7 +1302,7 @@ SELECT * FROM (
 ) t"""
                         logger.info(f"Executing INSERT OVERWRITE batch 1 with {len(batch)} rows")
                     else:
-                        # Subsequent batches: INSERT INTO to append
+                        # OVERWRITE mode - Subsequent batches: INSERT INTO to append within same ingestion
                         insert_sql = f"""INSERT INTO {self.repository.DATABASE}.{target_table}
 PARTITION (processing_date='{processing_date}')
 SELECT * FROM (
@@ -1319,18 +1333,22 @@ SELECT * FROM (
 
             # Success - update status
             if not is_session_upload:
-                # Include duplicate info in description for recon reference
+                # Include duplicate info and mode in description for recon reference
+                mode_label = 'APPEND' if ingestion_mode == 'append' else 'OVERWRITE'
                 update_data = {
                     'status': UploadKuduRepository.STATUS_COMPLETED,
                     'target_table_name': target_table,
                     'row_count': rows_inserted,
                 }
+                desc_parts = [f"processing_date={processing_date}", f"mode={mode_label}"]
                 if duplicate_count > 0:
-                    update_data['description'] = f"processing_date={processing_date}; {duplicate_count} duplicates removed"
+                    desc_parts.append(f"{duplicate_count} duplicates removed")
+                update_data['description'] = "; ".join(desc_parts)
                 self.repository.update_upload(upload_id, update_data, updated_by)
 
             # Build success message
-            success_msg = f"Successfully ingested {rows_inserted} rows to {target_table} with processing_date={processing_date}"
+            mode_label = 'appended' if ingestion_mode == 'append' else 'ingested'
+            success_msg = f"Successfully {mode_label} {rows_inserted} rows to {target_table} with processing_date={processing_date}"
             if duplicate_count > 0:
                 success_msg += f" ({duplicate_count} duplicate rows removed from source)"
 

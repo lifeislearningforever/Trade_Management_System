@@ -182,12 +182,13 @@ The File Upload module allows users to upload CSV files and ingest them into pre
 
 ---
 
-### Demo Scenario 3: Overwrite Behavior
+### Demo Scenario 3: Overwrite Mode (Default)
 
-**Objective:** Show partition overwrite (not append)
+**Objective:** Show partition overwrite behavior
 
 1. **First Upload**
    - Upload `CIS_External_upload_format_1.csv` with processing_date=20260304
+   - Keep default mode: **Overwrite**
    - Result: 11 rows in table
 
 2. **Verify in Database**
@@ -197,16 +198,51 @@ The File Upload module allows users to upload CSV files and ingest them into pre
    -- Returns: 11
    ```
 
-3. **Second Upload (Same Date)**
+3. **Second Upload (Same Date, Overwrite)**
    - Upload same file again
+   - Keep mode: **Overwrite**
    - System uses INSERT OVERWRITE
 
 4. **Verify No Duplication**
    ```sql
    SELECT COUNT(*) FROM gmp_cis.cis_user_sta_adhoc_position_1
    WHERE processing_date = '20260304';
-   -- Still returns: 11 (not 22)
+   -- Still returns: 11 (not 22) - data was replaced
    ```
+
+---
+
+### Demo Scenario 3b: Append Mode (Delta Load)
+
+**Objective:** Show append behavior for incremental data
+
+1. **First Upload (Base Data)**
+   - Upload `CIS_External_upload_format_1.csv` (11 rows)
+   - Mode: **Overwrite** (to start fresh)
+   - Result: 11 rows in table
+
+2. **Verify Base Data**
+   ```sql
+   SELECT COUNT(*) FROM gmp_cis.cis_user_sta_adhoc_position_1
+   WHERE processing_date = '20260304';
+   -- Returns: 11
+   ```
+
+3. **Second Upload (Delta Data, Append)**
+   - Upload `CIS_External_upload_format_1_delta.csv` (5 new rows)
+   - **Select: Append Mode**
+   - System uses INSERT INTO
+
+4. **Verify Data Added**
+   ```sql
+   SELECT COUNT(*) FROM gmp_cis.cis_user_sta_adhoc_position_1
+   WHERE processing_date = '20260304';
+   -- Returns: 16 (11 + 5)
+   ```
+
+5. **Explain UI**
+   - Show toggle buttons: Overwrite (red) vs Append (green)
+   - Show confirmation message for each mode
 
 ---
 
@@ -256,9 +292,45 @@ The File Upload module allows users to upload CSV files and ingest them into pre
 |---------|-------------|
 | **Metadata-Driven** | File → datasource config → target table (automatic) |
 | **Duplicate Detection** | Warns during validation, removes before insert |
-| **Partition Overwrite** | Same processing_date replaces, doesn't append |
+| **Overwrite/Append Mode** | User chooses to replace or add to existing data |
 | **Reconciliation** | Source vs Table comparison with quality checks |
 | **Refresh Button** | Real-time recon data without page reload |
+
+---
+
+## Ingestion Modes
+
+### Overwrite Mode (Default)
+- Replaces ALL existing data for the same `processing_date`
+- Use when re-uploading corrected data
+- Uses `INSERT OVERWRITE PARTITION`
+
+### Append Mode
+- Adds new rows to existing data (delta load)
+- Use for incremental data uploads
+- Uses `INSERT INTO PARTITION`
+- Duplicates within the uploaded file are still removed
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    INGESTION MODE                            │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│   ┌─────────────┐              ┌─────────────┐              │
+│   │  OVERWRITE  │              │   APPEND    │              │
+│   │  (Default)  │              │  (Delta)    │              │
+│   └──────┬──────┘              └──────┬──────┘              │
+│          │                            │                      │
+│          ▼                            ▼                      │
+│   ┌─────────────┐              ┌─────────────┐              │
+│   │ DELETE old  │              │ KEEP old    │              │
+│   │ INSERT new  │              │ INSERT new  │              │
+│   └─────────────┘              └─────────────┘              │
+│                                                              │
+│   Result: ONLY new data        Result: OLD + NEW data       │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -347,7 +419,12 @@ LIMIT 10;
 ## Q&A Preparation
 
 **Q: What happens if I upload the same file twice?**
-A: The system uses INSERT OVERWRITE on the partition (processing_date), so data is replaced, not appended.
+A: It depends on the mode you select:
+- **Overwrite mode** (default): Data is replaced, not appended
+- **Append mode**: Data is added to existing records
+
+**Q: When should I use Append mode?**
+A: Use Append mode for delta/incremental loads - when you want to add new data without removing existing records for the same processing_date.
 
 **Q: How are duplicates handled?**
 A: Duplicates are detected during validation (warning) and removed before insertion. Only unique rows are inserted.
