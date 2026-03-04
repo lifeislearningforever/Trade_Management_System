@@ -1201,9 +1201,10 @@ class UploadService:
             except Exception as e:
                 logger.warning(f"Could not drop partition (may not exist): {e}")
 
-            # Step 2: Insert data in batches using INSERT INTO SELECT UNION ALL
+            # Step 2: Insert data in batches using INSERT INTO SELECT * FROM (UNION ALL)
+            # Pattern: INSERT INTO table (cols) PARTITION (p) SELECT * FROM (SELECT ... UNION ALL SELECT ...)
             rows_inserted = 0
-            batch_size = 100  # Smaller batches for UNION ALL approach
+            batch_size = 50  # Smaller batches for stability
 
             for i in range(0, len(all_data), batch_size):
                 batch = all_data[i:i + batch_size]
@@ -1221,22 +1222,29 @@ class UploadService:
                         else:
                             val = ''
 
-                        # Escape single quotes
-                        escaped_val = str(val).replace("'", "''") if val else ''
-                        row_values.append(f"'{escaped_val}'")
+                        # Escape single quotes and handle empty/null values
+                        if val is None or val == '':
+                            row_values.append("''")
+                        else:
+                            escaped_val = str(val).replace("'", "''")
+                            row_values.append(f"'{escaped_val}'")
 
                     # Build SELECT statement for this row
                     select_statements.append(f"SELECT {', '.join(row_values)}")
 
                 if select_statements:
-                    # Build INSERT INTO ... SELECT ... UNION ALL ...
-                    union_query = ' UNION ALL '.join(select_statements)
-                    insert_sql = f"""
-                    INSERT INTO {self.repository.DATABASE}.{target_table}
-                    PARTITION (processing_date='{processing_date}')
-                    {union_query}
-                    """
+                    # Build INSERT INTO table (columns) PARTITION SELECT * FROM (UNION ALL)
+                    col_list = ', '.join(non_partition_cols)
+                    union_query = '\nUNION ALL\n'.join(select_statements)
 
+                    insert_sql = f"""INSERT INTO {self.repository.DATABASE}.{target_table}
+({col_list})
+PARTITION (processing_date='{processing_date}')
+SELECT * FROM (
+{union_query}
+) t"""
+
+                    logger.info(f"Executing INSERT batch {i//batch_size + 1} with {len(batch)} rows")
                     success = impala_manager.execute_write(insert_sql, database=self.repository.DATABASE)
                     if success:
                         rows_inserted += len(batch)
