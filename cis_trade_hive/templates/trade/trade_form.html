@@ -82,18 +82,17 @@
                                 {% endif %}
                             </div>
 
-                            <!-- Trade Status -->
+                            <!-- Trade Status (Read-only per SA feedback #11) -->
                             <div class="col-md-3">
                                 <label class="form-label">Trade Status</label>
-                                <select class="form-select" name="trade_status" id="trade_status">
-                                    <option value="">Select Status</option>
-                                    {% for ts in dropdown_options.trade_statuses %}
-                                    <option value="{{ ts.value }}"
-                                        {% if trade.trade_status == ts.value %}selected{% endif %}>
-                                        {{ ts.label }}
-                                    </option>
-                                    {% endfor %}
-                                </select>
+                                {% if is_edit %}
+                                <input type="text" class="form-control bg-light" value="{{ trade.trade_status|default:'INITIAL' }}" readonly disabled>
+                                <input type="hidden" name="trade_status" value="{{ trade.trade_status }}">
+                                {% else %}
+                                <input type="text" class="form-control bg-light" value="INITIAL" readonly disabled>
+                                <input type="hidden" name="trade_status" value="">
+                                {% endif %}
+                                <small class="text-muted">Status is system-managed</small>
                             </div>
 
                             <!-- Trade Date -->
@@ -307,11 +306,8 @@
                                 <input type="number" class="form-control" name="other_charges" id="other_charges"
                                        step="0.01" value="{{ trade.other_charges|default:'0' }}">
                             </div>
-                            <div class="col-md-2">
-                                <label class="form-label">Accrued Interest</label>
-                                <input type="number" class="form-control" name="accrued_interest" id="accrued_interest"
-                                       step="0.01" value="{{ trade.accrued_interest|default:'0' }}">
-                            </div>
+                            <!-- Accrued Interest removed per SA feedback #13 -->
+                            <input type="hidden" name="accrued_interest" value="0">
                             <div class="col-md-4">
                                 <label class="form-label">Total Amount</label>
                                 <input type="number" class="form-control fw-bold bg-light" name="total_amount" id="total_amount"
@@ -524,28 +520,11 @@
                         <hr class="my-4">
                         <h6>Settlement</h6>
 
+                        <!-- Cash Balance and Amor/Accr Method removed per SA feedback #13 -->
+                        <input type="hidden" name="amor_accr_method" value="">
+                        <input type="hidden" name="cash_balance" value="0">
+
                         <div class="row g-3">
-                            <div class="col-md-4">
-                                <label class="form-label">Amor/Accr Method</label>
-                                <select class="form-select" name="amor_accr_method" id="amor_accr_method">
-                                    <option value="">Select</option>
-                                    {% for am in dropdown_options.amor_methods %}
-                                    <option value="{{ am.value }}"
-                                        {% if trade.amor_accr_method == am.value %}selected{% endif %}>
-                                        {{ am.label }}
-                                    </option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div class="col-md-4">
-                                <label class="form-label">Cash Balance</label>
-                                <input type="number" class="form-control" name="cash_balance" id="cash_balance"
-                                       step="0.01" value="{{ trade.cash_balance|default:'' }}">
-                            </div>
-                            <div class="col-md-4">
-                                <!-- Placeholder for additional settlement fields -->
-                            </div>
-                        </div>
 
                         <div class="row g-3 mt-2">
                             <div class="col-md-4">

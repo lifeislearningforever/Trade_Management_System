@@ -166,6 +166,10 @@ def trade_list(request):
     trade_type_filter = request.GET.get('trade_type', '').strip()
     trade_date_from = request.GET.get('trade_date_from', '').strip()
     trade_date_to = request.GET.get('trade_date_to', '').strip()
+    # New filters per SA feedback #2
+    src_system_filter = request.GET.get('src_system', '').strip()
+    settle_date_from = request.GET.get('settle_date_from', '').strip()
+    settle_date_to = request.GET.get('settle_date_to', '').strip()
     export = request.GET.get('export', '').strip()
 
     # Multi-select portfolios (comma-separated or list)
@@ -192,7 +196,10 @@ def trade_list(request):
         securities=security_filter if security_filter else None,
         search=search_query if search_query else None,
         trade_date_from=trade_date_from if trade_date_from else None,
-        trade_date_to=trade_date_to if trade_date_to else None
+        trade_date_to=trade_date_to if trade_date_to else None,
+        src_system=src_system_filter if src_system_filter else None,
+        settle_date_from=settle_date_from if settle_date_from else None,
+        settle_date_to=settle_date_to if settle_date_to else None
     )
 
     wrapped_trades = [TradeWrapper(t, idx) for idx, t in enumerate(trades_data)]
@@ -275,6 +282,10 @@ def trade_list(request):
         'selected_securities': security_filter,   # List of selected security names
         'trade_date_from': trade_date_from,
         'trade_date_to': trade_date_to,
+        # New filters per SA feedback #2
+        'src_system_filter': src_system_filter,
+        'settle_date_from': settle_date_from,
+        'settle_date_to': settle_date_to,
         'total_count': len(trades_data),
         'status_options': status_options,
         'trade_types': dropdown_options.get('trade_types', []),

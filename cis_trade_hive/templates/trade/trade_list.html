@@ -140,8 +140,16 @@
                     </div>
                 </div>
 
-                <!-- Second Row: Date Filters -->
+                <!-- Second Row: Date Filters and Source (per SA feedback #2) -->
                 <div class="row g-3 mt-2">
+                    <div class="col-md-2">
+                        <label class="form-label">Source</label>
+                        <select class="form-select" name="src_system">
+                            <option value="">All Sources</option>
+                            <option value="CIS" {% if src_system_filter == 'CIS' %}selected{% endif %}>CIS</option>
+                            <option value="GMP" {% if src_system_filter == 'GMP' %}selected{% endif %}>GMP</option>
+                        </select>
+                    </div>
                     <div class="col-md-2">
                         <label class="form-label">Trade Date From</label>
                         <input type="date" class="form-control" name="trade_date_from" value="{{ trade_date_from }}">
@@ -150,9 +158,17 @@
                         <label class="form-label">Trade Date To</label>
                         <input type="date" class="form-control" name="trade_date_to" value="{{ trade_date_to }}">
                     </div>
-                    <div class="col-md-8 d-flex align-items-end justify-content-end gap-2">
+                    <div class="col-md-2">
+                        <label class="form-label">Settle Date From</label>
+                        <input type="date" class="form-control" name="settle_date_from" value="{{ settle_date_from }}">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Settle Date To</label>
+                        <input type="date" class="form-control" name="settle_date_to" value="{{ settle_date_to }}">
+                    </div>
+                    <div class="col-md-2 d-flex align-items-end justify-content-end gap-2">
                         <a href="{% url 'trade:list' %}" class="btn btn-outline-secondary">
-                            <i class="bi bi-x-circle"></i> Clear All Filters
+                            <i class="bi bi-x-circle"></i> Clear
                         </a>
                     </div>
                 </div>
@@ -203,7 +219,7 @@
                         <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
                             <tr>
                                 <th class="sortable" data-sort-type="text" style="min-width: 80px;">Source</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 120px;">Deal #</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 120px;">Trade ID</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 100px;">Type</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 150px;">Portfolio</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 70px;">Ccy</th>
@@ -235,16 +251,6 @@
                                         <span class="badge bg-success">Buy</span>
                                     {% elif trade.trade_type == 'SELL' %}
                                         <span class="badge bg-danger">Sell</span>
-                                    {% elif trade.trade_type == 'ADD_LONG' %}
-                                        <span class="badge bg-info">Add Long</span>
-                                    {% elif trade.trade_type == 'DELIVER_LONG' %}
-                                        <span class="badge bg-warning text-dark">Deliver Long</span>
-                                    {% elif trade.trade_type == 'REDUCTION_BASIS' %}
-                                        <span class="badge bg-secondary">Reduction</span>
-                                    {% elif trade.trade_type == 'INCOME' %}
-                                        <span class="badge bg-primary">Income</span>
-                                    {% elif trade.trade_type == 'SPLIT_TRANSACTION' %}
-                                        <span class="badge bg-dark">Split</span>
                                     {% else %}
                                         <span class="badge bg-secondary">{{ trade.trade_type }}</span>
                                     {% endif %}

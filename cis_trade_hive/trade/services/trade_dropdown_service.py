@@ -113,15 +113,16 @@ class TradeDropdownService:
     # =========================================================================
 
     def get_trade_types(self) -> List[Dict[str, Any]]:
-        """Get trade type options."""
+        """
+        Get trade type options.
+
+        Per SA feedback (2026-03-04):
+        - Removed: ADD_LONG, DELIVER_LONG, REDUCTION_BASIS, INCOME
+        - Kept: BUY, SELL only
+        """
         return [
             {'value': 'BUY', 'label': 'Buy'},
             {'value': 'SELL', 'label': 'Sell'},
-            {'value': 'ADD_LONG', 'label': 'Add Long'},
-            {'value': 'DELIVER_LONG', 'label': 'Deliver Long'},
-            {'value': 'REDUCTION_BASIS', 'label': 'Reduction Basis'},
-            {'value': 'INCOME', 'label': 'Income'},
-            {'value': 'SPLIT_TRANSACTION', 'label': 'Split Transaction'},
         ]
 
     def get_trade_statuses(self) -> List[Dict[str, Any]]:

@@ -209,7 +209,10 @@ class TradeKuduRepository:
         securities: Optional[List[str]] = None,
         search: Optional[str] = None,
         trade_date_from: Optional[str] = None,
-        trade_date_to: Optional[str] = None
+        trade_date_to: Optional[str] = None,
+        src_system: Optional[str] = None,
+        settle_date_from: Optional[str] = None,
+        settle_date_to: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Retrieve trades from Kudu with multi-select filters.
@@ -224,6 +227,9 @@ class TradeKuduRepository:
             search: Text search in deal_number, security_label, portfolio_short_name
             trade_date_from: Start date filter (YYYY-MM-DD)
             trade_date_to: End date filter (YYYY-MM-DD)
+            src_system: Source system filter (CIS or GMP) - per SA feedback #2
+            settle_date_from: Settlement date start filter - per SA feedback #2
+            settle_date_to: Settlement date end filter - per SA feedback #2
 
         Returns:
             List of trade dictionaries
@@ -236,6 +242,10 @@ class TradeKuduRepository:
 
             if status:
                 where_clauses.append(f"status = {self.escape_value(status)}")
+
+            # Source system filter (per SA feedback #2)
+            if src_system:
+                where_clauses.append(f"UPPER(src_system) = {self.escape_value(src_system.upper())}")
 
             # Multi-select portfolios with OR logic
             if portfolios and len(portfolios) > 0:
@@ -262,6 +272,13 @@ class TradeKuduRepository:
 
             if trade_date_to:
                 where_clauses.append(f"trade_date <= {self.escape_value(trade_date_to)}")
+
+            # Settlement date filters (per SA feedback #2)
+            if settle_date_from:
+                where_clauses.append(f"settle_date >= {self.escape_value(settle_date_from)}")
+
+            if settle_date_to:
+                where_clauses.append(f"settle_date <= {self.escape_value(settle_date_to)}")
 
             where_clause = " AND ".join(where_clauses)
 
@@ -1583,9 +1600,46 @@ class TradeKuduRepository:
                 'type_breakdown': {}
             }
 
-    def get_pending_validation_trades(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """Get trades pending validation."""
-        return self.get_all_trades(limit=limit, status=self.STATUS_PENDING_VALIDATION)
+    def get_pending_validation_trades(self, limit: int = 100, cis_only: bool = True) -> List[Dict[str, Any]]:
+        """
+        Get trades pending validation.
+
+        Per SA feedback (2026-03-04):
+        - By default, only show CIS trades (exclude GMP trades)
+        - Set cis_only=False to show all trades
+
+        Args:
+            limit: Maximum records to return
+            cis_only: If True (default), only show CIS trades (UPPER(src_system) = 'CIS')
+
+        Returns:
+            List of trades pending validation
+        """
+        try:
+            where_clauses = [
+                "(is_deleted = false OR is_deleted IS NULL)",
+                f"status = '{self.STATUS_PENDING_VALIDATION}'"
+            ]
+
+            if cis_only:
+                where_clauses.append("UPPER(src_system) = 'CIS'")
+
+            where_clause = " AND ".join(where_clauses)
+
+            query = f"""
+            SELECT *
+            FROM {self.DATABASE}.{self.TABLE_NAME}
+            WHERE {where_clause}
+            ORDER BY created_at DESC
+            LIMIT {limit}
+            """
+
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            return results if results else []
+
+        except Exception as e:
+            logger.error(f"Error getting pending validation trades: {str(e)}")
+            return []
 
     def get_pending_settlement_trades(self, limit: int = 100) -> List[Dict[str, Any]]:
         """Get validated trades pending settlement."""

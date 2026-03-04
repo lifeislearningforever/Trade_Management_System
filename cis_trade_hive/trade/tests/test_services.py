@@ -29,17 +29,13 @@ class TradeDropdownServiceTestCase(TestCase):
         result = self.service.get_trade_types()
 
         self.assertIsInstance(result, list)
-        self.assertEqual(len(result), 7)
+        # Per SA feedback: Only BUY and SELL trade types
+        self.assertEqual(len(result), 2)
 
         # Check specific trade types
         values = [t['value'] for t in result]
         self.assertIn('BUY', values)
         self.assertIn('SELL', values)
-        self.assertIn('ADD_LONG', values)
-        self.assertIn('DELIVER_LONG', values)
-        self.assertIn('REDUCTION_BASIS', values)
-        self.assertIn('INCOME', values)
-        self.assertIn('SPLIT_TRANSACTION', values)
 
     def test_get_trade_types_structure(self):
         """Test trade types have correct structure"""
