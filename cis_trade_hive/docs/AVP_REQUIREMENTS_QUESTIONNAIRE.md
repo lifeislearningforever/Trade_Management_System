@@ -25,7 +25,7 @@ Please review each section and provide answers/decisions. Mark your choice with 
 
 **Options:**
 - [ ] **A. Immediate (Sync)** - Calculate position during trade save (current behavior, slower)
-- [ ] **B. Background (Async)** - Queue position calculation, process in background (faster trade save)
+- [x] **B. Background (Async)** - Queue position calculation, process in background (faster trade save)
 - [ ] **C. Scheduled Batch** - Calculate all positions at end of day
 - [ ] **D. Hybrid** - Immediate for same-day settle, background for future-dated
 
@@ -38,7 +38,7 @@ Please review each section and provide answers/decisions. Mark your choice with 
 ### Q1.2: If async processing, what is acceptable delay?
 
 - [ ] Less than 1 minute
-- [ ] Less than 5 minutes
+- [x] Less than 5 minutes
 - [ ] Less than 15 minutes
 - [ ] End of day is acceptable
 
@@ -49,7 +49,7 @@ Please review each section and provide answers/decisions. Mark your choice with 
 ### Q1.3: Should users see position status in trade screen?
 
 - [ ] **Yes** - Show "Position: Processing...", "Position: Updated", "Position: Failed"
-- [ ] **No** - Position processing is transparent to users
+- [x] **No** - Position processing is transparent to users
 
 **Answer:** _______________________
 
@@ -60,8 +60,8 @@ Please review each section and provide answers/decisions. Mark your choice with 
 ### Q2.1: Which date drives position calculation?
 
 **Options:**
-- [ ] **A. Trade Date** - Position reflects on the day trade is executed
-- [ ] **B. Settle Date** - Position reflects on settlement date
+- [ X] **A. Trade Date** - Position reflects on the day trade is executed
+- [ x] **B. Settle Date** - Position reflects on settlement date
 - [ ] **C. User Choice** - Let user select per trade
 - [ ] **D. Configurable** - System-wide setting
 
@@ -76,14 +76,14 @@ Please review each section and provide answers/decisions. Mark your choice with 
 **Options:**
 - [ ] **A. Immediate** - Update position today, ignore settle date
 - [ ] **B. Pending Position** - Create "PENDING" position, activate on settle date
-- [ ] **C. Scheduled** - Don't create position until settle date arrives
+- [ x] **C. Scheduled** - Don't create position until settle date arrives
 - [ ] **D. Both Views** - Trade date position AND settle date position
 
 **Answer:** _______________________
 
 **If B or C:** Should pending positions be visible in position list?
 - [ ] Yes, with "PENDING" status
-- [ ] No, hide until settled
+- [ x] No, hide until settled
 
 **Answer:** _______________________
 
@@ -95,11 +95,11 @@ Please review each section and provide answers/decisions. Mark your choice with 
 
 **Options:**
 - [ ] **A. Not Allowed** - Reject backdated settlements
-- [ ] **B. Allowed with Limit** - Allow up to X days back
+- [ x] **B. Allowed with Limit** - Allow up to X days back
 - [ ] **C. Allowed Unlimited** - Any past date allowed
 - [ ] **D. Requires Approval** - Backdated trades need checker approval
 
-**If B, maximum days allowed:** _______________________
+**If B, maximum days allowed:** pervious month end
 
 **Answer:** _______________________
 
@@ -110,7 +110,7 @@ Please review each section and provide answers/decisions. Mark your choice with 
 **Scenario:** Position on 2026-03-03 shows qty=100. User enters backdated BUY 50 with settle date 2026-02-28.
 
 **Options:**
-- [ ] **A. Recalculate All** - Recalculate positions from 2026-02-28 to today
+- [x ] **A. Recalculate All** - Recalculate positions from 2026-02-28 to today
 - [ ] **B. Append Only** - Just add to current position, don't recalculate history
 - [ ] **C. Reject** - Don't allow if it would affect existing positions
 
@@ -123,14 +123,14 @@ Please review each section and provide answers/decisions. Mark your choice with 
 ### Q3.1: Which trade types affect position?
 
 | Trade Type | Affects Position? | Notes |
-|------------|-------------------|-------|
-| BUY | [ ] Yes [ ] No | |
-| SELL | [ ] Yes [ ] No | |
-| ADD_LONG | [ ] Yes [ ] No | |
-| DELIVER_LONG | [ ] Yes [ ] No | |
-| REDUCTION_BASIS | [ ] Yes [ ] No | |
-| INCOME | [ ] Yes [ ] No | |
-| SPLIT_TRANSACTION | [ ] Yes [ ] No | |
+|------------|-----------------|-------|
+| BUY | [x] Yes [ ] No  | |
+| SELL | [x] Yes [ ] No  | |
+| ADD_LONG | [ ] Yes [ ] No  | |
+| DELIVER_LONG | [ ] Yes [ ] No  | |
+| REDUCTION_BASIS | [ ] Yes [ ] No  | |
+| INCOME | [ ] Yes [ ] No  | |
+| SPLIT_TRANSACTION | [ ] Yes [ ] No  | |
 
 ---
 
@@ -139,7 +139,7 @@ Please review each section and provide answers/decisions. Mark your choice with 
 **Example:** Position has 100 shares, user tries to SELL 150 shares
 
 **Options:**
-- [ ] **A. Reject** - Error: "Insufficient quantity"
+- [x] **A. Reject** - Error: "Insufficient quantity"
 - [ ] **B. Allow Short** - Create short position (-50 shares)
 - [ ] **C. Partial Fill** - Only sell available (100), reject remainder
 - [ ] **D. Warning Only** - Allow with warning message
@@ -151,7 +151,7 @@ Please review each section and provide answers/decisions. Mark your choice with 
 ### Q3.3: Is SHORT SELLING allowed?
 
 - [ ] **Yes** - Allow negative positions
-- [ ] **No** - Positions must always be >= 0
+- [x] **No** - Positions must always be >= 0
 
 **If Yes, any limits on short quantity?** _______________________
 
@@ -172,7 +172,7 @@ Please review each section and provide answers/decisions. Mark your choice with 
 - [ ] Transfer at zero cost
 - [ ] User specifies transfer price
 
-**Answer:** _______________________
+**Answer:** NA
 
 ---
 
@@ -181,7 +181,7 @@ Please review each section and provide answers/decisions. Mark your choice with 
 ### Q4.1: AVP calculation method?
 
 **Options:**
-- [ ] **A. Weighted Average** - (Old Value + New Value) / Total Qty
+- [x] **A. Weighted Average** - (Old Value + New Value) / Total Qty
 - [ ] **B. FIFO** - First In, First Out
 - [ ] **C. LIFO** - Last In, First Out
 - [ ] **D. Specific Lot** - User selects which lots to sell
@@ -194,12 +194,12 @@ Please review each section and provide answers/decisions. Mark your choice with 
 ### Q4.2: What costs are included in average cost?
 
 | Cost Component | Include in Avg Cost? |
-|----------------|---------------------|
-| Trade Price | [ ] Yes [ ] No |
-| Commission | [ ] Yes [ ] No |
-| SEC Fee | [ ] Yes [ ] No |
-| Other Charges | [ ] Yes [ ] No |
-| Accrued Interest | [ ] Yes [ ] No |
+|----------------|----------------------|
+| Trade Price | [ x] Yes [ ] No      |
+| Commission | [ x] Yes [ ] No      |
+| SEC Fee | [ x] Yes [ ] No      |
+| Other Charges | [ x] Yes [ ] No      |
+
 
 ---
 
@@ -208,7 +208,7 @@ Please review each section and provide answers/decisions. Mark your choice with 
 - [ ] 2 decimal places
 - [ ] 4 decimal places
 - [ ] 6 decimal places
-- [ ] 8 decimal places
+- [x ] 8 decimal places
 
 **Answer:** _______________________
 
@@ -218,7 +218,7 @@ Please review each section and provide answers/decisions. Mark your choice with 
 
 ### Q5.1: Multi-currency support required?
 
-- [ ] **Yes** - Track positions in both local (security) and base (portfolio) currency
+- [ x] **Yes** - Track positions in both local (security) and base (portfolio) currency
 - [ ] **No** - Single currency only
 
 ---
@@ -239,7 +239,7 @@ Please review each section and provide answers/decisions. Mark your choice with 
 
 **When calculating market value in base currency:**
 - [ ] Use original trade FX rate (locked)
-- [ ] Use current/latest FX rate (floating)
+- [ x] Use current/latest FX rate (floating)
 - [ ] Both (show FX P&L separately)
 
 **Answer:** _______________________
@@ -249,7 +249,7 @@ Please review each section and provide answers/decisions. Mark your choice with 
 ### Q5.4: FX gain/loss tracking?
 
 - [ ] **Yes** - Track currency gain/loss separately from position P&L
-- [ ] **No** - Combined P&L only
+- [x ] **No** - Combined P&L only
 
 **Answer:** _______________________
 
@@ -302,21 +302,21 @@ Please review each section and provide answers/decisions. Mark your choice with 
 
 ### Q7.2: Which fields can be amended after position created?
 
-| Field | Amendable? | Recalculate Position? |
-|-------|------------|----------------------|
-| Quantity | [ ] Yes [ ] No | [ ] Yes [ ] No |
-| Price | [ ] Yes [ ] No | [ ] Yes [ ] No |
-| Trade Date | [ ] Yes [ ] No | [ ] Yes [ ] No |
-| Settle Date | [ ] Yes [ ] No | [ ] Yes [ ] No |
-| Security | [ ] Yes [ ] No | [ ] Yes [ ] No |
-| Portfolio | [ ] Yes [ ] No | [ ] Yes [ ] No |
+| Field | Amendable?      | Recalculate Position? |
+|-------|-----------------|-----------------------|
+| Quantity | [ x] Yes [ ] No | [x ] Yes [ ] No       |
+| Price | [ x] Yes [ ] No | [x ] Yes [ ] No       |
+| Trade Date | [ x] Yes [ ] No | [ x] Yes [ ] No       |
+| Settle Date | [ x] Yes [ ] No | [ x] Yes [ ] No       |
+| Security | [ x] Yes [ ] No | [ x] Yes [ ] No       |
+| Portfolio | [ x] Yes [ ] No | [ x] Yes [ ] No       |
 
 ---
 
 ### Q7.3: Trade cancellation impact?
 
 **Options:**
-- [ ] **A. Full Reversal** - Completely reverse position impact
+- [ x] **A. Full Reversal** - Completely reverse position impact
 - [ ] **B. Soft Delete** - Mark cancelled, keep position as-is
 - [ ] **C. Correction Entry** - Create offsetting trade
 
@@ -328,7 +328,7 @@ Please review each section and provide answers/decisions. Mark your choice with 
 
 - [ ] **Yes** - With full position recalculation
 - [ ] **Yes** - But requires special approval
-- [ ] **No** - Settled trades are final
+- [ x] **No** - Settled trades are final
 
 **Answer:** _______________________
 
@@ -339,7 +339,7 @@ Please review each section and provide answers/decisions. Mark your choice with 
 ### Q8.1: Allow manual position adjustments?
 
 - [ ] **Yes** - Users can manually adjust positions
-- [ ] **No** - Positions only from trades
+- [ x] **No** - Positions only from trades
 
 **If Yes, who can adjust?**
 - [ ] Any user
@@ -353,7 +353,7 @@ Please review each section and provide answers/decisions. Mark your choice with 
 ### Q8.2: Position adjustment requires approval?
 
 - [ ] **Yes** - Four-eyes principle for adjustments
-- [ ] **No** - Direct adjustment allowed
+- [ x] **No** - Direct adjustment allowed
 
 **Answer:** _______________________
 
@@ -362,7 +362,7 @@ Please review each section and provide answers/decisions. Mark your choice with 
 ### Q8.3: Position reconciliation?
 
 **Should system support position reconciliation with external systems?**
-- [ ] **Yes** - Import external positions, highlight differences
+- [ x] **Yes** - Import external positions, highlight differences
 - [ ] **No** - Not required
 
 **Answer:** _______________________
@@ -377,7 +377,7 @@ Please review each section and provide answers/decisions. Mark your choice with 
 - [ ] 1 year
 - [ ] 3 years
 - [ ] 5 years
-- [ ] 7 years
+- [x ] 7 years
 - [ ] Forever
 
 **Answer:** _______________________
@@ -438,7 +438,7 @@ Please review each section and provide answers/decisions. Mark your choice with 
 ### Q10.3: Real-time position updates?
 
 - [ ] **Yes** - Position list auto-refreshes
-- [ ] **No** - Manual refresh acceptable
+- [ x] **No** - Manual refresh acceptable
 
 **If Yes, refresh interval:** _______________________
 
@@ -488,16 +488,16 @@ Please review each section and provide answers/decisions. Mark your choice with 
 
 | Feature | Priority |
 |---------|----------|
-| Basic AVP calculation | |
-| Multi-currency | |
-| Future settlement | |
-| Backdated settlement | |
-| Short selling | |
-| Corporate actions | |
-| Position corrections | |
-| Trade amendments | |
-| Async processing | |
-| Real-time updates | |
+| Basic AVP calculation | H        |
+| Multi-currency | M        |
+| Future settlement | M        |
+| Backdated settlement | ,        |
+| Short selling | N        |
+| Corporate actions | N        |
+| Position corrections | M        |
+| Trade amendments | M        |
+| Async processing | M        |
+| Real-time updates | M        |
 
 ---
 
