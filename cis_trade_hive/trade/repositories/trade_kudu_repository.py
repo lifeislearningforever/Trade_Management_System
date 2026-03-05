@@ -1413,18 +1413,18 @@ class TradeKuduRepository:
             if market_value_base is None and fx_rate and fx_rate != 0:
                 market_value_base = market_value / fx_rate
 
-            # Build column list - all columns from cis_trade_position table
+            # Build column list - columns from cis_trade_position table (DDL: 13_avp_tables_kudu.sql)
+            # Note: Table has average_cost_base, total_cost_base, realized_pnl_base
+            #       but NOT unrealized_pnl_base or market_value_base
             columns = [
                 'version_id', 'position_id', 'position_date',
                 'portfolio_short_name', 'security_label',
                 'quantity', 'average_cost', 'total_cost',
-                'current_price', 'market_value',
-                'unrealized_pnl', 'realized_pnl',
+                'realized_pnl', 'current_price', 'market_value', 'unrealized_pnl',
                 'trade_id', 'trade_type',
                 'lots_held', 'custodian', 'sub_custodian',
                 'security_currency', 'portfolio_currency', 'fx_rate',
                 'average_cost_base', 'total_cost_base', 'realized_pnl_base',
-                'unrealized_pnl_base', 'market_value_base',
                 'status', 'is_active',
                 'created_by', 'created_at', 'updated_by', 'updated_at'
             ]
@@ -1439,10 +1439,10 @@ class TradeKuduRepository:
                 str(quantity),
                 str(average_cost),
                 str(total_cost),
+                str(realized_pnl),
                 str(current_price),
                 str(market_value),
                 str(unrealized_pnl),
-                str(realized_pnl),
                 str(trade_id) if trade_id else 'NULL',
                 self.escape_value(trade_type),
                 str(lots_held) if lots_held else 'NULL',
@@ -1454,8 +1454,6 @@ class TradeKuduRepository:
                 str(average_cost_base) if average_cost_base is not None else 'NULL',
                 str(total_cost_base) if total_cost_base is not None else 'NULL',
                 str(realized_pnl_base) if realized_pnl_base is not None else 'NULL',
-                str(unrealized_pnl_base) if unrealized_pnl_base is not None else 'NULL',
-                str(market_value_base) if market_value_base is not None else 'NULL',
                 self.escape_value(status),
                 str(is_active).lower(),
                 self.escape_value(created_by),

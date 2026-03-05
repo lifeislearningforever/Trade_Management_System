@@ -476,18 +476,18 @@ class PositionService:
                 unrealized_pnl_base = unrealized_pnl
                 market_value_base = market_value
 
-            # Match columns to cis_trade_position table structure (from user's environment)
+            # Match columns to cis_trade_position table structure (DDL: 13_avp_tables_kudu.sql)
+            # Note: Table has average_cost_base, total_cost_base, realized_pnl_base
+            #       but NOT unrealized_pnl_base or market_value_base
             columns = [
                 'version_id', 'position_id', 'position_date',
                 'portfolio_short_name', 'security_label',
                 'quantity', 'average_cost', 'total_cost',
-                'current_price', 'market_value',
-                'unrealized_pnl', 'realized_pnl',
+                'realized_pnl', 'current_price', 'market_value', 'unrealized_pnl',
                 'trade_id', 'trade_type',
                 'lots_held', 'custodian', 'sub_custodian',
                 'security_currency', 'portfolio_currency', 'fx_rate',
                 'average_cost_base', 'total_cost_base', 'realized_pnl_base',
-                'unrealized_pnl_base', 'market_value_base',
                 'status', 'is_active',
                 'created_by', 'created_at', 'updated_by', 'updated_at'
             ]
@@ -501,10 +501,10 @@ class PositionService:
                 str(quantity),
                 str(average_cost),
                 str(total_cost),
-                str(position_data.get('current_price', 0)),
+                str(realized_pnl),
+                str(position_data.get('current_price', 0) or 0),
                 str(market_value),
                 str(unrealized_pnl),
-                str(realized_pnl),
                 str(position_data.get('trade_id')) if position_data.get('trade_id') else 'NULL',
                 f"'{position_data.get('trade_type', '')}'",
                 str(position_data.get('lots_held', 0)) if position_data.get('lots_held') else 'NULL',
@@ -516,8 +516,6 @@ class PositionService:
                 str(average_cost_base),
                 str(total_cost_base),
                 str(realized_pnl_base),
-                str(unrealized_pnl_base),
-                str(market_value_base),
                 f"'{position_data.get('status', 'OPEN')}'",
                 str(position_data.get('is_active', True)).lower(),
                 f"'{self._escape(updated_by)}'",
