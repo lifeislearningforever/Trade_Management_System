@@ -85,11 +85,16 @@ class CurrencyRepository(ImpalaReferenceRepository):
             'rate_precision': row.get('rate_precision', ''),
             'calendar': row.get('calendar', ''),
             'spot_schedule': row.get('spot_schedule', ''),
+            'processing_date': row.get('processing_date', ''),
         }
+
+    def _get_max_processing_date_subquery(self) -> str:
+        """Get subquery for max processing_date filter"""
+        return f"(SELECT MAX(processing_date) FROM {self.TABLE_NAME})"
 
     def list_all(self, search: Optional[str] = None) -> List[Dict]:
         """
-        Fetch all currencies from Kudu/Impala
+        Fetch all currencies from Kudu/Impala for the latest processing_date.
 
         Args:
             search: Optional search term for code or name
@@ -97,10 +102,15 @@ class CurrencyRepository(ImpalaReferenceRepository):
         Returns:
             List of currency dictionaries
         """
-        query = f"SELECT * FROM {self.TABLE_NAME}"
+        # Filter by max(processing_date) to get only latest data
+        query = f"""
+        SELECT * FROM {self.TABLE_NAME}
+        WHERE processing_date = {self._get_max_processing_date_subquery()}
+        """
 
         if search:
-            query += f" WHERE LOWER(curr_name) LIKE '%{search.lower()}%' OR LOWER(iso_code) LIKE '%{search.lower()}%'"
+            search_escaped = search.replace("'", "''").lower()
+            query += f" AND (LOWER(name) LIKE '%{search_escaped}%' OR LOWER(iso_code) LIKE '%{search_escaped}%')"
 
         query += " ORDER BY iso_code"
 
@@ -109,8 +119,14 @@ class CurrencyRepository(ImpalaReferenceRepository):
         return remapped
 
     def get_by_code(self, code: str) -> Optional[Dict]:
-        """Get specific currency by ISO code"""
-        query = f"SELECT * FROM {self.TABLE_NAME} WHERE iso_code = '{code}' LIMIT 1"
+        """Get specific currency by ISO code for the latest processing_date"""
+        code_escaped = code.replace("'", "''")
+        query = f"""
+        SELECT * FROM {self.TABLE_NAME}
+        WHERE iso_code = '{code_escaped}'
+          AND processing_date = {self._get_max_processing_date_subquery()}
+        LIMIT 1
+        """
 
         results = self._execute_query(query)
         return self._remap_columns(results[0]) if results else None
@@ -125,9 +141,13 @@ class CountryRepository(ImpalaReferenceRepository):
 
     TABLE_NAME = 'gmp_cis_sta_dly_country'
 
+    def _get_max_processing_date_subquery(self) -> str:
+        """Get subquery for max processing_date filter"""
+        return f"(SELECT MAX(processing_date) FROM {self.TABLE_NAME})"
+
     def list_all(self, search: Optional[str] = None) -> List[Dict]:
         """
-        Fetch all countries from Kudu/Impala
+        Fetch all countries from Kudu/Impala for the latest processing_date.
 
         Args:
             search: Optional search term for code or name
@@ -135,10 +155,15 @@ class CountryRepository(ImpalaReferenceRepository):
         Returns:
             List of country dictionaries
         """
-        query = f"SELECT * FROM {self.TABLE_NAME}"
+        # Filter by max(processing_date) to get only latest data
+        query = f"""
+        SELECT * FROM {self.TABLE_NAME}
+        WHERE processing_date = {self._get_max_processing_date_subquery()}
+        """
 
         if search:
-            query += f" WHERE LOWER(label) LIKE '%{search.lower()}%' OR LOWER(full_name) LIKE '%{search.lower()}%'"
+            search_escaped = search.replace("'", "''").lower()
+            query += f" AND (LOWER(label) LIKE '%{search_escaped}%' OR LOWER(full_name) LIKE '%{search_escaped}%')"
 
         query += " ORDER BY label"
 
@@ -147,8 +172,14 @@ class CountryRepository(ImpalaReferenceRepository):
         return [{'code': r.get('label', ''), 'name': r.get('full_name', ''), **r} for r in results]
 
     def get_by_code(self, code: str) -> Optional[Dict]:
-        """Get specific country by code"""
-        query = f"SELECT * FROM {self.TABLE_NAME} WHERE label = '{code}' LIMIT 1"
+        """Get specific country by code for the latest processing_date"""
+        code_escaped = code.replace("'", "''")
+        query = f"""
+        SELECT * FROM {self.TABLE_NAME}
+        WHERE label = '{code_escaped}'
+          AND processing_date = {self._get_max_processing_date_subquery()}
+        LIMIT 1
+        """
 
         results = self._execute_query(query)
         return results[0] if results else None
@@ -159,13 +190,17 @@ class CalendarRepository(ImpalaReferenceRepository):
 
     TABLE_NAME = 'gmp_cis_sta_dly_calendar'
 
+    def _get_max_processing_date_subquery(self) -> str:
+        """Get subquery for max processing_date filter"""
+        return f"(SELECT MAX(processing_date) FROM {self.TABLE_NAME})"
+
     def list_all(
         self,
         calendar_label: Optional[str] = None,
         search: Optional[str] = None
     ) -> List[Dict]:
         """
-        Fetch calendar/holiday data from Kudu/Impala
+        Fetch calendar/holiday data from Kudu/Impala for the latest processing_date.
 
         Args:
             calendar_label: Filter by specific calendar
@@ -174,21 +209,30 @@ class CalendarRepository(ImpalaReferenceRepository):
         Returns:
             List of calendar dictionaries
         """
-        query = f"SELECT * FROM {self.TABLE_NAME} WHERE 1=1"
+        # Filter by max(processing_date) to get only latest data
+        query = f"""
+        SELECT * FROM {self.TABLE_NAME}
+        WHERE processing_date = {self._get_max_processing_date_subquery()}
+        """
 
         if calendar_label:
-            query += f" AND calendar_label = '{calendar_label}'"
+            calendar_label_escaped = calendar_label.replace("'", "''")
+            query += f" AND calendar_label = '{calendar_label_escaped}'"
 
         if search:
-            query += f" AND LOWER(calendar_description) LIKE '%{search.lower()}%'"
+            search_escaped = search.replace("'", "''").lower()
+            query += f" AND LOWER(calendar_description) LIKE '%{search_escaped}%'"
 
         query += " ORDER BY calendar_label, holiday_date"
 
         return self._execute_query(query)
 
     def get_distinct_calendars(self) -> List[str]:
-        """Get list of distinct calendar labels"""
-        query = f"SELECT DISTINCT calendar_label FROM {self.TABLE_NAME}"
+        """Get list of distinct calendar labels for the latest processing_date"""
+        query = f"""
+        SELECT DISTINCT calendar_label FROM {self.TABLE_NAME}
+        WHERE processing_date = {self._get_max_processing_date_subquery()}
+        """
 
         results = self._execute_query(query)
         calendars = [r.get('calendar_label') for r in results if r.get('calendar_label')]
