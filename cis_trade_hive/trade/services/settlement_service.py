@@ -433,18 +433,20 @@ class SettlementService:
         Process backdated settlement.
 
         Rules:
-        - Allowed up to previous month-end
+        - Allowed for any past date (no restriction on how far back)
         - Triggers recalculation of positions from settle_date to today
+        - Warning logged for dates before previous month-end
         """
         settle_dt = self._parse_date(settle_date)
         prev_month_end = self._get_previous_month_end()
 
-        # Validate: not beyond previous month-end
+        # Log warning for very old backdated trades (before previous month-end)
         if settle_dt < prev_month_end:
-            return False, (
-                f"Backdated settlement not allowed before {prev_month_end.strftime('%Y-%m-%d')}. "
-                f"Settlement date {settle_date} is too far in the past."
-            ), None
+            logger.warning(
+                f"Backdated settlement before previous month-end: "
+                f"settle_date={settle_date}, prev_month_end={prev_month_end.strftime('%Y-%m-%d')}. "
+                f"This may affect closed period positions."
+            )
 
         logger.info(
             f"Processing backdated settlement for trade {trade_id}: "
@@ -584,12 +586,13 @@ class SettlementService:
         prev_month_end = self._get_previous_month_end()
 
         if settle_dt < prev_month_end:
-            return False, (
-                f"Backdated settlement not allowed before {prev_month_end.strftime('%Y-%m-%d')}. "
-                f"Maximum backdating is to previous month-end."
+            # Allow but warn - may affect closed period
+            return True, (
+                f"Backdated settlement before previous month-end ({prev_month_end.strftime('%Y-%m-%d')}). "
+                f"Warning: This may affect closed period positions."
             )
 
-        return True, f"Backdated settlement allowed (within previous month-end limit)"
+        return True, f"Backdated settlement allowed"
 
     # =========================================================================
     # DATE UTILITIES
