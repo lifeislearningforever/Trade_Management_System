@@ -65,6 +65,8 @@ class EquityPriceDropdownService:
         """
         Get securities filtered by currency code (for cascading dropdown).
 
+        Uses cis_security_kudu table (same as Trade module) for consistency.
+
         Args:
             currency_code: Filter by currency (if None, returns all)
             user: Username for audit logging
@@ -73,22 +75,26 @@ class EquityPriceDropdownService:
             List of security dictionaries with security_id, security_name, isin, currency_code
         """
         try:
-            # Build WHERE clause
-            where_clauses = ["is_active = true"]
+            # Build WHERE clause - include NULL/empty status for legacy data
+            where_clauses = [
+                "(is_active = true OR is_active IS NULL)",
+                "(UPPER(status) IN ('ACTIVE', 'APPROVED', 'SETTLED') OR status IS NULL OR status = '' OR UPPER(status) = 'NONE')"
+            ]
 
             if currency_code:
-                escaped_currency = currency_code.replace("'", "\\'")
+                escaped_currency = currency_code.replace("'", "''")
                 where_clauses.append(f"currency_code = '{escaped_currency}'")
 
             where_clause = " AND ".join(where_clauses)
 
+            # Use cis_security_kudu table (same as Trade module)
             query = f"""
             SELECT DISTINCT
                 security_id,
                 security_name,
                 isin,
                 currency_code
-            FROM gmp_cis.cis_security
+            FROM gmp_cis.cis_security_kudu
             WHERE {where_clause}
               AND security_name IS NOT NULL
             ORDER BY security_name
@@ -114,6 +120,8 @@ class EquityPriceDropdownService:
         """
         Get security details including ISIN (for auto-populating ISIN field).
 
+        Uses cis_security_kudu table (same as Trade module) for consistency.
+
         Args:
             security_id: Security ID
             security_name: Security name (alternative lookup)
@@ -123,12 +131,12 @@ class EquityPriceDropdownService:
             Security details dictionary or None
         """
         try:
-            where_clauses = ["is_active = true"]
+            where_clauses = ["(is_active = true OR is_active IS NULL)"]
 
             if security_id:
                 where_clauses.append(f"security_id = {security_id}")
             elif security_name:
-                escaped_name = security_name.replace("'", "\\'")
+                escaped_name = security_name.replace("'", "''")
                 where_clauses.append(f"security_name = '{escaped_name}'")
             else:
                 logger.warning("No security_id or security_name provided")
@@ -136,6 +144,7 @@ class EquityPriceDropdownService:
 
             where_clause = " AND ".join(where_clauses)
 
+            # Use cis_security_kudu table (same as Trade module)
             query = f"""
             SELECT
                 security_id,
@@ -145,7 +154,7 @@ class EquityPriceDropdownService:
                 ticker,
                 security_type,
                 investment_type
-            FROM gmp_cis.cis_security
+            FROM gmp_cis.cis_security_kudu
             WHERE {where_clause}
             LIMIT 1
             """

@@ -269,29 +269,13 @@
                         <input type="hidden" name="use_datasource_ingestion" value="true">
                         <input type="hidden" name="processing_date" value="{{ processing_date }}">
 
-                        <!-- Ingestion Mode Selection -->
+                        <!-- Ingestion Mode: Hidden, default to overwrite -->
+                        <input type="hidden" name="ingestion_mode" value="overwrite">
                         <div class="mb-3">
                             <label class="form-label fw-semibold">Ingestion Mode</label>
-                            <div class="btn-group w-100" role="group" aria-label="Ingestion mode">
-                                <input type="radio" class="btn-check" name="ingestion_mode" id="modeOverwrite" value="overwrite" checked>
-                                <label class="btn btn-outline-danger" for="modeOverwrite">
-                                    <i class="bi bi-arrow-repeat"></i> Overwrite
-                                </label>
-
-                                <input type="radio" class="btn-check" name="ingestion_mode" id="modeAppend" value="append">
-                                <label class="btn btn-outline-success" for="modeAppend">
-                                    <i class="bi bi-plus-circle"></i> Append
-                                </label>
-                            </div>
-                            <div class="mt-2 small" id="modeDescription">
-                                <div id="overwriteDesc" class="text-danger">
-                                    <i class="bi bi-exclamation-triangle"></i>
-                                    <strong>Overwrite:</strong> Replace all existing data for this processing_date
-                                </div>
-                                <div id="appendDesc" class="text-success d-none">
-                                    <i class="bi bi-info-circle"></i>
-                                    <strong>Append:</strong> Add new rows to existing data (delta load)
-                                </div>
+                            <div class="alert alert-info py-2 mb-0">
+                                <i class="bi bi-arrow-repeat"></i>
+                                <strong>Overwrite Mode:</strong> Existing data for this processing_date will be replaced.
                             </div>
                         </div>
 
@@ -533,34 +517,12 @@ $(document).ready(function() {
         setTimeout(function() { toast.fadeOut(function() { $(this).remove(); }); }, 3000);
     }
 
-    // Ingestion Mode Toggle
-    $('input[name="ingestion_mode"]').on('change', function() {
-        const mode = $(this).val();
-        if (mode === 'overwrite') {
-            $('#overwriteDesc').removeClass('d-none');
-            $('#appendDesc').addClass('d-none');
-        } else {
-            $('#overwriteDesc').addClass('d-none');
-            $('#appendDesc').removeClass('d-none');
-        }
-    });
-
-    // Confirm ingestion based on mode
+    // Confirm ingestion (always overwrite mode)
     $('#datasourceIngestForm').on('submit', function(e) {
-        const mode = $('input[name="ingestion_mode"]:checked').val();
         const processingDate = $('input[name="processing_date"]').val();
 
-        let confirmMsg = '';
-        if (mode === 'overwrite') {
-            confirmMsg = 'OVERWRITE mode selected.\n\n' +
-                         'This will REPLACE all existing data for processing_date=' + processingDate + '.\n\n' +
-                         'Are you sure you want to continue?';
-        } else {
-            confirmMsg = 'APPEND mode selected.\n\n' +
-                         'This will ADD new rows to existing data for processing_date=' + processingDate + '.\n\n' +
-                         'Note: Duplicates will be removed from the uploaded file before insertion.\n\n' +
-                         'Are you sure you want to continue?';
-        }
+        const confirmMsg = 'OVERWRITE mode will REPLACE all existing data for processing_date=' + processingDate + '.\n\n' +
+                     'Are you sure you want to continue?';
 
         if (!confirm(confirmMsg)) {
             e.preventDefault();

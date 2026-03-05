@@ -862,20 +862,46 @@ class UploadService:
 
             # Use intake_columns from datasource config OR file header
             if intake_columns:
-                # Ensure column count matches file
-                if len(intake_columns) == len(file_header):
-                    result.columns = intake_columns
-                else:
-                    # Column count mismatch - use file header with STRING type
-                    logger.warning(
-                        f"intake_columns count ({len(intake_columns)}) != file header count ({len(file_header)}). "
-                        f"Using file header."
+                # Strict column validation: count AND names must match
+                expected_col_names = [col['name'].lower().strip() for col in intake_columns]
+                actual_col_names = [self.validation_service._clean_column_name(h).lower().strip() for h in file_header]
+
+                # Check column count
+                if len(intake_columns) != len(file_header):
+                    result.is_valid = False
+                    result.errors.append(
+                        f"Column count mismatch: File has {len(file_header)} columns, "
+                        f"but datasource config expects {len(intake_columns)} columns. "
+                        f"Expected columns: {', '.join(expected_col_names)}"
                     )
-                    result.columns = [
-                        {'name': self.validation_service._clean_column_name(h), 'type': 'STRING'}
-                        for h in file_header
-                    ]
+                    logger.error(
+                        f"INVALID: Column count mismatch for {file_name}. "
+                        f"Expected {len(intake_columns)}, got {len(file_header)}."
+                    )
+                    return result
+
+                # Check column names match (order matters)
+                mismatched_columns = []
+                for idx, (expected, actual) in enumerate(zip(expected_col_names, actual_col_names)):
+                    if expected != actual:
+                        mismatched_columns.append(f"Column {idx+1}: expected '{expected}', got '{actual}'")
+
+                if mismatched_columns:
+                    result.is_valid = False
+                    result.errors.append(
+                        f"Column name mismatch: {'; '.join(mismatched_columns)}. "
+                        f"File columns must match datasource configuration exactly."
+                    )
+                    logger.error(
+                        f"INVALID: Column name mismatch for {file_name}. "
+                        f"Mismatches: {mismatched_columns}"
+                    )
+                    return result
+
+                # All validations passed - use intake_columns
+                result.columns = intake_columns
                 result.column_count = len(result.columns)
+                logger.info(f"Column validation passed for {file_name}: {len(intake_columns)} columns match")
             else:
                 # Fall back to detection - but force STRING for external tables
                 result.columns = self.validation_service._infer_column_types(
