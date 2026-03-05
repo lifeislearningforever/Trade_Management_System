@@ -1073,10 +1073,12 @@ class TradeKuduRepository:
     def _get_security_details(self, security_label: str) -> Optional[Dict[str, Any]]:
         """Get security details including currency, ISIN, country, asset_class, listing_status."""
         try:
+            # Using cis_security table with correct column names
             query = f"""
-            SELECT security_currency, isin, country, asset_class, listing_status
-            FROM {self.DATABASE}.cis_security_kudu
-            WHERE security_label = {self.escape_value(security_label)}
+            SELECT currency_code as security_currency, isin, country,
+                   asset_class, listing_status
+            FROM {self.DATABASE}.cis_security
+            WHERE security_name = {self.escape_value(security_label)}
             LIMIT 1
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
@@ -1361,25 +1363,18 @@ class TradeKuduRepository:
         valuation_date: Optional[str] = None,
         market_unit_price: Optional[float] = None
     ) -> bool:
-        """Insert a new position version row into cis_trade_position with all new columns."""
+        """Insert a new position version row into cis_trade_position."""
         try:
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            # Build column list
+            # Build column list - use only columns that exist in the table
             columns = [
                 'version_id', 'position_id', 'position_date', 'portfolio_short_name', 'security_label',
                 'quantity', 'average_cost', 'total_cost',
                 'realized_pnl', 'current_price', 'market_value', 'unrealized_pnl',
                 'trade_id', 'trade_type',
                 'status', 'is_active',
-                'created_by', 'created_at',
-                # New columns
-                'src_system', 'security_currency', 'portfolio_currency', 'pct_ratio', 'isin',
-                'country', 'asset_class', 'listing_status',
-                'cost_value_local', 'cost_value_base',
-                'market_value_local', 'market_value_base',
-                'unrealized_pnl_local', 'unrealized_pnl_base',
-                'valuation_date', 'market_unit_price'
+                'created_by', 'created_at'
             ]
 
             # Build values list
@@ -1390,24 +1385,7 @@ class TradeKuduRepository:
                 str(realized_pnl), str(current_price), str(market_value), str(unrealized_pnl),
                 str(trade_id) if trade_id else 'NULL', self.escape_value(trade_type),
                 self.escape_value(status), str(is_active).lower(),
-                self.escape_value(created_by), f"'{timestamp}'",
-                # New column values
-                self.escape_value(src_system),
-                self.escape_value(security_currency),
-                self.escape_value(portfolio_currency),
-                str(pct_ratio) if pct_ratio is not None else 'NULL',
-                self.escape_value(isin),
-                self.escape_value(country),
-                self.escape_value(asset_class),
-                self.escape_value(listing_status),
-                str(cost_value_local) if cost_value_local is not None else 'NULL',
-                str(cost_value_base) if cost_value_base is not None else 'NULL',
-                str(market_value_local) if market_value_local is not None else 'NULL',
-                str(market_value_base) if market_value_base is not None else 'NULL',
-                str(unrealized_pnl_local) if unrealized_pnl_local is not None else 'NULL',
-                str(unrealized_pnl_base) if unrealized_pnl_base is not None else 'NULL',
-                self.escape_value(valuation_date),
-                str(market_unit_price) if market_unit_price is not None else 'NULL'
+                self.escape_value(created_by), f"'{timestamp}'"
             ]
 
             query = f"""

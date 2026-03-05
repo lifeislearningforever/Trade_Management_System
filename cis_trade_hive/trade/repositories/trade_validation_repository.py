@@ -43,7 +43,7 @@ class TradeValidationRepository:
     PORTFOLIO_VALID_STATUSES = ['SETTLED', 'settled']
 
     # Security table
-    SECURITY_TABLE = 'cis_security_kudu'
+    SECURITY_TABLE = 'cis_security'
     # Note: NULL status is also allowed for legacy data that hasn't been migrated
     # Case-insensitive matching for status
     SECURITY_VALID_STATUSES = ['ACTIVE', 'APPROVED', 'SETTLED', 'active', 'approved', 'settled', None, '']

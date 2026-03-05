@@ -65,7 +65,7 @@ class EquityPriceDropdownService:
         """
         Get securities filtered by currency code (for cascading dropdown).
 
-        Uses cis_security_kudu table (same as Trade module) for consistency.
+        Uses cis_security table (same as Trade module) for consistency.
 
         Args:
             currency_code: Filter by currency (if None, returns all)
@@ -87,14 +87,14 @@ class EquityPriceDropdownService:
 
             where_clause = " AND ".join(where_clauses)
 
-            # Use cis_security_kudu table (same as Trade module)
+            # Use cis_security table (same as Trade module)
             query = f"""
             SELECT DISTINCT
                 security_id,
                 security_name,
                 isin,
                 currency_code
-            FROM gmp_cis.cis_security_kudu
+            FROM gmp_cis.cis_security
             WHERE {where_clause}
               AND security_name IS NOT NULL
             ORDER BY security_name
@@ -120,7 +120,7 @@ class EquityPriceDropdownService:
         """
         Get security details including ISIN (for auto-populating ISIN field).
 
-        Uses cis_security_kudu table (same as Trade module) for consistency.
+        Uses cis_security table (same as Trade module) for consistency.
 
         Args:
             security_id: Security ID
@@ -144,7 +144,7 @@ class EquityPriceDropdownService:
 
             where_clause = " AND ".join(where_clauses)
 
-            # Use cis_security_kudu table (same as Trade module)
+            # Use cis_security table (same as Trade module)
             query = f"""
             SELECT
                 security_id,
@@ -154,7 +154,7 @@ class EquityPriceDropdownService:
                 ticker,
                 security_type,
                 investment_type
-            FROM gmp_cis.cis_security_kudu
+            FROM gmp_cis.cis_security
             WHERE {where_clause}
             LIMIT 1
             """

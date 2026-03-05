@@ -35,7 +35,7 @@ class MultiCurrencyService:
     DATABASE = 'gmp_cis'
     FX_RATE_TABLE = 'gmp_cis_sta_dly_fx_rates'
     PORTFOLIO_TABLE = 'cis_portfolio'
-    SECURITY_TABLE = 'cis_security_kudu'
+    SECURITY_TABLE = 'cis_security'
 
     # Precision for FX calculations
     FX_PRECISION = Decimal('0.00000001')  # 8 decimals

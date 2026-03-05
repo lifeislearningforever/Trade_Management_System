@@ -392,7 +392,7 @@ class PositionService:
     ) -> List[Dict[str, Any]]:
         """Get all positions with optional filters."""
         try:
-            where_clauses = ["src_system = 'CIS'"]
+            where_clauses = ["1=1"]  # Base condition
 
             if portfolio_id:
                 where_clauses.append(f"portfolio_short_name = '{self._escape(portfolio_id)}'")
@@ -431,6 +431,7 @@ class PositionService:
             version_id = self._generate_id()
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+            # Match columns to existing cis_trade_position table structure
             columns = [
                 'version_id', 'position_id', 'position_date',
                 'portfolio_short_name', 'security_label',
@@ -439,9 +440,6 @@ class PositionService:
                 'unrealized_pnl', 'realized_pnl',
                 'trade_id', 'trade_type',
                 'status', 'is_active',
-                'src_system',
-                'security_currency', 'portfolio_currency',
-                'isin',
                 'created_by', 'created_at'
             ]
 
@@ -462,10 +460,6 @@ class PositionService:
                 f"'{position_data.get('trade_type', '')}'",
                 f"'{position_data.get('status', 'OPEN')}'",
                 str(position_data.get('is_active', True)).lower(),
-                "'CIS'",
-                f"'{self._escape(position_data.get('security_currency', ''))}'" if position_data.get('security_currency') else 'NULL',
-                f"'{self._escape(position_data.get('portfolio_currency', ''))}'" if position_data.get('portfolio_currency') else 'NULL',
-                f"'{self._escape(position_data.get('isin', ''))}'" if position_data.get('isin') else 'NULL',
                 f"'{self._escape(updated_by)}'",
                 f"'{timestamp}'"
             ]

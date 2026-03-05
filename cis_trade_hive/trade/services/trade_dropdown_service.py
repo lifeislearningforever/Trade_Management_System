@@ -434,14 +434,14 @@ class TradeDropdownService:
     # =========================================================================
 
     def get_currencies(self) -> List[Dict[str, Any]]:
-        """Get available currencies from cis_security_kudu and cis_equity_price."""
+        """Get available currencies from cis_security and cis_equity_price."""
         currencies_set = set()
 
-        # Get currencies from cis_security_kudu
+        # Get currencies from cis_security
         try:
             query = f"""
             SELECT DISTINCT currency_code
-            FROM {self.DATABASE}.cis_security_kudu
+            FROM {self.DATABASE}.cis_security
             WHERE (is_active = true OR is_active IS NULL)
               AND currency_code IS NOT NULL
               AND currency_code <> ''
@@ -452,7 +452,7 @@ class TradeDropdownService:
                     if r.get('currency_code'):
                         currencies_set.add(r.get('currency_code'))
         except Exception as e:
-            logger.debug(f"Could not load currencies from cis_security_kudu: {str(e)}")
+            logger.debug(f"Could not load currencies from cis_security: {str(e)}")
 
         # Get currencies from cis_equity_price
         try:
@@ -489,11 +489,11 @@ class TradeDropdownService:
 
         securities_dict = {}
 
-        # Get from cis_security_kudu
+        # Get from cis_security
         try:
             query = f"""
             SELECT security_name, isin, exchange_code as market
-            FROM {self.DATABASE}.cis_security_kudu
+            FROM {self.DATABASE}.cis_security
             WHERE currency_code = '{currency_code}'
               AND (is_active = true OR is_active IS NULL)
             ORDER BY security_name
@@ -512,7 +512,7 @@ class TradeDropdownService:
                             'market': r.get('market', ''),
                         }
         except Exception as e:
-            logger.debug(f"Error loading from cis_security_kudu: {str(e)}")
+            logger.debug(f"Error loading from cis_security: {str(e)}")
 
         # Overlay prices from cis_equity_price
         try:
