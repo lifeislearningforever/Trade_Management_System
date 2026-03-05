@@ -1069,7 +1069,7 @@ def api_securities_detailed(request):
     Returns security details including type, ISIN, ticker, currency, price.
     """
     search = request.GET.get('search', '').strip()
-    securities = trade_validation_repository.get_valid_securities(search=search if search else None, limit=500)
+    securities = trade_validation_repository.get_valid_securities(search=search if search else None)
 
     results = []
     for s in securities:

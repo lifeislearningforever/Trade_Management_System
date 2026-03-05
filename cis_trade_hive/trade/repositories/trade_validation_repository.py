@@ -45,8 +45,9 @@ class TradeValidationRepository:
     # Security table
     SECURITY_TABLE = 'cis_security'
     # Note: NULL status is also allowed for legacy data that hasn't been migrated
-    # Case-insensitive matching for status
-    SECURITY_VALID_STATUSES = ['ACTIVE', 'APPROVED', 'SETTLED', 'active', 'approved', 'settled', None, '']
+    # Case-insensitive matching for status - includes INITIAL and VALIDATED
+    SECURITY_VALID_STATUSES = ['ACTIVE', 'APPROVED', 'SETTLED', 'INITIAL', 'VALIDATED',
+                               'active', 'approved', 'settled', 'initial', 'validated', None, '']
 
     # Counterparty table (using cis_party instead of deprecated cis_counterparty_kudu)
     COUNTERPARTY_TABLE = 'cis_party'
@@ -265,7 +266,7 @@ class TradeValidationRepository:
 
             # Case-insensitive status check (including NULL/empty for legacy data)
             status_upper = status.upper() if status else ''
-            valid_statuses_upper = ['ACTIVE', 'APPROVED', 'SETTLED']
+            valid_statuses_upper = ['ACTIVE', 'APPROVED', 'SETTLED', 'INITIAL', 'VALIDATED']
 
             # Status is valid if it's in valid list, or empty/None (legacy data)
             status_valid = (status_upper in valid_statuses_upper or
@@ -279,7 +280,7 @@ class TradeValidationRepository:
                     is_valid=False,
                     entity_type='SECURITY',
                     entity_name=security_name,
-                    message=f"Security '{security_name}' has status '{status}'. Only ACTIVE or APPROVED securities can be traded.",
+                    message=f"Security '{security_name}' has status '{status}'. Only ACTIVE, APPROVED, INITIAL, or VALIDATED securities can be traded.",
                     details=security
                 )
 
@@ -309,21 +310,21 @@ class TradeValidationRepository:
                 message=f"Error validating security: {str(e)}"
             )
 
-    def get_valid_securities(self, search: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
+    def get_valid_securities(self, search: Optional[str] = None, limit: int = None) -> List[Dict[str, Any]]:
         """
         Get list of valid securities for trade entry dropdown.
         Results are cached for 5 minutes to improve performance.
 
         Args:
             search: Optional search term
-            limit: Maximum results
+            limit: Maximum results (None = no limit)
 
         Returns:
             List of security dictionaries
         """
         try:
             # Check cache first (only for non-search queries)
-            cache_key = f"securities:{search or 'all'}:{limit}"
+            cache_key = f"securities:{search or 'all'}:{limit or 'all'}"
             if not search:  # Cache only full list queries
                 cached = query_cache.get(cache_key)
                 if cached:
@@ -331,6 +332,7 @@ class TradeValidationRepository:
 
             # Use UPPER() for case-insensitive status matching
             # Include NULL/empty status for legacy data
+            # Include INITIAL and VALIDATED statuses
             query = f"""
             SELECT security_name AS security_label,
                    security_name AS security_full_name,
@@ -342,7 +344,7 @@ class TradeValidationRepository:
                    issuer,
                    status
             FROM {self.DATABASE}.{self.SECURITY_TABLE}
-            WHERE (UPPER(status) IN ('ACTIVE', 'APPROVED', 'SETTLED')
+            WHERE (UPPER(status) IN ('ACTIVE', 'APPROVED', 'SETTLED', 'INITIAL', 'VALIDATED')
                    OR status IS NULL
                    OR status = ''
                    OR UPPER(status) = 'NONE')
@@ -357,7 +359,9 @@ class TradeValidationRepository:
                      OR LOWER(ticker) LIKE '%{search_escaped.lower()}%')
                 """
 
-            query += f" ORDER BY security_name LIMIT {limit}"
+            query += " ORDER BY security_name"
+            if limit:
+                query += f" LIMIT {limit}"
 
             logger.debug(f"get_valid_securities query: {query}")
             results = impala_manager.execute_query(query, database=self.DATABASE)
