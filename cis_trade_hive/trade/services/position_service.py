@@ -450,15 +450,17 @@ class PositionService:
             # Get FX rate for multi-currency calculations
             security_currency = position_data.get('security_currency', '')
             portfolio_currency = position_data.get('portfolio_currency', '')
-            fx_rate = self._get_fx_rate(security_currency, portfolio_currency) if security_currency and portfolio_currency else 1.0
+            fx_rate_raw = self._get_fx_rate(security_currency, portfolio_currency) if security_currency and portfolio_currency else Decimal('1')
+            # Convert to float for calculations (fx_rate returns Decimal)
+            fx_rate = float(fx_rate_raw) if fx_rate_raw else 1.0
 
             # Calculate base currency values (portfolio currency)
-            quantity = float(position_data.get('quantity', 0))
-            average_cost = float(position_data.get('average_cost', 0))
-            total_cost = float(position_data.get('total_cost', 0))
-            realized_pnl = float(position_data.get('realized_pnl', 0))
-            unrealized_pnl = float(position_data.get('unrealized_pnl', 0))
-            market_value = float(position_data.get('market_value', 0))
+            quantity = float(position_data.get('quantity', 0) or 0)
+            average_cost = float(position_data.get('average_cost', 0) or 0)
+            total_cost = float(position_data.get('total_cost', 0) or 0)
+            realized_pnl = float(position_data.get('realized_pnl', 0) or 0)
+            unrealized_pnl = float(position_data.get('unrealized_pnl', 0) or 0)
+            market_value = float(position_data.get('market_value', 0) or 0)
 
             # Base currency calculations (divide by fx_rate to convert from local to base)
             if fx_rate and fx_rate != 0:
