@@ -483,18 +483,40 @@ class TradeKuduRepository:
                 )
                 logger.info(f"Created trade {trade_id} ({deal_number}) with INITIAL status")
 
-                # Auto-create/update position from trade
-                trade_for_position = {
-                    'portfolio_short_name': trade_data.get('portfolio_short_name', ''),
-                    'security_label': trade_data.get('security_label', ''),
-                    'trade_type': trade_data.get('trade_type', ''),
-                    'quantity': trade_data.get('quantity', 0),
-                    'price': trade_data.get('price', 0),
-                    'total_amount': trade_data.get('total_amount', 0),
-                    'trade_id': trade_id,
-                    'trade_date': trade_data.get('trade_date', ''),
-                }
-                self.update_position_from_trade(trade_for_position, created_by)
+                # Process settlement based on settle_date using settlement service
+                # - T+0 (today): Calculate position immediately
+                # - T+1/T+2 (future): Queue for settlement
+                # - Backdated: Validate and recalculate chain
+                from trade.services.settlement_service import settlement_service
+                from decimal import Decimal
+
+                settle_date = trade_data.get('settle_date', '')
+                trade_date = trade_data.get('trade_date', '')
+                charges = Decimal(str(trade_data.get('commission', 0) or 0)) + \
+                          Decimal(str(trade_data.get('sec_fee', 0) or 0)) + \
+                          Decimal(str(trade_data.get('other_charges', 0) or 0))
+
+                settlement_success, settlement_msg, settlement_result = settlement_service.process_trade_settlement(
+                    trade_id=trade_id,
+                    portfolio_id=trade_data.get('portfolio_short_name', ''),
+                    security_id=trade_data.get('security_label', ''),
+                    trade_type=trade_data.get('trade_type', ''),
+                    quantity=Decimal(str(trade_data.get('quantity', 0) or 0)),
+                    price=Decimal(str(trade_data.get('price', 0) or 0)),
+                    charges=charges,
+                    trade_date=trade_date,
+                    settle_date=settle_date,
+                    updated_by=created_by,
+                    security_currency=security_details.get('currency_code') if security_details else None,
+                    portfolio_currency=portfolio_details.get('currency') if portfolio_details else None,
+                    isin=security_details.get('isin') if security_details else None,
+                    security_name=security_details.get('security_name') if security_details else None
+                )
+
+                if settlement_success:
+                    logger.info(f"Settlement processed for trade {trade_id}: {settlement_msg}")
+                else:
+                    logger.warning(f"Settlement processing note for trade {trade_id}: {settlement_msg}")
 
                 return trade_id
 
