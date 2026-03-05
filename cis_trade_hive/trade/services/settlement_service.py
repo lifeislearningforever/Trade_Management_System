@@ -67,7 +67,9 @@ class SettlementService:
         security_currency: str = None,
         portfolio_currency: str = None,
         isin: str = None,
-        security_name: str = None
+        security_name: str = None,
+        custodian: str = None,
+        sub_custodian: str = None
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """
         Process trade settlement based on settlement date.
@@ -192,7 +194,9 @@ class SettlementService:
             security_currency=kwargs.get('security_currency'),
             portfolio_currency=kwargs.get('portfolio_currency'),
             isin=kwargs.get('isin'),
-            security_name=kwargs.get('security_name')
+            security_name=kwargs.get('security_name'),
+            custodian=kwargs.get('custodian'),
+            sub_custodian=kwargs.get('sub_custodian')
         )
 
         if success:
@@ -230,6 +234,7 @@ class SettlementService:
              quantity, price, charges, settle_date,
              status, retry_count, queued_at, queued_by,
              security_currency, portfolio_currency, isin, security_name,
+             custodian, sub_custodian,
              processing_date)
             VALUES (
                 {queue_id}, {trade_id},
@@ -243,6 +248,8 @@ class SettlementService:
                 {self._null_or_str(kwargs.get('portfolio_currency'))},
                 {self._null_or_str(kwargs.get('isin'))},
                 {self._null_or_str(kwargs.get('security_name'))},
+                {self._null_or_str(kwargs.get('custodian'))},
+                {self._null_or_str(kwargs.get('sub_custodian'))},
                 '{processing_date}'
             )
             """
@@ -336,7 +343,9 @@ class SettlementService:
                         security_currency=item.get('security_currency'),
                         portfolio_currency=item.get('portfolio_currency'),
                         isin=item.get('isin'),
-                        security_name=item.get('security_name')
+                        security_name=item.get('security_name'),
+                        custodian=item.get('custodian'),
+                        sub_custodian=item.get('sub_custodian')
                     )
 
                     if success:
@@ -456,7 +465,9 @@ class SettlementService:
             security_currency=kwargs.get('security_currency'),
             portfolio_currency=kwargs.get('portfolio_currency'),
             isin=kwargs.get('isin'),
-            security_name=kwargs.get('security_name')
+            security_name=kwargs.get('security_name'),
+            custodian=kwargs.get('custodian'),
+            sub_custodian=kwargs.get('sub_custodian')
         )
 
         if not success:

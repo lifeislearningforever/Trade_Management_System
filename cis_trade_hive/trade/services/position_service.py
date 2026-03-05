@@ -63,7 +63,9 @@ class PositionService:
         security_currency: str = None,
         portfolio_currency: str = None,
         isin: str = None,
-        security_name: str = None
+        security_name: str = None,
+        custodian: str = None,
+        sub_custodian: str = None
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """
         Calculate position using weighted average method.
@@ -119,7 +121,9 @@ class PositionService:
                     security_currency=security_currency,
                     portfolio_currency=portfolio_currency,
                     isin=isin,
-                    security_name=security_name
+                    security_name=security_name,
+                    custodian=custodian,
+                    sub_custodian=sub_custodian
                 )
             elif trade_type == 'SELL':
                 return self._process_sell(
@@ -134,7 +138,9 @@ class PositionService:
                     security_currency=security_currency,
                     portfolio_currency=portfolio_currency,
                     isin=isin,
-                    security_name=security_name
+                    security_name=security_name,
+                    custodian=custodian,
+                    sub_custodian=sub_custodian
                 )
 
         except Exception as e:
@@ -155,7 +161,9 @@ class PositionService:
         security_currency: str = None,
         portfolio_currency: str = None,
         isin: str = None,
-        security_name: str = None
+        security_name: str = None,
+        custodian: str = None,
+        sub_custodian: str = None
     ) -> Tuple[bool, str, Dict[str, Any]]:
         """
         Process BUY trade - increase position, recalculate AVP.
@@ -230,7 +238,9 @@ class PositionService:
             'security_currency': security_currency,
             'portfolio_currency': portfolio_currency,
             'isin': isin,
-            'security_name': security_name
+            'security_name': security_name,
+            'custodian': custodian,
+            'sub_custodian': sub_custodian
         }
 
         # Save to cis_trade_position
@@ -256,7 +266,9 @@ class PositionService:
         security_currency: str = None,
         portfolio_currency: str = None,
         isin: str = None,
-        security_name: str = None
+        security_name: str = None,
+        custodian: str = None,
+        sub_custodian: str = None
     ) -> Tuple[bool, str, Dict[str, Any]]:
         """
         Process SELL trade - decrease position, AVP unchanged.
@@ -313,7 +325,9 @@ class PositionService:
                 'security_currency': security_currency,
                 'portfolio_currency': portfolio_currency,
                 'isin': isin,
-                'security_name': security_name
+                'security_name': security_name,
+                'custodian': custodian,
+                'sub_custodian': sub_custodian
             }
             logger.info(f"Position {position_id} fully closed. Total realized P&L: {new_realized_pnl}")
         else:
@@ -344,7 +358,9 @@ class PositionService:
                 'security_currency': security_currency,
                 'portfolio_currency': portfolio_currency,
                 'isin': isin,
-                'security_name': security_name
+                'security_name': security_name,
+                'custodian': custodian,
+                'sub_custodian': sub_custodian
             }
 
         # Save to cis_trade_position
@@ -431,7 +447,34 @@ class PositionService:
             version_id = self._generate_id()
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            # Match columns to existing cis_trade_position table structure
+            # Get FX rate for multi-currency calculations
+            security_currency = position_data.get('security_currency', '')
+            portfolio_currency = position_data.get('portfolio_currency', '')
+            fx_rate = self._get_fx_rate(security_currency, portfolio_currency) if security_currency and portfolio_currency else 1.0
+
+            # Calculate base currency values (portfolio currency)
+            quantity = float(position_data.get('quantity', 0))
+            average_cost = float(position_data.get('average_cost', 0))
+            total_cost = float(position_data.get('total_cost', 0))
+            realized_pnl = float(position_data.get('realized_pnl', 0))
+            unrealized_pnl = float(position_data.get('unrealized_pnl', 0))
+            market_value = float(position_data.get('market_value', 0))
+
+            # Base currency calculations (divide by fx_rate to convert from local to base)
+            if fx_rate and fx_rate != 0:
+                average_cost_base = average_cost / fx_rate
+                total_cost_base = total_cost / fx_rate
+                realized_pnl_base = realized_pnl / fx_rate
+                unrealized_pnl_base = unrealized_pnl / fx_rate
+                market_value_base = market_value / fx_rate
+            else:
+                average_cost_base = average_cost
+                total_cost_base = total_cost
+                realized_pnl_base = realized_pnl
+                unrealized_pnl_base = unrealized_pnl
+                market_value_base = market_value
+
+            # Match columns to cis_trade_position table structure (from user's environment)
             columns = [
                 'version_id', 'position_id', 'position_date',
                 'portfolio_short_name', 'security_label',
@@ -439,8 +482,12 @@ class PositionService:
                 'current_price', 'market_value',
                 'unrealized_pnl', 'realized_pnl',
                 'trade_id', 'trade_type',
+                'lots_held', 'custodian', 'sub_custodian',
+                'security_currency', 'portfolio_currency', 'fx_rate',
+                'average_cost_base', 'total_cost_base', 'realized_pnl_base',
+                'unrealized_pnl_base', 'market_value_base',
                 'status', 'is_active',
-                'created_by', 'created_at'
+                'created_by', 'created_at', 'updated_by', 'updated_at'
             ]
 
             values = [
@@ -449,17 +496,30 @@ class PositionService:
                 f"'{position_data.get('position_date', timestamp[:10])}'",
                 f"'{self._escape(position_data['portfolio_short_name'])}'",
                 f"'{self._escape(position_data['security_label'])}'",
-                str(position_data['quantity']),
-                str(position_data['average_cost']),
-                str(position_data['total_cost']),
+                str(quantity),
+                str(average_cost),
+                str(total_cost),
                 str(position_data.get('current_price', 0)),
-                str(position_data.get('market_value', 0)),
-                str(position_data.get('unrealized_pnl', 0)),
-                str(position_data.get('realized_pnl', 0)),
-                str(position_data.get('trade_id', 'NULL')),
+                str(market_value),
+                str(unrealized_pnl),
+                str(realized_pnl),
+                str(position_data.get('trade_id')) if position_data.get('trade_id') else 'NULL',
                 f"'{position_data.get('trade_type', '')}'",
+                str(position_data.get('lots_held', 0)) if position_data.get('lots_held') else 'NULL',
+                f"'{self._escape(position_data.get('custodian', ''))}'" if position_data.get('custodian') else 'NULL',
+                f"'{self._escape(position_data.get('sub_custodian', ''))}'" if position_data.get('sub_custodian') else 'NULL',
+                f"'{self._escape(security_currency)}'" if security_currency else 'NULL',
+                f"'{self._escape(portfolio_currency)}'" if portfolio_currency else 'NULL',
+                str(fx_rate) if fx_rate else 'NULL',
+                str(average_cost_base),
+                str(total_cost_base),
+                str(realized_pnl_base),
+                str(unrealized_pnl_base),
+                str(market_value_base),
                 f"'{position_data.get('status', 'OPEN')}'",
                 str(position_data.get('is_active', True)).lower(),
+                f"'{self._escape(updated_by)}'",
+                f"'{timestamp}'",
                 f"'{self._escape(updated_by)}'",
                 f"'{timestamp}'"
             ]
