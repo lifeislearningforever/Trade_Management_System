@@ -71,4 +71,7 @@ urlpatterns = [
     path('api/calculate-charges/', views.api_calculate_charges, name='api_calculate_charges'),
     path('api/exchanges/', views.api_get_exchanges, name='api_get_exchanges'),
     path('api/debug-charge-lut/', views.api_debug_charge_lut, name='api_debug_charge_lut'),
+
+    # Position Queue Health Check (for CML monitoring)
+    path('api/worker-health/', views.api_worker_health, name='api_worker_health'),
 ]

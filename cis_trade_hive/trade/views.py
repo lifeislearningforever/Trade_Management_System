@@ -1237,6 +1237,100 @@ def api_debug_charge_lut(request):
 
 
 # ==========================================================================
+# POSITION QUEUE WORKER HEALTH CHECK
+# ==========================================================================
+
+def api_worker_health(request):
+    """
+    API: Health check endpoint for position queue worker.
+    Used by CML monitoring to ensure the worker is running.
+
+    Returns:
+        JSON with worker status, queue statistics, and health indicators.
+
+    Usage:
+        GET /trade/api/worker-health/
+
+    Response:
+        {
+            "status": "healthy" | "degraded" | "unhealthy",
+            "worker_running": true | false,
+            "queue": {
+                "pending": 5,
+                "processing": 1,
+                "completed": 100,
+                "failed": 2,
+                "dead_letter": 0,
+                "total": 108
+            },
+            "sla_ok": true,  # True if oldest pending < 5 minutes
+            "timestamp": "2026-03-06 15:30:00"
+        }
+    """
+    from datetime import datetime
+    from trade.services.position_queue_service import position_queue_service
+
+    try:
+        # Get queue statistics
+        stats = position_queue_service.get_queue_statistics()
+
+        # Determine health status
+        pending = stats.get('pending', 0)
+        failed = stats.get('failed', 0)
+        dead_letter = stats.get('dead_letter', 0)
+
+        # Check if worker appears active (processing items or no backlog)
+        worker_running = stats.get('processing', 0) > 0 or pending == 0
+
+        # Check SLA - if pending items exist and are old, SLA is breached
+        sla_ok = True
+        oldest_pending_seconds = 0
+
+        if pending > 0:
+            # Get oldest pending item
+            oldest = position_queue_service.get_pending_items(limit=1)
+            if oldest:
+                queued_at = oldest[0].get('queued_at')
+                if queued_at:
+                    if isinstance(queued_at, str):
+                        queued_at = datetime.strptime(queued_at, '%Y-%m-%d %H:%M:%S')
+                    oldest_pending_seconds = (datetime.now() - queued_at).total_seconds()
+                    sla_ok = oldest_pending_seconds < 300  # 5 minute SLA
+
+        # Determine overall health
+        if dead_letter > 10:
+            status = 'unhealthy'
+        elif not sla_ok or failed > 5:
+            status = 'degraded'
+        else:
+            status = 'healthy'
+
+        return JsonResponse({
+            'status': status,
+            'worker_running': worker_running,
+            'queue': {
+                'pending': pending,
+                'processing': stats.get('processing', 0),
+                'completed': stats.get('completed', 0),
+                'failed': failed,
+                'dead_letter': dead_letter,
+                'total': stats.get('total', 0)
+            },
+            'sla_ok': sla_ok,
+            'oldest_pending_seconds': int(oldest_pending_seconds),
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+
+    except Exception as e:
+        logger.error(f"Health check error: {str(e)}")
+        return JsonResponse({
+            'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }, status=500)
+
+
+# ==========================================================================
 # POSITION VIEWS - DISABLED
 # ==========================================================================
 # To re-enable position functionality, uncomment the code below and also:
