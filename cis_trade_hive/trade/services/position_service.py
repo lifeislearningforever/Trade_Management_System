@@ -247,8 +247,9 @@ class PositionService:
         success = self._save_position(position_data, updated_by)
 
         if success:
-            # Also write to position_master external table
-            self._sync_to_position_master(position_data, updated_by)
+            # TODO: Enable position_master sync after table is created
+            # Disabled: position_master table may not exist in all environments
+            # self._sync_to_position_master(position_data, updated_by)
             return True, "Position updated successfully", position_data
         else:
             return False, "Failed to save position", None
@@ -367,8 +368,9 @@ class PositionService:
         success = self._save_position(position_data, updated_by)
 
         if success:
-            # Also write to position_master external table
-            self._sync_to_position_master(position_data, updated_by)
+            # TODO: Enable position_master sync after table is created
+            # Disabled: position_master table may not exist in all environments
+            # self._sync_to_position_master(position_data, updated_by)
             return True, "Position updated successfully", position_data
         else:
             return False, "Failed to save position", None
