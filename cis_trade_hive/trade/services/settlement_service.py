@@ -47,6 +47,15 @@ class SettlementService:
     def __init__(self, position_svc: PositionService = None):
         """Initialize settlement service."""
         self.position_service = position_svc or position_service
+        self._position_queue_service = None
+
+    @property
+    def position_queue_service(self):
+        """Lazy load position queue service to avoid circular imports."""
+        if self._position_queue_service is None:
+            from trade.services.position_queue_service import position_queue_service
+            self._position_queue_service = position_queue_service
+        return self._position_queue_service
 
     # =========================================================================
     # MAIN SETTLEMENT PROCESSING
@@ -69,10 +78,14 @@ class SettlementService:
         isin: str = None,
         security_name: str = None,
         custodian: str = None,
-        sub_custodian: str = None
+        sub_custodian: str = None,
+        async_mode: bool = True
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """
         Process trade settlement based on settlement date.
+
+        ALL settlements are queued for async processing to keep trade save fast.
+        The background worker processes the queue within SLA (< 5 minutes).
 
         Args:
             trade_id: Trade ID
@@ -85,6 +98,8 @@ class SettlementService:
             trade_date: Trade date (YYYY-MM-DD)
             settle_date: Settlement date (YYYY-MM-DD)
             updated_by: User performing the update
+            async_mode: If True (default), queue for async processing.
+                       If False, process synchronously (for EOD job).
 
         Returns:
             Tuple of (success, message, result_data)
@@ -99,12 +114,40 @@ class SettlementService:
 
             logger.info(
                 f"Processing settlement for trade {trade_id}: "
-                f"settle_date={settle_date}, today={today}"
+                f"settle_date={settle_date}, today={today}, async={async_mode}"
             )
 
-            # Determine settlement scenario
+            # Determine settlement type for logging/tracking
             if settle_dt == today:
-                # Current date settlement - process immediately
+                settlement_type = 'T+0'
+            elif settle_dt > today:
+                settlement_type = 'FUTURE'
+            else:
+                settlement_type = 'BACKDATED'
+
+            # ASYNC MODE: Queue ALL settlements for background processing
+            if async_mode:
+                return self._queue_for_async_processing(
+                    trade_id=trade_id,
+                    portfolio_id=portfolio_id,
+                    security_id=security_id,
+                    trade_type=trade_type,
+                    quantity=quantity,
+                    price=price,
+                    charges=charges,
+                    settle_date=settle_date,
+                    updated_by=updated_by,
+                    security_currency=security_currency,
+                    portfolio_currency=portfolio_currency,
+                    isin=isin,
+                    security_name=security_name,
+                    custodian=custodian,
+                    sub_custodian=sub_custodian,
+                    settlement_type=settlement_type
+                )
+
+            # SYNC MODE: Process immediately (for EOD job or manual processing)
+            if settle_dt == today:
                 return self._process_immediate_settlement(
                     trade_id=trade_id,
                     portfolio_id=portfolio_id,
@@ -122,7 +165,7 @@ class SettlementService:
                 )
 
             elif settle_dt > today:
-                # Future settlement - queue for later
+                # Future settlement - queue in settlement_queue table for EOD processing
                 return self._queue_for_settlement(
                     trade_id=trade_id,
                     portfolio_id=portfolio_id,
@@ -140,7 +183,7 @@ class SettlementService:
                 )
 
             else:
-                # Backdated settlement
+                # Backdated settlement - process with chain recalculation
                 return self._process_backdated_settlement(
                     trade_id=trade_id,
                     portfolio_id=portfolio_id,
@@ -160,6 +203,124 @@ class SettlementService:
         except Exception as e:
             logger.error(f"Error processing trade settlement: {str(e)}")
             return False, f"Settlement processing error: {str(e)}", None
+
+    # =========================================================================
+    # ASYNC QUEUE FOR ALL SETTLEMENTS (Fast Trade Save)
+    # =========================================================================
+
+    def _queue_for_async_processing(
+        self,
+        trade_id: int,
+        portfolio_id: str,
+        security_id: str,
+        trade_type: str,
+        quantity: Decimal,
+        price: Decimal,
+        charges: Decimal,
+        settle_date: str,
+        updated_by: str,
+        settlement_type: str,
+        **kwargs
+    ) -> Tuple[bool, str, Dict[str, Any]]:
+        """
+        Queue settlement for async background processing.
+        This is NON-BLOCKING - returns immediately after queuing.
+
+        For T+0 and backdated: Queued to cis_position_queue for immediate async processing
+        For Future (T+1/T+2): Queued to cis_settlement_queue for EOD processing on settle_date
+        """
+        try:
+            today = datetime.now().date()
+            settle_dt = self._parse_date(settle_date)
+
+            if settle_dt > today:
+                # Future settlement - use settlement_queue (processed by EOD job)
+                return self._queue_for_settlement(
+                    trade_id=trade_id,
+                    portfolio_id=portfolio_id,
+                    security_id=security_id,
+                    trade_type=trade_type,
+                    quantity=quantity,
+                    price=price,
+                    charges=charges,
+                    settle_date=settle_date,
+                    updated_by=updated_by,
+                    **kwargs
+                )
+
+            # T+0 or Backdated - use position_queue for async processing
+            success, message, queue_id = self.position_queue_service.enqueue_position_calculation(
+                trade_id=trade_id,
+                portfolio_id=portfolio_id,
+                security_id=security_id,
+                trade_type=trade_type,
+                quantity=quantity,
+                price=price,
+                charges=charges,
+                settle_date=settle_date,
+                queued_by=updated_by,
+                security_currency=kwargs.get('security_currency'),
+                portfolio_currency=kwargs.get('portfolio_currency'),
+                isin=kwargs.get('isin'),
+                security_name=kwargs.get('security_name'),
+                use_db_queue=True  # Persist to database for reliability
+            )
+
+            if success:
+                # For backdated, also flag for chain recalculation
+                if settlement_type == 'BACKDATED':
+                    self._flag_for_chain_recalculation(
+                        queue_id=queue_id,
+                        portfolio_id=portfolio_id,
+                        security_id=security_id,
+                        from_date=settle_date
+                    )
+
+                logger.info(
+                    f"Trade {trade_id} queued for async {settlement_type} processing "
+                    f"(queue_id={queue_id})"
+                )
+                return True, f"Position calculation queued ({settlement_type})", {
+                    'queue_id': queue_id,
+                    'settlement_type': settlement_type,
+                    'status': 'QUEUED'
+                }
+            else:
+                return False, f"Failed to queue settlement: {message}", None
+
+        except Exception as e:
+            logger.error(f"Error queuing async settlement: {str(e)}")
+            return False, f"Queue error: {str(e)}", None
+
+    def _flag_for_chain_recalculation(
+        self,
+        queue_id: int,
+        portfolio_id: str,
+        security_id: str,
+        from_date: str
+    ) -> bool:
+        """
+        Flag a queue item for position chain recalculation.
+        This adds metadata so the worker knows to recalculate subsequent positions.
+        """
+        try:
+            # Store chain recalc info in error_message field (repurposed as metadata)
+            # The worker will check this and trigger _recalculate_position_chain
+            metadata = f"CHAIN_RECALC:{portfolio_id}:{security_id}:{from_date}"
+
+            query = f"""
+            UPDATE {self.DATABASE}.cis_position_queue
+            SET error_message = '{self._escape(metadata)}'
+            WHERE queue_id = {queue_id}
+            """
+
+            impala_manager.execute_write(query, database=self.DATABASE)
+            logger.info(f"Flagged queue_id={queue_id} for chain recalculation from {from_date}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error flagging for chain recalculation: {str(e)}")
+            return False
 
     # =========================================================================
     # IMMEDIATE SETTLEMENT (settle_date = today)

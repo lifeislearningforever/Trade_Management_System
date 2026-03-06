@@ -273,6 +273,9 @@ class PositionQueueService:
                         f"SLA breach for queue_id={queue_id}: {elapsed:.0f}s > {self.SLA_SECONDS}s"
                     )
 
+            # Check if this is a backdated trade requiring chain recalculation
+            chain_recalc_info = self._parse_chain_recalc_metadata(item.get('error_message', ''))
+
             # Calculate position
             success, message, position = self.position_service.calculate_position(
                 portfolio_id=item['portfolio_id'],
@@ -291,6 +294,10 @@ class PositionQueueService:
             )
 
             if success:
+                # If backdated, trigger chain recalculation
+                if chain_recalc_info:
+                    self._process_chain_recalculation(chain_recalc_info)
+
                 if is_db_queue:
                     self._update_status(queue_id, self.STATUS_COMPLETED)
                 logger.info(f"Successfully processed queue_id={queue_id}, trade_id={trade_id}")
@@ -300,6 +307,98 @@ class PositionQueueService:
         except Exception as e:
             logger.error(f"Error processing queue_id={queue_id}: {str(e)}")
             self._handle_failure(item, str(e), is_db_queue)
+
+    def _parse_chain_recalc_metadata(self, metadata: str) -> Optional[Dict[str, str]]:
+        """
+        Parse chain recalculation metadata from error_message field.
+        Format: CHAIN_RECALC:portfolio_id:security_id:from_date
+        """
+        if not metadata or not metadata.startswith('CHAIN_RECALC:'):
+            return None
+
+        try:
+            parts = metadata.split(':')
+            if len(parts) >= 4:
+                return {
+                    'portfolio_id': parts[1],
+                    'security_id': parts[2],
+                    'from_date': parts[3]
+                }
+        except Exception:
+            pass
+
+        return None
+
+    def _process_chain_recalculation(self, chain_info: Dict[str, str]) -> Dict[str, int]:
+        """
+        Recalculate position chain for backdated trades.
+        This recalculates all positions from the backdate to today.
+        """
+        counters = {'recalculated': 0, 'errors': 0}
+
+        try:
+            portfolio_id = chain_info['portfolio_id']
+            security_id = chain_info['security_id']
+            from_date = chain_info['from_date']
+            today = datetime.now().date()
+
+            logger.info(
+                f"Starting chain recalculation for {portfolio_id}/{security_id} "
+                f"from {from_date} to {today}"
+            )
+
+            # Get all trades for this portfolio+security from the date onwards
+            query = f"""
+            SELECT trade_id, trade_type, quantity, price,
+                   COALESCE(commission, 0) + COALESCE(sec_fee, 0) + COALESCE(other_charges, 0) as charges,
+                   settle_date
+            FROM {self.DATABASE}.cis_trade
+            WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
+              AND security_label = '{self._escape(security_id)}'
+              AND settle_date > '{from_date}'
+              AND settle_date <= '{today.strftime("%Y-%m-%d")}'
+              AND status IN ('VALIDATED', 'SETTLED')
+              AND (is_deleted = false OR is_deleted IS NULL)
+            ORDER BY settle_date ASC, created_at ASC
+            """
+
+            trades = impala_manager.execute_query(query, database=self.DATABASE)
+
+            if trades:
+                logger.info(f"Recalculating {len(trades)} trades from {from_date} to {today}")
+
+                for trade in trades:
+                    try:
+                        success, _, _ = self.position_service.calculate_position(
+                            portfolio_id=portfolio_id,
+                            security_id=security_id,
+                            trade_type=trade['trade_type'],
+                            quantity=Decimal(str(trade['quantity'])),
+                            price=Decimal(str(trade['price'])),
+                            charges=Decimal(str(trade.get('charges', 0) or 0)),
+                            position_date=trade['settle_date'],
+                            trade_id=trade['trade_id'],
+                            updated_by='SYSTEM'
+                        )
+
+                        if success:
+                            counters['recalculated'] += 1
+                        else:
+                            counters['errors'] += 1
+
+                    except Exception as e:
+                        logger.error(f"Error recalculating trade {trade['trade_id']}: {str(e)}")
+                        counters['errors'] += 1
+
+            logger.info(
+                f"Chain recalculation complete: {counters['recalculated']} recalculated, "
+                f"{counters['errors']} errors"
+            )
+            return counters
+
+        except Exception as e:
+            logger.error(f"Error in chain recalculation: {str(e)}")
+            return counters
 
     def _handle_failure(self, item: Dict[str, Any], error_message: str, is_db_queue: bool = True):
         """Handle failed processing with retry logic."""
