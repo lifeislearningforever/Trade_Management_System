@@ -555,7 +555,7 @@ class SettlementService:
 
             retry_clause = ""
             if status == self.STATUS_FAILED:
-                retry_clause = ", retry_count = retry_count + 1"
+                retry_clause = ", retry_count = CAST(retry_count + 1 AS INT)"
 
             query = f"""
             UPDATE {self.DATABASE}.{self.SETTLEMENT_QUEUE_TABLE}

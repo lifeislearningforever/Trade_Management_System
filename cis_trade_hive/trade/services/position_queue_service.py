@@ -475,7 +475,7 @@ class PositionQueueService:
                 set_clauses.append(f"processed_at = '{timestamp}'")
 
             if increment_retry:
-                set_clauses.append("retry_count = retry_count + 1")
+                set_clauses.append("retry_count = CAST(retry_count + 1 AS INT)")
 
             query = f"""
             UPDATE {self.DATABASE}.{self.QUEUE_TABLE}

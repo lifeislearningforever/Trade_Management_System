@@ -492,19 +492,25 @@ class PositionService:
                 'created_by', 'created_at', 'updated_by', 'updated_at'
             ]
 
+            # Helper to cast decimal values to DECIMAL(20,8) to avoid precision errors
+            def cast_decimal(val):
+                if val is None:
+                    return 'NULL'
+                return f"CAST({val} AS DECIMAL(20,8))"
+
             values = [
                 str(version_id),
                 str(position_data['position_id']),
                 f"'{position_data.get('position_date', timestamp[:10])}'",
                 f"'{self._escape(position_data['portfolio_short_name'])}'",
                 f"'{self._escape(position_data['security_label'])}'",
-                str(quantity),
-                str(average_cost),
-                str(total_cost),
-                str(realized_pnl),
-                str(position_data.get('current_price', 0) or 0),
-                str(market_value),
-                str(unrealized_pnl),
+                cast_decimal(quantity),
+                cast_decimal(average_cost),
+                cast_decimal(total_cost),
+                cast_decimal(realized_pnl),
+                cast_decimal(position_data.get('current_price', 0) or 0),
+                cast_decimal(market_value),
+                cast_decimal(unrealized_pnl),
                 str(position_data.get('trade_id')) if position_data.get('trade_id') else 'NULL',
                 f"'{position_data.get('trade_type', '')}'",
                 str(position_data.get('lots_held', 0)) if position_data.get('lots_held') else 'NULL',
@@ -512,10 +518,10 @@ class PositionService:
                 f"'{self._escape(position_data.get('sub_custodian', ''))}'" if position_data.get('sub_custodian') else 'NULL',
                 f"'{self._escape(security_currency)}'" if security_currency else 'NULL',
                 f"'{self._escape(portfolio_currency)}'" if portfolio_currency else 'NULL',
-                str(fx_rate) if fx_rate else 'NULL',
-                str(average_cost_base),
-                str(total_cost_base),
-                str(realized_pnl_base),
+                cast_decimal(fx_rate) if fx_rate else 'NULL',
+                cast_decimal(average_cost_base),
+                cast_decimal(total_cost_base),
+                cast_decimal(realized_pnl_base),
                 f"'{position_data.get('status', 'OPEN')}'",
                 str(position_data.get('is_active', True)).lower(),
                 f"'{self._escape(updated_by)}'",

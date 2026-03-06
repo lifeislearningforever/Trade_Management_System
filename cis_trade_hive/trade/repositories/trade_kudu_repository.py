@@ -1433,6 +1433,12 @@ class TradeKuduRepository:
                 'created_by', 'created_at', 'updated_by', 'updated_at'
             ]
 
+            # Helper to cast decimal values to DECIMAL(20,8) to avoid precision errors
+            def cast_decimal(val):
+                if val is None:
+                    return 'NULL'
+                return f"CAST({val} AS DECIMAL(20,8))"
+
             # Build values list
             values = [
                 str(version_id),
@@ -1440,13 +1446,13 @@ class TradeKuduRepository:
                 self.escape_value(position_date),
                 self.escape_value(portfolio),
                 self.escape_value(security),
-                str(quantity),
-                str(average_cost),
-                str(total_cost),
-                str(realized_pnl),
-                str(current_price),
-                str(market_value),
-                str(unrealized_pnl),
+                cast_decimal(quantity),
+                cast_decimal(average_cost),
+                cast_decimal(total_cost),
+                cast_decimal(realized_pnl),
+                cast_decimal(current_price),
+                cast_decimal(market_value),
+                cast_decimal(unrealized_pnl),
                 str(trade_id) if trade_id else 'NULL',
                 self.escape_value(trade_type),
                 str(lots_held) if lots_held else 'NULL',
@@ -1454,10 +1460,10 @@ class TradeKuduRepository:
                 self.escape_value(sub_custodian) if sub_custodian else 'NULL',
                 self.escape_value(security_currency) if security_currency else 'NULL',
                 self.escape_value(portfolio_currency) if portfolio_currency else 'NULL',
-                str(fx_rate) if fx_rate else 'NULL',
-                str(average_cost_base) if average_cost_base is not None else 'NULL',
-                str(total_cost_base) if total_cost_base is not None else 'NULL',
-                str(realized_pnl_base) if realized_pnl_base is not None else 'NULL',
+                cast_decimal(fx_rate) if fx_rate else 'NULL',
+                cast_decimal(average_cost_base) if average_cost_base is not None else 'NULL',
+                cast_decimal(total_cost_base) if total_cost_base is not None else 'NULL',
+                cast_decimal(realized_pnl_base) if realized_pnl_base is not None else 'NULL',
                 self.escape_value(status),
                 str(is_active).lower(),
                 self.escape_value(created_by),
