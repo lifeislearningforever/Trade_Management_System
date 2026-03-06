@@ -149,6 +149,11 @@ class PositionQueueService:
             timestamp = item['queued_at'].strftime('%Y-%m-%d %H:%M:%S')
             processing_date = item['queued_at'].strftime('%Y%m%d')
 
+            # Cast decimal values to avoid precision errors
+            quantity = f"CAST({item['quantity']} AS DECIMAL(20,8))"
+            price = f"CAST({item['price']} AS DECIMAL(20,8))"
+            charges = f"CAST({item['charges']} AS DECIMAL(20,8))"
+
             query = f"""
             INSERT INTO {self.DATABASE}.{self.QUEUE_TABLE}
             (queue_id, trade_id, portfolio_id, security_id, trade_type,
@@ -160,13 +165,13 @@ class PositionQueueService:
                 '{self._escape(item['portfolio_id'])}',
                 '{self._escape(item['security_id'])}',
                 '{item['trade_type']}',
-                {item['quantity']}, {item['price']}, {item['charges']},
+                {quantity}, {price}, {charges},
                 '{item['settle_date']}',
                 {self._null_or_str(item.get('security_currency'))},
                 {self._null_or_str(item.get('portfolio_currency'))},
                 {self._null_or_str(item.get('isin'))},
                 {self._null_or_str(item.get('security_name'))},
-                '{self.STATUS_PENDING}', 0,
+                '{self.STATUS_PENDING}', CAST(0 AS INT),
                 '{timestamp}', '{self._escape(item['queued_by'])}',
                 '{processing_date}'
             )

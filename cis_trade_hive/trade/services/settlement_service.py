@@ -388,6 +388,11 @@ class SettlementService:
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             processing_date = datetime.now().strftime('%Y%m%d')
 
+            # Cast decimal values to avoid precision errors
+            qty_cast = f"CAST({float(quantity)} AS DECIMAL(20,8))"
+            price_cast = f"CAST({float(price)} AS DECIMAL(20,8))"
+            charges_cast = f"CAST({float(charges)} AS DECIMAL(20,8))"
+
             # Insert into settlement queue
             query = f"""
             INSERT INTO {self.DATABASE}.{self.SETTLEMENT_QUEUE_TABLE}
@@ -401,9 +406,9 @@ class SettlementService:
                 {queue_id}, {trade_id},
                 '{self._escape(portfolio_id)}', '{self._escape(security_id)}',
                 '{trade_type}',
-                {float(quantity)}, {float(price)}, {float(charges)},
+                {qty_cast}, {price_cast}, {charges_cast},
                 '{settle_date}',
-                '{self.STATUS_PENDING}', 0,
+                '{self.STATUS_PENDING}', CAST(0 AS INT),
                 '{timestamp}', '{self._escape(updated_by)}',
                 {self._null_or_str(kwargs.get('security_currency'))},
                 {self._null_or_str(kwargs.get('portfolio_currency'))},
