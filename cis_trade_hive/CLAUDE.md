@@ -226,6 +226,106 @@ All writes are logged to Kudu `cis_audit_log` table with:
 - Static files: WhiteNoise compression
 - Tested: 500 concurrent users, <1000ms avg response
 
+## AVP (Average Price Position) System
+
+The AVP system tracks portfolio positions with weighted average cost calculations.
+
+### Implementation Phases (All Complete)
+
+| Phase | Service | Lines | Description |
+|-------|---------|-------|-------------|
+| 1 | `trade/services/position_service.py` | 743 | Basic AVP calculation |
+| 2 | `trade/services/settlement_service.py` | 711 | Settlement date logic (T+0, T+1/T+2, backdated) |
+| 3 | `trade/services/position_queue_service.py` | 530 | Async background processing |
+| 4 | `trade/services/multicurrency_service.py` | 50+ | Multi-currency support |
+
+### AVP Database Tables
+
+| Table | Purpose |
+|-------|---------|
+| `cis_trade_position` | Core position tracking with versioning |
+| `cis_position_queue` | Async processing queue (SLA < 5 min) |
+| `cis_settlement_queue` | Future/backdated settlement queue |
+
+**DDL:** `sql/ddl/13_avp_tables_kudu.sql`
+
+### AVP Formulas
+
+```
+BUY:  new_avg_cost = (old_total_cost + (qty × price) + charges) / new_qty
+SELL: avg_cost unchanged; realized_pnl = (sell_price - avg_cost) × qty
+```
+
+- **Precision:** 8 decimal places (DECIMAL(20,8))
+- **Charges included:** commission + sec_fee + other_charges
+
+### AVP Calculation Examples
+
+```
+# First BUY
+Trade: BUY 100 @ $175.00, Commission $10.00
+→ Qty: 100, Avg Cost: $175.10, Total: $17,510.00
+
+# Second BUY (adding to position)
+Existing: 100 @ $175.10
+Trade: BUY 50 @ $180.00, Commission $5.00
+→ Qty: 150, Avg Cost: $176.77, Total: $26,515.00
+
+# SELL (partial)
+Existing: 150 @ $176.77
+Trade: SELL 30 @ $185.00
+→ Qty: 120, Avg Cost: $176.77 (unchanged), Realized P&L: $246.90
+```
+
+### Settlement Logic
+
+| Scenario | Behavior |
+|----------|----------|
+| T+0 (today) | Position calculated immediately |
+| T+1/T+2 (future) | Queued in `cis_settlement_queue`, processed on settle date |
+| Backdated | Allowed (any past date), triggers position recalculation chain |
+
+### Async Processing
+
+- **Architecture:** Queue-based with ThreadPoolExecutor (4 workers)
+- **Batch size:** 100 items
+- **Poll interval:** 10 seconds
+- **Retry:** Max 3 attempts, then dead letter queue
+- **SLA:** < 5 minutes from queue to completion
+
+### Multi-Currency Support
+
+- **Local currency:** Security's trading currency
+- **Base currency:** Portfolio's base currency
+- **FX rate:** Floating (latest rate, not locked to trade date)
+- **P&L:** Combined (FX impact included, not separate)
+
+### AVP Validation Rules
+
+| Rule | Implementation |
+|------|----------------|
+| Trade types | Only BUY and SELL affect position |
+| Short selling | Rejected (no overselling) |
+| AVP on SELL | Unchanged (uses old average) |
+| Settled trade cancel | Not allowed |
+| Position status | OPEN or CLOSED |
+
+### AVP Documentation
+
+- `docs/AVP_IMPLEMENTATION_PLAN.md` (657 lines) - Full specifications
+- `docs/AVP_USER_GUIDE.md` (549 lines) - User documentation
+- `docs/AVP_POSITION_REDESIGN_PLAN.md` (487 lines) - Architecture design
+- `docs/AVP_UI_INTEGRATION_GUIDE.md` - UI integration
+
+### AVP Tests
+
+```bash
+pytest trade/tests/test_position_service.py      # Phase 1
+pytest trade/tests/test_settlement_service.py    # Phase 2
+pytest trade/tests/test_position_queue_service.py # Phase 3
+pytest trade/tests/test_multicurrency_service.py  # Phase 4
+```
+
 ## Troubleshooting
 
 **Impala connection fails (Local Docker):**
