@@ -337,9 +337,19 @@ class PositionQueueService:
     def _process_chain_recalculation(self, chain_info: Dict[str, str]) -> Dict[str, int]:
         """
         Recalculate position chain for backdated trades.
-        This recalculates all positions from the backdate to today.
+
+        This handles the scenario where a user enters a backdated trade that affects
+        subsequent positions. For example:
+        - T1 entered on 5th March (settle 5th March) - Position: qty=100, avg=130
+        - T3 entered on 5th March (settle 3rd March - BACKDATED) - Must recalculate T1
+
+        Steps:
+        1. Get position BEFORE the backdated date (base position)
+        2. Get ALL trades from backdated date onwards (including the backdated trade)
+        3. Delete existing position versions from backdated date onwards
+        4. Recalculate all positions in chronological order
         """
-        counters = {'recalculated': 0, 'errors': 0}
+        counters = {'recalculated': 0, 'errors': 0, 'deleted': 0}
 
         try:
             portfolio_id = chain_info['portfolio_id']
@@ -352,19 +362,36 @@ class PositionQueueService:
                 f"from {from_date} to {today}"
             )
 
-            # Get all trades for this portfolio+security from the date onwards
+            # Step 1: Delete existing position versions from backdated date onwards
+            # This ensures we recalculate cleanly
+            delete_query = f"""
+            DELETE FROM {self.DATABASE}.cis_trade_position
+            WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
+              AND security_label = '{self._escape(security_id)}'
+              AND position_date >= '{from_date}'
+            """
+            try:
+                impala_manager.execute_write(delete_query, database=self.DATABASE)
+                logger.info(f"Deleted existing positions from {from_date} onwards")
+            except Exception as e:
+                logger.warning(f"Could not delete old positions (may not exist): {str(e)}")
+
+            # Step 2: Get ALL trades from backdated date onwards (>= not >)
+            # This INCLUDES the backdated trade itself
             query = f"""
             SELECT trade_id, trade_type, quantity, price,
                    COALESCE(commission, 0) + COALESCE(sec_fee, 0) + COALESCE(other_charges, 0) as charges,
-                   settle_date
+                   settle_date,
+                   security_currency, portfolio_currency, isin, security_name,
+                   custodian, sub_custodian
             FROM {self.DATABASE}.cis_trade
             WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
               AND security_label = '{self._escape(security_id)}'
-              AND settle_date > '{from_date}'
+              AND settle_date >= '{from_date}'
               AND settle_date <= '{today.strftime("%Y-%m-%d")}'
-              AND status IN ('VALIDATED', 'SETTLED')
+              AND trade_status IN ('VALIDATED', 'SETTLED')
               AND (is_deleted = false OR is_deleted IS NULL)
-            ORDER BY settle_date ASC, created_at ASC
+            ORDER BY settle_date ASC, trade_id ASC
             """
 
             trades = impala_manager.execute_query(query, database=self.DATABASE)
@@ -374,7 +401,7 @@ class PositionQueueService:
 
                 for trade in trades:
                     try:
-                        success, _, _ = self.position_service.calculate_position(
+                        success, msg, _ = self.position_service.calculate_position(
                             portfolio_id=portfolio_id,
                             security_id=security_id,
                             trade_type=trade['trade_type'],
@@ -383,17 +410,27 @@ class PositionQueueService:
                             charges=Decimal(str(trade.get('charges', 0) or 0)),
                             position_date=trade['settle_date'],
                             trade_id=trade['trade_id'],
-                            updated_by='SYSTEM'
+                            updated_by='SYSTEM',
+                            security_currency=trade.get('security_currency'),
+                            portfolio_currency=trade.get('portfolio_currency'),
+                            isin=trade.get('isin'),
+                            security_name=trade.get('security_name'),
+                            custodian=trade.get('custodian'),
+                            sub_custodian=trade.get('sub_custodian')
                         )
 
                         if success:
                             counters['recalculated'] += 1
+                            logger.info(f"Recalculated trade {trade['trade_id']} for {trade['settle_date']}")
                         else:
                             counters['errors'] += 1
+                            logger.error(f"Failed to recalculate trade {trade['trade_id']}: {msg}")
 
                     except Exception as e:
                         logger.error(f"Error recalculating trade {trade['trade_id']}: {str(e)}")
                         counters['errors'] += 1
+            else:
+                logger.warning(f"No trades found for recalculation from {from_date}")
 
             logger.info(
                 f"Chain recalculation complete: {counters['recalculated']} recalculated, "

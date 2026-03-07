@@ -104,8 +104,13 @@ class PositionService:
             if prc <= 0:
                 return False, "Price must be positive", None
 
-            # Get current position
-            current = self._get_current_position(portfolio_id, security_id)
+            # Get the appropriate base position for calculation
+            # For backdated trades, we need the position as of BEFORE the position_date
+            # For normal trades, we get the current (latest) position
+            current = self._get_position_as_of_date(portfolio_id, security_id, position_date)
+
+            # If no position before this date, this is the first trade for this date range
+            # (which is correct for backdated trades creating a new earliest position)
 
             if trade_type == 'BUY':
                 return self._process_buy(
@@ -396,6 +401,34 @@ class PositionService:
             return results[0] if results else None
         except Exception as e:
             logger.error(f"Error getting current position: {str(e)}")
+            return None
+
+    def _get_position_as_of_date(
+        self,
+        portfolio_id: str,
+        security_id: str,
+        as_of_date: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get position as of a specific date (for backdated trades).
+
+        Returns the latest position version with position_date < as_of_date.
+        This is used to find the base position for backdated trade calculations.
+        """
+        try:
+            query = f"""
+            SELECT *
+            FROM {self.DATABASE}.{self.POSITION_TABLE}
+            WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
+              AND security_label = '{self._escape(security_id)}'
+              AND position_date < '{as_of_date}'
+            ORDER BY position_date DESC, version_id DESC
+            LIMIT 1
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            return results[0] if results else None
+        except Exception as e:
+            logger.error(f"Error getting position as of {as_of_date}: {str(e)}")
             return None
 
     def get_position(self, portfolio_id: str, security_id: str) -> Optional[Dict[str, Any]]:
