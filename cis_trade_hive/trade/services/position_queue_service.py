@@ -378,12 +378,11 @@ class PositionQueueService:
 
             # Step 2: Get ALL trades from backdated date onwards (>= not >)
             # This INCLUDES the backdated trade itself
+            # Note: security_currency, portfolio_currency, isin, etc. are NOT in cis_trade table
             query = f"""
             SELECT trade_id, trade_type, quantity, price,
                    COALESCE(commission, 0) + COALESCE(sec_fee, 0) + COALESCE(other_charges, 0) as charges,
-                   settle_date,
-                   security_currency, portfolio_currency, isin, security_name,
-                   custodian, sub_custodian
+                   settle_date
             FROM {self.DATABASE}.cis_trade
             WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
               AND security_label = '{self._escape(security_id)}'
