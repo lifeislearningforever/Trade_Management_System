@@ -388,7 +388,7 @@ class PositionQueueService:
               AND security_label = '{self._escape(security_id)}'
               AND settle_date >= '{from_date}'
               AND settle_date <= '{today.strftime("%Y-%m-%d")}'
-              AND trade_status IN ('VALIDATED', 'SETTLED')
+              AND trade_status IN ('INITIAL', 'VALIDATED', 'SETTLED')
               AND (is_deleted = false OR is_deleted IS NULL)
             ORDER BY settle_date ASC, trade_id ASC
             """
