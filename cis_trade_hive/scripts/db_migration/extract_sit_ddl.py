@@ -7,26 +7,41 @@ This script connects to SIT Impala/Kudu database and extracts:
 2. Table data (INSERT statements) - optional
 3. Generates migration files for UAT deployment
 
+Supports two modes:
+1. PyHive connection (Python library)
+2. impala-shell (command line tool) - recommended for Kerberos
+
 Usage:
-    # Extract DDL only
-    python extract_sit_ddl.py --host sit-impala-host --port 21050
+    # Using impala-shell (recommended for Kerberos/CML)
+    python extract_sit_ddl.py --use-impala-shell --host sit-impala-host
+
+    # Using impala-shell with Kerberos
+    python extract_sit_ddl.py --use-impala-shell --host sit-impala-host --kerberos
+
+    # Using PyHive (local Docker)
+    python extract_sit_ddl.py --host localhost --port 21050
 
     # Extract DDL and data
-    python extract_sit_ddl.py --host sit-impala-host --port 21050 --include-data
+    python extract_sit_ddl.py --use-impala-shell --host sit-impala-host --include-data
 
     # Extract specific tables
-    python extract_sit_ddl.py --host sit-impala-host --tables cis_trade,cis_portfolio
+    python extract_sit_ddl.py --use-impala-shell --host sit-impala-host --tables cis_trade,cis_portfolio
 
 Environment Variables:
     SIT_IMPALA_HOST: SIT Impala host (default: localhost)
     SIT_IMPALA_PORT: SIT Impala port (default: 21050)
     SIT_IMPALA_AUTH: Authentication method (NOSASL, GSSAPI, LDAP)
+    KRB5_CONFIG: Kerberos config file path (for Kerberos auth)
+    KRB5CCNAME: Kerberos credential cache path
 """
 
 import os
 import sys
 import argparse
 import logging
+import subprocess
+import tempfile
+import json
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
@@ -34,13 +49,6 @@ from pathlib import Path
 # Add project root to path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
-
-try:
-    from pyhive import hive
-    from thrift.transport import TSocket
-except ImportError:
-    print("Error: pyhive not installed. Run: pip install pyhive thrift thrift-sasl")
-    sys.exit(1)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,8 +63,258 @@ DATABASE = 'gmp_cis'
 OUTPUT_DIR = Path(__file__).parent / 'output'
 
 
-class SITDDLExtractor:
-    """Extract DDL and data from SIT database."""
+class ImpalaShellExtractor:
+    """Extract DDL and data using impala-shell command line tool.
+
+    This is the recommended approach for Kerberos/CML environments.
+    """
+
+    def __init__(
+        self,
+        host: str = 'localhost',
+        port: int = 21050,
+        use_kerberos: bool = False,
+        use_ssl: bool = False,
+        principal: str = None,
+        ca_cert: str = None
+    ):
+        self.host = host
+        self.port = port
+        self.use_kerberos = use_kerberos
+        self.use_ssl = use_ssl
+        self.principal = principal
+        self.ca_cert = ca_cert
+
+    def _build_impala_shell_cmd(self, query: str = None, query_file: str = None) -> List[str]:
+        """Build impala-shell command with appropriate flags."""
+        cmd = ['impala-shell']
+
+        # Connection
+        cmd.extend(['-i', f'{self.host}:{self.port}'])
+
+        # Database
+        cmd.extend(['-d', DATABASE])
+
+        # Kerberos authentication
+        if self.use_kerberos:
+            cmd.append('-k')  # Use Kerberos authentication
+            if self.principal:
+                cmd.extend(['--principal', self.principal])
+
+        # SSL
+        if self.use_ssl:
+            cmd.append('--ssl')
+            if self.ca_cert:
+                cmd.extend(['--ca_cert', self.ca_cert])
+
+        # Output format
+        cmd.extend(['-B'])  # Batch mode (no pretty printing)
+        cmd.extend(['--output_delimiter', '\t'])  # Tab-delimited
+
+        # Query
+        if query:
+            cmd.extend(['-q', query])
+        elif query_file:
+            cmd.extend(['-f', query_file])
+
+        return cmd
+
+    def _execute_query(self, query: str) -> Tuple[bool, List[str], str]:
+        """Execute a query using impala-shell and return results."""
+        try:
+            cmd = self._build_impala_shell_cmd(query=query)
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minute timeout
+            )
+
+            if result.returncode != 0:
+                return False, [], result.stderr
+
+            # Parse output lines
+            lines = [line for line in result.stdout.strip().split('\n') if line]
+            return True, lines, ''
+
+        except subprocess.TimeoutExpired:
+            return False, [], 'Query timed out after 5 minutes'
+        except FileNotFoundError:
+            return False, [], 'impala-shell command not found. Please install Impala shell.'
+        except Exception as e:
+            return False, [], str(e)
+
+    def connect(self) -> bool:
+        """Test connection to Impala."""
+        logger.info(f"Testing connection to {self.host}:{self.port} using impala-shell")
+        if self.use_kerberos:
+            logger.info("Using Kerberos authentication")
+
+        success, _, error = self._execute_query("SELECT 1")
+        if success:
+            logger.info("Successfully connected to Impala")
+            return True
+        else:
+            logger.error(f"Failed to connect: {error}")
+            return False
+
+    def disconnect(self):
+        """No persistent connection to close."""
+        pass
+
+    def get_all_tables(self) -> List[str]:
+        """Get all tables in gmp_cis database."""
+        success, lines, error = self._execute_query(f"SHOW TABLES IN {DATABASE}")
+        if success:
+            tables = [line.strip() for line in lines if line.strip()]
+            logger.info(f"Found {len(tables)} tables in {DATABASE}")
+            return sorted(tables)
+        else:
+            logger.error(f"Error getting tables: {error}")
+            return []
+
+    def get_table_ddl(self, table_name: str) -> Optional[str]:
+        """Get CREATE TABLE statement for a table."""
+        success, lines, error = self._execute_query(
+            f"SHOW CREATE TABLE {DATABASE}.{table_name}"
+        )
+        if success:
+            return '\n'.join(lines)
+        else:
+            logger.error(f"Error getting DDL for {table_name}: {error}")
+            return None
+
+    def get_table_columns(self, table_name: str) -> List[Dict[str, str]]:
+        """Get column information for a table."""
+        success, lines, error = self._execute_query(
+            f"DESCRIBE {DATABASE}.{table_name}"
+        )
+        if success:
+            columns = []
+            for line in lines:
+                parts = line.split('\t')
+                if len(parts) >= 2:
+                    columns.append({
+                        'name': parts[0].strip(),
+                        'type': parts[1].strip(),
+                        'comment': parts[2].strip() if len(parts) > 2 else ''
+                    })
+            return columns
+        else:
+            logger.error(f"Error getting columns for {table_name}: {error}")
+            return []
+
+    def get_table_row_count(self, table_name: str) -> int:
+        """Get row count for a table."""
+        success, lines, error = self._execute_query(
+            f"SELECT COUNT(*) FROM {DATABASE}.{table_name}"
+        )
+        if success and lines:
+            try:
+                return int(lines[0].strip())
+            except ValueError:
+                return 0
+        return 0
+
+    def get_table_data(self, table_name: str, limit: int = None) -> List[Dict[str, Any]]:
+        """Get data from a table."""
+        # First get columns
+        columns = self.get_table_columns(table_name)
+        if not columns:
+            return []
+
+        col_names = [col['name'] for col in columns]
+
+        query = f"SELECT * FROM {DATABASE}.{table_name}"
+        if limit:
+            query += f" LIMIT {limit}"
+
+        success, lines, error = self._execute_query(query)
+        if success:
+            rows = []
+            for line in lines:
+                values = line.split('\t')
+                if len(values) == len(col_names):
+                    row = {}
+                    for i, col_name in enumerate(col_names):
+                        val = values[i].strip()
+                        row[col_name] = None if val == 'NULL' or val == '' else val
+                    rows.append(row)
+            return rows
+        else:
+            logger.error(f"Error getting data for {table_name}: {error}")
+            return []
+
+    def format_value_for_insert(self, value: Any, col_type: str) -> str:
+        """Format a value for INSERT statement."""
+        if value is None:
+            return 'NULL'
+
+        col_type_lower = col_type.lower()
+
+        # String types
+        if 'string' in col_type_lower or 'varchar' in col_type_lower or 'char' in col_type_lower:
+            escaped = str(value).replace("'", "''")
+            return f"'{escaped}'"
+
+        # Numeric types
+        if any(t in col_type_lower for t in ['int', 'bigint', 'smallint', 'tinyint', 'decimal', 'double', 'float']):
+            return str(value)
+
+        # Boolean
+        if 'boolean' in col_type_lower or 'bool' in col_type_lower:
+            return 'true' if str(value).lower() in ('true', '1', 'yes') else 'false'
+
+        # Timestamp/Date
+        if 'timestamp' in col_type_lower or 'date' in col_type_lower:
+            return f"'{value}'"
+
+        # Default: treat as string
+        escaped = str(value).replace("'", "''")
+        return f"'{escaped}'"
+
+    def generate_insert_statements(
+        self,
+        table_name: str,
+        columns: List[Dict[str, str]],
+        data: List[Dict[str, Any]],
+        batch_size: int = 100
+    ) -> List[str]:
+        """Generate INSERT/UPSERT statements for table data."""
+        if not data:
+            return []
+
+        statements = []
+        col_names = [col['name'] for col in columns]
+        col_types = {col['name']: col['type'] for col in columns}
+
+        for i in range(0, len(data), batch_size):
+            batch = data[i:i + batch_size]
+
+            values_list = []
+            for row in batch:
+                values = []
+                for col_name in col_names:
+                    value = row.get(col_name)
+                    col_type = col_types.get(col_name, 'string')
+                    values.append(self.format_value_for_insert(value, col_type))
+
+                values_list.append(f"({', '.join(values)})")
+
+            stmt = f"UPSERT INTO {DATABASE}.{table_name} ({', '.join(col_names)})\nVALUES\n"
+            stmt += ',\n'.join(values_list) + ";"
+
+            statements.append(stmt)
+
+        return statements
+
+
+class PyHiveExtractor:
+    """Extract DDL and data using PyHive library.
+
+    Use this for local Docker development or non-Kerberos environments.
+    """
 
     def __init__(
         self,
@@ -75,9 +333,11 @@ class SITDDLExtractor:
         self.cursor = None
 
     def connect(self) -> bool:
-        """Connect to SIT Impala."""
+        """Connect to SIT Impala using PyHive."""
         try:
-            logger.info(f"Connecting to SIT Impala at {self.host}:{self.port}")
+            from pyhive import hive
+
+            logger.info(f"Connecting to Impala at {self.host}:{self.port} using PyHive")
 
             conn_params = {
                 'host': self.host,
@@ -96,11 +356,14 @@ class SITDDLExtractor:
 
             # Test connection
             self.cursor.execute("SELECT 1")
-            logger.info("Successfully connected to SIT Impala")
+            logger.info("Successfully connected to Impala")
             return True
 
+        except ImportError:
+            logger.error("PyHive not installed. Run: pip install pyhive thrift thrift-sasl")
+            return False
         except Exception as e:
-            logger.error(f"Failed to connect to SIT Impala: {str(e)}")
+            logger.error(f"Failed to connect: {str(e)}")
             return False
 
     def disconnect(self):
@@ -109,7 +372,7 @@ class SITDDLExtractor:
             self.cursor.close()
         if self.connection:
             self.connection.close()
-        logger.info("Disconnected from SIT Impala")
+        logger.info("Disconnected from Impala")
 
     def get_all_tables(self) -> List[str]:
         """Get all tables in gmp_cis database."""
@@ -128,7 +391,6 @@ class SITDDLExtractor:
             self.cursor.execute(f"SHOW CREATE TABLE {DATABASE}.{table_name}")
             result = self.cursor.fetchall()
             if result:
-                # Join all rows (some DDLs span multiple rows)
                 ddl = '\n'.join([row[0] for row in result])
                 return ddl
             return None
@@ -186,25 +448,19 @@ class SITDDLExtractor:
 
         col_type_lower = col_type.lower()
 
-        # String types
         if 'string' in col_type_lower or 'varchar' in col_type_lower or 'char' in col_type_lower:
-            # Escape single quotes
             escaped = str(value).replace("'", "''")
             return f"'{escaped}'"
 
-        # Numeric types
         if any(t in col_type_lower for t in ['int', 'bigint', 'smallint', 'tinyint', 'decimal', 'double', 'float']):
             return str(value)
 
-        # Boolean
         if 'boolean' in col_type_lower or 'bool' in col_type_lower:
             return 'true' if value else 'false'
 
-        # Timestamp/Date
         if 'timestamp' in col_type_lower or 'date' in col_type_lower:
             return f"'{value}'"
 
-        # Default: treat as string
         escaped = str(value).replace("'", "''")
         return f"'{escaped}'"
 
@@ -223,7 +479,6 @@ class SITDDLExtractor:
         col_names = [col['name'] for col in columns]
         col_types = {col['name']: col['type'] for col in columns}
 
-        # Use UPSERT for Kudu tables
         for i in range(0, len(data), batch_size):
             batch = data[i:i + batch_size]
 
@@ -237,7 +492,6 @@ class SITDDLExtractor:
 
                 values_list.append(f"({', '.join(values)})")
 
-            # Generate UPSERT statement
             stmt = f"UPSERT INTO {DATABASE}.{table_name} ({', '.join(col_names)})\nVALUES\n"
             stmt += ',\n'.join(values_list) + ";"
 
@@ -247,7 +501,7 @@ class SITDDLExtractor:
 
 
 def extract_ddl(
-    extractor: SITDDLExtractor,
+    extractor,
     tables: List[str],
     include_data: bool = False,
     data_limit: int = None
@@ -321,7 +575,7 @@ def extract_ddl(
     return result
 
 
-def write_output_files(result: Dict[str, Any], output_dir: Path):
+def write_output_files(result: Dict[str, Any], output_dir: Path, use_kerberos: bool = False):
     """Write DDL and data files."""
 
     # Create output directory
@@ -439,7 +693,7 @@ def write_output_files(result: Dict[str, Any], output_dir: Path):
 
     logger.info(f"Written: {summary_file}")
 
-    # 6. Write UAT deployment script
+    # 6. Write UAT deployment script with Kerberos support
     deploy_script = output_dir / f'deploy_to_uat.sh'
     with open(deploy_script, 'w') as f:
         f.write("#!/bin/bash\n")
@@ -448,8 +702,17 @@ def write_output_files(result: Dict[str, Any], output_dir: Path):
         f.write(f"# Generated: {result['timestamp']}\n")
         f.write("#\n")
         f.write("# Usage:\n")
+        f.write("#   # Without Kerberos (local/Docker)\n")
         f.write("#   ./deploy_to_uat.sh --host uat-impala-host --port 21050\n")
-        f.write("#   ./deploy_to_uat.sh --host uat-impala-host --port 21050 --include-data\n")
+        f.write("#\n")
+        f.write("#   # With Kerberos (CML/Production)\n")
+        f.write("#   ./deploy_to_uat.sh --host uat-impala-host --kerberos\n")
+        f.write("#\n")
+        f.write("#   # With Kerberos and custom principal\n")
+        f.write("#   ./deploy_to_uat.sh --host uat-impala-host --kerberos --principal impala/host@REALM\n")
+        f.write("#\n")
+        f.write("#   # Include data\n")
+        f.write("#   ./deploy_to_uat.sh --host uat-impala-host --kerberos --include-data\n")
         f.write("#\n\n")
 
         f.write('set -e\n\n')
@@ -457,6 +720,10 @@ def write_output_files(result: Dict[str, Any], output_dir: Path):
         f.write('# Default values\n')
         f.write('UAT_HOST="${UAT_IMPALA_HOST:-localhost}"\n')
         f.write('UAT_PORT="${UAT_IMPALA_PORT:-21050}"\n')
+        f.write('USE_KERBEROS=false\n')
+        f.write('USE_SSL=false\n')
+        f.write('PRINCIPAL=""\n')
+        f.write('CA_CERT=""\n')
         f.write('INCLUDE_DATA=false\n')
         f.write('SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n\n')
 
@@ -465,16 +732,61 @@ def write_output_files(result: Dict[str, Any], output_dir: Path):
         f.write('    case $1 in\n')
         f.write('        --host) UAT_HOST="$2"; shift 2 ;;\n')
         f.write('        --port) UAT_PORT="$2"; shift 2 ;;\n')
+        f.write('        --kerberos|-k) USE_KERBEROS=true; shift ;;\n')
+        f.write('        --ssl) USE_SSL=true; shift ;;\n')
+        f.write('        --principal) PRINCIPAL="$2"; shift 2 ;;\n')
+        f.write('        --ca-cert) CA_CERT="$2"; shift 2 ;;\n')
         f.write('        --include-data) INCLUDE_DATA=true; shift ;;\n')
+        f.write('        --help|-h)\n')
+        f.write('            echo "Usage: $0 [options]"\n')
+        f.write('            echo ""\n')
+        f.write('            echo "Options:"\n')
+        f.write('            echo "  --host HOST       UAT Impala host"\n')
+        f.write('            echo "  --port PORT       UAT Impala port (default: 21050)"\n')
+        f.write('            echo "  --kerberos, -k    Use Kerberos authentication"\n')
+        f.write('            echo "  --ssl             Use SSL connection"\n')
+        f.write('            echo "  --principal PRINC Kerberos principal"\n')
+        f.write('            echo "  --ca-cert FILE    CA certificate for SSL"\n')
+        f.write('            echo "  --include-data    Load data as well as DDL"\n')
+        f.write('            exit 0\n')
+        f.write('            ;;\n')
         f.write('        *) echo "Unknown option: $1"; exit 1 ;;\n')
         f.write('    esac\n')
         f.write('done\n\n')
 
+        f.write('# Build impala-shell command\n')
+        f.write('IMPALA_CMD="impala-shell -i $UAT_HOST:$UAT_PORT"\n\n')
+
+        f.write('if [ "$USE_KERBEROS" = true ]; then\n')
+        f.write('    IMPALA_CMD="$IMPALA_CMD -k"\n')
+        f.write('    if [ -n "$PRINCIPAL" ]; then\n')
+        f.write('        IMPALA_CMD="$IMPALA_CMD --principal $PRINCIPAL"\n')
+        f.write('    fi\n')
+        f.write('    \n')
+        f.write('    # Check for valid Kerberos ticket\n')
+        f.write('    echo "Checking Kerberos ticket..."\n')
+        f.write('    if ! klist -s 2>/dev/null; then\n')
+        f.write('        echo "ERROR: No valid Kerberos ticket found."\n')
+        f.write('        echo "Please run: kinit <username>@<REALM>"\n')
+        f.write('        exit 1\n')
+        f.write('    fi\n')
+        f.write('    klist\n')
+        f.write('    echo ""\n')
+        f.write('fi\n\n')
+
+        f.write('if [ "$USE_SSL" = true ]; then\n')
+        f.write('    IMPALA_CMD="$IMPALA_CMD --ssl"\n')
+        f.write('    if [ -n "$CA_CERT" ]; then\n')
+        f.write('        IMPALA_CMD="$IMPALA_CMD --ca_cert $CA_CERT"\n')
+        f.write('    fi\n')
+        f.write('fi\n\n')
+
         f.write('echo "========================================"\n')
         f.write('echo "UAT Database Deployment"\n')
         f.write('echo "========================================"\n')
-        f.write('echo "Host: $UAT_HOST"\n')
-        f.write('echo "Port: $UAT_PORT"\n')
+        f.write('echo "Host: $UAT_HOST:$UAT_PORT"\n')
+        f.write('echo "Kerberos: $USE_KERBEROS"\n')
+        f.write('echo "SSL: $USE_SSL"\n')
         f.write('echo "Include Data: $INCLUDE_DATA"\n')
         f.write('echo ""\n\n')
 
@@ -482,7 +794,7 @@ def write_output_files(result: Dict[str, Any], output_dir: Path):
         f.write('run_sql() {\n')
         f.write('    local sql_file="$1"\n')
         f.write('    echo "Running: $sql_file"\n')
-        f.write('    impala-shell -i "$UAT_HOST:$UAT_PORT" -f "$sql_file"\n')
+        f.write('    $IMPALA_CMD -f "$sql_file"\n')
         f.write('}\n\n')
 
         f.write('# Step 1: Create tables (DDL)\n')
@@ -524,8 +836,35 @@ def write_output_files(result: Dict[str, Any], output_dir: Path):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Extract DDL from SIT database for UAT migration'
+        description='Extract DDL from SIT database for UAT migration',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Using impala-shell with Kerberos (recommended for CML)
+  python extract_sit_ddl.py --use-impala-shell --host sit-impala-host --kerberos
+
+  # Using impala-shell with Kerberos and custom principal
+  python extract_sit_ddl.py --use-impala-shell --host sit-impala-host --kerberos --principal impala/host@REALM
+
+  # Using PyHive (local Docker, no Kerberos)
+  python extract_sit_ddl.py --host localhost --port 21050
+
+  # Extract with data
+  python extract_sit_ddl.py --use-impala-shell --host sit-impala-host --kerberos --include-data
+
+  # Extract specific tables
+  python extract_sit_ddl.py --use-impala-shell --host sit-impala-host --tables cis_trade,cis_portfolio
+        """
     )
+
+    # Connection mode
+    parser.add_argument(
+        '--use-impala-shell',
+        action='store_true',
+        help='Use impala-shell command instead of PyHive (recommended for Kerberos)'
+    )
+
+    # Connection parameters
     parser.add_argument(
         '--host',
         default=os.environ.get('SIT_IMPALA_HOST', 'localhost'),
@@ -537,26 +876,52 @@ def main():
         default=int(os.environ.get('SIT_IMPALA_PORT', '21050')),
         help='SIT Impala port'
     )
+
+    # Authentication
+    parser.add_argument(
+        '--kerberos', '-k',
+        action='store_true',
+        help='Use Kerberos authentication (for impala-shell mode)'
+    )
+    parser.add_argument(
+        '--principal',
+        help='Kerberos principal (e.g., impala/host@REALM)'
+    )
+    parser.add_argument(
+        '--ssl',
+        action='store_true',
+        help='Use SSL connection'
+    )
+    parser.add_argument(
+        '--ca-cert',
+        help='CA certificate file for SSL'
+    )
+
+    # PyHive-specific auth (for non-Kerberos)
     parser.add_argument(
         '--auth',
         default=os.environ.get('SIT_IMPALA_AUTH', 'NOSASL'),
         choices=['NOSASL', 'GSSAPI', 'LDAP'],
-        help='Authentication method'
+        help='Authentication method (for PyHive mode)'
     )
     parser.add_argument(
         '--username',
         default=os.environ.get('SIT_IMPALA_USER'),
-        help='Username (for LDAP auth)'
+        help='Username (for LDAP auth with PyHive)'
     )
     parser.add_argument(
         '--password',
         default=os.environ.get('SIT_IMPALA_PASSWORD'),
-        help='Password (for LDAP auth)'
+        help='Password (for LDAP auth with PyHive)'
     )
+
+    # Table selection
     parser.add_argument(
         '--tables',
         help='Comma-separated list of tables to extract (default: all)'
     )
+
+    # Data extraction
     parser.add_argument(
         '--include-data',
         action='store_true',
@@ -567,6 +932,8 @@ def main():
         type=int,
         help='Limit rows per table when extracting data'
     )
+
+    # Output
     parser.add_argument(
         '--output-dir',
         type=Path,
@@ -576,14 +943,24 @@ def main():
 
     args = parser.parse_args()
 
-    # Create extractor
-    extractor = SITDDLExtractor(
-        host=args.host,
-        port=args.port,
-        auth=args.auth,
-        username=args.username,
-        password=args.password
-    )
+    # Create appropriate extractor
+    if args.use_impala_shell:
+        extractor = ImpalaShellExtractor(
+            host=args.host,
+            port=args.port,
+            use_kerberos=args.kerberos,
+            use_ssl=args.ssl,
+            principal=args.principal,
+            ca_cert=args.ca_cert
+        )
+    else:
+        extractor = PyHiveExtractor(
+            host=args.host,
+            port=args.port,
+            auth=args.auth,
+            username=args.username,
+            password=args.password
+        )
 
     # Connect
     if not extractor.connect():
@@ -612,7 +989,7 @@ def main():
         )
 
         # Write output files
-        output_dir = write_output_files(result, args.output_dir)
+        output_dir = write_output_files(result, args.output_dir, use_kerberos=args.kerberos)
 
         # Print summary
         print("\n" + "=" * 60)
@@ -626,7 +1003,10 @@ def main():
         print("\nNext Steps:")
         print("  1. Review generated DDL files")
         print("  2. Copy to UAT environment")
-        print(f"  3. Run: ./deploy_to_uat.sh --host <uat-host> --port 21050")
+        if args.kerberos:
+            print("  3. Run: ./deploy_to_uat.sh --host <uat-host> --kerberos")
+        else:
+            print("  3. Run: ./deploy_to_uat.sh --host <uat-host> --port 21050")
         print("=" * 60)
 
     finally:

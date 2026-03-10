@@ -5,21 +5,25 @@
 # This script extracts DDL from SIT Impala/Kudu database and generates
 # migration files for UAT deployment.
 #
-# Usage:
-#   # Extract DDL only (local Docker)
-#   ./run_extraction.sh
+# Supports two connection modes:
+# 1. impala-shell (recommended for Kerberos/CML environments)
+# 2. PyHive (for local Docker development)
 #
-#   # Extract DDL from specific SIT host
-#   ./run_extraction.sh --host sit-impala-host.company.com --port 21050
+# Usage:
+#   # Using impala-shell with Kerberos (CML/Production)
+#   ./run_extraction.sh --use-impala-shell --host sit-impala-host --kerberos
+#
+#   # Using impala-shell with Kerberos and custom principal
+#   ./run_extraction.sh --use-impala-shell --host sit-impala-host --kerberos --principal impala/host@REALM
+#
+#   # Using PyHive (local Docker)
+#   ./run_extraction.sh --host localhost --port 21050
 #
 #   # Extract DDL and data
-#   ./run_extraction.sh --host sit-impala-host --include-data
+#   ./run_extraction.sh --use-impala-shell --host sit-impala-host --kerberos --include-data
 #
 #   # Extract specific tables
-#   ./run_extraction.sh --tables cis_trade,cis_portfolio,cis_trade_position
-#
-#   # CML environment with Kerberos
-#   ./run_extraction.sh --host sit-impala-host --auth GSSAPI
+#   ./run_extraction.sh --use-impala-shell --host sit-impala-host --tables cis_trade,cis_portfolio
 #
 
 set -e
@@ -30,7 +34,11 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # Default values
 SIT_HOST="${SIT_IMPALA_HOST:-localhost}"
 SIT_PORT="${SIT_IMPALA_PORT:-21050}"
-SIT_AUTH="${SIT_IMPALA_AUTH:-NOSASL}"
+USE_IMPALA_SHELL=false
+USE_KERBEROS=false
+USE_SSL=false
+PRINCIPAL=""
+CA_CERT=""
 INCLUDE_DATA=false
 TABLES=""
 DATA_LIMIT=""
@@ -39,11 +47,61 @@ DATA_LIMIT=""
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+
+print_help() {
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Connection Modes:"
+    echo "  --use-impala-shell  Use impala-shell command (recommended for Kerberos)"
+    echo "                      Without this flag, PyHive library is used"
+    echo ""
+    echo "Connection Options:"
+    echo "  --host HOST         SIT Impala host (default: localhost)"
+    echo "  --port PORT         SIT Impala port (default: 21050)"
+    echo ""
+    echo "Authentication (for impala-shell):"
+    echo "  --kerberos, -k      Use Kerberos authentication"
+    echo "  --principal PRINC   Kerberos principal (e.g., impala/host@REALM)"
+    echo "  --ssl               Use SSL connection"
+    echo "  --ca-cert FILE      CA certificate for SSL"
+    echo ""
+    echo "Extraction Options:"
+    echo "  --tables TABLES     Comma-separated list of tables (default: all)"
+    echo "  --include-data      Extract table data as well"
+    echo "  --data-limit N      Limit rows per table when extracting data"
+    echo ""
+    echo "Other:"
+    echo "  --help, -h          Show this help message"
+    echo ""
+    echo "Environment Variables:"
+    echo "  SIT_IMPALA_HOST     SIT Impala host"
+    echo "  SIT_IMPALA_PORT     SIT Impala port"
+    echo "  KRB5_CONFIG         Kerberos config file path"
+    echo "  KRB5CCNAME          Kerberos credential cache path"
+    echo ""
+    echo "Examples:"
+    echo "  # CML with Kerberos (most common)"
+    echo "  $0 --use-impala-shell --host impala-host.company.com --kerberos"
+    echo ""
+    echo "  # CML with Kerberos and custom principal"
+    echo "  $0 --use-impala-shell --host impala-host.company.com --kerberos --principal impala/_HOST@REALM"
+    echo ""
+    echo "  # Local Docker (no Kerberos)"
+    echo "  $0 --host localhost --port 21050"
+    echo ""
+    echo "  # Extract with data"
+    echo "  $0 --use-impala-shell --host impala-host --kerberos --include-data"
+}
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --use-impala-shell)
+            USE_IMPALA_SHELL=true
+            shift
+            ;;
         --host)
             SIT_HOST="$2"
             shift 2
@@ -52,8 +110,20 @@ while [[ $# -gt 0 ]]; do
             SIT_PORT="$2"
             shift 2
             ;;
-        --auth)
-            SIT_AUTH="$2"
+        --kerberos|-k)
+            USE_KERBEROS=true
+            shift
+            ;;
+        --principal)
+            PRINCIPAL="$2"
+            shift 2
+            ;;
+        --ssl)
+            USE_SSL=true
+            shift
+            ;;
+        --ca-cert)
+            CA_CERT="$2"
             shift 2
             ;;
         --tables)
@@ -69,27 +139,12 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --help|-h)
-            echo "Usage: $0 [options]"
-            echo ""
-            echo "Options:"
-            echo "  --host HOST       SIT Impala host (default: localhost)"
-            echo "  --port PORT       SIT Impala port (default: 21050)"
-            echo "  --auth AUTH       Authentication: NOSASL, GSSAPI, LDAP (default: NOSASL)"
-            echo "  --tables TABLES   Comma-separated list of tables (default: all)"
-            echo "  --include-data    Extract table data as well"
-            echo "  --data-limit N    Limit rows per table when extracting data"
-            echo "  --help, -h        Show this help message"
-            echo ""
-            echo "Environment Variables:"
-            echo "  SIT_IMPALA_HOST     SIT Impala host"
-            echo "  SIT_IMPALA_PORT     SIT Impala port"
-            echo "  SIT_IMPALA_AUTH     Authentication method"
-            echo "  SIT_IMPALA_USER     Username (for LDAP)"
-            echo "  SIT_IMPALA_PASSWORD Password (for LDAP)"
+            print_help
             exit 0
             ;;
         *)
             echo -e "${RED}Unknown option: $1${NC}"
+            echo "Use --help for usage information"
             exit 1
             ;;
     esac
@@ -99,9 +154,18 @@ echo "============================================"
 echo "SIT to UAT Database Migration"
 echo "============================================"
 echo ""
+echo -e "Connection Mode: ${GREEN}$([ "$USE_IMPALA_SHELL" = true ] && echo "impala-shell" || echo "PyHive")${NC}"
 echo -e "SIT Host: ${GREEN}$SIT_HOST${NC}"
 echo -e "SIT Port: ${GREEN}$SIT_PORT${NC}"
-echo -e "Auth: ${GREEN}$SIT_AUTH${NC}"
+
+if [ "$USE_IMPALA_SHELL" = true ]; then
+    echo -e "Kerberos: ${GREEN}$USE_KERBEROS${NC}"
+    if [ -n "$PRINCIPAL" ]; then
+        echo -e "Principal: ${GREEN}$PRINCIPAL${NC}"
+    fi
+    echo -e "SSL: ${GREEN}$USE_SSL${NC}"
+fi
+
 echo -e "Include Data: ${GREEN}$INCLUDE_DATA${NC}"
 if [ -n "$TABLES" ]; then
     echo -e "Tables: ${GREEN}$TABLES${NC}"
@@ -109,6 +173,25 @@ else
     echo -e "Tables: ${GREEN}ALL${NC}"
 fi
 echo ""
+
+# Check Kerberos ticket if using Kerberos
+if [ "$USE_KERBEROS" = true ]; then
+    echo -e "${BLUE}Checking Kerberos ticket...${NC}"
+    if ! klist -s 2>/dev/null; then
+        echo -e "${RED}ERROR: No valid Kerberos ticket found.${NC}"
+        echo ""
+        echo "Please obtain a Kerberos ticket first:"
+        echo "  kinit <username>@<REALM>"
+        echo ""
+        echo "Or if using a keytab:"
+        echo "  kinit -kt /path/to/keytab <principal>"
+        echo ""
+        exit 1
+    fi
+    echo -e "${GREEN}Kerberos ticket found:${NC}"
+    klist
+    echo ""
+fi
 
 # Activate virtual environment if it exists
 if [ -f "$PROJECT_ROOT/.venv/bin/activate" ]; then
@@ -120,7 +203,26 @@ fi
 CMD="python $SCRIPT_DIR/extract_sit_ddl.py"
 CMD="$CMD --host $SIT_HOST"
 CMD="$CMD --port $SIT_PORT"
-CMD="$CMD --auth $SIT_AUTH"
+
+if [ "$USE_IMPALA_SHELL" = true ]; then
+    CMD="$CMD --use-impala-shell"
+fi
+
+if [ "$USE_KERBEROS" = true ]; then
+    CMD="$CMD --kerberos"
+fi
+
+if [ -n "$PRINCIPAL" ]; then
+    CMD="$CMD --principal $PRINCIPAL"
+fi
+
+if [ "$USE_SSL" = true ]; then
+    CMD="$CMD --ssl"
+fi
+
+if [ -n "$CA_CERT" ]; then
+    CMD="$CMD --ca-cert $CA_CERT"
+fi
 
 if [ -n "$TABLES" ]; then
     CMD="$CMD --tables $TABLES"
@@ -136,7 +238,7 @@ fi
 
 # Run extraction
 echo "Running extraction..."
-echo "Command: $CMD"
+echo -e "${BLUE}Command: $CMD${NC}"
 echo ""
 
 $CMD
@@ -153,7 +255,11 @@ if [ $EXIT_CODE -eq 0 ]; then
     echo ""
     echo "To deploy to UAT:"
     echo "  1. Copy the output directory to UAT environment"
-    echo "  2. Run: ./deploy_to_uat.sh --host <uat-host> --port 21050"
+    if [ "$USE_KERBEROS" = true ]; then
+        echo "  2. Run: ./deploy_to_uat.sh --host <uat-host> --kerberos"
+    else
+        echo "  2. Run: ./deploy_to_uat.sh --host <uat-host> --port 21050"
+    fi
     echo ""
 else
     echo ""
