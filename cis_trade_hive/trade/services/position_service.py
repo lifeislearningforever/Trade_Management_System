@@ -385,7 +385,11 @@ class PositionService:
     # =========================================================================
 
     def _get_current_position(self, portfolio_id: str, security_id: str) -> Optional[Dict[str, Any]]:
-        """Get current open position for portfolio-security combination."""
+        """
+        Get current open position for portfolio-security combination.
+
+        Returns the latest version (is_latest=true) of the most recent position_date.
+        """
         try:
             query = f"""
             SELECT *
@@ -394,7 +398,8 @@ class PositionService:
               AND security_label = '{self._escape(security_id)}'
               AND status = 'OPEN'
               AND is_active = true
-            ORDER BY version_id DESC
+              AND (is_latest = true OR is_latest IS NULL)
+            ORDER BY position_date DESC, version_id DESC
             LIMIT 1
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
@@ -412,7 +417,7 @@ class PositionService:
         """
         Get position as of a specific date (for backdated trades).
 
-        Returns the latest position version with position_date < as_of_date.
+        Returns the latest version (is_latest=true) with position_date < as_of_date.
         This is used to find the base position for backdated trade calculations.
         """
         try:
@@ -422,6 +427,7 @@ class PositionService:
             WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
               AND security_label = '{self._escape(security_id)}'
               AND position_date < '{as_of_date}'
+              AND (is_latest = true OR is_latest IS NULL)
             ORDER BY position_date DESC, version_id DESC
             LIMIT 1
             """
@@ -441,9 +447,13 @@ class PositionService:
         status: str = 'OPEN',
         limit: int = 500
     ) -> List[Dict[str, Any]]:
-        """Get all positions with optional filters."""
+        """
+        Get all positions with optional filters.
+
+        Only returns latest versions (is_latest=true) for each portfolio+security combination.
+        """
         try:
-            where_clauses = ["1=1"]  # Base condition
+            where_clauses = ["(is_latest = true OR is_latest IS NULL)"]
 
             if portfolio_id:
                 where_clauses.append(f"portfolio_short_name = '{self._escape(portfolio_id)}'")
@@ -453,17 +463,12 @@ class PositionService:
 
             where_clause = " AND ".join(where_clauses)
 
-            # Get latest version per position_id
+            # Get latest version (is_latest=true) per portfolio+security, most recent date
             query = f"""
-            SELECT p.*
-            FROM {self.DATABASE}.{self.POSITION_TABLE} p
-            INNER JOIN (
-                SELECT position_id, MAX(version_id) as max_version
-                FROM {self.DATABASE}.{self.POSITION_TABLE}
-                WHERE {where_clause}
-                GROUP BY position_id
-            ) latest ON p.position_id = latest.position_id AND p.version_id = latest.max_version
-            ORDER BY p.created_at DESC
+            SELECT *
+            FROM {self.DATABASE}.{self.POSITION_TABLE}
+            WHERE {where_clause}
+            ORDER BY position_date DESC, created_at DESC
             LIMIT {limit}
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
@@ -477,10 +482,24 @@ class PositionService:
     # =========================================================================
 
     def _save_position(self, position_data: Dict[str, Any], updated_by: str) -> bool:
-        """Save position to cis_trade_position table (versioned)."""
+        """
+        Save position to cis_trade_position table (versioned, immutable).
+
+        Version-based approach:
+        1. Mark any existing versions for same portfolio+security+position_date as is_latest=false
+        2. Insert new version with is_latest=true
+        3. Never delete - maintains full audit trail
+        """
         try:
             version_id = self._generate_id()
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            position_date = position_data.get('position_date', timestamp[:10])
+            portfolio_id = position_data['portfolio_short_name']
+            security_id = position_data['security_label']
+
+            # Step 1: Mark existing versions for this date as is_latest=false
+            # This is done via UPSERT with the same version_id but is_latest=false
+            self._mark_old_versions_not_latest(portfolio_id, security_id, position_date)
 
             # Get FX rate for multi-currency calculations
             security_currency = position_data.get('security_currency', '')
@@ -514,6 +533,7 @@ class PositionService:
             # Match columns to cis_trade_position table structure (DDL: 13_avp_tables_kudu.sql)
             # Note: Table has average_cost_base, total_cost_base, realized_pnl_base
             #       but NOT unrealized_pnl_base or market_value_base
+            # Added: is_latest column for version tracking
             columns = [
                 'version_id', 'position_id', 'position_date',
                 'portfolio_short_name', 'security_label',
@@ -523,7 +543,7 @@ class PositionService:
                 'lots_held', 'custodian', 'sub_custodian',
                 'security_currency', 'portfolio_currency', 'fx_rate',
                 'average_cost_base', 'total_cost_base', 'realized_pnl_base',
-                'status', 'is_active',
+                'status', 'is_active', 'is_latest',
                 'created_by', 'created_at', 'updated_by', 'updated_at'
             ]
 
@@ -536,9 +556,9 @@ class PositionService:
             values = [
                 str(version_id),
                 str(position_data['position_id']),
-                f"'{position_data.get('position_date', timestamp[:10])}'",
-                f"'{self._escape(position_data['portfolio_short_name'])}'",
-                f"'{self._escape(position_data['security_label'])}'",
+                f"'{position_date}'",
+                f"'{self._escape(portfolio_id)}'",
+                f"'{self._escape(security_id)}'",
                 cast_decimal(quantity),
                 cast_decimal(average_cost),
                 cast_decimal(total_cost),
@@ -559,6 +579,7 @@ class PositionService:
                 cast_decimal(realized_pnl_base),
                 f"'{position_data.get('status', 'OPEN')}'",
                 str(position_data.get('is_active', True)).lower(),
+                'true',  # is_latest = true for new version
                 f"'{self._escape(updated_by)}'",
                 f"'{timestamp}'",
                 f"'{self._escape(updated_by)}'",
@@ -573,11 +594,115 @@ class PositionService:
 
             success = impala_manager.execute_write(query, database=self.DATABASE)
             if success:
-                logger.info(f"Saved position version {version_id} for position {position_data['position_id']}")
+                logger.info(
+                    f"Saved position version {version_id} for position {position_data['position_id']} "
+                    f"(date={position_date}, is_latest=true)"
+                )
             return success
 
         except Exception as e:
             logger.error(f"Error saving position: {str(e)}")
+            return False
+
+    def _mark_old_versions_not_latest(
+        self,
+        portfolio_id: str,
+        security_id: str,
+        position_date: str
+    ) -> bool:
+        """
+        Mark existing versions for a position_date as is_latest=false.
+
+        This is called before inserting a new version to ensure only one
+        version per date has is_latest=true.
+
+        Note: Kudu doesn't support UPDATE with complex WHERE, so we need to:
+        1. Query existing versions for this date
+        2. Re-insert each with is_latest=false
+        """
+        try:
+            # Get existing versions for this date that are marked is_latest=true
+            query = f"""
+            SELECT version_id, position_id, position_date,
+                   portfolio_short_name, security_label,
+                   quantity, average_cost, total_cost,
+                   realized_pnl, current_price, market_value, unrealized_pnl,
+                   trade_id, trade_type,
+                   lots_held, custodian, sub_custodian,
+                   security_currency, portfolio_currency, fx_rate,
+                   average_cost_base, total_cost_base, realized_pnl_base,
+                   status, is_active,
+                   created_by, created_at, updated_by, updated_at
+            FROM {self.DATABASE}.{self.POSITION_TABLE}
+            WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
+              AND security_label = '{self._escape(security_id)}'
+              AND position_date = '{position_date}'
+              AND is_latest = true
+            """
+
+            existing = impala_manager.execute_query(query, database=self.DATABASE)
+
+            if not existing:
+                # No existing versions to update
+                return True
+
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            for row in existing:
+                # Re-insert with is_latest=false (UPSERT by version_id)
+                update_query = f"""
+                UPSERT INTO {self.DATABASE}.{self.POSITION_TABLE}
+                (version_id, position_id, position_date,
+                 portfolio_short_name, security_label,
+                 quantity, average_cost, total_cost,
+                 realized_pnl, current_price, market_value, unrealized_pnl,
+                 trade_id, trade_type,
+                 lots_held, custodian, sub_custodian,
+                 security_currency, portfolio_currency, fx_rate,
+                 average_cost_base, total_cost_base, realized_pnl_base,
+                 status, is_active, is_latest,
+                 created_by, created_at, updated_by, updated_at)
+                VALUES (
+                    {row['version_id']}, {row['position_id']}, '{row['position_date']}',
+                    '{self._escape(row['portfolio_short_name'])}', '{self._escape(row['security_label'])}',
+                    CAST({row.get('quantity') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('average_cost') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('total_cost') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('realized_pnl') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('current_price') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('market_value') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('unrealized_pnl') or 0} AS DECIMAL(20,8)),
+                    {row.get('trade_id') or 'NULL'},
+                    '{row.get('trade_type', '')}',
+                    {row.get('lots_held') or 'NULL'},
+                    {f"'{self._escape(row.get('custodian', ''))}'" if row.get('custodian') else 'NULL'},
+                    {f"'{self._escape(row.get('sub_custodian', ''))}'" if row.get('sub_custodian') else 'NULL'},
+                    {f"'{self._escape(row.get('security_currency', ''))}'" if row.get('security_currency') else 'NULL'},
+                    {f"'{self._escape(row.get('portfolio_currency', ''))}'" if row.get('portfolio_currency') else 'NULL'},
+                    {f"CAST({row.get('fx_rate')} AS DECIMAL(20,8))" if row.get('fx_rate') else 'NULL'},
+                    CAST({row.get('average_cost_base') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('total_cost_base') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('realized_pnl_base') or 0} AS DECIMAL(20,8)),
+                    '{row.get('status', 'OPEN')}',
+                    {str(row.get('is_active', True)).lower()},
+                    false,
+                    '{self._escape(row.get('created_by', ''))}',
+                    '{row.get('created_at', timestamp)}',
+                    'SYSTEM',
+                    '{timestamp}'
+                )
+                """
+                impala_manager.execute_write(update_query, database=self.DATABASE)
+                logger.debug(f"Marked version {row['version_id']} as is_latest=false")
+
+            logger.info(
+                f"Marked {len(existing)} old version(s) as is_latest=false "
+                f"for {portfolio_id}/{security_id} on {position_date}"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"Error marking old versions: {str(e)}")
             return False
 
     def _sync_to_position_master(self, position_data: Dict[str, Any], updated_by: str) -> bool:

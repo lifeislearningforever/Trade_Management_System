@@ -397,21 +397,13 @@ class PositionQueueService:
                 f"from {from_date} to {today}"
             )
 
-            # Step 1: Delete existing position versions from backdated date onwards
-            # This ensures we recalculate cleanly
-            delete_query = f"""
-            DELETE FROM {self.DATABASE}.cis_trade_position
-            WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
-              AND security_label = '{self._escape(security_id)}'
-              AND position_date >= '{from_date}'
-            """
-            try:
-                impala_manager.execute_write(delete_query, database=self.DATABASE)
-                logger.info(f"Deleted existing positions from {from_date} onwards")
-            except Exception as e:
-                logger.warning(f"Could not delete old positions (may not exist): {str(e)}")
+            # VERSION-BASED APPROACH: No deletes, create new versions
+            # The position_service._save_position() method will:
+            # 1. Mark existing versions for each date as is_latest=false
+            # 2. Insert new version with is_latest=true
+            # This maintains full audit trail
 
-            # Step 2: Get ALL trades from backdated date onwards (>= not >)
+            # Step 1: Get ALL trades from backdated date onwards (>= not >)
             # This INCLUDES the backdated trade itself
             # Note: security_currency, portfolio_currency, isin, etc. are NOT in cis_trade table
             today_str = today.strftime("%Y-%m-%d")
