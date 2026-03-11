@@ -81,7 +81,8 @@ class PositionQueueService:
         portfolio_currency: str = None,
         isin: str = None,
         security_name: str = None,
-        use_db_queue: bool = True
+        use_db_queue: bool = True,
+        chain_recalc_metadata: str = None
     ) -> Tuple[bool, str, Optional[int]]:
         """
         Add trade to position calculation queue.
@@ -122,7 +123,8 @@ class PositionQueueService:
                 'status': self.STATUS_PENDING,
                 'retry_count': 0,
                 'queued_at': timestamp,
-                'queued_by': queued_by
+                'queued_by': queued_by,
+                'error_message': chain_recalc_metadata  # CHAIN_RECALC metadata for backdated trades
             }
 
             if use_db_queue:
@@ -154,12 +156,16 @@ class PositionQueueService:
             price = f"CAST({item['price']} AS DECIMAL(20,8))"
             charges = f"CAST({item['charges']} AS DECIMAL(20,8))"
 
+            # Include error_message for CHAIN_RECALC metadata (for backdated trades)
+            error_message = item.get('error_message')
+            error_message_sql = f"'{self._escape(error_message)}'" if error_message else 'NULL'
+
             query = f"""
             INSERT INTO {self.DATABASE}.{self.QUEUE_TABLE}
             (queue_id, trade_id, portfolio_id, security_id, trade_type,
              quantity, price, charges, settle_date,
              security_currency, portfolio_currency, isin, security_name,
-             status, retry_count, queued_at, queued_by, processing_date)
+             status, retry_count, queued_at, queued_by, processing_date, error_message)
             VALUES (
                 {item['queue_id']}, {item['trade_id']},
                 '{self._escape(item['portfolio_id'])}',
@@ -173,7 +179,7 @@ class PositionQueueService:
                 {self._null_or_str(item.get('security_name'))},
                 '{self.STATUS_PENDING}', CAST(0 AS INT),
                 '{timestamp}', '{self._escape(item['queued_by'])}',
-                '{processing_date}'
+                '{processing_date}', {error_message_sql}
             )
             """
 

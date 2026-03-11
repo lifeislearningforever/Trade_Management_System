@@ -16,6 +16,7 @@ Performance Features:
 import logging
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
+from datetime import datetime, date
 
 from core.repositories.impala_connection import impala_manager, query_cache
 
@@ -513,6 +514,113 @@ class TradeValidationRepository:
             return []
 
     # =========================================================================
+    # DATE VALIDATION
+    # =========================================================================
+
+    def validate_settlement_date(
+        self,
+        trade_date: str,
+        settle_date: str
+    ) -> ValidationResult:
+        """
+        Validate that settlement date is equal to or greater than trade date.
+
+        Business Rule: settle_date >= trade_date
+
+        Args:
+            trade_date: Trade date (YYYY-MM-DD)
+            settle_date: Settlement date (YYYY-MM-DD)
+
+        Returns:
+            ValidationResult with is_valid, message
+        """
+        try:
+            if not trade_date:
+                return ValidationResult(
+                    is_valid=False,
+                    entity_type='DATE',
+                    entity_name='trade_date',
+                    message='Trade date is required'
+                )
+
+            if not settle_date:
+                return ValidationResult(
+                    is_valid=False,
+                    entity_type='DATE',
+                    entity_name='settle_date',
+                    message='Settlement date is required'
+                )
+
+            # Parse dates
+            trade_dt = self._parse_date(trade_date)
+            settle_dt = self._parse_date(settle_date)
+
+            if trade_dt is None:
+                return ValidationResult(
+                    is_valid=False,
+                    entity_type='DATE',
+                    entity_name='trade_date',
+                    message=f"Invalid trade date format: {trade_date}"
+                )
+
+            if settle_dt is None:
+                return ValidationResult(
+                    is_valid=False,
+                    entity_type='DATE',
+                    entity_name='settle_date',
+                    message=f"Invalid settlement date format: {settle_date}"
+                )
+
+            # Business rule: settle_date >= trade_date
+            if settle_dt < trade_dt:
+                return ValidationResult(
+                    is_valid=False,
+                    entity_type='DATE',
+                    entity_name='settle_date',
+                    message=f"Settlement date ({settle_date}) cannot be before trade date ({trade_date}). Settlement date must be equal to or greater than trade date.",
+                    details={'trade_date': trade_date, 'settle_date': settle_date}
+                )
+
+            return ValidationResult(
+                is_valid=True,
+                entity_type='DATE',
+                entity_name='settle_date',
+                message=f"Settlement date ({settle_date}) is valid (>= trade date: {trade_date})",
+                details={'trade_date': trade_date, 'settle_date': settle_date}
+            )
+
+        except Exception as e:
+            logger.error(f"Error validating settlement date: {str(e)}")
+            return ValidationResult(
+                is_valid=False,
+                entity_type='DATE',
+                entity_name='settle_date',
+                message=f"Error validating settlement date: {str(e)}"
+            )
+
+    def _parse_date(self, date_str: str) -> Optional[date]:
+        """Parse date string to date object."""
+        if not date_str:
+            return None
+
+        try:
+            # Handle date objects
+            if isinstance(date_str, date):
+                return date_str
+
+            # Try various formats
+            for fmt in ['%Y-%m-%d', '%Y%m%d', '%d-%m-%Y', '%d/%m/%Y']:
+                try:
+                    return datetime.strptime(date_str, fmt).date()
+                except ValueError:
+                    continue
+
+            return None
+
+        except Exception:
+            return None
+
+    # =========================================================================
     # COMBINED VALIDATION
     # =========================================================================
 
@@ -520,7 +628,9 @@ class TradeValidationRepository:
         self,
         portfolio_name: str,
         security_name: str,
-        counterparty_name: Optional[str] = None
+        counterparty_name: Optional[str] = None,
+        trade_date: Optional[str] = None,
+        settle_date: Optional[str] = None
     ) -> Tuple[bool, List[ValidationResult]]:
         """
         Validate all trade references at once.
@@ -529,6 +639,8 @@ class TradeValidationRepository:
             portfolio_name: Portfolio short name
             security_name: Security name/label
             counterparty_name: Optional counterparty short name
+            trade_date: Optional trade date (YYYY-MM-DD)
+            settle_date: Optional settlement date (YYYY-MM-DD)
 
         Returns:
             Tuple of (all_valid: bool, results: List[ValidationResult])
@@ -547,6 +659,11 @@ class TradeValidationRepository:
         if counterparty_name:
             counterparty_result = self.validate_counterparty(counterparty_name)
             results.append(counterparty_result)
+
+        # Validate Settlement Date (if both dates provided)
+        if trade_date and settle_date:
+            date_result = self.validate_settlement_date(trade_date, settle_date)
+            results.append(date_result)
 
         all_valid = all(r.is_valid for r in results)
 

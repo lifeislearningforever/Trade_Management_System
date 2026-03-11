@@ -52,6 +52,7 @@ urlpatterns = [
     path('api/validate-portfolio/', views.api_validate_portfolio, name='api_validate_portfolio'),
     path('api/validate-security/', views.api_validate_security, name='api_validate_security'),
     path('api/validate-counterparty/', views.api_validate_counterparty, name='api_validate_counterparty'),
+    path('api/validate-settlement-date/', views.api_validate_settlement_date, name='api_validate_settlement_date'),
     path('api/portfolios/', views.api_portfolios, name='api_portfolios'),
     path('api/securities/', views.api_securities, name='api_securities'),
     path('api/counterparties/', views.api_counterparties, name='api_counterparties'),

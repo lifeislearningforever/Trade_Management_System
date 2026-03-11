@@ -989,6 +989,21 @@ def api_validate_counterparty(request):
 
 
 @require_http_methods(["GET"])
+def api_validate_settlement_date(request):
+    """API: Validate settlement date is >= trade date."""
+    trade_date = request.GET.get('trade_date', '').strip()
+    settle_date = request.GET.get('settle_date', '').strip()
+
+    result = trade_validation_repository.validate_settlement_date(trade_date, settle_date)
+
+    return JsonResponse({
+        'is_valid': result.is_valid,
+        'message': result.message,
+        'details': result.details
+    })
+
+
+@require_http_methods(["GET"])
 def api_portfolios(request):
     """API: Get valid portfolios for dropdown (with search)."""
     search = request.GET.get('search', '').strip()

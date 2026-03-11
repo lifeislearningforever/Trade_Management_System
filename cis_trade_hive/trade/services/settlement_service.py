@@ -248,6 +248,13 @@ class SettlementService:
                     **kwargs
                 )
 
+            # For backdated, generate CHAIN_RECALC metadata upfront
+            # This is included in the INSERT to avoid race conditions
+            chain_recalc_metadata = None
+            if settlement_type == 'BACKDATED':
+                chain_recalc_metadata = f"CHAIN_RECALC:{portfolio_id}:{security_id}:{settle_date}"
+                logger.info(f"Backdated trade detected, chain_recalc_metadata: {chain_recalc_metadata}")
+
             # T+0 or Backdated - use position_queue for async processing
             success, message, queue_id = self.position_queue_service.enqueue_position_calculation(
                 trade_id=trade_id,
@@ -263,18 +270,11 @@ class SettlementService:
                 portfolio_currency=kwargs.get('portfolio_currency'),
                 isin=kwargs.get('isin'),
                 security_name=kwargs.get('security_name'),
-                use_db_queue=True  # Persist to database for reliability
+                use_db_queue=True,  # Persist to database for reliability
+                chain_recalc_metadata=chain_recalc_metadata  # Include metadata in INSERT
             )
 
             if success:
-                # For backdated, also flag for chain recalculation
-                if settlement_type == 'BACKDATED':
-                    self._flag_for_chain_recalculation(
-                        queue_id=queue_id,
-                        portfolio_id=portfolio_id,
-                        security_id=security_id,
-                        from_date=settle_date
-                    )
 
                 logger.info(
                     f"Trade {trade_id} queued for async {settlement_type} processing "
