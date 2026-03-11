@@ -412,21 +412,32 @@ class PositionService:
         self,
         portfolio_id: str,
         security_id: str,
-        as_of_date: str
+        as_of_date: str,
+        include_same_date: bool = True
     ) -> Optional[Dict[str, Any]]:
         """
-        Get position as of a specific date (for backdated trades).
+        Get position as of a specific date.
 
-        Returns the latest version (is_latest=true) with position_date < as_of_date.
-        This is used to find the base position for backdated trade calculations.
+        Args:
+            portfolio_id: Portfolio short name
+            security_id: Security label
+            as_of_date: Date to check (YYYY-MM-DD)
+            include_same_date: If True, includes positions with position_date <= as_of_date
+                              If False, only positions with position_date < as_of_date (for backdated)
+
+        Returns the latest version (is_latest=true) with position_date <= or < as_of_date.
         """
         try:
+            # For SELL or same-day trades: include positions on the same date
+            # For backdated calculations: use < to get base position before the date
+            date_operator = '<=' if include_same_date else '<'
+
             query = f"""
             SELECT *
             FROM {self.DATABASE}.{self.POSITION_TABLE}
             WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
               AND security_label = '{self._escape(security_id)}'
-              AND position_date < '{as_of_date}'
+              AND position_date {date_operator} '{as_of_date}'
               AND (is_latest = true OR is_latest IS NULL)
             ORDER BY position_date DESC, version_id DESC
             LIMIT 1
