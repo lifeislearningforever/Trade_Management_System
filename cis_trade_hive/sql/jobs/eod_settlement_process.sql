@@ -325,21 +325,32 @@ LEFT JOIN gmp_cis.v_current_positions_temp cp
     ON sq.portfolio_id = cp.portfolio_short_name
     AND sq.security_id = cp.security_label
 WHERE sq.settle_date <= '${var:SETTLE_DATE}'
-  AND sq.status = 'PROCESSING';
+  AND sq.status = 'PROCESSING'
+  -- Exclude error cases: SELL without position or insufficient quantity
+  AND NOT (
+      sq.trade_type = 'SELL' AND (
+          cp.position_id IS NULL
+          OR COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) < sq.quantity
+      )
+  );
 
 
 -- ============================================================================
--- STEP 6: Log processed records
+-- STEP 6: Log processed records with proper status
 -- ============================================================================
 -- Target: cis_eod_settlement_log
 -- Types: log_id BIGINT, batch_id BIGINT, queue_id BIGINT, trade_id BIGINT,
 --        portfolio_id STRING, security_id STRING, trade_type STRING,
 --        quantity DECIMAL(20,8), price DECIMAL(20,8), settle_date STRING,
---        status STRING, processed_at STRING
+--        status STRING, error_message STRING, processed_at STRING
+--
+-- Status determination:
+--   SUCCESS: BUY trade, or SELL with sufficient quantity
+--   FAILED: SELL without position, or SELL with insufficient quantity
 
 INSERT INTO gmp_cis.cis_eod_settlement_log
 (log_id, batch_id, queue_id, trade_id, portfolio_id, security_id, trade_type,
- quantity, price, settle_date, status, processed_at)
+ quantity, price, settle_date, status, error_message, processed_at)
 SELECT
     CAST(${var:BATCH_ID} * 10000 + ROW_NUMBER() OVER (ORDER BY sq.queue_id) AS BIGINT) AS log_id,
     CAST(${var:BATCH_ID} AS BIGINT) AS batch_id,
@@ -351,23 +362,65 @@ SELECT
     CAST(sq.quantity AS DECIMAL(20,8)) AS quantity,
     CAST(sq.price AS DECIMAL(20,8)) AS price,
     CAST(sq.settle_date AS STRING) AS settle_date,
-    CAST('SUCCESS' AS STRING) AS status,
+    -- Status: Check for error conditions
+    CAST(
+        CASE
+            -- SELL without existing position = FAILED
+            WHEN sq.trade_type = 'SELL' AND cp.position_id IS NULL THEN 'FAILED'
+            -- SELL with insufficient quantity = FAILED
+            WHEN sq.trade_type = 'SELL' AND COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) < sq.quantity THEN 'FAILED'
+            -- Otherwise SUCCESS
+            ELSE 'SUCCESS'
+        END
+    AS STRING) AS status,
+    -- Error message for failed records
+    CAST(
+        CASE
+            WHEN sq.trade_type = 'SELL' AND cp.position_id IS NULL THEN
+                CONCAT('No position found for ', sq.security_id, ' in portfolio ', sq.portfolio_id)
+            WHEN sq.trade_type = 'SELL' AND COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) < sq.quantity THEN
+                CONCAT('Insufficient quantity. Available: ', CAST(COALESCE(cp.quantity, 0) AS STRING), ', Requested: ', CAST(sq.quantity AS STRING))
+            ELSE NULL
+        END
+    AS STRING) AS error_message,
     CAST(FROM_UNIXTIME(UNIX_TIMESTAMP(), 'yyyy-MM-dd HH:mm:ss') AS STRING) AS processed_at
 FROM gmp_cis.cis_settlement_queue sq
+LEFT JOIN gmp_cis.v_current_positions_temp cp
+    ON sq.portfolio_id = cp.portfolio_short_name
+    AND sq.security_id = cp.security_label
 WHERE sq.settle_date <= '${var:SETTLE_DATE}'
   AND sq.status = 'PROCESSING';
 
 
 -- ============================================================================
--- STEP 7: Mark settlement queue records as COMPLETED
+-- STEP 7: Mark settlement queue records based on processing result
 -- ============================================================================
+-- COMPLETED: Successfully processed (logged as SUCCESS)
+-- FAILED: Error during processing (logged as FAILED)
 
+-- First, mark successful records as COMPLETED
 UPDATE gmp_cis.cis_settlement_queue
 SET status = 'COMPLETED',
     processed_at = FROM_UNIXTIME(UNIX_TIMESTAMP(), 'yyyy-MM-dd HH:mm:ss'),
     updated_at = FROM_UNIXTIME(UNIX_TIMESTAMP(), 'yyyy-MM-dd HH:mm:ss')
-WHERE settle_date <= '${var:SETTLE_DATE}'
-  AND status = 'PROCESSING';
+WHERE queue_id IN (
+    SELECT queue_id FROM gmp_cis.cis_eod_settlement_log
+    WHERE batch_id = ${var:BATCH_ID} AND status = 'SUCCESS'
+);
+
+-- Then, mark failed records as FAILED with error message
+UPDATE gmp_cis.cis_settlement_queue sq
+SET status = 'FAILED',
+    error_message = (
+        SELECT error_message FROM gmp_cis.cis_eod_settlement_log l
+        WHERE l.queue_id = sq.queue_id AND l.batch_id = ${var:BATCH_ID}
+    ),
+    processed_at = FROM_UNIXTIME(UNIX_TIMESTAMP(), 'yyyy-MM-dd HH:mm:ss'),
+    updated_at = FROM_UNIXTIME(UNIX_TIMESTAMP(), 'yyyy-MM-dd HH:mm:ss')
+WHERE queue_id IN (
+    SELECT queue_id FROM gmp_cis.cis_eod_settlement_log
+    WHERE batch_id = ${var:BATCH_ID} AND status = 'FAILED'
+);
 
 
 -- ============================================================================

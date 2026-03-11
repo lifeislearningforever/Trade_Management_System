@@ -299,19 +299,33 @@ class PositionQueueService:
                 )
                 recalc_result = self._process_chain_recalculation(chain_recalc_info)
 
-                if recalc_result['errors'] == 0:
-                    if is_db_queue:
-                        self._update_status(queue_id, self.STATUS_COMPLETED)
-                    logger.info(
-                        f"Successfully processed backdated trade queue_id={queue_id}, "
-                        f"recalculated {recalc_result['recalculated']} positions"
-                    )
-                else:
+                # Check for errors first
+                if recalc_result['errors'] > 0:
                     self._handle_failure(
                         item,
                         f"Chain recalculation had {recalc_result['errors']} errors",
                         is_db_queue
                     )
+                    return
+
+                # Check if any positions were actually recalculated
+                if recalc_result['recalculated'] == 0:
+                    # No trades found - this is an error condition
+                    self._handle_failure(
+                        item,
+                        f"No trades found for chain recalculation from {chain_recalc_info['from_date']}. "
+                        f"Portfolio={chain_recalc_info['portfolio_id']}, Security={chain_recalc_info['security_id']}",
+                        is_db_queue
+                    )
+                    return
+
+                # Success - positions were recalculated
+                if is_db_queue:
+                    self._update_status(queue_id, self.STATUS_COMPLETED)
+                logger.info(
+                    f"Successfully processed backdated trade queue_id={queue_id}, "
+                    f"recalculated {recalc_result['recalculated']} positions"
+                )
                 return
 
             # For T+0 (non-backdated): Calculate position directly
