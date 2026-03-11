@@ -281,15 +281,24 @@ run_eod_settlement() {
     log_info "Log file: $log_file"
     log_info "Processing $pending_count settlements..."
 
-    # Execute the SQL script with variables
+    # Create temp SQL file with variable substitution
+    # This is more reliable than impala-shell --var on Linux/edge nodes
+    local temp_sql="$LOG_DIR/eod_settlement_${PROCESSING_DATE}_${BATCH_ID}.sql"
+
+    log_info "Generating SQL with variable substitution..."
+    sed -e "s/__SETTLE_DATE__/$SETTLE_DATE/g" \
+        -e "s/__BATCH_ID__/$BATCH_ID/g" \
+        -e "s/__RUN_BY__/$RUN_BY/g" \
+        -e "s/__PROCESSING_DATE__/$PROCESSING_DATE/g" \
+        "$SQL_DIR/eod_settlement_process.sql" > "$temp_sql"
+
+    log_debug "Generated SQL file: $temp_sql"
+
+    # Execute the SQL script
     local start_time=$(date +%s)
 
     if impala-shell -i "$IMPALA_HOST" $auth_args -d "$DATABASE" \
-        --var=SETTLE_DATE="$SETTLE_DATE" \
-        --var=BATCH_ID="$BATCH_ID" \
-        --var=RUN_BY="$RUN_BY" \
-        --var=PROCESSING_DATE="$PROCESSING_DATE" \
-        -f "$SQL_DIR/eod_settlement_process.sql" \
+        -f "$temp_sql" \
         > "$log_file" 2>&1; then
 
         local end_time=$(date +%s)
@@ -297,6 +306,9 @@ run_eod_settlement() {
 
         log_info "Settlement processing completed successfully"
         log_info "Duration: ${duration} seconds"
+
+        # Cleanup temp SQL file
+        rm -f "$temp_sql"
 
         # Show summary
         show_batch_summary
@@ -308,6 +320,7 @@ run_eod_settlement() {
 
         log_error "Settlement processing failed after ${duration} seconds"
         log_error "Check log file: $log_file"
+        log_error "SQL file with substituted values: $temp_sql"
 
         # Show last 20 lines of log
         log_error "Last 20 lines of log:"
