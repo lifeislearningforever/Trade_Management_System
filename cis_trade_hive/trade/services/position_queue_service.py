@@ -285,11 +285,14 @@ class PositionQueueService:
                     )
 
             # Check if this is a backdated trade requiring chain recalculation
-            chain_recalc_info = self._parse_chain_recalc_metadata(item.get('error_message', ''))
+            error_message = item.get('error_message', '')
+            logger.info(f"Processing queue item: trade_id={trade_id}, error_message='{error_message}'")
+            chain_recalc_info = self._parse_chain_recalc_metadata(error_message)
 
             # For BACKDATED trades: Skip individual calculation, let chain recalculation handle ALL trades
             # This avoids the issue of creating a position that gets immediately deleted
             if chain_recalc_info:
+                logger.info(f"Parsed chain_recalc_info: {chain_recalc_info}")
                 logger.info(
                     f"Backdated trade detected for queue_id={queue_id}, trade_id={trade_id}. "
                     f"Using chain recalculation from {chain_recalc_info['from_date']}"
@@ -431,10 +434,14 @@ class PositionQueueService:
                 f"Chain recalc query: portfolio={portfolio_id}, security={security_id}, "
                 f"from_date={from_date}, to_date={today_str}"
             )
-            logger.debug(f"Query: {query}")
+            logger.info(f"CHAIN_RECALC QUERY: {query}")
 
             trades = impala_manager.execute_query(query, database=self.DATABASE)
             logger.info(f"Found {len(trades) if trades else 0} trades for chain recalculation")
+
+            if trades:
+                for t in trades:
+                    logger.info(f"  Trade found: id={t.get('trade_id')}, settle_date={t.get('settle_date')}, type={t.get('trade_type')}")
 
             if trades:
                 logger.info(f"Recalculating {len(trades)} trades from {from_date} to {today}")
