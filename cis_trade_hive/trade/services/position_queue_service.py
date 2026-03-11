@@ -281,7 +281,31 @@ class PositionQueueService:
             # Check if this is a backdated trade requiring chain recalculation
             chain_recalc_info = self._parse_chain_recalc_metadata(item.get('error_message', ''))
 
-            # Calculate position
+            # For BACKDATED trades: Skip individual calculation, let chain recalculation handle ALL trades
+            # This avoids the issue of creating a position that gets immediately deleted
+            if chain_recalc_info:
+                logger.info(
+                    f"Backdated trade detected for queue_id={queue_id}, trade_id={trade_id}. "
+                    f"Using chain recalculation from {chain_recalc_info['from_date']}"
+                )
+                recalc_result = self._process_chain_recalculation(chain_recalc_info)
+
+                if recalc_result['errors'] == 0:
+                    if is_db_queue:
+                        self._update_status(queue_id, self.STATUS_COMPLETED)
+                    logger.info(
+                        f"Successfully processed backdated trade queue_id={queue_id}, "
+                        f"recalculated {recalc_result['recalculated']} positions"
+                    )
+                else:
+                    self._handle_failure(
+                        item,
+                        f"Chain recalculation had {recalc_result['errors']} errors",
+                        is_db_queue
+                    )
+                return
+
+            # For T+0 (non-backdated): Calculate position directly
             success, message, position = self.position_service.calculate_position(
                 portfolio_id=item['portfolio_id'],
                 security_id=item['security_id'],
@@ -299,10 +323,6 @@ class PositionQueueService:
             )
 
             if success:
-                # If backdated, trigger chain recalculation
-                if chain_recalc_info:
-                    self._process_chain_recalculation(chain_recalc_info)
-
                 if is_db_queue:
                     self._update_status(queue_id, self.STATUS_COMPLETED)
                 logger.info(f"Successfully processed queue_id={queue_id}, trade_id={trade_id}")
@@ -354,8 +374,23 @@ class PositionQueueService:
         try:
             portfolio_id = chain_info['portfolio_id']
             security_id = chain_info['security_id']
-            from_date = chain_info['from_date']
+            from_date_raw = chain_info['from_date']
             today = datetime.now().date()
+
+            # Normalize from_date to YYYY-MM-DD format
+            # Handle various formats: YYYY-MM-DD, YYYYMMDD, or datetime string
+            from_date = from_date_raw
+            if len(from_date_raw) == 8 and from_date_raw.isdigit():
+                # YYYYMMDD format
+                from_date = f"{from_date_raw[:4]}-{from_date_raw[4:6]}-{from_date_raw[6:8]}"
+            elif 'T' in from_date_raw:
+                # ISO format with time
+                from_date = from_date_raw.split('T')[0]
+            # Else assume already YYYY-MM-DD
+
+            logger.info(
+                f"Chain recalc: from_date_raw='{from_date_raw}', normalized='{from_date}'"
+            )
 
             logger.info(
                 f"Starting chain recalculation for {portfolio_id}/{security_id} "
@@ -379,6 +414,7 @@ class PositionQueueService:
             # Step 2: Get ALL trades from backdated date onwards (>= not >)
             # This INCLUDES the backdated trade itself
             # Note: security_currency, portfolio_currency, isin, etc. are NOT in cis_trade table
+            today_str = today.strftime("%Y-%m-%d")
             query = f"""
             SELECT trade_id, trade_type, quantity, price,
                    COALESCE(commission, 0) + COALESCE(sec_fee, 0) + COALESCE(other_charges, 0) as charges,
@@ -387,13 +423,20 @@ class PositionQueueService:
             WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
               AND security_label = '{self._escape(security_id)}'
               AND settle_date >= '{from_date}'
-              AND settle_date <= '{today.strftime("%Y-%m-%d")}'
+              AND settle_date <= '{today_str}'
               AND trade_status IN ('INITIAL', 'VALIDATED', 'SETTLED')
               AND (is_deleted = false OR is_deleted IS NULL)
             ORDER BY settle_date ASC, trade_id ASC
             """
 
+            logger.info(
+                f"Chain recalc query: portfolio={portfolio_id}, security={security_id}, "
+                f"from_date={from_date}, to_date={today_str}"
+            )
+            logger.debug(f"Query: {query}")
+
             trades = impala_manager.execute_query(query, database=self.DATABASE)
+            logger.info(f"Found {len(trades) if trades else 0} trades for chain recalculation")
 
             if trades:
                 logger.info(f"Recalculating {len(trades)} trades from {from_date} to {today}")
