@@ -6,6 +6,7 @@ This script serves as the entry point for deploying the CIS Trade Hive
 Django application as a CML Project Application.
 
 Features:
+- Multi-environment support (SIT, UAT, PROD, DR)
 - Kerberos authentication with automatic ticket renewal
 - Hybrid connection: Impala (reads) + Hive (writes)
 - Gunicorn WSGI server with configurable workers/threads
@@ -16,13 +17,19 @@ CML Application Configuration:
 - Subdomain: cis-trade-hive
 
 Environment Variables (set in CML Project Settings):
-- CIS_ENV: Set to 'work' for CML/Cloudera environment
-- KRB5_KTNAME: Kerberos keytab path
-- KRB5_PRINCIPAL: Kerberos principal
+- CIS_ENV: Environment name (SIT, UAT, PROD, DR) - REQUIRED
+- KRB5_KTNAME: Override Kerberos keytab path (optional)
+- KRB5_PRINCIPAL: Override Kerberos principal (optional)
 - KRB5CCNAME: Kerberos credential cache
 - POSITION_WORKER_ENABLED: Set to '1' to enable position worker (default: enabled)
 - POSITION_WORKER_POLL_INTERVAL: Poll interval in seconds (default: 10)
 - POSITION_WORKER_BATCH_SIZE: Batch size for processing (default: 100)
+
+Environments:
+- SIT:  owntmrwsg@TST.UOBNET.COM (System Integration Testing)
+- UAT:  ownumrwsg@SG.UOBNET.COM  (User Acceptance Testing)
+- PROD: ownumrwsg@SG.UOBNET.COM  (Production)
+- DR:   ownrmrwsg@SG.UOBNET.COM  (Disaster Recovery)
 
 Impala/Hive are configured via IMPALA_CONFIG and HIVE_CONFIG in settings.py
 """
@@ -40,6 +47,66 @@ DJANGO_SETTINGS = os.environ.get("DJANGO_SETTINGS_MODULE", "config.settings")
 COLLECT_STATIC = os.environ.get("DJANGO_COLLECT_STATIC", "0") in ("1", "true", "True")
 print(os.environ.get("USER_OWNER"))
 print(os.environ.get("CDSW_USERNAME"))
+
+# ============================================================================
+# Environment Configuration
+# ============================================================================
+# Environment-specific Kerberos and connection settings
+
+ENV_CONFIGS = {
+    'SIT': {
+        'name': 'System Integration Testing',
+        'keytab': '/home/cdsw/CIS/secrets/owntmrwsg.keytab',
+        'principal': 'owntmrwsg@TST.UOBNET.COM',
+        'cache': 'FILE:/home/cdsw/CIS/krb5/krb5cc',
+    },
+    'UAT': {
+        'name': 'User Acceptance Testing',
+        'keytab': '/home/cdsw/CIS/secrets/ownumrwsg.keytab',
+        'principal': 'ownumrwsg@SG.UOBNET.COM',
+        'cache': 'FILE:/home/cdsw/CIS/krb5/krb5cc',
+    },
+    'PROD': {
+        'name': 'Production',
+        'keytab': '/home/cdsw/CIS/secrets/ownumrwsg.keytab',
+        'principal': 'ownumrwsg@SG.UOBNET.COM',
+        'cache': 'FILE:/home/cdsw/CIS/krb5/krb5cc',
+    },
+    'DR': {
+        'name': 'Disaster Recovery',
+        'keytab': '/home/cdsw/CIS/secrets/ownrmrwsg.keytab',
+        'principal': 'ownrmrwsg@SG.UOBNET.COM',
+        'cache': 'FILE:/home/cdsw/CIS/krb5/krb5cc',
+    },
+}
+
+
+def get_environment_config():
+    """
+    Get configuration for current environment.
+
+    Returns:
+        Tuple of (env_name, keytab, principal, cache)
+    """
+    # Get environment from CIS_ENV (required for CML)
+    cis_env = os.environ.get("CIS_ENV", "SIT").upper()
+
+    # Handle legacy 'work' value
+    if cis_env == "WORK":
+        cis_env = "SIT"
+
+    if cis_env not in ENV_CONFIGS:
+        print(f"WARNING: Unknown CIS_ENV '{cis_env}', defaulting to SIT")
+        cis_env = "SIT"
+
+    config = ENV_CONFIGS[cis_env]
+
+    # Allow environment variable overrides
+    keytab = os.environ.get("KRB5_KTNAME") or config['keytab']
+    principal = os.environ.get("KRB5_PRINCIPAL") or config['principal']
+    cache = os.environ.get("KRB5CCNAME") or config['cache']
+
+    return cis_env, keytab, principal, cache
 
 # Position Worker Configuration
 POSITION_WORKER_ENABLED = os.environ.get("POSITION_WORKER_ENABLED", "1") in ("1", "true", "True")
@@ -203,13 +270,27 @@ def main():
     if WORKDIR:
         os.chdir(WORKDIR)
 
+    # ==================== Environment Detection ====================
+    # Get environment-specific configuration (SIT, UAT, PROD, DR)
+    cis_env, keytab, principal, cache = get_environment_config()
+    env_config = ENV_CONFIGS.get(cis_env, {})
+
+    print("=" * 60)
+    print(f"  CIS Trade Hive - {env_config.get('name', cis_env)} Environment")
+    print("=" * 60)
+
     # Set Django environment
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", DJANGO_SETTINGS)
-    os.environ.setdefault("DJANGO_DEBUG", "True")
     os.environ.setdefault("DJANGO_ALLOWED_HOSTS", "*")
 
-    # Set CIS_ENV to 'work' for CML/Cloudera configuration
-    os.environ.setdefault("CIS_ENV", "work")
+    # Set CIS_ENV for settings.py to pick up
+    os.environ["CIS_ENV"] = cis_env
+
+    # Debug mode off for non-LOCAL environments
+    if cis_env in ("PROD", "DR"):
+        os.environ.setdefault("DJANGO_DEBUG", "False")
+    else:
+        os.environ.setdefault("DJANGO_DEBUG", "True")
 
     # ==================== REST Proxy Configuration ====================
     # Enable REST proxy mode for Hive operations (bypasses direct Hive connections)
@@ -229,10 +310,11 @@ def main():
     # Timeout for proxy requests (seconds)
     os.environ.setdefault("HIVE_TIMEOUT", "300")
 
-    # Kerberos config (from env)
-    keytab = os.environ.get("KRB5_KTNAME") or "/home/cdsw/CIS/secrets/qwntmwsg.keytab"
-    principal = os.environ.get("KRB5_PRINCIPAL") or "qwntmwsg@TST.UOBNET.COM"
-    cache = os.environ.get("KRB5CCNAME") or "FILE:/home/cdsw/CIS/krb5/krb5cc"
+    # ==================== Kerberos Authentication ====================
+    # Kerberos config from environment detection
+    print(f"==> Environment: {cis_env} ({env_config.get('name', 'Unknown')})")
+    print(f"==> Keytab: {keytab}")
+    print(f"==> Principal: {principal}")
 
     # Obtain Kerberos TGT up-front (before commands that hit Impala/Hive)
     kinit_with_keytab(keytab, principal, cache=cache)
@@ -270,31 +352,39 @@ def main():
     threads = os.environ.get("THREADS", "8")
     keepalive = os.environ.get("KEEPALIVE", "5")
 
-    print("=== Runtime Configuration ===")
-    print(f"DJANGO_SETTINGS_MODULE = {os.environ['DJANGO_SETTINGS_MODULE']}")
-    print(f"DJANGO_DEBUG           = {os.environ.get('DJANGO_DEBUG')}")
-    print(f"DJANGO_ALLOWED_HOSTS   = {os.environ.get('DJANGO_ALLOWED_HOSTS')}")
-    print(f"CIS_ENV                = {os.environ.get('CIS_ENV')}")
-    print(f"Collect_static         = {COLLECT_STATIC}")
-    print(f"Gunicorn bind          = {bind}")
-    print(f"Workers                = {workers}")
-    print(f"Timeout                = {timeout}")
-    print(f"KRB5_KTNAME            = {keytab}")
-    print(f"KRB5_PRINCIPAL         = {principal}")
-    print(f"KRB5CCNAME             = {cache}")
-    print(f"Worker class           = {worker_class}")
-    print(f"Threads                = {threads}")
-    print(f"Keep-alive             = {keepalive}")
-    print("--- REST Proxy Configuration ---")
-    print(f"USE_REST_PROXY         = {os.environ.get('USE_REST_PROXY')}")
-    print(f"HIVE_PROXY_URL         = {os.environ.get('HIVE_PROXY_URL')}")
-    print(f"HIVE_DATABASE          = {os.environ.get('HIVE_DATABASE')}")
-    print(f"HIVE_TIMEOUT           = {os.environ.get('HIVE_TIMEOUT')}")
-    print("--- Position Worker Configuration ---")
-    print(f"POSITION_WORKER_ENABLED      = {POSITION_WORKER_ENABLED}")
-    print(f"POSITION_WORKER_POLL_INTERVAL = {POSITION_WORKER_POLL_INTERVAL}s")
-    print(f"POSITION_WORKER_BATCH_SIZE    = {POSITION_WORKER_BATCH_SIZE}")
-    print("==============================")
+    print("=" * 60)
+    print("  Runtime Configuration")
+    print("=" * 60)
+    print(f"  Environment:         {cis_env} ({env_config.get('name', 'Unknown')})")
+    print(f"  Django Settings:     {os.environ['DJANGO_SETTINGS_MODULE']}")
+    print(f"  Debug Mode:          {os.environ.get('DJANGO_DEBUG')}")
+    print(f"  Allowed Hosts:       {os.environ.get('DJANGO_ALLOWED_HOSTS')}")
+    print(f"  Collect Static:      {COLLECT_STATIC}")
+    print("")
+    print("  Gunicorn:")
+    print(f"    Bind:              {bind}")
+    print(f"    Workers:           {workers}")
+    print(f"    Worker Class:      {worker_class}")
+    print(f"    Threads:           {threads}")
+    print(f"    Timeout:           {timeout}")
+    print(f"    Keep-alive:        {keepalive}")
+    print("")
+    print("  Kerberos:")
+    print(f"    Keytab:            {keytab}")
+    print(f"    Principal:         {principal}")
+    print(f"    Cache:             {cache}")
+    print("")
+    print("  REST Proxy:")
+    print(f"    Enabled:           {os.environ.get('USE_REST_PROXY')}")
+    print(f"    URL:               {os.environ.get('HIVE_PROXY_URL')}")
+    print(f"    Database:          {os.environ.get('HIVE_DATABASE')}")
+    print(f"    Timeout:           {os.environ.get('HIVE_TIMEOUT')}")
+    print("")
+    print("  Position Worker:")
+    print(f"    Enabled:           {POSITION_WORKER_ENABLED}")
+    print(f"    Poll Interval:     {POSITION_WORKER_POLL_INTERVAL}s")
+    print(f"    Batch Size:        {POSITION_WORKER_BATCH_SIZE}")
+    print("=" * 60)
 
     run([
         "gunicorn",

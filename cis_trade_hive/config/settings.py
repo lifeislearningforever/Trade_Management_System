@@ -4,6 +4,7 @@ Django settings for CisTrade project.
 Enterprise-grade Trade Management System with:
 - SOLID Architecture principles
 - Impala/Kudu database connectivity
+- Multi-environment support (LOCAL, SIT, UAT, PROD, DR)
 - Direct data access without authentication
 """
 
@@ -17,9 +18,32 @@ load_dotenv()
 # Build paths
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# ============================================================================
+# Environment Configuration
+# ============================================================================
+# Set CIS_ENV environment variable to switch environments:
+#   LOCAL - Local development with Docker
+#   SIT   - System Integration Testing
+#   UAT   - User Acceptance Testing
+#   PROD  - Production
+#   DR    - Disaster Recovery
+
+from config.environments import (
+    get_current_environment,
+    get_environment_config,
+    CURRENT_ENV,
+    CURRENT_CONFIG,
+)
+
+# Current environment
+CIS_ENVIRONMENT = CURRENT_ENV
+CIS_ENVIRONMENT_DISPLAY = CURRENT_CONFIG.get('ENV_DISPLAY', CIS_ENVIRONMENT)
+
 # Security Settings
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-CHANGE-ME-IN-PRODUCTION')
-DEBUG = os.environ.get('DJANGO_DEBUG', 'true').lower() == 'true'
+
+# Debug mode from environment config (can be overridden by env var)
+DEBUG = os.environ.get('DJANGO_DEBUG', str(CURRENT_CONFIG.get('DEBUG', True))).lower() == 'true'
 
 # Development mode settings
 SKIP_PERMISSION_CHECKS = DEBUG  # Skip permission checks in dev mode
@@ -103,34 +127,60 @@ DATABASES = {
     },
 }
 
-# Impala Configuration (Local Environment - Docker with Kudu)
-# Used for Kudu table operations via Impala (port 21050)
+# ============================================================================
+# Impala Configuration (Environment-aware)
+# ============================================================================
+# Uses environment-specific settings from config/environments.py
+# Can be overridden by environment variables
+
 IMPALA_CONFIG = {
-    'HOST': os.environ.get('IMPALA_HOST', 'localhost'),
-    'PORT': int(os.environ.get('IMPALA_PORT', '21050')),
-    'DATABASE': os.environ.get('IMPALA_DB', 'gmp_cis'),
-    'AUTH': os.environ.get('IMPALA_AUTH', 'NOSASL'),
+    'HOST': os.environ.get('IMPALA_HOST', CURRENT_CONFIG.get('IMPALA_HOST', 'localhost')),
+    'PORT': int(os.environ.get('IMPALA_PORT', str(CURRENT_CONFIG.get('IMPALA_PORT', 21050)))),
+    'DATABASE': os.environ.get('IMPALA_DB', CURRENT_CONFIG.get('IMPALA_DB', 'gmp_cis')),
+    'AUTH': os.environ.get('IMPALA_AUTH', CURRENT_CONFIG.get('IMPALA_AUTH', 'NOSASL')),
     'USERNAME': os.environ.get('IMPALA_USERNAME', ''),
     'PASSWORD': os.environ.get('IMPALA_PASSWORD', ''),
     'TIMEOUT': int(os.environ.get('IMPALA_TIMEOUT', '60')),
     'POOL_SIZE': int(os.environ.get('IMPALA_POOL_SIZE', '10')),
 }
 
-# Hive Configuration (HiveServer2 - port 10000)
-# Used for external table operations via HiveServer2
-# Uses impyla library (same as Impala) but connects to HiveServer2
+# ============================================================================
+# Hive Configuration (Environment-aware)
+# ============================================================================
+# Uses environment-specific settings from config/environments.py
+# Can be overridden by environment variables
+
 HIVE_CONFIG = {
-    'HOST': os.environ.get('HIVE_HOST', os.environ.get('IMPALA_HOST', 'localhost')),
-    'PORT': int(os.environ.get('HIVE_PORT', '10000')),
-    'DATABASE': os.environ.get('HIVE_DB', os.environ.get('IMPALA_DB', 'gmp_cis')),
-    'AUTH': os.environ.get('HIVE_AUTH', os.environ.get('IMPALA_AUTH', 'NOSASL')),
-    'USERNAME': os.environ.get('HIVE_USERNAME', os.environ.get('IMPALA_USERNAME', '')),
-    'PASSWORD': os.environ.get('HIVE_PASSWORD', os.environ.get('IMPALA_PASSWORD', '')),
+    'HOST': os.environ.get('HIVE_HOST', CURRENT_CONFIG.get('HIVE_HOST', 'localhost')),
+    'PORT': int(os.environ.get('HIVE_PORT', str(CURRENT_CONFIG.get('HIVE_PORT', 10000)))),
+    'DATABASE': os.environ.get('HIVE_DB', CURRENT_CONFIG.get('HIVE_DB', 'gmp_cis')),
+    'AUTH': os.environ.get('HIVE_AUTH', CURRENT_CONFIG.get('HIVE_AUTH', 'NOSASL')),
+    'USERNAME': os.environ.get('HIVE_USERNAME', ''),
+    'PASSWORD': os.environ.get('HIVE_PASSWORD', ''),
     'TIMEOUT': int(os.environ.get('HIVE_TIMEOUT', '120')),
     'POOL_SIZE': int(os.environ.get('HIVE_POOL_SIZE', '10')),
     'USE_SSL': os.environ.get('HIVE_USE_SSL', 'false').lower() == 'true',
     'KERBEROS_SERVICE_NAME': os.environ.get('HIVE_KERBEROS_SERVICE_NAME', 'hive'),
 }
+
+# ============================================================================
+# Kerberos Configuration (Environment-aware)
+# ============================================================================
+# Only used in non-LOCAL environments (SIT, UAT, PROD, DR)
+
+KERBEROS_CONFIG = {
+    'ENABLED': CURRENT_CONFIG.get('KERBEROS_ENABLED', False),
+    'KRB5_KTNAME': os.environ.get('KRB5_KTNAME', CURRENT_CONFIG.get('KRB5_KTNAME')),
+    'KRB5_PRINCIPAL': os.environ.get('KRB5_PRINCIPAL', CURRENT_CONFIG.get('KRB5_PRINCIPAL')),
+    'KRB5CCNAME': os.environ.get('KRB5CCNAME', CURRENT_CONFIG.get('KRB5CCNAME')),
+}
+
+# ============================================================================
+# REST Proxy Configuration (for Hive in CML environments)
+# ============================================================================
+
+USE_REST_PROXY = os.environ.get('USE_REST_PROXY', str(CURRENT_CONFIG.get('USE_REST_PROXY', False))).lower() == 'true'
+HIVE_PROXY_URL = os.environ.get('HIVE_PROXY_URL', CURRENT_CONFIG.get('HIVE_PROXY_URL'))
 
 # Impala Connection Pool Configuration
 # Increased from 10 to 35 to support Gunicorn workers (4 workers x 4 threads + margin)

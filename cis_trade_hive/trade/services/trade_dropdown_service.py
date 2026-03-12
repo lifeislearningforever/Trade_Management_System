@@ -7,11 +7,18 @@ Simplified service for trade form dropdowns:
 - Uses cis_portfolio, cis_security for entity lookups
 - No dependency on lookup tables (removed to improve performance)
 
+Performance Optimizations:
+- Django cache for UDF options (300s TTL)
+- Batch UDF loading to reduce DB queries from 18+ to 1
+- Graceful fallback to DB on cache miss/error
+
 Required tables: cis_trade, cis_udf_field, cis_party, cis_portfolio, cis_security, cis_equity_price
 """
 
 import logging
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
+
+from django.core.cache import cache
 
 from core.repositories.impala_connection import impala_manager
 from trade.repositories.trade_validation_repository import trade_validation_repository
@@ -19,20 +26,84 @@ from udf.repositories.udf_field_repository import udf_field_repository
 
 logger = logging.getLogger(__name__)
 
+# Cache configuration
+UDF_CACHE_TIMEOUT = 300  # 5 minutes
+UDF_CACHE_PREFIX = 'udf_trade_'
+UDF_BATCH_CACHE_KEY = 'udf_trade_all_fields'
+
 
 class TradeDropdownService:
-    """Service for fetching dropdown options for trade forms"""
+    """Service for fetching dropdown options for trade forms with caching"""
 
     DATABASE = 'gmp_cis'
     OBJECT_TYPE = 'TRADE'  # UDF Object Type for Trade entity
 
+    # List of UDF field names for batch loading
+    UDF_FIELD_NAMES = [
+        'GL Fund Type', 'GL Cost Centre', 'GL Account Code', 'Selling Rule',
+        'Sub Custodian', 'Open/Close Position', 'Extension', 'Fund Type',
+        'Income/Exp Type', 'UOBN/UOBN-HK', 'Section 31/26', 'Revision Code',
+        'Amortisation Method', 'Delivery Type', 'Income Type', 'Split Type',
+        'Reduction Type'
+    ]
+
     # =========================================================================
-    # UDF FIELD HELPER
+    # UDF CACHING METHODS
     # =========================================================================
+
+    def _get_cache_key(self, field_name: str) -> str:
+        """Generate cache key for a UDF field."""
+        return f"{UDF_CACHE_PREFIX}{field_name.replace(' ', '_').replace('/', '_').lower()}"
+
+    def _load_all_udf_fields_batch(self) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Load all UDF fields for TRADE entity in a single batch query.
+        Caches individual fields and returns the complete mapping.
+
+        Returns:
+            Dictionary mapping field_name to list of options
+        """
+        try:
+            # Try to get from batch cache first
+            cached_batch = cache.get(UDF_BATCH_CACHE_KEY)
+            if cached_batch is not None:
+                logger.debug("UDF batch loaded from cache")
+                return cached_batch
+
+            # Single query to load all TRADE UDF fields
+            all_fields = udf_field_repository.get_all(object_type=self.OBJECT_TYPE, is_active=True)
+
+            # Group by field_name
+            field_map: Dict[str, List[Dict[str, Any]]] = {}
+            for field in all_fields:
+                field_name = field.get('field_name', '')
+                field_value = field.get('field_value', '')
+                if field_name and field_value:
+                    if field_name not in field_map:
+                        field_map[field_name] = []
+                    field_map[field_name].append({
+                        'value': field_value,
+                        'label': field_value.replace('_', ' ').title()
+                    })
+
+            # Cache the batch result
+            cache.set(UDF_BATCH_CACHE_KEY, field_map, UDF_CACHE_TIMEOUT)
+
+            # Also cache individual fields for single-field lookups
+            for field_name, options in field_map.items():
+                cache_key = self._get_cache_key(field_name)
+                cache.set(cache_key, options, UDF_CACHE_TIMEOUT)
+
+            logger.info(f"UDF batch loaded: {len(field_map)} fields from database")
+            return field_map
+
+        except Exception as e:
+            logger.error(f"Error loading UDF batch: {str(e)}")
+            return {}
 
     def _get_udf_options(self, field_name: str) -> List[Dict[str, Any]]:
         """
-        Get dropdown options from UDF field table.
+        Get dropdown options from UDF field table with caching.
 
         Args:
             field_name: The field name in UDF table (e.g., 'Fund Type', 'Selling Rule')
@@ -40,21 +111,84 @@ class TradeDropdownService:
         Returns:
             List of options with 'value' and 'label' keys
         """
+        cache_key = self._get_cache_key(field_name)
+
+        # Try cache first
         try:
-            # Query UDF field values for this field_name
+            cached = cache.get(cache_key)
+            if cached is not None:
+                logger.debug(f"UDF cache hit for {field_name}")
+                return cached
+        except Exception as e:
+            logger.warning(f"Cache read error for {field_name}: {str(e)}")
+
+        # Cache miss - try batch load first (more efficient)
+        try:
+            batch_data = self._load_all_udf_fields_batch()
+            if field_name in batch_data:
+                return batch_data[field_name]
+        except Exception as e:
+            logger.warning(f"Batch load failed, falling back to single query: {str(e)}")
+
+        # Fallback to single field query
+        try:
             results = udf_field_repository.get_field_values(self.OBJECT_TYPE, field_name)
             if results:
-                logger.debug(f"Loaded {len(results)} options from UDF for {field_name}")
-                return [
+                options = [
                     {
                         'value': r.get('field_value', ''),
                         'label': r.get('field_value', '').replace('_', ' ').title()
                     }
                     for r in results if r.get('field_value')
                 ]
+                # Cache the result
+                try:
+                    cache.set(cache_key, options, UDF_CACHE_TIMEOUT)
+                except Exception as cache_err:
+                    logger.warning(f"Cache write error for {field_name}: {str(cache_err)}")
+
+                logger.debug(f"Loaded {len(options)} options from DB for {field_name}")
+                return options
         except Exception as e:
-            logger.debug(f"UDF not found for {field_name}, using defaults")
+            logger.debug(f"UDF not found for {field_name}: {str(e)}")
+
         return []
+
+    def invalidate_udf_cache(self, field_name: Optional[str] = None) -> None:
+        """
+        Invalidate UDF cache. Call this when UDF fields are modified.
+
+        Args:
+            field_name: Specific field to invalidate, or None to invalidate all
+        """
+        try:
+            if field_name:
+                # Invalidate specific field
+                cache_key = self._get_cache_key(field_name)
+                cache.delete(cache_key)
+                logger.info(f"Invalidated UDF cache for: {field_name}")
+
+            # Always invalidate batch cache when any field changes
+            cache.delete(UDF_BATCH_CACHE_KEY)
+            logger.info("Invalidated UDF batch cache")
+
+        except Exception as e:
+            logger.error(f"Error invalidating UDF cache: {str(e)}")
+
+    def warm_udf_cache(self) -> int:
+        """
+        Pre-load all UDF fields into cache (for app startup).
+
+        Returns:
+            Number of fields cached
+        """
+        try:
+            field_map = self._load_all_udf_fields_batch()
+            logger.info(f"UDF cache warmed with {len(field_map)} fields")
+            return len(field_map)
+        except Exception as e:
+            logger.error(f"Error warming UDF cache: {str(e)}")
+            return 0
 
     def get_all_dropdown_options(self) -> Dict[str, List[Dict[str, Any]]]:
         """

@@ -11,6 +11,10 @@ New Schema Support:
 Cascading Dropdown Logic:
 1. Get entity types: WHERE field_value = ''
 2. Get fields by entity: WHERE object_type = '<selected>' AND field_value != ''
+
+Cache Invalidation:
+- All create/update/delete/restore operations invalidate the UDF cache
+- This ensures trade dropdown service always has fresh data
 """
 
 from typing import List, Dict, Any, Optional
@@ -24,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 class UDFFieldService:
-    """Service for UDF field business logic operations with audit logging."""
+    """Service for UDF field business logic operations with audit logging and cache invalidation."""
 
     def __init__(self, repository: UDFFieldRepositoryInterface):
         """
@@ -34,6 +38,39 @@ class UDFFieldService:
             repository: UDF field repository implementation
         """
         self.repository = repository
+
+    # ========================================================================
+    # CACHE INVALIDATION
+    # ========================================================================
+
+    def _invalidate_udf_cache(self, object_type: str, field_name: str) -> None:
+        """
+        Invalidate UDF cache when a field is modified.
+        This ensures trade dropdown service gets fresh data.
+
+        Args:
+            object_type: The entity type (e.g., 'TRADE', 'PORTFOLIO')
+            field_name: The field name being modified
+        """
+        try:
+            # Import here to avoid circular imports
+            from trade.services.trade_dropdown_service import trade_dropdown_service
+
+            # Only invalidate if this is a TRADE UDF field
+            if object_type and object_type.upper() == 'TRADE':
+                trade_dropdown_service.invalidate_udf_cache(field_name)
+                logger.info(f"Invalidated UDF cache for TRADE.{field_name}")
+            else:
+                # For non-TRADE entities, just invalidate the batch cache
+                # in case future entity services also use caching
+                trade_dropdown_service.invalidate_udf_cache(None)
+                logger.debug(f"Invalidated UDF batch cache for {object_type}.{field_name}")
+
+        except ImportError:
+            logger.debug("trade_dropdown_service not available for cache invalidation")
+        except Exception as e:
+            # Don't fail the operation if cache invalidation fails
+            logger.warning(f"Failed to invalidate UDF cache: {str(e)}")
 
     # ========================================================================
     # CASCADING DROPDOWN OPERATIONS
@@ -209,6 +246,9 @@ class UDFFieldService:
             udf_id = self.repository.create(create_data)
 
             if udf_id:
+                # Invalidate cache
+                self._invalidate_udf_cache(create_data['object_type'], create_data['field_name'])
+
                 # Log to audit
                 audit_log_kudu_repository.log_action(
                     user_id=str(user_info['user_id']),
@@ -279,6 +319,11 @@ class UDFFieldService:
             success = self.repository.update(udf_id, update_data)
 
             if success:
+                # Invalidate cache (for both old and new field names if changed)
+                self._invalidate_udf_cache(update_data['object_type'], update_data['field_name'])
+                if existing.get('field_name') != update_data['field_name']:
+                    self._invalidate_udf_cache(existing['object_type'], existing['field_name'])
+
                 # Log to audit
                 audit_log_kudu_repository.log_action(
                     user_id=str(user_info['user_id']),
@@ -334,6 +379,9 @@ class UDFFieldService:
             success = self.repository.soft_delete(udf_id, user_info['username'])
 
             if success:
+                # Invalidate cache
+                self._invalidate_udf_cache(existing['object_type'], existing['field_name'])
+
                 # Log to audit
                 audit_log_kudu_repository.log_action(
                     user_id=str(user_info['user_id']),
@@ -389,6 +437,9 @@ class UDFFieldService:
             success = self.repository.restore(udf_id, user_info['username'])
 
             if success:
+                # Invalidate cache
+                self._invalidate_udf_cache(existing['object_type'], existing['field_name'])
+
                 # Log to audit
                 audit_log_kudu_repository.log_action(
                     user_id=str(user_info['user_id']),
