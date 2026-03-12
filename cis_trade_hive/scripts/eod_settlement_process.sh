@@ -286,13 +286,30 @@ run_eod_settlement() {
     local temp_sql="$LOG_DIR/eod_settlement_${PROCESSING_DATE}_${BATCH_ID}.sql"
 
     log_info "Generating SQL with variable substitution..."
-    sed -e "s/__SETTLE_DATE__/$SETTLE_DATE/g" \
-        -e "s/__BATCH_ID__/$BATCH_ID/g" \
-        -e "s/__RUN_BY__/$RUN_BY/g" \
-        -e "s/__PROCESSING_DATE__/$PROCESSING_DATE/g" \
+    log_info "  SETTLE_DATE=$SETTLE_DATE"
+    log_info "  BATCH_ID=$BATCH_ID"
+    log_info "  RUN_BY=$RUN_BY"
+    log_info "  PROCESSING_DATE=$PROCESSING_DATE"
+
+    # Use sed with different delimiter to avoid issues with special characters
+    # Also export variables to ensure they're available
+    export SETTLE_DATE BATCH_ID RUN_BY PROCESSING_DATE
+
+    sed "s|__SETTLE_DATE__|${SETTLE_DATE}|g; \
+         s|__BATCH_ID__|${BATCH_ID}|g; \
+         s|__RUN_BY__|${RUN_BY}|g; \
+         s|__PROCESSING_DATE__|${PROCESSING_DATE}|g" \
         "$SQL_DIR/eod_settlement_process.sql" > "$temp_sql"
 
     log_debug "Generated SQL file: $temp_sql"
+
+    # Verify substitution worked
+    if grep -q "__SETTLE_DATE__\|__BATCH_ID__\|__RUN_BY__\|__PROCESSING_DATE__" "$temp_sql"; then
+        log_error "Variable substitution failed! Placeholders still present in SQL file."
+        log_error "Check the generated SQL: $temp_sql"
+        return 1
+    fi
+    log_info "Variable substitution verified OK"
 
     # Execute the SQL script
     local start_time=$(date +%s)
