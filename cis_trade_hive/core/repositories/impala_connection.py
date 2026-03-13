@@ -90,7 +90,7 @@ class ImpalaConnectionManager:
         try:
             config = settings.IMPALA_CONFIG
             db_name = database or config['DATABASE']
-            auth_mode = config.get('AUTH', 'NOSASL')
+            auth_mode = config.get('AUTH_MECHANISM', config.get('AUTH', 'NOSASL'))
 
             # Build connection parameters
             conn_params = {
@@ -99,6 +99,14 @@ class ImpalaConnectionManager:
                 'database': db_name,
                 'auth_mechanism': auth_mode,
             }
+
+            # Add SSL if enabled (for Work/CML environments)
+            if config.get('USE_SSL', False):
+                conn_params['use_ssl'] = True
+
+            # Add Kerberos service name if using GSSAPI
+            if auth_mode == 'GSSAPI' and config.get('KERBEROS_SERVICE_NAME'):
+                conn_params['kerberos_service_name'] = config['KERBEROS_SERVICE_NAME']
 
             # Add credentials for auth modes that require them
             if auth_mode in ['LDAP', 'CUSTOM']:

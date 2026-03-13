@@ -31,8 +31,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 from config.environments import (
     get_current_environment,
     get_environment_config,
+    get_impala_config,
+    get_hive_config,
     CURRENT_ENV,
     CURRENT_CONFIG,
+    IMPALA_CONFIG as ENV_IMPALA_CONFIG,
+    HIVE_CONFIG as ENV_HIVE_CONFIG,
 )
 
 # Current environment
@@ -133,16 +137,8 @@ DATABASES = {
 # Uses environment-specific settings from config/environments.py
 # Can be overridden by environment variables
 
-IMPALA_CONFIG = {
-    'HOST': os.environ.get('IMPALA_HOST', CURRENT_CONFIG.get('IMPALA_HOST', 'localhost')),
-    'PORT': int(os.environ.get('IMPALA_PORT', str(CURRENT_CONFIG.get('IMPALA_PORT', 21050)))),
-    'DATABASE': os.environ.get('IMPALA_DB', CURRENT_CONFIG.get('IMPALA_DB', 'gmp_cis')),
-    'AUTH': os.environ.get('IMPALA_AUTH', CURRENT_CONFIG.get('IMPALA_AUTH', 'NOSASL')),
-    'USERNAME': os.environ.get('IMPALA_USERNAME', ''),
-    'PASSWORD': os.environ.get('IMPALA_PASSWORD', ''),
-    'TIMEOUT': int(os.environ.get('IMPALA_TIMEOUT', '60')),
-    'POOL_SIZE': int(os.environ.get('IMPALA_POOL_SIZE', '10')),
-}
+# Use IMPALA_CONFIG from environments.py (already environment-aware)
+IMPALA_CONFIG = ENV_IMPALA_CONFIG
 
 # ============================================================================
 # Hive Configuration (Environment-aware)
@@ -150,18 +146,8 @@ IMPALA_CONFIG = {
 # Uses environment-specific settings from config/environments.py
 # Can be overridden by environment variables
 
-HIVE_CONFIG = {
-    'HOST': os.environ.get('HIVE_HOST', CURRENT_CONFIG.get('HIVE_HOST', 'localhost')),
-    'PORT': int(os.environ.get('HIVE_PORT', str(CURRENT_CONFIG.get('HIVE_PORT', 10000)))),
-    'DATABASE': os.environ.get('HIVE_DB', CURRENT_CONFIG.get('HIVE_DB', 'gmp_cis')),
-    'AUTH': os.environ.get('HIVE_AUTH', CURRENT_CONFIG.get('HIVE_AUTH', 'NOSASL')),
-    'USERNAME': os.environ.get('HIVE_USERNAME', ''),
-    'PASSWORD': os.environ.get('HIVE_PASSWORD', ''),
-    'TIMEOUT': int(os.environ.get('HIVE_TIMEOUT', '120')),
-    'POOL_SIZE': int(os.environ.get('HIVE_POOL_SIZE', '10')),
-    'USE_SSL': os.environ.get('HIVE_USE_SSL', 'false').lower() == 'true',
-    'KERBEROS_SERVICE_NAME': os.environ.get('HIVE_KERBEROS_SERVICE_NAME', 'hive'),
-}
+# Use HIVE_CONFIG from environments.py (already environment-aware)
+HIVE_CONFIG = ENV_HIVE_CONFIG
 
 # ============================================================================
 # Kerberos Configuration (Environment-aware)
