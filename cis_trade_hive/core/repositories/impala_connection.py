@@ -113,6 +113,9 @@ class ImpalaConnectionManager:
                 conn_params['user'] = config.get('USERNAME', '')
                 conn_params['password'] = config.get('PASSWORD', '')
 
+            # Log connection params for debugging
+            logger.info(f"Impala connection params: {conn_params}")
+
             # Create connection
             connection = impala_connect(**conn_params)
 

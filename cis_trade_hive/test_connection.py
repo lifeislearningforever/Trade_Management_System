@@ -200,10 +200,24 @@ def test_impala_manager():
 
     try:
         from core.repositories.impala_connection import ImpalaConnectionManager, IMPALA_AVAILABLE
+        from django.conf import settings
 
         if not IMPALA_AVAILABLE:
             print("  ERROR: Impala library not available")
             return False
+
+        # Print what settings the manager will use
+        print(f"  settings.IMPALA_CONFIG:")
+        print(f"    HOST:          {settings.IMPALA_CONFIG.get('HOST')}")
+        print(f"    PORT:          {settings.IMPALA_CONFIG.get('PORT')}")
+        print(f"    DATABASE:      {settings.IMPALA_CONFIG.get('DATABASE')}")
+        print(f"    AUTH_MECHANISM:{settings.IMPALA_CONFIG.get('AUTH_MECHANISM')}")
+        print(f"    USE_SSL:       {settings.IMPALA_CONFIG.get('USE_SSL')}")
+        print(f"    KERBEROS:      {settings.IMPALA_CONFIG.get('KERBEROS_SERVICE_NAME')}")
+        print("-" * 70)
+
+        # Reset singleton to pick up fresh config
+        ImpalaConnectionManager._instance = None
 
         manager = ImpalaConnectionManager()
 
