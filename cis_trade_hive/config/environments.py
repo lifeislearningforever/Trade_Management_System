@@ -22,8 +22,9 @@ import os
 # Environment Detection
 # ============================================================================
 
-# Set CIS_ENV='SIT' for CML/Cloudera, defaults to 'local' for development
-CIS_ENV = os.environ.get('CIS_ENV', 'local')  # 'local', 'SIT', 'UAT', 'PROD', 'DR'
+# Set CIS_ENV='SIT' for CML/Cloudera, defaults to 'LOCAL' for development
+# Convert to uppercase to handle case-insensitivity
+CIS_ENV = os.environ.get('CIS_ENV', 'LOCAL').upper()
 
 # ============================================================================
 # IMPALA Configuration (for FAST READS)
@@ -166,14 +167,9 @@ else:
 # Optional: Initial Hive session properties to apply AFTER cursor creation
 # ============================================================================
 
-# If your cluster supports them, e.g.:
-# SET hive.execution.engine=tez
-# Set hive session flags if your cluster supports them, e.g.:
 INIT_STATEMENTS = [
-    # Set hive.execution.engine=tez for faster operations
-    # Add other session flags if your cluster supports them, e.g.:
+    # 'SET hive.execution.engine=tez',
     # 'SET hive.vectorized.execution.enabled=true',
-    # 'SET hive.vectorized.execution.reduce.enabled=true',
 ]
 
 # ============================================================================
@@ -281,10 +277,6 @@ def get_current_environment() -> str:
     """
     env = os.environ.get('CIS_ENV', 'LOCAL').upper()
 
-    # Handle lowercase 'local'
-    if env == 'LOCAL':
-        return 'LOCAL'
-
     if env not in VALID_ENVIRONMENTS:
         print(f"WARNING: Unknown environment '{env}', defaulting to LOCAL")
         return 'LOCAL'
@@ -295,12 +287,6 @@ def get_current_environment() -> str:
 def get_environment_config(env_name: str = None) -> dict:
     """
     Get configuration for the specified or current environment.
-
-    Args:
-        env_name: Environment name (optional, uses CIS_ENV if not provided)
-
-    Returns:
-        Environment configuration dictionary
     """
     if env_name is None:
         env_name = get_current_environment()
@@ -312,33 +298,21 @@ def get_environment_config(env_name: str = None) -> dict:
 
 
 def get_impala_config(env_name: str = None) -> dict:
-    """
-    Get Impala configuration for the specified or current environment.
-
-    Returns:
-        IMPALA_CONFIG dictionary
-    """
+    """Get Impala configuration."""
     return IMPALA_CONFIG
 
 
 def get_hive_config(env_name: str = None) -> dict:
-    """
-    Get Hive configuration for the specified or current environment.
-
-    Returns:
-        HIVE_CONFIG dictionary
-    """
+    """Get Hive configuration."""
     return HIVE_CONFIG
 
 
 def print_environment_info():
     """Print current environment configuration (for debugging)."""
-    env = get_current_environment()
-
     print("=" * 60)
     print(f"  CIS Trade Hive - Environment Configuration")
     print("=" * 60)
-    print(f"  Environment:     {env}")
+    print(f"  CIS_ENV:         {CIS_ENV}")
     print("")
     print("  Impala (FAST READS):")
     print(f"    Host:          {IMPALA_CONFIG['HOST']}")
@@ -346,6 +320,7 @@ def print_environment_info():
     print(f"    Auth:          {IMPALA_CONFIG['AUTH_MECHANISM']}")
     print(f"    Database:      {IMPALA_CONFIG['DATABASE']}")
     print(f"    SSL:           {IMPALA_CONFIG['USE_SSL']}")
+    print(f"    Kerberos:      {IMPALA_CONFIG['KERBEROS_SERVICE_NAME']}")
     print(f"    Pool Size:     {IMPALA_CONFIG['POOL_SIZE']}")
     print("")
     print("  Hive (ACID WRITES):")
@@ -354,9 +329,8 @@ def print_environment_info():
     print(f"    Auth:          {HIVE_CONFIG['AUTH']}")
     print(f"    Database:      {HIVE_CONFIG['DATABASE']}")
     print(f"    SSL:           {HIVE_CONFIG['USE_SSL']}")
+    print(f"    Kerberos:      {HIVE_CONFIG['KERBEROS_SERVICE_NAME']}")
     print(f"    Pool Size:     {HIVE_CONFIG['POOL_SIZE']}")
-    if HIVE_CONFIG.get('KERBEROS_SERVICE_NAME'):
-        print(f"    Kerberos:      {HIVE_CONFIG['KERBEROS_SERVICE_NAME']}")
     print("=" * 60)
 
 
@@ -364,8 +338,5 @@ def print_environment_info():
 # Module-level convenience
 # ============================================================================
 
-# Current environment name
 CURRENT_ENV = get_current_environment()
-
-# Current environment config
 CURRENT_CONFIG = get_environment_config()
