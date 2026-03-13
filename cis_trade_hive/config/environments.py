@@ -3,7 +3,10 @@ Environment Configuration for CIS Trade Hive
 
 Supported Environments:
 - LOCAL: Local development with Docker Kudu/Impala (No Kerberos)
-- Work: CML/Cloudera with Kerberos authentication
+- SIT: System Integration Testing (Cloudera with Kerberos)
+- UAT: User Acceptance Testing (Cloudera with Kerberos)
+- PROD: Production (Cloudera with Kerberos)
+- DR: Disaster Recovery (Cloudera with Kerberos)
 
 Usage:
     from config.environments import get_environment_config, ENV_CONFIG
@@ -19,19 +22,54 @@ import os
 # Environment Detection
 # ============================================================================
 
-# Environment Detection
-if CIS_ENV := os.environ.get('CIS_ENV', 'local'):
-    # Set CIS_ENV='work' for CML/Cloudera, defaults to 'local' for development
-    CIS_ENV = os.environ.get('CIS_ENV', 'local')  # 'local' or 'work'
+# Set CIS_ENV='SIT' for CML/Cloudera, defaults to 'local' for development
+CIS_ENV = os.environ.get('CIS_ENV', 'local')  # 'local', 'SIT', 'UAT', 'PROD', 'DR'
 
 # ============================================================================
 # IMPALA Configuration (for FAST READS)
 # ============================================================================
+# Connection: impala-shell -i <host>:21050
 
-# WORK/CML Configuration (Cloudera with Kerberos)
-if CIS_ENV == 'Work':
+if CIS_ENV == 'SIT':
+    # SIT - System Integration Testing (TST.UOBNET.COM)
     IMPALA_CONFIG = {
         'HOST': os.environ.get('IMPALA_HOST', 'lxmrwtsgyodt1.sg.uobnet.com'),
+        'PORT': int(os.environ.get('IMPALA_PORT', '21050')),
+        'DATABASE': os.environ.get('IMPALA_DB', 'gmp_cis'),
+        'AUTH_MECHANISM': os.environ.get('IMPALA_AUTH', 'GSSAPI'),
+        'USE_SSL': os.environ.get('IMPALA_USE_SSL', 'true').lower() == 'true',
+        'KERBEROS_SERVICE_NAME': os.environ.get('IMPALA_KRB_SERVICE_NAME', 'impala'),
+        'TIMEOUT': int(os.environ.get('IMPALA_TIMEOUT', '60')),
+        'POOL_SIZE': int(os.environ.get('IMPALA_POOL_SIZE', '10')),
+    }
+elif CIS_ENV == 'UAT':
+    # UAT - User Acceptance Testing (SG.UOBNET.COM)
+    IMPALA_CONFIG = {
+        'HOST': os.environ.get('IMPALA_HOST', 'lxmrwtsgvqk2.sg.uobnet.com'),
+        'PORT': int(os.environ.get('IMPALA_PORT', '21050')),
+        'DATABASE': os.environ.get('IMPALA_DB', 'gmp_cis'),
+        'AUTH_MECHANISM': os.environ.get('IMPALA_AUTH', 'GSSAPI'),
+        'USE_SSL': os.environ.get('IMPALA_USE_SSL', 'true').lower() == 'true',
+        'KERBEROS_SERVICE_NAME': os.environ.get('IMPALA_KRB_SERVICE_NAME', 'impala'),
+        'TIMEOUT': int(os.environ.get('IMPALA_TIMEOUT', '60')),
+        'POOL_SIZE': int(os.environ.get('IMPALA_POOL_SIZE', '10')),
+    }
+elif CIS_ENV == 'PROD':
+    # PROD - Production (SG.UOBNET.COM)
+    IMPALA_CONFIG = {
+        'HOST': os.environ.get('IMPALA_HOST', 'lxmrwtsgvqk2.sg.uobnet.com'),
+        'PORT': int(os.environ.get('IMPALA_PORT', '21050')),
+        'DATABASE': os.environ.get('IMPALA_DB', 'gmp_cis'),
+        'AUTH_MECHANISM': os.environ.get('IMPALA_AUTH', 'GSSAPI'),
+        'USE_SSL': os.environ.get('IMPALA_USE_SSL', 'true').lower() == 'true',
+        'KERBEROS_SERVICE_NAME': os.environ.get('IMPALA_KRB_SERVICE_NAME', 'impala'),
+        'TIMEOUT': int(os.environ.get('IMPALA_TIMEOUT', '60')),
+        'POOL_SIZE': int(os.environ.get('IMPALA_POOL_SIZE', '10')),
+    }
+elif CIS_ENV == 'DR':
+    # DR - Disaster Recovery (SG.UOBNET.COM)
+    IMPALA_CONFIG = {
+        'HOST': os.environ.get('IMPALA_HOST', 'lxmrwtsgvqk2.sg.uobnet.com'),
         'PORT': int(os.environ.get('IMPALA_PORT', '21050')),
         'DATABASE': os.environ.get('IMPALA_DB', 'gmp_cis'),
         'AUTH_MECHANISM': os.environ.get('IMPALA_AUTH', 'GSSAPI'),
@@ -56,9 +94,10 @@ else:
 # ============================================================================
 # HIVE Configuration (for ACID WRITES - INSERT, UPDATE, DELETE)
 # ============================================================================
-
 # Connection: beeline -u 'jdbc:hive2://<host>:10000/;principal=hive/_HOST@REALM'
-if CIS_ENV == 'Work':
+
+if CIS_ENV == 'SIT':
+    # SIT - System Integration Testing
     HIVE_CONFIG = {
         'HOST': os.environ.get('HIVE_HOST', 'lxmrwtsgvqk2.sg.uobnet.com'),
         'PORT': int(os.environ.get('HIVE_PORT', '10000')),
@@ -68,7 +107,45 @@ if CIS_ENV == 'Work':
         'POOL_SIZE': int(os.environ.get('HIVE_POOL_SIZE', '10')),
         'KERBEROS_SERVICE_NAME': os.environ.get('HIVE_KERBEROS_SERVICE_NAME', 'hive'),
         'USE_SSL': os.environ.get('HIVE_USE_SSL', 'true').lower() == 'true',
-        # Optional: to_bool(os.environ.get('HIVE_POC_USE_SSL'), default=True),
+        'CA_CERT': os.environ.get('HIVE_POC_CA_CERT', '') or None,
+    }
+elif CIS_ENV == 'UAT':
+    # UAT - User Acceptance Testing
+    HIVE_CONFIG = {
+        'HOST': os.environ.get('HIVE_HOST', 'lxmrwtsgvqk2.sg.uobnet.com'),
+        'PORT': int(os.environ.get('HIVE_PORT', '10000')),
+        'DATABASE': os.environ.get('HIVE_DB', 'mrw_ima'),
+        'AUTH': os.environ.get('HIVE_AUTH', 'GSSAPI'),
+        'TIMEOUT': int(os.environ.get('HIVE_TIMEOUT', '300')),
+        'POOL_SIZE': int(os.environ.get('HIVE_POOL_SIZE', '10')),
+        'KERBEROS_SERVICE_NAME': os.environ.get('HIVE_KERBEROS_SERVICE_NAME', 'hive'),
+        'USE_SSL': os.environ.get('HIVE_USE_SSL', 'true').lower() == 'true',
+        'CA_CERT': os.environ.get('HIVE_POC_CA_CERT', '') or None,
+    }
+elif CIS_ENV == 'PROD':
+    # PROD - Production
+    HIVE_CONFIG = {
+        'HOST': os.environ.get('HIVE_HOST', 'lxmrwtsgvqk2.sg.uobnet.com'),
+        'PORT': int(os.environ.get('HIVE_PORT', '10000')),
+        'DATABASE': os.environ.get('HIVE_DB', 'mrw_ima'),
+        'AUTH': os.environ.get('HIVE_AUTH', 'GSSAPI'),
+        'TIMEOUT': int(os.environ.get('HIVE_TIMEOUT', '300')),
+        'POOL_SIZE': int(os.environ.get('HIVE_POOL_SIZE', '10')),
+        'KERBEROS_SERVICE_NAME': os.environ.get('HIVE_KERBEROS_SERVICE_NAME', 'hive'),
+        'USE_SSL': os.environ.get('HIVE_USE_SSL', 'true').lower() == 'true',
+        'CA_CERT': os.environ.get('HIVE_POC_CA_CERT', '') or None,
+    }
+elif CIS_ENV == 'DR':
+    # DR - Disaster Recovery
+    HIVE_CONFIG = {
+        'HOST': os.environ.get('HIVE_HOST', 'lxmrwtsgvqk2.sg.uobnet.com'),
+        'PORT': int(os.environ.get('HIVE_PORT', '10000')),
+        'DATABASE': os.environ.get('HIVE_DB', 'mrw_ima'),
+        'AUTH': os.environ.get('HIVE_AUTH', 'GSSAPI'),
+        'TIMEOUT': int(os.environ.get('HIVE_TIMEOUT', '300')),
+        'POOL_SIZE': int(os.environ.get('HIVE_POOL_SIZE', '10')),
+        'KERBEROS_SERVICE_NAME': os.environ.get('HIVE_KERBEROS_SERVICE_NAME', 'hive'),
+        'USE_SSL': os.environ.get('HIVE_USE_SSL', 'true').lower() == 'true',
         'CA_CERT': os.environ.get('HIVE_POC_CA_CERT', '') or None,
     }
 else:
@@ -114,29 +191,77 @@ ENV_CONFIG = {
         'ENV_NAME': 'LOCAL',
         'ENV_DISPLAY': 'Local Development',
         'DEBUG': True,
-        'IMPALA_HOST': IMPALA_CONFIG['HOST'],
-        'IMPALA_PORT': IMPALA_CONFIG['PORT'],
-        'IMPALA_AUTH': IMPALA_CONFIG['AUTH_MECHANISM'],
-        'IMPALA_DB': IMPALA_CONFIG['DATABASE'],
-        'HIVE_HOST': HIVE_CONFIG['HOST'],
-        'HIVE_PORT': HIVE_CONFIG['PORT'],
-        'HIVE_AUTH': HIVE_CONFIG['AUTH'],
-        'HIVE_DB': HIVE_CONFIG['DATABASE'],
+        'IMPALA_HOST': 'localhost',
+        'IMPALA_PORT': 21050,
+        'IMPALA_AUTH': 'NOSASL',
+        'IMPALA_DB': 'gmp_cis',
+        'HIVE_HOST': 'localhost',
+        'HIVE_PORT': 10000,
+        'HIVE_AUTH': 'NOSASL',
+        'HIVE_DB': 'gmp_cis',
         'KERBEROS_ENABLED': False,
         'USE_SSL': False,
     },
-    'Work': {
-        'ENV_NAME': 'Work',
-        'ENV_DISPLAY': 'CML/Cloudera Work Environment',
+    'SIT': {
+        'ENV_NAME': 'SIT',
+        'ENV_DISPLAY': 'System Integration Testing',
         'DEBUG': False,
-        'IMPALA_HOST': IMPALA_CONFIG['HOST'],
-        'IMPALA_PORT': IMPALA_CONFIG['PORT'],
-        'IMPALA_AUTH': IMPALA_CONFIG['AUTH_MECHANISM'],
-        'IMPALA_DB': IMPALA_CONFIG['DATABASE'],
-        'HIVE_HOST': HIVE_CONFIG['HOST'],
-        'HIVE_PORT': HIVE_CONFIG['PORT'],
-        'HIVE_AUTH': HIVE_CONFIG['AUTH'],
-        'HIVE_DB': HIVE_CONFIG['DATABASE'],
+        'IMPALA_HOST': 'lxmrwtsgyodt1.sg.uobnet.com',
+        'IMPALA_PORT': 21050,
+        'IMPALA_AUTH': 'GSSAPI',
+        'IMPALA_DB': 'gmp_cis',
+        'HIVE_HOST': 'lxmrwtsgvqk2.sg.uobnet.com',
+        'HIVE_PORT': 10000,
+        'HIVE_AUTH': 'GSSAPI',
+        'HIVE_DB': 'mrw_ima',
+        'KERBEROS_ENABLED': True,
+        'KERBEROS_SERVICE_NAME': 'impala',
+        'USE_SSL': True,
+    },
+    'UAT': {
+        'ENV_NAME': 'UAT',
+        'ENV_DISPLAY': 'User Acceptance Testing',
+        'DEBUG': False,
+        'IMPALA_HOST': 'lxmrwtsgvqk2.sg.uobnet.com',
+        'IMPALA_PORT': 21050,
+        'IMPALA_AUTH': 'GSSAPI',
+        'IMPALA_DB': 'gmp_cis',
+        'HIVE_HOST': 'lxmrwtsgvqk2.sg.uobnet.com',
+        'HIVE_PORT': 10000,
+        'HIVE_AUTH': 'GSSAPI',
+        'HIVE_DB': 'mrw_ima',
+        'KERBEROS_ENABLED': True,
+        'KERBEROS_SERVICE_NAME': 'impala',
+        'USE_SSL': True,
+    },
+    'PROD': {
+        'ENV_NAME': 'PROD',
+        'ENV_DISPLAY': 'Production',
+        'DEBUG': False,
+        'IMPALA_HOST': 'lxmrwtsgvqk2.sg.uobnet.com',
+        'IMPALA_PORT': 21050,
+        'IMPALA_AUTH': 'GSSAPI',
+        'IMPALA_DB': 'gmp_cis',
+        'HIVE_HOST': 'lxmrwtsgvqk2.sg.uobnet.com',
+        'HIVE_PORT': 10000,
+        'HIVE_AUTH': 'GSSAPI',
+        'HIVE_DB': 'mrw_ima',
+        'KERBEROS_ENABLED': True,
+        'KERBEROS_SERVICE_NAME': 'impala',
+        'USE_SSL': True,
+    },
+    'DR': {
+        'ENV_NAME': 'DR',
+        'ENV_DISPLAY': 'Disaster Recovery',
+        'DEBUG': False,
+        'IMPALA_HOST': 'lxmrwtsgvqk2.sg.uobnet.com',
+        'IMPALA_PORT': 21050,
+        'IMPALA_AUTH': 'GSSAPI',
+        'IMPALA_DB': 'gmp_cis',
+        'HIVE_HOST': 'lxmrwtsgvqk2.sg.uobnet.com',
+        'HIVE_PORT': 10000,
+        'HIVE_AUTH': 'GSSAPI',
+        'HIVE_DB': 'mrw_ima',
         'KERBEROS_ENABLED': True,
         'KERBEROS_SERVICE_NAME': 'impala',
         'USE_SSL': True,
@@ -152,9 +277,13 @@ def get_current_environment() -> str:
     Detect current environment from CIS_ENV environment variable.
 
     Returns:
-        Environment name (LOCAL or Work)
+        Environment name (LOCAL, SIT, UAT, PROD, DR)
     """
-    env = os.environ.get('CIS_ENV', 'local')
+    env = os.environ.get('CIS_ENV', 'LOCAL').upper()
+
+    # Handle lowercase 'local'
+    if env == 'LOCAL':
+        return 'LOCAL'
 
     if env not in VALID_ENVIRONMENTS:
         print(f"WARNING: Unknown environment '{env}', defaulting to LOCAL")
