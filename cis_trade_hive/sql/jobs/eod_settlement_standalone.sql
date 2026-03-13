@@ -304,7 +304,7 @@ SELECT
     -- status: CLOSED if quantity becomes 0 or negative
     CASE
         WHEN sq.trade_type = 'BUY' THEN 'OPEN'
-        WHEN sq.trade_type = 'SELL' AND (COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) - sq.quantity) <= CAST(0 AS DECIMAL(20,8)) THEN 'CLOSED'
+        WHEN sq.trade_type = 'SELL' AND (COALESCE(CAST(cp.quantity AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8))) - CAST(sq.quantity AS DECIMAL(38,8))) <= CAST(0 AS DECIMAL(38,8)) THEN 'CLOSED'
         ELSE 'OPEN'
     END,
     CAST(true AS BOOLEAN),            -- is_active
@@ -319,7 +319,7 @@ LEFT JOIN gmp_cis.tmp_current_positions_eod cp
 WHERE sq.settle_date <= '2026-03-12'
   AND sq.status = 'PROCESSING'
   -- Exclude error cases: SELL without position or insufficient quantity
-  AND NOT (sq.trade_type = 'SELL' AND (cp.position_id IS NULL OR COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) < sq.quantity));
+  AND NOT (sq.trade_type = 'SELL' AND (cp.position_id IS NULL OR COALESCE(CAST(cp.quantity AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8))) < CAST(sq.quantity AS DECIMAL(38,8))));
 
 
 -- ============================================================================
@@ -342,13 +342,13 @@ SELECT
     sq.settle_date,
     CASE
         WHEN sq.trade_type = 'SELL' AND cp.position_id IS NULL THEN 'FAILED'
-        WHEN sq.trade_type = 'SELL' AND COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) < sq.quantity THEN 'FAILED'
+        WHEN sq.trade_type = 'SELL' AND COALESCE(CAST(cp.quantity AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8))) < CAST(sq.quantity AS DECIMAL(38,8)) THEN 'FAILED'
         ELSE 'SUCCESS'
     END,
     CASE
         WHEN sq.trade_type = 'SELL' AND cp.position_id IS NULL THEN
             CONCAT('No position found for ', sq.security_id, ' in portfolio ', sq.portfolio_id)
-        WHEN sq.trade_type = 'SELL' AND COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) < sq.quantity THEN
+        WHEN sq.trade_type = 'SELL' AND COALESCE(CAST(cp.quantity AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8))) < CAST(sq.quantity AS DECIMAL(38,8)) THEN
             CONCAT('Insufficient quantity. Available: ', CAST(COALESCE(cp.quantity, 0) AS STRING), ', Requested: ', CAST(sq.quantity AS STRING))
         ELSE NULL
     END,
