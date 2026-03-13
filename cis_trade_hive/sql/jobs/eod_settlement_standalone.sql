@@ -252,39 +252,40 @@ SELECT
     sq.portfolio_id,
     sq.security_id,
     -- quantity: add for BUY, subtract for SELL
+    -- Use DECIMAL(38,8) internally to avoid precision errors, then cast to DECIMAL(20,8)
     CAST(CASE
-        WHEN sq.trade_type = 'BUY' THEN COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) + sq.quantity
-        WHEN sq.trade_type = 'SELL' THEN COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) - sq.quantity
-        ELSE COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8)))
+        WHEN sq.trade_type = 'BUY' THEN COALESCE(CAST(cp.quantity AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8))) + CAST(sq.quantity AS DECIMAL(38,8))
+        WHEN sq.trade_type = 'SELL' THEN COALESCE(CAST(cp.quantity AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8))) - CAST(sq.quantity AS DECIMAL(38,8))
+        ELSE COALESCE(CAST(cp.quantity AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8)))
     END AS DECIMAL(20,8)),
     -- average_cost: recalculate for BUY, preserve for SELL
     CAST(CASE
         WHEN sq.trade_type = 'BUY' THEN
             CASE
-                WHEN (COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) + sq.quantity) > CAST(0 AS DECIMAL(20,8)) THEN
-                    (COALESCE(cp.total_cost, CAST(0 AS DECIMAL(20,8))) + (sq.quantity * sq.price) + COALESCE(sq.charges, CAST(0 AS DECIMAL(20,8)))) /
-                    (COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) + sq.quantity)
-                ELSE CAST(0 AS DECIMAL(20,8))
+                WHEN (COALESCE(CAST(cp.quantity AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8))) + CAST(sq.quantity AS DECIMAL(38,8))) > CAST(0 AS DECIMAL(38,8)) THEN
+                    (COALESCE(CAST(cp.total_cost AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8))) + (CAST(sq.quantity AS DECIMAL(38,8)) * CAST(sq.price AS DECIMAL(38,8))) + COALESCE(CAST(sq.charges AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8)))) /
+                    (COALESCE(CAST(cp.quantity AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8))) + CAST(sq.quantity AS DECIMAL(38,8)))
+                ELSE CAST(0 AS DECIMAL(38,8))
             END
-        ELSE COALESCE(cp.average_cost, CAST(0 AS DECIMAL(20,8)))
+        ELSE COALESCE(CAST(cp.average_cost AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8)))
     END AS DECIMAL(20,8)),
     -- total_cost: add buy value for BUY, reduce proportionally for SELL
     CAST(CASE
         WHEN sq.trade_type = 'BUY' THEN
-            COALESCE(cp.total_cost, CAST(0 AS DECIMAL(20,8))) + (sq.quantity * sq.price) + COALESCE(sq.charges, CAST(0 AS DECIMAL(20,8)))
+            COALESCE(CAST(cp.total_cost AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8))) + (CAST(sq.quantity AS DECIMAL(38,8)) * CAST(sq.price AS DECIMAL(38,8))) + COALESCE(CAST(sq.charges AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8)))
         WHEN sq.trade_type = 'SELL' THEN
             CASE
-                WHEN COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) > CAST(0 AS DECIMAL(20,8)) THEN
-                    COALESCE(cp.total_cost, CAST(0 AS DECIMAL(20,8))) * (COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) - sq.quantity) / cp.quantity
-                ELSE CAST(0 AS DECIMAL(20,8))
+                WHEN COALESCE(CAST(cp.quantity AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8))) > CAST(0 AS DECIMAL(38,8)) THEN
+                    COALESCE(CAST(cp.total_cost AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8))) * (COALESCE(CAST(cp.quantity AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8))) - CAST(sq.quantity AS DECIMAL(38,8))) / CAST(cp.quantity AS DECIMAL(38,8))
+                ELSE CAST(0 AS DECIMAL(38,8))
             END
-        ELSE COALESCE(cp.total_cost, CAST(0 AS DECIMAL(20,8)))
+        ELSE COALESCE(CAST(cp.total_cost AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8)))
     END AS DECIMAL(20,8)),
     -- realized_pnl: calculate P&L on SELL
     CAST(CASE
         WHEN sq.trade_type = 'SELL' THEN
-            COALESCE(cp.realized_pnl, CAST(0 AS DECIMAL(20,8))) + (sq.quantity * (sq.price - COALESCE(cp.average_cost, CAST(0 AS DECIMAL(20,8)))))
-        ELSE COALESCE(cp.realized_pnl, CAST(0 AS DECIMAL(20,8)))
+            COALESCE(CAST(cp.realized_pnl AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8))) + (CAST(sq.quantity AS DECIMAL(38,8)) * (CAST(sq.price AS DECIMAL(38,8)) - COALESCE(CAST(cp.average_cost AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8)))))
+        ELSE COALESCE(CAST(cp.realized_pnl AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8)))
     END AS DECIMAL(20,8)),
     CAST(sq.price AS DECIMAL(20,8)),  -- current_price
     CAST(NULL AS DECIMAL(20,8)),      -- market_value (calculated later)
