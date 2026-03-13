@@ -156,7 +156,8 @@ class ImpalaConnectionHandler(IConnectionReader, IConnectionWriter, IConnectionP
 
         try:
             db_name = database or self._config.get('DATABASE', 'default')
-            auth_mode = self._config.get('AUTH', 'NOSASL')
+            # Support both AUTH and AUTH_MECHANISM keys for compatibility
+            auth_mode = self._config.get('AUTH') or self._config.get('AUTH_MECHANISM', 'NOSASL')
 
             conn_params = {
                 'host': self._config['HOST'],
@@ -443,7 +444,8 @@ class HiveConnectionHandler(IConnectionReader, IConnectionWriter, IConnectionPoo
 
         try:
             db_name = database or self._config.get('DATABASE', 'default')
-            auth_mode = self._config.get('AUTH', 'NOSASL')
+            # Support both AUTH and AUTH_MECHANISM keys for compatibility
+            auth_mode = self._config.get('AUTH') or self._config.get('AUTH_MECHANISM', 'NOSASL')
 
             if self._use_impyla:
                 # impyla connection
