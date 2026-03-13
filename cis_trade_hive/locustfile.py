@@ -615,6 +615,192 @@ class DashboardUserBehavior(SequentialTaskSet):
 
 
 # ===========================
+# Position/AVP User Behavior
+# ===========================
+
+class PositionAVPUserBehavior(SequentialTaskSet):
+    """
+    Position and AVP (Average Price) calculation workflow.
+    Tests position queries, AVP calculations, and position updates.
+    """
+
+    @task
+    def view_position_list(self):
+        """View position list for a portfolio"""
+        portfolio = random.choice(PORTFOLIOS)
+        with self.client.get(f'/trade/positions/?portfolio={portfolio}',
+                            name="Position List", catch_response=True) as response:
+            if response.status_code in [200, 404]:
+                response.success()
+            else:
+                response.failure(f"Position list failed: {response.status_code}")
+
+    @task
+    def view_position_summary(self):
+        """View position summary/dashboard"""
+        self.client.get('/trade/positions/summary/', name="Position Summary")
+
+    @task
+    def get_position_by_security(self):
+        """Get position for specific security"""
+        portfolio = random.choice(PORTFOLIOS)
+        security = random.choice(SECURITIES)
+        with self.client.get(
+            f'/trade/api/position/?portfolio={portfolio}&security={security}',
+            name="Position API - By Security", catch_response=True
+        ) as response:
+            if response.status_code in [200, 404]:
+                response.success()
+            else:
+                response.failure(f"Position API failed: {response.status_code}")
+
+    @task
+    def get_avp_calculation(self):
+        """Get AVP (Average Price) for a position"""
+        portfolio = random.choice(PORTFOLIOS)
+        security = random.choice(SECURITIES)
+        with self.client.get(
+            f'/trade/api/avp/?portfolio={portfolio}&security={security}',
+            name="AVP Calculation API", catch_response=True
+        ) as response:
+            if response.status_code in [200, 404]:
+                response.success()
+            else:
+                response.failure(f"AVP API failed: {response.status_code}")
+
+    @task
+    def get_position_history(self):
+        """Get position history for audit"""
+        portfolio = random.choice(PORTFOLIOS)
+        security = random.choice(SECURITIES)
+        with self.client.get(
+            f'/trade/positions/history/?portfolio={portfolio}&security={security}',
+            name="Position History", catch_response=True
+        ) as response:
+            if response.status_code in [200, 404]:
+                response.success()
+            else:
+                response.failure(f"Position history failed: {response.status_code}")
+
+    @task
+    def trigger_position_recalculation(self):
+        """Trigger position recalculation (simulates trade settlement)"""
+        portfolio = random.choice(PORTFOLIOS)
+        security = random.choice(SECURITIES)
+        recalc_data = {
+            'portfolio_short_name': portfolio,
+            'security_label': security,
+            'recalculate_from': random_date(30),
+        }
+        with self.client.post(
+            '/trade/api/position/recalculate/',
+            json=recalc_data,
+            name="Position Recalculation", catch_response=True
+        ) as response:
+            if response.status_code in [200, 202, 404]:
+                response.success()
+            else:
+                response.failure(f"Recalculation failed: {response.status_code}")
+
+    @task
+    def export_positions_csv(self):
+        """Export positions to CSV"""
+        portfolio = random.choice(PORTFOLIOS)
+        self.client.get(f'/trade/positions/?portfolio={portfolio}&export=csv',
+                       name="Position CSV Export")
+
+
+# ===========================
+# Connection Pool Stress Behavior
+# ===========================
+
+class ConnectionPoolStressBehavior(SequentialTaskSet):
+    """
+    Connection pool stress testing.
+    Rapid-fire requests to stress test database connection pool.
+    Tests pool exhaustion, recovery, and concurrent access.
+    """
+
+    @task(5)
+    def rapid_query_trade(self):
+        """Rapid trade queries - stresses read connections"""
+        with self.client.get('/trade/', name="Pool Stress: Trade List",
+                            catch_response=True) as response:
+            if response.status_code == 200:
+                response.success()
+            else:
+                response.failure(f"Trade query failed: {response.status_code}")
+
+    @task(3)
+    def rapid_query_position(self):
+        """Rapid position queries - stresses aggregation queries"""
+        portfolio = random.choice(PORTFOLIOS)
+        with self.client.get(f'/trade/positions/?portfolio={portfolio}',
+                            name="Pool Stress: Position Query",
+                            catch_response=True) as response:
+            if response.status_code in [200, 404]:
+                response.success()
+            else:
+                response.failure(f"Position query failed: {response.status_code}")
+
+    @task(2)
+    def rapid_create_trade(self):
+        """Rapid trade creation - stresses write connections"""
+        trade_data = {
+            'trade_type': random.choice(TRADE_TYPES),
+            'portfolio_short_name': random.choice(PORTFOLIOS),
+            'security_label': random.choice(SECURITIES),
+            'quantity': random_quantity(),
+            'price': random_price(),
+            'trade_date': random_date(7),
+            'settlement_date': random_date(0),
+            'currency_code': random.choice(CURRENCIES),
+            'counterparty': random.choice(COUNTERPARTIES),
+        }
+        trade_data['total_amount'] = trade_data['quantity'] * trade_data['price']
+
+        with self.client.post('/trade/create/', data=trade_data,
+                              name="Pool Stress: Trade Create",
+                              catch_response=True) as response:
+            if response.status_code in [200, 302]:
+                response.success()
+            else:
+                response.failure(f"Trade create failed: {response.status_code}")
+
+    @task(2)
+    def concurrent_security_read(self):
+        """Concurrent security reads"""
+        with self.client.get('/security/', name="Pool Stress: Security List",
+                            catch_response=True) as response:
+            if response.status_code == 200:
+                response.success()
+            else:
+                response.failure(f"Security query failed: {response.status_code}")
+
+    @task(1)
+    def complex_aggregation_query(self):
+        """Complex aggregation - stresses pool with long-running query"""
+        with self.client.get('/trade/positions/summary/',
+                            name="Pool Stress: Complex Aggregation",
+                            catch_response=True) as response:
+            if response.status_code in [200, 404]:
+                response.success()
+            else:
+                response.failure(f"Aggregation failed: {response.status_code}")
+
+    @task(1)
+    def export_large_dataset(self):
+        """Export large dataset - long-running connection"""
+        with self.client.get('/trade/?export=csv',
+                            name="Pool Stress: Large Export",
+                            catch_response=True) as response:
+            if response.status_code in [200]:
+                response.success()
+            else:
+                response.failure(f"Export failed: {response.status_code}")
+
+
+# ===========================
 # User Type Definitions
 # ===========================
 
@@ -709,6 +895,32 @@ class DashboardUser(AuthenticationMixin, HttpUser):
     tasks = [DashboardUserBehavior]
 
 
+class PositionAVPUser(AuthenticationMixin, HttpUser):
+    """
+    Position/AVP user (10% of users)
+    - Operations team checking positions
+    - Risk managers viewing AVP calculations
+
+    Usage: locust --host=http://localhost:8000 PositionAVPUser
+    """
+    wait_time = between(2, 5)
+    weight = 10
+    tasks = [PositionAVPUserBehavior]
+
+
+class ConnectionPoolStressUser(AuthenticationMixin, HttpUser):
+    """
+    Connection pool stress test user
+    - Rapid-fire requests to stress connection pool
+    - Tests pool exhaustion and recovery
+    - Use with high user count (100-500)
+
+    Usage: locust --host=http://localhost:8000 --users 200 --spawn-rate 20 ConnectionPoolStressUser
+    """
+    wait_time = between(0.1, 0.5)  # Very fast requests
+    tasks = [ConnectionPoolStressBehavior]
+
+
 class MixedUser(AuthenticationMixin, HttpUser):
     """
     Mixed behavior user (realistic workflow)
@@ -752,6 +964,12 @@ class MixedUser(AuthenticationMixin, HttpUser):
     def dashboard_workflow(self):
         """Dashboard monitoring"""
         self.client.get('/dashboard/')
+
+    @task(2)
+    def position_avp_workflow(self):
+        """Position and AVP checks"""
+        portfolio = random.choice(PORTFOLIOS)
+        self.client.get(f'/trade/positions/?portfolio={portfolio}', name="Position Check")
 
 
 # ===========================

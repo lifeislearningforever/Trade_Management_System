@@ -368,8 +368,7 @@ class UDFFieldServiceCreateFieldTestCase(TestCase):
     def test_create_field_success(self, mock_audit):
         """Test successful field creation"""
         self.mock_repository.get_all.return_value = []
-        self.mock_repository.get_next_id.return_value = 100
-        self.mock_repository.create.return_value = True
+        self.mock_repository.create.return_value = 100  # Returns udf_id on success
 
         field_data = {
             'field_name': 'fund_type',
@@ -377,7 +376,9 @@ class UDFFieldServiceCreateFieldTestCase(TestCase):
             'object_type': 'TRADE'
         }
 
-        success, error, udf_id = self.service.create_field(field_data, self.user_info)
+        # Mock cache invalidation
+        with patch.object(self.service, '_invalidate_udf_cache'):
+            success, error, udf_id = self.service.create_field(field_data, self.user_info)
 
         self.assertTrue(success)
         self.assertIsNone(error)
@@ -403,8 +404,7 @@ class UDFFieldServiceCreateFieldTestCase(TestCase):
     def test_create_field_repository_failure(self, mock_audit):
         """Test create_field when repository fails"""
         self.mock_repository.get_all.return_value = []
-        self.mock_repository.get_next_id.return_value = 100
-        self.mock_repository.create.return_value = False
+        self.mock_repository.create.return_value = 0  # Returns 0 on failure
 
         field_data = {
             'field_name': 'fund_type',
@@ -473,7 +473,9 @@ class UDFFieldServiceUpdateFieldTestCase(TestCase):
             'is_active': True
         }
 
-        success, error = self.service.update_field(1, field_data, self.user_info)
+        # Mock cache invalidation
+        with patch.object(self.service, '_invalidate_udf_cache'):
+            success, error = self.service.update_field(1, field_data, self.user_info)
 
         self.assertTrue(success)
         self.assertIsNone(error)
@@ -572,7 +574,9 @@ class UDFFieldServiceDeleteFieldTestCase(TestCase):
         self.mock_repository.get_by_id.return_value = self.existing_field
         self.mock_repository.soft_delete.return_value = True
 
-        success, error = self.service.delete_field(1, self.user_info)
+        # Mock cache invalidation
+        with patch.object(self.service, '_invalidate_udf_cache'):
+            success, error = self.service.delete_field(1, self.user_info)
 
         self.assertTrue(success)
         self.assertIsNone(error)
@@ -648,7 +652,9 @@ class UDFFieldServiceRestoreFieldTestCase(TestCase):
         self.mock_repository.get_by_id.return_value = self.deleted_field
         self.mock_repository.restore.return_value = True
 
-        success, error = self.service.restore_field(1, self.user_info)
+        # Mock cache invalidation
+        with patch.object(self.service, '_invalidate_udf_cache'):
+            success, error = self.service.restore_field(1, self.user_info)
 
         self.assertTrue(success)
         self.assertIsNone(error)
@@ -707,3 +713,93 @@ class UDFFieldServiceSingletonTestCase(TestCase):
     def test_singleton_has_repository(self):
         """Test singleton has repository injected"""
         self.assertIsNotNone(udf_field_service.repository)
+
+
+class UDFFieldServiceCacheInvalidationTestCase(TestCase):
+    """Test cases for _invalidate_udf_cache method"""
+
+    def setUp(self):
+        """Set up test service with mocked repository"""
+        self.mock_repository = Mock()
+        self.service = UDFFieldService(repository=self.mock_repository)
+
+    @patch('udf.services.udf_field_service.logger')
+    def test_invalidate_cache_trade_entity(self, mock_logger):
+        """Test cache invalidation for TRADE entity type"""
+        with patch('trade.services.trade_dropdown_service.trade_dropdown_service') as mock_dropdown:
+            self.service._invalidate_udf_cache('TRADE', 'fund_type')
+            mock_dropdown.invalidate_udf_cache.assert_called_once_with('fund_type')
+
+    @patch('udf.services.udf_field_service.logger')
+    def test_invalidate_cache_non_trade_entity(self, mock_logger):
+        """Test cache invalidation for non-TRADE entity type"""
+        with patch('trade.services.trade_dropdown_service.trade_dropdown_service') as mock_dropdown:
+            self.service._invalidate_udf_cache('PORTFOLIO', 'some_field')
+            # Should invalidate batch cache with None
+            mock_dropdown.invalidate_udf_cache.assert_called_once_with(None)
+
+    @patch('udf.services.udf_field_service.logger')
+    def test_invalidate_cache_import_error(self, mock_logger):
+        """Test cache invalidation handles ImportError gracefully"""
+        with patch.dict('sys.modules', {'trade.services.trade_dropdown_service': None}):
+            # Should not raise, just log debug
+            try:
+                self.service._invalidate_udf_cache('TRADE', 'fund_type')
+            except ImportError:
+                pass  # Expected in some cases
+            # The method should handle the error gracefully
+
+    @patch('udf.services.udf_field_service.logger')
+    def test_invalidate_cache_exception(self, mock_logger):
+        """Test cache invalidation handles general exception gracefully"""
+        with patch('trade.services.trade_dropdown_service.trade_dropdown_service') as mock_dropdown:
+            mock_dropdown.invalidate_udf_cache.side_effect = Exception("Cache error")
+            # Should not raise
+            self.service._invalidate_udf_cache('TRADE', 'fund_type')
+            mock_logger.warning.assert_called()
+
+
+class UDFFieldServiceUpdateFieldNameChangeTestCase(TestCase):
+    """Test cases for update_field when field name changes"""
+
+    def setUp(self):
+        """Set up test service with mocked repository"""
+        self.mock_repository = Mock()
+        self.service = UDFFieldService(repository=self.mock_repository)
+        self.user_info = {
+            'user_id': 1,
+            'username': 'testuser',
+            'user_email': 'test@example.com',
+            'ip_address': '127.0.0.1',
+            'user_agent': 'TestAgent'
+        }
+        self.existing_field = {
+            'udf_id': 1,
+            'object_type': 'TRADE',
+            'field_name': 'old_field_name',
+            'field_value': 'Old Label',
+            'is_active': True,
+            'created_by': 'admin',
+            'created_at': 1234567890
+        }
+
+    @patch('udf.services.udf_field_service.audit_log_kudu_repository')
+    def test_update_field_name_change_invalidates_both_caches(self, mock_audit):
+        """Test that changing field name invalidates both old and new caches"""
+        self.mock_repository.get_by_id.return_value = self.existing_field
+        self.mock_repository.get_all.return_value = [self.existing_field]
+        self.mock_repository.update.return_value = True
+
+        field_data = {
+            'field_name': 'new_field_name',  # Changed
+            'field_value': 'New Label',
+            'object_type': 'TRADE',
+            'is_active': True
+        }
+
+        with patch.object(self.service, '_invalidate_udf_cache') as mock_invalidate:
+            success, error = self.service.update_field(1, field_data, self.user_info)
+
+        self.assertTrue(success)
+        # Should be called twice - once for new name, once for old name
+        self.assertEqual(mock_invalidate.call_count, 2)

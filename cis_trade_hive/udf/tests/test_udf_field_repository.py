@@ -380,14 +380,58 @@ class UDFFieldRepositoryGetByKeyTestCase(TestCase):
 
 
 class UDFFieldRepositoryGetByIdTestCase(TestCase):
-    """Test cases for deprecated get_by_id method"""
+    """Test cases for get_by_id method"""
 
     def setUp(self):
         """Set up test repository"""
         self.repository = UDFFieldRepository()
 
-    def test_get_by_id_returns_none(self):
-        """Test get_by_id returns None (deprecated)"""
+    @patch('udf.repositories.udf_field_repository.impala_manager.execute_query')
+    def test_get_by_id_found(self, mock_execute):
+        """Test get_by_id when record found"""
+        mock_execute.return_value = [
+            {
+                'udf_id': 123,
+                'object_type': 'TRADE',
+                'field_name': 'Fund Type',
+                'field_value': 'EQUITY',
+                'is_active': True,
+                'created_by': 'admin',
+                'created_at': 1234567890,
+                'updated_by': 'admin',
+                'updated_at': 1234567890
+            }
+        ]
+
+        result = self.repository.get_by_id(123)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result['udf_id'], 123)
+        self.assertEqual(result['object_type'], 'TRADE')
+
+    @patch('udf.repositories.udf_field_repository.impala_manager.execute_query')
+    def test_get_by_id_not_found(self, mock_execute):
+        """Test get_by_id when record not found"""
+        mock_execute.return_value = []
+
+        result = self.repository.get_by_id(999)
+
+        self.assertIsNone(result)
+
+    @patch('udf.repositories.udf_field_repository.impala_manager.execute_query')
+    def test_get_by_id_none_result(self, mock_execute):
+        """Test get_by_id with None result"""
+        mock_execute.return_value = None
+
+        result = self.repository.get_by_id(123)
+
+        self.assertIsNone(result)
+
+    @patch('udf.repositories.udf_field_repository.impala_manager.execute_query')
+    def test_get_by_id_exception(self, mock_execute):
+        """Test get_by_id handles exception gracefully"""
+        mock_execute.side_effect = Exception("Database error")
+
         result = self.repository.get_by_id(123)
 
         self.assertIsNone(result)
@@ -614,133 +658,99 @@ class UDFFieldRepositoryUpdateTestCase(TestCase):
 
 
 class UDFFieldRepositorySoftDeleteTestCase(TestCase):
-    """Test cases for soft_delete method"""
+    """Test cases for soft_delete method (udf_id based)"""
 
     def setUp(self):
         """Set up test repository"""
         self.repository = UDFFieldRepository()
 
-    @patch.object(UDFFieldRepository, 'create')
-    @patch.object(UDFFieldRepository, 'get_by_key')
-    def test_soft_delete_success(self, mock_get, mock_create):
-        """Test successful soft delete"""
-        mock_get.return_value = {
-            'object_type': 'TRADE',
-            'field_name': 'Fund Type',
-            'field_value': 'EQUITY',
-            'is_active': True,
-            'created_by': 'admin',
-            'created_at': 1234567890
-        }
-        mock_create.return_value = True
+    @patch('udf.repositories.udf_field_repository.impala_manager.execute_write')
+    def test_soft_delete_success(self, mock_execute):
+        """Test successful soft delete by udf_id"""
+        mock_execute.return_value = True
 
-        result = self.repository.soft_delete('TRADE', 'Fund Type', 'EQUITY', 'admin')
+        result = self.repository.soft_delete(12345, 'admin')
 
         self.assertTrue(result)
-        mock_create.assert_called_once()
-        # Verify is_active is set to False
-        call_args = mock_create.call_args[0][0]
-        self.assertFalse(call_args['is_active'])
+        mock_execute.assert_called_once()
+        # Verify query contains is_active = false
+        call_args = mock_execute.call_args[0][0]
+        self.assertIn('false', call_args)
+        self.assertIn('12345', call_args)
 
-    @patch.object(UDFFieldRepository, 'get_by_key')
-    def test_soft_delete_not_found(self, mock_get):
-        """Test soft delete when record not found"""
-        mock_get.return_value = None
+    @patch('udf.repositories.udf_field_repository.impala_manager.execute_write')
+    def test_soft_delete_not_found(self, mock_execute):
+        """Test soft delete when execute returns False"""
+        mock_execute.return_value = False
 
-        result = self.repository.soft_delete('TRADE', 'Unknown', 'Value', 'admin')
-
-        self.assertFalse(result)
-
-    @patch.object(UDFFieldRepository, 'create')
-    @patch.object(UDFFieldRepository, 'get_by_key')
-    def test_soft_delete_failure(self, mock_get, mock_create):
-        """Test soft delete when create fails"""
-        mock_get.return_value = {
-            'object_type': 'TRADE',
-            'field_name': 'Fund Type',
-            'field_value': 'EQUITY',
-            'is_active': True,
-            'created_by': 'admin',
-            'created_at': 1234567890
-        }
-        mock_create.return_value = False
-
-        result = self.repository.soft_delete('TRADE', 'Fund Type', 'EQUITY', 'admin')
+        result = self.repository.soft_delete(99999, 'admin')
 
         self.assertFalse(result)
 
-    @patch.object(UDFFieldRepository, 'get_by_key')
-    def test_soft_delete_exception(self, mock_get):
+    @patch('udf.repositories.udf_field_repository.impala_manager.execute_write')
+    def test_soft_delete_failure(self, mock_execute):
+        """Test soft delete when execute fails"""
+        mock_execute.return_value = False
+
+        result = self.repository.soft_delete(12345, 'admin')
+
+        self.assertFalse(result)
+
+    @patch('udf.repositories.udf_field_repository.impala_manager.execute_write')
+    def test_soft_delete_exception(self, mock_execute):
         """Test soft delete handles exception"""
-        mock_get.side_effect = Exception("Database error")
+        mock_execute.side_effect = Exception("Database error")
 
-        result = self.repository.soft_delete('TRADE', 'Fund Type', 'EQUITY', 'admin')
+        result = self.repository.soft_delete(12345, 'admin')
 
         self.assertFalse(result)
 
 
 class UDFFieldRepositoryRestoreTestCase(TestCase):
-    """Test cases for restore method"""
+    """Test cases for restore method (udf_id based)"""
 
     def setUp(self):
         """Set up test repository"""
         self.repository = UDFFieldRepository()
 
-    @patch.object(UDFFieldRepository, 'create')
-    @patch.object(UDFFieldRepository, 'get_by_key')
-    def test_restore_success(self, mock_get, mock_create):
-        """Test successful restore"""
-        mock_get.return_value = {
-            'object_type': 'TRADE',
-            'field_name': 'Fund Type',
-            'field_value': 'EQUITY',
-            'is_active': False,
-            'created_by': 'admin',
-            'created_at': 1234567890
-        }
-        mock_create.return_value = True
+    @patch('udf.repositories.udf_field_repository.impala_manager.execute_write')
+    def test_restore_success(self, mock_execute):
+        """Test successful restore by udf_id"""
+        mock_execute.return_value = True
 
-        result = self.repository.restore('TRADE', 'Fund Type', 'EQUITY', 'admin')
+        result = self.repository.restore(12345, 'admin')
 
         self.assertTrue(result)
-        mock_create.assert_called_once()
-        # Verify is_active is set to True
-        call_args = mock_create.call_args[0][0]
-        self.assertTrue(call_args['is_active'])
+        mock_execute.assert_called_once()
+        # Verify query contains is_active = true
+        call_args = mock_execute.call_args[0][0]
+        self.assertIn('true', call_args)
+        self.assertIn('12345', call_args)
 
-    @patch.object(UDFFieldRepository, 'get_by_key')
-    def test_restore_not_found(self, mock_get):
-        """Test restore when record not found"""
-        mock_get.return_value = None
+    @patch('udf.repositories.udf_field_repository.impala_manager.execute_write')
+    def test_restore_not_found(self, mock_execute):
+        """Test restore when execute returns False"""
+        mock_execute.return_value = False
 
-        result = self.repository.restore('TRADE', 'Unknown', 'Value', 'admin')
-
-        self.assertFalse(result)
-
-    @patch.object(UDFFieldRepository, 'create')
-    @patch.object(UDFFieldRepository, 'get_by_key')
-    def test_restore_failure(self, mock_get, mock_create):
-        """Test restore when create fails"""
-        mock_get.return_value = {
-            'object_type': 'TRADE',
-            'field_name': 'Fund Type',
-            'field_value': 'EQUITY',
-            'is_active': False,
-            'created_by': 'admin',
-            'created_at': 1234567890
-        }
-        mock_create.return_value = False
-
-        result = self.repository.restore('TRADE', 'Fund Type', 'EQUITY', 'admin')
+        result = self.repository.restore(99999, 'admin')
 
         self.assertFalse(result)
 
-    @patch.object(UDFFieldRepository, 'get_by_key')
-    def test_restore_exception(self, mock_get):
+    @patch('udf.repositories.udf_field_repository.impala_manager.execute_write')
+    def test_restore_failure(self, mock_execute):
+        """Test restore when execute fails"""
+        mock_execute.return_value = False
+
+        result = self.repository.restore(12345, 'admin')
+
+        self.assertFalse(result)
+
+    @patch('udf.repositories.udf_field_repository.impala_manager.execute_write')
+    def test_restore_exception(self, mock_execute):
         """Test restore handles exception"""
-        mock_get.side_effect = Exception("Database error")
+        mock_execute.side_effect = Exception("Database error")
 
-        result = self.repository.restore('TRADE', 'Fund Type', 'EQUITY', 'admin')
+        result = self.repository.restore(12345, 'admin')
 
         self.assertFalse(result)
 
@@ -850,6 +860,58 @@ class UDFFieldRepositoryAddFieldValueTestCase(TestCase):
         """Test add_field_value raises error for None value"""
         with self.assertRaises(ValueError):
             self.repository.add_field_value('TRADE', 'Fund Type', None, 'admin')
+
+
+class UDFFieldRepositoryGetNextIdTestCase(TestCase):
+    """Test cases for get_next_id method"""
+
+    def setUp(self):
+        """Set up test repository"""
+        self.repository = UDFFieldRepository()
+
+    def test_get_next_id_returns_timestamp(self):
+        """Test get_next_id returns timestamp-based ID"""
+        result = self.repository.get_next_id()
+
+        self.assertIsInstance(result, int)
+        self.assertGreater(result, 0)
+        # Should be a timestamp in milliseconds (13+ digits)
+        self.assertGreater(result, 1000000000000)
+
+    def test_get_next_id_unique(self):
+        """Test get_next_id returns unique values"""
+        import time
+        id1 = self.repository.get_next_id()
+        time.sleep(0.001)  # Wait 1ms
+        id2 = self.repository.get_next_id()
+
+        self.assertNotEqual(id1, id2)
+
+
+class UDFFieldRepositoryUpdateByIdTestCase(TestCase):
+    """Test cases for update method with udf_id"""
+
+    def setUp(self):
+        """Set up test repository"""
+        self.repository = UDFFieldRepository()
+
+    @patch('udf.repositories.udf_field_repository.impala_manager.execute_write')
+    def test_update_by_id_success(self, mock_execute):
+        """Test successful update via composite key"""
+        mock_execute.return_value = True
+
+        field_data = {
+            'is_active': True,
+            'updated_by': 'admin',
+            'created_by': 'admin',
+            'created_at': 1234567890
+        }
+
+        result = self.repository.update('TRADE', 'Fund Type', 'EQUITY', field_data)
+
+        # update() returns the result of create() which returns field_id
+        self.assertIsNotNone(result)
+        mock_execute.assert_called_once()
 
 
 class UDFFieldRepositoryConstantsTestCase(TestCase):

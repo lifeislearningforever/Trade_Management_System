@@ -175,14 +175,74 @@ cursor.execute("""
 ## Testing
 
 - **Framework:** pytest + pytest-django
-- **Coverage:** 39.33% (90 tests)
 - **Config:** `pytest.ini`, `.coveragerc`
+- **Target Coverage:** 95%
+
+### Current Test Coverage (Updated: 2026-03-13)
+
+| Module | Coverage | Tests | Status |
+|--------|----------|-------|--------|
+| **udf/services/udf_field_service.py** | 92% | 46 | Near Target |
+| **trade/repositories/trade_kudu_repository.py** | 86% | 150+ | Good |
+| **trade/repositories/trade_validation_repository.py** | 84% | 50+ | Good |
+| **trade/views.py** | 84% | 80+ | Good |
+| **reference_data/models.py** | 95% | 20+ | Target Met |
+| **trade/services** | ~60% | 100+ | In Progress |
+| **portfolio** | ~50% | 40+ | Needs Work |
+| **security** | ~30% | 20+ | Needs Work |
+| **core** | ~20% | 30+ | Needs Work |
+| **market_data** | ~15% | 10+ | Needs Work |
+| **Overall** | ~30% | 557 | In Progress |
+
+### Test Coverage Improvement Plan
+
+**Priority 1 - Critical Services (Target: 95%)**
+- [ ] trade/services/position_service.py (current: ~40%)
+- [ ] trade/services/settlement_service.py (current: ~60%)
+- [ ] trade/services/position_queue_service.py (current: ~55%)
+- [x] udf/services/udf_field_service.py (current: 92%)
+
+**Priority 2 - Repositories (Target: 95%)**
+- [x] trade/repositories/trade_kudu_repository.py (current: 86%)
+- [x] trade/repositories/trade_validation_repository.py (current: 84%)
+- [ ] udf/repositories/udf_field_repository.py (current: ~83%)
+
+**Priority 3 - Views & Integration (Target: 85%)**
+- [ ] trade/views.py (current: 84%)
+- [ ] portfolio/views.py (current: ~57%)
+- [ ] udf/views.py (current: ~19%)
+
+**Priority 4 - Supporting Modules (Target: 80%)**
+- [ ] core/audit/* (current: ~0%)
+- [ ] core/repositories/impala_connection.py (current: ~22%)
+- [ ] market_data/services/* (current: ~17%)
+
+### Running Tests
 
 ```bash
+# Run all tests with coverage
+pytest --cov=core --cov=portfolio --cov=trade --cov=udf --cov=security --cov-report=term-missing
+
+# Run specific module tests
+pytest trade/tests/ -v
+pytest udf/tests/ -v
+
 # Generate HTML coverage report
 pytest --cov=. --cov-report=html
 open htmlcov/index.html
+
+# Run specific test file
+pytest trade/tests/test_position_service.py -v
+
+# Run with verbose output
+pytest -v --tb=short
 ```
+
+### Known Failing Tests (45 total)
+- UDF repository soft_delete/restore tests (need mock updates)
+- Trade position/settlement integration tests (need DB mocking)
+- Portfolio view tests (need session mocking)
+- Core auth tests (need user fixture updates)
 
 ## Code Style Guidelines
 

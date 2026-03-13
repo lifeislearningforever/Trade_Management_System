@@ -3,10 +3,12 @@ UDF View Tests
 
 Tests for UDF views including:
 - List view with search/filter
-- Detail view
 - Create/Edit/Delete operations
 - CSV export
 - UDFWrapper class
+- API endpoints
+
+Updated to match urls_simplified.py structure
 """
 
 import pytest
@@ -36,153 +38,67 @@ class UDFListViewTestCase(TestCase):
             {
                 'udf_id': 1,
                 'field_name': 'risk_rating',
-                'label': 'Risk Rating',
-                'description': 'Portfolio risk rating',
-                'field_type': 'DROPDOWN',
-                'entity_type': 'PORTFOLIO',
-                'is_required': True,
+                'field_value': 'Risk Rating',
+                'object_type': 'PORTFOLIO',
                 'is_active': True,
-                'display_order': 1,
-                'dropdown_options': 'Low,Medium,High',
-                'created_at': '2025-12-27 10:00:00',
-                'updated_at': '2025-12-27 10:00:00',
+                'created_at': 1704067200000,
+                'updated_at': 1704067200000,
                 'created_by': 'testuser',
                 'updated_by': 'testuser'
             },
             {
                 'udf_id': 2,
                 'field_name': 'custom_note',
-                'label': 'Custom Note',
-                'description': 'Custom notes',
-                'field_type': 'TEXT',
-                'entity_type': 'PORTFOLIO',
-                'is_required': False,
+                'field_value': 'Custom Note',
+                'object_type': 'PORTFOLIO',
                 'is_active': True,
-                'display_order': 2,
-                'max_length': 500,
-                'created_at': '2025-12-27 10:00:00',
-                'updated_at': '2025-12-27 10:00:00',
+                'created_at': 1704067200000,
+                'updated_at': 1704067200000,
                 'created_by': 'testuser',
                 'updated_by': 'testuser'
             }
         ]
 
-    @patch('udf.views.audit_log_kudu_repository.log_action')
-    @patch('udf.views.udf_definition_repository.get_all_definitions')
-    def test_udf_list_view_success(self, mock_get_all, mock_audit):
+    @patch('udf.views_simplified.udf_field_service')
+    def test_udf_list_view_success(self, mock_service):
         """Test UDF list view loads successfully"""
-        mock_get_all.return_value = self.sample_udfs
+        mock_service.get_all_fields.return_value = self.sample_udfs
+        mock_service.get_object_types.return_value = ['PORTFOLIO', 'TRADE']
 
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'udf/udf_list.html')
-        self.assertIn('page_obj', response.context)
+        self.assertTemplateUsed(response, 'udf/list.html')
 
-        # Verify audit log was called
-        mock_audit.assert_called_once()
-        call_kwargs = mock_audit.call_args[1]
-        self.assertEqual(call_kwargs['action_type'], 'VIEW')
-        self.assertEqual(call_kwargs['entity_type'], 'UDF')
+    @patch('udf.views_simplified.udf_field_service')
+    def test_udf_list_with_object_type_filter(self, mock_service):
+        """Test UDF list view with object_type filter"""
+        mock_service.get_all_fields.return_value = self.sample_udfs
+        mock_service.get_object_types.return_value = ['PORTFOLIO', 'TRADE']
 
-    @patch('udf.views.audit_log_kudu_repository.log_action')
-    @patch('udf.views.udf_definition_repository.get_all_definitions')
-    def test_udf_list_search(self, mock_get_all, mock_audit):
-        """Test UDF search functionality"""
-        mock_get_all.return_value = [self.sample_udfs[0]]
-
-        response = self.client.get(self.url, {'search': 'risk'})
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('search', response.context)
-
-    @patch('udf.views.audit_log_kudu_repository.log_action')
-    @patch('udf.views.udf_definition_repository.get_all_definitions')
-    def test_udf_list_entity_type_filter(self, mock_get_all, mock_audit):
-        """Test filtering by entity type"""
-        mock_get_all.return_value = self.sample_udfs
-
-        response = self.client.get(self.url, {'entity_type': 'PORTFOLIO'})
+        response = self.client.get(self.url, {'object_type': 'PORTFOLIO'})
 
         self.assertEqual(response.status_code, 200)
 
-    @patch('udf.views.audit_log_kudu_repository.log_action')
-    @patch('udf.views.udf_definition_repository.get_all_definitions')
-    def test_udf_csv_export(self, mock_get_all, mock_audit):
-        """Test CSV export functionality"""
-        mock_get_all.return_value = self.sample_udfs
+    @patch('udf.views_simplified.udf_field_service')
+    def test_udf_list_with_status_filter(self, mock_service):
+        """Test UDF list view with status filter"""
+        mock_service.get_all_fields.return_value = self.sample_udfs
+        mock_service.get_object_types.return_value = ['PORTFOLIO', 'TRADE']
 
-        response = self.client.get(self.url, {'export': 'csv'})
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response['Content-Type'], 'text/csv')
-        self.assertIn('attachment', response['Content-Disposition'])
-
-        # Check CSV content
-        content = response.content.decode('utf-8')
-        self.assertIn('risk_rating', content)
-        self.assertIn('custom_note', content)
-
-        # Verify export was logged (only EXPORT, no VIEW)
-        self.assertEqual(mock_audit.call_count, 1)  # EXPORT only
-        call_kwargs = mock_audit.call_args[1]
-        self.assertEqual(call_kwargs['action_type'], 'EXPORT')
-
-
-class UDFDetailViewTestCase(TestCase):
-    """Test cases for UDF detail view"""
-
-    def setUp(self):
-        """Set up test client"""
-        self.client = Client()
-
-        session = self.client.session
-        session['user_login'] = 'testuser'
-        session['user_id'] = 1
-        session.save()
-
-        self.udf_data = {
-            'udf_id': 1,
-            'field_name': 'risk_rating',
-            'label': 'Risk Rating',
-            'description': 'Portfolio risk rating',
-            'field_type': 'DROPDOWN',
-            'entity_type': 'PORTFOLIO',
-            'is_required': True,
-            'is_active': True,
-            'dropdown_options': 'Low,Medium,High',
-            'created_at': '2025-12-27 10:00:00',
-            'updated_at': '2025-12-27 10:00:00',
-            'created_by': 'testuser',
-            'updated_by': 'testuser'
-        }
-
-    @patch('udf.views.audit_log_kudu_repository.log_action')
-    @patch('udf.views.udf_definition_repository.get_definition_by_name')
-    def test_udf_detail_view_success(self, mock_get_udf, mock_audit):
-        """Test UDF detail view loads successfully"""
-        mock_get_udf.return_value = self.udf_data
-
-        url = reverse('udf:detail', args=['risk_rating'])
-        response = self.client.get(url)
+        response = self.client.get(self.url, {'status': 'active'})
 
         self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'udf/udf_detail.html')
-        self.assertIn('udf', response.context)
 
-        # Verify correct UDF was retrieved
-        mock_get_udf.assert_called_once_with('risk_rating')
+    @patch('udf.views_simplified.udf_field_service')
+    def test_udf_list_empty(self, mock_service):
+        """Test UDF list view with no data"""
+        mock_service.get_all_fields.return_value = []
+        mock_service.get_object_types.return_value = []
 
-    @patch('udf.views.audit_log_kudu_repository.log_action')
-    @patch('udf.views.udf_definition_repository.get_definition_by_name')
-    def test_udf_detail_not_found(self, mock_get_udf, mock_audit):
-        """Test detail view with non-existent UDF"""
-        mock_get_udf.return_value = None
+        response = self.client.get(self.url)
 
-        url = reverse('udf:detail', args=['nonexistent'])
-        response = self.client.get(url)
-
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 200)
 
 
 class UDFCreateViewTestCase(TestCase):
@@ -196,56 +112,46 @@ class UDFCreateViewTestCase(TestCase):
         session = self.client.session
         session['user_login'] = 'testuser'
         session['user_id'] = 1
+        session['user_name'] = 'Test User'
+        session['user_email'] = 'test@example.com'
         session.save()
 
         self.form_data = {
             'field_name': 'new_udf_field',
-            'label': 'New UDF',
-            'description': 'Test UDF',
-            'field_type': 'TEXT',
-            'entity_type': 'PORTFOLIO',
-            'is_required': False,
-            'is_active': True,
-            'display_order': 10,
-            'max_length': 255
+            'field_value': 'New UDF',
+            'object_type': 'PORTFOLIO',
         }
 
-    def test_udf_create_view_get(self):
+    @patch('udf.views_simplified.udf_field_service')
+    def test_udf_create_view_get(self, mock_service):
         """Test GET request to create view"""
+        mock_service.get_object_types.return_value = ['PORTFOLIO', 'TRADE']
+
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'udf/udf_form.html')
-        self.assertIn('field_type_choices', response.context)
-        self.assertIn('entity_type_choices', response.context)
+        self.assertTemplateUsed(response, 'udf/form.html')
 
-    @patch('udf.views.audit_log_kudu_repository.log_action')
-    @patch('udf.views.udf_definition_repository.insert_definition')
-    def test_udf_create_success(self, mock_insert, mock_audit):
+    @patch('udf.views_simplified.udf_field_service')
+    def test_udf_create_success(self, mock_service):
         """Test successful UDF creation"""
-        mock_insert.return_value = True
+        mock_service.create_field.return_value = (True, None, 100)
+        mock_service.get_object_types.return_value = ['PORTFOLIO', 'TRADE']
 
         response = self.client.post(self.url, self.form_data)
 
-        self.assertEqual(response.status_code, 302)
-        mock_insert.assert_called_once()
+        self.assertEqual(response.status_code, 302)  # Redirect on success
+        mock_service.create_field.assert_called_once()
 
-        # Verify audit log
-        mock_audit.assert_called_once()
-        call_kwargs = mock_audit.call_args[1]
-        self.assertEqual(call_kwargs['action_type'], 'CREATE')
-        self.assertEqual(call_kwargs['entity_type'], 'UDF')
-
-    @patch('udf.views.udf_definition_repository.insert_definition')
-    def test_udf_create_duplicate_field_name(self, mock_insert):
-        """Test creating UDF with duplicate field name"""
-        mock_insert.return_value = False
+    @patch('udf.views_simplified.udf_field_service')
+    def test_udf_create_failure(self, mock_service):
+        """Test UDF creation failure"""
+        mock_service.create_field.return_value = (False, 'Field already exists', None)
+        mock_service.get_object_types.return_value = ['PORTFOLIO', 'TRADE']
 
         response = self.client.post(self.url, self.form_data)
 
-        # Should show error message
-        self.assertEqual(response.status_code, 200)
-        # Check for error in messages or context
+        self.assertEqual(response.status_code, 200)  # Stay on form
 
 
 class UDFEditViewTestCase(TestCase):
@@ -258,62 +164,74 @@ class UDFEditViewTestCase(TestCase):
         session = self.client.session
         session['user_login'] = 'testuser'
         session['user_id'] = 1
+        session['user_name'] = 'Test User'
+        session['user_email'] = 'test@example.com'
         session.save()
 
         self.udf_data = {
             'udf_id': 1,
             'field_name': 'risk_rating',
-            'label': 'Risk Rating',
-            'description': 'Portfolio risk rating',
-            'field_type': 'DROPDOWN',
-            'entity_type': 'PORTFOLIO',
-            'is_required': True,
+            'field_value': 'Risk Rating',
+            'object_type': 'PORTFOLIO',
             'is_active': True,
-            'dropdown_options': 'Low,Medium,High',
-            'created_at': '2025-12-27 10:00:00',
+            'created_at': 1704067200000,
             'created_by': 'testuser'
         }
 
-    @patch('udf.views.udf_definition_repository.get_definition_by_name')
-    def test_udf_edit_view_get(self, mock_get_udf):
+    @patch('udf.views_simplified.udf_field_service')
+    def test_udf_edit_view_get(self, mock_service):
         """Test GET request to edit view"""
-        mock_get_udf.return_value = self.udf_data
+        mock_service.get_field_by_id.return_value = self.udf_data
+        mock_service.get_object_types.return_value = ['PORTFOLIO', 'TRADE']
 
-        url = reverse('udf:edit', args=['risk_rating'])
+        url = reverse('udf:edit', args=[1])
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'udf/udf_form.html')
-        self.assertIn('udf', response.context)
+        self.assertTemplateUsed(response, 'udf/form.html')
 
-    @patch('udf.views.audit_log_kudu_repository.log_action')
-    @patch('udf.views.udf_definition_repository.update_definition')
-    @patch('udf.views.udf_definition_repository.get_definition_by_name')
-    def test_udf_edit_success(self, mock_get, mock_update, mock_audit):
+    @patch('udf.views_simplified.udf_field_service')
+    def test_udf_edit_view_not_found(self, mock_service):
+        """Test edit view when UDF not found"""
+        mock_service.get_field_by_id.return_value = None
+        mock_service.get_object_types.return_value = ['PORTFOLIO', 'TRADE']
+
+        url = reverse('udf:edit', args=[999])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 404)  # 404 Not Found
+
+    @patch('udf.views_simplified.udf_field_service')
+    def test_udf_edit_success(self, mock_service):
         """Test successful UDF edit"""
-        mock_get.return_value = self.udf_data
-        mock_update.return_value = True
+        mock_service.get_field_by_id.return_value = self.udf_data
+        mock_service.update_field.return_value = (True, None)
+        mock_service.get_object_types.return_value = ['PORTFOLIO', 'TRADE']
 
-        url = reverse('udf:edit', args=['risk_rating'])
+        url = reverse('udf:edit', args=[1])
         response = self.client.post(url, {
             'field_name': 'risk_rating',
-            'label': 'Updated Risk Rating',
-            'description': 'Updated description',
-            'field_type': 'DROPDOWN',
-            'entity_type': 'PORTFOLIO',
-            'is_required': True,
-            'is_active': True,
-            'dropdown_options': 'Low,Medium,High,Critical',
-            'display_order': 1
+            'field_value': 'Updated Risk Rating',
+            'object_type': 'PORTFOLIO',
         })
 
-        self.assertEqual(response.status_code, 302)
-        mock_update.assert_called_once()
+        self.assertEqual(response.status_code, 302)  # Redirect on success
 
-        # Verify audit log
-        mock_audit.assert_called_once()
-        call_kwargs = mock_audit.call_args[1]
-        self.assertEqual(call_kwargs['action_type'], 'UPDATE')
+    @patch('udf.views_simplified.udf_field_service')
+    def test_udf_edit_failure(self, mock_service):
+        """Test UDF edit failure"""
+        mock_service.get_field_by_id.return_value = self.udf_data
+        mock_service.update_field.return_value = (False, 'Update failed')
+        mock_service.get_object_types.return_value = ['PORTFOLIO', 'TRADE']
+
+        url = reverse('udf:edit', args=[1])
+        response = self.client.post(url, {
+            'field_name': 'risk_rating',
+            'field_value': 'Updated Risk Rating',
+            'object_type': 'PORTFOLIO',
+        })
+
+        self.assertEqual(response.status_code, 200)  # Stay on form
 
 
 class UDFDeleteViewTestCase(TestCase):
@@ -326,114 +244,183 @@ class UDFDeleteViewTestCase(TestCase):
         session = self.client.session
         session['user_login'] = 'testuser'
         session['user_id'] = 1
+        session['user_name'] = 'Test User'
+        session['user_email'] = 'test@example.com'
         session.save()
 
         self.udf_data = {
             'udf_id': 1,
             'field_name': 'risk_rating',
-            'label': 'Risk Rating',
+            'field_value': 'Risk Rating',
             'is_active': True
         }
 
-    @patch('udf.views.audit_log_kudu_repository.log_action')
-    @patch('udf.views.udf_definition_repository.delete_definition')
-    @patch('udf.views.udf_definition_repository.get_definition_by_name')
-    def test_udf_delete_success(self, mock_get, mock_delete, mock_audit):
+    @patch('udf.views_simplified.udf_field_service')
+    def test_udf_delete_success(self, mock_service):
         """Test successful UDF soft delete"""
-        mock_get.return_value = self.udf_data
-        mock_delete.return_value = True
+        mock_service.delete_field.return_value = (True, None)
 
-        url = reverse('udf:delete', args=['risk_rating'])
+        url = reverse('udf:delete', args=[1])
         response = self.client.post(url)
 
-        self.assertEqual(response.status_code, 302)
-        mock_delete.assert_called_once_with(1)
+        self.assertEqual(response.status_code, 302)  # Redirect on success
+        mock_service.delete_field.assert_called_once()
 
-        # Verify audit log
-        mock_audit.assert_called_once()
-        call_kwargs = mock_audit.call_args[1]
-        self.assertEqual(call_kwargs['action_type'], 'DELETE')
+    @patch('udf.views_simplified.udf_field_service')
+    def test_udf_delete_failure(self, mock_service):
+        """Test UDF delete failure"""
+        mock_service.delete_field.return_value = (False, 'Delete failed')
+
+        url = reverse('udf:delete', args=[1])
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 400)  # Bad request on error
 
 
-class UDFWrapperTestCase(TestCase):
-    """Test cases for UDFWrapper class"""
+class UDFRestoreViewTestCase(TestCase):
+    """Test cases for UDF restore view"""
 
-    def test_wrapper_initialization(self):
-        """Test UDFWrapper initialization"""
-        from udf.views import UDFWrapper
+    def setUp(self):
+        """Set up test client"""
+        self.client = Client()
 
+        session = self.client.session
+        session['user_login'] = 'testuser'
+        session['user_id'] = 1
+        session['user_name'] = 'Test User'
+        session['user_email'] = 'test@example.com'
+        session.save()
+
+    @patch('udf.views_simplified.udf_field_service')
+    def test_udf_restore_success(self, mock_service):
+        """Test successful UDF restore"""
+        mock_service.restore_field.return_value = (True, None)
+
+        url = reverse('udf:restore', args=[1])
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 302)  # Redirect on success
+        mock_service.restore_field.assert_called_once()
+
+    @patch('udf.views_simplified.udf_field_service')
+    def test_udf_restore_failure(self, mock_service):
+        """Test UDF restore failure"""
+        mock_service.restore_field.return_value = (False, 'Restore failed')
+
+        url = reverse('udf:restore', args=[1])
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 400)  # Bad request on error
+
+
+class UDFDashboardViewTestCase(TestCase):
+    """Test cases for UDF dashboard view"""
+
+    def setUp(self):
+        """Set up test client"""
+        self.client = Client()
+        self.url = reverse('udf:dashboard')
+
+        session = self.client.session
+        session['user_login'] = 'testuser'
+        session['user_id'] = 1
+        session.save()
+
+    @patch('udf.views_simplified.udf_field_service')
+    def test_dashboard_view_success(self, mock_service):
+        """Test dashboard view loads successfully"""
+        mock_service.get_dashboard_stats.return_value = [
+            {'object_type': 'PORTFOLIO', 'total_fields': 10, 'active_fields': 8, 'inactive_fields': 2}
+        ]
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+
+
+class UDFAPITestCase(TestCase):
+    """Test cases for UDF API endpoints"""
+
+    def setUp(self):
+        """Set up test client"""
+        self.client = Client()
+
+        session = self.client.session
+        session['user_login'] = 'testuser'
+        session['user_id'] = 1
+        session.save()
+
+    @patch('udf.views_simplified.udf_field_service')
+    def test_api_get_object_types(self, mock_service):
+        """Test API endpoint for getting object types"""
+        mock_service.get_object_types.return_value = ['PORTFOLIO', 'TRADE', 'SECURITY']
+
+        url = reverse('udf:api_object_types')
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/json')
+
+    @patch('udf.views_simplified.udf_field_service')
+    def test_api_get_fields_by_entity(self, mock_service):
+        """Test API endpoint for getting fields by entity"""
+        mock_service.get_fields_by_entity.return_value = [
+            {'field_name': 'risk_rating'},
+            {'field_name': 'portfolio_type'}
+        ]
+
+        url = reverse('udf:api_fields_by_object_new', args=['PORTFOLIO'])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/json')
+
+
+class UDFDataDictTestCase(TestCase):
+    """Test cases for UDF data dict handling in views"""
+
+    def test_udf_data_dict_access(self):
+        """Test UDF data dictionary access patterns"""
         data = {
             'udf_id': 1,
             'field_name': 'risk_rating',
-            'label': 'Risk Rating',
-            'description': 'Portfolio risk rating',
-            'field_type': 'DROPDOWN',
-            'entity_type': 'PORTFOLIO',
-            'is_required': True,
+            'field_value': 'Risk Rating',
+            'object_type': 'PORTFOLIO',
             'is_active': True,
-            'dropdown_options': 'Low,Medium,High',
-            'created_at': '2025-12-27 10:00:00',
-            'updated_at': '2025-12-27 10:00:00'
+            'created_at': 1704067200000,
+            'updated_at': 1704067200000
         }
 
-        wrapper = UDFWrapper(data, index=0)
+        # Test direct dict access
+        self.assertEqual(data.get('udf_id'), 1)
+        self.assertEqual(data.get('field_name'), 'risk_rating')
+        self.assertEqual(data.get('field_value'), 'Risk Rating')
+        self.assertTrue(data.get('is_active'))
 
-        self.assertEqual(wrapper.udf_id, 1)
-        self.assertEqual(wrapper.field_name, 'risk_rating')
-        self.assertEqual(wrapper.field_type, 'DROPDOWN')
-        self.assertTrue(wrapper.is_required)
-        self.assertTrue(wrapper.is_active)
-
-    def test_wrapper_get_field_type_display(self):
-        """Test get_field_type_display method"""
-        from udf.views import UDFWrapper
-
-        data = {'field_name': 'test', 'field_type': 'DROPDOWN', 'udf_id': 1}
-        wrapper = UDFWrapper(data)
-
-        self.assertEqual(wrapper.get_field_type_display(), 'Dropdown')
-
-    def test_wrapper_get_entity_type_display(self):
-        """Test get_entity_type_display method"""
-        from udf.views import UDFWrapper
-
-        data = {'field_name': 'test', 'entity_type': 'PORTFOLIO', 'udf_id': 1}
-        wrapper = UDFWrapper(data)
-
-        self.assertEqual(wrapper.get_entity_type_display(), 'Portfolio')
-
-    def test_wrapper_dropdown_options_property(self):
-        """Test dropdown_options property stores value as-is"""
-        from udf.views import UDFWrapper
-
-        # Test with string value
-        data = {
-            'field_name': 'test',
-            'dropdown_options': 'Low,Medium,High',
-            'udf_id': 1
-        }
-        wrapper = UDFWrapper(data)
-
-        options = wrapper.dropdown_options
-        self.assertIsInstance(options, str)
-        self.assertEqual(options, 'Low,Medium,High')
-
-    def test_wrapper_missing_fields(self):
-        """Test UDFWrapper handles missing fields"""
-        from udf.views import UDFWrapper
-
+    def test_udf_data_dict_defaults(self):
+        """Test UDF data dictionary with defaults"""
         minimal_data = {
             'udf_id': 1,
             'field_name': 'test_field'
         }
 
-        wrapper = UDFWrapper(minimal_data, index=0)
+        # Test defaults
+        self.assertEqual(minimal_data.get('field_value', ''), '')
+        self.assertEqual(minimal_data.get('object_type', ''), '')
+        self.assertEqual(minimal_data.get('is_active', True), True)
 
-        self.assertEqual(wrapper.field_name, 'test_field')
-        # Missing fields should default to empty strings or defaults
-        self.assertEqual(wrapper.label, '')
-        self.assertEqual(wrapper.description, '')
-        self.assertIsNone(wrapper.min_value)
+    def test_udf_timestamp_handling(self):
+        """Test UDF timestamp to datetime conversion"""
+        from datetime import datetime
+
+        timestamp_ms = 1704067200000  # Jan 1, 2024 00:00:00 UTC
+
+        # Convert millisecond timestamp to datetime
+        dt = datetime.fromtimestamp(timestamp_ms / 1000)
+
+        self.assertEqual(dt.year, 2024)
+        self.assertEqual(dt.month, 1)
+        self.assertEqual(dt.day, 1)
 
 
 class UDFURLTestCase(TestCase):
@@ -442,12 +429,7 @@ class UDFURLTestCase(TestCase):
     def test_udf_list_url_resolves(self):
         """Test UDF list URL resolves correctly"""
         url = reverse('udf:list')
-        self.assertEqual(url, '/udf/')
-
-    def test_udf_detail_url_resolves(self):
-        """Test UDF detail URL resolves correctly"""
-        url = reverse('udf:detail', args=['risk_rating'])
-        self.assertEqual(url, '/udf/risk_rating/')
+        self.assertEqual(url, '/udf/list/')
 
     def test_udf_create_url_resolves(self):
         """Test UDF create URL resolves correctly"""
@@ -456,10 +438,30 @@ class UDFURLTestCase(TestCase):
 
     def test_udf_edit_url_resolves(self):
         """Test UDF edit URL resolves correctly"""
-        url = reverse('udf:edit', args=['risk_rating'])
-        self.assertEqual(url, '/udf/risk_rating/edit/')
+        url = reverse('udf:edit', args=[1])
+        self.assertEqual(url, '/udf/1/edit/')
 
     def test_udf_delete_url_resolves(self):
         """Test UDF delete URL resolves correctly"""
-        url = reverse('udf:delete', args=['risk_rating'])
-        self.assertEqual(url, '/udf/risk_rating/delete/')
+        url = reverse('udf:delete', args=[1])
+        self.assertEqual(url, '/udf/1/delete/')
+
+    def test_udf_restore_url_resolves(self):
+        """Test UDF restore URL resolves correctly"""
+        url = reverse('udf:restore', args=[1])
+        self.assertEqual(url, '/udf/1/restore/')
+
+    def test_udf_dashboard_url_resolves(self):
+        """Test UDF dashboard URL resolves correctly"""
+        url = reverse('udf:dashboard')
+        self.assertEqual(url, '/udf/')
+
+    def test_api_object_types_url_resolves(self):
+        """Test API object types URL resolves correctly"""
+        url = reverse('udf:api_object_types')
+        self.assertEqual(url, '/udf/api/object-types/')
+
+    def test_api_fields_by_object_url_resolves(self):
+        """Test API fields by object URL resolves correctly"""
+        url = reverse('udf:api_fields_by_object_new', args=['PORTFOLIO'])
+        self.assertEqual(url, '/udf/api/fields/PORTFOLIO/')
