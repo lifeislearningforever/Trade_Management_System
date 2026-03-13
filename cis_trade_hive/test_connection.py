@@ -131,15 +131,20 @@ def test_hive_connection():
 
     try:
         # Build connection params
+        # Note: pyhive uses 'KERBEROS' not 'GSSAPI' for auth
+        auth_mode = HIVE_CONFIG['AUTH']
+        if auth_mode == 'GSSAPI':
+            auth_mode = 'KERBEROS'  # pyhive uses 'KERBEROS' not 'GSSAPI'
+
         conn_params = {
             'host': HIVE_CONFIG['HOST'],
             'port': HIVE_CONFIG['PORT'],
             'database': HIVE_CONFIG['DATABASE'],
-            'auth': HIVE_CONFIG['AUTH'],
+            'auth': auth_mode,
         }
 
-        # Add Kerberos service name if using GSSAPI
-        if HIVE_CONFIG['AUTH'] == 'GSSAPI':
+        # Add Kerberos service name if using KERBEROS auth
+        if auth_mode == 'KERBEROS':
             conn_params['kerberos_service_name'] = HIVE_CONFIG.get('KERBEROS_SERVICE_NAME', 'hive')
 
         print(f"  Connecting with params: {conn_params}")
@@ -217,28 +222,39 @@ def test_impala_manager():
         print("-" * 70)
 
         # Reset singleton to pick up fresh config
+        if hasattr(ImpalaConnectionManager, '_instance') and ImpalaConnectionManager._instance is not None:
+            # Clear the instance's initialized flag too
+            if hasattr(ImpalaConnectionManager._instance, '_initialized'):
+                del ImpalaConnectionManager._instance._initialized
         ImpalaConnectionManager._instance = None
 
         manager = ImpalaConnectionManager()
 
         print("  Testing connection via manager...")
-        success = manager.test_connection()
 
-        if success:
+        # Try to get a connection and run a query
+        try:
+            with manager.get_cursor() as cursor:
+                if cursor is None:
+                    print("  ERROR: Could not get cursor")
+                    return False
+
+                cursor.execute("SELECT 1 as test_col")
+                result = cursor.fetchone()
+                print(f"  SELECT 1 result: {result}")
+
             print("  CONNECTION MANAGER: SUCCESS")
-
-            # Try a query
-            print("\n  Testing query execution...")
-            results = manager.execute_query("SELECT 1 as test_col")
-            print(f"  Query result: {results}")
-
             return True
-        else:
+
+        except Exception as conn_error:
+            print(f"  Connection error: {conn_error}")
             print("  CONNECTION MANAGER: FAILED")
             return False
 
     except Exception as e:
         print(f"  ERROR: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
