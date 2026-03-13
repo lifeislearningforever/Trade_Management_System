@@ -40,7 +40,8 @@ if CIS_ENV == 'SIT':
         'AUTH': os.environ.get('IMPALA_AUTH', 'GSSAPI'),  # Used by hybrid_connection.py
         'AUTH_MECHANISM': os.environ.get('IMPALA_AUTH', 'GSSAPI'),  # Used by impala_connection.py
         'USE_SSL': os.environ.get('IMPALA_USE_SSL', 'true').lower() == 'true',
-        'KERBEROS_SERVICE_NAME': os.environ.get('IMPALA_KRB_SERVICE_NAME', 'impala'),
+        # Check both KRB_SERVICE_NAME and IMPALA_KRB_SERVICE_NAME for compatibility with .env
+        'KERBEROS_SERVICE_NAME': os.environ.get('IMPALA_KRB_SERVICE_NAME', os.environ.get('KRB_SERVICE_NAME', 'impala')),
         'TIMEOUT': int(os.environ.get('IMPALA_TIMEOUT', '60')),
         'POOL_SIZE': int(os.environ.get('IMPALA_POOL_SIZE', '10')),
     }
@@ -53,7 +54,7 @@ elif CIS_ENV == 'UAT':
         'AUTH': os.environ.get('IMPALA_AUTH', 'GSSAPI'),
         'AUTH_MECHANISM': os.environ.get('IMPALA_AUTH', 'GSSAPI'),
         'USE_SSL': os.environ.get('IMPALA_USE_SSL', 'true').lower() == 'true',
-        'KERBEROS_SERVICE_NAME': os.environ.get('IMPALA_KRB_SERVICE_NAME', 'impala'),
+        'KERBEROS_SERVICE_NAME': os.environ.get('IMPALA_KRB_SERVICE_NAME', os.environ.get('KRB_SERVICE_NAME', 'impala')),
         'TIMEOUT': int(os.environ.get('IMPALA_TIMEOUT', '60')),
         'POOL_SIZE': int(os.environ.get('IMPALA_POOL_SIZE', '10')),
     }
@@ -66,7 +67,7 @@ elif CIS_ENV == 'PROD':
         'AUTH': os.environ.get('IMPALA_AUTH', 'GSSAPI'),
         'AUTH_MECHANISM': os.environ.get('IMPALA_AUTH', 'GSSAPI'),
         'USE_SSL': os.environ.get('IMPALA_USE_SSL', 'true').lower() == 'true',
-        'KERBEROS_SERVICE_NAME': os.environ.get('IMPALA_KRB_SERVICE_NAME', 'impala'),
+        'KERBEROS_SERVICE_NAME': os.environ.get('IMPALA_KRB_SERVICE_NAME', os.environ.get('KRB_SERVICE_NAME', 'impala')),
         'TIMEOUT': int(os.environ.get('IMPALA_TIMEOUT', '60')),
         'POOL_SIZE': int(os.environ.get('IMPALA_POOL_SIZE', '10')),
     }
@@ -79,7 +80,7 @@ elif CIS_ENV == 'DR':
         'AUTH': os.environ.get('IMPALA_AUTH', 'GSSAPI'),
         'AUTH_MECHANISM': os.environ.get('IMPALA_AUTH', 'GSSAPI'),
         'USE_SSL': os.environ.get('IMPALA_USE_SSL', 'true').lower() == 'true',
-        'KERBEROS_SERVICE_NAME': os.environ.get('IMPALA_KRB_SERVICE_NAME', 'impala'),
+        'KERBEROS_SERVICE_NAME': os.environ.get('IMPALA_KRB_SERVICE_NAME', os.environ.get('KRB_SERVICE_NAME', 'impala')),
         'TIMEOUT': int(os.environ.get('IMPALA_TIMEOUT', '60')),
         'POOL_SIZE': int(os.environ.get('IMPALA_POOL_SIZE', '10')),
     }

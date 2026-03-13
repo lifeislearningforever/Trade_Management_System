@@ -31,11 +31,27 @@ from config.environments import (
 
 def test_environment():
     """Print current environment configuration."""
+    import os as _os
     print("=" * 70)
     print("  ENVIRONMENT CHECK")
     print("=" * 70)
-    print(f"  CIS_ENV:       {CIS_ENV}")
-    print(f"  CURRENT_ENV:   {CURRENT_ENV}")
+    print(f"  CIS_ENV (from module): {CIS_ENV}")
+    print(f"  CIS_ENV (from os.env): {_os.environ.get('CIS_ENV', 'NOT SET')}")
+    print(f"  CURRENT_ENV:           {CURRENT_ENV}")
+    print("")
+    print("  Raw environment variables:")
+    print(f"    IMPALA_HOST:         {_os.environ.get('IMPALA_HOST', 'NOT SET')}")
+    print(f"    IMPALA_AUTH:         {_os.environ.get('IMPALA_AUTH', 'NOT SET')}")
+    print(f"    IMPALA_USE_SSL:      {_os.environ.get('IMPALA_USE_SSL', 'NOT SET')}")
+    print(f"    KRB_SERVICE_NAME:    {_os.environ.get('KRB_SERVICE_NAME', 'NOT SET')}")
+    print("")
+    print("  IMPALA_CONFIG (from environments.py):")
+    print(f"    AUTH:                {IMPALA_CONFIG.get('AUTH', 'KEY NOT FOUND')}")
+    print(f"    AUTH_MECHANISM:      {IMPALA_CONFIG.get('AUTH_MECHANISM', 'KEY NOT FOUND')}")
+    print(f"    KERBEROS_SERVICE_NAME: {IMPALA_CONFIG.get('KERBEROS_SERVICE_NAME', 'KEY NOT FOUND')}")
+    print(f"    USE_SSL:             {IMPALA_CONFIG.get('USE_SSL', 'KEY NOT FOUND')}")
+    print(f"    HOST:                {IMPALA_CONFIG.get('HOST', 'KEY NOT FOUND')}")
+    print(f"    All keys in config:  {list(IMPALA_CONFIG.keys())}")
     print("")
     print_environment_info()
 
