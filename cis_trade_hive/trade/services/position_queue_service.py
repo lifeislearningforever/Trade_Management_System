@@ -477,7 +477,8 @@ class PositionQueueService:
                             isin=trade.get('isin'),
                             security_name=trade.get('security_name'),
                             custodian=trade.get('custodian'),
-                            sub_custodian=trade.get('sub_custodian')
+                            sub_custodian=trade.get('sub_custodian'),
+                            is_chain_recalc=True  # Use position BEFORE this date
                         )
 
                         if success:

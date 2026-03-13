@@ -699,7 +699,8 @@ class SettlementService:
 
                 for trade in trades:
                     try:
-                        # Recalculate each position
+                        # Recalculate each position using chain_recalc mode
+                        # This ensures we get position BEFORE this date, not the old same-date position
                         success, _, _ = self.position_service.calculate_position(
                             portfolio_id=portfolio_id,
                             security_id=security_id,
@@ -709,7 +710,8 @@ class SettlementService:
                             charges=Decimal(str(trade.get('charges', 0) or 0)),
                             position_date=trade['settle_date'],
                             trade_id=trade['trade_id'],
-                            updated_by=updated_by
+                            updated_by=updated_by,
+                            is_chain_recalc=True  # Use position BEFORE this date
                         )
 
                         if success:

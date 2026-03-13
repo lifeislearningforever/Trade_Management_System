@@ -65,7 +65,8 @@ class PositionService:
         isin: str = None,
         security_name: str = None,
         custodian: str = None,
-        sub_custodian: str = None
+        sub_custodian: str = None,
+        is_chain_recalc: bool = False
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """
         Calculate position using weighted average method.
@@ -105,9 +106,21 @@ class PositionService:
                 return False, "Price must be positive", None
 
             # Get the appropriate base position for calculation
-            # For backdated trades, we need the position as of BEFORE the position_date
-            # For normal trades, we get the current (latest) position
-            current = self._get_position_as_of_date(portfolio_id, security_id, position_date)
+            # For chain recalculation (backdated trades), we need position BEFORE this date
+            # to avoid picking up the old position for the same date
+            # For normal trades, we include same date positions
+            if is_chain_recalc:
+                # Chain recalc: get position strictly BEFORE this date
+                current = self._get_position_as_of_date(
+                    portfolio_id, security_id, position_date, include_same_date=False
+                )
+                logger.info(
+                    f"Chain recalc mode: Getting position BEFORE {position_date} for "
+                    f"{portfolio_id}/{security_id}. Found: {current is not None}"
+                )
+            else:
+                # Normal mode: include same date positions
+                current = self._get_position_as_of_date(portfolio_id, security_id, position_date)
 
             # If no position before this date, this is the first trade for this date range
             # (which is correct for backdated trades creating a new earliest position)

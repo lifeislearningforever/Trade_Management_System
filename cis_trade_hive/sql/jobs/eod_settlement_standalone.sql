@@ -99,33 +99,80 @@ WHERE settle_date <= '2026-03-12'
 
 
 -- ============================================================================
--- STEP 3: Create temp table for current positions (latest version per security)
+-- STEP 3: Create temp table for position lookup (position BEFORE each trade date)
 -- ============================================================================
+-- For chain recalculation, we need the position BEFORE each trade's settle_date
+-- NOT the global latest position. This ensures backdated trades accumulate correctly.
 
 DROP TABLE IF EXISTS gmp_cis.tmp_current_positions_eod;
 
+-- Get the latest position BEFORE each settle_date for each portfolio/security combo
+-- This handles the case where Trade1 on 13th, Trade2 backdated to 6th March
 CREATE TABLE gmp_cis.tmp_current_positions_eod
 STORED AS PARQUET AS
 SELECT
-    p.portfolio_short_name,
-    p.security_label,
+    sq.queue_id,
+    sq.portfolio_id,
+    sq.security_id,
+    sq.settle_date as trade_settle_date,
     p.position_id,
     p.quantity,
     p.average_cost,
     p.total_cost,
     p.realized_pnl,
     p.lots_held,
-    p.status
-FROM gmp_cis.cis_trade_position p
+    p.status,
+    p.position_date as base_position_date
+FROM gmp_cis.cis_settlement_queue sq
+LEFT JOIN (
+    -- Get the latest position version BEFORE each settle_date
+    SELECT
+        p1.portfolio_short_name,
+        p1.security_label,
+        p1.position_date,
+        p1.position_id,
+        p1.quantity,
+        p1.average_cost,
+        p1.total_cost,
+        p1.realized_pnl,
+        p1.lots_held,
+        p1.status,
+        p1.version_id
+    FROM gmp_cis.cis_trade_position p1
+    INNER JOIN (
+        -- Get max version_id for each portfolio/security/position_date
+        SELECT portfolio_short_name, security_label, position_date, MAX(version_id) as max_version
+        FROM gmp_cis.cis_trade_position
+        WHERE is_latest = true OR is_latest IS NULL
+        GROUP BY portfolio_short_name, security_label, position_date
+    ) pv ON p1.portfolio_short_name = pv.portfolio_short_name
+        AND p1.security_label = pv.security_label
+        AND p1.position_date = pv.position_date
+        AND p1.version_id = pv.max_version
+) p ON sq.portfolio_id = p.portfolio_short_name
+    AND sq.security_id = p.security_label
+    AND p.position_date < sq.settle_date  -- BEFORE the trade date, not <=
+WHERE sq.settle_date <= '2026-03-12'
+  AND sq.status = 'PROCESSING';
+
+-- For each queue item, keep only the most recent position before the trade date
+DROP TABLE IF EXISTS gmp_cis.tmp_base_positions_eod;
+
+CREATE TABLE gmp_cis.tmp_base_positions_eod
+STORED AS PARQUET AS
+SELECT t.*
+FROM gmp_cis.tmp_current_positions_eod t
 INNER JOIN (
-    SELECT portfolio_short_name, security_label, MAX(version_id) as max_version
-    FROM gmp_cis.cis_trade_position
-    WHERE is_latest = true OR is_latest IS NULL
-    GROUP BY portfolio_short_name, security_label
-) latest
-ON p.portfolio_short_name = latest.portfolio_short_name
-   AND p.security_label = latest.security_label
-   AND p.version_id = latest.max_version;
+    SELECT queue_id, MAX(base_position_date) as max_date
+    FROM gmp_cis.tmp_current_positions_eod
+    WHERE position_id IS NOT NULL
+    GROUP BY queue_id
+) latest ON t.queue_id = latest.queue_id
+        AND (t.base_position_date = latest.max_date OR t.position_id IS NULL);
+
+-- Replace the temp table
+DROP TABLE IF EXISTS gmp_cis.tmp_current_positions_eod;
+ALTER TABLE gmp_cis.tmp_base_positions_eod RENAME TO gmp_cis.tmp_current_positions_eod;
 
 COMPUTE STATS gmp_cis.tmp_current_positions_eod;
 
@@ -183,6 +230,11 @@ FROM gmp_cis.tmp_positions_to_update;
 -- AVP Formula:
 --   BUY: new_avg_cost = (old_total_cost + buy_value + charges) / (old_qty + buy_qty)
 --   SELL: avg_cost unchanged, realized_pnl = sell_qty * (sell_price - avg_cost)
+--
+-- IMPORTANT: For chain recalculation (backdated trades), we use the position
+-- BEFORE each trade's settle_date, NOT the global latest position.
+-- The tmp_current_positions_eod now contains one row per queue_id with
+-- the correct base position for that specific trade date.
 
 INSERT INTO gmp_cis.cis_trade_position
 (version_id, position_id, position_date, portfolio_short_name, security_label,
@@ -193,9 +245,9 @@ INSERT INTO gmp_cis.cis_trade_position
  created_by, created_at, updated_by, updated_at)
 SELECT
     -- version_id: unique per record
-    CAST(1741788000000 * 1000 + ROW_NUMBER() OVER (ORDER BY sq.queue_id) AS BIGINT),
+    CAST(1741788000000 * 1000 + ROW_NUMBER() OVER (ORDER BY sq.settle_date, sq.queue_id) AS BIGINT),
     -- position_id: reuse existing or generate new
-    CAST(COALESCE(cp.position_id, 1741788000000 * 100 + ROW_NUMBER() OVER (ORDER BY sq.queue_id)) AS BIGINT),
+    CAST(COALESCE(cp.position_id, 1741788000000 * 100 + ROW_NUMBER() OVER (ORDER BY sq.settle_date, sq.queue_id)) AS BIGINT),
     sq.settle_date,
     sq.portfolio_id,
     sq.security_id,
@@ -262,8 +314,7 @@ SELECT
     FROM_UNIXTIME(UNIX_TIMESTAMP(), 'yyyy-MM-dd HH:mm:ss')
 FROM gmp_cis.cis_settlement_queue sq
 LEFT JOIN gmp_cis.tmp_current_positions_eod cp
-    ON sq.portfolio_id = cp.portfolio_short_name
-    AND sq.security_id = cp.security_label
+    ON sq.queue_id = cp.queue_id  -- Join by queue_id to get correct base position for each trade
 WHERE sq.settle_date <= '2026-03-12'
   AND sq.status = 'PROCESSING'
   -- Exclude error cases: SELL without position or insufficient quantity
@@ -303,8 +354,7 @@ SELECT
     FROM_UNIXTIME(UNIX_TIMESTAMP(), 'yyyy-MM-dd HH:mm:ss')
 FROM gmp_cis.cis_settlement_queue sq
 LEFT JOIN gmp_cis.tmp_current_positions_eod cp
-    ON sq.portfolio_id = cp.portfolio_short_name
-    AND sq.security_id = cp.security_label
+    ON sq.queue_id = cp.queue_id  -- Join by queue_id to match correct base position
 WHERE sq.settle_date <= '2026-03-12'
   AND sq.status = 'PROCESSING';
 

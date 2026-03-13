@@ -29,7 +29,7 @@ class TestAVPCalculation:
         # Scenario: First purchase of 100 shares at $50 with $10 commission
         # Expected: qty=100, avg_cost=50.10 (including charges), total_cost=5010
 
-        with patch.object(self.service, '_get_current_position', return_value=None):
+        with patch.object(self.service, '_get_position_as_of_date', return_value=None):
             with patch.object(self.service, '_get_market_price', return_value=50.0):
                 with patch.object(self.service, '_save_position', return_value=True):
                     with patch.object(self.service, '_sync_to_position_master', return_value=True):
@@ -70,7 +70,7 @@ class TestAVPCalculation:
             'realized_pnl': 0
         }
 
-        with patch.object(self.service, '_get_current_position', return_value=existing_position):
+        with patch.object(self.service, '_get_position_as_of_date', return_value=existing_position):
             with patch.object(self.service, '_get_market_price', return_value=60.0):
                 with patch.object(self.service, '_save_position', return_value=True):
                     with patch.object(self.service, '_sync_to_position_master', return_value=True):
@@ -109,7 +109,7 @@ class TestAVPCalculation:
             'realized_pnl': 0
         }
 
-        with patch.object(self.service, '_get_current_position', return_value=existing_after_buy1):
+        with patch.object(self.service, '_get_position_as_of_date', return_value=existing_after_buy1):
             with patch.object(self.service, '_get_market_price', return_value=20.0):
                 with patch.object(self.service, '_save_position', return_value=True):
                     with patch.object(self.service, '_sync_to_position_master', return_value=True):
@@ -147,7 +147,7 @@ class TestAVPCalculation:
             'realized_pnl': 0
         }
 
-        with patch.object(self.service, '_get_current_position', return_value=existing_position):
+        with patch.object(self.service, '_get_position_as_of_date', return_value=existing_position):
             with patch.object(self.service, '_get_market_price', return_value=70.0):
                 with patch.object(self.service, '_save_position', return_value=True):
                     with patch.object(self.service, '_sync_to_position_master', return_value=True):
@@ -183,7 +183,7 @@ class TestAVPCalculation:
             'realized_pnl': 0
         }
 
-        with patch.object(self.service, '_get_current_position', return_value=existing_position):
+        with patch.object(self.service, '_get_position_as_of_date', return_value=existing_position):
             with patch.object(self.service, '_save_position', return_value=True):
                 with patch.object(self.service, '_sync_to_position_master', return_value=True):
                     success, message, position = self.service.calculate_position(
@@ -217,7 +217,7 @@ class TestAVPCalculation:
             'realized_pnl': 0
         }
 
-        with patch.object(self.service, '_get_current_position', return_value=existing_position):
+        with patch.object(self.service, '_get_position_as_of_date', return_value=existing_position):
             with patch.object(self.service, '_get_market_price', return_value=40.0):
                 with patch.object(self.service, '_save_position', return_value=True):
                     with patch.object(self.service, '_sync_to_position_master', return_value=True):
@@ -249,7 +249,7 @@ class TestAVPCalculation:
             'realized_pnl': 200.0  # Already had some realized gains
         }
 
-        with patch.object(self.service, '_get_current_position', return_value=existing_position):
+        with patch.object(self.service, '_get_position_as_of_date', return_value=existing_position):
             with patch.object(self.service, '_get_market_price', return_value=60.0):
                 with patch.object(self.service, '_save_position', return_value=True):
                     with patch.object(self.service, '_sync_to_position_master', return_value=True):
@@ -274,7 +274,7 @@ class TestAVPCalculation:
 
     def test_sell_no_position_rejected(self):
         """Test SELL without existing position is rejected."""
-        with patch.object(self.service, '_get_current_position', return_value=None):
+        with patch.object(self.service, '_get_position_as_of_date', return_value=None):
             success, message, position = self.service.calculate_position(
                 portfolio_id='FUND-001',
                 security_id='AAPL',
@@ -300,7 +300,7 @@ class TestAVPCalculation:
             'realized_pnl': 0
         }
 
-        with patch.object(self.service, '_get_current_position', return_value=existing_position):
+        with patch.object(self.service, '_get_position_as_of_date', return_value=existing_position):
             success, message, position = self.service.calculate_position(
                 portfolio_id='FUND-001',
                 security_id='AAPL',
@@ -319,7 +319,7 @@ class TestAVPCalculation:
 
     def test_negative_quantity_rejected(self):
         """Test negative quantity is rejected."""
-        with patch.object(self.service, '_get_current_position', return_value=None):
+        with patch.object(self.service, '_get_position_as_of_date', return_value=None):
             success, message, _ = self.service.calculate_position(
                 portfolio_id='FUND-001',
                 security_id='AAPL',
@@ -337,7 +337,7 @@ class TestAVPCalculation:
 
     def test_negative_price_rejected(self):
         """Test negative price is rejected."""
-        with patch.object(self.service, '_get_current_position', return_value=None):
+        with patch.object(self.service, '_get_position_as_of_date', return_value=None):
             success, message, _ = self.service.calculate_position(
                 portfolio_id='FUND-001',
                 security_id='AAPL',
@@ -380,7 +380,7 @@ class TestAVPCalculation:
         # Scenario: 3 shares at $10.12345678 each = $30.37037034 total
         # avg = 30.37037034 / 3 = 10.12345678
 
-        with patch.object(self.service, '_get_current_position', return_value=None):
+        with patch.object(self.service, '_get_position_as_of_date', return_value=None):
             with patch.object(self.service, '_get_market_price', return_value=10.12345678):
                 with patch.object(self.service, '_save_position', return_value=True):
                     with patch.object(self.service, '_sync_to_position_master', return_value=True):
@@ -407,7 +407,7 @@ class TestAVPCalculation:
         # Total cost = (100 * 10) + 50 = 1050
         # AVP = 1050 / 100 = $10.50
 
-        with patch.object(self.service, '_get_current_position', return_value=None):
+        with patch.object(self.service, '_get_position_as_of_date', return_value=None):
             with patch.object(self.service, '_get_market_price', return_value=10.50):
                 with patch.object(self.service, '_save_position', return_value=True):
                     with patch.object(self.service, '_sync_to_position_master', return_value=True):
@@ -436,7 +436,7 @@ class TestValidation:
 
     def test_validate_buy_no_position_passes(self):
         """BUY validation passes when no existing position."""
-        with patch.object(self.service, '_get_current_position', return_value=None):
+        with patch.object(self.service, '_get_position_as_of_date', return_value=None):
             is_valid, errors = self.service.validate_trade_for_position(
                 trade_type='BUY',
                 quantity=Decimal('100'),
@@ -450,7 +450,7 @@ class TestValidation:
 
     def test_validate_sell_no_position_fails(self):
         """SELL validation fails when no existing position."""
-        with patch.object(self.service, '_get_current_position', return_value=None):
+        with patch.object(self.service, '_get_position_as_of_date', return_value=None):
             is_valid, errors = self.service.validate_trade_for_position(
                 trade_type='SELL',
                 quantity=Decimal('100'),
@@ -466,7 +466,7 @@ class TestValidation:
         """SELL validation fails when quantity exceeds position."""
         existing_position = {'quantity': 50}
 
-        with patch.object(self.service, '_get_current_position', return_value=existing_position):
+        with patch.object(self.service, '_get_position_as_of_date', return_value=existing_position):
             is_valid, errors = self.service.validate_trade_for_position(
                 trade_type='SELL',
                 quantity=Decimal('100'),
