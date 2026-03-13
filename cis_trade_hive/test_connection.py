@@ -197,19 +197,15 @@ def check_kerberos():
         return False
 
 
-def test_impala_manager():
-    """Test ImpalaConnectionManager."""
+def test_hybrid_manager():
+    """Test HybridConnectionManager (the actual connection manager used)."""
     print("\n" + "=" * 70)
-    print("  IMPALA CONNECTION MANAGER TEST")
+    print("  HYBRID CONNECTION MANAGER TEST")
     print("=" * 70)
 
     try:
-        from core.repositories.impala_connection import ImpalaConnectionManager, IMPALA_AVAILABLE
+        from core.repositories.hybrid_connection import HybridConnectionManager, hybrid_manager
         from django.conf import settings
-
-        if not IMPALA_AVAILABLE:
-            print("  ERROR: Impala library not available")
-            return False
 
         # Print what settings the manager will use
         print(f"  settings.IMPALA_CONFIG:")
@@ -217,38 +213,41 @@ def test_impala_manager():
         print(f"    PORT:          {settings.IMPALA_CONFIG.get('PORT')}")
         print(f"    DATABASE:      {settings.IMPALA_CONFIG.get('DATABASE')}")
         print(f"    AUTH_MECHANISM:{settings.IMPALA_CONFIG.get('AUTH_MECHANISM')}")
+        print(f"    AUTH:          {settings.IMPALA_CONFIG.get('AUTH')}")
         print(f"    USE_SSL:       {settings.IMPALA_CONFIG.get('USE_SSL')}")
         print(f"    KERBEROS:      {settings.IMPALA_CONFIG.get('KERBEROS_SERVICE_NAME')}")
         print("-" * 70)
 
         # Reset singleton to pick up fresh config
-        if hasattr(ImpalaConnectionManager, '_instance') and ImpalaConnectionManager._instance is not None:
-            # Clear the instance's initialized flag too
-            if hasattr(ImpalaConnectionManager._instance, '_initialized'):
-                del ImpalaConnectionManager._instance._initialized
-        ImpalaConnectionManager._instance = None
+        if hasattr(HybridConnectionManager, '_instance') and HybridConnectionManager._instance is not None:
+            if hasattr(HybridConnectionManager._instance, '_initialized'):
+                HybridConnectionManager._instance._initialized = False
+        HybridConnectionManager._instance = None
 
-        manager = ImpalaConnectionManager()
+        # Create new manager
+        manager = HybridConnectionManager()
 
-        print("  Testing connection via manager...")
+        print("  Testing connections...")
+        results = manager.test_connections()
 
-        # Try to get a connection and run a query
-        try:
-            with manager.get_cursor() as cursor:
-                if cursor is None:
-                    print("  ERROR: Could not get cursor")
-                    return False
+        print(f"  Impala: {'PASS' if results['impala'] else 'FAIL'}")
+        print(f"  Hive:   {'PASS' if results['hive'] else 'FAIL'}")
 
-                cursor.execute("SELECT 1 as test_col")
-                result = cursor.fetchone()
-                print(f"  SELECT 1 result: {result}")
+        if results['impala']:
+            # Try a query
+            print("\n  Testing Kudu read...")
+            data = manager.kudu_read("SELECT 1 as test_col")
+            print(f"  Query result: {data}")
 
-            print("  CONNECTION MANAGER: SUCCESS")
+        print("-" * 70)
+        if results['impala'] and results['hive']:
+            print("  HYBRID MANAGER: ALL PASS")
             return True
-
-        except Exception as conn_error:
-            print(f"  Connection error: {conn_error}")
-            print("  CONNECTION MANAGER: FAILED")
+        elif results['impala']:
+            print("  HYBRID MANAGER: IMPALA PASS, HIVE FAIL")
+            return True  # Impala is primary
+        else:
+            print("  HYBRID MANAGER: FAILED")
             return False
 
     except Exception as e:
@@ -278,8 +277,8 @@ def main():
     # Test Hive
     hive_ok = test_hive_connection()
 
-    # Test Connection Manager
-    manager_ok = test_impala_manager()
+    # Test Hybrid Connection Manager
+    manager_ok = test_hybrid_manager()
 
     # Summary
     print("\n" + "=" * 70)
@@ -287,7 +286,7 @@ def main():
     print("=" * 70)
     print(f"  Impala Direct:      {'PASS' if impala_ok else 'FAIL'}")
     print(f"  Hive Direct:        {'PASS' if hive_ok else 'FAIL'}")
-    print(f"  Connection Manager: {'PASS' if manager_ok else 'FAIL'}")
+    print(f"  Hybrid Manager:     {'PASS' if manager_ok else 'FAIL'}")
     print("=" * 70)
 
     return impala_ok and manager_ok
