@@ -60,9 +60,6 @@
                                value="{{ security.security_name|default:'' }}"
                                required maxlength="200"
                                placeholder="Enter security label">
-                        <div class="form-text">
-                            <i class="bi bi-info-circle"></i> Short label/identifier for the security
-                        </div>
                     </div>
 
                     <div class="col-md-4 mb-3">
@@ -80,6 +77,9 @@
                         <label for="security_description" class="form-label">Security Full Name</label>
                         <textarea class="form-control" id="security_description" name="security_description" rows="3"
                                   placeholder="Enter full name of the security">{{ security.security_description|default:'' }}</textarea>
+                        <div class="form-text">
+                            <i class="bi bi-info-circle"></i> Full name of the security
+                        </div>
                     </div>
 
                     <div class="col-md-4 mb-3">
