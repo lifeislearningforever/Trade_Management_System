@@ -42,19 +42,10 @@
                         </h5>
                     </div>
 
-                    <div class="col-md-4 mb-3">
-                        <label for="record_type" class="form-label">Record Type</label>
-                        <select class="form-select" id="record_type" name="record_type">
-                            <option value="">Select Record Type</option>
-                            {% for option in dropdown_options.record_type_options %}
-                                <option value="{{ option.value }}" {% if security.record_type == option.value %}selected{% endif %}>
-                                    {{ option.value }}
-                                </option>
-                            {% endfor %}
-                        </select>
-                    </div>
+                    <!-- Hidden: Record Type removed per requirement -->
+                    <input type="hidden" id="record_type" name="record_type" value="{{ security.record_type|default:'' }}">
 
-                    <div class="col-md-8 mb-3">
+                    <div class="col-md-12 mb-3">
                         <label for="security_name" class="form-label required">Security Label</label>
                         <input type="text" class="form-control" id="security_name" name="security_name"
                                value="{{ security.security_name|default:'' }}"
@@ -493,7 +484,6 @@
 $(document).ready(function() {
     // List of ALL visible dropdown IDs in the security form
     var allDropdownIds = [
-        'record_type',
         'issuer',
         'industry',
         'country_of_incorporation',

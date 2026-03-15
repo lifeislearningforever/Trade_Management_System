@@ -140,14 +140,15 @@ class SecurityDropdownRepository:
         Schema (from office environment):
         - name: Currency code (e.g., 'SGD', 'USD')
         - full_name: Full currency name (e.g., 'Singapore Dollar')
-        - symbol: Currency symbol
+        - symbol: Currency symbol (reserved word - must be escaped)
 
         Returns:
             List of currency dictionaries with 'code' and 'name' keys
         """
         try:
+            # Note: 'symbol' is a reserved word in Impala, must use backticks
             query = f"""
-            SELECT DISTINCT name, full_name, symbol
+            SELECT DISTINCT name, full_name, `symbol`
             FROM {SecurityDropdownRepository.DATABASE}.{SecurityDropdownRepository.CURRENCY_TABLE}
             WHERE name IS NOT NULL AND name != ''
             ORDER BY name
