@@ -135,17 +135,22 @@ class SecurityDropdownRepository:
     @staticmethod
     def get_currencies() -> List[Dict[str, str]]:
         """
-        Get currencies from currency table.
+        Get currencies from gmp_cis_sta_dly_currency table.
+
+        Schema (from office environment):
+        - name: Currency code (e.g., 'SGD', 'USD')
+        - full_name: Full currency name (e.g., 'Singapore Dollar')
+        - symbol: Currency symbol
 
         Returns:
             List of currency dictionaries with 'code' and 'name' keys
         """
         try:
             query = f"""
-            SELECT DISTINCT curr_symbol, curr_name
+            SELECT DISTINCT name, full_name, symbol
             FROM {SecurityDropdownRepository.DATABASE}.{SecurityDropdownRepository.CURRENCY_TABLE}
-            WHERE curr_symbol IS NOT NULL AND curr_symbol != ''
-            ORDER BY curr_symbol
+            WHERE name IS NOT NULL AND name != ''
+            ORDER BY name
             """
 
             result = impala_manager.execute_query(query, database=SecurityDropdownRepository.DATABASE)
@@ -153,10 +158,41 @@ class SecurityDropdownRepository:
             if not result:
                 return []
 
-            return [{'code': row.get('curr_symbol', ''), 'name': row.get('curr_name', '')} for row in result]
+            return [{'code': row.get('name', ''), 'name': row.get('full_name', '')} for row in result]
 
         except Exception as e:
             logger.error(f"Error fetching currencies: {str(e)}")
+            return []
+
+    @staticmethod
+    def get_markets() -> List[Dict[str, str]]:
+        """
+        Get market dropdown options from UDF table.
+
+        Returns:
+            List of market dictionaries with 'value' key
+        """
+        try:
+            query = f"""
+            SELECT DISTINCT field_value
+            FROM {SecurityDropdownRepository.DATABASE}.{SecurityDropdownRepository.UDF_FIELD_TABLE}
+            WHERE object_type = 'SECURITY'
+              AND field_name = 'Market'
+              AND field_value IS NOT NULL
+              AND field_value != ''
+              AND is_active = true
+            ORDER BY field_value
+            """
+
+            result = impala_manager.execute_query(query, database=SecurityDropdownRepository.DATABASE)
+
+            if not result:
+                return []
+
+            return [{'value': row.get('field_value', '')} for row in result if row.get('field_value')]
+
+        except Exception as e:
+            logger.error(f"Error fetching markets: {str(e)}")
             return []
 
 
@@ -349,6 +385,12 @@ class SecurityDropdownService:
         self._log_dropdown_fetch('currencies', len(currencies), user)
         return currencies
 
+    def get_markets(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get Market dropdown options from UDF table"""
+        markets = self.repository.get_markets()
+        self._log_dropdown_fetch('markets', len(markets), user)
+        return markets
+
     # ==========================================================================
     # Aggregate method to get all dropdown options at once
     # ==========================================================================
@@ -392,6 +434,7 @@ class SecurityDropdownService:
             'issuers': self.get_issuers(user),
             'countries': self.get_countries(user),
             'currencies': self.get_currencies(user),
+            'markets': self.get_markets(user),
         }
 
 

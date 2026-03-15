@@ -55,13 +55,13 @@
                     </div>
 
                     <div class="col-md-8 mb-3">
-                        <label for="security_name" class="form-label required">Security Name</label>
+                        <label for="security_name" class="form-label required">Security Label</label>
                         <input type="text" class="form-control" id="security_name" name="security_name"
                                value="{{ security.security_name|default:'' }}"
                                required maxlength="200"
-                               placeholder="Enter security name">
+                               placeholder="Enter security label">
                         <div class="form-text">
-                            <i class="bi bi-info-circle"></i> Full name of the security
+                            <i class="bi bi-info-circle"></i> Short label/identifier for the security
                         </div>
                     </div>
 
@@ -77,9 +77,9 @@
                     </div>
 
                     <div class="col-md-8 mb-3">
-                        <label for="security_description" class="form-label">Security Description</label>
+                        <label for="security_description" class="form-label">Security Full Name</label>
                         <textarea class="form-control" id="security_description" name="security_description" rows="3"
-                                  placeholder="Enter a detailed description">{{ security.security_description|default:'' }}</textarea>
+                                  placeholder="Enter full name of the security">{{ security.security_description|default:'' }}</textarea>
                     </div>
 
                     <div class="col-md-4 mb-3">
@@ -127,12 +127,19 @@
                     </div>
 
                     <div class="col-md-6 mb-3">
-                        <label for="price" class="form-label">Price</label>
-                        <input type="number" class="form-control" id="price" name="price"
-                               value="{{ security.price|default:'' }}"
-                               step="0.0001"
-                               placeholder="0.0000">
+                        <label for="market" class="form-label">Market</label>
+                        <select class="form-select" id="market" name="market">
+                            <option value="">Select Market</option>
+                            {% for mkt in dropdown_options.markets %}
+                                <option value="{{ mkt.value }}" {% if security.market == mkt.value %}selected{% endif %}>
+                                    {{ mkt.value }}
+                                </option>
+                            {% endfor %}
+                        </select>
                     </div>
+
+                    <!-- Hidden: Price field removed per requirement -->
+                    <input type="hidden" id="price" name="price" value="{{ security.price|default:'' }}">
                 </div>
 
                 <!-- Section 2: Exchange & Trading -->
@@ -168,12 +175,12 @@
                     </div>
 
                     <div class="col-md-4 mb-3">
-                        <label for="currency_code" class="form-label">Currency Code</label>
-                        <select class="form-select" id="currency_code" name="currency_code">
+                        <label for="currency_code" class="form-label required">Currency Code</label>
+                        <select class="form-select" id="currency_code" name="currency_code" required>
                             <option value="">Select Currency</option>
                             {% for curr in dropdown_options.currencies %}
                                 <option value="{{ curr.code }}" {% if security.currency_code == curr.code %}selected{% endif %}>
-                                    {{ curr.code }} - {{ curr.name }}
+                                    {{ curr.code }}{% if curr.name %} - {{ curr.name }}{% endif %}
                                 </option>
                             {% endfor %}
                         </select>
@@ -212,8 +219,8 @@
                     </div>
 
                     <div class="col-md-4 mb-3">
-                        <label for="quoted_unquoted" class="form-label">Quoted / Unquoted</label>
-                        <select class="form-select" id="quoted_unquoted" name="quoted_unquoted">
+                        <label for="quoted_unquoted" class="form-label required">Quoted / Unquoted</label>
+                        <select class="form-select" id="quoted_unquoted" name="quoted_unquoted" required>
                             <option value="">Select Option</option>
                             {% for option in dropdown_options.quoted_unquoted_options %}
                                 <option value="{{ option.value }}" {% if security.quoted_unquoted == option.value %}selected{% endif %}>
@@ -228,66 +235,22 @@
                         <select class="form-select" id="security_type" name="security_type">
                             <option value="">Select Type</option>
                             {% for st in dropdown_options.security_types %}
-                                <option value="{{ st.value }}" {% if security.security_type == st.value %}selected{% endif %}>
+                                <option value="{{ st.value }}" {% if security.security_type == st.value or st.value == 'COMMON STOCK' and not security.security_type %}selected{% endif %}>
                                     {{ st.value }}
                                 </option>
                             {% endfor %}
                         </select>
                     </div>
 
-                    <div class="col-md-4 mb-3">
-                        <label for="investment_type" class="form-label">Investment Type</label>
-                        <select class="form-select" id="investment_type" name="investment_type">
-                            <option value="">Select Type</option>
-                            {% for it in dropdown_options.investment_types %}
-                                <option value="{{ it.value }}" {% if security.investment_type == it.value %}selected{% endif %}>
-                                    {{ it.value }}
-                                </option>
-                            {% endfor %}
-                        </select>
-                    </div>
+                    <!-- Hidden: Investment Type removed per requirement -->
+                    <input type="hidden" id="investment_type" name="investment_type" value="{{ security.investment_type|default:'' }}">
                 </div>
 
-                <!-- Section 3: Holdings -->
-                <div class="row mb-5">
-                    <div class="col-12">
-                        <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
-                            <i class="bi bi-pie-chart"></i> Holdings
-                        </h5>
-                    </div>
-
-                    <div class="col-md-6 mb-3">
-                        <label for="pct_hld_entity_1" class="form-label">PCT HLD Entity 1</label>
-                        <input type="text" class="form-control" id="pct_hld_entity_1" name="pct_hld_entity_1"
-                               value="{{ security.pct_hld_entity_1|default:'' }}"
-                               maxlength="200"
-                               placeholder="Enter PCT HLD Entity 1">
-                    </div>
-
-                    <div class="col-md-6 mb-3">
-                        <label for="pct_hld_entity_2" class="form-label">PCT HLD Entity 2</label>
-                        <input type="text" class="form-control" id="pct_hld_entity_2" name="pct_hld_entity_2"
-                               value="{{ security.pct_hld_entity_2|default:'' }}"
-                               maxlength="200"
-                               placeholder="Enter PCT HLD Entity 2">
-                    </div>
-
-                    <div class="col-md-6 mb-3">
-                        <label for="pct_hld_entity_3" class="form-label">PCT HLD Entity 3</label>
-                        <input type="text" class="form-control" id="pct_hld_entity_3" name="pct_hld_entity_3"
-                               value="{{ security.pct_hld_entity_3|default:'' }}"
-                               maxlength="200"
-                               placeholder="Enter PCT HLD Entity 3">
-                    </div>
-
-                    <div class="col-md-6 mb-3">
-                        <label for="pct_hld_entity_aggr" class="form-label">PCT HLD Entity AGGR</label>
-                        <input type="text" class="form-control" id="pct_hld_entity_aggr" name="pct_hld_entity_aggr"
-                               value="{{ security.pct_hld_entity_aggr|default:'' }}"
-                               maxlength="200"
-                               placeholder="Enter PCT HLD Entity AGGR">
-                    </div>
-                </div>
+                <!-- Hidden: Holdings section (PCT HLD Entity 1-3, AGGR) removed per requirement -->
+                <input type="hidden" id="pct_hld_entity_1" name="pct_hld_entity_1" value="{{ security.pct_hld_entity_1|default:'' }}">
+                <input type="hidden" id="pct_hld_entity_2" name="pct_hld_entity_2" value="{{ security.pct_hld_entity_2|default:'' }}">
+                <input type="hidden" id="pct_hld_entity_3" name="pct_hld_entity_3" value="{{ security.pct_hld_entity_3|default:'' }}">
+                <input type="hidden" id="pct_hld_entity_aggr" name="pct_hld_entity_aggr" value="{{ security.pct_hld_entity_aggr|default:'' }}">
 
                 <!-- Section 4: Regulatory & Compliance -->
                 <div class="row mb-5">
@@ -393,13 +356,8 @@
                                placeholder="0.0000">
                     </div>
 
-                    <div class="col-md-4 mb-3">
-                        <label for="par_value" class="form-label">PAR Value</label>
-                        <input type="number" class="form-control" id="par_value" name="par_value"
-                               value="{{ security.par_value|default:'' }}"
-                               step="0.000001"
-                               placeholder="0.000000">
-                    </div>
+                    <!-- Hidden: PAR Value removed per requirement -->
+                    <input type="hidden" id="par_value" name="par_value" value="{{ security.par_value|default:'' }}">
                 </div>
 
                 <!-- Section 5: Management -->
@@ -533,7 +491,7 @@
 <script>
 // Initialize Select2 on ALL security form dropdowns
 $(document).ready(function() {
-    // List of ALL dropdown IDs in the security form
+    // List of ALL visible dropdown IDs in the security form
     var allDropdownIds = [
         'record_type',
         'issuer',
@@ -546,7 +504,7 @@ $(document).ready(function() {
         'issuer_type',
         'quoted_unquoted',
         'security_type',
-        'investment_type',
+        'market',
         'substantial_10_pct',
         'pevc_s32_devest',
         's32_representative',

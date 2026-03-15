@@ -190,8 +190,9 @@ def security_create(request: HttpRequest) -> HttpResponse:
                 'country_of_issue': request.POST.get('country_of_issue', '').strip(),
                 'issuer_type': request.POST.get('issuer_type', '').strip(),
                 'quoted_unquoted': request.POST.get('quoted_unquoted', '').strip(),
-                'security_type': request.POST.get('security_type', '').strip(),
+                'security_type': request.POST.get('security_type', '').strip() or 'COMMON STOCK',  # Default to COMMON STOCK
                 'investment_type': request.POST.get('investment_type', '').strip(),
+                'market': request.POST.get('market', '').strip(),
                 'pct_hld_entity_1': request.POST.get('pct_hld_entity_1', '').strip(),
                 'pct_hld_entity_2': request.POST.get('pct_hld_entity_2', '').strip(),
                 'pct_hld_entity_3': request.POST.get('pct_hld_entity_3', '').strip(),
@@ -308,8 +309,9 @@ def security_edit(request: HttpRequest, security_id: int) -> HttpResponse:
                 'country_of_issue': request.POST.get('country_of_issue', '').strip(),
                 'issuer_type': request.POST.get('issuer_type', '').strip(),
                 'quoted_unquoted': request.POST.get('quoted_unquoted', '').strip(),
-                'security_type': request.POST.get('security_type', '').strip(),
+                'security_type': request.POST.get('security_type', '').strip() or 'COMMON STOCK',  # Default to COMMON STOCK
                 'investment_type': request.POST.get('investment_type', '').strip(),
+                'market': request.POST.get('market', '').strip(),
                 'pct_hld_entity_1': request.POST.get('pct_hld_entity_1', '').strip(),
                 'pct_hld_entity_2': request.POST.get('pct_hld_entity_2', '').strip(),
                 'pct_hld_entity_3': request.POST.get('pct_hld_entity_3', '').strip(),
