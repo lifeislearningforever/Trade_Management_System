@@ -117,23 +117,27 @@ class PortfolioDropdownRepository:
         """
         Get list of currencies from reference data table.
 
+        Schema: gmp_cis_sta_dly_currency (name, full_name, `symbol`)
+        Note: 'symbol' is a reserved word in Impala, must use backticks
+
         Returns:
             List of dicts with 'code' and 'name'
         """
         try:
+            # Note: 'symbol' is a reserved word in Impala, must use backticks
             query = f"""
-            SELECT DISTINCT `curr_symbol`, `curr_name`
+            SELECT DISTINCT name, full_name, `symbol`
             FROM {PortfolioDropdownRepository.DATABASE}.{PortfolioDropdownRepository.CURRENCY_TABLE}
-            WHERE `curr_symbol` IS NOT NULL AND `curr_symbol` != ''
-            ORDER BY `curr_symbol`
+            WHERE name IS NOT NULL AND name != ''
+            ORDER BY name
             """
             results = impala_manager.execute_query(query, database=PortfolioDropdownRepository.DATABASE)
             return [
                 {
-                    'code': r.get('curr_symbol'),
-                    'name': r.get('curr_name', r.get('curr_symbol'))
+                    'code': r.get('name'),
+                    'name': r.get('full_name', r.get('name'))
                 }
-                for r in results if r.get('curr_symbol')
+                for r in results if r.get('name')
             ] if results else []
 
         except Exception as e:
