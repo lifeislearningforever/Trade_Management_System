@@ -391,6 +391,8 @@ def portfolio_create(request):
                 'cash_balance_list': request.POST.get('cash_balance_list', ''),
             }
 
+            if not data.get('description'):
+                raise ValidationError("Description is required")
             if not data.get('currency'):
                 raise ValidationError("Currency is required")
             if not data.get('manager'):

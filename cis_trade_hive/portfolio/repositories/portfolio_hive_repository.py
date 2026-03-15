@@ -75,9 +75,10 @@ class PortfolioHiveRepository:
 
             if search:
                 search_term = search.replace("'", "''")
+                # Case-insensitive search using LOWER() function
                 where_clauses.append(
-                    f"(`name` LIKE '%{search_term}%' OR "
-                    f"`description` LIKE '%{search_term}%')"
+                    f"(LOWER(`name`) LIKE LOWER('%{search_term}%') OR "
+                    f"LOWER(`description`) LIKE LOWER('%{search_term}%'))"
                 )
 
             where_clause = " AND ".join(where_clauses) if where_clauses else "1=1"

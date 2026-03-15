@@ -38,6 +38,7 @@ class PortfolioDropdownRepository:
     UDF_FIELD_TABLE = 'cis_udf_field'  # Simplified UDF table (ONLY table for UDF field definitions)
     CURRENCY_TABLE = 'gmp_cis_sta_dly_currency'
     COUNTRY_TABLE = 'gmp_cis_sta_dly_country'
+    PARTY_TABLE = 'cis_party'  # Party table for Entity dropdown
 
     @staticmethod
     def get_active_udf_fields(object_type: str = 'PORTFOLIO') -> List[Dict[str, Any]]:
@@ -165,6 +166,35 @@ class PortfolioDropdownRepository:
 
         except Exception as e:
             logger.error(f"Error fetching countries: {str(e)}")
+            return []
+
+    @staticmethod
+    def get_entities() -> List[Dict[str, str]]:
+        """
+        Get list of entities from Party table for dropdown.
+
+        Returns:
+            List of dicts with 'code' (party_short_name) and 'name' (party_full_name)
+        """
+        try:
+            query = f"""
+            SELECT party_short_name, party_full_name
+            FROM {PortfolioDropdownRepository.DATABASE}.{PortfolioDropdownRepository.PARTY_TABLE}
+            WHERE party_short_name IS NOT NULL AND party_short_name != ''
+              AND (is_active = TRUE OR is_active IS NULL)
+            ORDER BY party_short_name
+            """
+            results = impala_manager.execute_query(query, database=PortfolioDropdownRepository.DATABASE)
+            return [
+                {
+                    'code': r.get('party_short_name'),
+                    'name': r.get('party_full_name', r.get('party_short_name'))
+                }
+                for r in results if r.get('party_short_name')
+            ] if results else []
+
+        except Exception as e:
+            logger.error(f"Error fetching entities from party table: {str(e)}")
             return []
 
 
@@ -456,6 +486,42 @@ class PortfolioDropdownService:
             logger.error(f"Error fetching cash_balance_lists: {str(e)}")
             return []
 
+    def get_entities(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """
+        Get entity options from Party table.
+
+        Args:
+            user: Username for audit logging
+
+        Returns:
+            List of dicts with 'code' and 'name'
+        """
+        entities = self.repository.get_entities()
+        self._log_dropdown_fetch('entity', len(entities), user)
+        return entities
+
+    def get_investment_types(self, user: str = 'SYSTEM') -> List[str]:
+        """
+        Get investment type options from UDF system.
+
+        Fetches from cis_udf_field where field_name = 'Investment Type'.
+        The actual values are stored in field_value column.
+
+        Args:
+            user: Username for audit logging
+
+        Returns:
+            List of investment type names
+        """
+        try:
+            results = PortfolioDropdownRepository.get_dropdown_options_by_field_name('Investment Type', 'PORTFOLIO')
+            investment_types = [r.get('field_value') for r in results if r.get('field_value')]
+            self._log_dropdown_fetch('investment_type', len(investment_types), user)
+            return investment_types
+        except Exception as e:
+            logger.error(f"Error fetching investment_types: {str(e)}")
+            return []
+
     # ========================================================================
     # AGGREGATE METHODS
     # ========================================================================
@@ -488,6 +554,8 @@ class PortfolioDropdownService:
             'countries': self.get_countries(user),
             'desk_heads': self.get_desk_heads(user),
             'cash_balance_lists': self.get_cash_balance_lists(user),
+            'entities': self.get_entities(user),
+            'investment_types': self.get_investment_types(user),
         }
 
     def get_udf_field_metadata(self, entity_type: str = 'PORTFOLIO') -> List[Dict[str, Any]]:
