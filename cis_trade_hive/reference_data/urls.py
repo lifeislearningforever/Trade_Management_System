@@ -34,10 +34,12 @@ urlpatterns = [
     # Party URLs (new naming - uses cis_party and cis_party_cif tables)
     path('party/', views.party_list, name='party_list'),
     path('party/create/', views.party_create, name='party_create'),
+    path('party/pending/', views.party_pending_approvals, name='party_pending_approvals'),
     path('party/<str:short_name>/', views.party_detail, name='party_detail'),
     path('party/<str:short_name>/edit/', views.party_edit, name='party_edit'),
     path('party/<str:short_name>/delete/', views.party_delete, name='party_delete'),
     path('party/<str:short_name>/restore/', views.party_restore, name='party_restore'),
+    path('party/<str:short_name>/validate/', views.party_validate, name='party_validate'),
 
     # Party CIF URLs (AJAX API)
     path('party/<str:short_name>/cif/', views.party_cif_list, name='party_cif_list'),

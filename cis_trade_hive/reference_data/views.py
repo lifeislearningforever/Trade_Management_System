@@ -1225,6 +1225,10 @@ def party_list(request):
         # Get distinct countries for filter dropdown
         countries = party_service.get_distinct_countries()
 
+        # Get pending approval count for header badge
+        pending_parties = party_service.get_pending_approval_parties()
+        pending_count = len(pending_parties)
+
         context = {
             'parties': page_obj,
             'search': search,
@@ -1233,6 +1237,7 @@ def party_list(request):
             'selected_status': status_filter,
             'cif_filter': cif_filter,
             'total_count': len(parties),
+            'pending_count': pending_count,
         }
 
         return render(request, 'reference_data/party_list.html', context)
@@ -1262,10 +1267,19 @@ def party_detail(request, short_name):
         # Get all CIFs for this party
         cifs = party_cif_service.list_cifs_for_party(short_name, is_active=None)
 
+        # Get user info for can_validate check
+        username = request.session.get('user_login', 'anonymous')
+
+        # Check if user can validate this party
+        can_validate = party_service.can_user_validate(party, username)
+        status_color = party_service.get_status_display_color(party.get('status', ''))
+
         context = {
             'party': party,
             'cifs': cifs,
             'cif_count': len(cifs),
+            'can_validate': can_validate,
+            'status_color': status_color,
         }
 
         return render(request, 'reference_data/party_details.html', context)
@@ -1623,6 +1637,103 @@ def party_restore(request, short_name):
         messages.error(request, f"Error restoring party: {str(e)}")
 
     return redirect('reference_data:party_list')
+
+
+# ============================================================================
+# Party Maker-Checker Workflow Views
+# ============================================================================
+
+@require_login
+def party_pending_approvals(request):
+    """
+    List parties pending approval (INITIAL or MODIFIED status).
+    Four-Eyes Principle: Checker reviews Maker's work.
+    """
+    try:
+        # Get pending parties
+        parties = party_service.get_pending_approval_parties()
+
+        # Get user info
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+
+        # Add validation permission flag to each party
+        for party in parties:
+            party['can_validate'] = party_service.can_user_validate(party, username)
+            party['status_color'] = party_service.get_status_display_color(party.get('status', ''))
+
+        # Pagination
+        paginator = Paginator(parties, 25)
+        page_number = request.GET.get('page', 1)
+        page_obj = paginator.get_page(page_number)
+
+        context = {
+            'parties': page_obj,
+            'pending_count': len(parties),
+            'username': username,
+        }
+
+        return render(request, 'reference_data/party_pending_approvals.html', context)
+
+    except Exception as e:
+        logger.error(f"Error in party_pending_approvals: {str(e)}")
+        messages.error(request, f"Error loading pending approvals: {str(e)}")
+        return render(request, 'reference_data/party_pending_approvals.html', {
+            'parties': [],
+            'pending_count': 0
+        })
+
+
+@require_login
+@require_http_methods(["POST"])
+def party_validate(request, short_name):
+    """
+    Validate party (Checker action).
+    POST with action='approve' or action='reject'
+    """
+    try:
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+
+        comments = request.POST.get('comments', '').strip()
+        action = request.POST.get('action', 'approve')
+
+        user_info = {'username': username, 'user_id': user_id, 'user_email': user_email}
+
+        if action == 'approve':
+            success, error_msg = party_service.approve_party(short_name, user_info, comments)
+
+            if success:
+                # Log VALIDATE action to Kudu
+                audit_log_kudu_repository.log_action(
+                    user_id=user_id,
+                    username=username,
+                    user_email=user_email,
+                    action_type='VALIDATE',
+                    entity_type='REFERENCE_DATA',
+                    entity_name='Party',
+                    entity_id=short_name,
+                    action_description=f"Validated party: {short_name}" + (f" - {comments}" if comments else ""),
+                    request_method=request.method,
+                    request_path=request.path,
+                    ip_address=get_client_ip(request),
+                    user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                    status='SUCCESS'
+                )
+                messages.success(request, f"Party '{short_name}' validated successfully")
+            else:
+                messages.error(request, error_msg)
+        else:
+            # Reject action - redirect to delete/soft-delete
+            messages.warning(request, "Reject action redirects to delete functionality")
+
+    except Exception as e:
+        logger.error(f"Error validating party: {str(e)}")
+        messages.error(request, f"Error validating party: {str(e)}")
+
+    return redirect('reference_data:party_pending_approvals')
 
 
 # ============================================================================

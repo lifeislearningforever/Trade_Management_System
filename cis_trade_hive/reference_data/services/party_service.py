@@ -13,7 +13,12 @@ logger = logging.getLogger('reference_data')
 
 
 class PartyService:
-    """Service for Party reference data - Full CRUD operations"""
+    """Service for Party reference data - Full CRUD operations with Maker-Checker workflow"""
+
+    # Maker-Checker Status Constants
+    STATUS_INITIAL = 'INITIAL'
+    STATUS_MODIFIED = 'MODIFIED'
+    STATUS_VALIDATED = 'VALIDATED'
 
     def __init__(self):
         self.repository = party_repository
@@ -108,6 +113,9 @@ class PartyService:
         # Set src_system to 'cis' for all records created via UI
         party_data['src_system'] = 'cis'
 
+        # Set initial status for maker-checker workflow
+        party_data['status'] = self.STATUS_INITIAL
+
         # Set audit fields
         username = user_info.get('username', 'system')
         party_data['created_by'] = username
@@ -176,6 +184,9 @@ class PartyService:
         # Preserve m_label and src_system from existing record
         party_data['m_label'] = existing.get('m_label', short_name)
         party_data['src_system'] = existing.get('src_system', 'cis')
+
+        # Set status to MODIFIED after edit (maker-checker workflow)
+        party_data['status'] = self.STATUS_MODIFIED
 
         # Set audit fields
         username = user_info.get('username', 'system')
@@ -255,6 +266,116 @@ class PartyService:
             return True, None
         else:
             return False, "Failed to restore party in database"
+
+    def approve_party(
+        self,
+        short_name: str,
+        user_info: Dict[str, str],
+        comments: str = ''
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Validate/approve party (Checker action - Four-Eyes principle).
+        INITIAL/MODIFIED -> VALIDATED
+
+        Args:
+            short_name: Party short name
+            user_info: User information (validator)
+            comments: Validation comments
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        # Get existing party
+        existing = self.repository.get_by_short_name(short_name)
+        if not existing:
+            return False, f"Party '{short_name}' not found"
+
+        # Validate current status
+        current_status = existing.get('status', '')
+        if current_status not in [self.STATUS_INITIAL, self.STATUS_MODIFIED]:
+            return False, f"Cannot validate party with status '{current_status}'. Only INITIAL or MODIFIED parties can be validated."
+
+        # Only CIS records can be validated
+        if not self.can_edit_party(existing):
+            return False, f"Cannot validate party from source system '{existing.get('src_system', 'unknown')}'."
+
+        # Four-Eyes check: validator cannot be the creator
+        created_by = existing.get('created_by', '')
+        username = user_info.get('username', '')
+        if created_by == username:
+            return False, "You cannot validate your own party (Four-Eyes principle)"
+
+        # Update status to VALIDATED
+        success = self.repository.update_party_status(
+            short_name=short_name,
+            status=self.STATUS_VALIDATED,
+            updated_by=username,
+            validated_by=username,
+            validation_comments=comments
+        )
+
+        if success:
+            return True, None
+        else:
+            return False, "Failed to validate party in database"
+
+    def get_pending_approval_parties(self) -> List[Dict]:
+        """
+        Get all parties pending approval (INITIAL or MODIFIED status).
+
+        Returns:
+            List of party dictionaries
+        """
+        return self.repository.get_parties_by_status([
+            self.STATUS_INITIAL,
+            self.STATUS_MODIFIED
+        ])
+
+    def can_user_validate(self, party: Dict[str, Any], username: str) -> bool:
+        """
+        Check if user can validate a party.
+
+        Args:
+            party: Party dictionary
+            username: Username
+
+        Returns:
+            True if user can validate
+        """
+        if not party:
+            return False
+
+        # Can validate if:
+        # 1. Status is INITIAL or MODIFIED
+        # 2. User is not the creator (Four-Eyes)
+        # 3. Party is from CIS source system
+        status = party.get('status', '')
+        created_by = party.get('created_by', '')
+        src_system = (party.get('src_system', '') or '').lower()
+
+        return (
+            status in [self.STATUS_INITIAL, self.STATUS_MODIFIED] and
+            created_by != username and
+            src_system == 'cis'
+        )
+
+    @staticmethod
+    def get_status_display_color(status: str) -> str:
+        """
+        Get Bootstrap color class for status badge.
+
+        Args:
+            status: Party status
+
+        Returns:
+            Bootstrap color class
+        """
+        colors = {
+            'INITIAL': 'secondary',
+            'MODIFIED': 'info',
+            'VALIDATED': 'success',
+        }
+        return colors.get(status, 'secondary')
 
 
 class PartyCIFService:

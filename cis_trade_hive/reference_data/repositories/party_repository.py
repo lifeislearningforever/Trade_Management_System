@@ -16,6 +16,11 @@ class PartyRepository(ImpalaReferenceRepository):
 
     TABLE_NAME = 'cis_party'
 
+    # Maker-Checker Status Constants
+    STATUS_INITIAL = 'INITIAL'
+    STATUS_MODIFIED = 'MODIFIED'
+    STATUS_VALIDATED = 'VALIDATED'
+
     def list_all(
         self,
         search: Optional[str] = None,
@@ -86,7 +91,8 @@ class PartyRepository(ImpalaReferenceRepository):
 
         # Optional string fields
         string_fields = [
-            'm_label', 'party_full_name', 'record_type',
+            'm_label', 'party_full_name', 'record_type', 'status',
+            'validated_by', 'validation_comments',
             'address_line_0', 'address_line_1', 'address_line_2', 'address_line_3',
             'city', 'country', 'postal_code',
             'fax_number', 'telex_number', 'primary_contact', 'primary_number',
@@ -231,6 +237,93 @@ class PartyRepository(ImpalaReferenceRepository):
             return True
         except Exception as e:
             logger.error(f"Error restoring party: {e}")
+            return False
+
+    def get_parties_by_status(self, statuses: List[str]) -> List[Dict]:
+        """
+        Fetch parties by status(es) for pending approval queue.
+
+        Args:
+            statuses: List of status values (e.g., ['INITIAL', 'MODIFIED'])
+
+        Returns:
+            List of party dictionaries
+        """
+        if not statuses:
+            return []
+
+        status_list = ", ".join([f"'{s}'" for s in statuses])
+        query = f"""
+            SELECT * FROM {self.TABLE_NAME}
+            WHERE status IN ({status_list})
+            AND (is_deleted = FALSE OR is_deleted IS NULL)
+            ORDER BY CASE WHEN UPPER(src_system) = 'CIS' THEN 0 ELSE 1 END,
+                     updated_at DESC
+        """
+        return self._execute_query(query)
+
+    def update_party_status(
+        self,
+        short_name: str,
+        status: str,
+        updated_by: str,
+        validated_by: str = None,
+        validation_comments: str = None
+    ) -> bool:
+        """
+        Update party status and validation fields using UPSERT.
+
+        Args:
+            short_name: Party short name
+            status: New status (INITIAL, MODIFIED, VALIDATED)
+            updated_by: User performing the update
+            validated_by: User validating (for VALIDATED status)
+            validation_comments: Validation comments
+
+        Returns:
+            True if successful
+        """
+        short_name_escaped = short_name.replace("'", "''")
+        updated_by_escaped = updated_by.replace("'", "''")
+        status_escaped = status.replace("'", "''")
+
+        # Build columns and values for UPSERT
+        columns = ['party_short_name', 'status', 'updated_by', 'updated_at']
+        values = [
+            f"'{short_name_escaped}'",
+            f"'{status_escaped}'",
+            f"'{updated_by_escaped}'",
+            'NOW()'
+        ]
+
+        if status == self.STATUS_VALIDATED and validated_by:
+            validated_by_escaped = validated_by.replace("'", "''")
+            columns.append('validated_by')
+            values.append(f"'{validated_by_escaped}'")
+            columns.append('validated_at')
+            values.append('NOW()')
+            if validation_comments:
+                comments_escaped = validation_comments.replace("'", "''")
+                columns.append('validation_comments')
+                values.append(f"'{comments_escaped}'")
+
+        columns_str = ', '.join(columns)
+        values_str = ', '.join(values)
+
+        # Use UPSERT to update only the specified columns
+        query = f"""
+        UPSERT INTO {self.TABLE_NAME} ({columns_str})
+        SELECT {values_str}
+        FROM {self.TABLE_NAME}
+        WHERE party_short_name = '{short_name_escaped}'
+        """
+
+        try:
+            self._execute_write(query)
+            logger.info(f"Party {short_name} status updated to {status} by {updated_by}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating party status: {e}")
             return False
 
 
