@@ -285,7 +285,11 @@ class PositionQueueService:
                     )
 
             # Check if this is a backdated trade requiring chain recalculation
-            error_message = item.get('error_message', '')
+            # error_message field may contain:
+            # 1. CHAIN_RECALC metadata (original)
+            # 2. Error message from previous retry (check for embedded CHAIN_RECALC)
+            # 3. Combined: "Previous error. CHAIN_RECALC:..." or "Max retries exceeded. Last error: ..."
+            error_message = item.get('error_message', '') or ''
             logger.info(f"Processing queue item: trade_id={trade_id}, error_message='{error_message}'")
             chain_recalc_info = self._parse_chain_recalc_metadata(error_message)
 
@@ -359,21 +363,37 @@ class PositionQueueService:
     def _parse_chain_recalc_metadata(self, metadata: str) -> Optional[Dict[str, str]]:
         """
         Parse chain recalculation metadata from error_message field.
-        Format: CHAIN_RECALC:portfolio_id:security_id:from_date
+        Supports two formats:
+        - Colon format: CHAIN_RECALC:portfolio_id:security_id:from_date
+        - Space format: CHAIN_RECALC portfolio_id security_id from_date
         """
-        if not metadata or not metadata.startswith('CHAIN_RECALC:'):
+        if not metadata or not metadata.startswith('CHAIN_RECALC'):
             return None
 
         try:
-            parts = metadata.split(':')
-            if len(parts) >= 4:
+            # Try colon format first (preferred)
+            if metadata.startswith('CHAIN_RECALC:'):
+                parts = metadata.split(':')
+                if len(parts) >= 4:
+                    return {
+                        'portfolio_id': parts[1],
+                        'security_id': parts[2],
+                        'from_date': parts[3]
+                    }
+
+            # Try space format (legacy/alternate)
+            # Format: CHAIN_RECALC portfolio_id security_id from_date
+            parts = metadata.split()
+            if len(parts) >= 4 and parts[0] == 'CHAIN_RECALC':
                 return {
                     'portfolio_id': parts[1],
                     'security_id': parts[2],
                     'from_date': parts[3]
                 }
-        except Exception:
-            pass
+
+            logger.warning(f"Could not parse CHAIN_RECALC metadata: {metadata}")
+        except Exception as e:
+            logger.error(f"Error parsing CHAIN_RECALC metadata '{metadata}': {e}")
 
         return None
 
