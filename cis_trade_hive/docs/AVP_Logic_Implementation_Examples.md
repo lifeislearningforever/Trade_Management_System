@@ -421,6 +421,345 @@ Result:           FAILED - No position found
 
 ---
 
+## Use Case 11: Backdated BUY Trade (Historical Entry)
+
+### Scenario
+Today is **2026-03-18**. Portfolio A already has a position from trades executed on March 15-17.
+A backdated BUY trade for **2026-03-14** is entered (before existing trades).
+
+### Current Position (as of 2026-03-17)
+| Field | Value |
+|-------|-------|
+| Quantity | 200 |
+| Average Cost | $55.00 |
+| Total Cost | $11,000.00 |
+| Realized P&L | $0.00 |
+
+### Backdated Trade Input
+| Field | Value |
+|-------|-------|
+| Trade Date | 2026-03-14 (backdated) |
+| Settlement Date | 2026-03-14 |
+| Trade Type | BUY |
+| Quantity | 50 |
+| Price | $45.00 |
+
+### Processing Logic
+```
+Backdated Trade Processing:
+1. System detects settle_date (2026-03-14) < today (2026-03-18)
+2. Trade is queued for settlement with status='PENDING'
+3. EOD settlement processes trades in chronological order by settle_date
+4. Position is recalculated from the backdated point forward
+
+Recalculation Order:
+  - 2026-03-14: BUY 50 @ $45.00 (backdated trade - processed first)
+  - 2026-03-15: Original trade (reprocessed)
+  - 2026-03-16: Original trade (reprocessed)
+  - 2026-03-17: Original trade (reprocessed)
+```
+
+### Result After Backdated Settlement
+| Field | Before Backdate | After Backdate |
+|-------|-----------------|----------------|
+| Quantity | 200 | 250 |
+| Average Cost | $55.00 | **$53.00** (recalculated) |
+| Total Cost | $11,000.00 | $13,250.00 |
+| Realized P&L | $0.00 | $0.00 |
+
+**Key Point:** Backdated trades are processed in settlement date order. The average cost is recalculated by replaying all trades from the backdated point forward.
+
+---
+
+## Use Case 12: Backdated SELL Trade (Historical Correction)
+
+### Scenario
+Today is **2026-03-18**. Portfolio A has 300 shares at $13.645 average cost.
+A backdated SELL trade for **2026-03-16** is entered to correct a missing sale.
+
+### Current Position (as of 2026-03-17)
+| Field | Value |
+|-------|-------|
+| Quantity | 300 |
+| Average Cost | $13.645 |
+| Total Cost | $4,093.50 |
+| Realized P&L | $0.00 |
+
+### Backdated Trade Input
+| Field | Value |
+|-------|-------|
+| Trade Date | 2026-03-16 (backdated) |
+| Settlement Date | 2026-03-16 |
+| Trade Type | SELL |
+| Quantity | 100 |
+| Price | $18.00 |
+
+### Validation
+```
+Backdated SELL Validation:
+1. System checks position as of 2026-03-16 (before the sell)
+2. Available quantity on 2026-03-16: Must be >= 100
+3. If sufficient quantity → PENDING for settlement
+4. If insufficient → FAILED with error message
+```
+
+### Calculation (if valid)
+```
+Position as of 2026-03-16 (before backdated sell): 150 shares @ $17.29
+
+Backdated SELL 100 @ $18.00:
+New Quantity   = 150 - 100 = 50
+Avg Cost       = $17.29 (unchanged)
+Total Cost     = 2,593.50 × (50/150) = $864.50
+Realized P&L   = 0 + (100 × (18.00 - 17.29)) = $71.00
+
+Then subsequent trades (2026-03-17) are reprocessed with new starting position.
+```
+
+### Important Validation Rule
+```
+SELL Validation for Backdated Trades:
+- System must verify quantity existed AT THAT POINT IN TIME
+- Cannot sell more than what was held on the backdated date
+- Error: "Insufficient quantity on 2026-03-16. Available: X, Requested: Y"
+```
+
+---
+
+## Use Case 13: Future-Dated BUY Trade
+
+### Scenario
+Today is **2026-03-16**. Portfolio A enters a BUY trade with settlement date **2026-03-20** (T+2 settlement).
+
+### Current Position
+| Field | Value |
+|-------|-------|
+| Quantity | 100 |
+| Average Cost | $50.00 |
+| Total Cost | $5,000.00 |
+
+### Future Trade Input
+| Field | Value |
+|-------|-------|
+| Trade Date | 2026-03-16 (today) |
+| Settlement Date | 2026-03-20 (future) |
+| Trade Type | BUY |
+| Quantity | 50 |
+| Price | $55.00 |
+
+### Processing Logic
+```
+Future-Dated Trade Processing:
+1. Trade is created with status='PENDING'
+2. Added to cis_settlement_queue with settle_date='2026-03-20'
+3. Position is NOT updated immediately
+4. EOD settlement on 2026-03-20 will process this trade
+
+Current Position (unchanged until 2026-03-20):
+  Quantity: 100, Avg Cost: $50.00
+
+After EOD Settlement on 2026-03-20:
+  Quantity: 150, Avg Cost: $51.67
+```
+
+### Timeline
+| Date | Action | Position Qty | Avg Cost |
+|------|--------|--------------|----------|
+| 2026-03-16 | Trade entered (future-dated) | 100 | $50.00 |
+| 2026-03-17 | No change (pending) | 100 | $50.00 |
+| 2026-03-18 | No change (pending) | 100 | $50.00 |
+| 2026-03-19 | No change (pending) | 100 | $50.00 |
+| 2026-03-20 | **EOD Settlement processes trade** | **150** | **$51.67** |
+
+### Calculation on Settlement Date
+```
+On 2026-03-20 EOD:
+New Quantity   = 100 + 50 = 150
+Buy Value      = 50 × 55.00 = $2,750.00
+New Total Cost = 5,000.00 + 2,750.00 = $7,750.00
+New Avg Cost   = 7,750.00 / 150 = $51.67
+```
+
+---
+
+## Use Case 14: Future-Dated SELL Trade (Forward Sale)
+
+### Scenario
+Today is **2026-03-16**. Portfolio A has 200 shares and enters a forward SELL with settlement **2026-03-25**.
+
+### Current Position
+| Field | Value |
+|-------|-------|
+| Quantity | 200 |
+| Average Cost | $45.00 |
+| Total Cost | $9,000.00 |
+| Realized P&L | $0.00 |
+
+### Future Trade Input
+| Field | Value |
+|-------|-------|
+| Trade Date | 2026-03-16 (today) |
+| Settlement Date | 2026-03-25 (future) |
+| Trade Type | SELL |
+| Quantity | 80 |
+| Price | $52.00 |
+
+### Validation at Trade Entry
+```
+Future SELL Validation:
+1. Check CURRENT quantity: 200 shares ✓
+2. Requested sell: 80 shares
+3. Available: 200 >= 80 ✓
+4. Trade is ACCEPTED with status='PENDING'
+
+Note: System validates against CURRENT position, not projected position.
+Warning may be issued if other pending sells exist.
+```
+
+### Settlement Queue Status
+```
+Trade Status Lifecycle:
+- 2026-03-16: Trade created → status='PENDING'
+- 2026-03-16 to 2026-03-24: Remains in queue, position unchanged
+- 2026-03-25 EOD: Processed → status='SETTLED'
+```
+
+### Calculation on Settlement Date (2026-03-25)
+```
+Position at start of 2026-03-25: 200 shares @ $45.00 (assuming no other trades)
+
+SELL 80 @ $52.00:
+New Quantity   = 200 - 80 = 120
+Avg Cost       = $45.00 (unchanged)
+New Total Cost = 9,000.00 × (120/200) = $5,400.00
+Profit/Share   = 52.00 - 45.00 = $7.00
+Realized P&L   = 0 + (80 × 7.00) = $560.00
+```
+
+### Result After Settlement
+| Field | Before (2026-03-24) | After (2026-03-25) |
+|-------|---------------------|-------------------|
+| Quantity | 200 | 120 |
+| Average Cost | $45.00 | $45.00 |
+| Total Cost | $9,000.00 | $5,400.00 |
+| Realized P&L | $0.00 | **$560.00** |
+
+---
+
+## Use Case 15: Mixed Backdated and Future Trades
+
+### Scenario
+Today is **2026-03-18**. Portfolio A has the following pending trades:
+
+| Trade Date | Settlement Date | Type | Qty | Price | Status |
+|------------|-----------------|------|-----|-------|--------|
+| 2026-03-18 | 2026-03-14 | BUY | 30 | $40.00 | Backdated |
+| 2026-03-18 | 2026-03-18 | BUY | 50 | $48.00 | Today |
+| 2026-03-18 | 2026-03-22 | SELL | 20 | $55.00 | Future |
+
+### Current Position (before any processing)
+| Field | Value |
+|-------|-------|
+| Quantity | 100 |
+| Average Cost | $50.00 |
+| Total Cost | $5,000.00 |
+
+### EOD Settlement Processing Order
+```
+EOD on 2026-03-18 processes trades where settle_date <= '2026-03-18':
+
+Processing Order (by settle_date, then queue_id):
+1. 2026-03-14: BUY 30 @ $40.00 (backdated - processed first)
+2. 2026-03-18: BUY 50 @ $48.00 (today's trade)
+
+Future trade (2026-03-22) remains PENDING - not processed yet.
+```
+
+### Step-by-Step Calculation
+
+#### Step 1: Process Backdated BUY (2026-03-14)
+```
+Starting: 100 @ $50.00 = $5,000.00
+
+BUY 30 @ $40.00:
+New Qty      = 100 + 30 = 130
+New Total    = 5,000 + 1,200 = $6,200.00
+New Avg Cost = 6,200 / 130 = $47.69
+```
+
+#### Step 2: Process Today's BUY (2026-03-18)
+```
+Starting: 130 @ $47.69 = $6,200.00
+
+BUY 50 @ $48.00:
+New Qty      = 130 + 50 = 180
+New Total    = 6,200 + 2,400 = $8,600.00
+New Avg Cost = 8,600 / 180 = $47.78
+```
+
+### Position After EOD 2026-03-18
+| Field | Value |
+|-------|-------|
+| Quantity | 180 |
+| Average Cost | $47.78 |
+| Total Cost | $8,600.00 |
+| Pending Trades | SELL 20 @ $55 (settles 2026-03-22) |
+
+### Future Settlement (2026-03-22)
+```
+Starting: 180 @ $47.78 = $8,600.00
+
+SELL 20 @ $55.00:
+New Qty      = 180 - 20 = 160
+Avg Cost     = $47.78 (unchanged)
+New Total    = 8,600 × (160/180) = $7,644.44
+Profit/Share = 55.00 - 47.78 = $7.22
+Realized P&L = 0 + (20 × 7.22) = $144.40
+```
+
+---
+
+## Backdated & Future Trade Rules Summary
+
+### Backdated Trades
+| Rule | Description |
+|------|-------------|
+| Processing | Processed in chronological order by settle_date |
+| BUY Validation | Always valid (adds to position) |
+| SELL Validation | Must verify quantity existed on that date |
+| Recalculation | All subsequent positions are recalculated |
+| Status Flow | PENDING → PROCESSING → SETTLED |
+
+### Future-Dated Trades
+| Rule | Description |
+|------|-------------|
+| Entry Validation | Validates against CURRENT position |
+| Position Impact | No immediate impact - position unchanged until settlement |
+| Settlement | Processed on EOD when settle_date <= current_date |
+| SELL Risk | Position may change before settlement (warning issued) |
+| Status Flow | PENDING → (waits) → PROCESSING → SETTLED |
+
+### Key System Behaviors
+```
+1. Trade Entry:
+   - Backdated: settle_date < today → queued for immediate EOD processing
+   - Same-day:  settle_date = today → queued for today's EOD
+   - Future:    settle_date > today → queued, waits until settle_date
+
+2. EOD Settlement:
+   - Processes all trades WHERE settle_date <= current_eod_date
+   - Ordered by settle_date ASC, then queue_id ASC
+   - Each trade updates position, which affects subsequent trades
+
+3. Validation:
+   - BUY: Always valid (no quantity check needed)
+   - SELL: Validates against position AT SETTLEMENT DATE
+     - Backdated SELL: Checks historical position
+     - Future SELL: Checks current position (warning if other pending sells)
+```
+
+---
+
 ## SQL Implementation Reference
 
 ### AVP Calculation in Step 6 (EOD Settlement)
@@ -478,9 +817,33 @@ END AS status
 2. **Realized P&L** only changes on SELL trades (profit/loss crystallized)
 3. **Total Cost** increases on BUY, decreases proportionally on SELL
 4. **Position closes** when quantity reaches zero
+5. **Backdated trades** are processed in settlement date order, recalculating subsequent positions
+6. **Future-dated trades** remain pending until their settlement date
 
 ---
 
-*Document Version: 1.0*
+## Use Case Index
+
+| # | Use Case | Type | Key Concept |
+|---|----------|------|-------------|
+| 1 | Simple BUY (Opening) | BUY | New position creation |
+| 2 | Averaging Up | BUY | Additional purchase at higher price |
+| 3 | Averaging Down | BUY | Additional purchase at lower price |
+| 4 | Partial SELL (Profit) | SELL | Realize gain on partial sale |
+| 5 | Partial SELL (Loss) | SELL | Realize loss on partial sale |
+| 6 | Full SELL (Closing) | SELL | Close position completely |
+| 7 | Complete Trading Cycle | Mixed | Full lifecycle example |
+| 8 | Multiple Trades Same Day | Mixed | Intraday trading |
+| 9 | Insufficient Quantity | SELL | Validation failure |
+| 10 | No Position | SELL | Validation failure |
+| 11 | Backdated BUY | BUY | Historical entry |
+| 12 | Backdated SELL | SELL | Historical correction |
+| 13 | Future-Dated BUY | BUY | T+N settlement |
+| 14 | Future-Dated SELL | SELL | Forward sale |
+| 15 | Mixed Backdated/Future | Mixed | Complex scenario |
+
+---
+
+*Document Version: 1.1*
 *Last Updated: 2026-03-16*
 *System: CIS Trade Hive - EOD Settlement Processing*
