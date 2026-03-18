@@ -34,11 +34,11 @@
         <div class="card-body">
             <form method="get" action="{% url 'reference_data:currency_list' %}" class="row g-3">
                 <div class="col-md-6">
-                    <label class="form-label">Search</label>
+                    <label class="form-label">Search by ISO Code, Name, Full Name, Symbol</label>
                     <div class="input-group">
                         <span class="input-group-text"><i class="bi bi-search"></i></span>
                         <input type="text" class="form-control" name="search" value="{{ search_query }}"
-                               placeholder="Search by code, name, or symbol...">
+                               placeholder="Search by ISO Code, Name, Full Name, Symbol...">
                     </div>
                 </div>
                 <div class="col-md-3">

@@ -110,7 +110,12 @@ class CurrencyRepository(ImpalaReferenceRepository):
 
         if search:
             search_escaped = search.replace("'", "''").lower()
-            query += f" AND (LOWER(name) LIKE '%{search_escaped}%' OR LOWER(iso_code) LIKE '%{search_escaped}%')"
+            query += f""" AND (
+                LOWER(iso_code) LIKE '%{search_escaped}%'
+                OR LOWER(name) LIKE '%{search_escaped}%'
+                OR LOWER(full_name) LIKE '%{search_escaped}%'
+                OR LOWER(`symbol`) LIKE '%{search_escaped}%'
+            )"""
 
         query += " ORDER BY iso_code"
 
