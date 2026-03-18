@@ -132,7 +132,7 @@ def currency_list(request):
     except Exception as e:
         logger.error(f"Error in currency_list: {str(e)}")
         messages.error(request, f"Error loading currencies: {str(e)}")
-        return render(request, 'reference_data/currency_list.html', {'currencies': []})
+        return render(request, 'reference_data/currency_list.html', {'currencies': [], 'search': search})
 
 
 @require_login
