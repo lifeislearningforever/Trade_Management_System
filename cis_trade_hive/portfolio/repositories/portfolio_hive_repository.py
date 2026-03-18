@@ -162,7 +162,10 @@ class PortfolioHiveRepository:
                 'settled_portfolios': status_counts.get(PortfolioHiveRepository.STATUS_SETTLED, 0),
                 'pending_validation': status_counts.get(PortfolioHiveRepository.STATUS_PENDING_VALIDATION, 0),
                 'validated': status_counts.get(PortfolioHiveRepository.STATUS_VALIDATED, 0),
-                'status_breakdown': status_counts,
+                'status_breakdown': [
+                    {'status': k, 'count': v}
+                    for k, v in sorted(status_counts.items())
+                ],
                 'currency_breakdown': [
                     {'currency': k, 'count': v}
                     for k, v in sorted(currency_counts.items())
@@ -176,7 +179,7 @@ class PortfolioHiveRepository:
                 'settled_portfolios': 0,
                 'pending_validation': 0,
                 'validated': 0,
-                'status_breakdown': {},
+                'status_breakdown': [],
                 'currency_breakdown': []
             }
 
