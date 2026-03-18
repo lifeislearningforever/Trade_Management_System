@@ -33,21 +33,13 @@
         </div>
         <div class="card-body">
             <form method="get" action="{% url 'reference_data:currency_list' %}" class="row g-3">
-                <div class="col-md-6">
+                <div class="col-md-9">
                     <label class="form-label">Search by ISO Code, Name, Full Name, Symbol</label>
                     <div class="input-group">
                         <span class="input-group-text"><i class="bi bi-search"></i></span>
                         <input type="text" class="form-control" name="search" value="{{ search }}"
                                placeholder="Search by ISO Code, Name, Full Name, Symbol...">
                     </div>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">Status</label>
-                    <select class="form-select" name="status">
-                        <option value="">All Statuses</option>
-                        <option value="ACTIVE" {% if status_filter == 'ACTIVE' %}selected{% endif %}>Active</option>
-                        <option value="INACTIVE" {% if status_filter == 'INACTIVE' %}selected{% endif %}>Inactive</option>
-                    </select>
                 </div>
                 <div class="col-md-3 d-flex align-items-end gap-2">
                     <button type="submit" class="btn btn-primary">

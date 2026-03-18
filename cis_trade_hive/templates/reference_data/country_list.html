@@ -33,40 +33,20 @@
         </div>
         <div class="card-body">
             <form method="get" action="{% url 'reference_data:country_list' %}" class="row g-3">
-                <div class="col-md-5">
-                    <label class="form-label">Search</label>
+                <div class="col-md-9">
+                    <label class="form-label">Search by Code and Name</label>
                     <div class="input-group">
                         <span class="input-group-text"><i class="bi bi-search"></i></span>
                         <input type="text" class="form-control" name="search" value="{{ search }}"
-                               placeholder="Search by code, name, or region...">
+                               placeholder="Search by Code and Name...">
                     </div>
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label">Region</label>
-                    <select class="form-select" name="region">
-                        <option value="">All Regions</option>
-                        <option value="Asia" {% if region_filter == 'Asia' %}selected{% endif %}>Asia</option>
-                        <option value="Europe" {% if region_filter == 'Europe' %}selected{% endif %}>Europe</option>
-                        <option value="North America" {% if region_filter == 'North America' %}selected{% endif %}>North America</option>
-                        <option value="South America" {% if region_filter == 'South America' %}selected{% endif %}>South America</option>
-                        <option value="Africa" {% if region_filter == 'Africa' %}selected{% endif %}>Africa</option>
-                        <option value="Oceania" {% if region_filter == 'Oceania' %}selected{% endif %}>Oceania</option>
-                    </select>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label">Status</label>
-                    <select class="form-select" name="status">
-                        <option value="">All</option>
-                        <option value="ACTIVE" {% if status_filter == 'ACTIVE' %}selected{% endif %}>Active</option>
-                        <option value="INACTIVE" {% if status_filter == 'INACTIVE' %}selected{% endif %}>Inactive</option>
-                    </select>
-                </div>
-                <div class="col-md-2 d-flex align-items-end gap-2">
+                <div class="col-md-3 d-flex align-items-end gap-2">
                     <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-search"></i>
+                        <i class="bi bi-search"></i> Search
                     </button>
                     <a href="{% url 'reference_data:country_list' %}" class="btn btn-outline-secondary">
-                        <i class="bi bi-x-circle"></i>
+                        <i class="bi bi-x-circle"></i> Clear
                     </a>
                 </div>
             </form>

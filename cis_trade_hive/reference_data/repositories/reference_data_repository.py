@@ -109,12 +109,12 @@ class CurrencyRepository(ImpalaReferenceRepository):
         """
 
         if search:
-            search_escaped = search.replace("'", "''")
+            search_escaped = search.replace("'", "''").lower()
             query += f""" AND (
-                iso_code LIKE '%{search_escaped}%'
-                OR name LIKE '%{search_escaped}%'
-                OR full_name LIKE '%{search_escaped}%'
-                OR `symbol` LIKE '%{search_escaped}%'
+                LOWER(iso_code) LIKE '%{search_escaped}%'
+                OR LOWER(name) LIKE '%{search_escaped}%'
+                OR LOWER(full_name) LIKE '%{search_escaped}%'
+                OR LOWER(`symbol`) LIKE '%{search_escaped}%'
             )"""
 
         query += " ORDER BY iso_code"
@@ -226,7 +226,11 @@ class CalendarRepository(ImpalaReferenceRepository):
 
         if search:
             search_escaped = search.replace("'", "''").lower()
-            query += f" AND LOWER(calendar_description) LIKE '%{search_escaped}%'"
+            query += f""" AND (
+                LOWER(calendar_label) LIKE '%{search_escaped}%'
+                OR LOWER(calendar_description) LIKE '%{search_escaped}%'
+                OR CAST(holiday_date AS STRING) LIKE '%{search_escaped}%'
+            )"""
 
         query += " ORDER BY calendar_label, holiday_date"
 

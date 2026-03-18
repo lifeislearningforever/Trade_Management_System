@@ -246,7 +246,12 @@ def country_list(request):
     except Exception as e:
         logger.error(f"Error in country_list: {str(e)}")
         messages.error(request, f"Error loading countries: {str(e)}")
-        return render(request, 'reference_data/country_list.html', {'countries': [], 'search': search})
+        return render(request, 'reference_data/country_list.html', {
+            'countries': [],
+            'search': search,
+            'sort_by': sort_by,
+            'sort_order': sort_order,
+        })
 
 
 @require_login
@@ -371,6 +376,7 @@ def calendar_list(request):
         return render(request, 'reference_data/calendar_list.html', {
             'calendars': [],
             'calendar_labels': [],
+            'search': search,
             'sort_by': sort_by,
             'sort_order': sort_order,
         })
