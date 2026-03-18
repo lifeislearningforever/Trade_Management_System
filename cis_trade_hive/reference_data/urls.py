@@ -46,4 +46,14 @@ urlpatterns = [
     path('party/<str:short_name>/cif/create/', views.party_cif_create, name='party_cif_create'),
     path('party/<str:short_name>/cif/<str:m_label>/update/', views.party_cif_update, name='party_cif_update'),
     path('party/<str:short_name>/cif/<str:m_label>/delete/', views.party_cif_delete, name='party_cif_delete'),
+
+    # Corporate Action URLs
+    path('corporate-action/', views.corporate_action_list, name='corporate_action_list'),
+    path('corporate-action/create/', views.corporate_action_create, name='corporate_action_create'),
+    path('corporate-action/pending/', views.corporate_action_pending_approvals, name='corporate_action_pending_approvals'),
+    path('corporate-action/<int:ca_id>/', views.corporate_action_detail, name='corporate_action_detail'),
+    path('corporate-action/<int:ca_id>/edit/', views.corporate_action_edit, name='corporate_action_edit'),
+    path('corporate-action/<int:ca_id>/delete/', views.corporate_action_delete, name='corporate_action_delete'),
+    path('corporate-action/<int:ca_id>/restore/', views.corporate_action_restore, name='corporate_action_restore'),
+    path('corporate-action/<int:ca_id>/validate/', views.corporate_action_validate, name='corporate_action_validate'),
 ]

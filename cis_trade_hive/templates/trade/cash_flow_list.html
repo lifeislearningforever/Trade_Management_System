@@ -1,0 +1,277 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Cash Flows - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'trade:list' %}">Trade</a></li>
+    <li class="breadcrumb-item active">Cash Flows</li>
+{% endblock %}
+
+{% block content %}
+<div class="cash-flow-list-container" style="max-width: 100%; overflow-x: hidden;">
+    <!-- Page Header -->
+    <div class="content-header d-flex justify-content-between align-items-start">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-cash-stack text-primary"></i> Cash Flows
+            </h1>
+            <p class="content-subtitle">Manage cash flow entries (dividends, interest, fees, etc.)</p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{% url 'trade:cash_flow_pending_approvals' %}" class="btn btn-warning">
+                <i class="bi bi-clock-history"></i> Pending Approvals
+                {% if pending_count %}<span class="badge bg-light text-dark">{{ pending_count }}</span>{% endif %}
+            </a>
+            <a href="{% url 'trade:cash_flow_create' %}" class="btn btn-primary">
+                <i class="bi bi-plus-circle"></i> Create Cash Flow
+            </a>
+            <a href="{% url 'trade:list' %}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Back to Trades
+            </a>
+        </div>
+    </div>
+
+    <!-- Search & Filter Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-funnel"></i> Search & Filter
+            </h5>
+        </div>
+        <div class="card-body">
+            <form method="get" action="{% url 'trade:cash_flow_list' %}" class="row g-3">
+                <!-- Search -->
+                <div class="col-md-3">
+                    <label class="form-label">Search</label>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" name="search" value="{{ search }}"
+                               placeholder="CF number, portfolio, security...">
+                    </div>
+                </div>
+
+                <!-- Portfolio Filter -->
+                <div class="col-md-3">
+                    <label class="form-label">Portfolio</label>
+                    <select class="form-select" name="portfolio">
+                        <option value="">All Portfolios</option>
+                        {% for p in portfolios %}
+                            <option value="{{ p.value }}" {% if selected_portfolio == p.value %}selected{% endif %}>
+                                {{ p.label }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Cash Flow Type Filter -->
+                <div class="col-md-2">
+                    <label class="form-label">Type</label>
+                    <select class="form-select" name="cash_flow_type">
+                        <option value="">All Types</option>
+                        {% for cft in cash_flow_types %}
+                            <option value="{{ cft.value }}" {% if selected_cash_flow_type == cft.value %}selected{% endif %}>
+                                {{ cft.label }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Status Filter -->
+                <div class="col-md-2">
+                    <label class="form-label">Status</label>
+                    <select class="form-select" name="status">
+                        <option value="">All Statuses</option>
+                        <option value="INITIAL" {% if selected_status == 'INITIAL' %}selected{% endif %}>Initial</option>
+                        <option value="MODIFIED" {% if selected_status == 'MODIFIED' %}selected{% endif %}>Modified</option>
+                        <option value="APPROVED" {% if selected_status == 'APPROVED' %}selected{% endif %}>Approved</option>
+                        <option value="REJECTED" {% if selected_status == 'REJECTED' %}selected{% endif %}>Rejected</option>
+                    </select>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="col-md-2 d-flex align-items-end gap-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i>
+                    </button>
+                    <a href="{% url 'trade:cash_flow_list' %}" class="btn btn-outline-secondary">
+                        <i class="bi bi-x-circle"></i>
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Cash Flows Table -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0">
+                Cash Flow List
+                <span class="badge badge-primary ms-2">{{ total_count }} records</span>
+            </h5>
+            <a href="?export=csv{% if search %}&search={{ search }}{% endif %}{% if selected_cash_flow_type %}&cash_flow_type={{ selected_cash_flow_type }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_portfolio %}&portfolio={{ selected_portfolio }}{% endif %}" class="btn btn-sm btn-success">
+                <i class="bi bi-download"></i> Export CSV
+            </a>
+        </div>
+        <div class="card-body p-0">
+            {% if cash_flows %}
+                <div class="table-responsive" style="display: block; width: 100%; max-height: 600px; overflow-x: auto; overflow-y: auto;">
+                    <table class="table table-hover table-sm mb-0" style="font-size: 0.875rem; white-space: nowrap;">
+                        <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
+                            <tr>
+                                <th style="width: 130px;">CF Number</th>
+                                <th style="width: 120px;">Portfolio</th>
+                                <th style="width: 150px;">Security</th>
+                                <th style="width: 100px;">Type</th>
+                                <th style="width: 80px;">Send/Recv</th>
+                                <th style="width: 100px;">Value Date</th>
+                                <th style="width: 100px;">Payment Date</th>
+                                <th style="width: 100px;">Local Amount</th>
+                                <th style="width: 60px;">CCY</th>
+                                <th style="width: 90px;">Status</th>
+                                <th style="width: 100px;">Created By</th>
+                                <th style="width: 160px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for cf in cash_flows %}
+                            <tr>
+                                <td>
+                                    <a href="{% url 'trade:cash_flow_detail' cf.cf_id %}" class="text-primary fw-bold">
+                                        {{ cf.cf_number|default:"-" }}
+                                    </a>
+                                </td>
+                                <td>{{ cf.portfolio_short_name|default:"-" }}</td>
+                                <td>{{ cf.security_name|default:"-"|truncatechars:20 }}</td>
+                                <td>{{ cf.cash_flow_type|default:"-" }}</td>
+                                <td>{{ cf.send_receive|default:"-" }}</td>
+                                <td>{{ cf.value_date|default:"-" }}</td>
+                                <td>{{ cf.payment_date|default:"-" }}</td>
+                                <td class="text-end">{{ cf.local_amount|default:"-" }}</td>
+                                <td>{{ cf.local_ccy|default:"-" }}</td>
+                                <td>
+                                    <span class="badge badge-{{ cf.status_color }}">
+                                        {{ cf.status|default:"-" }}
+                                    </span>
+                                </td>
+                                <td>{{ cf.created_by|default:"-" }}</td>
+                                <td>
+                                    <div class="btn-group" role="group">
+                                        <a href="{% url 'trade:cash_flow_detail' cf.cf_id %}"
+                                           class="btn btn-sm btn-outline-info" title="View Details">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                        {% if cf.src_system|lower == 'cis' or not cf.src_system %}
+                                            <a href="{% url 'trade:cash_flow_edit' cf.cf_id %}"
+                                               class="btn btn-sm btn-outline-primary" title="Edit">
+                                                <i class="bi bi-pencil"></i>
+                                            </a>
+                                            {% if cf.is_deleted %}
+                                                <form method="post" action="{% url 'trade:cash_flow_restore' cf.cf_id %}"
+                                                      style="display: inline;" onsubmit="return confirm('Restore this cash flow?');">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-sm btn-outline-success" title="Restore">
+                                                        <i class="bi bi-arrow-counterclockwise"></i>
+                                                    </button>
+                                                </form>
+                                            {% else %}
+                                                <form method="post" action="{% url 'trade:cash_flow_delete' cf.cf_id %}"
+                                                      style="display: inline;" onsubmit="return confirm('Delete this cash flow?');">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                                                        <i class="bi bi-trash"></i>
+                                                    </button>
+                                                </form>
+                                            {% endif %}
+                                        {% else %}
+                                            <button class="btn btn-sm btn-outline-secondary" disabled title="Read-only: External record">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                {% if cash_flows.has_other_pages %}
+                <div class="card-footer">
+                    <nav aria-label="Cash Flow pagination">
+                        <ul class="pagination justify-content-center mb-0">
+                            {% if cash_flows.has_previous %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if selected_cash_flow_type %}&cash_flow_type={{ selected_cash_flow_type }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_portfolio %}&portfolio={{ selected_portfolio }}{% endif %}" aria-label="First">
+                                        <span aria-hidden="true">&laquo;&laquo;</span>
+                                    </a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ cash_flows.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if selected_cash_flow_type %}&cash_flow_type={{ selected_cash_flow_type }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_portfolio %}&portfolio={{ selected_portfolio }}{% endif %}" aria-label="Previous">
+                                        <span aria-hidden="true">&laquo;</span>
+                                    </a>
+                                </li>
+                            {% else %}
+                                <li class="page-item disabled"><span class="page-link">&laquo;&laquo;</span></li>
+                                <li class="page-item disabled"><span class="page-link">&laquo;</span></li>
+                            {% endif %}
+
+                            {% for num in cash_flows.paginator.page_range %}
+                                {% if cash_flows.number == num %}
+                                    <li class="page-item active"><span class="page-link">{{ num }}</span></li>
+                                {% elif num > cash_flows.number|add:'-3' and num < cash_flows.number|add:'3' %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="?page={{ num }}{% if search %}&search={{ search }}{% endif %}{% if selected_cash_flow_type %}&cash_flow_type={{ selected_cash_flow_type }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_portfolio %}&portfolio={{ selected_portfolio }}{% endif %}">{{ num }}</a>
+                                    </li>
+                                {% endif %}
+                            {% endfor %}
+
+                            {% if cash_flows.has_next %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ cash_flows.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if selected_cash_flow_type %}&cash_flow_type={{ selected_cash_flow_type }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_portfolio %}&portfolio={{ selected_portfolio }}{% endif %}" aria-label="Next">
+                                        <span aria-hidden="true">&raquo;</span>
+                                    </a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ cash_flows.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if selected_cash_flow_type %}&cash_flow_type={{ selected_cash_flow_type }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_portfolio %}&portfolio={{ selected_portfolio }}{% endif %}" aria-label="Last">
+                                        <span aria-hidden="true">&raquo;&raquo;</span>
+                                    </a>
+                                </li>
+                            {% else %}
+                                <li class="page-item disabled"><span class="page-link">&raquo;</span></li>
+                                <li class="page-item disabled"><span class="page-link">&raquo;&raquo;</span></li>
+                            {% endif %}
+                        </ul>
+                        <div class="text-center mt-2" style="font-size: var(--font-size-sm); color: var(--gray-600);">
+                            Page {{ cash_flows.number }} of {{ cash_flows.paginator.num_pages }} ({{ total_count }} total)
+                        </div>
+                    </nav>
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="text-center py-5" style="color: var(--gray-500);">
+                    <i class="bi bi-cash-stack" style="font-size: 3rem; opacity: 0.3;"></i>
+                    <p class="mt-3 mb-0">No cash flows found</p>
+                    {% if search or selected_cash_flow_type or selected_status or selected_portfolio %}
+                        <p class="text-muted">Try adjusting your filters</p>
+                        <a href="{% url 'trade:cash_flow_list' %}" class="btn btn-sm btn-primary mt-2">Clear Filters</a>
+                    {% else %}
+                        <a href="{% url 'trade:cash_flow_create' %}" class="btn btn-sm btn-primary mt-2">
+                            <i class="bi bi-plus-circle"></i> Create First Cash Flow
+                        </a>
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    <div class="alert alert-info mt-4">
+        <i class="bi bi-info-circle"></i>
+        <strong>Note:</strong> Cash flows are managed with Maker-Checker workflow.
+        New records require approval by another user (Four-Eyes Principle).
+    </div>
+</div>
+{% endblock %}

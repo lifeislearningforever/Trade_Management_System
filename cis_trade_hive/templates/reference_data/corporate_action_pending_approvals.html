@@ -1,0 +1,219 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Pending Corporate Action Approvals - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="#">Reference Data</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'reference_data:corporate_action_list' %}">Corporate Actions</a></li>
+    <li class="breadcrumb-item active">Pending Approvals</li>
+{% endblock %}
+
+{% block content %}
+<div class="pending-approvals-container" style="max-width: 100%; overflow-x: hidden;">
+    <!-- Page Header -->
+    <div class="content-header d-flex justify-content-between align-items-start">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-clock-history text-warning"></i> Pending Corporate Action Approvals
+            </h1>
+            <p class="content-subtitle">
+                Corporate actions awaiting validation (Four-Eyes Principle)
+                {% if pending_count %}
+                    - <span class="badge bg-warning text-dark">{{ pending_count }} pending</span>
+                {% endif %}
+            </p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{% url 'reference_data:corporate_action_list' %}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Back to List
+            </a>
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    <div class="alert alert-warning mb-4">
+        <i class="bi bi-info-circle"></i>
+        <strong>Four-Eyes Principle:</strong> You can only validate corporate actions created by other users.
+        Records you created will show "Cannot validate" status.
+    </div>
+
+    <!-- Pending Approvals Table -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0">
+                Pending Validations
+                <span class="badge badge-warning ms-2">{{ pending_count }} records</span>
+            </h5>
+        </div>
+        <div class="card-body p-0">
+            {% if corporate_actions %}
+                <div class="table-responsive" style="display: block; width: 100%; max-height: 600px; overflow-x: auto; overflow-y: auto;">
+                    <table class="table table-hover table-sm mb-0" style="font-size: 0.875rem; white-space: nowrap;">
+                        <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
+                            <tr>
+                                <th style="width: 140px;">CA Number</th>
+                                <th style="width: 120px;">CA Type</th>
+                                <th style="width: 200px;">Security</th>
+                                <th style="width: 100px;">Ex Date</th>
+                                <th style="width: 100px;">Payment Date</th>
+                                <th style="width: 100px;">Price</th>
+                                <th style="width: 80px;">Currency</th>
+                                <th style="width: 100px;">Status</th>
+                                <th style="width: 120px;">Created By</th>
+                                <th style="width: 250px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for ca in corporate_actions %}
+                            <tr>
+                                <td>
+                                    <a href="{% url 'reference_data:corporate_action_detail' ca.ca_id %}" class="text-primary fw-bold">
+                                        {{ ca.ca_number|default:"-" }}
+                                    </a>
+                                </td>
+                                <td>{{ ca.ca_type|default:"-" }}</td>
+                                <td>{{ ca.security_name|default:"-" }}</td>
+                                <td>{{ ca.ex_date|default:"-" }}</td>
+                                <td>{{ ca.payment_date|default:"-" }}</td>
+                                <td>{{ ca.price|default:"-" }}</td>
+                                <td>{{ ca.currency|default:"-" }}</td>
+                                <td>
+                                    <span class="badge badge-{{ ca.status_color }}">
+                                        {{ ca.status|default:"-" }}
+                                    </span>
+                                </td>
+                                <td>{{ ca.created_by|default:"-" }}</td>
+                                <td>
+                                    {% if ca.can_validate %}
+                                        <form method="post" action="{% url 'reference_data:corporate_action_validate' ca.ca_id %}"
+                                              class="d-inline validate-form" style="display: inline;">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="action" value="approve">
+                                            <input type="hidden" name="comments" value="">
+                                            <button type="submit" class="btn btn-sm btn-success" title="Validate">
+                                                <i class="bi bi-check-circle"></i> Validate
+                                            </button>
+                                        </form>
+                                        <form method="post" action="{% url 'reference_data:corporate_action_validate' ca.ca_id %}"
+                                              style="display: inline;">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="action" value="reject">
+                                            <input type="hidden" name="comments" value="Rejected">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger"
+                                                    title="Reject"
+                                                    onclick="return confirm('Are you sure you want to reject this corporate action?');">
+                                                <i class="bi bi-x-circle"></i> Reject
+                                            </button>
+                                        </form>
+                                    {% else %}
+                                        <span class="text-muted small">
+                                            <i class="bi bi-lock"></i> Cannot validate own record
+                                        </span>
+                                    {% endif %}
+                                    <a href="{% url 'reference_data:corporate_action_detail' ca.ca_id %}"
+                                       class="btn btn-sm btn-outline-info ms-1" title="View Details">
+                                        <i class="bi bi-eye"></i>
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                {% if corporate_actions.has_other_pages %}
+                <div class="card-footer">
+                    <nav aria-label="Pending approvals pagination">
+                        <ul class="pagination justify-content-center mb-0">
+                            {% if corporate_actions.has_previous %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ corporate_actions.previous_page_number }}" aria-label="Previous">
+                                        <span aria-hidden="true">&laquo;</span>
+                                    </a>
+                                </li>
+                            {% else %}
+                                <li class="page-item disabled"><span class="page-link">&laquo;</span></li>
+                            {% endif %}
+
+                            {% for num in corporate_actions.paginator.page_range %}
+                                {% if corporate_actions.number == num %}
+                                    <li class="page-item active"><span class="page-link">{{ num }}</span></li>
+                                {% elif num > corporate_actions.number|add:'-3' and num < corporate_actions.number|add:'3' %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="?page={{ num }}">{{ num }}</a>
+                                    </li>
+                                {% endif %}
+                            {% endfor %}
+
+                            {% if corporate_actions.has_next %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ corporate_actions.next_page_number }}" aria-label="Next">
+                                        <span aria-hidden="true">&raquo;</span>
+                                    </a>
+                                </li>
+                            {% else %}
+                                <li class="page-item disabled"><span class="page-link">&raquo;</span></li>
+                            {% endif %}
+                        </ul>
+                    </nav>
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="text-center py-5" style="color: var(--gray-500);">
+                    <i class="bi bi-check-circle" style="font-size: 3rem; opacity: 0.3;"></i>
+                    <p class="mt-3 mb-0">No pending approvals</p>
+                    <p class="text-muted">All corporate actions have been validated</p>
+                    <a href="{% url 'reference_data:corporate_action_list' %}" class="btn btn-sm btn-primary mt-2">
+                        <i class="bi bi-list"></i> View All Corporate Actions
+                    </a>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Validation Modal with Comments -->
+<div class="modal fade" id="validateModal" tabindex="-1" aria-labelledby="validateModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="validateModalLabel">
+                    <i class="bi bi-check-circle text-success"></i> Validate Corporate Action
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="validateForm" method="post" action="">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="approve">
+                <div class="modal-body">
+                    <p>You are about to validate corporate action: <strong id="modalCANumber"></strong></p>
+                    <div class="mb-3">
+                        <label for="validateComments" class="form-label">Comments (optional)</label>
+                        <textarea class="form-control" id="validateComments" name="comments" rows="3"
+                                  placeholder="Add any validation comments..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-check-circle"></i> Confirm Validation
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+// Optional: Add modal-based validation with comments
+document.querySelectorAll('.validate-form').forEach(function(form) {
+    form.addEventListener('submit', function(e) {
+        // For now, just submit directly
+        // Could enhance to show modal for comments
+    });
+});
+</script>
+{% endblock %}

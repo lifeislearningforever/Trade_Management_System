@@ -1,0 +1,310 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Cash Flow {{ cash_flow.cf_number }} - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'trade:list' %}">Trade</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'trade:cash_flow_list' %}">Cash Flows</a></li>
+    <li class="breadcrumb-item active">{{ cash_flow.cf_number }}</li>
+{% endblock %}
+
+{% block content %}
+<div class="cash-flow-detail-container" style="max-width: 1200px; margin: 0 auto;">
+    <!-- Page Header -->
+    <div class="content-header d-flex justify-content-between align-items-start mb-4">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-cash-stack text-primary"></i>
+                {{ cash_flow.cf_number }}
+            </h1>
+            <p class="content-subtitle">
+                {{ cash_flow.cash_flow_type }} for {{ cash_flow.portfolio_short_name }}
+            </p>
+        </div>
+        <div class="d-flex gap-2">
+            {% if can_edit %}
+                <a href="{% url 'trade:cash_flow_edit' cash_flow.cf_id %}" class="btn btn-primary">
+                    <i class="bi bi-pencil"></i> Edit
+                </a>
+            {% endif %}
+            <a href="{% url 'trade:cash_flow_list' %}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Back to List
+            </a>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Main Information -->
+        <div class="col-lg-8">
+            <!-- Basic Info Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-info-circle"></i> Cash Flow Details
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="text-muted small">CF Number</label>
+                            <p class="mb-2 fw-bold">{{ cash_flow.cf_number|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Cash Flow Type</label>
+                            <p class="mb-2 fw-bold">{{ cash_flow.cash_flow_type|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Send/Receive</label>
+                            <p class="mb-2 fw-bold">{{ cash_flow.send_receive|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-muted small">Portfolio</label>
+                            <p class="mb-2 fw-bold text-primary">{{ cash_flow.portfolio_short_name|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-muted small">Security</label>
+                            <p class="mb-2 fw-bold">{{ cash_flow.security_name|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-muted small">Cash Flow Status</label>
+                            <p class="mb-2 fw-bold">{{ cash_flow.cash_flow_status|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-muted small">Source System</label>
+                            <p class="mb-2">
+                                {% if cash_flow.src_system|upper == 'CIS' %}
+                                    <span class="badge badge-success">CIS</span>
+                                {% else %}
+                                    <span class="badge badge-secondary">{{ cash_flow.src_system|upper|default:"External" }}</span>
+                                {% endif %}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dates Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-calendar3"></i> Dates
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="text-muted small">Value Date</label>
+                            <p class="mb-2 fw-bold">{{ cash_flow.value_date|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Payment Date</label>
+                            <p class="mb-2 fw-bold">{{ cash_flow.payment_date|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Dividend Date</label>
+                            <p class="mb-2 fw-bold">{{ cash_flow.dividend_date|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Ex Date</label>
+                            <p class="mb-2 fw-bold">{{ cash_flow.ex_date|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Record Date</label>
+                            <p class="mb-2 fw-bold">{{ cash_flow.record_date|default:"-" }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Amounts Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-currency-dollar"></i> GL & Amounts
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-12">
+                            <label class="text-muted small">GL Acc No</label>
+                            <p class="mb-2 fw-bold">{{ cash_flow.gl_acc_no|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Local Currency</label>
+                            <p class="mb-2 fw-bold">{{ cash_flow.local_ccy|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Local Amount</label>
+                            <p class="mb-2 fw-bold fs-5">{{ cash_flow.local_amount|default:"0.00" }}</p>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Flow Amount (Local)</label>
+                            <p class="mb-2 fw-bold">{{ cash_flow.flow_amount_local|default:"0.00" }}</p>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Foreign Currency</label>
+                            <p class="mb-2 fw-bold">{{ cash_flow.foreign_ccy|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Foreign Amount</label>
+                            <p class="mb-2 fw-bold">{{ cash_flow.foreign_ccy_amount|default:"0.00" }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Card -->
+            {% if history %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-clock-history"></i> History
+                    </h5>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Action</th>
+                                    <th>Status</th>
+                                    <th>By</th>
+                                    <th>Date</th>
+                                    <th>Comments</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for h in history %}
+                                <tr>
+                                    <td>
+                                        <span class="badge badge-{% if h.action == 'CREATE' %}primary{% elif h.action == 'UPDATE' %}info{% elif h.action == 'APPROVE' %}success{% elif h.action == 'REJECT' %}danger{% else %}secondary{% endif %}">
+                                            {{ h.action }}
+                                        </span>
+                                    </td>
+                                    <td>{{ h.status|default:"-" }}</td>
+                                    <td>{{ h.performed_by|default:"-" }}</td>
+                                    <td>{{ h.performed_at|default:"-" }}</td>
+                                    <td>{{ h.comments|default:"-"|truncatechars:50 }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Sidebar -->
+        <div class="col-lg-4">
+            <!-- Status Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-check-circle"></i> Workflow Status
+                    </h5>
+                </div>
+                <div class="card-body text-center">
+                    <span class="badge badge-{{ status_color }} fs-4 px-4 py-2">
+                        {{ cash_flow.status|default:"INITIAL" }}
+                    </span>
+
+                    {% if can_approve %}
+                    <hr>
+                    <p class="text-muted mb-3">You can approve or reject this cash flow</p>
+                    <form method="post" action="{% url 'trade:cash_flow_approve' cash_flow.cf_id %}" class="mb-2">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="approve">
+                        <div class="mb-3">
+                            <textarea class="form-control" name="comments" rows="2" placeholder="Approval comments (optional)"></textarea>
+                        </div>
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-success">
+                                <i class="bi bi-check-circle"></i> Approve
+                            </button>
+                        </div>
+                    </form>
+                    <form method="post" action="{% url 'trade:cash_flow_approve' cash_flow.cf_id %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="reject">
+                        <input type="hidden" name="comments" value="Rejected without comment">
+                        <button type="submit" class="btn btn-outline-danger w-100" onclick="return confirm('Are you sure you want to reject this cash flow?');">
+                            <i class="bi bi-x-circle"></i> Reject
+                        </button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Audit Info Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-person-badge"></i> Audit Information
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="text-muted small">Created By</label>
+                        <p class="mb-0 fw-bold">{{ cash_flow.created_by|default:"-" }}</p>
+                    </div>
+                    <div class="mb-3">
+                        <label class="text-muted small">Created At</label>
+                        <p class="mb-0">{{ cash_flow.created_at|default:"-" }}</p>
+                    </div>
+                    <div class="mb-3">
+                        <label class="text-muted small">Updated By</label>
+                        <p class="mb-0 fw-bold">{{ cash_flow.updated_by|default:"-" }}</p>
+                    </div>
+                    <div class="mb-3">
+                        <label class="text-muted small">Updated At</label>
+                        <p class="mb-0">{{ cash_flow.updated_at|default:"-" }}</p>
+                    </div>
+                    {% if cash_flow.reviewed_by %}
+                    <div class="mb-3">
+                        <label class="text-muted small">Reviewed By</label>
+                        <p class="mb-0 fw-bold">{{ cash_flow.reviewed_by }}</p>
+                    </div>
+                    <div class="mb-3">
+                        <label class="text-muted small">Reviewed At</label>
+                        <p class="mb-0">{{ cash_flow.reviewed_at|default:"-" }}</p>
+                    </div>
+                    {% if cash_flow.reviewed_comments %}
+                    <div class="mb-0">
+                        <label class="text-muted small">Review Comments</label>
+                        <p class="mb-0">{{ cash_flow.reviewed_comments }}</p>
+                    </div>
+                    {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Quick Actions Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-lightning"></i> Quick Actions
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-grid gap-2">
+                        {% if can_edit %}
+                        <a href="{% url 'trade:cash_flow_edit' cash_flow.cf_id %}" class="btn btn-outline-primary">
+                            <i class="bi bi-pencil"></i> Edit Cash Flow
+                        </a>
+                        {% endif %}
+                        <a href="{% url 'trade:cash_flow_list' %}" class="btn btn-outline-secondary">
+                            <i class="bi bi-list"></i> View All Cash Flows
+                        </a>
+                        <a href="{% url 'trade:cash_flow_create' %}" class="btn btn-outline-success">
+                            <i class="bi bi-plus-circle"></i> Create New
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

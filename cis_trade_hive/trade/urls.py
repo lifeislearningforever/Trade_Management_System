@@ -6,6 +6,7 @@ URL patterns for trade management module.
 
 from django.urls import path
 from trade import views
+from trade import views_cash_flow
 
 app_name = 'trade'
 
@@ -75,4 +76,20 @@ urlpatterns = [
 
     # Position Queue Health Check (for CML monitoring)
     path('api/worker-health/', views.api_worker_health, name='api_worker_health'),
+
+    # =========================================================================
+    # Cash Flow URLs
+    # =========================================================================
+    path('cash-flow/', views_cash_flow.cash_flow_list, name='cash_flow_list'),
+    path('cash-flow/create/', views_cash_flow.cash_flow_create, name='cash_flow_create'),
+    path('cash-flow/pending/', views_cash_flow.cash_flow_pending_approvals, name='cash_flow_pending_approvals'),
+    path('cash-flow/<int:cf_id>/', views_cash_flow.cash_flow_detail, name='cash_flow_detail'),
+    path('cash-flow/<int:cf_id>/edit/', views_cash_flow.cash_flow_edit, name='cash_flow_edit'),
+    path('cash-flow/<int:cf_id>/delete/', views_cash_flow.cash_flow_delete, name='cash_flow_delete'),
+    path('cash-flow/<int:cf_id>/restore/', views_cash_flow.cash_flow_restore, name='cash_flow_restore'),
+    path('cash-flow/<int:cf_id>/approve/', views_cash_flow.cash_flow_approve, name='cash_flow_approve'),
+
+    # Cash Flow API endpoints
+    path('api/cash-flow/validate-portfolio/', views_cash_flow.api_validate_cf_portfolio, name='api_validate_cf_portfolio'),
+    path('api/cash-flow/validate-security/', views_cash_flow.api_validate_cf_security, name='api_validate_cf_security'),
 ]

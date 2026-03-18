@@ -109,6 +109,35 @@
                     {# </li> #}
                 </ul>
             </li>
+
+            <!-- Cash Flows -->
+            <li class="nav-item">
+                <a class="nav-link nav-link-toggle {% if 'cash-flow' in request.path %}active{% endif %}" href="#cashFlowSubmenu" data-bs-toggle="collapse" aria-expanded="{% if 'cash-flow' in request.path %}true{% else %}false{% endif %}">
+                    <i class="bi bi-cash-stack"></i>
+                    <span>Cash Flows</span>
+                    <i class="bi bi-chevron-down submenu-icon"></i>
+                </a>
+                <ul class="collapse nav-submenu {% if 'cash-flow' in request.path %}show{% endif %}" id="cashFlowSubmenu">
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'cash_flow_list' %}active{% endif %}" href="{% url 'trade:cash_flow_list' %}">
+                            <i class="bi bi-list-ul"></i>
+                            <span>All Cash Flows</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'cash_flow_create' %}active{% endif %}" href="{% url 'trade:cash_flow_create' %}">
+                            <i class="bi bi-plus-circle"></i>
+                            <span>New Cash Flow</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'cash_flow_pending_approvals' %}active{% endif %}" href="{% url 'trade:cash_flow_pending_approvals' %}">
+                            <i class="bi bi-clock-history"></i>
+                            <span>Pending Approval</span>
+                        </a>
+                    </li>
+                </ul>
+            </li>
         </ul>
 
         <!-- Market Data Section -->

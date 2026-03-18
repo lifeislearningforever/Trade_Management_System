@@ -25,6 +25,8 @@ from .services.reference_data_service import (
 )
 from .services.counterparty_cif_service import counterparty_cif_service
 from .services.party_service import party_service, party_cif_service
+from .services.corporate_action_service import corporate_action_service
+from .services.corporate_action_dropdown_service import corporate_action_dropdown_service
 
 logger = logging.getLogger('reference_data')
 
@@ -1970,3 +1972,444 @@ def party_cif_delete(request, short_name, m_label):
             'success': False,
             'error': str(e)
         }, status=500)
+
+
+# ============================================================================
+# Corporate Action Views
+# ============================================================================
+
+@require_login
+def corporate_action_list(request):
+    """
+    Corporate Action list view with search, filter, and CSV export.
+    Requires: Authentication
+    """
+    search = request.GET.get('search', '').strip()
+    status_filter = request.GET.get('status', '').strip()
+    ca_type_filter = request.GET.get('ca_type', '').strip()
+    export = request.GET.get('export') == 'csv'
+    page_number = request.GET.get('page', 1)
+
+    try:
+        # Fetch data
+        corporate_actions = corporate_action_service.list_all(
+            search=search if search else None,
+            status=status_filter if status_filter else None,
+            ca_type=ca_type_filter if ca_type_filter else None
+        )
+
+        # Get user info from session
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+
+        # Add can_validate flag to each record
+        for ca in corporate_actions:
+            ca['can_validate'] = corporate_action_service.can_user_validate(ca, username)
+            ca['status_color'] = corporate_action_service.get_status_display_color(ca.get('status', ''))
+
+        # CSV Export
+        if export:
+            response = HttpResponse(content_type='text/csv')
+            response['Content-Disposition'] = f'attachment; filename="corporate_actions_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv"'
+
+            writer = csv.writer(response)
+            writer.writerow([
+                'CA Number', 'CA Type', 'Security', 'Announcement Date',
+                'Ex Date', 'Record Date', 'Payment Date', 'Effective Date',
+                'Subscription Start', 'Subscription End', 'Price', 'Currency',
+                'Status', 'Created By', 'Created At'
+            ])
+
+            for ca in corporate_actions:
+                writer.writerow([
+                    ca.get('ca_number', ''),
+                    ca.get('ca_type', ''),
+                    ca.get('security_name', ''),
+                    ca.get('announcement_date', ''),
+                    ca.get('ex_date', ''),
+                    ca.get('record_date', ''),
+                    ca.get('payment_date', ''),
+                    ca.get('effective_date', ''),
+                    ca.get('subscription_start_date', ''),
+                    ca.get('subscription_end_date', ''),
+                    ca.get('price', ''),
+                    ca.get('currency', ''),
+                    ca.get('status', ''),
+                    ca.get('created_by', ''),
+                    ca.get('created_at', ''),
+                ])
+
+            # Log EXPORT action
+            audit_log_kudu_repository.log_action(
+                user_id=user_id,
+                username=username,
+                user_email=user_email,
+                action_type='EXPORT',
+                entity_type='CORPORATE_ACTION',
+                entity_name='Corporate Action',
+                entity_id='CA_EXPORT',
+                action_description=f'Exported {len(corporate_actions)} corporate actions to CSV',
+                request_method=request.method,
+                request_path=request.path,
+                ip_address=get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
+            )
+
+            return response
+
+        # Pagination
+        paginator = Paginator(corporate_actions, 25)
+        page_obj = paginator.get_page(page_number)
+
+        # Get dropdown options for filters
+        dropdown_options = corporate_action_dropdown_service.get_all_dropdown_options()
+
+        # Get pending count for badge
+        pending_count = len(corporate_action_service.get_pending_approvals())
+
+        context = {
+            'corporate_actions': page_obj,
+            'search': search,
+            'selected_status': status_filter,
+            'selected_ca_type': ca_type_filter,
+            'ca_types': dropdown_options.get('ca_types', []),
+            'total_count': len(corporate_actions),
+            'pending_count': pending_count,
+        }
+
+        return render(request, 'reference_data/corporate_action_list.html', context)
+
+    except Exception as e:
+        logger.error(f"Error in corporate_action_list: {str(e)}")
+        messages.error(request, f"Error loading corporate actions: {str(e)}")
+        return render(request, 'reference_data/corporate_action_list.html', {
+            'corporate_actions': [],
+            'ca_types': []
+        })
+
+
+@require_login
+def corporate_action_detail(request, ca_id):
+    """
+    View corporate action details.
+    Requires: Authentication
+    """
+    try:
+        ca = corporate_action_service.get_by_id(int(ca_id))
+
+        if not ca:
+            messages.error(request, f"Corporate Action {ca_id} not found")
+            return redirect('reference_data:corporate_action_list')
+
+        # Get user info for can_validate check
+        username = request.session.get('user_login', 'anonymous')
+
+        # Get history
+        history = corporate_action_service.get_history(int(ca_id))
+
+        context = {
+            'corporate_action': ca,
+            'history': history,
+            'can_validate': corporate_action_service.can_user_validate(ca, username),
+            'can_edit': corporate_action_service.can_user_edit(ca, username),
+            'status_color': corporate_action_service.get_status_display_color(ca.get('status', '')),
+        }
+
+        return render(request, 'reference_data/corporate_action_detail.html', context)
+
+    except Exception as e:
+        logger.error(f"Error in corporate_action_detail: {str(e)}")
+        messages.error(request, f"Error loading corporate action: {str(e)}")
+        return redirect('reference_data:corporate_action_list')
+
+
+@require_login
+def corporate_action_create(request):
+    """
+    Create new corporate action.
+    Requires: Authentication
+    """
+    if request.method == 'POST':
+        try:
+            username = request.session.get('user_login', 'anonymous')
+            user_id = str(request.session.get('user_id', ''))
+            user_email = request.session.get('user_email', '')
+
+            ca_data = {
+                'ca_number': request.POST.get('ca_number', '').strip(),
+                'ca_type': request.POST.get('ca_type', '').strip(),
+                'security_name': request.POST.get('security_name', '').strip(),
+                'announcement_date': request.POST.get('announcement_date', '').strip(),
+                'ex_date': request.POST.get('ex_date', '').strip(),
+                'record_date': request.POST.get('record_date', '').strip(),
+                'payment_date': request.POST.get('payment_date', '').strip(),
+                'effective_date': request.POST.get('effective_date', '').strip(),
+                'subscription_start_date': request.POST.get('subscription_start_date', '').strip(),
+                'subscription_end_date': request.POST.get('subscription_end_date', '').strip(),
+                'price': request.POST.get('price', '').strip() or None,
+                'currency': request.POST.get('currency', '').strip(),
+            }
+
+            # Convert price to float if provided
+            if ca_data['price']:
+                try:
+                    ca_data['price'] = float(ca_data['price'])
+                except ValueError:
+                    ca_data['price'] = None
+
+            success, ca_id, error_msg = corporate_action_service.create(
+                ca_data=ca_data,
+                user_id=user_id,
+                username=username,
+                user_email=user_email
+            )
+
+            if success:
+                messages.success(request, f"Corporate Action '{ca_data.get('ca_number', ca_id)}' created successfully")
+                return redirect('reference_data:corporate_action_list')
+            else:
+                messages.error(request, error_msg)
+
+        except Exception as e:
+            logger.error(f"Error creating corporate action: {str(e)}")
+            messages.error(request, f"Error creating corporate action: {str(e)}")
+
+    # GET request - show form with dropdowns
+    dropdown_options = corporate_action_dropdown_service.get_all_dropdown_options()
+
+    context = {
+        'dropdown_options': dropdown_options,
+    }
+    return render(request, 'reference_data/corporate_action_form.html', context)
+
+
+@require_login
+def corporate_action_edit(request, ca_id):
+    """
+    Edit existing corporate action.
+    Requires: Authentication
+    """
+    try:
+        ca = corporate_action_service.get_by_id(int(ca_id))
+        if not ca:
+            messages.error(request, f"Corporate Action {ca_id} not found")
+            return redirect('reference_data:corporate_action_list')
+
+        username = request.session.get('user_login', 'anonymous')
+
+        # Check if editable
+        if not corporate_action_service.can_user_edit(ca, username):
+            src_system = ca.get('src_system', 'unknown')
+            messages.warning(request, f"Cannot edit corporate action from source system '{src_system}'.")
+            return redirect('reference_data:corporate_action_list')
+
+        if request.method == 'POST':
+            user_id = str(request.session.get('user_id', ''))
+            user_email = request.session.get('user_email', '')
+
+            ca_data = {
+                'ca_number': request.POST.get('ca_number', '').strip(),
+                'ca_type': request.POST.get('ca_type', '').strip(),
+                'security_name': request.POST.get('security_name', '').strip(),
+                'announcement_date': request.POST.get('announcement_date', '').strip(),
+                'ex_date': request.POST.get('ex_date', '').strip(),
+                'record_date': request.POST.get('record_date', '').strip(),
+                'payment_date': request.POST.get('payment_date', '').strip(),
+                'effective_date': request.POST.get('effective_date', '').strip(),
+                'subscription_start_date': request.POST.get('subscription_start_date', '').strip(),
+                'subscription_end_date': request.POST.get('subscription_end_date', '').strip(),
+                'price': request.POST.get('price', '').strip() or None,
+                'currency': request.POST.get('currency', '').strip(),
+            }
+
+            # Convert price to float if provided
+            if ca_data['price']:
+                try:
+                    ca_data['price'] = float(ca_data['price'])
+                except ValueError:
+                    ca_data['price'] = None
+
+            success, error_msg = corporate_action_service.update(
+                ca_id=int(ca_id),
+                ca_data=ca_data,
+                user_id=user_id,
+                username=username,
+                user_email=user_email
+            )
+
+            if success:
+                messages.success(request, f"Corporate Action '{ca_data.get('ca_number', ca_id)}' updated successfully")
+                return redirect('reference_data:corporate_action_list')
+            else:
+                messages.error(request, error_msg)
+
+        # GET request - show form with existing data
+        dropdown_options = corporate_action_dropdown_service.get_all_dropdown_options()
+
+        context = {
+            'corporate_action': ca,
+            'dropdown_options': dropdown_options,
+            'is_edit': True,
+        }
+        return render(request, 'reference_data/corporate_action_form.html', context)
+
+    except Exception as e:
+        logger.error(f"Error editing corporate action: {str(e)}")
+        messages.error(request, f"Error editing corporate action: {str(e)}")
+        return redirect('reference_data:corporate_action_list')
+
+
+@require_login
+def corporate_action_delete(request, ca_id):
+    """
+    Soft delete corporate action (POST only).
+    Requires: Authentication
+    """
+    if request.method != 'POST':
+        return redirect('reference_data:corporate_action_list')
+
+    try:
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+
+        success, error_msg = corporate_action_service.delete(
+            ca_id=int(ca_id),
+            user_id=user_id,
+            username=username,
+            user_email=user_email
+        )
+
+        if success:
+            messages.success(request, f"Corporate Action {ca_id} deleted successfully")
+        else:
+            messages.error(request, error_msg)
+
+    except Exception as e:
+        logger.error(f"Error deleting corporate action: {str(e)}")
+        messages.error(request, f"Error deleting corporate action: {str(e)}")
+
+    return redirect('reference_data:corporate_action_list')
+
+
+@require_login
+def corporate_action_restore(request, ca_id):
+    """
+    Restore soft-deleted corporate action (POST only).
+    Requires: Authentication
+    """
+    if request.method != 'POST':
+        return redirect('reference_data:corporate_action_list')
+
+    try:
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+
+        success, error_msg = corporate_action_service.restore(
+            ca_id=int(ca_id),
+            user_id=user_id,
+            username=username,
+            user_email=user_email
+        )
+
+        if success:
+            messages.success(request, f"Corporate Action {ca_id} restored successfully")
+        else:
+            messages.error(request, error_msg)
+
+    except Exception as e:
+        logger.error(f"Error restoring corporate action: {str(e)}")
+        messages.error(request, f"Error restoring corporate action: {str(e)}")
+
+    return redirect('reference_data:corporate_action_list')
+
+
+@require_login
+def corporate_action_pending_approvals(request):
+    """
+    List corporate actions pending approval (INITIAL or MODIFIED status).
+    Four-Eyes Principle: Checker reviews Maker's work.
+    """
+    try:
+        corporate_actions = corporate_action_service.get_pending_approvals()
+
+        username = request.session.get('user_login', 'anonymous')
+
+        # Add validation flags
+        for ca in corporate_actions:
+            ca['can_validate'] = corporate_action_service.can_user_validate(ca, username)
+            ca['status_color'] = corporate_action_service.get_status_display_color(ca.get('status', ''))
+
+        # Pagination
+        paginator = Paginator(corporate_actions, 25)
+        page_number = request.GET.get('page', 1)
+        page_obj = paginator.get_page(page_number)
+
+        context = {
+            'corporate_actions': page_obj,
+            'pending_count': len(corporate_actions),
+            'username': username,
+        }
+
+        return render(request, 'reference_data/corporate_action_pending_approvals.html', context)
+
+    except Exception as e:
+        logger.error(f"Error in corporate_action_pending_approvals: {str(e)}")
+        messages.error(request, f"Error loading pending approvals: {str(e)}")
+        return render(request, 'reference_data/corporate_action_pending_approvals.html', {
+            'corporate_actions': [],
+            'pending_count': 0
+        })
+
+
+@require_login
+@require_http_methods(["POST"])
+def corporate_action_validate(request, ca_id):
+    """
+    Validate corporate action (Checker action).
+    POST with action='approve' or action='reject'
+    """
+    try:
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+
+        comments = request.POST.get('comments', '').strip()
+        action = request.POST.get('action', 'approve')
+
+        if action == 'approve':
+            success, error_msg = corporate_action_service.validate(
+                ca_id=int(ca_id),
+                user_id=user_id,
+                username=username,
+                user_email=user_email,
+                comments=comments
+            )
+
+            if success:
+                messages.success(request, f"Corporate Action {ca_id} validated successfully")
+            else:
+                messages.error(request, error_msg)
+        else:
+            # Reject action
+            success, error_msg = corporate_action_service.reject(
+                ca_id=int(ca_id),
+                user_id=user_id,
+                username=username,
+                user_email=user_email,
+                comments=comments
+            )
+
+            if success:
+                messages.success(request, f"Corporate Action {ca_id} rejected")
+            else:
+                messages.error(request, error_msg)
+
+    except Exception as e:
+        logger.error(f"Error validating corporate action: {str(e)}")
+        messages.error(request, f"Error validating corporate action: {str(e)}")
+
+    return redirect('reference_data:corporate_action_pending_approvals')
