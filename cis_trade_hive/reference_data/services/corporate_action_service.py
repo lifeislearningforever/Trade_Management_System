@@ -15,6 +15,7 @@ from typing import Dict, Optional, Any, List
 from datetime import datetime
 
 from reference_data.repositories.corporate_action_repository import corporate_action_repository
+from reference_data.services.ca_cash_flow_service import ca_cash_flow_service
 from core.audit.audit_kudu_repository import AuditLogKuduRepository
 
 logger = logging.getLogger(__name__)
@@ -332,6 +333,17 @@ class CorporateActionService:
                 new_value=comments,
                 status='SUCCESS'
             )
+
+            # Queue CA for cash flow generation (for DIVIDEND, INTEREST, COUPON types)
+            try:
+                ca_cash_flow_service.queue_ca_for_processing(
+                    ca_id=ca_id,
+                    ca_data=ca,
+                    username=username
+                )
+            except Exception as cf_error:
+                # Log but don't fail validation if cash flow queue fails
+                logger.warning(f"Failed to queue CA {ca_id} for cash flow processing: {str(cf_error)}")
 
             return True, None
 

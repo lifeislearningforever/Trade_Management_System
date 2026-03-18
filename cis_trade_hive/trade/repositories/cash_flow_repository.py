@@ -285,6 +285,9 @@ class CashFlowRepository:
                 'foreign_ccy_amount': float,
                 'cash_flow_status': str,
                 'src_system': str,
+                # Corporate Action reference fields
+                'ca_id': int,
+                'ca_number': str,
             }
 
             for field, field_type in field_mapping.items():
@@ -292,6 +295,8 @@ class CashFlowRepository:
                     columns.append(field)
                     if field_type == float:
                         values.append(CashFlowRepository.to_decimal(cf_data[field]))
+                    elif field_type == int:
+                        values.append(str(int(cf_data[field])))
                     else:
                         values.append(CashFlowRepository.escape_value(cf_data[field]))
 
