@@ -30,8 +30,29 @@
 
         <!-- Main Content -->
         <div class="main-content">
-            <!-- Top Navbar -->
-            {% include 'components/navbar_acl.html' %}
+            <!-- Top Navbar with Breadcrumb -->
+            <nav class="top-navbar">
+                <!-- Left Side -->
+                <div class="navbar-left">
+                    <!-- Mobile Menu Toggle -->
+                    <button class="navbar-icon d-md-none" id="sidebar-toggle">
+                        <i class="bi bi-list"></i>
+                    </button>
+
+                    <!-- Breadcrumb -->
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item">
+                            <a href="{% url 'dashboard' %}">
+                                <i class="bi bi-house-door"></i>
+                            </a>
+                        </li>
+                        {% block breadcrumb %}{% endblock %}
+                    </ol>
+                </div>
+
+                <!-- Right Side - included from navbar_acl -->
+                {% include 'components/navbar_acl.html' %}
+            </nav>
 
             <!-- Content Area -->
             <div class="content-area">
