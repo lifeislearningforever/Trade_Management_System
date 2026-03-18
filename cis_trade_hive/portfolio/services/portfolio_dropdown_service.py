@@ -125,10 +125,15 @@ class PortfolioDropdownRepository:
         """
         try:
             # Note: 'symbol' is a reserved word in Impala, must use backticks
+            # Filter by max(processing_date) to avoid duplicates from multiple dates
             query = f"""
             SELECT DISTINCT name, full_name, `symbol`
             FROM {PortfolioDropdownRepository.DATABASE}.{PortfolioDropdownRepository.CURRENCY_TABLE}
             WHERE name IS NOT NULL AND name != ''
+              AND processing_date = (
+                  SELECT MAX(processing_date)
+                  FROM {PortfolioDropdownRepository.DATABASE}.{PortfolioDropdownRepository.CURRENCY_TABLE}
+              )
             ORDER BY name
             """
             results = impala_manager.execute_query(query, database=PortfolioDropdownRepository.DATABASE)

@@ -448,6 +448,86 @@ $(document).ready(function() {
 
     // Initialize all dropdowns using the global CISSelect2 utility
     CISSelect2.initByIds(allDropdownIds);
+
+    // Custom form validation for mandatory fields
+    $('form').on('submit', function(e) {
+        var isValid = true;
+        var firstInvalidField = null;
+
+        // Clear previous validation messages
+        $('.validation-error').remove();
+        $('.is-invalid').removeClass('is-invalid');
+
+        // Check all required fields
+        $(this).find('[required]').each(function() {
+            var $field = $(this);
+            var value = $field.val();
+            var fieldName = $field.attr('name');
+            var $label = $('label[for="' + $field.attr('id') + '"]');
+            var labelText = $label.text().replace(' *', '').replace('*', '').trim();
+
+            // Check if field is empty
+            if (!value || (typeof value === 'string' && value.trim() === '')) {
+                isValid = false;
+                $field.addClass('is-invalid');
+
+                // Add validation message
+                if (!$field.next('.validation-error').length) {
+                    $field.after('<div class="validation-error text-danger small mt-1"><i class="bi bi-exclamation-circle"></i> ' + labelText + ' is required</div>');
+                }
+
+                if (!firstInvalidField) {
+                    firstInvalidField = $field;
+                }
+            }
+        });
+
+        // Check Select2 dropdowns with required attribute
+        $(this).find('select[required]').each(function() {
+            var $field = $(this);
+            var value = $field.val();
+            var $label = $('label[for="' + $field.attr('id') + '"]');
+            var labelText = $label.text().replace(' *', '').replace('*', '').trim();
+
+            if (!value || value === '') {
+                isValid = false;
+                $field.addClass('is-invalid');
+                $field.next('.select2-container').addClass('is-invalid');
+
+                // Add validation message after Select2 container
+                var $select2Container = $field.next('.select2-container');
+                if ($select2Container.length && !$select2Container.next('.validation-error').length) {
+                    $select2Container.after('<div class="validation-error text-danger small mt-1"><i class="bi bi-exclamation-circle"></i> ' + labelText + ' is required</div>');
+                }
+
+                if (!firstInvalidField) {
+                    firstInvalidField = $field;
+                }
+            }
+        });
+
+        if (!isValid) {
+            e.preventDefault();
+            // Scroll to first invalid field
+            if (firstInvalidField) {
+                $('html, body').animate({
+                    scrollTop: firstInvalidField.offset().top - 100
+                }, 300);
+                firstInvalidField.focus();
+            }
+            return false;
+        }
+
+        return true;
+    });
+
+    // Clear validation error on field change
+    $('[required]').on('change input', function() {
+        $(this).removeClass('is-invalid');
+        $(this).next('.validation-error').remove();
+        $(this).next('.select2-container').removeClass('is-invalid');
+        $(this).next('.select2-container').next('.validation-error').remove();
+    });
 });
 </script>
 {% endblock %}
