@@ -196,6 +196,33 @@
                     <span>Securities</span>
                 </a>
             </li>
+            <li class="nav-item">
+                <a class="nav-link nav-link-toggle {% if 'corporate-action' in request.path %}active{% endif %}" href="#corporateActionSubmenu" data-bs-toggle="collapse" aria-expanded="{% if 'corporate-action' in request.path %}true{% else %}false{% endif %}">
+                    <i class="bi bi-building"></i>
+                    <span>Corporate Actions</span>
+                    <i class="bi bi-chevron-down submenu-icon"></i>
+                </a>
+                <ul class="collapse nav-submenu {% if 'corporate-action' in request.path %}show{% endif %}" id="corporateActionSubmenu">
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'corporate_action_list' %}active{% endif %}" href="{% url 'reference_data:corporate_action_list' %}">
+                            <i class="bi bi-list-ul"></i>
+                            <span>All Corporate Actions</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'corporate_action_create' %}active{% endif %}" href="{% url 'reference_data:corporate_action_create' %}">
+                            <i class="bi bi-plus-circle"></i>
+                            <span>New Corporate Action</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'corporate_action_pending_approvals' %}active{% endif %}" href="{% url 'reference_data:corporate_action_pending_approvals' %}">
+                            <i class="bi bi-clock-history"></i>
+                            <span>Pending Approval</span>
+                        </a>
+                    </li>
+                </ul>
+            </li>
         </ul>
 
         <!-- Configuration Section -->
