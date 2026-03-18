@@ -204,6 +204,8 @@ def audit_log(request):
     Audit log list view with filtering and search - KUDU/IMPALA INTEGRATION.
     Fetches audit logs from Kudu cis_audit_log table via Impala.
     """
+    import csv
+    from django.http import HttpResponse
     from core.audit.audit_kudu_repository import audit_log_kudu_repository
 
     # Get filter parameters
@@ -212,11 +214,12 @@ def audit_log(request):
     entity_filter = request.GET.get('entity_type', '').strip()
     date_from = request.GET.get('date_from', '').strip()
     date_to = request.GET.get('date_to', '').strip()
+    export = request.GET.get('export') == 'csv'
 
     # Get audit logs from Kudu/Impala with error handling
     try:
         audit_logs_list = audit_log_kudu_repository.get_all_logs(
-            limit=1000,  # Fetch more for client-side pagination
+            limit=10000 if export else 1000,  # Fetch more for export
             action_type=action_filter if action_filter else None,
             entity_type=entity_filter if entity_filter else None,
             date_from=date_from if date_from else None,
@@ -227,6 +230,33 @@ def audit_log(request):
         # If Kudu connection fails, return empty list with error message
         messages.warning(request, f'Unable to connect to Kudu: {str(e)}. Showing empty results.')
         audit_logs_list = []
+
+    # CSV Export
+    if export:
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="audit_logs_{timezone.now().strftime("%Y%m%d_%H%M%S")}.csv"'
+
+        writer = csv.writer(response)
+        writer.writerow(['Timestamp', 'User', 'Email', 'Action', 'Entity Type', 'Entity ID',
+                        'Entity Name', 'Description', 'Old Value', 'New Value', 'IP Address', 'Status'])
+
+        for log in audit_logs_list:
+            writer.writerow([
+                log.get('audit_timestamp', ''),
+                log.get('username', ''),
+                log.get('user_email', ''),
+                log.get('action_type', ''),
+                log.get('entity_type', ''),
+                log.get('entity_id', ''),
+                log.get('entity_name', ''),
+                log.get('action_description', ''),
+                log.get('old_value', ''),
+                log.get('new_value', ''),
+                log.get('ip_address', ''),
+                log.get('status', ''),
+            ])
+
+        return response
 
     # Pagination
     from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
