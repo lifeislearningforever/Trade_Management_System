@@ -87,11 +87,29 @@
         <div class="card-body p-0">
             {% if countries %}
                 <div class="table-responsive" style="overflow-x: auto;">
-                    <table class="table table-hover mb-0 sortable-table" style="min-width: 600px;">
+                    <table class="table table-hover mb-0" style="min-width: 600px;">
                         <thead>
                             <tr>
-                                <th class="sortable" data-sort-type="text" style="width: 20%;">Code</th>
-                                <th class="sortable" data-sort-type="text" style="width: 80%;">Name</th>
+                                <th style="width: 20%;">
+                                    <a href="?sort=code&order={% if sort_by == 'code' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}" class="text-decoration-none text-dark">
+                                        Code
+                                        {% if sort_by == 'code' %}
+                                            <i class="bi bi-caret-{% if sort_order == 'asc' %}up{% else %}down{% endif %}-fill"></i>
+                                        {% else %}
+                                            <i class="bi bi-caret-down text-muted"></i>
+                                        {% endif %}
+                                    </a>
+                                </th>
+                                <th style="width: 80%;">
+                                    <a href="?sort=name&order={% if sort_by == 'name' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}" class="text-decoration-none text-dark">
+                                        Name
+                                        {% if sort_by == 'name' %}
+                                            <i class="bi bi-caret-{% if sort_order == 'asc' %}up{% else %}down{% endif %}-fill"></i>
+                                        {% else %}
+                                            <i class="bi bi-caret-down text-muted"></i>
+                                        {% endif %}
+                                    </a>
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
@@ -116,12 +134,12 @@
                         <ul class="pagination justify-content-center mb-0">
                             {% if countries.has_previous %}
                                 <li class="page-item">
-                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}" aria-label="First">
+                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if sort_by %}&sort={{ sort_by }}&order={{ sort_order }}{% endif %}" aria-label="First">
                                         <span aria-hidden="true">&laquo;&laquo;</span>
                                     </a>
                                 </li>
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ countries.previous_page_number }}{% if search %}&search={{ search }}{% endif %}" aria-label="Previous">
+                                    <a class="page-link" href="?page={{ countries.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if sort_by %}&sort={{ sort_by }}&order={{ sort_order }}{% endif %}" aria-label="Previous">
                                         <span aria-hidden="true">&laquo;</span>
                                     </a>
                                 </li>
@@ -141,19 +159,19 @@
                                     </li>
                                 {% elif num > countries.number|add:'-3' and num < countries.number|add:'3' %}
                                     <li class="page-item">
-                                        <a class="page-link" href="?page={{ num }}{% if search %}&search={{ search }}{% endif %}">{{ num }}</a>
+                                        <a class="page-link" href="?page={{ num }}{% if search %}&search={{ search }}{% endif %}{% if sort_by %}&sort={{ sort_by }}&order={{ sort_order }}{% endif %}">{{ num }}</a>
                                     </li>
                                 {% endif %}
                             {% endfor %}
 
                             {% if countries.has_next %}
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ countries.next_page_number }}{% if search %}&search={{ search }}{% endif %}" aria-label="Next">
+                                    <a class="page-link" href="?page={{ countries.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if sort_by %}&sort={{ sort_by }}&order={{ sort_order }}{% endif %}" aria-label="Next">
                                         <span aria-hidden="true">&raquo;</span>
                                     </a>
                                 </li>
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ countries.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}" aria-label="Last">
+                                    <a class="page-link" href="?page={{ countries.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if sort_by %}&sort={{ sort_by }}&order={{ sort_order }}{% endif %}" aria-label="Last">
                                         <span aria-hidden="true">&raquo;&raquo;</span>
                                     </a>
                                 </li>

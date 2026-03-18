@@ -49,10 +49,23 @@ def currency_list(request):
     search = request.GET.get('search', '').strip()
     export = request.GET.get('export') == 'csv'
     page_number = request.GET.get('page', 1)
+    sort_by = request.GET.get('sort', 'code')  # Default sort by code
+    sort_order = request.GET.get('order', 'asc')  # Default ascending
 
     try:
         # Fetch data
         currencies = currency_service.list_all(search=search if search else None)
+
+        # Server-side sorting
+        reverse_order = sort_order == 'desc'
+        sort_key_map = {
+            'code': lambda x: (x.get('code') or '').lower(),
+            'name': lambda x: (x.get('name') or '').lower(),
+            'full_name': lambda x: (x.get('full_name') or '').lower(),
+            'symbol': lambda x: (x.get('symbol') or '').lower(),
+        }
+        sort_func = sort_key_map.get(sort_by, sort_key_map['code'])
+        currencies = sorted(currencies, key=sort_func, reverse=reverse_order)
 
         # Get user info from session (ACL authentication)
         username = request.session.get('user_login', 'anonymous')
@@ -125,6 +138,8 @@ def currency_list(request):
             'currencies': page_obj,
             'search': search,
             'total_count': len(currencies),
+            'sort_by': sort_by,
+            'sort_order': sort_order,
         }
 
         return render(request, 'reference_data/currency_list.html', context)
@@ -132,7 +147,7 @@ def currency_list(request):
     except Exception as e:
         logger.error(f"Error in currency_list: {str(e)}")
         messages.error(request, f"Error loading currencies: {str(e)}")
-        return render(request, 'reference_data/currency_list.html', {'currencies': [], 'search': search})
+        return render(request, 'reference_data/currency_list.html', {'currencies': [], 'search': search, 'sort_by': sort_by, 'sort_order': sort_order})
 
 
 @require_login
@@ -144,10 +159,19 @@ def country_list(request):
     search = request.GET.get('search', '').strip()
     export = request.GET.get('export') == 'csv'
     page_number = request.GET.get('page', 1)
+    sort_by = request.GET.get('sort', 'name')  # Default sort by name
+    sort_order = request.GET.get('order', 'asc')  # Default ascending
 
     try:
         # Fetch data
         countries = country_service.list_all(search=search if search else None)
+
+        # Server-side sorting
+        reverse_order = sort_order == 'desc'
+        if sort_by == 'code':
+            countries = sorted(countries, key=lambda x: (x.get('code') or '').lower(), reverse=reverse_order)
+        else:  # Default sort by name
+            countries = sorted(countries, key=lambda x: (x.get('name') or '').lower(), reverse=reverse_order)
 
         # Get user info from session (ACL authentication)
         username = request.session.get('user_login', 'anonymous')
@@ -213,6 +237,8 @@ def country_list(request):
             'countries': page_obj,
             'search': search,
             'total_count': len(countries),
+            'sort_by': sort_by,
+            'sort_order': sort_order,
         }
 
         return render(request, 'reference_data/country_list.html', context)
@@ -220,7 +246,7 @@ def country_list(request):
     except Exception as e:
         logger.error(f"Error in country_list: {str(e)}")
         messages.error(request, f"Error loading countries: {str(e)}")
-        return render(request, 'reference_data/country_list.html', {'countries': []})
+        return render(request, 'reference_data/country_list.html', {'countries': [], 'search': search})
 
 
 @require_login
@@ -235,6 +261,8 @@ def calendar_list(request):
     search = request.GET.get('search', '').strip()
     export = request.GET.get('export') == 'csv'
     page_number = request.GET.get('page', 1)
+    sort_by = request.GET.get('sort', 'calendar_label')  # Default sort by calendar_label
+    sort_order = request.GET.get('order', 'asc')  # Default ascending
 
     try:
         # Parse dates
@@ -248,6 +276,16 @@ def calendar_list(request):
             end_date=end_date_obj,
             search=search if search else None
         )
+
+        # Server-side sorting
+        reverse_order = sort_order == 'desc'
+        sort_key_map = {
+            'calendar_label': lambda x: (x.get('calendar_label') or '').lower(),
+            'calendar_description': lambda x: (x.get('calendar_description') or '').lower(),
+            'holiday_date': lambda x: str(x.get('holiday_date') or ''),
+        }
+        sort_func = sort_key_map.get(sort_by, sort_key_map['calendar_label'])
+        calendars = sorted(calendars, key=sort_func, reverse=reverse_order)
 
         # Get distinct calendar labels for filter dropdown
         calendar_labels = calendar_service.get_distinct_calendars()
@@ -321,6 +359,8 @@ def calendar_list(request):
             'end_date': end_date,
             'search': search,
             'total_count': len(calendars),
+            'sort_by': sort_by,
+            'sort_order': sort_order,
         }
 
         return render(request, 'reference_data/calendar_list.html', context)
@@ -330,7 +370,9 @@ def calendar_list(request):
         messages.error(request, f"Error loading calendars: {str(e)}")
         return render(request, 'reference_data/calendar_list.html', {
             'calendars': [],
-            'calendar_labels': []
+            'calendar_labels': [],
+            'sort_by': sort_by,
+            'sort_order': sort_order,
         })
 
 

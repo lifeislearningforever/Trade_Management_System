@@ -94,12 +94,39 @@
         <div class="card-body p-0">
             {% if calendars %}
                 <div class="table-responsive" style="overflow-x: auto;">
-                    <table class="table table-hover mb-0 sortable-table" style="min-width: 800px;">
+                    <table class="table table-hover mb-0" style="min-width: 800px;">
                         <thead>
                             <tr>
-                                <th class="sortable" data-sort-type="text" style="width: 20%;">Calendar</th>
-                                <th class="sortable" data-sort-type="text" style="width: 50%;">Description</th>
-                                <th class="sortable" data-sort-type="date" style="width: 30%;">Holiday Date</th>
+                                <th style="width: 20%;">
+                                    <a href="?sort=calendar_label&order={% if sort_by == 'calendar_label' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if selected_calendar %}&calendar={{ selected_calendar }}{% endif %}" class="text-decoration-none text-dark">
+                                        Calendar
+                                        {% if sort_by == 'calendar_label' %}
+                                            <i class="bi bi-caret-{% if sort_order == 'asc' %}up{% else %}down{% endif %}-fill"></i>
+                                        {% else %}
+                                            <i class="bi bi-caret-down text-muted"></i>
+                                        {% endif %}
+                                    </a>
+                                </th>
+                                <th style="width: 50%;">
+                                    <a href="?sort=calendar_description&order={% if sort_by == 'calendar_description' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if selected_calendar %}&calendar={{ selected_calendar }}{% endif %}" class="text-decoration-none text-dark">
+                                        Description
+                                        {% if sort_by == 'calendar_description' %}
+                                            <i class="bi bi-caret-{% if sort_order == 'asc' %}up{% else %}down{% endif %}-fill"></i>
+                                        {% else %}
+                                            <i class="bi bi-caret-down text-muted"></i>
+                                        {% endif %}
+                                    </a>
+                                </th>
+                                <th style="width: 30%;">
+                                    <a href="?sort=holiday_date&order={% if sort_by == 'holiday_date' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if selected_calendar %}&calendar={{ selected_calendar }}{% endif %}" class="text-decoration-none text-dark">
+                                        Holiday Date
+                                        {% if sort_by == 'holiday_date' %}
+                                            <i class="bi bi-caret-{% if sort_order == 'asc' %}up{% else %}down{% endif %}-fill"></i>
+                                        {% else %}
+                                            <i class="bi bi-caret-down text-muted"></i>
+                                        {% endif %}
+                                    </a>
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
@@ -123,12 +150,12 @@
                         <ul class="pagination justify-content-center mb-0">
                             {% if calendars.has_previous %}
                                 <li class="page-item">
-                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if selected_calendar %}&calendar={{ selected_calendar }}{% endif %}" aria-label="First">
+                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if selected_calendar %}&calendar={{ selected_calendar }}{% endif %}{% if sort_by %}&sort={{ sort_by }}&order={{ sort_order }}{% endif %}" aria-label="First">
                                         <span aria-hidden="true">&laquo;&laquo;</span>
                                     </a>
                                 </li>
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ calendars.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if selected_calendar %}&calendar={{ selected_calendar }}{% endif %}" aria-label="Previous">
+                                    <a class="page-link" href="?page={{ calendars.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if selected_calendar %}&calendar={{ selected_calendar }}{% endif %}{% if sort_by %}&sort={{ sort_by }}&order={{ sort_order }}{% endif %}" aria-label="Previous">
                                         <span aria-hidden="true">&laquo;</span>
                                     </a>
                                 </li>
@@ -148,19 +175,19 @@
                                     </li>
                                 {% elif num > calendars.number|add:'-3' and num < calendars.number|add:'3' %}
                                     <li class="page-item">
-                                        <a class="page-link" href="?page={{ num }}{% if search %}&search={{ search }}{% endif %}{% if selected_calendar %}&calendar={{ selected_calendar }}{% endif %}">{{ num }}</a>
+                                        <a class="page-link" href="?page={{ num }}{% if search %}&search={{ search }}{% endif %}{% if selected_calendar %}&calendar={{ selected_calendar }}{% endif %}{% if sort_by %}&sort={{ sort_by }}&order={{ sort_order }}{% endif %}">{{ num }}</a>
                                     </li>
                                 {% endif %}
                             {% endfor %}
 
                             {% if calendars.has_next %}
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ calendars.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if selected_calendar %}&calendar={{ selected_calendar }}{% endif %}" aria-label="Next">
+                                    <a class="page-link" href="?page={{ calendars.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if selected_calendar %}&calendar={{ selected_calendar }}{% endif %}{% if sort_by %}&sort={{ sort_by }}&order={{ sort_order }}{% endif %}" aria-label="Next">
                                         <span aria-hidden="true">&raquo;</span>
                                     </a>
                                 </li>
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ calendars.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if selected_calendar %}&calendar={{ selected_calendar }}{% endif %}" aria-label="Last">
+                                    <a class="page-link" href="?page={{ calendars.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if selected_calendar %}&calendar={{ selected_calendar }}{% endif %}{% if sort_by %}&sort={{ sort_by }}&order={{ sort_order }}{% endif %}" aria-label="Last">
                                         <span aria-hidden="true">&raquo;&raquo;</span>
                                     </a>
                                 </li>
