@@ -109,7 +109,8 @@
                             <tr>
                                 <th style="width: 140px;">CA Number</th>
                                 <th style="width: 120px;">CA Type</th>
-                                <th style="width: 200px;">Security</th>
+                                <th style="width: 180px;">Security</th>
+                                <th style="width: 150px;">Portfolio</th>
                                 <th style="width: 100px;">Ex Date</th>
                                 <th style="width: 100px;">Record Date</th>
                                 <th style="width: 100px;">Payment Date</th>
@@ -130,6 +131,7 @@
                                 </td>
                                 <td>{{ ca.ca_type|default:"-" }}</td>
                                 <td>{{ ca.security_name|default:"-" }}</td>
+                                <td>{{ ca.portfolio_name|default:"-" }}</td>
                                 <td>{{ ca.ex_date|default:"-" }}</td>
                                 <td>{{ ca.record_date|default:"-" }}</td>
                                 <td>{{ ca.payment_date|default:"-" }}</td>

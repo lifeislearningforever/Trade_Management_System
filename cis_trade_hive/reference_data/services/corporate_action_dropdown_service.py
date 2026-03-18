@@ -38,9 +38,73 @@ class CorporateActionDropdownService:
         """
         return {
             'securities': self.get_securities(),
+            'portfolios': self.get_portfolios(),
             'ca_types': self.get_ca_types(),
             'currencies': self.get_currencies(),
         }
+
+    def get_portfolios(self, search: str = None) -> List[Dict[str, Any]]:
+        """
+        Get portfolios for dropdown (same as trade create).
+
+        Args:
+            search: Optional search term
+
+        Returns:
+            List of portfolio options
+        """
+        cache_key = f"{CACHE_PREFIX}portfolios"
+
+        # Try cache first (only for non-search requests)
+        if not search:
+            try:
+                cached = cache.get(cache_key)
+                if cached is not None:
+                    return cached
+            except Exception as e:
+                logger.warning(f"Cache read error for portfolios: {str(e)}")
+
+        try:
+            # Query portfolios from cis_portfolio table
+            query = f"""
+            SELECT DISTINCT short_name, name, currency
+            FROM {self.DATABASE}.cis_portfolio
+            WHERE short_name IS NOT NULL AND short_name != ''
+              AND (is_deleted = false OR is_deleted IS NULL)
+              AND status IN ('VALIDATED', 'SETTLED')
+            """
+
+            if search:
+                search_term = f"%{search}%"
+                query += f" AND (LOWER(short_name) LIKE LOWER('%{search}%') OR LOWER(name) LIKE LOWER('%{search}%'))"
+
+            query += " ORDER BY short_name"
+
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+
+            options = []
+            if results:
+                options = [
+                    {
+                        'value': r.get('short_name', ''),
+                        'label': f"{r.get('short_name', '')} - {r.get('name', '')}" if r.get('name') else r.get('short_name', ''),
+                        'currency': r.get('currency', ''),
+                    }
+                    for r in results if r.get('short_name')
+                ]
+
+            # Cache non-search results
+            if not search and options:
+                try:
+                    cache.set(cache_key, options, CACHE_TIMEOUT)
+                except Exception as e:
+                    logger.warning(f"Cache write error for portfolios: {str(e)}")
+
+            return options
+
+        except Exception as e:
+            logger.error(f"Error loading portfolios: {str(e)}")
+            return []
 
     def get_securities(self, search: str = None) -> List[Dict[str, Any]]:
         """

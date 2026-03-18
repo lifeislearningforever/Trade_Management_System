@@ -208,6 +208,7 @@ class CorporateActionRepository:
                 'ca_number': str,
                 'ca_type': str,
                 'security_name': str,
+                'portfolio_name': str,
                 'announcement_date': str,
                 'ex_date': str,
                 'record_date': str,
@@ -285,9 +286,9 @@ class CorporateActionRepository:
 
             # Update business fields if provided
             updatable_fields = [
-                'ca_number', 'ca_type', 'security_name', 'announcement_date',
-                'ex_date', 'record_date', 'payment_date', 'effective_date',
-                'subscription_start_date', 'subscription_end_date',
+                'ca_number', 'ca_type', 'security_name', 'portfolio_name',
+                'announcement_date', 'ex_date', 'record_date', 'payment_date',
+                'effective_date', 'subscription_start_date', 'subscription_end_date',
                 'price', 'currency', 'status',
             ]
 

@@ -51,35 +51,56 @@
             <form method="post" class="needs-validation" novalidate>
                 {% csrf_token %}
 
-                <!-- Security & Basic Info Section -->
+                <!-- Security & Portfolio Section -->
                 <div class="mb-4">
                     <h6 class="text-muted mb-3 border-bottom pb-2">
-                        <i class="bi bi-shield-check"></i> Security Information
+                        <i class="bi bi-shield-check"></i> Security & Portfolio Information
                     </h6>
                     <div class="row g-3">
-                        <!-- Security (Required) -->
-                        <div class="col-md-8">
+                        <!-- Security (Required - Multi-select) -->
+                        <div class="col-md-6">
                             <label for="security_name" class="form-label">
                                 Security <span class="text-danger">*</span>
                             </label>
                             <select class="form-select select2-security"
                                     id="security_name"
                                     name="security_name"
+                                    multiple
                                     required>
-                                <option value="">Select Security...</option>
                                 {% for security in dropdown_options.securities %}
                                     <option value="{{ security.value }}"
                                             data-currency="{{ security.currency }}"
-                                            {% if corporate_action.security_name == security.value %}selected{% endif %}>
+                                            {% if security.value in corporate_action.security_name_list %}selected{% endif %}>
                                         {{ security.label }}
                                     </option>
                                 {% endfor %}
                             </select>
-                            <div class="invalid-feedback">Security is required</div>
+                            <div class="form-text"><i class="bi bi-info-circle"></i> Select one or multiple securities</div>
+                            <div class="invalid-feedback">At least one security is required</div>
+                        </div>
+
+                        <!-- Portfolio (Multi-select) -->
+                        <div class="col-md-6">
+                            <label for="portfolio_name" class="form-label">
+                                Portfolio
+                            </label>
+                            <select class="form-select select2-portfolio"
+                                    id="portfolio_name"
+                                    name="portfolio_name"
+                                    multiple>
+                                {% for portfolio in dropdown_options.portfolios %}
+                                    <option value="{{ portfolio.value }}"
+                                            data-currency="{{ portfolio.currency }}"
+                                            {% if portfolio.value in corporate_action.portfolio_name_list %}selected{% endif %}>
+                                        {{ portfolio.label }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                            <div class="form-text"><i class="bi bi-info-circle"></i> Select one or multiple portfolios (optional)</div>
                         </div>
 
                         <!-- Corporate Action Type (Required) -->
-                        <div class="col-md-4">
+                        <div class="col-md-6">
                             <label for="ca_type" class="form-label">
                                 Corporate Action Type <span class="text-danger">*</span>
                             </label>
@@ -332,9 +353,26 @@
 <script>
 // Initialize Select2 on all dropdowns
 $(document).ready(function() {
-    // Initialize security dropdown with Select2
+    // Initialize security dropdown with Select2 (multi-select)
     $('.select2-security').each(function() {
-        CISSelect2.initElement($(this));
+        $(this).select2({
+            theme: 'bootstrap-5',
+            placeholder: 'Select Securities...',
+            allowClear: true,
+            width: '100%',
+            closeOnSelect: false
+        });
+    });
+
+    // Initialize portfolio dropdown with Select2 (multi-select)
+    $('.select2-portfolio').each(function() {
+        $(this).select2({
+            theme: 'bootstrap-5',
+            placeholder: 'Select Portfolios...',
+            allowClear: true,
+            width: '100%',
+            closeOnSelect: false
+        });
     });
 
     // Initialize CA type dropdown with Select2
@@ -347,12 +385,14 @@ $(document).ready(function() {
         CISSelect2.initElement($(this));
     });
 
-    // Auto-populate currency when security is selected
+    // Auto-populate currency when security is selected (use first selected)
     $('#security_name').on('change', function() {
-        var selectedOption = $(this).find('option:selected');
-        var currency = selectedOption.data('currency');
-        if (currency) {
-            $('#currency').val(currency).trigger('change');
+        var selectedOptions = $(this).find('option:selected');
+        if (selectedOptions.length > 0) {
+            var currency = selectedOptions.first().data('currency');
+            if (currency) {
+                $('#currency').val(currency).trigger('change');
+            }
         }
     });
 });

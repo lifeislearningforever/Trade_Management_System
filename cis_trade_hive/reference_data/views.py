@@ -2185,10 +2185,15 @@ def corporate_action_create(request):
             user_id = str(request.session.get('user_id', ''))
             user_email = request.session.get('user_email', '')
 
+            # Handle multi-select fields (security and portfolio)
+            security_names = request.POST.getlist('security_name')
+            portfolio_names = request.POST.getlist('portfolio_name')
+
             ca_data = {
                 'ca_number': request.POST.get('ca_number', '').strip(),
                 'ca_type': request.POST.get('ca_type', '').strip(),
-                'security_name': request.POST.get('security_name', '').strip(),
+                'security_name': ','.join(security_names) if security_names else '',
+                'portfolio_name': ','.join(portfolio_names) if portfolio_names else '',
                 'announcement_date': request.POST.get('announcement_date', '').strip(),
                 'ex_date': request.POST.get('ex_date', '').strip(),
                 'record_date': request.POST.get('record_date', '').strip(),
@@ -2257,10 +2262,15 @@ def corporate_action_edit(request, ca_id):
             user_id = str(request.session.get('user_id', ''))
             user_email = request.session.get('user_email', '')
 
+            # Handle multi-select fields (security and portfolio)
+            security_names = request.POST.getlist('security_name')
+            portfolio_names = request.POST.getlist('portfolio_name')
+
             ca_data = {
                 'ca_number': request.POST.get('ca_number', '').strip(),
                 'ca_type': request.POST.get('ca_type', '').strip(),
-                'security_name': request.POST.get('security_name', '').strip(),
+                'security_name': ','.join(security_names) if security_names else '',
+                'portfolio_name': ','.join(portfolio_names) if portfolio_names else '',
                 'announcement_date': request.POST.get('announcement_date', '').strip(),
                 'ex_date': request.POST.get('ex_date', '').strip(),
                 'record_date': request.POST.get('record_date', '').strip(),
@@ -2295,6 +2305,17 @@ def corporate_action_edit(request, ca_id):
 
         # GET request - show form with existing data
         dropdown_options = corporate_action_dropdown_service.get_all_dropdown_options()
+
+        # Convert comma-separated strings to lists for multi-select
+        if ca.get('security_name'):
+            ca['security_name_list'] = [s.strip() for s in ca['security_name'].split(',') if s.strip()]
+        else:
+            ca['security_name_list'] = []
+
+        if ca.get('portfolio_name'):
+            ca['portfolio_name_list'] = [p.strip() for p in ca['portfolio_name'].split(',') if p.strip()]
+        else:
+            ca['portfolio_name_list'] = []
 
         context = {
             'corporate_action': ca,
