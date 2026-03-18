@@ -158,10 +158,15 @@ class PortfolioDropdownRepository:
             List of dicts with 'code' (label) and 'name' (full_name)
         """
         try:
+            # Filter by max(processing_date) to avoid duplicates from multiple dates
             query = f"""
-            SELECT `label`, `full_name`
+            SELECT DISTINCT `label`, `full_name`
             FROM {PortfolioDropdownRepository.DATABASE}.{PortfolioDropdownRepository.COUNTRY_TABLE}
             WHERE `label` IS NOT NULL AND `label` != ''
+              AND processing_date = (
+                  SELECT MAX(processing_date)
+                  FROM {PortfolioDropdownRepository.DATABASE}.{PortfolioDropdownRepository.COUNTRY_TABLE}
+              )
             ORDER BY `full_name`
             """
             results = impala_manager.execute_query(query, database=PortfolioDropdownRepository.DATABASE)
