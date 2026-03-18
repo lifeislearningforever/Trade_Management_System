@@ -239,9 +239,9 @@ def portfolio_list(request):
 
     context = {
         'page_obj': portfolios,
-        'search_query': search_query,
-        'status_filter': status_filter,
-        'currency_filter': currency_filter,
+        'search': search_query,
+        'status': status_filter,
+        'currency': currency_filter,
         'currencies': currencies,
         'total_count': len(portfolios_data),
         'status_options': status_options,
