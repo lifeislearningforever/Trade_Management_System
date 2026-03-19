@@ -68,17 +68,13 @@ class CorporateActionDropdownService:
             # Query portfolios from cis_portfolio table
             # Note: Portfolio table uses 'name' as the primary identifier (no short_name column)
             query = f"""
-            SELECT DISTINCT name, description, currency
+            SELECT DISTINCT name, currency
             FROM {self.DATABASE}.cis_portfolio
             WHERE name IS NOT NULL AND name != ''
-              AND (is_deleted = false OR is_deleted IS NULL)
-              AND status IN ('VALIDATED', 'SETTLED')
+              AND (is_active = true OR is_active IS NULL)
+              AND status IN ('VALIDATED', 'SETTLED', 'INITIAL')
+            ORDER BY name
             """
-
-            if search:
-                query += f" AND (LOWER(name) LIKE LOWER('%{search}%') OR LOWER(description) LIKE LOWER('%{search}%'))"
-
-            query += " ORDER BY name"
 
             results = impala_manager.execute_query(query, database=self.DATABASE)
 
@@ -87,7 +83,7 @@ class CorporateActionDropdownService:
                 options = [
                     {
                         'value': r.get('name', ''),
-                        'label': f"{r.get('name', '')} - {r.get('description', '')}" if r.get('description') else r.get('name', ''),
+                        'label': r.get('name', ''),
                         'currency': r.get('currency', ''),
                     }
                     for r in results if r.get('name')
