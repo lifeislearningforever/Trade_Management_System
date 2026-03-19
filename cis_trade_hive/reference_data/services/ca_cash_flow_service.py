@@ -347,28 +347,27 @@ class CACashFlowService:
             # Map CA type to cash flow type
             cf_type = self.CA_TO_CF_TYPE_MAP.get(ca_type, ca_type)
 
+            # Map to actual cis_cash_flow table field names
             cf_data = {
-                'cf_number': cf_number,
+                'cash_flow_number': cf_number,
                 'portfolio_short_name': portfolio_short_name,
-                'security_name': security_name,
+                'security_label': security_name,
                 'cash_flow_type': cf_type,
                 'send_receive': 'RECEIVE',  # Dividends are received
-                'cash_flow_status': 'PENDING',
+                'position_updated': False,
                 'value_date': ex_date,
                 'payment_date': payment_date,
                 'dividend_date': record_date,
                 'ex_date': ex_date,
                 'record_date': record_date,
                 'local_ccy': currency,
-                'local_amount': float(amount),
+                'local_ccy_amt': float(amount),
                 'flow_amount_local': float(amount),
                 'foreign_ccy': currency,
-                'foreign_ccy_amount': float(amount),
+                'foreign_ccy_amt': float(amount),
+                'dividend_price': float(quantity),  # Store quantity as reference
                 'status': 'INITIAL',
                 'src_system': 'CIS',
-                # CA reference fields (need to be added to cash flow table)
-                'ca_id': ca_id,
-                'ca_number': ca_number,
             }
 
             # Use cash flow repository to insert

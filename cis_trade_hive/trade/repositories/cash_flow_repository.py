@@ -266,28 +266,28 @@ class CashFlowRepository:
             values = [str(cf_id)]
 
             # Add all business fields from cf_data
+            # Field mapping matches actual cis_cash_flow table in production
             field_mapping = {
-                'cf_number': str,
+                'cash_flow_number': str,
                 'portfolio_short_name': str,
-                'security_name': str,
+                'security_label': str,
                 'cash_flow_type': str,
                 'send_receive': str,
-                'value_date': str,
+                'position_updated': bool,
+                'foreign_ccy': str,
+                'local_ccy': str,
+                'local_ccy_amt': float,
+                'foreign_ccy_amt': float,
+                'flow_amount_local': float,
+                'dividend_price': float,
+                'gl_acc_no': str,
+                'src_system': str,
                 'payment_date': str,
+                'trade_date': str,
+                'value_date': str,
                 'dividend_date': str,
                 'ex_date': str,
                 'record_date': str,
-                'gl_acc_no': str,
-                'local_ccy': str,
-                'local_amount': float,
-                'flow_amount_local': float,
-                'foreign_ccy': str,
-                'foreign_ccy_amount': float,
-                'cash_flow_status': str,
-                'src_system': str,
-                # Corporate Action reference fields
-                'ca_id': int,
-                'ca_number': str,
             }
 
             for field, field_type in field_mapping.items():
@@ -295,8 +295,8 @@ class CashFlowRepository:
                     columns.append(field)
                     if field_type == float:
                         values.append(CashFlowRepository.to_decimal(cf_data[field]))
-                    elif field_type == int:
-                        values.append(str(int(cf_data[field])))
+                    elif field_type == bool:
+                        values.append('true' if cf_data[field] else 'false')
                     else:
                         values.append(CashFlowRepository.escape_value(cf_data[field]))
 
@@ -360,19 +360,23 @@ class CashFlowRepository:
 
             # Update business fields if provided
             updatable_fields = [
-                'cf_number', 'portfolio_short_name', 'security_name',
-                'cash_flow_type', 'send_receive', 'value_date', 'payment_date',
-                'dividend_date', 'ex_date', 'record_date', 'gl_acc_no',
-                'local_ccy', 'local_amount', 'flow_amount_local',
-                'foreign_ccy', 'foreign_ccy_amount', 'cash_flow_status', 'status',
+                'cash_flow_number', 'portfolio_short_name', 'security_label',
+                'cash_flow_type', 'send_receive', 'position_updated',
+                'foreign_ccy', 'local_ccy', 'local_ccy_amt', 'foreign_ccy_amt',
+                'flow_amount_local', 'dividend_price', 'gl_acc_no', 'src_system',
+                'payment_date', 'trade_date', 'value_date', 'dividend_date',
+                'ex_date', 'record_date', 'status',
             ]
 
-            decimal_fields = ['local_amount', 'flow_amount_local', 'foreign_ccy_amount']
+            decimal_fields = ['local_ccy_amt', 'foreign_ccy_amt', 'flow_amount_local', 'dividend_price']
+            boolean_fields = ['position_updated']
 
             for field in updatable_fields:
                 if field in cf_data:
                     if field in decimal_fields:
                         set_clauses.append(f"{field} = {CashFlowRepository.to_decimal(cf_data[field])}")
+                    elif field in boolean_fields:
+                        set_clauses.append(f"{field} = {'true' if cf_data[field] else 'false'}")
                     else:
                         set_clauses.append(f"{field} = {CashFlowRepository.escape_value(cf_data[field])}")
 
@@ -407,7 +411,7 @@ class CashFlowRepository:
         cf_id: int,
         status: str,
         updated_by: str,
-        reviewed_comments: str = None
+        comments: str = None
     ) -> bool:
         """
         Update cash flow status (for maker-checker workflow).
@@ -416,27 +420,39 @@ class CashFlowRepository:
             cf_id: Cash Flow ID
             status: New status
             updated_by: Username updating
-            reviewed_comments: Reviewer comments
+            comments: Reviewer/settlement comments
 
         Returns:
             True if successful, False otherwise
         """
         try:
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
+            timestamp_now = datetime.now()
+            timestamp_str = timestamp_now.strftime('%Y-%m-%d %H:%M:%S')
 
             set_clauses = [
                 f"status = {CashFlowRepository.escape_value(status)}",
                 f"updated_by = {CashFlowRepository.escape_value(updated_by)}",
-                f"updated_at = {timestamp_ms}",
-                f"reviewed_by = {CashFlowRepository.escape_value(updated_by)}",
-                f"reviewed_at = {CashFlowRepository.escape_value(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))}",
+                f"updated_at = CAST('{timestamp_str}' AS TIMESTAMP)",
             ]
 
-            if reviewed_comments:
-                set_clauses.append(f"reviewed_comments = {CashFlowRepository.escape_value(reviewed_comments)}")
-
-            if status == 'APPROVED':
+            # Set appropriate workflow fields based on status
+            if status == 'VALIDATED':
+                set_clauses.append(f"validated_by = {CashFlowRepository.escape_value(updated_by)}")
+                set_clauses.append(f"validated_at = CAST('{timestamp_str}' AS TIMESTAMP)")
+                if comments:
+                    set_clauses.append(f"validation_comments = {CashFlowRepository.escape_value(comments)}")
                 set_clauses.append("is_active = true")
+            elif status == 'SETTLED':
+                set_clauses.append(f"settled_by = {CashFlowRepository.escape_value(updated_by)}")
+                set_clauses.append(f"settled_at = CAST('{timestamp_str}' AS TIMESTAMP)")
+                if comments:
+                    set_clauses.append(f"settlement_comments = {CashFlowRepository.escape_value(comments)}")
+            elif status == 'CANCELLED':
+                set_clauses.append(f"cancelled_by = {CashFlowRepository.escape_value(updated_by)}")
+                set_clauses.append(f"cancelled_at = CAST('{timestamp_str}' AS TIMESTAMP)")
+                if comments:
+                    set_clauses.append(f"cancel_reason = {CashFlowRepository.escape_value(comments)}")
+                set_clauses.append("is_active = false")
 
             update_sql = f"""
             UPDATE {CashFlowRepository.DATABASE}.{CashFlowRepository.TABLE_NAME}

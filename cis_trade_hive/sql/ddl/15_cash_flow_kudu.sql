@@ -8,156 +8,132 @@
 --   - cis_cash_flow_history: Audit trail for cash flow changes
 -- ============================================================================
 
--- Drop existing tables if they exist
-DROP TABLE IF EXISTS gmp_cis.cis_cash_flow_history;
-DROP TABLE IF EXISTS gmp_cis.cis_cash_flow;
+-- Use gmp_cis database
+USE gmp_cis;
 
 -- ============================================================================
 -- Main Cash Flow Table
 -- ============================================================================
-CREATE TABLE gmp_cis.cis_cash_flow (
+
+DROP TABLE IF EXISTS cis_cash_flow;
+
+CREATE TABLE cis_cash_flow (
     -- Primary Key
     cf_id BIGINT NOT NULL,
 
     -- Cash Flow Identification
-    cf_number STRING NOT NULL,                    -- Format: CF-YYYYMMDD-XXXXX
+    cash_flow_number STRING NOT NULL,           -- Format: CF-YYYYMMDD-XXXXX
 
     -- Portfolio and Security References
-    portfolio_short_name STRING NOT NULL,         -- FK to cis_portfolio
-    security_name STRING,                         -- FK to cis_security_kudu (optional)
+    security_label STRING,                      -- FK to cis_security_kudu
+    portfolio_short_name STRING NOT NULL,       -- FK to cis_portfolio
 
     -- Cash Flow Type Information
-    cash_flow_type STRING NOT NULL,               -- UDF: DIVIDEND, INTEREST, FEE, COUPON, etc.
-    send_receive STRING NOT NULL,                 -- UDF: SEND, RECEIVE
-    cash_flow_status STRING,                      -- UDF: PENDING, SETTLED, CANCELLED
+    cash_flow_type STRING NOT NULL,             -- UDF: DIVIDEND, INTEREST, FEE, COUPON, etc.
+    send_receive STRING NOT NULL,               -- UDF: SEND, RECEIVE
 
-    -- Important Dates
-    value_date STRING,                            -- Value date (YYYY-MM-DD)
-    payment_date STRING,                          -- Payment date (YYYY-MM-DD)
-    dividend_date STRING,                         -- Dividend declaration date
-    ex_date STRING,                               -- Ex-dividend date
-    record_date STRING,                           -- Record date
+    -- Position Flag
+    position_updated BOOLEAN DEFAULT FALSE,     -- Whether position was updated
+
+    -- Currency and Amounts
+    foreign_ccy STRING,                         -- Foreign currency code
+    local_ccy STRING,                           -- Local currency code
+    local_ccy_amt DECIMAL(20, 6),               -- Amount in local currency
+    foreign_ccy_amt DECIMAL(20, 6),             -- Amount in foreign currency
+    flow_amount_local DECIMAL(20, 6),           -- Flow amount in local currency
+    dividend_price DECIMAL(20, 6),              -- Dividend price per share
 
     -- GL Account
-    gl_acc_no STRING,                             -- General Ledger Account Number
-
-    -- Local Currency Amounts
-    local_ccy STRING,                             -- Local currency code (e.g., USD, EUR)
-    local_amount DECIMAL(20, 8),                  -- Amount in local currency
-    flow_amount_local DECIMAL(20, 8),             -- Flow amount in local currency
-
-    -- Foreign Currency Amounts
-    foreign_ccy STRING,                           -- Foreign currency code
-    foreign_ccy_amount DECIMAL(20, 8),            -- Amount in foreign currency
+    gl_acc_no STRING,                           -- General Ledger Account Number
 
     -- Source System
-    src_system STRING DEFAULT 'CIS',              -- Source system identifier
+    src_system STRING DEFAULT 'CIS',            -- Source system identifier
+
+    -- Important Dates
+    payment_date TIMESTAMP,                     -- Payment date
+    trade_date TIMESTAMP,                       -- Trade date
+    value_date TIMESTAMP,                       -- Value date
+    dividend_date TIMESTAMP,                    -- Dividend declaration date
+    ex_date TIMESTAMP,                          -- Ex-dividend date
+    record_date TIMESTAMP,                      -- Record date
+
+    -- Soft Delete & Active Flags
+    is_deleted BOOLEAN DEFAULT FALSE,
+    is_active BOOLEAN DEFAULT TRUE,
+
+    -- Audit Fields
+    created_by STRING,
+    created_at TIMESTAMP,
+    updated_by STRING,
+    updated_at TIMESTAMP,
 
     -- Workflow Status (Maker-Checker)
-    status STRING DEFAULT 'INITIAL',              -- INITIAL, MODIFIED, APPROVED, REJECTED
+    status STRING DEFAULT 'INITIAL',            -- INITIAL, MODIFIED, VALIDATED, REJECTED, SETTLED, CANCELLED
 
-    -- Soft Delete
-    is_deleted BOOLEAN DEFAULT FALSE,
-    deleted_at STRING,
-    deleted_by STRING,
+    -- Submission
+    submitted_by STRING,
+    submitted_at TIMESTAMP,
 
-    -- Audit Fields - Creator (Maker)
-    created_by STRING NOT NULL,
-    created_by_id BIGINT,
-    created_by_email STRING,
-    created_at STRING NOT NULL,
+    -- Validation
+    validated_by STRING,
+    validated_at TIMESTAMP,
+    validation_comments STRING,
 
-    -- Audit Fields - Last Modifier
-    updated_by STRING,
-    updated_by_id BIGINT,
-    updated_by_email STRING,
-    updated_at STRING,
+    -- Settlement
+    settled_by STRING,
+    settled_at TIMESTAMP,
+    settlement_comments STRING,
 
-    -- Audit Fields - Reviewer (Checker)
-    reviewed_by STRING,
-    reviewed_by_id BIGINT,
-    reviewed_by_email STRING,
-    reviewed_at STRING,
-    reviewed_comments STRING,
+    -- Cancellation
+    cancelled_by STRING,
+    cancelled_at TIMESTAMP,
+    cancel_reason STRING,
 
-    -- Primary Key
     PRIMARY KEY (cf_id)
 )
-PARTITION BY HASH(cf_id) PARTITIONS 4
+PARTITION BY HASH (cf_id) PARTITIONS 8
 STORED AS KUDU
 TBLPROPERTIES (
-    'kudu.table_name' = 'cis_cash_flow',
     'kudu.num_tablet_replicas' = '1'
 );
 
+COMMENT ON TABLE cis_cash_flow IS
+'Cash flow records for dividends, interest, fees, coupons, and other monetary flows.
+Supports Maker-Checker workflow with validation and settlement tracking.';
+
+
 -- ============================================================================
--- Cash Flow History Table (Audit Trail)
+-- Cash Flow History Table
 -- ============================================================================
-CREATE TABLE gmp_cis.cis_cash_flow_history (
+
+DROP TABLE IF EXISTS cis_cash_flow_history;
+
+CREATE TABLE cis_cash_flow_history (
     -- Primary Key
     history_id BIGINT NOT NULL,
-    cf_id BIGINT NOT NULL,                        -- FK to cis_cash_flow
 
-    -- Action Information
-    action STRING NOT NULL,                       -- CREATE, UPDATE, APPROVE, REJECT, DELETE, RESTORE
-    status STRING,                                -- Status at time of action
+    -- Reference to Cash Flow
+    cf_id BIGINT NOT NULL,
+    cash_flow_number STRING,
+    portfolio_short_name STRING,
 
-    -- Performer Information
-    performed_by STRING NOT NULL,
-    performed_by_id BIGINT,
-    performed_by_email STRING,
-    performed_at STRING NOT NULL,
+    -- Action Details
+    action STRING,                              -- CREATE, UPDATE, VALIDATE, SETTLE, CANCEL, DELETE
+    status STRING,
+    changes STRING,                             -- JSON blob of field changes
+    comments STRING,
 
-    -- Change Details
-    comments STRING,                              -- Action comments
-    old_values STRING,                            -- JSON of previous values (for updates)
-    new_values STRING,                            -- JSON of new values (for updates)
+    -- Audit Fields
+    performed_by STRING,
+    performed_at BIGINT,
 
-    -- Primary Key
     PRIMARY KEY (history_id)
 )
-PARTITION BY HASH(history_id) PARTITIONS 4
+PARTITION BY HASH (history_id) PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES (
-    'kudu.table_name' = 'cis_cash_flow_history',
     'kudu.num_tablet_replicas' = '1'
 );
 
--- ============================================================================
--- Indexes (Kudu secondary indexes for common queries)
--- ============================================================================
--- Note: Kudu doesn't support traditional indexes like MySQL/PostgreSQL.
--- Query optimization is achieved through partition pruning and column predicates.
-
--- ============================================================================
--- Sample Data (Optional - for development/testing)
--- ============================================================================
--- UPSERT INTO gmp_cis.cis_cash_flow (
---     cf_id, cf_number, portfolio_short_name, security_name,
---     cash_flow_type, send_receive, cash_flow_status,
---     value_date, payment_date, local_ccy, local_amount,
---     src_system, status, is_deleted,
---     created_by, created_by_id, created_at
--- ) VALUES (
---     1, 'CF-20260318-00001', 'GROWTH_FUND', 'AAPL',
---     'DIVIDEND', 'RECEIVE', 'PENDING',
---     '2026-03-20', '2026-03-25', 'USD', 1500.00,
---     'CIS', 'INITIAL', FALSE,
---     'admin', 1, '2026-03-18 10:00:00'
--- );
-
--- ============================================================================
--- Grant Permissions (adjust as needed for your environment)
--- ============================================================================
--- GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE gmp_cis.cis_cash_flow TO ROLE cis_app_role;
--- GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE gmp_cis.cis_cash_flow_history TO ROLE cis_app_role;
--- GRANT SELECT ON TABLE gmp_cis.cis_cash_flow TO ROLE cis_readonly_role;
--- GRANT SELECT ON TABLE gmp_cis.cis_cash_flow_history TO ROLE cis_readonly_role;
-
--- ============================================================================
--- Verification Queries
--- ============================================================================
--- DESCRIBE gmp_cis.cis_cash_flow;
--- DESCRIBE gmp_cis.cis_cash_flow_history;
--- SELECT COUNT(*) FROM gmp_cis.cis_cash_flow;
--- SELECT COUNT(*) FROM gmp_cis.cis_cash_flow_history;
+COMMENT ON TABLE cis_cash_flow_history IS
+'Audit history table for cash flows. Tracks all changes with field-level change tracking.';
