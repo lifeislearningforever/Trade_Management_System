@@ -309,15 +309,16 @@ class CashFlowRepository:
                 columns.append('src_system')
                 values.append("'CIS'")
 
-            # Add audit fields
+            # Add audit fields - use TIMESTAMP format for created_at/updated_at
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             columns.extend(['is_active', 'is_deleted', 'created_by', 'created_at', 'updated_by', 'updated_at'])
             values.extend([
                 'true',
                 'false',
                 CashFlowRepository.escape_value(created_by),
-                str(timestamp_ms),
+                f"CAST('{timestamp_str}' AS TIMESTAMP)",
                 CashFlowRepository.escape_value(created_by),
-                str(timestamp_ms)
+                f"CAST('{timestamp_str}' AS TIMESTAMP)"
             ])
 
             # Build UPSERT statement
@@ -380,9 +381,10 @@ class CashFlowRepository:
                     else:
                         set_clauses.append(f"{field} = {CashFlowRepository.escape_value(cf_data[field])}")
 
-            # Always update audit fields
+            # Always update audit fields - use TIMESTAMP format
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             set_clauses.append(f"updated_by = {CashFlowRepository.escape_value(updated_by)}")
-            set_clauses.append(f"updated_at = {timestamp_ms}")
+            set_clauses.append(f"updated_at = CAST('{timestamp_str}' AS TIMESTAMP)")
 
             if not set_clauses:
                 logger.warning(f"No fields to update for cash flow {cf_id}")
@@ -484,14 +486,14 @@ class CashFlowRepository:
             True if successful, False otherwise
         """
         try:
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             update_sql = f"""
             UPDATE {CashFlowRepository.DATABASE}.{CashFlowRepository.TABLE_NAME}
             SET is_deleted = true,
                 is_active = false,
                 updated_by = {CashFlowRepository.escape_value(deleted_by)},
-                updated_at = {timestamp_ms}
+                updated_at = CAST('{timestamp_str}' AS TIMESTAMP)
             WHERE cf_id = {cf_id}
             """
 
@@ -519,7 +521,7 @@ class CashFlowRepository:
             True if successful, False otherwise
         """
         try:
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             update_sql = f"""
             UPDATE {CashFlowRepository.DATABASE}.{CashFlowRepository.TABLE_NAME}
@@ -527,7 +529,7 @@ class CashFlowRepository:
                 is_active = true,
                 status = 'MODIFIED',
                 updated_by = {CashFlowRepository.escape_value(restored_by)},
-                updated_at = {timestamp_ms}
+                updated_at = CAST('{timestamp_str}' AS TIMESTAMP)
             WHERE cf_id = {cf_id}
             """
 
