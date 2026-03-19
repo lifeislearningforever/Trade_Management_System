@@ -413,8 +413,8 @@ class CACashFlowQueueRepository:
 
             insert_sql = f"""
             UPSERT INTO {CACashFlowQueueRepository.DATABASE}.{CACashFlowQueueRepository.LOG_TABLE_NAME} (
-                log_id, queue_id, ca_id, cf_id,
-                portfolio_short_name, security_name,
+                log_id, queue_id, ca_id, cash_flow_id,
+                portfolio_short_name, security_label,
                 quantity, amount, currency,
                 status, error_message,
                 created_at
@@ -422,7 +422,7 @@ class CACashFlowQueueRepository:
                 {log_id},
                 {CACashFlowQueueRepository.escape_value(log_data.get('queue_id'))},
                 {CACashFlowQueueRepository.escape_value(log_data.get('ca_id'))},
-                {CACashFlowQueueRepository.escape_value(log_data.get('cf_id'))},
+                {CACashFlowQueueRepository.escape_value(log_data.get('cash_flow_id'))},
                 {CACashFlowQueueRepository.escape_value(log_data.get('portfolio_short_name'))},
                 {CACashFlowQueueRepository.escape_value(log_data.get('security_name'))},
                 {CACashFlowQueueRepository.escape_value(log_data.get('quantity'))},

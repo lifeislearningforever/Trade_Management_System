@@ -171,7 +171,7 @@ class CACashFlowService:
                     continue
 
                 # Create cash flow
-                success, cf_id, error = self.create_cash_flow_from_ca(
+                success, cash_flow_id, error = self.create_cash_flow_from_ca(
                     ca_id=ca_id,
                     ca_number=ca_number,
                     ca_type=ca_type,
@@ -190,7 +190,7 @@ class CACashFlowService:
                 log_data = {
                     'queue_id': queue_id,
                     'ca_id': ca_id,
-                    'cf_id': cf_id,
+                    'cash_flow_id': cash_flow_id,
                     'portfolio_short_name': portfolio_short_name,
                     'security_name': security_name,
                     'quantity': quantity,
@@ -337,7 +337,7 @@ class CACashFlowService:
             created_by: User creating the cash flow
 
         Returns:
-            Tuple of (success, cf_id, error_message)
+            Tuple of (success, cash_flow_id, error_message)
         """
         try:
             # Generate CF number
@@ -370,13 +370,16 @@ class CACashFlowService:
                 'src_system': 'CIS',
             }
 
+            logger.info(f"Creating cash flow with data: security_label={security_name}, "
+                       f"portfolio={portfolio_short_name}, cf_number={cf_number}")
+
             # Use cash flow repository to insert
-            success, cf_id = CashFlowRepository.insert(cf_data, created_by)
+            success, cash_flow_id = CashFlowRepository.insert(cf_data, created_by)
 
             if success:
                 logger.info(f"Created cash flow {cf_number} from CA {ca_number} "
                            f"for portfolio {portfolio_short_name}, amount: {amount} {currency}")
-                return True, cf_id, None
+                return True, cash_flow_id, None
             else:
                 return False, None, "Failed to insert cash flow"
 

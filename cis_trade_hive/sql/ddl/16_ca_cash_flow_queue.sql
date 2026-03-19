@@ -74,11 +74,11 @@ CREATE TABLE IF NOT EXISTS gmp_cis.cis_ca_cash_flow_log (
     -- References
     queue_id BIGINT NOT NULL COMMENT 'Reference to cis_ca_cash_flow_queue.queue_id',
     ca_id BIGINT NOT NULL COMMENT 'Reference to corporate action',
-    cf_id BIGINT COMMENT 'Reference to created cash flow (if successful)',
+    cash_flow_id BIGINT COMMENT 'Reference to created cash flow (if successful)',
 
     -- Details
     portfolio_short_name STRING NOT NULL COMMENT 'Portfolio for this cash flow',
-    security_name STRING NOT NULL COMMENT 'Security name',
+    security_label STRING NOT NULL COMMENT 'Security name',
     quantity DECIMAL(20,8) COMMENT 'Quantity held at ex-date',
     amount DECIMAL(20,8) COMMENT 'Calculated cash flow amount',
     currency STRING COMMENT 'Currency code',

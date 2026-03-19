@@ -165,13 +165,13 @@ class CashFlowService:
                     return False, None, security_validation.get('message', 'Invalid security')
 
             # Generate CF number if not provided
-            if not cf_data.get('cf_number'):
-                cf_data['cf_number'] = self.repository.generate_cf_number()
+            if not cf_data.get('cash_flow_number'):
+                cf_data['cash_flow_number'] = self.repository.generate_cash_flow_number()
 
             # Check for duplicate CF number
-            existing = self.repository.get_by_cf_number(cf_data['cf_number'])
+            existing = self.repository.get_by_cash_flow_number(cf_data['cash_flow_number'])
             if existing:
-                return False, None, f"Cash Flow with number '{cf_data['cf_number']}' already exists"
+                return False, None, f"Cash Flow with number '{cf_data['cash_flow_number']}' already exists"
 
             # Set initial status
             cf_data['status'] = self.STATUS_INITIAL
@@ -184,8 +184,8 @@ class CashFlowService:
 
             # Insert history record
             self.repository.insert_history(
-                cf_id=cf_id,
-                cf_number=cf_data.get('cf_number', ''),
+                cash_flow_id=cf_id,
+                cash_flow_number=cf_data.get('cash_flow_number', ''),
                 portfolio_short_name=cf_data.get('portfolio_short_name', ''),
                 action='CREATE',
                 status=self.STATUS_INITIAL,
@@ -202,8 +202,8 @@ class CashFlowService:
                 action_type='CREATE',
                 entity_type='CASH_FLOW',
                 entity_id=str(cf_id),
-                entity_name=cf_data.get('cf_number', ''),
-                action_description=f'Created cash flow: {cf_data.get("cf_number")} for portfolio {cf_data.get("portfolio_short_name")}',
+                entity_name=cf_data.get('cash_flow_number', ''),
+                action_description=f'Created cash flow: {cf_data.get("cash_flow_number")} for portfolio {cf_data.get("portfolio_short_name")}',
                 status='SUCCESS'
             )
 
@@ -273,7 +273,7 @@ class CashFlowService:
 
             # Update cash flow
             success = self.repository.update(
-                cf_id=cf_id,
+                cash_flow_id=cf_id,
                 cf_data=cf_data,
                 updated_by=username
             )
@@ -283,8 +283,8 @@ class CashFlowService:
 
             # Insert history record
             self.repository.insert_history(
-                cf_id=cf_id,
-                cf_number=cf.get('cf_number', ''),
+                cash_flow_id=cf_id,
+                cash_flow_number=cf.get('cash_flow_number', ''),
                 portfolio_short_name=cf.get('portfolio_short_name', ''),
                 action='UPDATE',
                 status=self.STATUS_MODIFIED,
@@ -306,7 +306,7 @@ class CashFlowService:
                 action_type='UPDATE',
                 entity_type='CASH_FLOW',
                 entity_id=str(cf_id),
-                entity_name=cf.get('cf_number', ''),
+                entity_name=cf.get('cash_flow_number', ''),
                 action_description=f'Updated cash flow: {cf.get("cf_number")} - Changed fields: {", ".join(changed_fields)}',
                 old_value=json.dumps(old_values, default=str),
                 new_value=json.dumps(new_values, default=str),
@@ -371,8 +371,8 @@ class CashFlowService:
 
             # Insert history record
             self.repository.insert_history(
-                cf_id=cf_id,
-                cf_number=cf.get('cf_number', ''),
+                cash_flow_id=cf_id,
+                cash_flow_number=cf.get('cash_flow_number', ''),
                 portfolio_short_name=cf.get('portfolio_short_name', ''),
                 action='APPROVE',
                 status=self.STATUS_APPROVED,
@@ -389,7 +389,7 @@ class CashFlowService:
                 action_type='APPROVE',
                 entity_type='CASH_FLOW',
                 entity_id=str(cf_id),
-                entity_name=cf.get('cf_number', ''),
+                entity_name=cf.get('cash_flow_number', ''),
                 action_description=f'Approved cash flow: {cf.get("cf_number")}',
                 new_value=comments,
                 status='SUCCESS'
@@ -452,8 +452,8 @@ class CashFlowService:
 
             # Insert history record
             self.repository.insert_history(
-                cf_id=cf_id,
-                cf_number=cf.get('cf_number', ''),
+                cash_flow_id=cf_id,
+                cash_flow_number=cf.get('cash_flow_number', ''),
                 portfolio_short_name=cf.get('portfolio_short_name', ''),
                 action='REJECT',
                 status=self.STATUS_REJECTED,
@@ -470,7 +470,7 @@ class CashFlowService:
                 action_type='REJECT',
                 entity_type='CASH_FLOW',
                 entity_id=str(cf_id),
-                entity_name=cf.get('cf_number', ''),
+                entity_name=cf.get('cash_flow_number', ''),
                 action_description=f'Rejected cash flow: {cf.get("cf_number")}',
                 new_value=comments,
                 status='SUCCESS'
@@ -520,8 +520,8 @@ class CashFlowService:
 
             # Insert history record
             self.repository.insert_history(
-                cf_id=cf_id,
-                cf_number=cf.get('cf_number', ''),
+                cash_flow_id=cf_id,
+                cash_flow_number=cf.get('cash_flow_number', ''),
                 portfolio_short_name=cf.get('portfolio_short_name', ''),
                 action='DELETE',
                 status='DELETED',
@@ -538,7 +538,7 @@ class CashFlowService:
                 action_type='DELETE',
                 entity_type='CASH_FLOW',
                 entity_id=str(cf_id),
-                entity_name=cf.get('cf_number', ''),
+                entity_name=cf.get('cash_flow_number', ''),
                 action_description=f'Deleted cash flow: {cf.get("cf_number")}',
                 status='SUCCESS'
             )
@@ -580,8 +580,8 @@ class CashFlowService:
 
             # Insert history record
             self.repository.insert_history(
-                cf_id=cf_id,
-                cf_number=cf.get('cf_number', '') if cf else '',
+                cash_flow_id=cf_id,
+                cash_flow_number=cf.get('cash_flow_number', '') if cf else '',
                 portfolio_short_name=cf.get('portfolio_short_name', '') if cf else '',
                 action='RESTORE',
                 status=self.STATUS_MODIFIED,
@@ -598,7 +598,7 @@ class CashFlowService:
                 action_type='RESTORE',
                 entity_type='CASH_FLOW',
                 entity_id=str(cf_id),
-                entity_name=cf.get('cf_number', '') if cf else '',
+                entity_name=cf.get('cash_flow_number', '') if cf else '',
                 action_description=f'Restored cash flow: {cf.get("cf_number") if cf else cf_id}',
                 status='SUCCESS'
             )

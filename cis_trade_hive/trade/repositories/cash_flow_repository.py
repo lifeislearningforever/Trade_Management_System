@@ -83,7 +83,7 @@ class CashFlowRepository:
             limit: Maximum number of records to return
             offset: Number of records to skip
             status: Filter by workflow status
-            search: Search term for cf_number or security_name
+            search: Search term for cash_flow_number or security_label
             portfolio_short_name: Filter by portfolio
             cash_flow_type: Filter by cash flow type
             include_deleted: Include soft-deleted records
@@ -108,8 +108,8 @@ class CashFlowRepository:
 
             if search:
                 search_term = f"%{search}%"
-                query += f" AND (LOWER(cf_number) LIKE LOWER({CashFlowRepository.escape_value(search_term)}) "
-                query += f"OR LOWER(security_name) LIKE LOWER({CashFlowRepository.escape_value(search_term)}) "
+                query += f" AND (LOWER(cash_flow_number) LIKE LOWER({CashFlowRepository.escape_value(search_term)}) "
+                query += f"OR LOWER(security_label) LIKE LOWER({CashFlowRepository.escape_value(search_term)}) "
                 query += f"OR LOWER(portfolio_short_name) LIKE LOWER({CashFlowRepository.escape_value(search_term)}))"
 
             if portfolio_short_name:
@@ -134,12 +134,12 @@ class CashFlowRepository:
             return []
 
     @staticmethod
-    def get_by_id(cf_id: int) -> Optional[Dict[str, Any]]:
+    def get_by_id(cash_flow_id: int) -> Optional[Dict[str, Any]]:
         """
         Fetch a single cash flow by ID.
 
         Args:
-            cf_id: Cash Flow ID
+            cash_flow_id: Cash Flow ID
 
         Returns:
             Cash flow dictionary or None
@@ -148,23 +148,23 @@ class CashFlowRepository:
             query = f"""
             SELECT *
             FROM {CashFlowRepository.DATABASE}.{CashFlowRepository.TABLE_NAME}
-            WHERE cf_id = {cf_id}
+            WHERE cash_flow_id = {cash_flow_id}
             """
 
             result = impala_manager.execute_query(query, database=CashFlowRepository.DATABASE)
             return result[0] if result and len(result) > 0 else None
 
         except Exception as e:
-            logger.error(f"Error fetching cash flow {cf_id}: {str(e)}")
+            logger.error(f"Error fetching cash flow {cash_flow_id}: {str(e)}")
             return None
 
     @staticmethod
-    def get_by_cf_number(cf_number: str) -> Optional[Dict[str, Any]]:
+    def get_by_cash_flow_number(cash_flow_number: str) -> Optional[Dict[str, Any]]:
         """
-        Fetch a single cash flow by CF Number.
+        Fetch a single cash flow by Cash Flow Number.
 
         Args:
-            cf_number: Cash Flow Number
+            cash_flow_number: Cash Flow Number
 
         Returns:
             Cash flow dictionary or None
@@ -173,14 +173,14 @@ class CashFlowRepository:
             query = f"""
             SELECT *
             FROM {CashFlowRepository.DATABASE}.{CashFlowRepository.TABLE_NAME}
-            WHERE cf_number = {CashFlowRepository.escape_value(cf_number)}
+            WHERE cash_flow_number = {CashFlowRepository.escape_value(cash_flow_number)}
             """
 
             result = impala_manager.execute_query(query, database=CashFlowRepository.DATABASE)
             return result[0] if result and len(result) > 0 else None
 
         except Exception as e:
-            logger.error(f"Error fetching cash flow by number {cf_number}: {str(e)}")
+            logger.error(f"Error fetching cash flow by number {cash_flow_number}: {str(e)}")
             return None
 
     @staticmethod
@@ -254,16 +254,16 @@ class CashFlowRepository:
             created_by: Username creating the record
 
         Returns:
-            Tuple of (success, cf_id)
+            Tuple of (success, cash_flow_id)
         """
         try:
-            # Generate cf_id (timestamp-based)
+            # Generate cash_flow_id (timestamp-based)
             timestamp_ms = int(datetime.now().timestamp() * 1000)
-            cf_id = timestamp_ms
+            cash_flow_id = timestamp_ms
 
             # Build column and value lists
-            columns = ['cf_id']
-            values = [str(cf_id)]
+            columns = ['cash_flow_id']
+            values = [str(cash_flow_id)]
 
             # Add all business fields from cf_data
             # Field mapping matches actual cis_cash_flow table in production
@@ -331,8 +331,8 @@ class CashFlowRepository:
             success = impala_manager.execute_write(upsert_sql, database=CashFlowRepository.DATABASE)
 
             if success:
-                logger.info(f"Successfully inserted cash flow {cf_id}")
-                return True, cf_id
+                logger.info(f"Successfully inserted cash flow {cash_flow_id}")
+                return True, cash_flow_id
 
             return False, None
 
@@ -341,12 +341,12 @@ class CashFlowRepository:
             return False, None
 
     @staticmethod
-    def update(cf_id: int, cf_data: Dict[str, Any], updated_by: str) -> bool:
+    def update(cash_flow_id: int, cf_data: Dict[str, Any], updated_by: str) -> bool:
         """
         Update an existing cash flow record in Kudu.
 
         Args:
-            cf_id: Cash Flow ID to update
+            cash_flow_id: Cash Flow ID to update
             cf_data: Dictionary of fields to update
             updated_by: Username updating the record
 
@@ -387,30 +387,30 @@ class CashFlowRepository:
             set_clauses.append(f"updated_at = CAST('{timestamp_str}' AS TIMESTAMP)")
 
             if not set_clauses:
-                logger.warning(f"No fields to update for cash flow {cf_id}")
+                logger.warning(f"No fields to update for cash flow {cash_flow_id}")
                 return False
 
             # Build UPDATE statement
             update_sql = f"""
             UPDATE {CashFlowRepository.DATABASE}.{CashFlowRepository.TABLE_NAME}
             SET {', '.join(set_clauses)}
-            WHERE cf_id = {cf_id}
+            WHERE cash_flow_id = {cash_flow_id}
             """
 
             success = impala_manager.execute_write(update_sql, database=CashFlowRepository.DATABASE)
 
             if success:
-                logger.info(f"Successfully updated cash flow {cf_id}")
+                logger.info(f"Successfully updated cash flow {cash_flow_id}")
 
             return success
 
         except Exception as e:
-            logger.error(f"Error updating cash flow {cf_id}: {str(e)}")
+            logger.error(f"Error updating cash flow {cash_flow_id}: {str(e)}")
             return False
 
     @staticmethod
     def update_status(
-        cf_id: int,
+        cash_flow_id: int,
         status: str,
         updated_by: str,
         comments: str = None
@@ -419,7 +419,7 @@ class CashFlowRepository:
         Update cash flow status (for maker-checker workflow).
 
         Args:
-            cf_id: Cash Flow ID
+            cash_flow_id: Cash Flow ID
             status: New status
             updated_by: Username updating
             comments: Reviewer/settlement comments
@@ -459,27 +459,27 @@ class CashFlowRepository:
             update_sql = f"""
             UPDATE {CashFlowRepository.DATABASE}.{CashFlowRepository.TABLE_NAME}
             SET {', '.join(set_clauses)}
-            WHERE cf_id = {cf_id}
+            WHERE cash_flow_id = {cash_flow_id}
             """
 
             success = impala_manager.execute_write(update_sql, database=CashFlowRepository.DATABASE)
 
             if success:
-                logger.info(f"Successfully updated cash flow {cf_id} status to {status}")
+                logger.info(f"Successfully updated cash flow {cash_flow_id} status to {status}")
 
             return success
 
         except Exception as e:
-            logger.error(f"Error updating cash flow status {cf_id}: {str(e)}")
+            logger.error(f"Error updating cash flow status {cash_flow_id}: {str(e)}")
             return False
 
     @staticmethod
-    def soft_delete(cf_id: int, deleted_by: str) -> bool:
+    def soft_delete(cash_flow_id: int, deleted_by: str) -> bool:
         """
         Soft delete a cash flow.
 
         Args:
-            cf_id: Cash Flow ID
+            cash_flow_id: Cash Flow ID
             deleted_by: Username deleting
 
         Returns:
@@ -494,27 +494,27 @@ class CashFlowRepository:
                 is_active = false,
                 updated_by = {CashFlowRepository.escape_value(deleted_by)},
                 updated_at = CAST('{timestamp_str}' AS TIMESTAMP)
-            WHERE cf_id = {cf_id}
+            WHERE cash_flow_id = {cash_flow_id}
             """
 
             success = impala_manager.execute_write(update_sql, database=CashFlowRepository.DATABASE)
 
             if success:
-                logger.info(f"Successfully soft deleted cash flow {cf_id}")
+                logger.info(f"Successfully soft deleted cash flow {cash_flow_id}")
 
             return success
 
         except Exception as e:
-            logger.error(f"Error soft deleting cash flow {cf_id}: {str(e)}")
+            logger.error(f"Error soft deleting cash flow {cash_flow_id}: {str(e)}")
             return False
 
     @staticmethod
-    def restore(cf_id: int, restored_by: str) -> bool:
+    def restore(cash_flow_id: int, restored_by: str) -> bool:
         """
         Restore a soft-deleted cash flow.
 
         Args:
-            cf_id: Cash Flow ID
+            cash_flow_id: Cash Flow ID
             restored_by: Username restoring
 
         Returns:
@@ -530,18 +530,18 @@ class CashFlowRepository:
                 status = 'MODIFIED',
                 updated_by = {CashFlowRepository.escape_value(restored_by)},
                 updated_at = CAST('{timestamp_str}' AS TIMESTAMP)
-            WHERE cf_id = {cf_id}
+            WHERE cash_flow_id = {cash_flow_id}
             """
 
             success = impala_manager.execute_write(update_sql, database=CashFlowRepository.DATABASE)
 
             if success:
-                logger.info(f"Successfully restored cash flow {cf_id}")
+                logger.info(f"Successfully restored cash flow {cash_flow_id}")
 
             return success
 
         except Exception as e:
-            logger.error(f"Error restoring cash flow {cf_id}: {str(e)}")
+            logger.error(f"Error restoring cash flow {cash_flow_id}: {str(e)}")
             return False
 
     # =========================================================================
@@ -550,8 +550,8 @@ class CashFlowRepository:
 
     @staticmethod
     def insert_history(
-        cf_id: int,
-        cf_number: str,
+        cash_flow_id: int,
+        cash_flow_number: str,
         portfolio_short_name: str,
         action: str,
         status: str,
@@ -563,8 +563,8 @@ class CashFlowRepository:
         Insert a cash flow history record.
 
         Args:
-            cf_id: Cash Flow ID
-            cf_number: CF Number (denormalized)
+            cash_flow_id: Cash Flow ID
+            cash_flow_number: Cash Flow Number (denormalized)
             portfolio_short_name: Portfolio name (denormalized)
             action: Action type (CREATE, UPDATE, APPROVE, REJECT, DELETE)
             status: Status after action
@@ -584,11 +584,11 @@ class CashFlowRepository:
 
             insert_sql = f"""
             UPSERT INTO {CashFlowRepository.DATABASE}.{CashFlowRepository.HISTORY_TABLE}
-            (history_id, cf_id, cf_number, portfolio_short_name, action, status, changes, comments, performed_by, performed_at)
+            (history_id, cash_flow_id, cash_flow_number, portfolio_short_name, action, status, changes, comments, performed_by, performed_at)
             VALUES (
                 {history_id},
-                {cf_id},
-                {CashFlowRepository.escape_value(cf_number)},
+                {cash_flow_id},
+                {CashFlowRepository.escape_value(cash_flow_number)},
                 {CashFlowRepository.escape_value(portfolio_short_name)},
                 {CashFlowRepository.escape_value(action)},
                 {CashFlowRepository.escape_value(status)},
@@ -602,7 +602,7 @@ class CashFlowRepository:
             success = impala_manager.execute_write(insert_sql, database=CashFlowRepository.DATABASE)
 
             if success:
-                logger.info(f"Successfully inserted history for cash flow {cf_id}, action {action}")
+                logger.info(f"Successfully inserted history for cash flow {cash_flow_id}, action {action}")
 
             return success
 
@@ -611,12 +611,12 @@ class CashFlowRepository:
             return False
 
     @staticmethod
-    def get_history(cf_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+    def get_history(cash_flow_id: int, limit: int = 50) -> List[Dict[str, Any]]:
         """
         Get history records for a cash flow.
 
         Args:
-            cf_id: Cash Flow ID
+            cash_flow_id: Cash Flow ID
             limit: Maximum number of records
 
         Returns:
@@ -626,7 +626,7 @@ class CashFlowRepository:
             query = f"""
             SELECT *
             FROM {CashFlowRepository.DATABASE}.{CashFlowRepository.HISTORY_TABLE}
-            WHERE cf_id = {cf_id}
+            WHERE cash_flow_id = {cash_flow_id}
             ORDER BY performed_at DESC
             LIMIT {limit}
             """
@@ -635,7 +635,7 @@ class CashFlowRepository:
             return result if result else []
 
         except Exception as e:
-            logger.error(f"Error fetching cash flow history {cf_id}: {str(e)}")
+            logger.error(f"Error fetching cash flow history {cash_flow_id}: {str(e)}")
             return []
 
     # =========================================================================
@@ -643,7 +643,7 @@ class CashFlowRepository:
     # =========================================================================
 
     @staticmethod
-    def generate_cf_number() -> str:
+    def generate_cash_flow_number() -> str:
         """
         Generate a unique Cash Flow number.
 
@@ -656,17 +656,17 @@ class CashFlowRepository:
 
             # Get the latest CF number for today
             query = f"""
-            SELECT cf_number
+            SELECT cash_flow_number
             FROM {CashFlowRepository.DATABASE}.{CashFlowRepository.TABLE_NAME}
-            WHERE cf_number LIKE '{prefix}%'
-            ORDER BY cf_number DESC
+            WHERE cash_flow_number LIKE '{prefix}%'
+            ORDER BY cash_flow_number DESC
             LIMIT 1
             """
 
             result = impala_manager.execute_query(query, database=CashFlowRepository.DATABASE)
 
             if result and len(result) > 0:
-                last_number = result[0].get('cf_number', '')
+                last_number = result[0].get('cash_flow_number', '')
                 if last_number:
                     try:
                         seq = int(last_number.split('-')[-1])
