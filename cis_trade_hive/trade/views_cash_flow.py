@@ -131,17 +131,17 @@ def cash_flow_list(request):
 
             for cf in cash_flows:
                 writer.writerow([
-                    cf.get('cf_number', ''),
+                    cf.get('cash_flow_number', ''),
                     cf.get('portfolio_short_name', ''),
-                    cf.get('security_name', ''),
+                    cf.get('security_label', ''),
                     cf.get('cash_flow_type', ''),
                     cf.get('send_receive', ''),
                     cf.get('value_date', ''),
                     cf.get('payment_date', ''),
                     cf.get('local_ccy', ''),
-                    cf.get('local_amount', ''),
+                    cf.get('local_ccy_amt', ''),
                     cf.get('foreign_ccy', ''),
-                    cf.get('foreign_ccy_amount', ''),
+                    cf.get('foreign_ccy_amt', ''),
                     cf.get('cash_flow_status', ''),
                     cf.get('status', ''),
                     cf.get('created_by', ''),

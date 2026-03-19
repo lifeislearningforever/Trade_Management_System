@@ -138,17 +138,17 @@
                             {% for cf in cash_flows %}
                             <tr>
                                 <td>
-                                    <a href="{% url 'trade:cash_flow_detail' cf.cf_id %}" class="text-primary fw-bold">
-                                        {{ cf.cf_number|default:"-" }}
+                                    <a href="{% url 'trade:cash_flow_detail' cf.cash_flow_id %}" class="text-primary fw-bold">
+                                        {{ cf.cash_flow_number|default:"-" }}
                                     </a>
                                 </td>
                                 <td>{{ cf.portfolio_short_name|default:"-" }}</td>
-                                <td>{{ cf.security_name|default:"-"|truncatechars:20 }}</td>
+                                <td>{{ cf.security_label|default:"-"|truncatechars:20 }}</td>
                                 <td>{{ cf.cash_flow_type|default:"-" }}</td>
                                 <td>{{ cf.send_receive|default:"-" }}</td>
                                 <td>{{ cf.value_date|default:"-" }}</td>
                                 <td>{{ cf.payment_date|default:"-" }}</td>
-                                <td class="text-end">{{ cf.local_amount|default:"-" }}</td>
+                                <td class="text-end">{{ cf.local_ccy_amt|default:"-" }}</td>
                                 <td>{{ cf.local_ccy|default:"-" }}</td>
                                 <td>
                                     <span class="badge badge-{{ cf.status_color }}">
@@ -158,17 +158,17 @@
                                 <td>{{ cf.created_by|default:"-" }}</td>
                                 <td>
                                     <div class="btn-group" role="group">
-                                        <a href="{% url 'trade:cash_flow_detail' cf.cf_id %}"
+                                        <a href="{% url 'trade:cash_flow_detail' cf.cash_flow_id %}"
                                            class="btn btn-sm btn-outline-info" title="View Details">
                                             <i class="bi bi-eye"></i>
                                         </a>
                                         {% if cf.src_system|lower == 'cis' or not cf.src_system %}
-                                            <a href="{% url 'trade:cash_flow_edit' cf.cf_id %}"
+                                            <a href="{% url 'trade:cash_flow_edit' cf.cash_flow_id %}"
                                                class="btn btn-sm btn-outline-primary" title="Edit">
                                                 <i class="bi bi-pencil"></i>
                                             </a>
                                             {% if cf.is_deleted %}
-                                                <form method="post" action="{% url 'trade:cash_flow_restore' cf.cf_id %}"
+                                                <form method="post" action="{% url 'trade:cash_flow_restore' cf.cash_flow_id %}"
                                                       style="display: inline;" onsubmit="return confirm('Restore this cash flow?');">
                                                     {% csrf_token %}
                                                     <button type="submit" class="btn btn-sm btn-outline-success" title="Restore">
@@ -176,7 +176,7 @@
                                                     </button>
                                                 </form>
                                             {% else %}
-                                                <form method="post" action="{% url 'trade:cash_flow_delete' cf.cf_id %}"
+                                                <form method="post" action="{% url 'trade:cash_flow_delete' cf.cash_flow_id %}"
                                                       style="display: inline;" onsubmit="return confirm('Delete this cash flow?');">
                                                     {% csrf_token %}
                                                     <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
