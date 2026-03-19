@@ -66,19 +66,19 @@ class CorporateActionDropdownService:
 
         try:
             # Query portfolios from cis_portfolio table
+            # Note: Portfolio table uses 'name' as the primary identifier (no short_name column)
             query = f"""
-            SELECT DISTINCT short_name, name, currency
+            SELECT DISTINCT name, description, currency
             FROM {self.DATABASE}.cis_portfolio
-            WHERE short_name IS NOT NULL AND short_name != ''
+            WHERE name IS NOT NULL AND name != ''
               AND (is_deleted = false OR is_deleted IS NULL)
               AND status IN ('VALIDATED', 'SETTLED')
             """
 
             if search:
-                search_term = f"%{search}%"
-                query += f" AND (LOWER(short_name) LIKE LOWER('%{search}%') OR LOWER(name) LIKE LOWER('%{search}%'))"
+                query += f" AND (LOWER(name) LIKE LOWER('%{search}%') OR LOWER(description) LIKE LOWER('%{search}%'))"
 
-            query += " ORDER BY short_name"
+            query += " ORDER BY name"
 
             results = impala_manager.execute_query(query, database=self.DATABASE)
 
@@ -86,11 +86,11 @@ class CorporateActionDropdownService:
             if results:
                 options = [
                     {
-                        'value': r.get('short_name', ''),
-                        'label': f"{r.get('short_name', '')} - {r.get('name', '')}" if r.get('name') else r.get('short_name', ''),
+                        'value': r.get('name', ''),
+                        'label': f"{r.get('name', '')} - {r.get('description', '')}" if r.get('description') else r.get('name', ''),
                         'currency': r.get('currency', ''),
                     }
-                    for r in results if r.get('short_name')
+                    for r in results if r.get('name')
                 ]
 
             # Cache non-search results
