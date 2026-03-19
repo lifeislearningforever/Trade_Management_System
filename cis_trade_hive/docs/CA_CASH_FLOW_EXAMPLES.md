@@ -4,6 +4,8 @@
 
 When a Corporate Action (CA) is validated, the system automatically generates cash flow entries based on the CA type and portfolio holdings.
 
+**Key Concept**: Corporate Actions are created at the **security level**, not the portfolio level. When processing a CA, the system automatically finds **ALL portfolios** holding the security from `cis_trade_position` and creates cash flows for each portfolio-security combination.
+
 ---
 
 ## Example 1: Cash Dividend
@@ -24,6 +26,8 @@ When a Corporate Action (CA) is validated, the system automatically generates ca
 | BALANCED_FUND_C | AAPL | 2,500 shares |
 
 ### Corporate Action Record
+
+**Note**: No portfolio is specified - CA applies to ALL portfolios holding the security.
 
 ```
 CA Number:        CA-20260315-00001
@@ -166,10 +170,11 @@ EOD Job: python manage.py process_corporate_actions
 
 1. Reads pending CAs from cis_ca_cash_flow_queue
 2. For each CA:
-   a. Gets portfolio holdings as of ex_date
-   b. Calculates dividend amount per portfolio
-   c. Creates cash flow entries
-   d. Logs results
+   a. Queries cis_trade_position to find ALL portfolios holding the security as of ex_date
+   b. For each portfolio with positive holdings:
+      - Calculates dividend amount: quantity × price
+      - Creates cash flow entry linked to the CA
+   c. Logs results to cis_ca_cash_flow_log
 3. Marks queue entry as COMPLETED
 ```
 
@@ -240,9 +245,28 @@ python manage.py process_corporate_actions --ca-id 1710758400000
 
 ## Key Business Rules
 
-1. **Four-Eyes Principle**: CA must be validated by a different user than the creator
-2. **Holdings as of Ex-Date**: Only portfolios holding the security on the ex-date receive cash flows
-3. **Positive Quantity Only**: Portfolios with zero or negative positions are skipped
-4. **Amount Precision**: 8 decimal places (DECIMAL(20,8))
-5. **Cash Flow Status**: Created as PENDING, requires separate approval
-6. **CA Reference**: Each cash flow links back to the source CA via `ca_id` and `ca_number`
+1. **Security-Level CA**: Corporate Actions are created at the security level, NOT portfolio level
+2. **Automatic Portfolio Discovery**: System queries `cis_trade_position` to find ALL portfolios holding the security
+3. **Four-Eyes Principle**: CA must be validated by a different user than the creator
+4. **Holdings as of Ex-Date**: Only portfolios holding the security on the ex-date receive cash flows
+5. **Positive Quantity Only**: Portfolios with zero or negative positions are skipped
+6. **Amount Precision**: 8 decimal places (DECIMAL(20,8))
+7. **Cash Flow Status**: Created with status INITIAL, requires separate approval
+8. **CA Reference**: Each cash flow links back to the source CA via `ca_id` and `ca_number`
+
+## Data Flow
+
+```
+┌─────────────────────┐     ┌─────────────────────────┐     ┌──────────────────┐
+│  Create CA          │     │  cis_ca_cash_flow_queue │     │  cis_cash_flow   │
+│  (Security: AAPL)   │ ──▶ │  (Queued for EOD)       │ ──▶ │  (Cash flows)    │
+│  No portfolio!      │     │                         │     │                  │
+└─────────────────────┘     └─────────────────────────┘     └──────────────────┘
+                                      │
+                                      ▼
+                            ┌─────────────────────────┐
+                            │  cis_trade_position     │
+                            │  (Find ALL portfolios   │
+                            │   holding AAPL)         │
+                            └─────────────────────────┘
+```
