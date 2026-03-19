@@ -307,7 +307,7 @@ class CashFlowService:
                 entity_type='CASH_FLOW',
                 entity_id=str(cf_id),
                 entity_name=cf.get('cash_flow_number', ''),
-                action_description=f'Updated cash flow: {cf.get("cf_number")} - Changed fields: {", ".join(changed_fields)}',
+                action_description=f'Updated cash flow: {cf.get("cash_flow_number")} - Changed fields: {", ".join(changed_fields)}',
                 old_value=json.dumps(old_values, default=str),
                 new_value=json.dumps(new_values, default=str),
                 field_name=', '.join(changed_fields),
@@ -360,10 +360,10 @@ class CashFlowService:
 
             # Update status to APPROVED
             success = self.repository.update_status(
-                cf_id=cf_id,
+                cash_flow_id=cf_id,
                 status=self.STATUS_APPROVED,
                 updated_by=username,
-                reviewed_comments=comments
+                comments=comments
             )
 
             if not success:
@@ -390,7 +390,7 @@ class CashFlowService:
                 entity_type='CASH_FLOW',
                 entity_id=str(cf_id),
                 entity_name=cf.get('cash_flow_number', ''),
-                action_description=f'Approved cash flow: {cf.get("cf_number")}',
+                action_description=f'Approved cash flow: {cf.get("cash_flow_number")}',
                 new_value=comments,
                 status='SUCCESS'
             )
@@ -441,10 +441,10 @@ class CashFlowService:
 
             # Update status to REJECTED
             success = self.repository.update_status(
-                cf_id=cf_id,
+                cash_flow_id=cf_id,
                 status=self.STATUS_REJECTED,
                 updated_by=username,
-                reviewed_comments=comments
+                comments=comments
             )
 
             if not success:
@@ -471,7 +471,7 @@ class CashFlowService:
                 entity_type='CASH_FLOW',
                 entity_id=str(cf_id),
                 entity_name=cf.get('cash_flow_number', ''),
-                action_description=f'Rejected cash flow: {cf.get("cf_number")}',
+                action_description=f'Rejected cash flow: {cf.get("cash_flow_number")}',
                 new_value=comments,
                 status='SUCCESS'
             )
@@ -539,7 +539,7 @@ class CashFlowService:
                 entity_type='CASH_FLOW',
                 entity_id=str(cf_id),
                 entity_name=cf.get('cash_flow_number', ''),
-                action_description=f'Deleted cash flow: {cf.get("cf_number")}',
+                action_description=f'Deleted cash flow: {cf.get("cash_flow_number")}',
                 status='SUCCESS'
             )
 
@@ -599,7 +599,7 @@ class CashFlowService:
                 entity_type='CASH_FLOW',
                 entity_id=str(cf_id),
                 entity_name=cf.get('cash_flow_number', '') if cf else '',
-                action_description=f'Restored cash flow: {cf.get("cf_number") if cf else cf_id}',
+                action_description=f'Restored cash flow: {cf.get("cash_flow_number") if cf else cf_id}',
                 status='SUCCESS'
             )
 
