@@ -79,15 +79,16 @@
                             <div class="invalid-feedback">At least one security is required</div>
                         </div>
 
-                        <!-- Portfolio (Multi-select) -->
+                        <!-- Portfolio (Required - Multi-select) -->
                         <div class="col-md-6">
                             <label for="portfolio_name" class="form-label">
-                                Portfolio
+                                Portfolio <span class="text-danger">*</span>
                             </label>
                             <select class="form-select select2-portfolio"
                                     id="portfolio_name"
                                     name="portfolio_name"
-                                    multiple>
+                                    multiple
+                                    required>
                                 {% for portfolio in dropdown_options.portfolios %}
                                     <option value="{{ portfolio.value }}"
                                             data-currency="{{ portfolio.currency }}"
@@ -96,7 +97,8 @@
                                     </option>
                                 {% endfor %}
                             </select>
-                            <div class="form-text"><i class="bi bi-info-circle"></i> Select one or multiple portfolios (optional)</div>
+                            <div class="form-text"><i class="bi bi-info-circle"></i> Select one or multiple portfolios</div>
+                            <div class="invalid-feedback">At least one portfolio is required</div>
                         </div>
 
                         <!-- Corporate Action Type (Required) -->

@@ -31,7 +31,7 @@ CREATE TABLE cis_corporate_actions (
     ca_number STRING COMMENT 'Corporate Action Number (format: CA-YYYYMMDD-XXXXX)',
     ca_type STRING COMMENT 'Corporate Action Type (from UDF: DIVIDEND, STOCK_SPLIT, etc.)',
     security_name STRING COMMENT 'Security label/name from cis_security (comma-separated for multiple)',
-    portfolio_name STRING COMMENT 'Portfolio name(s) from cis_portfolio (comma-separated for multiple, NULL for all)',
+    portfolio_name STRING NOT NULL COMMENT 'Portfolio name(s) from cis_portfolio (comma-separated for multiple)',
     -- Key Dates
     announcement_date STRING COMMENT 'Announcement/Declaration Date (YYYY-MM-DD)',
     ex_date STRING COMMENT 'Ex-Dividend/Ex-Date (YYYY-MM-DD)',
