@@ -261,32 +261,41 @@ class CACashFlowService:
             ])
 
             # Build query for holdings as of ex_date
+            # Get the latest position version for each portfolio+security as of the ex_date
             query = f"""
             SELECT
-                portfolio_short_name,
-                security_label,
-                quantity,
-                average_cost,
-                security_currency
-            FROM {self.DATABASE}.{self.POSITION_TABLE}
-            WHERE ({security_conditions})
-              AND position_date <= '{as_of_date}'
-              AND status = 'OPEN'
-              AND is_active = true
-              AND (is_latest = true OR is_latest IS NULL)
-              AND quantity > 0
+                p.portfolio_short_name,
+                p.security_label,
+                p.quantity,
+                p.average_cost,
+                p.security_currency
+            FROM {self.DATABASE}.{self.POSITION_TABLE} p
+            INNER JOIN (
+                SELECT portfolio_short_name, security_label, MAX(position_date) as max_date
+                FROM {self.DATABASE}.{self.POSITION_TABLE}
+                WHERE ({security_conditions})
+                  AND position_date <= '{as_of_date}'
+                  AND status = 'OPEN'
+                  AND is_active = true
+                GROUP BY portfolio_short_name, security_label
+            ) latest ON p.portfolio_short_name = latest.portfolio_short_name
+                    AND p.security_label = latest.security_label
+                    AND p.position_date = latest.max_date
+            WHERE p.quantity > 0
+              AND p.status = 'OPEN'
+              AND p.is_active = true
             """
 
             # Filter by specific portfolios if provided
             if portfolio_name:
-                portfolios = [p.strip() for p in portfolio_name.split(',') if p.strip()]
+                portfolios = [pf.strip() for pf in portfolio_name.split(',') if pf.strip()]
                 if portfolios:
                     portfolio_conditions = " OR ".join([
-                        f"portfolio_short_name = '{self._escape(p)}'" for p in portfolios
+                        f"p.portfolio_short_name = '{self._escape(pf)}'" for pf in portfolios
                     ])
                     query += f" AND ({portfolio_conditions})"
 
-            query += " ORDER BY portfolio_short_name, security_label"
+            query += " ORDER BY p.portfolio_short_name, p.security_label"
 
             results = impala_manager.execute_query(query, database=self.DATABASE)
             return results if results else []
