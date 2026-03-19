@@ -41,11 +41,11 @@ CREATE TABLE IF NOT EXISTS gmp_cis.cis_ca_cash_flow_queue (
 
     -- Processing Status
     status STRING DEFAULT 'PENDING' COMMENT 'PENDING, PROCESSING, COMPLETED, FAILED',
-    retry_count INT DEFAULT 0 COMMENT 'Number of processing attempts',
+    retry_count BIGINT DEFAULT 0 COMMENT 'Number of processing attempts',
     error_message STRING COMMENT 'Error details if failed',
 
     -- Processing Metadata
-    cash_flows_created INT DEFAULT 0 COMMENT 'Number of cash flows created',
+    cash_flows_created BIGINT DEFAULT 0 COMMENT 'Number of cash flows created',
     total_amount DECIMAL(20,8) COMMENT 'Total amount of cash flows created',
     processed_at BIGINT COMMENT 'Timestamp when processing completed',
 
