@@ -80,6 +80,11 @@ class Command(BaseCommand):
             help='Retry previously failed queue entries'
         )
         parser.add_argument(
+            '--reset-stuck',
+            action='store_true',
+            help='Reset stuck PROCESSING entries back to PENDING (for entries stuck > 10 minutes)'
+        )
+        parser.add_argument(
             '--status',
             action='store_true',
             help='Show queue statistics only, do not process'
@@ -95,6 +100,7 @@ class Command(BaseCommand):
         run_by = options['user']
         batch_size = options['batch_size']
         retry_failed = options['retry_failed']
+        reset_stuck = options['reset_stuck']
         show_status = options['status']
 
         # Print header
@@ -113,6 +119,11 @@ class Command(BaseCommand):
             # Show status only
             if show_status:
                 self._show_statistics()
+                return
+
+            # Reset stuck PROCESSING entries
+            if reset_stuck:
+                self._reset_stuck_entries(verbose)
                 return
 
             # Retry failed entries
@@ -154,10 +165,21 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING('No statistics available'))
             return
 
-        self.stdout.write(f"  Pending:    {stats.get('pending', 0)}")
-        self.stdout.write(f"  Processing: {stats.get('processing', 0)}")
-        self.stdout.write(f"  Completed:  {stats.get('completed', 0)}")
-        self.stdout.write(f"  Failed:     {stats.get('failed', 0)}")
+        pending = stats.get('pending', 0)
+        processing = stats.get('processing', 0)
+        completed = stats.get('completed', 0)
+        failed = stats.get('failed', 0)
+
+        self.stdout.write(f"  Pending:    {pending}")
+        if processing > 0:
+            self.stdout.write(self.style.WARNING(f"  Processing: {processing}  (use --reset-stuck to reset)"))
+        else:
+            self.stdout.write(f"  Processing: {processing}")
+        self.stdout.write(f"  Completed:  {completed}")
+        if failed > 0:
+            self.stdout.write(self.style.ERROR(f"  Failed:     {failed}  (use --retry-failed to retry)"))
+        else:
+            self.stdout.write(f"  Failed:     {failed}")
         self.stdout.write('')
         self.stdout.write(f"  Total Cash Flows Created: {stats.get('total_cash_flows', 0)}")
         self.stdout.write(f"  Total Amount: {stats.get('total_amount', Decimal('0'))}")
@@ -278,6 +300,58 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.SUCCESS(f'  ✓ {message}'))
             else:
                 self.stdout.write(self.style.ERROR(f'  ✗ Failed: {message}'))
+
+    def _reset_stuck_entries(self, verbose: bool):
+        """Reset stuck PROCESSING entries back to PENDING."""
+        self.stdout.write(self.style.HTTP_INFO('\n--- Resetting Stuck PROCESSING Entries ---\n'))
+
+        try:
+            from core.repositories.impala_connection import impala_manager
+
+            # Find entries stuck in PROCESSING for more than 10 minutes
+            query = """
+            SELECT queue_id, ca_number, ca_type, security_name, created_at
+            FROM gmp_cis.cis_ca_cash_flow_queue
+            WHERE status = 'PROCESSING'
+            ORDER BY created_at ASC
+            """
+
+            stuck = impala_manager.execute_query(query, database='gmp_cis')
+
+            if not stuck:
+                self.stdout.write(self.style.SUCCESS('No stuck PROCESSING entries found'))
+                return
+
+            self.stdout.write(f'Found {len(stuck)} stuck PROCESSING entry(ies)\n')
+
+            reset_count = 0
+            for entry in stuck:
+                queue_id = entry.get('queue_id')
+                ca_number = entry.get('ca_number', 'Unknown')
+
+                self.stdout.write(f'Resetting: {ca_number} (queue_id: {queue_id})')
+
+                # Reset status to PENDING
+                update_sql = f"""
+                UPDATE gmp_cis.cis_ca_cash_flow_queue
+                SET status = 'PENDING',
+                    error_message = 'Reset from stuck PROCESSING state'
+                WHERE queue_id = {queue_id}
+                """
+
+                success = impala_manager.execute_write(update_sql, database='gmp_cis')
+
+                if success:
+                    self.stdout.write(self.style.SUCCESS(f'  ✓ Reset to PENDING'))
+                    reset_count += 1
+                else:
+                    self.stdout.write(self.style.ERROR(f'  ✗ Failed to reset'))
+
+            self.stdout.write(self.style.HTTP_INFO(f'\n--- Reset {reset_count} of {len(stuck)} entries ---'))
+            self.stdout.write(self.style.WARNING('\nRun without --reset-stuck to process these entries'))
+
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'Error resetting stuck entries: {str(e)}'))
 
     def _retry_failed_entries(self, verbose: bool):
         """Retry failed queue entries."""
