@@ -244,23 +244,23 @@ def cash_flow_pending_approvals(request):
 # ============================================================================
 
 @require_login
-def cash_flow_detail(request, cf_id):
+def cash_flow_detail(request, cash_flow_id):
     """
     View cash flow details.
     Requires: Authentication
     """
     try:
-        cf = cash_flow_service.get_by_id(int(cf_id))
+        cf = cash_flow_service.get_by_id(int(cash_flow_id))
 
         if not cf:
-            messages.error(request, f"Cash Flow {cf_id} not found")
+            messages.error(request, f"Cash Flow {cash_flow_id} not found")
             return redirect('trade:cash_flow_list')
 
         # Get user info for can_approve check
         username = request.session.get('user_login', 'anonymous')
 
         # Get history
-        history = cash_flow_service.get_history(int(cf_id))
+        history = cash_flow_service.get_history(int(cash_flow_id))
 
         context = {
             'cash_flow': cf,
@@ -349,15 +349,15 @@ def cash_flow_create(request):
 
 
 @require_login
-def cash_flow_edit(request, cf_id):
+def cash_flow_edit(request, cash_flow_id):
     """
     Edit existing cash flow.
     Requires: Authentication
     """
     try:
-        cf = cash_flow_service.get_by_id(int(cf_id))
+        cf = cash_flow_service.get_by_id(int(cash_flow_id))
         if not cf:
-            messages.error(request, f"Cash Flow {cf_id} not found")
+            messages.error(request, f"Cash Flow {cash_flow_id} not found")
             return redirect('trade:cash_flow_list')
 
         username = request.session.get('user_login', 'anonymous')
@@ -399,7 +399,7 @@ def cash_flow_edit(request, cf_id):
                         cf_data[field] = None
 
             success, error_msg = cash_flow_service.update(
-                cf_id=int(cf_id),
+                cf_id=int(cash_flow_id),
                 cf_data=cf_data,
                 user_id=user_id,
                 username=username,
@@ -407,7 +407,7 @@ def cash_flow_edit(request, cf_id):
             )
 
             if success:
-                messages.success(request, f"Cash Flow '{cf.get('cf_number', cf_id)}' updated successfully")
+                messages.success(request, f"Cash Flow '{cf.get('cash_flow_number', cash_flow_id)}' updated successfully")
                 return redirect('trade:cash_flow_list')
             else:
                 messages.error(request, error_msg)
@@ -434,7 +434,7 @@ def cash_flow_edit(request, cf_id):
 
 @require_login
 @require_http_methods(["POST"])
-def cash_flow_approve(request, cf_id):
+def cash_flow_approve(request, cash_flow_id):
     """
     Approve cash flow (Checker action).
     POST with action='approve' or action='reject'
@@ -449,7 +449,7 @@ def cash_flow_approve(request, cf_id):
 
         if action == 'approve':
             success, error_msg = cash_flow_service.approve(
-                cf_id=int(cf_id),
+                cf_id=int(cash_flow_id),
                 user_id=user_id,
                 username=username,
                 user_email=user_email,
@@ -457,13 +457,13 @@ def cash_flow_approve(request, cf_id):
             )
 
             if success:
-                messages.success(request, f"Cash Flow {cf_id} approved successfully")
+                messages.success(request, f"Cash Flow {cash_flow_id} approved successfully")
             else:
                 messages.error(request, error_msg)
         else:
             # Reject action
             success, error_msg = cash_flow_service.reject(
-                cf_id=int(cf_id),
+                cf_id=int(cash_flow_id),
                 user_id=user_id,
                 username=username,
                 user_email=user_email,
@@ -471,7 +471,7 @@ def cash_flow_approve(request, cf_id):
             )
 
             if success:
-                messages.success(request, f"Cash Flow {cf_id} rejected")
+                messages.success(request, f"Cash Flow {cash_flow_id} rejected")
             else:
                 messages.error(request, error_msg)
 
@@ -484,7 +484,7 @@ def cash_flow_approve(request, cf_id):
 
 @require_login
 @require_http_methods(["POST"])
-def cash_flow_delete(request, cf_id):
+def cash_flow_delete(request, cash_flow_id):
     """
     Soft delete cash flow (POST only).
     Requires: Authentication
@@ -495,14 +495,14 @@ def cash_flow_delete(request, cf_id):
         user_email = request.session.get('user_email', '')
 
         success, error_msg = cash_flow_service.delete(
-            cf_id=int(cf_id),
+            cf_id=int(cash_flow_id),
             user_id=user_id,
             username=username,
             user_email=user_email
         )
 
         if success:
-            messages.success(request, f"Cash Flow {cf_id} deleted successfully")
+            messages.success(request, f"Cash Flow {cash_flow_id} deleted successfully")
         else:
             messages.error(request, error_msg)
 
@@ -515,7 +515,7 @@ def cash_flow_delete(request, cf_id):
 
 @require_login
 @require_http_methods(["POST"])
-def cash_flow_restore(request, cf_id):
+def cash_flow_restore(request, cash_flow_id):
     """
     Restore soft-deleted cash flow (POST only).
     Requires: Authentication
@@ -526,14 +526,14 @@ def cash_flow_restore(request, cf_id):
         user_email = request.session.get('user_email', '')
 
         success, error_msg = cash_flow_service.restore(
-            cf_id=int(cf_id),
+            cf_id=int(cash_flow_id),
             user_id=user_id,
             username=username,
             user_email=user_email
         )
 
         if success:
-            messages.success(request, f"Cash Flow {cf_id} restored successfully")
+            messages.success(request, f"Cash Flow {cash_flow_id} restored successfully")
         else:
             messages.error(request, error_msg)
 
