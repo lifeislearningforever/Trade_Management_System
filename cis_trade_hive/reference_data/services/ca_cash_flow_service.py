@@ -66,12 +66,13 @@ class CACashFlowService:
                 logger.info(f"CA type {ca_type} does not generate cash flows, skipping queue")
                 return True, None
 
+            # Note: portfolio_name removed - CA applies at security level
+            # EOD job will find all portfolios holding the security from positions
             queue_data = {
                 'ca_id': ca_id,
                 'ca_number': ca_data.get('ca_number'),
                 'ca_type': ca_type,
                 'security_name': ca_data.get('security_name'),
-                'portfolio_name': ca_data.get('portfolio_name'),
                 'ex_date': ca_data.get('ex_date'),
                 'record_date': ca_data.get('record_date'),
                 'payment_date': ca_data.get('payment_date'),
@@ -118,7 +119,6 @@ class CACashFlowService:
 
             ca_type = queue_entry.get('ca_type')
             security_name = queue_entry.get('security_name')
-            portfolio_name = queue_entry.get('portfolio_name')
             ex_date = queue_entry.get('ex_date')
             price = Decimal(str(queue_entry.get('price') or 0))
             currency = queue_entry.get('currency')
@@ -133,10 +133,9 @@ class CACashFlowService:
                     ca_cash_flow_queue_repository.mark_failed(queue_id, error_msg)
                 return False, error_msg, 0, Decimal('0')
 
-            # Get affected portfolios with their holdings
+            # Get ALL portfolios holding this security (CA applies to security level)
             holdings = self.get_holdings_for_ca(
                 security_name=security_name,
-                portfolio_name=portfolio_name,
                 as_of_date=ex_date
             )
 
@@ -233,15 +232,14 @@ class CACashFlowService:
     def get_holdings_for_ca(
         self,
         security_name: str,
-        portfolio_name: str = None,
         as_of_date: str = None
     ) -> List[Dict[str, Any]]:
         """
-        Get portfolio holdings for a security as of a specific date.
+        Get ALL portfolio holdings for a security as of a specific date.
+        CA applies at security level - finds all portfolios holding the security.
 
         Args:
             security_name: Security name (comma-separated if multiple)
-            portfolio_name: Portfolio name filter (comma-separated if multiple, None for all)
             as_of_date: Date to check holdings (YYYY-MM-DD), defaults to today
 
         Returns:
@@ -262,6 +260,7 @@ class CACashFlowService:
 
             # Build query for holdings as of ex_date
             # Get the latest position version for each portfolio+security as of the ex_date
+            # This finds ALL portfolios holding the security - no portfolio filter
             query = f"""
             SELECT
                 p.portfolio_short_name,
@@ -284,20 +283,11 @@ class CACashFlowService:
             WHERE p.quantity > 0
               AND p.status = 'OPEN'
               AND p.is_active = true
+            ORDER BY p.portfolio_short_name, p.security_label
             """
 
-            # Filter by specific portfolios if provided
-            if portfolio_name:
-                portfolios = [pf.strip() for pf in portfolio_name.split(',') if pf.strip()]
-                if portfolios:
-                    portfolio_conditions = " OR ".join([
-                        f"p.portfolio_short_name = '{self._escape(pf)}'" for pf in portfolios
-                    ])
-                    query += f" AND ({portfolio_conditions})"
-
-            query += " ORDER BY p.portfolio_short_name, p.security_label"
-
             results = impala_manager.execute_query(query, database=self.DATABASE)
+            logger.info(f"Found {len(results) if results else 0} portfolios holding security {security_name} as of {as_of_date}")
             return results if results else []
 
         except Exception as e:

@@ -65,7 +65,7 @@ class CACashFlowQueueRepository:
             insert_sql = f"""
             UPSERT INTO {CACashFlowQueueRepository.DATABASE}.{CACashFlowQueueRepository.TABLE_NAME} (
                 queue_id, ca_id, ca_number, ca_type,
-                security_name, portfolio_name,
+                security_name,
                 ex_date, record_date, payment_date,
                 price, currency,
                 status, retry_count, error_message,
@@ -77,7 +77,6 @@ class CACashFlowQueueRepository:
                 {CACashFlowQueueRepository.escape_value(queue_data.get('ca_number'))},
                 {CACashFlowQueueRepository.escape_value(queue_data.get('ca_type'))},
                 {CACashFlowQueueRepository.escape_value(queue_data.get('security_name'))},
-                {CACashFlowQueueRepository.escape_value(queue_data.get('portfolio_name'))},
                 {CACashFlowQueueRepository.escape_value(queue_data.get('ex_date'))},
                 {CACashFlowQueueRepository.escape_value(queue_data.get('record_date'))},
                 {CACashFlowQueueRepository.escape_value(queue_data.get('payment_date'))},

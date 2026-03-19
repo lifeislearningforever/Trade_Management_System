@@ -26,9 +26,8 @@ CREATE TABLE IF NOT EXISTS gmp_cis.cis_ca_cash_flow_queue (
     ca_number STRING COMMENT 'Corporate Action number for display',
     ca_type STRING NOT NULL COMMENT 'Type: DIVIDEND, INTEREST, COUPON, etc.',
 
-    -- Security & Portfolio
+    -- Security (CA is at security level - portfolios determined from positions)
     security_name STRING NOT NULL COMMENT 'Security name(s) - comma separated if multiple',
-    portfolio_name STRING COMMENT 'Portfolio name(s) - comma separated if multiple, NULL for all',
 
     -- Key Dates
     ex_date STRING COMMENT 'Ex-dividend date (YYYY-MM-DD)',

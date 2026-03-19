@@ -51,10 +51,10 @@
             <form method="post" class="needs-validation" novalidate>
                 {% csrf_token %}
 
-                <!-- Security & Portfolio Section -->
+                <!-- Security & CA Type Section -->
                 <div class="mb-4">
                     <h6 class="text-muted mb-3 border-bottom pb-2">
-                        <i class="bi bi-shield-check"></i> Security & Portfolio Information
+                        <i class="bi bi-shield-check"></i> Security Information
                     </h6>
                     <div class="row g-3">
                         <!-- Security (Required - Multi-select) -->
@@ -75,30 +75,8 @@
                                     </option>
                                 {% endfor %}
                             </select>
-                            <div class="form-text"><i class="bi bi-info-circle"></i> Select one or multiple securities</div>
+                            <div class="form-text"><i class="bi bi-info-circle"></i> Select one or multiple securities. Cash flows will be created for all portfolios holding these securities.</div>
                             <div class="invalid-feedback">At least one security is required</div>
-                        </div>
-
-                        <!-- Portfolio (Required - Multi-select) -->
-                        <div class="col-md-6">
-                            <label for="portfolio_name" class="form-label">
-                                Portfolio <span class="text-danger">*</span>
-                            </label>
-                            <select class="form-select select2-portfolio"
-                                    id="portfolio_name"
-                                    name="portfolio_name"
-                                    multiple
-                                    required>
-                                {% for portfolio in dropdown_options.portfolios %}
-                                    <option value="{{ portfolio.value }}"
-                                            data-currency="{{ portfolio.currency }}"
-                                            {% if portfolio.value in corporate_action.portfolio_name_list %}selected{% endif %}>
-                                        {{ portfolio.label }}
-                                    </option>
-                                {% endfor %}
-                            </select>
-                            <div class="form-text"><i class="bi bi-info-circle"></i> Select one or multiple portfolios</div>
-                            <div class="invalid-feedback">At least one portfolio is required</div>
                         </div>
 
                         <!-- Corporate Action Type (Required) -->
@@ -360,17 +338,6 @@ $(document).ready(function() {
         $(this).select2({
             theme: 'bootstrap-5',
             placeholder: 'Select Securities...',
-            allowClear: true,
-            width: '100%',
-            closeOnSelect: false
-        });
-    });
-
-    // Initialize portfolio dropdown with Select2 (multi-select)
-    $('.select2-portfolio').each(function() {
-        $(this).select2({
-            theme: 'bootstrap-5',
-            placeholder: 'Select Portfolios...',
             allowClear: true,
             width: '100%',
             closeOnSelect: false

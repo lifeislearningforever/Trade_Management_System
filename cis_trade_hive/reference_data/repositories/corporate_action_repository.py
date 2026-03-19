@@ -204,11 +204,11 @@ class CorporateActionRepository:
             values = [str(ca_id)]
 
             # Add all business fields from ca_data
+            # Note: portfolio_name removed - CA applies at security level
             field_mapping = {
                 'ca_number': str,
                 'ca_type': str,
                 'security_name': str,
-                'portfolio_name': str,
                 'announcement_date': str,
                 'ex_date': str,
                 'record_date': str,
@@ -285,8 +285,9 @@ class CorporateActionRepository:
             set_clauses = []
 
             # Update business fields if provided
+            # Note: portfolio_name removed - CA applies at security level
             updatable_fields = [
-                'ca_number', 'ca_type', 'security_name', 'portfolio_name',
+                'ca_number', 'ca_type', 'security_name',
                 'announcement_date', 'ex_date', 'record_date', 'payment_date',
                 'effective_date', 'subscription_start_date', 'subscription_end_date',
                 'price', 'currency', 'status',
