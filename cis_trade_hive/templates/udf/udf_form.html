@@ -11,20 +11,14 @@
 <link href="{% static 'css/select2-custom.css' %}" rel="stylesheet" />
 {% endblock %}
 
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'udf:list' %}">User Defined Fields</a></li>
+    <li class="breadcrumb-item active">{% if udf %}Edit{% else %}Create{% endif %}</li>
+{% endblock %}
+
 {% block content %}
 <div class="container-fluid">
-    <div class="row mb-4">
-        <div class="col-md-12">
-            <nav aria-label="breadcrumb">
-                <ol class="breadcrumb">
-                    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Home</a></li>
-                    <li class="breadcrumb-item"><a href="{% url 'udf:list' %}">User Defined Fields</a></li>
-                    <li class="breadcrumb-item active">{% if udf %}Edit{% else %}Create{% endif %}</li>
-                </ol>
-            </nav>
-        </div>
-    </div>
-
     <div class="row">
         <div class="col-md-12">
             <div class="card shadow-sm">
