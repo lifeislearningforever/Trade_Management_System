@@ -33,6 +33,7 @@ class TradeKuduRepository:
     HISTORY_TABLE = 'cis_trade_history'
     NOTE_TABLE = 'cis_trade_note'
     TRADE_POSITION_TABLE = 'cis_trade_position'
+    EVENT_QUEUE_TABLE = 'cis_trade_event_queue'
     SEQUENCE_TABLE = 'cis_sequence'
 
     # Trade Types
@@ -552,6 +553,250 @@ class TradeKuduRepository:
         except Exception as e:
             logger.error(f"Error inserting trade: {str(e)}")
             raise
+
+    def insert_trade_fast(self, trade_data: Dict[str, Any], created_by: str) -> Optional[int]:
+        """
+        Fast trade insert - only saves core trade data, queues everything else.
+
+        This method is optimized for speed by:
+        1. Only validating and inserting the trade record
+        2. Queuing history, audit, settlement, and AVP for async processing
+
+        Returns trade_id if successful, None otherwise.
+        """
+        try:
+            # Validate first - now returns entity details to avoid duplicate queries
+            is_valid, errors, entity_details = self.validate_trade_data(trade_data)
+            if not is_valid:
+                logger.error(f"Trade validation failed: {errors}")
+                raise ValueError("; ".join(errors))
+
+            # Generate IDs
+            trade_id = self.get_next_id('trade_id')
+            deal_number = trade_data.get('deal_number') or f"DEAL-{datetime.now().strftime('%Y%m%d')}-{trade_id % 10000}"
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            # Use entity details from validation (avoids duplicate DB queries)
+            portfolio_details = entity_details.get('portfolio') or {}
+            security_details = entity_details.get('security') or {}
+
+            # Build column and value lists
+            columns = [
+                'trade_id', 'trade_type', 'deal_number',
+                'portfolio_short_name', 'portfolio_full_name',
+                'security_label', 'security_full_name', 'security_type',
+                'currency_code',
+                'trade_status', 'trade_date', 'settle_date',
+                'quantity', 'face_value', 'lot', 'price',
+                'commission', 'accrued_interest', 'sec_fee',
+                'other_charges', 'total_amount',
+                'open_close_position', 'extension', 'brokers', 'broker_name',
+                'gl_fund_type', 'gl_cost_centre', 'gl_account_code',
+                'contract_ref', 'fd_receipt', 'org_pur_date',
+                'open_fx_rate', 'curr_dealing', 'open_dealing',
+                'input_tax_oth', 'qty_entitled',
+                'selling_rule', 'cash_balance', 'custodian', 'amor_accr_method',
+                'remarks', 'counterparty',
+                'udf_fund_type', 'udf_section_31_26', 'udf_sub_custodian',
+                'udf_disclosure_req', 'udf_counter_pledged', 'udf_revision_code',
+                'udf_uobn_uobn_hk', 'udf_income_exp_type', 'udf_currency_hedge',
+                'charge_fee_type', 'charge_exchange', 'charge_country',
+                'charge_fee_rule', 'charge_fee_value',
+                'calculated_commission', 'calculated_clearing_fee',
+                'calculated_trading_fee', 'calculated_gst', 'calculated_other_fees',
+                'total_calculated_charges', 'charges_auto_calculated',
+                'status', 'is_active', 'is_deleted', 'src_system',
+                'created_by', 'created_at', 'updated_by', 'updated_at'
+            ]
+
+            values = [
+                str(trade_id),
+                self.escape_value(trade_data.get('trade_type')),
+                self.escape_value(deal_number),
+                self.escape_value(trade_data.get('portfolio_short_name')),
+                self.escape_value(portfolio_details.get('name', '')),
+                self.escape_value(trade_data.get('security_label')),
+                self.escape_value(security_details.get('security_name', '')),
+                self.escape_value(security_details.get('security_type', '')),
+                self.escape_value(trade_data.get('currency_code', '')),
+                self.escape_value(trade_data.get('trade_status', '')),
+                self.escape_value(trade_data.get('trade_date')),
+                self.escape_value(trade_data.get('settle_date', '')),
+                self.to_decimal(trade_data.get('quantity'), 0),
+                self.to_decimal(trade_data.get('face_value'), 0),
+                self.to_decimal(trade_data.get('lot'), 0),
+                self.to_decimal(trade_data.get('price'), 0),
+                self.to_decimal(trade_data.get('commission'), 0),
+                self.to_decimal(trade_data.get('accrued_interest'), 0),
+                self.to_decimal(trade_data.get('sec_fee'), 0),
+                self.to_decimal(trade_data.get('other_charges'), 0),
+                self.to_decimal(trade_data.get('total_amount'), 0),
+                self.escape_value(trade_data.get('open_close_position', '')),
+                self.escape_value(trade_data.get('extension', '')),
+                self.escape_value(trade_data.get('brokers', '')),
+                self.escape_value(trade_data.get('broker_name', '')),
+                self.escape_value(trade_data.get('gl_fund_type', '')),
+                self.escape_value(trade_data.get('gl_cost_centre', '')),
+                self.escape_value(trade_data.get('gl_account_code', '')),
+                self.escape_value(trade_data.get('contract_ref', '')),
+                self.escape_value(trade_data.get('fd_receipt', '')),
+                self.escape_value(trade_data.get('org_pur_date', '')),
+                self.to_decimal(trade_data.get('open_fx_rate'), 0),
+                self.to_decimal(trade_data.get('curr_dealing'), 0),
+                self.to_decimal(trade_data.get('open_dealing'), 0),
+                self.to_decimal(trade_data.get('input_tax_oth'), 0),
+                self.to_decimal(trade_data.get('qty_entitled'), 0),
+                self.escape_value(trade_data.get('selling_rule', '')),
+                self.to_decimal(trade_data.get('cash_balance'), 0),
+                self.escape_value(trade_data.get('custodian', '')),
+                self.escape_value(trade_data.get('amor_accr_method', '')),
+                self.escape_value(trade_data.get('remarks', '')),
+                self.escape_value(trade_data.get('counterparty', '')),
+                self.escape_value(trade_data.get('udf_fund_type', '')),
+                self.escape_value(trade_data.get('udf_section_31_26', '')),
+                self.escape_value(trade_data.get('udf_sub_custodian', '')),
+                str(trade_data.get('udf_disclosure_req', False)).lower(),
+                str(trade_data.get('udf_counter_pledged', False)).lower(),
+                self.escape_value(trade_data.get('udf_revision_code', '')),
+                self.escape_value(trade_data.get('udf_uobn_uobn_hk', '')),
+                self.escape_value(trade_data.get('udf_income_exp_type', '')),
+                str(trade_data.get('udf_currency_hedge', False)).lower(),
+                self.escape_value(trade_data.get('charge_fee_type', '')),
+                self.escape_value(trade_data.get('charge_exchange', '')),
+                self.escape_value(trade_data.get('charge_country', '')),
+                self.escape_value(trade_data.get('charge_fee_rule', '')),
+                self.to_decimal(trade_data.get('charge_fee_value'), 0),
+                self.to_decimal(trade_data.get('calculated_commission'), 0),
+                self.to_decimal(trade_data.get('calculated_clearing_fee'), 0),
+                self.to_decimal(trade_data.get('calculated_trading_fee'), 0),
+                self.to_decimal(trade_data.get('calculated_gst'), 0),
+                self.to_decimal(trade_data.get('calculated_other_fees'), 0),
+                self.to_decimal(trade_data.get('total_calculated_charges'), 0),
+                str(trade_data.get('charges_auto_calculated', False)).lower(),
+                f"'{self.STATUS_INITIAL}'",
+                'false',
+                'false',
+                "'CIS'",
+                self.escape_value(created_by),
+                f"'{timestamp}'",
+                self.escape_value(created_by),
+                f"'{timestamp}'"
+            ]
+
+            # Single UPSERT for trade - this is the only blocking operation
+            query = f"""
+            UPSERT INTO {self.DATABASE}.{self.TABLE_NAME}
+            ({', '.join(columns)})
+            VALUES ({', '.join(values)})
+            """
+
+            success = impala_manager.execute_write(query, database=self.DATABASE)
+
+            if success:
+                logger.info(f"Created trade {trade_id} ({deal_number}) with INITIAL status (fast mode)")
+
+                # Queue all post-trade events asynchronously
+                self._queue_trade_events(
+                    trade_id=trade_id,
+                    deal_number=deal_number,
+                    trade_data=trade_data,
+                    created_by=created_by,
+                    portfolio_details=portfolio_details,
+                    security_details=security_details
+                )
+
+                return trade_id
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error in fast trade insert: {str(e)}")
+            raise
+
+    def _queue_trade_events(
+        self,
+        trade_id: int,
+        deal_number: str,
+        trade_data: Dict[str, Any],
+        created_by: str,
+        portfolio_details: Dict[str, Any],
+        security_details: Dict[str, Any]
+    ) -> None:
+        """
+        Queue trade events for async processing (non-blocking).
+        Events: HISTORY, SETTLEMENT (includes AVP)
+
+        Note: Audit is handled separately via log_action_async in views.
+        """
+        try:
+            timestamp = datetime.now()
+            base_event_id = int(timestamp.timestamp() * 1000)
+
+            # Prepare event data for settlement/AVP processing
+            event_data = {
+                'trade_id': trade_id,
+                'deal_number': deal_number,
+                'trade_type': trade_data.get('trade_type'),
+                'portfolio_short_name': trade_data.get('portfolio_short_name'),
+                'security_label': trade_data.get('security_label'),
+                'quantity': str(trade_data.get('quantity', 0)),
+                'price': str(trade_data.get('price', 0)),
+                'trade_date': trade_data.get('trade_date'),
+                'settle_date': trade_data.get('settle_date'),
+                'commission': str(trade_data.get('commission', 0)),
+                'sec_fee': str(trade_data.get('sec_fee', 0)),
+                'other_charges': str(trade_data.get('other_charges', 0)),
+                'custodian': trade_data.get('custodian', ''),
+                'sub_custodian': trade_data.get('udf_sub_custodian', ''),
+                'security_currency': security_details.get('currency_code'),
+                'portfolio_currency': portfolio_details.get('currency'),
+                'isin': security_details.get('isin'),
+                'security_name': security_details.get('security_name'),
+            }
+
+            # Queue HISTORY event
+            history_query = f"""
+            UPSERT INTO {self.DATABASE}.{self.EVENT_QUEUE_TABLE}
+            (event_id, trade_id, deal_number, event_type, event_data, status, retry_count, created_by, created_at)
+            VALUES (
+                {base_event_id},
+                {trade_id},
+                {self.escape_value(deal_number)},
+                'HISTORY',
+                {self.escape_value(json.dumps({'action': 'CREATE', 'old_status': None, 'new_status': self.STATUS_INITIAL}))},
+                'PENDING',
+                0,
+                {self.escape_value(created_by)},
+                '{timestamp.strftime('%Y-%m-%d %H:%M:%S')}'
+            )
+            """
+
+            # Queue SETTLEMENT event (includes AVP calculation)
+            settlement_query = f"""
+            UPSERT INTO {self.DATABASE}.{self.EVENT_QUEUE_TABLE}
+            (event_id, trade_id, deal_number, event_type, event_data, status, retry_count, created_by, created_at)
+            VALUES (
+                {base_event_id + 1},
+                {trade_id},
+                {self.escape_value(deal_number)},
+                'SETTLEMENT',
+                {self.escape_value(json.dumps(event_data, default=str))},
+                'PENDING',
+                0,
+                {self.escape_value(created_by)},
+                '{timestamp.strftime('%Y-%m-%d %H:%M:%S')}'
+            )
+            """
+
+            # Execute both queue inserts asynchronously (non-blocking)
+            impala_manager.execute_write_async(history_query, database=self.DATABASE)
+            impala_manager.execute_write_async(settlement_query, database=self.DATABASE)
+
+            logger.debug(f"Queued HISTORY and SETTLEMENT events for trade {trade_id}")
+
+        except Exception as e:
+            # Log but don't fail - trade is already saved
+            logger.error(f"Error queuing trade events for {trade_id}: {str(e)}")
 
     def update_trade(self, trade_id: int, trade_data: Dict[str, Any], updated_by: str) -> bool:
         """

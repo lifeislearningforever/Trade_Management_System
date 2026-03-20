@@ -478,13 +478,13 @@ def trade_create(request, trade_type=None):
                 }
                 return render(request, 'trade/trade_form.html', context)
 
-            # Insert trade
-            trade_id = trade_kudu_repository.insert_trade(trade_data, created_by=user_info['username'])
+            # Insert trade using FAST method (decoupled - queues history/settlement/AVP)
+            trade_id = trade_kudu_repository.insert_trade_fast(trade_data, created_by=user_info['username'])
 
             if not trade_id:
                 raise Exception("Failed to create trade")
 
-            # Use async audit logging for better performance (non-blocking)
+            # Audit logging is also async (non-blocking)
             audit_log_kudu_repository.log_action_async(
                 user_id=user_info['user_id'],
                 username=user_info['username'],
