@@ -554,31 +554,57 @@ class TradeKuduRepository:
             logger.error(f"Error inserting trade: {str(e)}")
             raise
 
-    def insert_trade_fast(self, trade_data: Dict[str, Any], created_by: str) -> Optional[int]:
+    def insert_trade_fast(
+        self,
+        trade_data: Dict[str, Any],
+        created_by: str,
+        skip_validation: bool = False
+    ) -> Optional[int]:
         """
         Fast trade insert - only saves core trade data, queues everything else.
 
         This method is optimized for speed by:
-        1. Only validating and inserting the trade record
-        2. Queuing history, audit, settlement, and AVP for async processing
+        1. Optionally skipping validation (if already done in view)
+        2. Only inserting the trade record (single DB write)
+        3. Queuing history, audit, settlement, and AVP for async processing
+
+        Args:
+            trade_data: Trade data dictionary
+            created_by: Username of creator
+            skip_validation: If True, skip DB validation (use when already validated)
 
         Returns trade_id if successful, None otherwise.
         """
         try:
-            # Validate first - now returns entity details to avoid duplicate queries
-            is_valid, errors, entity_details = self.validate_trade_data(trade_data)
-            if not is_valid:
-                logger.error(f"Trade validation failed: {errors}")
-                raise ValueError("; ".join(errors))
+            portfolio_details = {}
+            security_details = {}
+
+            if not skip_validation:
+                # Validate first - now returns entity details to avoid duplicate queries
+                is_valid, errors, entity_details = self.validate_trade_data(trade_data)
+                if not is_valid:
+                    logger.error(f"Trade validation failed: {errors}")
+                    raise ValueError("; ".join(errors))
+                portfolio_details = entity_details.get('portfolio') or {}
+                security_details = entity_details.get('security') or {}
+            else:
+                # Basic required field check only (no DB queries)
+                errors = []
+                if not trade_data.get('portfolio_short_name'):
+                    errors.append("Portfolio is required")
+                if not trade_data.get('security_label'):
+                    errors.append("Security is required")
+                if not trade_data.get('trade_type'):
+                    errors.append("Trade type is required")
+                if not trade_data.get('trade_date'):
+                    errors.append("Trade date is required")
+                if errors:
+                    raise ValueError("; ".join(errors))
 
             # Generate IDs
             trade_id = self.get_next_id('trade_id')
             deal_number = trade_data.get('deal_number') or f"DEAL-{datetime.now().strftime('%Y%m%d')}-{trade_id % 10000}"
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-            # Use entity details from validation (avoids duplicate DB queries)
-            portfolio_details = entity_details.get('portfolio') or {}
-            security_details = entity_details.get('security') or {}
 
             # Build column and value lists
             columns = [
