@@ -53,7 +53,8 @@ class MultiCurrencyService:
         self,
         from_currency: str,
         to_currency: str,
-        rate_date: str = None
+        rate_date: str = None,
+        strict: bool = False
     ) -> Tuple[Decimal, str]:
         """
         Get FX rate between two currencies.
@@ -62,15 +63,21 @@ class MultiCurrencyService:
             from_currency: Source currency code (e.g., 'USD')
             to_currency: Target currency code (e.g., 'SGD')
             rate_date: Optional date for historical rate (YYYY-MM-DD)
+            strict: If True, raise error when rate not found instead of defaulting to 1.0
 
         Returns:
             Tuple of (rate, rate_date_used)
+
+        Raises:
+            ValueError: If strict=True and no rate is found
         """
         # Same currency - no conversion
         if from_currency == to_currency:
             return Decimal('1'), rate_date or datetime.now().strftime('%Y-%m-%d')
 
         if not from_currency or not to_currency:
+            if strict:
+                raise ValueError(f"Currency codes are required. Got from='{from_currency}', to='{to_currency}'")
             return Decimal('1'), rate_date or datetime.now().strftime('%Y-%m-%d')
 
         try:
@@ -105,12 +112,24 @@ class MultiCurrencyService:
                     self._cache_rate(cache_key, (triangulated, rate_date or datetime.now().strftime('%Y-%m-%d')))
                     return triangulated, rate_date or datetime.now().strftime('%Y-%m-%d')
 
-            # Default to 1 if no rate found
+            # Rate not found
+            if strict:
+                raise ValueError(
+                    f"FX rate not found for {from_currency}->{to_currency}. "
+                    f"Please ensure rate exists in FX rates table."
+                )
+
+            # Default to 1 if no rate found (legacy behavior for non-strict mode)
             logger.warning(f"No FX rate found for {from_currency}-{to_currency}, using 1.0")
             return Decimal('1'), rate_date or datetime.now().strftime('%Y-%m-%d')
 
+        except ValueError:
+            # Re-raise ValueError (from strict mode)
+            raise
         except Exception as e:
             logger.error(f"Error getting FX rate: {str(e)}")
+            if strict:
+                raise ValueError(f"Error fetching FX rate for {from_currency}->{to_currency}: {str(e)}")
             return Decimal('1'), rate_date or datetime.now().strftime('%Y-%m-%d')
 
     def _lookup_rate(

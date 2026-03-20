@@ -70,6 +70,11 @@ class TradeValidationRepositoryTestCase(TestCase):
         from trade.repositories.trade_validation_repository import (
             trade_validation_repository, TradeValidationRepository
         )
+        from core.repositories.impala_connection import query_cache
+
+        # Clear cache before each test to ensure isolated tests
+        query_cache.clear()
+
         self.repository = trade_validation_repository
         self.TradeValidationRepository = TradeValidationRepository
 
@@ -323,7 +328,8 @@ class TradeValidationRepositoryTestCase(TestCase):
         result = self.repository.validate_security('SEC001')
 
         self.assertFalse(result.is_valid)
-        self.assertIn('Only ACTIVE or APPROVED', result.message)
+        # The message now includes INITIAL and VALIDATED as valid statuses
+        self.assertIn('Only ACTIVE, APPROVED, INITIAL, or VALIDATED', result.message)
 
     @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_validate_security_approved_status(self, mock_execute):
@@ -758,7 +764,7 @@ class TradeValidationRepositoryTestCase(TestCase):
 
     def test_security_table_constant(self):
         """Test SECURITY_TABLE constant"""
-        self.assertEqual(self.TradeValidationRepository.SECURITY_TABLE, 'cis_security_kudu')
+        self.assertEqual(self.TradeValidationRepository.SECURITY_TABLE, 'cis_security')
 
     def test_counterparty_table_constant(self):
         """Test COUNTERPARTY_TABLE constant"""

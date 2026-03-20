@@ -759,6 +759,7 @@ class TradeKuduRepository:
             base_event_id = int(timestamp.timestamp() * 1000)
 
             # Prepare event data for settlement/AVP processing
+            # Include ALL charges (manual + auto-calculated) for accurate AVP
             event_data = {
                 'trade_id': trade_id,
                 'deal_number': deal_number,
@@ -769,9 +770,18 @@ class TradeKuduRepository:
                 'price': str(trade_data.get('price', 0)),
                 'trade_date': trade_data.get('trade_date'),
                 'settle_date': trade_data.get('settle_date'),
-                'commission': str(trade_data.get('commission', 0)),
-                'sec_fee': str(trade_data.get('sec_fee', 0)),
-                'other_charges': str(trade_data.get('other_charges', 0)),
+                # Manual charges
+                'commission': str(trade_data.get('commission', 0) or 0),
+                'sec_fee': str(trade_data.get('sec_fee', 0) or 0),
+                'other_charges': str(trade_data.get('other_charges', 0) or 0),
+                # Auto-calculated charges (include ALL for accurate AVP)
+                'calculated_commission': str(trade_data.get('calculated_commission', 0) or 0),
+                'calculated_clearing_fee': str(trade_data.get('calculated_clearing_fee', 0) or 0),
+                'calculated_trading_fee': str(trade_data.get('calculated_trading_fee', 0) or 0),
+                'calculated_gst': str(trade_data.get('calculated_gst', 0) or 0),
+                'calculated_other_fees': str(trade_data.get('calculated_other_fees', 0) or 0),
+                'total_calculated_charges': str(trade_data.get('total_calculated_charges', 0) or 0),
+                # Other fields
                 'custodian': trade_data.get('custodian', ''),
                 'sub_custodian': trade_data.get('udf_sub_custodian', ''),
                 'security_currency': security_details.get('currency_code'),
@@ -814,15 +824,32 @@ class TradeKuduRepository:
             )
             """
 
-            # Execute both queue inserts asynchronously (non-blocking)
-            impala_manager.execute_write_async(history_query, database=self.DATABASE)
-            impala_manager.execute_write_async(settlement_query, database=self.DATABASE)
+            # Execute both queue inserts asynchronously with retry callback
+            def on_queue_failure(success: bool, event_type: str, tid: int):
+                if not success:
+                    logger.error(f"CRITICAL: Failed to queue {event_type} event for trade {tid}. "
+                                 f"Manual intervention required - check cis_trade_event_queue.")
+                    # TODO: Could also write to a dead-letter file or alert system
+
+            impala_manager.execute_write_async(
+                history_query,
+                database=self.DATABASE,
+                callback=lambda s: on_queue_failure(s, 'HISTORY', trade_id)
+            )
+            impala_manager.execute_write_async(
+                settlement_query,
+                database=self.DATABASE,
+                callback=lambda s: on_queue_failure(s, 'SETTLEMENT', trade_id)
+            )
 
             logger.debug(f"Queued HISTORY and SETTLEMENT events for trade {trade_id}")
 
         except Exception as e:
-            # Log but don't fail - trade is already saved
-            logger.error(f"Error queuing trade events for {trade_id}: {str(e)}")
+            # Log ERROR but don't fail - trade is already saved
+            # This is a critical issue that needs manual intervention
+            logger.error(f"CRITICAL: Failed to queue trade events for {trade_id}: {str(e)}. "
+                         f"Trade saved but background processing will NOT occur. "
+                         f"Manual requeue required.")
 
     def update_trade(self, trade_id: int, trade_data: Dict[str, Any], updated_by: str) -> bool:
         """

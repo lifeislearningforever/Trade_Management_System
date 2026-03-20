@@ -65,13 +65,13 @@ class ImpalaConnectionManager:
             self._max_connections = max_pool_size
             self._connection_timeout = 3600  # 1 hour in seconds
 
-            # Thread pool for async writes (audit logs, history)
-            # Using 5 workers for background tasks to not overwhelm Kudu
-            self._async_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix='kudu_async_')
+            # Thread pool for async writes (audit logs, history, event queue)
+            # Using 15 workers to handle event queue throughput during high trade volume
+            self._async_executor = ThreadPoolExecutor(max_workers=15, thread_name_prefix='kudu_async_')
             self._async_futures = []
 
             self._initialized = True
-            logger.info(f"Impala connection pool initialized (max: {max_pool_size} connections, async workers: 5)")
+            logger.info(f"Impala connection pool initialized (max: {max_pool_size} connections, async workers: 15)")
 
     def _create_connection(self, database: Optional[str] = None):
         """

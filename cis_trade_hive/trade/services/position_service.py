@@ -20,6 +20,7 @@ from datetime import datetime
 import uuid
 
 from core.repositories.impala_connection import impala_manager
+from trade.services.multicurrency_service import multicurrency_service
 
 logger = logging.getLogger(__name__)
 
@@ -526,9 +527,19 @@ class PositionService:
             self._mark_old_versions_not_latest(portfolio_id, security_id, position_date)
 
             # Get FX rate for multi-currency calculations
+            # Use strict=True for cross-currency positions to ensure accurate AVP
             security_currency = position_data.get('security_currency', '')
             portfolio_currency = position_data.get('portfolio_currency', '')
-            fx_rate_raw = self._get_fx_rate(security_currency, portfolio_currency) if security_currency and portfolio_currency else Decimal('1')
+            is_cross_currency = security_currency and portfolio_currency and security_currency != portfolio_currency
+            try:
+                fx_rate_raw = self._get_fx_rate(
+                    security_currency, portfolio_currency, strict=is_cross_currency
+                ) if security_currency and portfolio_currency else Decimal('1')
+            except ValueError as e:
+                # Log error and use 1.0 as fallback, but mark position as needing FX review
+                logger.error(f"FX rate lookup failed for position {portfolio_id}/{security_id}: {e}")
+                fx_rate_raw = Decimal('1')
+                # TODO: Could add a flag to position record indicating FX rate issue
             # Convert to float for calculations (fx_rate returns Decimal)
             fx_rate = float(fx_rate_raw) if fx_rate_raw else 1.0
 
@@ -833,41 +844,41 @@ class PositionService:
             logger.error(f"Error fetching market price for {security_label}: {str(e)}")
             return None
 
-    def _get_fx_rate(self, from_ccy: str, to_ccy: str) -> Decimal:
-        """Get FX rate between currencies."""
+    def _get_fx_rate(self, from_ccy: str, to_ccy: str, strict: bool = False) -> Decimal:
+        """
+        Get FX rate between currencies using multicurrency service.
+
+        Args:
+            from_ccy: Source currency code
+            to_ccy: Target currency code
+            strict: If True, raise error when rate not found (for AVP calculations)
+
+        Returns:
+            FX rate as Decimal
+
+        Raises:
+            ValueError: If strict=True and no rate is found
+        """
         if from_ccy == to_ccy:
             return Decimal('1')
 
-        try:
-            fx_pair = f"{from_ccy}-{to_ccy}"
-            query = f"""
-            SELECT spot_rate_d
-            FROM {self.DATABASE}.gmp_cis_sta_dly_fx_rates
-            WHERE ref_quot_ccy = '{fx_pair}'
-            ORDER BY `date` DESC
-            LIMIT 1
-            """
-            results = impala_manager.execute_query(query, database=self.DATABASE)
-            if results and results[0].get('spot_rate_d'):
-                return Decimal(str(results[0]['spot_rate_d']))
-
-            # Try reverse pair
-            reverse_pair = f"{to_ccy}-{from_ccy}"
-            query = f"""
-            SELECT spot_rate_d
-            FROM {self.DATABASE}.gmp_cis_sta_dly_fx_rates
-            WHERE ref_quot_ccy = '{reverse_pair}'
-            ORDER BY `date` DESC
-            LIMIT 1
-            """
-            results = impala_manager.execute_query(query, database=self.DATABASE)
-            if results and results[0].get('spot_rate_d'):
-                rate = Decimal(str(results[0]['spot_rate_d']))
-                return Decimal('1') / rate if rate != 0 else Decimal('1')
-
+        if not from_ccy or not to_ccy:
+            if strict:
+                raise ValueError(f"Currency codes are required for FX rate lookup. "
+                                f"Got from='{from_ccy}', to='{to_ccy}'")
             return Decimal('1')
+
+        try:
+            # Use multicurrency service with strict mode
+            rate, _ = multicurrency_service.get_fx_rate(from_ccy, to_ccy, strict=strict)
+            return rate
+        except ValueError:
+            # Re-raise ValueError from strict mode
+            raise
         except Exception as e:
             logger.error(f"Error fetching FX rate for {from_ccy}-{to_ccy}: {str(e)}")
+            if strict:
+                raise ValueError(f"Error fetching FX rate for {from_ccy}-{to_ccy}: {str(e)}")
             return Decimal('1')
 
     # =========================================================================

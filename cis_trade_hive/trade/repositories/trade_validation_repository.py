@@ -64,8 +64,9 @@ class TradeValidationRepository:
             return str(val).lower()
         return str(val)
 
-    # Cache TTL for individual entity lookups (60 seconds - shorter than dropdown cache)
-    ENTITY_CACHE_TTL = 60
+    # Cache TTL for individual entity lookups (15 seconds - short to avoid stale data)
+    # Reduced from 60s to prevent stale portfolio/security status during rapid updates
+    ENTITY_CACHE_TTL = 15
 
     # =========================================================================
     # PORTFOLIO VALIDATION

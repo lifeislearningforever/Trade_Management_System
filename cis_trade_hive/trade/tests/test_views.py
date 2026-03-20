@@ -392,10 +392,10 @@ class TradeCreateViewTestCase(TestCase):
     @patch('trade.views.trade_kudu_repository')
     @patch('trade.views.audit_log_kudu_repository')
     def test_trade_create_post_success(self, mock_audit, mock_repo, mock_dropdown):
-        """Test successful trade creation"""
+        """Test successful trade creation using fast insert"""
         mock_dropdown.get_all_dropdown_options.return_value = {}
         mock_repo.validate_trade_data.return_value = (True, [], {})  # Now returns 3 values
-        mock_repo.insert_trade.return_value = 1001
+        mock_repo.insert_trade_fast.return_value = 1001  # Using fast insert method
 
         response = self.client.post(reverse('trade:create'), {
             'trade_type': 'BUY',
@@ -407,7 +407,7 @@ class TradeCreateViewTestCase(TestCase):
         })
 
         self.assertEqual(response.status_code, 302)  # Redirect
-        mock_repo.insert_trade.assert_called_once()
+        mock_repo.insert_trade_fast.assert_called_once()  # Updated to fast insert
 
     @patch('trade.views.trade_dropdown_service')
     @patch('trade.views.trade_kudu_repository')
@@ -1044,10 +1044,10 @@ class TradeCreateExceptionTestCase(TestCase):
     @patch('trade.views.trade_dropdown_service')
     @patch('trade.views.trade_kudu_repository')
     def test_trade_create_insert_returns_none(self, mock_repo, mock_dropdown):
-        """Test trade create when insert returns None"""
+        """Test trade create when insert_trade_fast returns None"""
         mock_dropdown.get_all_dropdown_options.return_value = {}
         mock_repo.validate_trade_data.return_value = (True, [], {})  # Now returns 3 values
-        mock_repo.insert_trade.return_value = None  # Simulate failure
+        mock_repo.insert_trade_fast.return_value = None  # Simulate failure (using fast insert)
 
         response = self.client.post(
             reverse('trade:create'),
@@ -1067,10 +1067,10 @@ class TradeCreateExceptionTestCase(TestCase):
     @patch('trade.views.trade_dropdown_service')
     @patch('trade.views.trade_kudu_repository')
     def test_trade_create_value_error(self, mock_repo, mock_dropdown):
-        """Test trade create with ValueError exception"""
+        """Test trade create with ValueError exception using fast insert"""
         mock_dropdown.get_all_dropdown_options.return_value = {}
         mock_repo.validate_trade_data.return_value = (True, [], {})  # Now returns 3 values
-        mock_repo.insert_trade.side_effect = ValueError("Invalid data")
+        mock_repo.insert_trade_fast.side_effect = ValueError("Invalid data")
 
         response = self.client.post(
             reverse('trade:create'),
@@ -1090,10 +1090,10 @@ class TradeCreateExceptionTestCase(TestCase):
     @patch('trade.views.trade_dropdown_service')
     @patch('trade.views.trade_kudu_repository')
     def test_trade_create_generic_exception(self, mock_repo, mock_dropdown):
-        """Test trade create with generic exception"""
+        """Test trade create with generic exception using fast insert"""
         mock_dropdown.get_all_dropdown_options.return_value = {}
         mock_repo.validate_trade_data.return_value = (True, [], {})  # Now returns 3 values
-        mock_repo.insert_trade.side_effect = Exception("Database error")
+        mock_repo.insert_trade_fast.side_effect = Exception("Database error")
 
         response = self.client.post(
             reverse('trade:create'),
