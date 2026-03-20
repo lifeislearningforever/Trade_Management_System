@@ -211,6 +211,115 @@ class AuditLogKuduRepository:
             return False
 
     @staticmethod
+    def log_action_async(
+        user_id: str,
+        username: str,
+        action_type: str,
+        entity_type: str,
+        entity_id: Optional[str] = None,
+        entity_name: Optional[str] = None,
+        action_description: Optional[str] = None,
+        old_value: Optional[str] = None,
+        new_value: Optional[str] = None,
+        field_name: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        request_path: Optional[str] = None,
+        request_method: Optional[str] = None,
+        status: str = 'SUCCESS',
+        error_message: Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Log an action to Kudu audit log table asynchronously (non-blocking).
+        Uses the impala_manager's async write capability for better performance.
+
+        Same parameters as log_action().
+
+        Returns:
+            True (immediately, as write is queued asynchronously)
+        """
+        try:
+            # Generate audit timestamp and date
+            now = datetime.now()
+            audit_timestamp = now.strftime('%Y-%m-%d %H:%M:%S')
+            audit_date = now.strftime('%Y-%m-%d')
+
+            # Generate unique audit_id (timestamp-based with random component)
+            audit_id = int(now.timestamp() * 1000) + (uuid.uuid4().int % 1000)
+
+            # Prepare audit data
+            audit_data = {
+                'audit_id': audit_id,
+                'audit_timestamp': audit_timestamp,
+                'user_id': user_id,
+                'username': username,
+                'user_email': kwargs.get('user_email'),
+                'action_type': action_type,
+                'action_category': kwargs.get('action_category', 'DATA'),
+                'action_description': action_description,
+                'entity_type': entity_type,
+                'entity_id': entity_id,
+                'entity_name': entity_name,
+                'field_name': field_name,
+                'old_value': old_value,
+                'new_value': new_value,
+                'request_method': request_method,
+                'request_path': request_path,
+                'request_params': kwargs.get('request_params'),
+                'status': status,
+                'status_code': kwargs.get('status_code', 200),
+                'error_message': error_message,
+                'error_traceback': kwargs.get('error_traceback'),
+                'session_id': kwargs.get('session_id'),
+                'ip_address': ip_address,
+                'user_agent': user_agent,
+                'module_name': kwargs.get('module_name'),
+                'function_name': kwargs.get('function_name'),
+                'duration_ms': kwargs.get('duration_ms'),
+                'tags': kwargs.get('tags'),
+                'metadata': kwargs.get('metadata'),
+                'audit_date': audit_date
+            }
+
+            # Build UPSERT query
+            columns = []
+            values = []
+            for key, value in audit_data.items():
+                if value is not None:
+                    columns.append(f"`{key}`")
+                    if isinstance(value, str):
+                        escaped_value = value.replace("\\", "\\\\").replace("'", "\\'")
+                        values.append(f"'{escaped_value}'")
+                    elif isinstance(value, bool):
+                        values.append('true' if value else 'false')
+                    elif isinstance(value, (int, float)):
+                        values.append(str(value))
+                    else:
+                        values.append(f"'{str(value)}'")
+
+            upsert_query = f"""
+            UPSERT INTO {ImpalaAuditConnection.DATABASE}.{AuditLogKuduRepository.GENERAL_AUDIT_TABLE}
+            ({', '.join(columns)})
+            VALUES ({', '.join(values)})
+            """
+
+            # Execute ASYNC - non-blocking write
+            impala_manager.execute_write_async(upsert_query, database=ImpalaAuditConnection.DATABASE)
+
+            # Also log to Django logger for immediate visibility
+            logger.info(
+                f"AUDIT (async): [{status}] {username} ({user_id}) - {action_type} on {entity_type}"
+                f"{f'#{entity_id}' if entity_id else ''} - {action_description}"
+            )
+
+            return True  # Returns immediately (async)
+
+        except Exception as e:
+            logger.error(f"Error queuing async audit log: {str(e)}")
+            return False
+
+    @staticmethod
     def log_udf_action(
         user_id: str,
         username: str,

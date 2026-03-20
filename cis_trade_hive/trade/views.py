@@ -465,7 +465,8 @@ def trade_create(request, trade_type=None):
             }
 
             # Validate trade data (includes Portfolio, Security, Counterparty validation)
-            is_valid, errors = trade_kudu_repository.validate_trade_data(trade_data)
+            # Returns entity_details to avoid duplicate queries in insert_trade
+            is_valid, errors, _ = trade_kudu_repository.validate_trade_data(trade_data)
 
             if not is_valid:
                 for error in errors:
@@ -483,7 +484,8 @@ def trade_create(request, trade_type=None):
             if not trade_id:
                 raise Exception("Failed to create trade")
 
-            audit_log_kudu_repository.log_action(
+            # Use async audit logging for better performance (non-blocking)
+            audit_log_kudu_repository.log_action_async(
                 user_id=user_info['user_id'],
                 username=user_info['username'],
                 user_email=user_info['user_email'],

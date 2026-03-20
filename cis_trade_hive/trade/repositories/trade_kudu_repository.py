@@ -113,18 +113,21 @@ class TradeKuduRepository:
         self,
         trade_data: Dict[str, Any],
         is_update: bool = False
-    ) -> tuple[bool, List[str]]:
+    ) -> tuple[bool, List[str], Dict[str, Any]]:
         """
         Validate trade data before insert/update.
+        Returns validation results along with fetched entity details for reuse.
 
         Args:
             trade_data: Trade data dictionary
             is_update: True if updating existing trade
 
         Returns:
-            Tuple of (is_valid, list_of_errors)
+            Tuple of (is_valid, list_of_errors, entity_details)
+            entity_details contains 'portfolio' and 'security' dicts if validation passed
         """
         errors = []
+        entity_details = {'portfolio': None, 'security': None}
 
         # Required fields
         if not trade_data.get('portfolio_short_name'):
@@ -150,6 +153,14 @@ class TradeKuduRepository:
 
         if not all_valid:
             errors.extend(trade_validation_repository.get_validation_errors(validation_results))
+        else:
+            # Extract entity details from validation results for reuse
+            # This avoids duplicate queries in insert_trade()
+            for result in validation_results:
+                if result.entity_type == 'PORTFOLIO' and result.is_valid and result.details:
+                    entity_details['portfolio'] = result.details
+                elif result.entity_type == 'SECURITY' and result.is_valid and result.details:
+                    entity_details['security'] = result.details
 
         # Trade type specific validations
         trade_type = trade_data.get('trade_type', '')
@@ -171,7 +182,7 @@ class TradeKuduRepository:
             elif trade_detail.get('quantity', 0) < float(trade_data.get('quantity', 0)):
                 errors.append(f"Insufficient quantity. Available: {trade_detail.get('quantity', 0)}, Requested: {trade_data.get('quantity', 0)}")
 
-        return len(errors) == 0, errors
+        return len(errors) == 0, errors, entity_details
 
     # =========================================================================
     # TRADE CRUD OPERATIONS
@@ -336,8 +347,8 @@ class TradeKuduRepository:
         Returns trade_id if successful, None otherwise.
         """
         try:
-            # Validate first
-            is_valid, errors = self.validate_trade_data(trade_data)
+            # Validate first - now returns entity details to avoid duplicate queries
+            is_valid, errors, entity_details = self.validate_trade_data(trade_data)
             if not is_valid:
                 logger.error(f"Trade validation failed: {errors}")
                 raise ValueError("; ".join(errors))
@@ -347,13 +358,21 @@ class TradeKuduRepository:
             deal_number = trade_data.get('deal_number') or f"DEAL-{datetime.now().strftime('%Y%m%d')}-{trade_id % 10000}"
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            # Get auto-populated fields from validation
-            portfolio_details = trade_validation_repository.get_portfolio_details(
-                trade_data.get('portfolio_short_name', '')
-            )
-            security_details = trade_validation_repository.get_security_details(
-                trade_data.get('security_label', '')
-            )
+            # Use entity details from validation (avoids duplicate DB queries)
+            # Fallback to re-query only if details not available (shouldn't happen)
+            portfolio_details = entity_details.get('portfolio')
+            security_details = entity_details.get('security')
+
+            if not portfolio_details:
+                logger.debug("Portfolio details not in cache, re-fetching")
+                portfolio_details = trade_validation_repository.get_portfolio_details(
+                    trade_data.get('portfolio_short_name', '')
+                )
+            if not security_details:
+                logger.debug("Security details not in cache, re-fetching")
+                security_details = trade_validation_repository.get_security_details(
+                    trade_data.get('security_label', '')
+                )
 
             # Build column and value lists
             columns = [
@@ -548,8 +567,8 @@ class TradeKuduRepository:
             if current_status not in self.MAKER_EDITABLE_STATUSES:
                 raise ValueError(f"Cannot edit trade with status '{current_status}'")
 
-            # Validate
-            is_valid, errors = self.validate_trade_data(trade_data, is_update=True)
+            # Validate (entity_details not needed for update as we don't auto-populate)
+            is_valid, errors, _ = self.validate_trade_data(trade_data, is_update=True)
             if not is_valid:
                 raise ValueError("; ".join(errors))
 

@@ -172,7 +172,7 @@ class TradeKuduRepositoryTestCase(TestCase):
             'trade_date': '2024-01-15'
         }
 
-        is_valid, errors = self.repository.validate_trade_data(trade_data)
+        is_valid, errors, _ = self.repository.validate_trade_data(trade_data)
 
         self.assertFalse(is_valid)
         self.assertIn("Portfolio is required", errors)
@@ -189,7 +189,7 @@ class TradeKuduRepositoryTestCase(TestCase):
             'trade_date': '2024-01-15'
         }
 
-        is_valid, errors = self.repository.validate_trade_data(trade_data)
+        is_valid, errors, _ = self.repository.validate_trade_data(trade_data)
 
         self.assertFalse(is_valid)
         self.assertIn("Security is required", errors)
@@ -206,7 +206,7 @@ class TradeKuduRepositoryTestCase(TestCase):
             'trade_date': '2024-01-15'
         }
 
-        is_valid, errors = self.repository.validate_trade_data(trade_data)
+        is_valid, errors, _ = self.repository.validate_trade_data(trade_data)
 
         self.assertFalse(is_valid)
         self.assertIn("Trade type is required", errors)
@@ -223,7 +223,7 @@ class TradeKuduRepositoryTestCase(TestCase):
             'trade_type': 'BUY'
         }
 
-        is_valid, errors = self.repository.validate_trade_data(trade_data)
+        is_valid, errors, _ = self.repository.validate_trade_data(trade_data)
 
         self.assertFalse(is_valid)
         self.assertIn("Trade date is required", errors)
@@ -242,7 +242,7 @@ class TradeKuduRepositoryTestCase(TestCase):
             'price': 50.00
         }
 
-        is_valid, errors = self.repository.validate_trade_data(trade_data)
+        is_valid, errors, _ = self.repository.validate_trade_data(trade_data)
 
         self.assertFalse(is_valid)
         self.assertIn("Quantity is required for Buy/Sell trades", errors)
@@ -261,7 +261,7 @@ class TradeKuduRepositoryTestCase(TestCase):
             'quantity': 100
         }
 
-        is_valid, errors = self.repository.validate_trade_data(trade_data)
+        is_valid, errors, _ = self.repository.validate_trade_data(trade_data)
 
         self.assertFalse(is_valid)
         self.assertIn("Price is required for Buy/Sell trades", errors)
@@ -281,7 +281,7 @@ class TradeKuduRepositoryTestCase(TestCase):
             'price': 50.00
         }
 
-        is_valid, errors = self.repository.validate_trade_data(trade_data)
+        is_valid, errors, _ = self.repository.validate_trade_data(trade_data)
 
         self.assertTrue(is_valid)
         self.assertEqual(len(errors), 0)
@@ -302,7 +302,7 @@ class TradeKuduRepositoryTestCase(TestCase):
         }
 
         with patch.object(self.repository, 'get_trade_detail', return_value=None):
-            is_valid, errors = self.repository.validate_trade_data(trade_data)
+            is_valid, errors, _ = self.repository.validate_trade_data(trade_data)
 
         self.assertFalse(is_valid)
         self.assertTrue(any("No trade detail found" in e for e in errors))
@@ -325,7 +325,7 @@ class TradeKuduRepositoryTestCase(TestCase):
         position = {'quantity': 100}  # Only 100 available
 
         with patch.object(self.repository, 'get_trade_detail', return_value=position):
-            is_valid, errors = self.repository.validate_trade_data(trade_data)
+            is_valid, errors, _ = self.repository.validate_trade_data(trade_data)
 
         self.assertFalse(is_valid)
         self.assertTrue(any("Insufficient quantity" in e for e in errors))

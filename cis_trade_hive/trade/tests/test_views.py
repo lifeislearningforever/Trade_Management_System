@@ -394,7 +394,7 @@ class TradeCreateViewTestCase(TestCase):
     def test_trade_create_post_success(self, mock_audit, mock_repo, mock_dropdown):
         """Test successful trade creation"""
         mock_dropdown.get_all_dropdown_options.return_value = {}
-        mock_repo.validate_trade_data.return_value = (True, [])
+        mock_repo.validate_trade_data.return_value = (True, [], {})  # Now returns 3 values
         mock_repo.insert_trade.return_value = 1001
 
         response = self.client.post(reverse('trade:create'), {
@@ -414,7 +414,7 @@ class TradeCreateViewTestCase(TestCase):
     def test_trade_create_post_validation_failure(self, mock_repo, mock_dropdown):
         """Test trade creation with validation failure"""
         mock_dropdown.get_all_dropdown_options.return_value = {}
-        mock_repo.validate_trade_data.return_value = (False, ['Portfolio is required'])
+        mock_repo.validate_trade_data.return_value = (False, ['Portfolio is required'], {})  # Now returns 3 values
 
         response = self.client.post(reverse('trade:create'), {
             'trade_type': 'BUY',
@@ -1046,7 +1046,7 @@ class TradeCreateExceptionTestCase(TestCase):
     def test_trade_create_insert_returns_none(self, mock_repo, mock_dropdown):
         """Test trade create when insert returns None"""
         mock_dropdown.get_all_dropdown_options.return_value = {}
-        mock_repo.validate_trade_data.return_value = (True, [])
+        mock_repo.validate_trade_data.return_value = (True, [], {})  # Now returns 3 values
         mock_repo.insert_trade.return_value = None  # Simulate failure
 
         response = self.client.post(
@@ -1069,7 +1069,7 @@ class TradeCreateExceptionTestCase(TestCase):
     def test_trade_create_value_error(self, mock_repo, mock_dropdown):
         """Test trade create with ValueError exception"""
         mock_dropdown.get_all_dropdown_options.return_value = {}
-        mock_repo.validate_trade_data.return_value = (True, [])
+        mock_repo.validate_trade_data.return_value = (True, [], {})  # Now returns 3 values
         mock_repo.insert_trade.side_effect = ValueError("Invalid data")
 
         response = self.client.post(
@@ -1092,7 +1092,7 @@ class TradeCreateExceptionTestCase(TestCase):
     def test_trade_create_generic_exception(self, mock_repo, mock_dropdown):
         """Test trade create with generic exception"""
         mock_dropdown.get_all_dropdown_options.return_value = {}
-        mock_repo.validate_trade_data.return_value = (True, [])
+        mock_repo.validate_trade_data.return_value = (True, [], {})  # Now returns 3 values
         mock_repo.insert_trade.side_effect = Exception("Database error")
 
         response = self.client.post(

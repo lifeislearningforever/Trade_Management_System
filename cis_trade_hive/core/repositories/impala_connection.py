@@ -130,12 +130,17 @@ class ImpalaConnectionManager:
             logger.error(f"Failed to create Impala connection: {str(e)}")
             return None
 
-    def _validate_connection(self, connection) -> bool:
+    # Skip validation for connections used within this many seconds
+    VALIDATION_SKIP_THRESHOLD = 30
+
+    def _validate_connection(self, connection, force_ping: bool = False) -> bool:
         """
         Validate if connection is still alive and not expired.
+        Optimized to skip SELECT 1 ping for recently-used connections.
 
         Args:
             connection: Connection to validate
+            force_ping: If True, always perform SELECT 1 ping
 
         Returns:
             True if valid, False otherwise
@@ -148,7 +153,14 @@ class ImpalaConnectionManager:
                     logger.debug("Connection expired (age: {:.0f}s), will recycle".format(age))
                     return False
 
-            # Ping the connection
+            # Skip ping for recently-used connections (performance optimization)
+            if not force_ping and hasattr(connection, '_last_used'):
+                idle_time = time.time() - connection._last_used
+                if idle_time < self.VALIDATION_SKIP_THRESHOLD:
+                    # Connection was used recently, assume it's still valid
+                    return True
+
+            # Ping the connection (only for idle connections or forced)
             cursor = connection.cursor()
             cursor.execute("SELECT 1")
             cursor.fetchone()
@@ -176,8 +188,9 @@ class ImpalaConnectionManager:
         try:
             connection = self._pool.get(block=False)
 
-            # Validate connection
+            # Validate connection (skip ping if recently used)
             if self._validate_connection(connection):
+                connection._last_used = time.time()
                 return connection
             else:
                 # Connection is stale, close it
@@ -205,6 +218,7 @@ class ImpalaConnectionManager:
                 try:
                     connection = self._pool.get(timeout=30)
                     if self._validate_connection(connection):
+                        connection._last_used = time.time()
                         return connection
                     else:
                         # Stale connection, create new one
@@ -229,7 +243,9 @@ class ImpalaConnectionManager:
             return
 
         try:
-            # Validate before returning to pool
+            # Mark connection as just used and return to pool
+            # Skip full validation (ping) since we just used it
+            connection._last_used = time.time()
             if self._validate_connection(connection):
                 self._pool.put(connection, block=False)
             else:

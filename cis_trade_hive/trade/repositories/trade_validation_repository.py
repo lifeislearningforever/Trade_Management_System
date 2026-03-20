@@ -64,6 +64,9 @@ class TradeValidationRepository:
             return str(val).lower()
         return str(val)
 
+    # Cache TTL for individual entity lookups (60 seconds - shorter than dropdown cache)
+    ENTITY_CACHE_TTL = 60
+
     # =========================================================================
     # PORTFOLIO VALIDATION
     # =========================================================================
@@ -71,6 +74,7 @@ class TradeValidationRepository:
     def validate_portfolio(self, portfolio_name: str) -> ValidationResult:
         """
         Validate that portfolio exists and is in SETTLED status.
+        Results are cached for 60 seconds to reduce duplicate queries.
 
         Args:
             portfolio_name: Portfolio short name to validate
@@ -86,6 +90,13 @@ class TradeValidationRepository:
                     entity_name=portfolio_name or '',
                     message='Portfolio name is required'
                 )
+
+            # Check cache first (60 second TTL)
+            cache_key = f"portfolio_detail:{portfolio_name}"
+            cached = query_cache.get(cache_key)
+            if cached is not None:
+                logger.debug(f"Cache hit for portfolio validation: {portfolio_name}")
+                return cached
 
             portfolio_name_escaped = portfolio_name.replace("'", "''")
             status_list = ", ".join([f"'{s}'" for s in self.PORTFOLIO_VALID_STATUSES])
@@ -136,13 +147,16 @@ class TradeValidationRepository:
                     details=portfolio
                 )
 
-            return ValidationResult(
+            result = ValidationResult(
                 is_valid=True,
                 entity_type='PORTFOLIO',
                 entity_name=portfolio_name,
                 message=f"Portfolio '{portfolio_name}' is valid for trading (status: {status})",
                 details=portfolio
             )
+            # Cache the successful validation
+            query_cache.set(cache_key, result, self.ENTITY_CACHE_TTL)
+            return result
 
         except Exception as e:
             logger.error(f"Error validating portfolio '{portfolio_name}': {str(e)}")
@@ -216,6 +230,7 @@ class TradeValidationRepository:
     def validate_security(self, security_name: str) -> ValidationResult:
         """
         Validate that security exists and is in ACTIVE/APPROVED status.
+        Results are cached for 60 seconds to reduce duplicate queries.
 
         Args:
             security_name: Security name/label to validate
@@ -231,6 +246,13 @@ class TradeValidationRepository:
                     entity_name=security_name or '',
                     message='Security name is required'
                 )
+
+            # Check cache first (60 second TTL)
+            cache_key = f"security_detail:{security_name}"
+            cached = query_cache.get(cache_key)
+            if cached is not None:
+                logger.debug(f"Cache hit for security validation: {security_name}")
+                return cached
 
             security_name_escaped = security_name.replace("'", "''")
             status_list = ", ".join([f"'{s}'" for s in self.SECURITY_VALID_STATUSES])
@@ -294,13 +316,16 @@ class TradeValidationRepository:
                     details=security
                 )
 
-            return ValidationResult(
+            result = ValidationResult(
                 is_valid=True,
                 entity_type='SECURITY',
                 entity_name=security_name,
                 message=f"Security '{security_name}' is valid for trading (status: {status or 'N/A'})",
                 details=security
             )
+            # Cache the successful validation
+            query_cache.set(cache_key, result, self.ENTITY_CACHE_TTL)
+            return result
 
         except Exception as e:
             logger.error(f"Error validating security '{security_name}': {str(e)}")
