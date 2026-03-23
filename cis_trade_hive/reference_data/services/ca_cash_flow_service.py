@@ -42,6 +42,39 @@ class CACashFlowService:
             return ''
         return str(value).replace("'", "''")
 
+    def _check_existing_cash_flow(
+        self,
+        ca_number: str,
+        portfolio_short_name: str,
+        ex_date: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Check if a cash flow already exists for this CA + portfolio + ex_date combination.
+        Prevents duplicate cash flows when EOD job runs multiple times.
+
+        Returns:
+            Cash flow dict if exists, None otherwise
+        """
+        try:
+            # Check by matching ex_date, portfolio, and looking for CA number pattern in cash_flow_number
+            # CA cash flows have cash_flow_number like "CF-YYYYMMDD-XXXXX" but we can match by ex_date + portfolio
+            query = f"""
+            SELECT cash_flow_id, cash_flow_number
+            FROM {self.DATABASE}.cis_cash_flow
+            WHERE portfolio_short_name = '{self._escape(portfolio_short_name)}'
+              AND ex_date = '{ex_date}'
+              AND cash_flow_type IN ('DIVIDEND', 'INTEREST', 'COUPON', 'CAPITAL_DISTRIBUTION')
+              AND (is_deleted = false OR is_deleted IS NULL)
+            LIMIT 1
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            if results and len(results) > 0:
+                return results[0]
+            return None
+        except Exception as e:
+            logger.warning(f"Error checking existing cash flow: {e}")
+            return None
+
     def queue_ca_for_processing(
         self,
         ca_id: int,
@@ -375,6 +408,12 @@ class CACashFlowService:
             Tuple of (success, cash_flow_id, error_message)
         """
         try:
+            # Check for duplicate - prevent creating multiple cash flows for same CA + portfolio
+            existing = self._check_existing_cash_flow(ca_number, portfolio_short_name, ex_date)
+            if existing:
+                logger.info(f"Cash flow already exists for CA {ca_number}, portfolio {portfolio_short_name}")
+                return True, existing.get('cash_flow_id'), "Cash flow already exists (skipped)"
+
             # Generate CF number
             timestamp = datetime.now()
             cf_number = f"CF-{timestamp.strftime('%Y%m%d')}-{int(timestamp.timestamp() * 1000) % 100000:05d}"
