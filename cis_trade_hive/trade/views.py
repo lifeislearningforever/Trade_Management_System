@@ -217,7 +217,12 @@ def trade_list(request):
         lc = trade.get('portfolio_currency', '')  # Portfolio/Local Currency
         total_fc = Decimal(str(trade.get('total_amount', 0) or 0))
 
-        if fc and lc and fc != lc and total_fc:
+        # If no portfolio currency, default to security currency
+        if not lc:
+            lc = fc
+            trade['portfolio_currency'] = fc
+
+        if fc and lc and fc != lc:
             try:
                 # Get latest FX rate for FC->LC pair
                 fx_rate, _ = multicurrency_service.get_fx_rate(fc, lc)
@@ -229,7 +234,7 @@ def trade_list(request):
                 trade['fx_rate'] = 1.0
                 trade['total_amount_lc'] = float(total_fc)
         else:
-            # Same currency or no conversion needed
+            # Same currency - no conversion needed, LC = FC
             trade['fx_rate'] = 1.0
             trade['total_amount_lc'] = float(total_fc)
 
