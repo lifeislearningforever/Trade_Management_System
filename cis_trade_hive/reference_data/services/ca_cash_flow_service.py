@@ -13,6 +13,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from core.repositories.impala_connection import impala_manager
 from reference_data.repositories.ca_cash_flow_queue_repository import ca_cash_flow_queue_repository
 from trade.repositories.cash_flow_repository import CashFlowRepository
+from trade.services.multicurrency_service import multicurrency_service
 
 logger = logging.getLogger(__name__)
 
@@ -154,22 +155,47 @@ class CACashFlowService:
             for holding in holdings:
                 portfolio_short_name = holding.get('portfolio_short_name')
                 quantity = Decimal(str(holding.get('quantity') or 0))
+                security_currency = holding.get('security_currency') or currency
+                # Get portfolio currency (from position or portfolio table)
+                portfolio_currency = (
+                    holding.get('portfolio_base_currency') or
+                    holding.get('portfolio_currency') or
+                    security_currency  # Fallback to security currency if not found
+                )
 
                 if quantity <= 0:
                     continue
 
-                # Calculate cash flow amount: quantity × dividend price
-                amount = (quantity * price).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+                # Calculate cash flow amount in FOREIGN currency (security currency)
+                # Formula: Amount FC = Quantity × Dividend Price
+                amount_fc = (quantity * price).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+
+                # Calculate cash flow amount in LOCAL currency (portfolio currency)
+                # Formula: Amount LC = Amount FC × FX Rate
+                if security_currency != portfolio_currency:
+                    try:
+                        fx_rate, _ = multicurrency_service.get_fx_rate(
+                            security_currency, portfolio_currency, ex_date
+                        )
+                        amount_lc = (amount_fc * fx_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    except Exception as e:
+                        logger.warning(f"FX rate lookup failed for {security_currency}->{portfolio_currency}: {e}")
+                        fx_rate = Decimal('1')
+                        amount_lc = amount_fc
+                else:
+                    fx_rate = Decimal('1')
+                    amount_lc = amount_fc
 
                 if dry_run:
                     logger.info(f"[DRY RUN] Would create {ca_type} cash flow: "
                                f"Portfolio={portfolio_short_name}, Qty={quantity}, "
-                               f"Price={price}, Amount={amount} {currency}")
+                               f"Price={price}, Amount FC={amount_fc} {security_currency}, "
+                               f"Amount LC={amount_lc} {portfolio_currency}, FX Rate={fx_rate}")
                     cash_flows_created += 1
-                    total_amount += amount
+                    total_amount += amount_lc  # Track in local currency
                     continue
 
-                # Create cash flow
+                # Create cash flow with proper multi-currency support
                 success, cash_flow_id, error = self.create_cash_flow_from_ca(
                     ca_id=ca_id,
                     ca_number=ca_number,
@@ -177,8 +203,11 @@ class CACashFlowService:
                     portfolio_short_name=portfolio_short_name,
                     security_name=security_name,
                     quantity=quantity,
-                    amount=amount,
-                    currency=currency,
+                    amount_fc=amount_fc,
+                    amount_lc=amount_lc,
+                    foreign_currency=security_currency,
+                    local_currency=portfolio_currency,
+                    fx_rate=fx_rate,
                     ex_date=ex_date,
                     record_date=record_date,
                     payment_date=payment_date,
@@ -261,13 +290,16 @@ class CACashFlowService:
             # Build query for holdings as of ex_date
             # Get the latest position version for each portfolio+security as of the ex_date
             # This finds ALL portfolios holding the security - no portfolio filter
+            # Also join with portfolio table to get portfolio currency (for local amount calculation)
             query = f"""
             SELECT
                 p.portfolio_short_name,
                 p.security_label,
                 p.quantity,
                 p.average_cost,
-                p.security_currency
+                p.security_currency,
+                p.portfolio_currency,
+                pf.currency as portfolio_base_currency
             FROM {self.DATABASE}.{self.POSITION_TABLE} p
             INNER JOIN (
                 SELECT portfolio_short_name, security_label, MAX(position_date) as max_date
@@ -280,6 +312,7 @@ class CACashFlowService:
             ) latest ON p.portfolio_short_name = latest.portfolio_short_name
                     AND p.security_label = latest.security_label
                     AND p.position_date = latest.max_date
+            LEFT JOIN {self.DATABASE}.cis_portfolio pf ON p.portfolio_short_name = pf.name
             WHERE p.quantity > 0
               AND p.status = 'OPEN'
               AND p.is_active = true
@@ -302,15 +335,24 @@ class CACashFlowService:
         portfolio_short_name: str,
         security_name: str,
         quantity: Decimal,
-        amount: Decimal,
-        currency: str,
+        amount_fc: Decimal,
+        amount_lc: Decimal,
+        foreign_currency: str,
+        local_currency: str,
+        fx_rate: Decimal,
         ex_date: str,
         record_date: str,
         payment_date: str,
         created_by: str
     ) -> Tuple[bool, Optional[int], Optional[str]]:
         """
-        Create a cash flow entry from a corporate action.
+        Create a cash flow entry from a corporate action with multi-currency support.
+
+        Based on SA/BA specification:
+        - Foreign Currency = Security Currency (e.g., USD)
+        - Amount FC = Quantity × Dividend Price (e.g., 18 × $0.35 = $6.30)
+        - Local Currency = Portfolio Currency (e.g., SGD)
+        - Amount LC = Amount FC × FX Rate (e.g., $6.30 × 1.28964 = $8.12)
 
         Args:
             ca_id: Corporate Action ID
@@ -319,8 +361,11 @@ class CACashFlowService:
             portfolio_short_name: Portfolio short name
             security_name: Security name
             quantity: Quantity held
-            amount: Calculated amount
-            currency: Currency code
+            amount_fc: Amount in Foreign Currency (security currency)
+            amount_lc: Amount in Local Currency (portfolio currency)
+            foreign_currency: Security currency code (e.g., USD)
+            local_currency: Portfolio currency code (e.g., SGD)
+            fx_rate: FX rate used for conversion
             ex_date: Ex-dividend date
             record_date: Record date
             payment_date: Payment date
@@ -338,6 +383,7 @@ class CACashFlowService:
             cf_type = self.CA_TO_CF_TYPE_MAP.get(ca_type, ca_type)
 
             # Map to actual cis_cash_flow table field names
+            # Following SA/BA specification for multi-currency cash flows
             cf_data = {
                 'cash_flow_number': cf_number,
                 'portfolio_short_name': portfolio_short_name,
@@ -350,25 +396,32 @@ class CACashFlowService:
                 'dividend_date': record_date,
                 'ex_date': ex_date,
                 'record_date': record_date,
-                'local_ccy': currency,
-                'local_ccy_amt': float(amount),
-                'flow_amount_local': float(amount),
-                'foreign_ccy': currency,
-                'foreign_ccy_amt': float(amount),
-                'dividend_price': float(quantity),  # Store quantity as reference
+                # Foreign Currency (Security Currency) - e.g., USD
+                'foreign_ccy': foreign_currency,
+                'foreign_ccy_amt': float(amount_fc),
+                # Local Currency (Portfolio Currency) - e.g., SGD
+                'local_ccy': local_currency,
+                'local_ccy_amt': float(amount_lc),
+                'flow_amount_local': float(amount_lc),
+                # Store dividend details for reference
+                'dividend_price': float(amount_fc / quantity) if quantity else 0,  # Price per share
+                'quantity': float(quantity),  # Store quantity held
+                'fx_rate': float(fx_rate),  # Store FX rate used
                 'status': 'INITIAL',
                 'src_system': 'CIS',
             }
 
-            logger.info(f"Creating cash flow with data: security_label={security_name}, "
-                       f"portfolio={portfolio_short_name}, cf_number={cf_number}")
+            logger.info(f"Creating cash flow: {cf_number}, Portfolio={portfolio_short_name}, "
+                       f"Security={security_name}, Qty={quantity}, "
+                       f"Amount FC={amount_fc} {foreign_currency}, "
+                       f"Amount LC={amount_lc} {local_currency}, FX={fx_rate}")
 
             # Use cash flow repository to insert
             success, cash_flow_id = CashFlowRepository.insert(cf_data, created_by)
 
             if success:
                 logger.info(f"Created cash flow {cf_number} from CA {ca_number} "
-                           f"for portfolio {portfolio_short_name}, amount: {amount} {currency}")
+                           f"for portfolio {portfolio_short_name}")
                 return True, cash_flow_id, None
             else:
                 return False, None, "Failed to insert cash flow"
