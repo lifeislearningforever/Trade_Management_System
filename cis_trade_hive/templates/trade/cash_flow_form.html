@@ -147,21 +147,19 @@
                             </select>
                         </div>
 
-                        <!-- Cash Flow Status -->
+                        <!-- Cash Flow Status (Hidden - managed by workflow) -->
+                        {% if is_edit %}
                         <div class="col-md-4">
-                            <label for="cash_flow_status" class="form-label">Cash Flow Status</label>
-                            <select class="form-select"
-                                    id="cash_flow_status"
-                                    name="cash_flow_status">
-                                <option value="">Select Status...</option>
-                                {% for cfs in dropdown_options.cash_flow_statuses %}
-                                    <option value="{{ cfs.value }}"
-                                            {% if cash_flow.cash_flow_status == cfs.value %}selected{% endif %}>
-                                        {{ cfs.label }}
-                                    </option>
-                                {% endfor %}
-                            </select>
+                            <label class="form-label">Cash Flow Status</label>
+                            <input type="text"
+                                   class="form-control bg-light"
+                                   value="{{ cash_flow.cash_flow_status|default:'INITIAL' }}"
+                                   readonly>
+                            <small class="text-muted">Status managed by workflow</small>
                         </div>
+                        {% endif %}
+                        <!-- Hidden input to preserve existing status on edit -->
+                        <input type="hidden" name="cash_flow_status" value="{{ cash_flow.cash_flow_status|default:'INITIAL' }}">
                     </div>
                 </div>
 

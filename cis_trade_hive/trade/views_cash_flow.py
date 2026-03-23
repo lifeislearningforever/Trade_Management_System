@@ -311,7 +311,8 @@ def cash_flow_create(request):
                 'flow_amount_local': request.POST.get('flow_amount_local', '').strip() or None,
                 'foreign_ccy': request.POST.get('foreign_ccy', '').strip(),
                 'foreign_ccy_amount': request.POST.get('foreign_ccy_amount', '').strip() or None,
-                'cash_flow_status': request.POST.get('cash_flow_status', '').strip(),
+                # Note: cash_flow_status is NOT taken from form - backend sets INITIAL on create
+                # Status follows Four-Eyes workflow: INITIAL -> APPROVED/REJECTED
             }
 
             # Convert numeric fields
