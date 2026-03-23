@@ -234,23 +234,19 @@
                                    placeholder="0.00">
                         </div>
 
-                        <!-- Currency (Required) -->
+                        <!-- Currency (Auto-populated from Security - Readonly) -->
                         <div class="col-md-4">
                             <label for="currency" class="form-label">
                                 Currency <span class="text-danger">*</span>
+                                <small class="text-muted">(from Security)</small>
                             </label>
-                            <select class="form-select select2-currency"
-                                    id="currency"
-                                    name="currency"
-                                    required>
-                                <option value="">Select Currency...</option>
-                                {% for currency in dropdown_options.currencies %}
-                                    <option value="{{ currency.value }}"
-                                            {% if corporate_action.currency == currency.value %}selected{% endif %}>
-                                        {{ currency.label }}
-                                    </option>
-                                {% endfor %}
-                            </select>
+                            <input type="text"
+                                   class="form-control bg-light"
+                                   id="currency_display"
+                                   readonly
+                                   placeholder="Select Security first..."
+                                   value="{{ corporate_action.currency|default:'' }}">
+                            <input type="hidden" id="currency" name="currency" value="{{ corporate_action.currency|default:'' }}" required>
                             <div class="invalid-feedback">Currency is required</div>
                         </div>
                     </div>
@@ -349,21 +345,38 @@ $(document).ready(function() {
         CISSelect2.initElement($(this));
     });
 
-    // Initialize currency dropdown with Select2
-    $('.select2-currency').each(function() {
-        CISSelect2.initElement($(this));
-    });
+    // Note: Currency field is now readonly, no Select2 needed
 
     // Auto-populate currency when security is selected (use first selected)
+    // Currency is now readonly and auto-set from security
     $('#security_name').on('change', function() {
         var selectedOptions = $(this).find('option:selected');
         if (selectedOptions.length > 0) {
             var currency = selectedOptions.first().data('currency');
             if (currency) {
-                $('#currency').val(currency).trigger('change');
+                $('#currency').val(currency);
+                $('#currency_display').val(currency);
+            } else {
+                $('#currency').val('');
+                $('#currency_display').val('');
             }
+        } else {
+            // Clear currency if no security selected
+            $('#currency').val('');
+            $('#currency_display').val('');
         }
     });
+
+    // On page load for edit mode, ensure currency display is set
+    {% if is_edit %}
+    var selectedSecurities = $('#security_name option:selected');
+    if (selectedSecurities.length > 0 && !$('#currency_display').val()) {
+        var currency = selectedSecurities.first().data('currency');
+        if (currency) {
+            $('#currency_display').val(currency);
+        }
+    }
+    {% endif %}
 });
 
 // Client-side form validation
