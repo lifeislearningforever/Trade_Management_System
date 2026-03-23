@@ -49,7 +49,11 @@ CREATE TABLE IF NOT EXISTS cis_cash_flow (
     gl_acc_no STRING,                           -- General Ledger Account Number
 
     -- Source System
-    src_system STRING DEFAULT 'CIS',            -- Source system identifier
+    src_system STRING DEFAULT 'CIS',            -- Source system identifier: CIS (manual), CA (corporate action)
+
+    -- Corporate Action Reference (for CA-generated cash flows)
+    ca_id BIGINT,                               -- Reference to cis_corporate_action
+    ca_number STRING,                           -- CA number for audit trail
 
     -- Important Dates
     payment_date STRING,                        -- Payment date (YYYY-MM-DD)

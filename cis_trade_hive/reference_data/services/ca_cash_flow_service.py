@@ -454,6 +454,7 @@ class CACashFlowService:
 
             # Map to actual cis_cash_flow table field names
             # Following SA/BA specification for multi-currency cash flows
+            # CA-generated cash flows are auto-validated (no four-eyes needed)
             cf_data = {
                 'cash_flow_number': cf_number,
                 'portfolio_short_name': portfolio_short_name,
@@ -477,8 +478,12 @@ class CACashFlowService:
                 'dividend_price': float(amount_fc / quantity) if quantity else 0,
                 'quantity': float(quantity),    # Quantity held at ex-date
                 'fx_rate': float(fx_rate),      # FX rate used for LC conversion
-                'status': 'INITIAL',
-                'src_system': 'CIS',
+                # CA-generated cash flows skip four-eyes and are auto-validated
+                'status': 'VALIDATED',
+                'src_system': 'CA',  # Mark as CA-generated (not manual CIS entry)
+                # CA reference for audit trail
+                'ca_id': ca_id,
+                'ca_number': ca_number,
             }
 
             logger.info(f"[CREATE_CF] Creating cash flow: {cf_number}, Portfolio={portfolio_short_name}, "
@@ -495,6 +500,21 @@ class CACashFlowService:
             if success:
                 logger.info(f"[CREATE_CF] SUCCESS - Created cash flow {cf_number} (id={cash_flow_id}) "
                            f"from CA {ca_number} for portfolio {portfolio_short_name}")
+
+                # Update position table with CA/cash flow details
+                self._update_position_with_ca_details(
+                    portfolio_short_name=portfolio_short_name,
+                    security_name=security_name,
+                    ca_id=ca_id,
+                    ca_number=ca_number,
+                    ca_type=ca_type,
+                    ex_date=ex_date,
+                    cash_flow_id=cash_flow_id,
+                    cash_flow_number=cf_number,
+                    cash_flow_amount=amount_lc,
+                    updated_by=created_by
+                )
+
                 return True, cash_flow_id, None
             else:
                 logger.error(f"[CREATE_CF] FAILED - Failed to insert cash flow for {portfolio_short_name}")
@@ -504,6 +524,79 @@ class CACashFlowService:
             error_msg = f"Error creating cash flow from CA: {str(e)}"
             logger.error(error_msg)
             return False, None, error_msg
+
+    def _update_position_with_ca_details(
+        self,
+        portfolio_short_name: str,
+        security_name: str,
+        ca_id: int,
+        ca_number: str,
+        ca_type: str,
+        ex_date: str,
+        cash_flow_id: int,
+        cash_flow_number: str,
+        cash_flow_amount: Decimal,
+        updated_by: str
+    ) -> bool:
+        """
+        Update the position table with CA/cash flow details.
+
+        This links the position to the last CA and cash flow that affected it.
+        Called after successfully creating a validated CA cash flow.
+
+        Args:
+            portfolio_short_name: Portfolio short name
+            security_name: Security label
+            ca_id: Corporate Action ID
+            ca_number: CA number
+            ca_type: CA type (DIVIDEND, INTEREST, etc.)
+            ex_date: Ex-dividend date
+            cash_flow_id: Created cash flow ID
+            cash_flow_number: Cash flow number
+            cash_flow_amount: Cash flow amount in local currency
+            updated_by: User who triggered the update
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            # Update the latest position version for this portfolio+security
+            # Find and update the most recent OPEN position
+            update_sql = f"""
+            UPDATE {self.DATABASE}.{self.POSITION_TABLE}
+            SET last_ca_id = {ca_id},
+                last_ca_number = '{self._escape(ca_number)}',
+                last_ca_type = '{self._escape(ca_type)}',
+                last_ca_date = '{ex_date}',
+                last_cash_flow_id = {cash_flow_id},
+                last_cash_flow_number = '{self._escape(cash_flow_number)}',
+                last_cash_flow_amount = {float(cash_flow_amount)},
+                updated_by = '{self._escape(updated_by)}',
+                updated_at = '{timestamp_str}'
+            WHERE portfolio_short_name = '{self._escape(portfolio_short_name)}'
+              AND security_label = '{self._escape(security_name)}'
+              AND status = 'OPEN'
+              AND is_active = true
+            """
+
+            logger.info(f"[UPDATE_POS] Updating position with CA details: portfolio={portfolio_short_name}, "
+                       f"security={security_name}, ca_number={ca_number}, cf_number={cash_flow_number}")
+
+            success = impala_manager.execute_write(update_sql, database=self.DATABASE)
+
+            if success:
+                logger.info(f"[UPDATE_POS] SUCCESS - Position updated with CA/cash flow details")
+            else:
+                logger.warning(f"[UPDATE_POS] Position update returned false (may be no matching position)")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"[UPDATE_POS] Error updating position with CA details: {str(e)}")
+            # Don't fail the cash flow creation if position update fails
+            return False
 
     def process_pending_cas(
         self,

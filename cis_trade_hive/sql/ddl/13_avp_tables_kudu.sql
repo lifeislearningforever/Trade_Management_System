@@ -70,6 +70,15 @@ CREATE TABLE cis_trade_position (
     status STRING,                       -- OPEN, CLOSED
     is_active BOOLEAN,
 
+    -- Last Corporate Action / Cash Flow tracking
+    last_ca_id BIGINT,                   -- Last CA that generated cash flow
+    last_ca_number STRING,               -- Last CA number
+    last_ca_type STRING,                 -- Last CA type (DIVIDEND, INTEREST, etc.)
+    last_ca_date STRING,                 -- Date of last CA (ex_date)
+    last_cash_flow_id BIGINT,            -- Last cash flow ID generated from CA
+    last_cash_flow_number STRING,        -- Last cash flow number
+    last_cash_flow_amount DECIMAL(20,8), -- Amount of last cash flow (in local currency)
+
     -- Metadata
     created_by STRING,
     created_at STRING,

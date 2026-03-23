@@ -290,6 +290,9 @@ class CashFlowRepository:
                 'dividend_date': str,
                 'ex_date': str,
                 'record_date': str,
+                # CA reference fields
+                'ca_id': int,
+                'ca_number': str,
             }
 
             for field, field_type in field_mapping.items():
@@ -303,10 +306,12 @@ class CashFlowRepository:
                         values.append(CashFlowRepository.escape_value(cf_data[field]))
 
             # Add status
+            status = cf_data.get('status', 'INITIAL')
             columns.append('status')
-            values.append(CashFlowRepository.escape_value(cf_data.get('status', 'INITIAL')))
+            values.append(CashFlowRepository.escape_value(status))
 
-            # Add src_system - 'CIS' for records created via UI
+            # Add src_system - 'CIS' for records created via UI, 'CA' for corporate action generated
+            src_system = cf_data.get('src_system', 'CIS')
             if 'src_system' not in cf_data:
                 columns.append('src_system')
                 values.append("'CIS'")
@@ -322,6 +327,15 @@ class CashFlowRepository:
                 CashFlowRepository.escape_value(created_by),
                 f"CAST('{timestamp_str}' AS TIMESTAMP)"
             ])
+
+            # For CA-generated cash flows (status=VALIDATED, src_system=CA), auto-populate validation fields
+            if status == 'VALIDATED' and src_system == 'CA':
+                columns.extend(['validated_by', 'validated_at', 'validation_comments'])
+                values.extend([
+                    "'SYSTEM_CA'",  # Auto-validated by CA system
+                    f"CAST('{timestamp_str}' AS TIMESTAMP)",
+                    "'Auto-validated: Generated from Corporate Action'"
+                ])
 
             # Build UPSERT statement
             upsert_sql = f"""
