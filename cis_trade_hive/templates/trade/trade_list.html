@@ -228,7 +228,9 @@
                                 <th class="sortable" data-sort-type="date" style="min-width: 110px;">Settle Date</th>
                                 <th class="sortable" data-sort-type="number" style="min-width: 100px; text-align: right;">Quantity</th>
                                 <th class="sortable" data-sort-type="number" style="min-width: 100px; text-align: right;">Price</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 120px; text-align: right;">Total Amount</th>
+                                <th class="sortable" data-sort-type="number" style="min-width: 120px; text-align: right;">Total Amt FC</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 70px;">Port CCY</th>
+                                <th class="sortable" data-sort-type="number" style="min-width: 120px; text-align: right;">Total Amt LC</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 130px;">Status</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 120px;">Counterparty</th>
                                 <th class="sortable" data-sort-type="date" style="min-width: 140px;">Created At</th>
@@ -272,6 +274,14 @@
                                 <td class="text-end">{{ trade.quantity|floatformat:2|default:"0.00" }}</td>
                                 <td class="text-end">{{ trade.price|floatformat:4|default:"0.0000" }}</td>
                                 <td class="text-end">{{ trade.total_amount|floatformat:2|default:"0.00" }}</td>
+                                <td>
+                                    {% if trade.portfolio_currency %}
+                                        <span class="badge bg-secondary">{{ trade.portfolio_currency }}</span>
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">{{ trade.total_amount_lc|floatformat:2|default:"0.00" }}</td>
                                 <td>
                                     {% if trade.status == 'INITIAL' %}
                                         <span class="badge badge-secondary">Initial</span>

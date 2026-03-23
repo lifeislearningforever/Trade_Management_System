@@ -296,12 +296,15 @@ class TradeKuduRepository:
 
             where_clause = " AND ".join(where_clauses)
 
+            # Join with portfolio table to get portfolio currency for LC calculation
             query = f"""
-            SELECT *
-            FROM {self.DATABASE}.{self.TABLE_NAME}
+            SELECT t.*,
+                   p.currency as portfolio_currency
+            FROM {self.DATABASE}.{self.TABLE_NAME} t
+            LEFT JOIN {self.DATABASE}.cis_portfolio p ON t.portfolio_short_name = p.name
             WHERE {where_clause}
-            ORDER BY CASE WHEN UPPER(src_system) = 'CIS' THEN 0 ELSE 1 END,
-                     created_at DESC
+            ORDER BY CASE WHEN UPPER(t.src_system) = 'CIS' THEN 0 ELSE 1 END,
+                     t.created_at DESC
             LIMIT {limit}
             """
 

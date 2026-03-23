@@ -18,6 +18,7 @@ Workflow:
 
 import json
 import logging
+from decimal import Decimal, ROUND_HALF_UP
 from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
@@ -31,6 +32,7 @@ from core.audit.audit_kudu_repository import audit_log_kudu_repository
 from trade.repositories.trade_kudu_repository import trade_kudu_repository, TradeKuduRepository
 from trade.repositories.trade_validation_repository import trade_validation_repository
 from trade.services.trade_dropdown_service import trade_dropdown_service
+from trade.services.multicurrency_service import multicurrency_service
 
 
 class TradeWrapper:
@@ -64,7 +66,12 @@ class TradeWrapper:
         self.accrued_interest = data.get('accrued_interest', 0)
         self.sec_fee = data.get('sec_fee', 0)
         self.other_charges = data.get('other_charges', 0)
-        self.total_amount = data.get('total_amount', 0)
+        self.total_amount = data.get('total_amount', 0)  # Total Amount FC (Foreign Currency = Security CCY)
+
+        # Multi-currency fields (FC = Security CCY, LC = Portfolio CCY)
+        self.portfolio_currency = data.get('portfolio_currency', '')  # Local Currency
+        self.fx_rate = data.get('fx_rate', 1.0)  # FX Rate (FC->LC)
+        self.total_amount_lc = data.get('total_amount_lc', 0)  # Total Amount LC (Local Currency)
 
         # GL & Broker
         self.open_close_position = data.get('open_close_position', '')
@@ -202,6 +209,30 @@ def trade_list(request):
         settle_date_to=settle_date_to if settle_date_to else None
     )
 
+    # Calculate Total Amount LC for each trade using FX rates
+    # FC (Foreign Currency) = Security Currency (currency_code)
+    # LC (Local Currency) = Portfolio Currency (portfolio_currency)
+    for trade in trades_data:
+        fc = trade.get('currency_code', '')  # Security/Foreign Currency
+        lc = trade.get('portfolio_currency', '')  # Portfolio/Local Currency
+        total_fc = Decimal(str(trade.get('total_amount', 0) or 0))
+
+        if fc and lc and fc != lc and total_fc:
+            try:
+                # Get latest FX rate for FC->LC pair
+                fx_rate, _ = multicurrency_service.get_fx_rate(fc, lc)
+                total_lc = (total_fc * fx_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                trade['fx_rate'] = float(fx_rate)
+                trade['total_amount_lc'] = float(total_lc)
+            except Exception as e:
+                logger.warning(f"FX rate lookup failed for {fc}->{lc}: {e}")
+                trade['fx_rate'] = 1.0
+                trade['total_amount_lc'] = float(total_fc)
+        else:
+            # Same currency or no conversion needed
+            trade['fx_rate'] = 1.0
+            trade['total_amount_lc'] = float(total_fc)
+
     wrapped_trades = [TradeWrapper(t, idx) for idx, t in enumerate(trades_data)]
 
     # CSV Export
@@ -211,8 +242,9 @@ def trade_list(request):
 
         writer = csv.writer(response)
         writer.writerow([
-            'Deal Number', 'Type', 'Portfolio', 'Security', 'Trade Date',
-            'Settle Date', 'Quantity', 'Price', 'Total Amount', 'Status'
+            'Deal Number', 'Type', 'Portfolio', 'Portfolio CCY', 'Security', 'Security CCY',
+            'Trade Date', 'Settle Date', 'Quantity', 'Price',
+            'Total Amount FC', 'Total Amount LC', 'FX Rate', 'Status'
         ])
 
         for trade in trades_data:
@@ -220,12 +252,16 @@ def trade_list(request):
                 trade.get('deal_number', ''),
                 trade.get('trade_type', ''),
                 trade.get('portfolio_short_name', ''),
+                trade.get('portfolio_currency', ''),
                 trade.get('security_label', ''),
+                trade.get('currency_code', ''),
                 trade.get('trade_date', ''),
                 trade.get('settle_date', ''),
                 trade.get('quantity', ''),
                 trade.get('price', ''),
                 trade.get('total_amount', ''),
+                trade.get('total_amount_lc', ''),
+                trade.get('fx_rate', ''),
                 trade.get('status', '')
             ])
 
