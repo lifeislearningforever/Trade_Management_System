@@ -223,7 +223,7 @@ class CACashFlowService:
                     'security_name': security_name,
                     'quantity': quantity,
                     'amount': amount_lc,  # Use local currency amount
-                    'currency': local_currency,
+                    'currency': portfolio_currency,  # Local currency = portfolio currency
                     'status': 'SUCCESS' if success else 'FAILED',
                     'error_message': error if not success else None
                 }
