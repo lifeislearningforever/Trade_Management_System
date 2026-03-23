@@ -539,10 +539,13 @@ class CACashFlowService:
         updated_by: str
     ) -> bool:
         """
-        Update the position table with CA/cash flow details.
+        Create a NEW position version with CA/cash flow details.
 
-        This links the position to the last CA and cash flow that affected it.
-        Called after successfully creating a validated CA cash flow.
+        For dividends/income CA types:
+        - Creates a new position version (new version_id)
+        - Reduces total_cost by dividend amount (cost basis reduction)
+        - Recalculates average_cost based on new total_cost
+        - Records CA/cash flow reference for audit trail
 
         Args:
             portfolio_short_name: Portfolio short name
@@ -560,42 +563,164 @@ class CACashFlowService:
             True if successful, False otherwise
         """
         try:
-            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            logger.info(f"[UPDATE_POS] Creating new position version with CA details: "
+                       f"portfolio={portfolio_short_name}, security={security_name}, "
+                       f"ca_number={ca_number}, cf_number={cash_flow_number}, amount={cash_flow_amount}")
 
-            # Update the latest position version for this portfolio+security
-            # Find and update the most recent OPEN position
-            update_sql = f"""
-            UPDATE {self.DATABASE}.{self.POSITION_TABLE}
-            SET last_ca_id = {ca_id},
-                last_ca_number = '{self._escape(ca_number)}',
-                last_ca_type = '{self._escape(ca_type)}',
-                last_ca_date = '{ex_date}',
-                last_cash_flow_id = {cash_flow_id},
-                last_cash_flow_number = '{self._escape(cash_flow_number)}',
-                last_cash_flow_amount = {float(cash_flow_amount)},
-                updated_by = '{self._escape(updated_by)}',
-                updated_at = '{timestamp_str}'
-            WHERE portfolio_short_name = '{self._escape(portfolio_short_name)}'
-              AND security_label = '{self._escape(security_name)}'
-              AND status = 'OPEN'
-              AND is_active = true
+            # Step 1: Get current open position
+            current_position = self._get_current_position(portfolio_short_name, security_name)
+
+            if not current_position:
+                logger.warning(f"[UPDATE_POS] No open position found for {portfolio_short_name}/{security_name}")
+                return False
+
+            # Step 2: Extract current values
+            position_id = current_position.get('position_id')
+            old_version_id = current_position.get('version_id')
+            quantity = Decimal(str(current_position.get('quantity', 0) or 0))
+            old_total_cost = Decimal(str(current_position.get('total_cost', 0) or 0))
+            old_avg_cost = Decimal(str(current_position.get('average_cost', 0) or 0))
+            realized_pnl = Decimal(str(current_position.get('realized_pnl', 0) or 0))
+            current_price = current_position.get('current_price', 0)
+            market_value = current_position.get('market_value', 0)
+
+            logger.info(f"[UPDATE_POS] Current position: qty={quantity}, total_cost={old_total_cost}, "
+                       f"avg_cost={old_avg_cost}, realized_pnl={realized_pnl}")
+
+            # Step 3: Calculate new values
+            # Dividend reduces cost basis (total_cost) but quantity stays same
+            # This effectively lowers the average cost per share
+            new_total_cost = (old_total_cost - cash_flow_amount).quantize(
+                Decimal('0.00000001'), rounding=ROUND_HALF_UP
+            )
+            if new_total_cost < 0:
+                new_total_cost = Decimal('0')  # Cost basis can't go negative
+
+            # Recalculate average cost
+            if quantity > 0:
+                new_avg_cost = (new_total_cost / quantity).quantize(
+                    Decimal('0.00000001'), rounding=ROUND_HALF_UP
+                )
+            else:
+                new_avg_cost = Decimal('0')
+
+            # Recalculate unrealized P&L
+            market_value_dec = Decimal(str(market_value or 0))
+            new_unrealized_pnl = market_value_dec - new_total_cost
+
+            logger.info(f"[UPDATE_POS] After dividend: new_total_cost={new_total_cost}, "
+                       f"new_avg_cost={new_avg_cost}, unrealized_pnl={new_unrealized_pnl}")
+
+            # Step 4: Mark old version as not latest
+            self._mark_old_version_not_latest(old_version_id)
+
+            # Step 5: Create new position version
+            timestamp = datetime.now()
+            timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
+            new_version_id = int(timestamp.timestamp() * 1000)
+
+            insert_sql = f"""
+            UPSERT INTO {self.DATABASE}.{self.POSITION_TABLE} (
+                version_id, position_id, position_date,
+                portfolio_short_name, security_label,
+                quantity, average_cost, total_cost,
+                realized_pnl, current_price, market_value, unrealized_pnl,
+                trade_id, trade_type,
+                security_currency, portfolio_currency, fx_rate,
+                average_cost_base, total_cost_base, realized_pnl_base,
+                status, is_active, is_latest,
+                last_ca_id, last_ca_number, last_ca_type, last_ca_date,
+                last_cash_flow_id, last_cash_flow_number, last_cash_flow_amount,
+                created_by, created_at, updated_by, updated_at
+            ) VALUES (
+                {new_version_id},
+                {position_id},
+                '{ex_date}',
+                '{self._escape(portfolio_short_name)}',
+                '{self._escape(security_name)}',
+                {float(quantity)},
+                {float(new_avg_cost)},
+                {float(new_total_cost)},
+                {float(realized_pnl)},
+                {float(current_price or 0)},
+                {float(market_value or 0)},
+                {float(new_unrealized_pnl)},
+                NULL,
+                'CA_{ca_type}',
+                '{self._escape(current_position.get("security_currency", ""))}',
+                '{self._escape(current_position.get("portfolio_currency", ""))}',
+                {float(current_position.get("fx_rate", 1) or 1)},
+                {float(new_avg_cost)},
+                {float(new_total_cost)},
+                {float(realized_pnl)},
+                'OPEN',
+                true,
+                true,
+                {ca_id},
+                '{self._escape(ca_number)}',
+                '{self._escape(ca_type)}',
+                '{ex_date}',
+                {cash_flow_id},
+                '{self._escape(cash_flow_number)}',
+                {float(cash_flow_amount)},
+                '{self._escape(updated_by)}',
+                '{timestamp_str}',
+                '{self._escape(updated_by)}',
+                '{timestamp_str}'
+            )
             """
 
-            logger.info(f"[UPDATE_POS] Updating position with CA details: portfolio={portfolio_short_name}, "
-                       f"security={security_name}, ca_number={ca_number}, cf_number={cash_flow_number}")
-
-            success = impala_manager.execute_write(update_sql, database=self.DATABASE)
+            success = impala_manager.execute_write(insert_sql, database=self.DATABASE)
 
             if success:
-                logger.info(f"[UPDATE_POS] SUCCESS - Position updated with CA/cash flow details")
+                logger.info(f"[UPDATE_POS] SUCCESS - Created new position version {new_version_id} "
+                           f"with CA/cash flow details. New avg_cost={new_avg_cost}")
             else:
-                logger.warning(f"[UPDATE_POS] Position update returned false (may be no matching position)")
+                logger.error(f"[UPDATE_POS] FAILED - Could not create new position version")
 
             return success
 
         except Exception as e:
-            logger.error(f"[UPDATE_POS] Error updating position with CA details: {str(e)}")
+            logger.error(f"[UPDATE_POS] Error creating position version with CA details: {str(e)}")
             # Don't fail the cash flow creation if position update fails
+            return False
+
+    def _get_current_position(
+        self,
+        portfolio_short_name: str,
+        security_name: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get the current open position for a portfolio/security combination."""
+        try:
+            query = f"""
+            SELECT *
+            FROM {self.DATABASE}.{self.POSITION_TABLE}
+            WHERE portfolio_short_name = '{self._escape(portfolio_short_name)}'
+              AND security_label = '{self._escape(security_name)}'
+              AND status = 'OPEN'
+              AND is_active = true
+              AND (is_latest = true OR is_latest IS NULL)
+            ORDER BY position_date DESC, version_id DESC
+            LIMIT 1
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            return results[0] if results else None
+        except Exception as e:
+            logger.error(f"[UPDATE_POS] Error getting current position: {str(e)}")
+            return None
+
+    def _mark_old_version_not_latest(self, version_id: int) -> bool:
+        """Mark an existing position version as not latest."""
+        try:
+            update_sql = f"""
+            UPDATE {self.DATABASE}.{self.POSITION_TABLE}
+            SET is_latest = false,
+                updated_at = '{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}'
+            WHERE version_id = {version_id}
+            """
+            return impala_manager.execute_write(update_sql, database=self.DATABASE)
+        except Exception as e:
+            logger.error(f"[UPDATE_POS] Error marking version {version_id} as not latest: {str(e)}")
             return False
 
     def process_pending_cas(

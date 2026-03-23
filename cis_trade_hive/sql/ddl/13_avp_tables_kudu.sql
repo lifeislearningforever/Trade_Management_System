@@ -69,6 +69,7 @@ CREATE TABLE cis_trade_position (
     -- Status
     status STRING,                       -- OPEN, CLOSED
     is_active BOOLEAN,
+    is_latest BOOLEAN DEFAULT TRUE,      -- Latest version for this portfolio+security+date
 
     -- Last Corporate Action / Cash Flow tracking
     last_ca_id BIGINT,                   -- Last CA that generated cash flow
