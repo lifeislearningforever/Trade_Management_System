@@ -280,8 +280,8 @@ class CashFlowRepository:
                 'foreign_ccy_amt': float,
                 'flow_amount_local': float,
                 'dividend_price': float,
-                'quantity': float,  # Quantity held at ex-date
-                'fx_rate': float,   # FX rate used for conversion
+                'quantity': float,      # Quantity held at ex-date (for CA cash flows)
+                'fx_rate': float,       # FX rate used for LC conversion
                 'gl_acc_no': str,
                 'src_system': str,
                 'payment_date': str,

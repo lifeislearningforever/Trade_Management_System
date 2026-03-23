@@ -36,12 +36,14 @@ CREATE TABLE IF NOT EXISTS cis_cash_flow (
     position_updated BOOLEAN DEFAULT FALSE,     -- Whether position was updated
 
     -- Currency and Amounts
-    foreign_ccy STRING,                         -- Foreign currency code
-    local_ccy STRING,                           -- Local currency code
+    foreign_ccy STRING,                         -- Foreign currency code (Security currency)
+    local_ccy STRING,                           -- Local currency code (Portfolio currency)
     local_ccy_amt DECIMAL(20, 8),               -- Amount in local currency
     foreign_ccy_amt DECIMAL(20, 8),             -- Amount in foreign currency
     flow_amount_local DECIMAL(20, 8),           -- Flow amount in local currency
     dividend_price DECIMAL(20, 8),              -- Dividend price per share
+    quantity DECIMAL(20, 8),                    -- Quantity held at ex-date (for CA cash flows)
+    fx_rate DECIMAL(20, 8),                     -- FX rate used for LC conversion
 
     -- GL Account
     gl_acc_no STRING,                           -- General Ledger Account Number

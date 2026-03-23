@@ -403,10 +403,10 @@ class CACashFlowService:
                 'local_ccy': local_currency,
                 'local_ccy_amt': float(amount_lc),
                 'flow_amount_local': float(amount_lc),
-                # Store dividend details for reference
-                'dividend_price': float(amount_fc / quantity) if quantity else 0,  # Price per share
-                'quantity': float(quantity),  # Store quantity held
-                'fx_rate': float(fx_rate),  # Store FX rate used
+                # Dividend price per share (Amount FC / Quantity)
+                'dividend_price': float(amount_fc / quantity) if quantity else 0,
+                'quantity': float(quantity),    # Quantity held at ex-date
+                'fx_rate': float(fx_rate),      # FX rate used for LC conversion
                 'status': 'INITIAL',
                 'src_system': 'CIS',
             }
