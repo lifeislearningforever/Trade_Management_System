@@ -282,8 +282,8 @@ class UDFFieldServiceValidateFieldDataTestCase(TestCase):
         # Check that object_type was converted to uppercase
         self.assertEqual(field_data['object_type'], 'TRADE')
 
-    def test_validate_duplicate_field_name(self):
-        """Test validation fails for duplicate field_name"""
+    def test_validate_duplicate_field_value(self):
+        """Test validation fails for duplicate field_value (same object_type + field_name + field_value)"""
         self.mock_repository.get_all.return_value = [
             {
                 'object_type': 'TRADE',
@@ -293,9 +293,10 @@ class UDFFieldServiceValidateFieldDataTestCase(TestCase):
             }
         ]
 
+        # Same field_name AND field_value should fail
         field_data = {
             'field_name': 'fund_type',
-            'field_value': 'New Value',
+            'field_value': 'Existing',  # Same value as existing
             'object_type': 'TRADE'
         }
 
@@ -303,6 +304,29 @@ class UDFFieldServiceValidateFieldDataTestCase(TestCase):
 
         self.assertFalse(is_valid)
         self.assertIn('already exists', error)
+
+    def test_validate_allows_different_field_value(self):
+        """Test validation allows same field_name with different field_value"""
+        self.mock_repository.get_all.return_value = [
+            {
+                'object_type': 'TRADE',
+                'field_name': 'fund_type',
+                'field_value': 'Existing',
+                'udf_id': 1
+            }
+        ]
+
+        # Same field_name but different field_value should be allowed
+        field_data = {
+            'field_name': 'fund_type',
+            'field_value': 'New Value',  # Different value
+            'object_type': 'TRADE'
+        }
+
+        is_valid, error = self.service.validate_field_data(field_data)
+
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
 
     def test_validate_allows_update_same_record(self):
         """Test validation allows updating the same record"""

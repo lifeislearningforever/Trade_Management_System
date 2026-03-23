@@ -193,7 +193,8 @@ class UDFFieldService:
         field_data['field_value'] = field_data['field_value'].strip()
         field_data['object_type'] = field_data['object_type'].upper()
 
-        # Check uniqueness of (object_type, field_name) combination
+        # Check uniqueness of (object_type, field_name, field_value) combination
+        # Multiple field_values are allowed for the same object_type + field_name
         existing_fields = self.repository.get_all(object_type=field_data['object_type'], is_active=True)
 
         for existing in existing_fields:
@@ -205,10 +206,11 @@ class UDFFieldService:
             if not existing.get('field_value'):
                 continue
 
-            # Check if combination already exists
+            # Check if exact combination already exists (object_type + field_name + field_value)
             if (existing.get('object_type') == field_data['object_type'] and
-                existing.get('field_name') == field_name):
-                return False, f"Field Name '{field_name}' already exists for entity type '{field_data['object_type']}'"
+                existing.get('field_name') == field_name and
+                existing.get('field_value') == field_data['field_value']):
+                return False, f"Value '{field_data['field_value']}' already exists for '{field_name}' in entity type '{field_data['object_type']}'"
 
         return True, None
 
