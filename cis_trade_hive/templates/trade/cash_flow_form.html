@@ -246,23 +246,19 @@
                                    placeholder="Enter GL Account Number">
                         </div>
 
-                        <!-- Local Currency (Required) -->
+                        <!-- Local Currency (Auto-populated from Portfolio - Readonly) -->
                         <div class="col-md-4">
                             <label for="local_ccy" class="form-label">
                                 Local Ccy <span class="text-danger">*</span>
+                                <small class="text-muted">(from Portfolio)</small>
                             </label>
-                            <select class="form-select select2-currency"
-                                    id="local_ccy"
-                                    name="local_ccy"
-                                    required>
-                                <option value="">Select Currency...</option>
-                                {% for c in dropdown_options.currencies %}
-                                    <option value="{{ c.value }}"
-                                            {% if cash_flow.local_ccy == c.value %}selected{% endif %}>
-                                        {{ c.label }}
-                                    </option>
-                                {% endfor %}
-                            </select>
+                            <input type="text"
+                                   class="form-control bg-light"
+                                   id="local_ccy_display"
+                                   readonly
+                                   placeholder="Select Portfolio first..."
+                                   value="{{ cash_flow.local_ccy|default:'' }}">
+                            <input type="hidden" id="local_ccy" name="local_ccy" value="{{ cash_flow.local_ccy|default:'' }}">
                             <div class="invalid-feedback">Local currency is required</div>
                         </div>
 
@@ -290,20 +286,19 @@
                                    placeholder="0.00">
                         </div>
 
-                        <!-- Foreign Currency -->
+                        <!-- Foreign Currency (Auto-populated from Security - Readonly) -->
                         <div class="col-md-4">
-                            <label for="foreign_ccy" class="form-label">Foreign Ccy</label>
-                            <select class="form-select select2-currency"
-                                    id="foreign_ccy"
-                                    name="foreign_ccy">
-                                <option value="">Select Currency...</option>
-                                {% for c in dropdown_options.currencies %}
-                                    <option value="{{ c.value }}"
-                                            {% if cash_flow.foreign_ccy == c.value %}selected{% endif %}>
-                                        {{ c.label }}
-                                    </option>
-                                {% endfor %}
-                            </select>
+                            <label for="foreign_ccy" class="form-label">
+                                Foreign Ccy
+                                <small class="text-muted">(from Security)</small>
+                            </label>
+                            <input type="text"
+                                   class="form-control bg-light"
+                                   id="foreign_ccy_display"
+                                   readonly
+                                   placeholder="Select Security first..."
+                                   value="{{ cash_flow.foreign_ccy|default:'' }}">
+                            <input type="hidden" id="foreign_ccy" name="foreign_ccy" value="{{ cash_flow.foreign_ccy|default:'' }}">
                         </div>
 
                         <!-- Foreign Ccy Amount -->
@@ -405,42 +400,71 @@ $(document).ready(function() {
         CISSelect2.initElement($(this));
     });
 
-    // Initialize currency dropdowns
-    $('.select2-currency').each(function() {
-        CISSelect2.initElement($(this));
-    });
+    // Note: Currency fields are now readonly text inputs, no Select2 needed
 
-    // Portfolio validation on change
+    // Portfolio validation on change - Auto-set Local Currency (readonly)
     $('#portfolio_short_name').on('change', function() {
         var portfolio = $(this).val();
         if (portfolio) {
             validatePortfolio(portfolio);
-            // Set local currency from portfolio
+            // Set local currency from portfolio (readonly field)
             var selectedOption = $(this).find('option:selected');
             var currency = selectedOption.data('currency');
             if (currency) {
-                $('#local_ccy').val(currency).trigger('change');
+                $('#local_ccy').val(currency);
+                $('#local_ccy_display').val(currency);
+            } else {
+                $('#local_ccy').val('');
+                $('#local_ccy_display').val('');
             }
+        } else {
+            // Clear local currency if no portfolio selected
+            $('#local_ccy').val('');
+            $('#local_ccy_display').val('');
         }
     });
 
-    // Security validation on change
+    // Security validation on change - Auto-set Foreign Currency (readonly)
     $('#security_name').on('change', function() {
         var security = $(this).val();
         if (security) {
             validateSecurity(security);
+            // Set foreign currency from security (readonly field)
+            var selectedOption = $(this).find('option:selected');
+            var currency = selectedOption.data('currency');
+            if (currency) {
+                $('#foreign_ccy').val(currency);
+                $('#foreign_ccy_display').val(currency);
+            } else {
+                $('#foreign_ccy').val('');
+                $('#foreign_ccy_display').val('');
+            }
+        } else {
+            // Clear foreign currency if no security selected
+            $('#foreign_ccy').val('');
+            $('#foreign_ccy_display').val('');
         }
     });
 
-    // Trigger validation on page load for edit mode
+    // Trigger validation and currency auto-fill on page load for edit mode
     {% if is_edit %}
     var portfolio = $('#portfolio_short_name').val();
     if (portfolio) {
         validatePortfolio(portfolio);
+        // Set local currency display from selected portfolio
+        var portfolioCurrency = $('#portfolio_short_name option:selected').data('currency');
+        if (portfolioCurrency) {
+            $('#local_ccy_display').val(portfolioCurrency);
+        }
     }
     var security = $('#security_name').val();
     if (security) {
         validateSecurity(security);
+        // Set foreign currency display from selected security
+        var securityCurrency = $('#security_name option:selected').data('currency');
+        if (securityCurrency) {
+            $('#foreign_ccy_display').val(securityCurrency);
+        }
     }
     {% endif %}
 });
