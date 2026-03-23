@@ -46,22 +46,23 @@ class CACashFlowService:
         self,
         ca_number: str,
         portfolio_short_name: str,
+        security_name: str,
         ex_date: str
     ) -> Optional[Dict[str, Any]]:
         """
-        Check if a cash flow already exists for this CA + portfolio + ex_date combination.
+        Check if a cash flow already exists for this CA + portfolio + security + ex_date combination.
         Prevents duplicate cash flows when EOD job runs multiple times.
 
         Returns:
             Cash flow dict if exists, None otherwise
         """
         try:
-            # Check by matching ex_date, portfolio, and looking for CA number pattern in cash_flow_number
-            # CA cash flows have cash_flow_number like "CF-YYYYMMDD-XXXXX" but we can match by ex_date + portfolio
+            # Check by matching ex_date, portfolio, security, and cash flow type
             query = f"""
             SELECT cash_flow_id, cash_flow_number
             FROM {self.DATABASE}.cis_cash_flow
             WHERE portfolio_short_name = '{self._escape(portfolio_short_name)}'
+              AND security_label = '{self._escape(security_name)}'
               AND ex_date = '{ex_date}'
               AND cash_flow_type IN ('DIVIDEND', 'INTEREST', 'COUPON', 'CAPITAL_DISTRIBUTION')
               AND (is_deleted = false OR is_deleted IS NULL)
@@ -408,10 +409,10 @@ class CACashFlowService:
             Tuple of (success, cash_flow_id, error_message)
         """
         try:
-            # Check for duplicate - prevent creating multiple cash flows for same CA + portfolio
-            existing = self._check_existing_cash_flow(ca_number, portfolio_short_name, ex_date)
+            # Check for duplicate - prevent creating multiple cash flows for same CA + portfolio + security
+            existing = self._check_existing_cash_flow(ca_number, portfolio_short_name, security_name, ex_date)
             if existing:
-                logger.info(f"Cash flow already exists for CA {ca_number}, portfolio {portfolio_short_name}")
+                logger.info(f"Cash flow already exists for CA {ca_number}, portfolio {portfolio_short_name}, security {security_name}")
                 return True, existing.get('cash_flow_id'), "Cash flow already exists (skipped)"
 
             # Generate CF number
