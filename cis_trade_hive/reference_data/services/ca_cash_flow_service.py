@@ -68,12 +68,14 @@ class CACashFlowService:
               AND (is_deleted = false OR is_deleted IS NULL)
             LIMIT 1
             """
+            logger.info(f"[CHECK_DUP] Checking for existing cash flow with query: {query.strip()}")
             results = impala_manager.execute_query(query, database=self.DATABASE)
+            logger.info(f"[CHECK_DUP] Query returned {len(results) if results else 0} results: {results}")
             if results and len(results) > 0:
                 return results[0]
             return None
         except Exception as e:
-            logger.warning(f"Error checking existing cash flow: {e}")
+            logger.warning(f"[CHECK_DUP] Error checking existing cash flow: {e}")
             return None
 
     def queue_ca_for_processing(
@@ -169,10 +171,17 @@ class CACashFlowService:
                 return False, error_msg, 0, Decimal('0')
 
             # Get ALL portfolios holding this security (CA applies to security level)
+            logger.info(f"[EOD] Looking up holdings for security '{security_name}' as of {ex_date}")
             holdings = self.get_holdings_for_ca(
                 security_name=security_name,
                 as_of_date=ex_date
             )
+
+            logger.info(f"[EOD] Found {len(holdings) if holdings else 0} holdings for {security_name}")
+            if holdings:
+                for i, h in enumerate(holdings):
+                    logger.info(f"[EOD]   Holding {i+1}: portfolio={h.get('portfolio_short_name')}, "
+                               f"security={h.get('security_label')}, qty={h.get('quantity')}")
 
             if not holdings:
                 msg = f"No holdings found for security {security_name} as of {ex_date}"
@@ -186,7 +195,11 @@ class CACashFlowService:
             total_amount = Decimal('0')
             errors = []
 
-            for holding in holdings:
+            logger.info(f"[EOD] Starting cash flow creation loop for {len(holdings)} holdings")
+            for idx, holding in enumerate(holdings):
+                logger.info(f"[EOD] === Processing holding {idx + 1}/{len(holdings)} ===")
+                logger.info(f"[EOD]   Raw holding data: {holding}")
+
                 portfolio_short_name = holding.get('portfolio_short_name')
                 quantity = Decimal(str(holding.get('quantity') or 0))
                 security_currency = holding.get('security_currency') or currency
@@ -197,7 +210,11 @@ class CACashFlowService:
                     security_currency  # Fallback to security currency if not found
                 )
 
+                logger.info(f"[EOD]   portfolio_short_name={portfolio_short_name}, quantity={quantity}, "
+                           f"security_currency={security_currency}, portfolio_currency={portfolio_currency}")
+
                 if quantity <= 0:
+                    logger.info(f"[EOD]   Skipping: quantity <= 0")
                     continue
 
                 # Calculate cash flow amount in FOREIGN currency (security currency)
@@ -230,6 +247,7 @@ class CACashFlowService:
                     continue
 
                 # Create cash flow with proper multi-currency support
+                logger.info(f"[EOD]   Calling create_cash_flow_from_ca() for holding {idx + 1}")
                 success, cash_flow_id, error = self.create_cash_flow_from_ca(
                     ca_id=ca_id,
                     ca_number=ca_number,
@@ -247,6 +265,7 @@ class CACashFlowService:
                     payment_date=payment_date,
                     created_by=queue_entry.get('created_by', 'system')
                 )
+                logger.info(f"[EOD]   create_cash_flow_from_ca result: success={success}, cash_flow_id={cash_flow_id}, error={error}")
 
                 # Log the result
                 log_data = {
@@ -353,8 +372,11 @@ class CACashFlowService:
             ORDER BY p.portfolio_short_name, p.security_label
             """
 
+            logger.info(f"[HOLDINGS] Executing holdings query:\n{query}")
             results = impala_manager.execute_query(query, database=self.DATABASE)
-            logger.info(f"Found {len(results) if results else 0} portfolios holding security {security_name} as of {as_of_date}")
+            logger.info(f"[HOLDINGS] Found {len(results) if results else 0} portfolios holding security {security_name} as of {as_of_date}")
+            if results:
+                logger.info(f"[HOLDINGS] Full results: {results}")
             return results if results else []
 
         except Exception as e:
@@ -409,15 +431,23 @@ class CACashFlowService:
             Tuple of (success, cash_flow_id, error_message)
         """
         try:
+            logger.info(f"[CREATE_CF] === create_cash_flow_from_ca called ===")
+            logger.info(f"[CREATE_CF] ca_number={ca_number}, portfolio={portfolio_short_name}, "
+                       f"security={security_name}, ex_date={ex_date}")
+
             # Check for duplicate - prevent creating multiple cash flows for same CA + portfolio + security
+            logger.info(f"[CREATE_CF] Checking for existing cash flow...")
             existing = self._check_existing_cash_flow(ca_number, portfolio_short_name, security_name, ex_date)
             if existing:
-                logger.info(f"Cash flow already exists for CA {ca_number}, portfolio {portfolio_short_name}, security {security_name}")
+                logger.info(f"[CREATE_CF] DUPLICATE DETECTED! Cash flow already exists: "
+                           f"cash_flow_id={existing.get('cash_flow_id')}, cf_number={existing.get('cash_flow_number')}")
                 return True, existing.get('cash_flow_id'), "Cash flow already exists (skipped)"
+            logger.info(f"[CREATE_CF] No existing cash flow found, proceeding to create...")
 
             # Generate CF number
             timestamp = datetime.now()
             cf_number = f"CF-{timestamp.strftime('%Y%m%d')}-{int(timestamp.timestamp() * 1000) % 100000:05d}"
+            logger.info(f"[CREATE_CF] Generated cf_number={cf_number}")
 
             # Map CA type to cash flow type
             cf_type = self.CA_TO_CF_TYPE_MAP.get(ca_type, ca_type)
@@ -451,19 +481,23 @@ class CACashFlowService:
                 'src_system': 'CIS',
             }
 
-            logger.info(f"Creating cash flow: {cf_number}, Portfolio={portfolio_short_name}, "
+            logger.info(f"[CREATE_CF] Creating cash flow: {cf_number}, Portfolio={portfolio_short_name}, "
                        f"Security={security_name}, Qty={quantity}, "
                        f"Amount FC={amount_fc} {foreign_currency}, "
                        f"Amount LC={amount_lc} {local_currency}, FX={fx_rate}")
+            logger.info(f"[CREATE_CF] cf_data = {cf_data}")
 
             # Use cash flow repository to insert
+            logger.info(f"[CREATE_CF] Calling CashFlowRepository.insert()...")
             success, cash_flow_id = CashFlowRepository.insert(cf_data, created_by)
+            logger.info(f"[CREATE_CF] CashFlowRepository.insert() returned: success={success}, cash_flow_id={cash_flow_id}")
 
             if success:
-                logger.info(f"Created cash flow {cf_number} from CA {ca_number} "
-                           f"for portfolio {portfolio_short_name}")
+                logger.info(f"[CREATE_CF] SUCCESS - Created cash flow {cf_number} (id={cash_flow_id}) "
+                           f"from CA {ca_number} for portfolio {portfolio_short_name}")
                 return True, cash_flow_id, None
             else:
+                logger.error(f"[CREATE_CF] FAILED - Failed to insert cash flow for {portfolio_short_name}")
                 return False, None, "Failed to insert cash flow"
 
         except Exception as e:
@@ -503,11 +537,13 @@ class CACashFlowService:
                 'errors': []
             }
 
-            for entry in pending:
+            logger.info(f"[PENDING] Processing {len(pending)} pending CA entries")
+            for entry_idx, entry in enumerate(pending):
                 queue_id = entry.get('queue_id')
                 ca_number = entry.get('ca_number')
 
-                logger.info(f"Processing CA {ca_number} (queue_id: {queue_id})")
+                logger.info(f"[PENDING] === Processing entry {entry_idx + 1}/{len(pending)}: CA {ca_number} (queue_id: {queue_id}) ===")
+                logger.info(f"[PENDING] Full entry data: {entry}")
 
                 success, message, cf_count, amount = self.process_ca_cash_flows(
                     queue_id=queue_id,
