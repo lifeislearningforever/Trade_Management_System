@@ -222,8 +222,8 @@ class CACashFlowService:
                     'portfolio_short_name': portfolio_short_name,
                     'security_name': security_name,
                     'quantity': quantity,
-                    'amount': amount,
-                    'currency': currency,
+                    'amount': amount_lc,  # Use local currency amount
+                    'currency': local_currency,
                     'status': 'SUCCESS' if success else 'FAILED',
                     'error_message': error if not success else None
                 }
@@ -231,7 +231,7 @@ class CACashFlowService:
 
                 if success:
                     cash_flows_created += 1
-                    total_amount += amount
+                    total_amount += amount_lc  # Use local currency amount
                 else:
                     errors.append(f"{portfolio_short_name}: {error}")
 
