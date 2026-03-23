@@ -179,8 +179,8 @@
                     </div>
                 </div>
 
-                <!-- Subscription Dates Section -->
-                <div class="mb-4">
+                <!-- Subscription Dates Section (Only for Bonus Issue, Rights, Warrant) -->
+                <div class="mb-4" id="subscription_period_section" style="display: none;">
                     <h6 class="text-muted mb-3 border-bottom pb-2">
                         <i class="bi bi-calendar-range"></i> Subscription Period
                     </h6>
@@ -188,28 +188,26 @@
                         <!-- Subscription Start Date -->
                         <div class="col-md-4">
                             <label for="subscription_start_date" class="form-label">
-                                Subscription Start Date <span class="text-danger">*</span>
+                                Subscription Start Date <span class="text-danger subscription-required">*</span>
                             </label>
                             <input type="date"
                                    class="form-control"
                                    id="subscription_start_date"
                                    name="subscription_start_date"
-                                   value="{{ corporate_action.subscription_start_date|default:'' }}"
-                                   required>
+                                   value="{{ corporate_action.subscription_start_date|default:'' }}">
                             <div class="invalid-feedback">Subscription start date is required</div>
                         </div>
 
                         <!-- Subscription End Date -->
                         <div class="col-md-4">
                             <label for="subscription_end_date" class="form-label">
-                                Subscription End Date <span class="text-danger">*</span>
+                                Subscription End Date <span class="text-danger subscription-required">*</span>
                             </label>
                             <input type="date"
                                    class="form-control"
                                    id="subscription_end_date"
                                    name="subscription_end_date"
-                                   value="{{ corporate_action.subscription_end_date|default:'' }}"
-                                   required>
+                                   value="{{ corporate_action.subscription_end_date|default:'' }}">
                             <div class="invalid-feedback">Subscription end date is required</div>
                         </div>
                     </div>
@@ -309,10 +307,11 @@
         <strong>Note:</strong>
         <ul class="mb-0 mt-2">
             <li>CA Number is auto-generated when you create a new corporate action</li>
-            <li>All dates are required - use the date pickers to select dates</li>
+            <li>All key dates are required - use the date pickers to select dates</li>
+            <li><strong>Subscription Period</strong> is only required for: Bonus Issue, Rights Entitlement, Warrant Entitlement</li>
             <li>New corporate actions are created with <strong>INITIAL</strong> status</li>
             <li>A different user must validate the record (Four-Eyes Principle)</li>
-            <li>Currency can be auto-populated based on selected security</li>
+            <li>Currency is auto-populated based on the selected security</li>
         </ul>
     </div>
 </div>
@@ -327,6 +326,31 @@
 <script src="{% static 'js/select2-init.js' %}"></script>
 
 <script>
+// CA types that require subscription period
+var SUBSCRIPTION_CA_TYPES = ['BONUS_ISSUE', 'RIGHTS_ENTITLEMENT', 'WARRANT_ENTITLEMENT'];
+
+// Function to toggle subscription period visibility and required status
+function toggleSubscriptionPeriod(caType) {
+    var subscriptionSection = document.getElementById('subscription_period_section');
+    var startDateField = document.getElementById('subscription_start_date');
+    var endDateField = document.getElementById('subscription_end_date');
+
+    if (SUBSCRIPTION_CA_TYPES.includes(caType)) {
+        // Show subscription period section
+        subscriptionSection.style.display = 'block';
+        startDateField.required = true;
+        endDateField.required = true;
+    } else {
+        // Hide subscription period section
+        subscriptionSection.style.display = 'none';
+        startDateField.required = false;
+        endDateField.required = false;
+        // Clear values when hidden
+        startDateField.value = '';
+        endDateField.value = '';
+    }
+}
+
 // Initialize Select2 on all dropdowns
 $(document).ready(function() {
     // Initialize security dropdown with Select2 (multi-select)
@@ -344,6 +368,18 @@ $(document).ready(function() {
     $('.select2-ca-type').each(function() {
         CISSelect2.initElement($(this));
     });
+
+    // Handle CA type change to show/hide subscription period
+    $('#ca_type').on('change', function() {
+        var selectedType = $(this).val();
+        toggleSubscriptionPeriod(selectedType);
+    });
+
+    // On page load, check current CA type and toggle subscription period
+    var currentCAType = $('#ca_type').val();
+    if (currentCAType) {
+        toggleSubscriptionPeriod(currentCAType);
+    }
 
     // Note: Currency field is now readonly, no Select2 needed
 

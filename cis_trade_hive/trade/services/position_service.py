@@ -566,14 +566,19 @@ class PositionService:
                 market_value_base = market_value
 
             # Match columns to cis_trade_position table structure (DDL: 13_avp_tables_kudu.sql)
-            # Note: Table has average_cost_base, total_cost_base, realized_pnl_base
-            #       but NOT unrealized_pnl_base or market_value_base
+            # FC = Foreign Currency (Security Currency)
+            # LC = Local Currency (Portfolio Currency)
             # Added: is_latest column for version tracking
+            # Added: realized_pnl_fc, unrealized_pnl_fc, realized_pnl_lc, unrealized_pnl_lc, market_value_lc
             columns = [
                 'version_id', 'position_id', 'position_date',
                 'portfolio_short_name', 'security_label',
                 'quantity', 'average_cost', 'total_cost',
                 'realized_pnl', 'current_price', 'market_value', 'unrealized_pnl',
+                # P&L in FC (Foreign Currency = Security Currency)
+                'realized_pnl_fc', 'unrealized_pnl_fc',
+                # P&L in LC (Local Currency = Portfolio Currency)
+                'realized_pnl_lc', 'unrealized_pnl_lc', 'market_value_lc',
                 'trade_id', 'trade_type',
                 'lots_held', 'custodian', 'sub_custodian',
                 'security_currency', 'portfolio_currency', 'fx_rate',
@@ -588,6 +593,13 @@ class PositionService:
                     return 'NULL'
                 return f"CAST({val} AS DECIMAL(20,8))"
 
+            # FC P&L = same as base values (security currency)
+            # LC P&L = converted to portfolio currency using FX rate
+            realized_pnl_fc = realized_pnl  # FC = Security Currency
+            unrealized_pnl_fc = unrealized_pnl  # FC = Security Currency
+            realized_pnl_lc = realized_pnl_base  # LC = Portfolio Currency
+            unrealized_pnl_lc = unrealized_pnl_base  # LC = Portfolio Currency
+
             values = [
                 str(version_id),
                 str(position_data['position_id']),
@@ -601,6 +613,13 @@ class PositionService:
                 cast_decimal(position_data.get('current_price', 0) or 0),
                 cast_decimal(market_value),
                 cast_decimal(unrealized_pnl),
+                # P&L in FC (Foreign Currency = Security Currency)
+                cast_decimal(realized_pnl_fc),
+                cast_decimal(unrealized_pnl_fc),
+                # P&L in LC (Local Currency = Portfolio Currency)
+                cast_decimal(realized_pnl_lc),
+                cast_decimal(unrealized_pnl_lc),
+                cast_decimal(market_value_base),  # market_value_lc
                 str(position_data.get('trade_id')) if position_data.get('trade_id') else 'NULL',
                 f"'{position_data.get('trade_type', '')}'",
                 str(position_data.get('lots_held', 0)) if position_data.get('lots_held') else 'NULL',
@@ -662,6 +681,8 @@ class PositionService:
                    portfolio_short_name, security_label,
                    quantity, average_cost, total_cost,
                    realized_pnl, current_price, market_value, unrealized_pnl,
+                   realized_pnl_fc, unrealized_pnl_fc,
+                   realized_pnl_lc, unrealized_pnl_lc, market_value_lc,
                    trade_id, trade_type,
                    lots_held, custodian, sub_custodian,
                    security_currency, portfolio_currency, fx_rate,
@@ -691,6 +712,8 @@ class PositionService:
                  portfolio_short_name, security_label,
                  quantity, average_cost, total_cost,
                  realized_pnl, current_price, market_value, unrealized_pnl,
+                 realized_pnl_fc, unrealized_pnl_fc,
+                 realized_pnl_lc, unrealized_pnl_lc, market_value_lc,
                  trade_id, trade_type,
                  lots_held, custodian, sub_custodian,
                  security_currency, portfolio_currency, fx_rate,
@@ -707,6 +730,11 @@ class PositionService:
                     CAST({row.get('current_price') or 0} AS DECIMAL(20,8)),
                     CAST({row.get('market_value') or 0} AS DECIMAL(20,8)),
                     CAST({row.get('unrealized_pnl') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('realized_pnl_fc') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('unrealized_pnl_fc') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('realized_pnl_lc') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('unrealized_pnl_lc') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('market_value_lc') or 0} AS DECIMAL(20,8)),
                     {row.get('trade_id') or 'NULL'},
                     '{row.get('trade_type', '')}',
                     {row.get('lots_held') or 'NULL'},
