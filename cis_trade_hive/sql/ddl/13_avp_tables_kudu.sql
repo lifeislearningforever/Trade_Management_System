@@ -43,11 +43,22 @@ CREATE TABLE cis_trade_position (
     average_cost DECIMAL(20,8),          -- Weighted average cost (AVP)
     total_cost DECIMAL(20,8),            -- Total cost basis
 
-    -- P&L
-    realized_pnl DECIMAL(20,8),          -- Cumulative realized P&L
-    current_price DECIMAL(20,8),         -- Latest market price
-    market_value DECIMAL(20,8),          -- qty * current_price
-    unrealized_pnl DECIMAL(20,8),        -- market_value - total_cost
+    -- P&L in Foreign Currency (Security Currency)
+    realized_pnl_fc DECIMAL(20,8),       -- Cumulative realized P&L in FC
+    unrealized_pnl_fc DECIMAL(20,8),     -- Unrealized P&L in FC (market_value - total_cost)
+
+    -- P&L in Local Currency (Portfolio Currency)
+    realized_pnl_lc DECIMAL(20,8),       -- Cumulative realized P&L in LC
+    unrealized_pnl_lc DECIMAL(20,8),     -- Unrealized P&L in LC
+
+    -- Legacy P&L columns (for backward compatibility, same as FC)
+    realized_pnl DECIMAL(20,8),          -- Cumulative realized P&L (= realized_pnl_fc)
+    unrealized_pnl DECIMAL(20,8),        -- Unrealized P&L (= unrealized_pnl_fc)
+
+    -- Market Value
+    current_price DECIMAL(20,8),         -- Latest market price in FC
+    market_value DECIMAL(20,8),          -- qty * current_price (in FC)
+    market_value_lc DECIMAL(20,8),       -- Market value in LC
 
     -- Trade that caused this version
     trade_id BIGINT,

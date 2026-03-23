@@ -502,6 +502,7 @@ class CACashFlowService:
                            f"from CA {ca_number} for portfolio {portfolio_short_name}")
 
                 # Update position table with CA/cash flow details
+                # Pass both FC and LC amounts along with currencies and FX rate
                 self._update_position_with_ca_details(
                     portfolio_short_name=portfolio_short_name,
                     security_name=security_name,
@@ -511,7 +512,11 @@ class CACashFlowService:
                     ex_date=ex_date,
                     cash_flow_id=cash_flow_id,
                     cash_flow_number=cf_number,
-                    cash_flow_amount=amount_lc,
+                    cash_flow_amount_fc=amount_fc,
+                    cash_flow_amount_lc=amount_lc,
+                    security_currency=foreign_currency,
+                    portfolio_currency=local_currency,
+                    fx_rate=fx_rate,
                     updated_by=created_by
                 )
 
@@ -535,7 +540,11 @@ class CACashFlowService:
         ex_date: str,
         cash_flow_id: int,
         cash_flow_number: str,
-        cash_flow_amount: Decimal,
+        cash_flow_amount_fc: Decimal,
+        cash_flow_amount_lc: Decimal,
+        security_currency: str,
+        portfolio_currency: str,
+        fx_rate: Decimal,
         updated_by: str
     ) -> bool:
         """
@@ -545,6 +554,7 @@ class CACashFlowService:
         - Creates a new position version (new version_id)
         - Reduces total_cost by dividend amount (cost basis reduction)
         - Recalculates average_cost based on new total_cost
+        - Calculates P&L in both FC (foreign/security currency) and LC (local/portfolio currency)
         - Records CA/cash flow reference for audit trail
 
         Args:
@@ -556,7 +566,11 @@ class CACashFlowService:
             ex_date: Ex-dividend date
             cash_flow_id: Created cash flow ID
             cash_flow_number: Cash flow number
-            cash_flow_amount: Cash flow amount in local currency
+            cash_flow_amount_fc: Cash flow amount in Foreign Currency (security currency)
+            cash_flow_amount_lc: Cash flow amount in Local Currency (portfolio currency)
+            security_currency: Security currency code (FC)
+            portfolio_currency: Portfolio currency code (LC)
+            fx_rate: FX rate used (FC to LC)
             updated_by: User who triggered the update
 
         Returns:
@@ -565,7 +579,9 @@ class CACashFlowService:
         try:
             logger.info(f"[UPDATE_POS] Creating new position version with CA details: "
                        f"portfolio={portfolio_short_name}, security={security_name}, "
-                       f"ca_number={ca_number}, cf_number={cash_flow_number}, amount={cash_flow_amount}")
+                       f"ca_number={ca_number}, cf_number={cash_flow_number}, "
+                       f"amount_fc={cash_flow_amount_fc} {security_currency}, "
+                       f"amount_lc={cash_flow_amount_lc} {portfolio_currency}, fx_rate={fx_rate}")
 
             # Step 1: Get current open position
             current_position = self._get_current_position(portfolio_short_name, security_name)
@@ -580,41 +596,74 @@ class CACashFlowService:
             quantity = Decimal(str(current_position.get('quantity', 0) or 0))
             old_total_cost = Decimal(str(current_position.get('total_cost', 0) or 0))
             old_avg_cost = Decimal(str(current_position.get('average_cost', 0) or 0))
-            realized_pnl = Decimal(str(current_position.get('realized_pnl', 0) or 0))
-            current_price = current_position.get('current_price', 0)
-            market_value = current_position.get('market_value', 0)
+            old_total_cost_base = Decimal(str(current_position.get('total_cost_base', 0) or 0))
+            old_avg_cost_base = Decimal(str(current_position.get('average_cost_base', 0) or 0))
+            current_price = Decimal(str(current_position.get('current_price', 0) or 0))
+            market_value = Decimal(str(current_position.get('market_value', 0) or 0))
+
+            # Get existing P&L values (in FC)
+            realized_pnl_fc = Decimal(str(current_position.get('realized_pnl_fc', 0) or
+                                         current_position.get('realized_pnl', 0) or 0))
+            realized_pnl_lc = Decimal(str(current_position.get('realized_pnl_lc', 0) or
+                                         current_position.get('realized_pnl_base', 0) or 0))
 
             logger.info(f"[UPDATE_POS] Current position: qty={quantity}, total_cost={old_total_cost}, "
-                       f"avg_cost={old_avg_cost}, realized_pnl={realized_pnl}")
+                       f"avg_cost={old_avg_cost}, realized_pnl_fc={realized_pnl_fc}, realized_pnl_lc={realized_pnl_lc}")
 
-            # Step 3: Calculate new values
+            # Step 3: Calculate new values in FC (Foreign Currency / Security Currency)
             # Dividend reduces cost basis (total_cost) but quantity stays same
-            # This effectively lowers the average cost per share
-            new_total_cost = (old_total_cost - cash_flow_amount).quantize(
+            new_total_cost_fc = (old_total_cost - cash_flow_amount_fc).quantize(
                 Decimal('0.00000001'), rounding=ROUND_HALF_UP
             )
-            if new_total_cost < 0:
-                new_total_cost = Decimal('0')  # Cost basis can't go negative
+            if new_total_cost_fc < 0:
+                new_total_cost_fc = Decimal('0')  # Cost basis can't go negative
 
-            # Recalculate average cost
+            # Recalculate average cost in FC
             if quantity > 0:
-                new_avg_cost = (new_total_cost / quantity).quantize(
+                new_avg_cost_fc = (new_total_cost_fc / quantity).quantize(
                     Decimal('0.00000001'), rounding=ROUND_HALF_UP
                 )
             else:
-                new_avg_cost = Decimal('0')
+                new_avg_cost_fc = Decimal('0')
 
-            # Recalculate unrealized P&L
-            market_value_dec = Decimal(str(market_value or 0))
-            new_unrealized_pnl = market_value_dec - new_total_cost
+            # Calculate unrealized P&L in FC
+            new_unrealized_pnl_fc = (market_value - new_total_cost_fc).quantize(
+                Decimal('0.00000001'), rounding=ROUND_HALF_UP
+            )
 
-            logger.info(f"[UPDATE_POS] After dividend: new_total_cost={new_total_cost}, "
-                       f"new_avg_cost={new_avg_cost}, unrealized_pnl={new_unrealized_pnl}")
+            # Step 4: Calculate values in LC (Local Currency / Portfolio Currency)
+            new_total_cost_lc = (old_total_cost_base - cash_flow_amount_lc).quantize(
+                Decimal('0.00000001'), rounding=ROUND_HALF_UP
+            )
+            if new_total_cost_lc < 0:
+                new_total_cost_lc = Decimal('0')
 
-            # Step 4: Mark old version as not latest
+            if quantity > 0:
+                new_avg_cost_lc = (new_total_cost_lc / quantity).quantize(
+                    Decimal('0.00000001'), rounding=ROUND_HALF_UP
+                )
+            else:
+                new_avg_cost_lc = Decimal('0')
+
+            # Market value in LC
+            market_value_lc = (market_value * fx_rate).quantize(
+                Decimal('0.00000001'), rounding=ROUND_HALF_UP
+            )
+
+            # Unrealized P&L in LC
+            new_unrealized_pnl_lc = (market_value_lc - new_total_cost_lc).quantize(
+                Decimal('0.00000001'), rounding=ROUND_HALF_UP
+            )
+
+            logger.info(f"[UPDATE_POS] After dividend in FC: total_cost={new_total_cost_fc}, "
+                       f"avg_cost={new_avg_cost_fc}, unrealized_pnl={new_unrealized_pnl_fc}")
+            logger.info(f"[UPDATE_POS] After dividend in LC: total_cost={new_total_cost_lc}, "
+                       f"avg_cost={new_avg_cost_lc}, unrealized_pnl={new_unrealized_pnl_lc}")
+
+            # Step 5: Mark old version as not latest
             self._mark_old_version_not_latest(old_version_id)
 
-            # Step 5: Create new position version
+            # Step 6: Create new position version with all currency values
             timestamp = datetime.now()
             timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
             new_version_id = int(timestamp.timestamp() * 1000)
@@ -624,7 +673,10 @@ class CACashFlowService:
                 version_id, position_id, position_date,
                 portfolio_short_name, security_label,
                 quantity, average_cost, total_cost,
-                realized_pnl, current_price, market_value, unrealized_pnl,
+                current_price, market_value, market_value_lc,
+                realized_pnl, unrealized_pnl,
+                realized_pnl_fc, unrealized_pnl_fc,
+                realized_pnl_lc, unrealized_pnl_lc,
                 trade_id, trade_type,
                 security_currency, portfolio_currency, fx_rate,
                 average_cost_base, total_cost_base, realized_pnl_base,
@@ -639,20 +691,25 @@ class CACashFlowService:
                 '{self._escape(portfolio_short_name)}',
                 '{self._escape(security_name)}',
                 {float(quantity)},
-                {float(new_avg_cost)},
-                {float(new_total_cost)},
-                {float(realized_pnl)},
-                {float(current_price or 0)},
-                {float(market_value or 0)},
-                {float(new_unrealized_pnl)},
+                {float(new_avg_cost_fc)},
+                {float(new_total_cost_fc)},
+                {float(current_price)},
+                {float(market_value)},
+                {float(market_value_lc)},
+                {float(realized_pnl_fc)},
+                {float(new_unrealized_pnl_fc)},
+                {float(realized_pnl_fc)},
+                {float(new_unrealized_pnl_fc)},
+                {float(realized_pnl_lc)},
+                {float(new_unrealized_pnl_lc)},
                 NULL,
                 'CA_{ca_type}',
-                '{self._escape(current_position.get("security_currency", ""))}',
-                '{self._escape(current_position.get("portfolio_currency", ""))}',
-                {float(current_position.get("fx_rate", 1) or 1)},
-                {float(new_avg_cost)},
-                {float(new_total_cost)},
-                {float(realized_pnl)},
+                '{self._escape(security_currency)}',
+                '{self._escape(portfolio_currency)}',
+                {float(fx_rate)},
+                {float(new_avg_cost_lc)},
+                {float(new_total_cost_lc)},
+                {float(realized_pnl_lc)},
                 'OPEN',
                 true,
                 true,
@@ -662,7 +719,7 @@ class CACashFlowService:
                 '{ex_date}',
                 {cash_flow_id},
                 '{self._escape(cash_flow_number)}',
-                {float(cash_flow_amount)},
+                {float(cash_flow_amount_lc)},
                 '{self._escape(updated_by)}',
                 '{timestamp_str}',
                 '{self._escape(updated_by)}',
@@ -674,7 +731,7 @@ class CACashFlowService:
 
             if success:
                 logger.info(f"[UPDATE_POS] SUCCESS - Created new position version {new_version_id} "
-                           f"with CA/cash flow details. New avg_cost={new_avg_cost}")
+                           f"with CA/cash flow details. New avg_cost_fc={new_avg_cost_fc}, avg_cost_lc={new_avg_cost_lc}")
             else:
                 logger.error(f"[UPDATE_POS] FAILED - Could not create new position version")
 

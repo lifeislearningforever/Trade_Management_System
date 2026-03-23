@@ -138,50 +138,76 @@ class MultiCurrencyService:
         to_ccy: str,
         rate_date: str = None
     ) -> Tuple[Optional[Decimal], Optional[str]]:
-        """Look up rate from database."""
+        """
+        Look up FX rate from database.
+
+        The FX rate table uses spot_ff0 column with format FC-LC (e.g., USD-SGD).
+        Uses mid_rate as the rate value, with trade_date for date filtering.
+        """
         try:
             fx_pair = f"{from_ccy}-{to_ccy}"
 
             if rate_date:
-                # Specific date
+                # Convert rate_date from YYYY-MM-DD to YYYYMMDD if needed
+                formatted_date = rate_date.replace('-', '') if '-' in rate_date else rate_date
+
+                # Specific date - try exact match first
                 query = f"""
-                SELECT spot_rate_d, `date`
+                SELECT mid_rate, trade_date
                 FROM {self.DATABASE}.{self.FX_RATE_TABLE}
-                WHERE ref_quot_ccy = '{fx_pair}'
-                  AND `date` = '{rate_date}'
+                WHERE spot_ff0 = '{fx_pair}'
+                  AND trade_date = '{formatted_date}'
+                  AND record_type = 'D'
                 LIMIT 1
                 """
+                results = impala_manager.execute_query(query, database=self.DATABASE)
+
+                # If no exact match, get closest earlier date
+                if not results:
+                    query = f"""
+                    SELECT mid_rate, trade_date
+                    FROM {self.DATABASE}.{self.FX_RATE_TABLE}
+                    WHERE spot_ff0 = '{fx_pair}'
+                      AND trade_date <= '{formatted_date}'
+                      AND record_type = 'D'
+                    ORDER BY trade_date DESC
+                    LIMIT 1
+                    """
+                    results = impala_manager.execute_query(query, database=self.DATABASE)
             else:
                 # Latest rate
                 query = f"""
-                SELECT spot_rate_d, `date`
+                SELECT mid_rate, trade_date
                 FROM {self.DATABASE}.{self.FX_RATE_TABLE}
-                WHERE ref_quot_ccy = '{fx_pair}'
-                ORDER BY `date` DESC
+                WHERE spot_ff0 = '{fx_pair}'
+                  AND record_type = 'D'
+                ORDER BY trade_date DESC
                 LIMIT 1
                 """
+                results = impala_manager.execute_query(query, database=self.DATABASE)
 
-            results = impala_manager.execute_query(query, database=self.DATABASE)
-
-            if results and results[0].get('spot_rate_d') is not None:
-                rate = Decimal(str(results[0]['spot_rate_d']))
-                date_used = results[0].get('date', rate_date)
+            if results and results[0].get('mid_rate') is not None:
+                rate = Decimal(str(results[0]['mid_rate']))
+                date_used = results[0].get('trade_date', rate_date)
+                logger.info(f"[FX_LOOKUP] Found rate for {fx_pair}: {rate} on {date_used}")
                 return rate, date_used
 
+            logger.debug(f"[FX_LOOKUP] No rate found for {fx_pair}")
             return None, None
 
         except Exception as e:
-            logger.error(f"Error looking up FX rate: {str(e)}")
+            logger.error(f"Error looking up FX rate for {from_ccy}-{to_ccy}: {str(e)}")
             return None, None
 
     def get_latest_rates_for_currency(self, base_currency: str) -> List[Dict[str, Any]]:
         """Get all latest FX rates for a base currency."""
         try:
             query = f"""
-            SELECT ref_quot_ccy, spot_rate_d, `date`
+            SELECT spot_ff0, mid_rate, trade_date
             FROM {self.DATABASE}.{self.FX_RATE_TABLE}
-            WHERE ref_quot_ccy LIKE '{base_currency}-%'
-            ORDER BY `date` DESC
+            WHERE spot_ff0 LIKE '{base_currency}-%'
+              AND record_type = 'D'
+            ORDER BY trade_date DESC
             LIMIT 100
             """
 
@@ -190,12 +216,12 @@ class MultiCurrencyService:
             # Deduplicate to get latest for each pair
             latest = {}
             for row in results or []:
-                pair = row.get('ref_quot_ccy')
+                pair = row.get('spot_ff0')
                 if pair not in latest:
                     latest[pair] = {
                         'pair': pair,
-                        'rate': float(row.get('spot_rate_d', 1)),
-                        'date': row.get('date')
+                        'rate': float(row.get('mid_rate', 1)),
+                        'date': row.get('trade_date')
                     }
 
             return list(latest.values())
