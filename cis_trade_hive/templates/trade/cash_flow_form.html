@@ -84,15 +84,16 @@
                             <div class="invalid-feedback">Portfolio is required</div>
                         </div>
 
-                        <!-- Security (Optional) -->
+                        <!-- Security (Required - provides Foreign Currency) -->
                         <div class="col-md-6">
                             <label for="security_name" class="form-label">
-                                Security
+                                Security <span class="text-danger">*</span>
                             </label>
                             <div class="input-group">
                                 <select class="form-select select2-security"
                                         id="security_name"
-                                        name="security_name">
+                                        name="security_name"
+                                        required>
                                     <option value="">Select Security...</option>
                                     {% for s in dropdown_options.securities %}
                                         <option value="{{ s.value }}"
@@ -107,6 +108,7 @@
                                 </span>
                             </div>
                             <div id="security-validation-message" class="form-text"></div>
+                            <div class="invalid-feedback">Security is required</div>
                         </div>
 
                         <!-- Cash Flow Type (Required) -->
@@ -247,70 +249,69 @@
                         </div>
 
                         <!-- Local Currency (Auto-populated from Portfolio - Readonly) -->
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label for="local_ccy" class="form-label">
                                 Local Ccy <span class="text-danger">*</span>
-                                <small class="text-muted">(from Portfolio)</small>
+                                <small class="text-muted">(Portfolio)</small>
                             </label>
                             <input type="text"
                                    class="form-control bg-light"
                                    id="local_ccy_display"
                                    readonly
-                                   placeholder="Select Portfolio first..."
-                                   value="{{ cash_flow.local_ccy|default:'' }}">
-                            <input type="hidden" id="local_ccy" name="local_ccy" value="{{ cash_flow.local_ccy|default:'' }}">
+                                   placeholder="Select Portfolio..."
+                                   value="{{ cash_flow.local_ccy|default:'' }}"
+                                   required>
+                            <input type="hidden" id="local_ccy" name="local_ccy" value="{{ cash_flow.local_ccy|default:'' }}" required>
                             <div class="invalid-feedback">Local currency is required</div>
                         </div>
 
-                        <!-- Local Amount -->
-                        <div class="col-md-4">
-                            <label for="local_amount" class="form-label">Local Amount</label>
+                        <!-- Local Amount (Required) -->
+                        <div class="col-md-3">
+                            <label for="local_amount" class="form-label">
+                                Local Amount <span class="text-danger">*</span>
+                            </label>
                             <input type="number"
                                    class="form-control"
                                    id="local_amount"
                                    name="local_amount"
                                    step="0.01"
                                    value="{{ cash_flow.local_amount|default:'' }}"
-                                   placeholder="0.00">
-                        </div>
-
-                        <!-- Flow Amount (Local) -->
-                        <div class="col-md-4">
-                            <label for="flow_amount_local" class="form-label">Flow Amount (Local)</label>
-                            <input type="number"
-                                   class="form-control"
-                                   id="flow_amount_local"
-                                   name="flow_amount_local"
-                                   step="0.01"
-                                   value="{{ cash_flow.flow_amount_local|default:'' }}"
-                                   placeholder="0.00">
+                                   placeholder="0.00"
+                                   required>
+                            <div class="invalid-feedback">Local amount is required</div>
                         </div>
 
                         <!-- Foreign Currency (Auto-populated from Security - Readonly) -->
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label for="foreign_ccy" class="form-label">
-                                Foreign Ccy
-                                <small class="text-muted">(from Security)</small>
+                                Foreign Ccy <span class="text-danger">*</span>
+                                <small class="text-muted">(Security)</small>
                             </label>
                             <input type="text"
                                    class="form-control bg-light"
                                    id="foreign_ccy_display"
                                    readonly
-                                   placeholder="Select Security first..."
-                                   value="{{ cash_flow.foreign_ccy|default:'' }}">
-                            <input type="hidden" id="foreign_ccy" name="foreign_ccy" value="{{ cash_flow.foreign_ccy|default:'' }}">
+                                   placeholder="Select Security..."
+                                   value="{{ cash_flow.foreign_ccy|default:'' }}"
+                                   required>
+                            <input type="hidden" id="foreign_ccy" name="foreign_ccy" value="{{ cash_flow.foreign_ccy|default:'' }}" required>
+                            <div class="invalid-feedback">Foreign currency is required</div>
                         </div>
 
-                        <!-- Foreign Ccy Amount -->
-                        <div class="col-md-4">
-                            <label for="foreign_ccy_amount" class="form-label">Foreign Ccy Amount</label>
+                        <!-- Foreign Ccy Amount (Required) -->
+                        <div class="col-md-3">
+                            <label for="foreign_ccy_amount" class="form-label">
+                                Foreign Amount <span class="text-danger">*</span>
+                            </label>
                             <input type="number"
                                    class="form-control"
                                    id="foreign_ccy_amount"
                                    name="foreign_ccy_amount"
                                    step="0.01"
                                    value="{{ cash_flow.foreign_ccy_amount|default:'' }}"
-                                   placeholder="0.00">
+                                   placeholder="0.00"
+                                   required>
+                            <div class="invalid-feedback">Foreign amount is required</div>
                         </div>
                     </div>
                 </div>

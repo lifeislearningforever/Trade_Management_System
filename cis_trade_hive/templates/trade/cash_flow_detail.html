@@ -131,25 +131,23 @@
                             <label class="text-muted small">GL Acc No</label>
                             <p class="mb-2 fw-bold">{{ cash_flow.gl_acc_no|default:"-" }}</p>
                         </div>
-                        <div class="col-md-4">
+                        <!-- Local Currency (Portfolio Currency) -->
+                        <div class="col-md-3">
                             <label class="text-muted small">Local Currency</label>
                             <p class="mb-2 fw-bold">{{ cash_flow.local_ccy|default:"-" }}</p>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label class="text-muted small">Local Amount</label>
-                            <p class="mb-2 fw-bold fs-5">{{ cash_flow.local_amount|default:"0.00" }}</p>
+                            <p class="mb-2 fw-bold fs-5 text-success">{{ cash_flow.local_amount|default:"0.00" }}</p>
                         </div>
-                        <div class="col-md-4">
-                            <label class="text-muted small">Flow Amount (Local)</label>
-                            <p class="mb-2 fw-bold">{{ cash_flow.flow_amount_local|default:"0.00" }}</p>
-                        </div>
-                        <div class="col-md-4">
+                        <!-- Foreign Currency (Security Currency) -->
+                        <div class="col-md-3">
                             <label class="text-muted small">Foreign Currency</label>
                             <p class="mb-2 fw-bold">{{ cash_flow.foreign_ccy|default:"-" }}</p>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label class="text-muted small">Foreign Amount</label>
-                            <p class="mb-2 fw-bold">{{ cash_flow.foreign_ccy_amount|default:"0.00" }}</p>
+                            <p class="mb-2 fw-bold fs-5 text-primary">{{ cash_flow.foreign_ccy_amount|default:"0.00" }}</p>
                         </div>
                     </div>
                 </div>
