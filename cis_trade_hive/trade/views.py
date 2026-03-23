@@ -50,7 +50,8 @@ class TradeWrapper:
         self.security_label = data.get('security_label', '')
         self.security_full_name = data.get('security_full_name', '')
         self.security_type = data.get('security_type', '')
-        self.currency_code = data.get('currency_code', '')
+        self.currency_code = data.get('currency_code', '')  # Portfolio Currency (Local CCY)
+        self.security_currency = data.get('security_currency', '')  # Security Currency (Foreign CCY)
 
         # Dates & Quantities
         self.trade_status = data.get('trade_status', '')
@@ -66,11 +67,12 @@ class TradeWrapper:
         self.accrued_interest = data.get('accrued_interest', 0)
         self.sec_fee = data.get('sec_fee', 0)
         self.other_charges = data.get('other_charges', 0)
-        self.total_amount = data.get('total_amount', 0)  # Total Amount FC (Foreign Currency = Security CCY)
+        self.total_amount = data.get('total_amount', 0)  # Total Amount (legacy)
 
         # Multi-currency fields (FC = Security CCY, LC = Portfolio CCY)
         self.portfolio_currency = data.get('portfolio_currency', '')  # Local Currency
         self.fx_rate = data.get('fx_rate', 1.0)  # FX Rate (FC->LC)
+        self.total_amount_fc = data.get('total_amount', 0)  # Total Amount FC (Foreign Currency = Security CCY)
         self.total_amount_lc = data.get('total_amount_lc', 0)  # Total Amount LC (Local Currency)
 
         # GL & Broker

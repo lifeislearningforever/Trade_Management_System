@@ -139,19 +139,29 @@
                             <small class="text-muted">{{ trade.portfolio_full_name|default:"" }}</small>
                         </div>
                         <div class="col-md-2 mb-3">
-                            <label class="form-label text-muted">Currency</label>
+                            <label class="form-label text-muted">Local CCY</label>
                             <div class="fw-bold">
                                 {% if trade.currency_code %}
-                                    <span class="badge bg-info">{{ trade.currency_code }}</span>
+                                    <span class="badge bg-success">{{ trade.currency_code }}</span>
                                 {% else %}
                                     -
                                 {% endif %}
                             </div>
                         </div>
-                        <div class="col-md-6 mb-3">
+                        <div class="col-md-4 mb-3">
                             <label class="form-label text-muted">Security</label>
                             <div class="fw-bold">{{ trade.security_label|default:"-" }}</div>
                             <small class="text-muted">{{ trade.security_full_name|default:"" }}</small>
+                        </div>
+                        <div class="col-md-2 mb-3">
+                            <label class="form-label text-muted">Foreign CCY</label>
+                            <div class="fw-bold">
+                                {% if trade.security_currency %}
+                                    <span class="badge bg-primary">{{ trade.security_currency }}</span>
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
                     <div class="row">
@@ -214,6 +224,24 @@
                         <div class="col-md-3 mb-3">
                             <label class="form-label text-muted">Total Amount</label>
                             <div class="fw-bold fs-5 text-primary">{{ trade.total_amount|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                    </div>
+                    <hr>
+                    <!-- Total Amount in FC (Foreign Currency) and LC (Local Currency) -->
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label text-muted">Total Amount FC (Foreign Currency)</label>
+                            <div class="d-flex align-items-center">
+                                <span class="badge bg-primary me-2">{{ trade.security_currency|default:"-" }}</span>
+                                <span class="fw-bold fs-5">{{ trade.total_amount_fc|floatformat:2|default:"0.00" }}</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label text-muted">Total Amount LC (Local Currency)</label>
+                            <div class="d-flex align-items-center">
+                                <span class="badge bg-success me-2">{{ trade.currency_code|default:"-" }}</span>
+                                <span class="fw-bold fs-5">{{ trade.total_amount_lc|floatformat:2|default:"0.00" }}</span>
+                            </div>
                         </div>
                     </div>
                 </div>
