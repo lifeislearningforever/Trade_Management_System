@@ -221,9 +221,26 @@
                             <label class="form-label text-muted">Other Charges</label>
                             <div>{{ trade.other_charges|floatformat:2|default:"0.00" }}</div>
                         </div>
+                    </div>
+                    <hr>
+                    <div class="row">
                         <div class="col-md-3 mb-3">
-                            <label class="form-label text-muted">Total Amount</label>
-                            <div class="fw-bold fs-5 text-primary">{{ trade.total_amount|floatformat:2|default:"0.00" }}</div>
+                            <label class="form-label text-muted">Total Amount FC</label>
+                            <div class="fw-bold fs-5 text-primary">
+                                {{ trade.total_amount|floatformat:2|default:"0.00" }}
+                                {% if trade.security_currency %}
+                                    <span class="badge bg-primary">{{ trade.security_currency }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label text-muted">Total Amount LC</label>
+                            <div class="fw-bold fs-5 text-success">
+                                {{ trade.total_amount_lc|floatformat:2|default:"0.00" }}
+                                {% if trade.currency_code %}
+                                    <span class="badge bg-success">{{ trade.currency_code }}</span>
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
                 </div>

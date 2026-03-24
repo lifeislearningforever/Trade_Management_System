@@ -211,8 +211,34 @@ def trade_list(request):
         settle_date_to=settle_date_to if settle_date_to else None
     )
 
-    # Note: Total Amount FC/LC calculation removed to improve performance
-    # FX rate lookups were causing slow page loads
+    # Calculate Total Amount LC for each trade using FX rates
+    # FC (Foreign Currency) = Security Currency (currency_code)
+    # LC (Local Currency) = Portfolio Currency (portfolio_currency)
+    for trade in trades_data:
+        fc = trade.get('currency_code', '')  # Security/Foreign Currency
+        lc = trade.get('portfolio_currency', '')  # Portfolio/Local Currency
+        total_fc = Decimal(str(trade.get('total_amount', 0) or 0))
+
+        # If no portfolio currency, default to security currency
+        if not lc:
+            lc = fc
+            trade['portfolio_currency'] = fc
+
+        if fc and lc and fc != lc:
+            try:
+                # Get latest FX rate for FC->LC pair
+                fx_rate, _ = multicurrency_service.get_fx_rate(fc, lc)
+                total_lc = (total_fc * fx_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                trade['fx_rate'] = float(fx_rate)
+                trade['total_amount_lc'] = float(total_lc)
+            except Exception as e:
+                logger.warning(f"FX rate lookup failed for {fc}->{lc}: {e}")
+                trade['fx_rate'] = 1.0
+                trade['total_amount_lc'] = float(total_fc)
+        else:
+            # Same currency - no conversion needed, LC = FC
+            trade['fx_rate'] = 1.0
+            trade['total_amount_lc'] = float(total_fc)
 
     wrapped_trades = [TradeWrapper(t, idx) for idx, t in enumerate(trades_data)]
 
@@ -351,6 +377,29 @@ def trade_detail(request, trade_id):
         security_details = trade_validation_repository.get_security_details(trade_data.get('security_label'))
         if security_details:
             trade_data['security_currency'] = security_details.get('currency_code', '')
+
+    # Calculate Total Amount LC for trade detail
+    fc = trade_data.get('currency_code', '')  # Security/Foreign Currency
+    lc = trade_data.get('portfolio_currency', '')  # Portfolio/Local Currency
+    total_fc = Decimal(str(trade_data.get('total_amount', 0) or 0))
+
+    if not lc:
+        lc = fc
+        trade_data['portfolio_currency'] = fc
+
+    if fc and lc and fc != lc:
+        try:
+            fx_rate, _ = multicurrency_service.get_fx_rate(fc, lc)
+            total_lc = (total_fc * fx_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            trade_data['fx_rate'] = float(fx_rate)
+            trade_data['total_amount_lc'] = float(total_lc)
+        except Exception as e:
+            logger.warning(f"FX rate lookup failed for {fc}->{lc}: {e}")
+            trade_data['fx_rate'] = 1.0
+            trade_data['total_amount_lc'] = float(total_fc)
+    else:
+        trade_data['fx_rate'] = 1.0
+        trade_data['total_amount_lc'] = float(total_fc)
 
     trade = TradeWrapper(trade_data)
     status = trade.status
