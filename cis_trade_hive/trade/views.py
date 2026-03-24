@@ -211,34 +211,8 @@ def trade_list(request):
         settle_date_to=settle_date_to if settle_date_to else None
     )
 
-    # Calculate Total Amount LC for each trade using FX rates
-    # FC (Foreign Currency) = Security Currency (currency_code)
-    # LC (Local Currency) = Portfolio Currency (portfolio_currency)
-    for trade in trades_data:
-        fc = trade.get('currency_code', '')  # Security/Foreign Currency
-        lc = trade.get('portfolio_currency', '')  # Portfolio/Local Currency
-        total_fc = Decimal(str(trade.get('total_amount', 0) or 0))
-
-        # If no portfolio currency, default to security currency
-        if not lc:
-            lc = fc
-            trade['portfolio_currency'] = fc
-
-        if fc and lc and fc != lc:
-            try:
-                # Get latest FX rate for FC->LC pair
-                fx_rate, _ = multicurrency_service.get_fx_rate(fc, lc)
-                total_lc = (total_fc * fx_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                trade['fx_rate'] = float(fx_rate)
-                trade['total_amount_lc'] = float(total_lc)
-            except Exception as e:
-                logger.warning(f"FX rate lookup failed for {fc}->{lc}: {e}")
-                trade['fx_rate'] = 1.0
-                trade['total_amount_lc'] = float(total_fc)
-        else:
-            # Same currency - no conversion needed, LC = FC
-            trade['fx_rate'] = 1.0
-            trade['total_amount_lc'] = float(total_fc)
+    # Note: Total Amount FC/LC calculation removed to improve performance
+    # FX rate lookups were causing slow page loads
 
     wrapped_trades = [TradeWrapper(t, idx) for idx, t in enumerate(trades_data)]
 
@@ -249,9 +223,9 @@ def trade_list(request):
 
         writer = csv.writer(response)
         writer.writerow([
-            'Deal Number', 'Type', 'Portfolio', 'Portfolio CCY', 'Security', 'Security CCY',
+            'Deal Number', 'Type', 'Portfolio', 'Security',
             'Trade Date', 'Settle Date', 'Quantity', 'Price',
-            'Total Amount FC', 'Total Amount LC', 'FX Rate', 'Status'
+            'Total Amount', 'Status'
         ])
 
         for trade in trades_data:
@@ -259,16 +233,12 @@ def trade_list(request):
                 trade.get('deal_number', ''),
                 trade.get('trade_type', ''),
                 trade.get('portfolio_short_name', ''),
-                trade.get('portfolio_currency', ''),
                 trade.get('security_label', ''),
-                trade.get('currency_code', ''),
                 trade.get('trade_date', ''),
                 trade.get('settle_date', ''),
                 trade.get('quantity', ''),
                 trade.get('price', ''),
                 trade.get('total_amount', ''),
-                trade.get('total_amount_lc', ''),
-                trade.get('fx_rate', ''),
                 trade.get('status', '')
             ])
 
@@ -375,6 +345,12 @@ def trade_detail(request, trade_id):
 
     if not trade_data:
         raise Http404(f"Trade '{trade_id}' not found")
+
+    # Fetch security currency if not present in trade data
+    if not trade_data.get('security_currency') and trade_data.get('security_label'):
+        security_details = trade_validation_repository.get_security_details(trade_data.get('security_label'))
+        if security_details:
+            trade_data['security_currency'] = security_details.get('currency_code', '')
 
     trade = TradeWrapper(trade_data)
     status = trade.status

@@ -226,24 +226,6 @@
                             <div class="fw-bold fs-5 text-primary">{{ trade.total_amount|floatformat:2|default:"0.00" }}</div>
                         </div>
                     </div>
-                    <hr>
-                    <!-- Total Amount in FC (Foreign Currency) and LC (Local Currency) -->
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label text-muted">Total Amount FC (Foreign Currency)</label>
-                            <div class="d-flex align-items-center">
-                                <span class="badge bg-primary me-2">{{ trade.security_currency|default:"-" }}</span>
-                                <span class="fw-bold fs-5">{{ trade.total_amount_fc|floatformat:2|default:"0.00" }}</span>
-                            </div>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label text-muted">Total Amount LC (Local Currency)</label>
-                            <div class="d-flex align-items-center">
-                                <span class="badge bg-success me-2">{{ trade.currency_code|default:"-" }}</span>
-                                <span class="fw-bold fs-5">{{ trade.total_amount_lc|floatformat:2|default:"0.00" }}</span>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </div>
 
