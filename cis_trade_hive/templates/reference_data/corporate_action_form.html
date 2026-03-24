@@ -57,7 +57,7 @@
                         <i class="bi bi-shield-check"></i> Security Information
                     </h6>
                     <div class="row g-3">
-                        <!-- Security (Required - Multi-select) -->
+                        <!-- Security (Required - Single select) -->
                         <div class="col-md-6">
                             <label for="security_name" class="form-label">
                                 Security <span class="text-danger">*</span>
@@ -65,18 +65,18 @@
                             <select class="form-select select2-security"
                                     id="security_name"
                                     name="security_name"
-                                    multiple
                                     required>
+                                <option value="">Select Security...</option>
                                 {% for security in dropdown_options.securities %}
                                     <option value="{{ security.value }}"
                                             data-currency="{{ security.currency }}"
-                                            {% if security.value in corporate_action.security_name_list %}selected{% endif %}>
+                                            {% if corporate_action.security_name == security.value %}selected{% endif %}>
                                         {{ security.label }}
                                     </option>
                                 {% endfor %}
                             </select>
-                            <div class="form-text"><i class="bi bi-info-circle"></i> Select one or multiple securities. Cash flows will be created for all portfolios holding these securities.</div>
-                            <div class="invalid-feedback">At least one security is required</div>
+                            <div class="form-text"><i class="bi bi-info-circle"></i> Corporate action applies to all portfolios holding this security.</div>
+                            <div class="invalid-feedback">Security is required</div>
                         </div>
 
                         <!-- Corporate Action Type (Required) -->
@@ -353,15 +353,9 @@ function toggleSubscriptionPeriod(caType) {
 
 // Initialize Select2 on all dropdowns
 $(document).ready(function() {
-    // Initialize security dropdown with Select2 (multi-select)
+    // Initialize security dropdown with Select2 (single select)
     $('.select2-security').each(function() {
-        $(this).select2({
-            theme: 'bootstrap-5',
-            placeholder: 'Select Securities...',
-            allowClear: true,
-            width: '100%',
-            closeOnSelect: false
-        });
+        CISSelect2.initElement($(this));
     });
 
     // Initialize CA type dropdown with Select2
@@ -381,14 +375,12 @@ $(document).ready(function() {
         toggleSubscriptionPeriod(currentCAType);
     }
 
-    // Note: Currency field is now readonly, no Select2 needed
-
-    // Auto-populate currency when security is selected (use first selected)
-    // Currency is now readonly and auto-set from security
+    // Auto-populate currency when security is selected
+    // Currency is readonly and auto-set from security
     $('#security_name').on('change', function() {
-        var selectedOptions = $(this).find('option:selected');
-        if (selectedOptions.length > 0) {
-            var currency = selectedOptions.first().data('currency');
+        var selectedOption = $(this).find('option:selected');
+        if (selectedOption.val()) {
+            var currency = selectedOption.data('currency');
             if (currency) {
                 $('#currency').val(currency);
                 $('#currency_display').val(currency);
@@ -405,9 +397,9 @@ $(document).ready(function() {
 
     // On page load for edit mode, ensure currency display is set
     {% if is_edit %}
-    var selectedSecurities = $('#security_name option:selected');
-    if (selectedSecurities.length > 0 && !$('#currency_display').val()) {
-        var currency = selectedSecurities.first().data('currency');
+    var selectedSecurity = $('#security_name option:selected');
+    if (selectedSecurity.val() && !$('#currency_display').val()) {
+        var currency = selectedSecurity.data('currency');
         if (currency) {
             $('#currency_display').val(currency);
         }
