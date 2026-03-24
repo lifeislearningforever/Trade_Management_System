@@ -178,6 +178,22 @@
                             <p class="mb-2 fw-bold fs-5 text-primary">{{ cash_flow.foreign_ccy_amt|floatformat:2|default:"0.00" }}</p>
                         </div>
                     </div>
+                    <hr>
+                    <!-- Tax & Charges -->
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="text-muted small">Tax Deducted FC</label>
+                            <p class="mb-2 fw-bold text-danger">{{ cash_flow.tax_deducted_fc|floatformat:2|default:"0.00" }}</p>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Tax Deducted LC</label>
+                            <p class="mb-2 fw-bold text-danger">{{ cash_flow.tax_deducted_lc|floatformat:2|default:"0.00" }}</p>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Other Charges FC</label>
+                            <p class="mb-2 fw-bold text-warning">{{ cash_flow.other_charges_fc|floatformat:2|default:"0.00" }}</p>
+                        </div>
+                    </div>
                 </div>
             </div>
 

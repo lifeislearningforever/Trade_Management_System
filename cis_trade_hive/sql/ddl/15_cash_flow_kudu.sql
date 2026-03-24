@@ -45,6 +45,11 @@ CREATE TABLE IF NOT EXISTS cis_cash_flow (
     quantity DECIMAL(20, 8),                    -- Quantity held at ex-date (for CA cash flows)
     fx_rate DECIMAL(20, 8),                     -- FX rate used for LC conversion
 
+    -- Tax and Charges
+    tax_deducted_fc DECIMAL(20, 8),             -- Tax deducted in foreign currency
+    tax_deducted_lc DECIMAL(20, 8),             -- Tax deducted in local currency
+    other_charges_fc DECIMAL(20, 8),            -- Other charges in foreign currency
+
     -- GL Account
     gl_acc_no STRING,                           -- General Ledger Account Number
 
