@@ -65,11 +65,27 @@
                         </div>
                         <div class="col-md-6">
                             <label class="text-muted small">Security</label>
-                            <p class="mb-2 fw-bold">{{ cash_flow.security_name|default:"-" }}</p>
+                            <p class="mb-2 fw-bold">{{ cash_flow.security_label|default:"-" }}</p>
                         </div>
                         <div class="col-md-6">
                             <label class="text-muted small">Cash Flow Status</label>
-                            <p class="mb-2 fw-bold">{{ cash_flow.cash_flow_status|default:"-" }}</p>
+                            <p class="mb-2">
+                                {% if cash_flow.status == 'INITIAL' %}
+                                    <span class="badge badge-secondary">Initial</span>
+                                {% elif cash_flow.status == 'MODIFIED' %}
+                                    <span class="badge badge-info">Modified</span>
+                                {% elif cash_flow.status == 'VALIDATED' %}
+                                    <span class="badge badge-primary">Validated</span>
+                                {% elif cash_flow.status == 'SETTLED' %}
+                                    <span class="badge badge-success">Settled</span>
+                                {% elif cash_flow.status == 'CANCELLED' %}
+                                    <span class="badge badge-dark">Cancelled</span>
+                                {% elif cash_flow.status == 'REJECTED' %}
+                                    <span class="badge badge-danger">Rejected</span>
+                                {% else %}
+                                    <span class="badge badge-secondary">{{ cash_flow.status|default:"INITIAL" }}</span>
+                                {% endif %}
+                            </p>
                         </div>
                         <div class="col-md-6">
                             <label class="text-muted small">Source System</label>
@@ -134,20 +150,32 @@
                         <!-- Local Currency (Portfolio Currency) -->
                         <div class="col-md-3">
                             <label class="text-muted small">Local Currency</label>
-                            <p class="mb-2 fw-bold">{{ cash_flow.local_ccy|default:"-" }}</p>
+                            <p class="mb-2 fw-bold">
+                                {% if cash_flow.local_ccy %}
+                                    <span class="badge bg-success">{{ cash_flow.local_ccy }}</span>
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </p>
                         </div>
                         <div class="col-md-3">
                             <label class="text-muted small">Local Amount</label>
-                            <p class="mb-2 fw-bold fs-5 text-success">{{ cash_flow.local_amount|default:"0.00" }}</p>
+                            <p class="mb-2 fw-bold fs-5 text-success">{{ cash_flow.local_ccy_amt|floatformat:2|default:"0.00" }}</p>
                         </div>
                         <!-- Foreign Currency (Security Currency) -->
                         <div class="col-md-3">
                             <label class="text-muted small">Foreign Currency</label>
-                            <p class="mb-2 fw-bold">{{ cash_flow.foreign_ccy|default:"-" }}</p>
+                            <p class="mb-2 fw-bold">
+                                {% if cash_flow.foreign_ccy %}
+                                    <span class="badge bg-primary">{{ cash_flow.foreign_ccy }}</span>
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </p>
                         </div>
                         <div class="col-md-3">
                             <label class="text-muted small">Foreign Amount</label>
-                            <p class="mb-2 fw-bold fs-5 text-primary">{{ cash_flow.foreign_ccy_amount|default:"0.00" }}</p>
+                            <p class="mb-2 fw-bold fs-5 text-primary">{{ cash_flow.foreign_ccy_amt|floatformat:2|default:"0.00" }}</p>
                         </div>
                     </div>
                 </div>
