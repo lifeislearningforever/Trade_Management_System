@@ -10,7 +10,7 @@
 --   3. cis_settlement_queue - Queue for future settlement dates (T+1, T+2)
 --
 -- Created: 2026-03-05
--- Version: 1.0
+-- Version: 1.1 (Added position_basis for trade-date vs settle-date tracking)
 -- ============================================================================
 
 -- ============================================================================
@@ -18,6 +18,16 @@
 -- ============================================================================
 -- Stores position snapshots with AVP (Average Price) calculations.
 -- Each trade creates a new version (snapshot) of the position.
+--
+-- POSITION BASIS:
+--   - TRADE_DATE: Position calculated based on trade date (T+0 accounting)
+--   - SETTLE_DATE: Position calculated based on settlement date (T+1/T+2 accounting)
+--
+-- A single trade creates TWO position records:
+--   1. One with position_basis='TRADE_DATE' (reflects on trade_date)
+--   2. One with position_basis='SETTLE_DATE' (reflects on settle_date)
+--
+-- This allows dual reporting: "What do I own?" vs "What has settled?"
 -- ============================================================================
 
 DROP TABLE IF EXISTS cis_trade_position;
@@ -26,11 +36,19 @@ CREATE TABLE cis_trade_position (
     -- Primary Key (auto-increment per snapshot)
     version_id BIGINT NOT NULL,
 
-    -- Position Identity (same across all versions for a portfolio+security)
+    -- Position Identity (same across all versions for a portfolio+security+basis)
     position_id BIGINT NOT NULL,
 
-    -- Snapshot date
+    -- POSITION BASIS: 'TRADE_DATE' or 'SETTLE_DATE'
+    -- Determines when this position record takes effect
+    position_basis STRING NOT NULL DEFAULT 'TRADE_DATE',
+
+    -- Snapshot date (trade_date or settle_date depending on position_basis)
     position_date STRING NOT NULL,
+
+    -- Reference dates from the trade
+    trade_date STRING,                   -- Original trade date
+    settle_date STRING,                  -- Original settlement date
 
     -- Portfolio Reference
     portfolio_short_name STRING NOT NULL,
@@ -80,7 +98,7 @@ CREATE TABLE cis_trade_position (
     -- Status
     status STRING,                       -- OPEN, CLOSED
     is_active BOOLEAN,
-    is_latest BOOLEAN DEFAULT TRUE,      -- Latest version for this portfolio+security+date
+    is_latest BOOLEAN DEFAULT TRUE,      -- Latest version for this portfolio+security+basis
 
     -- Last Corporate Action / Cash Flow tracking
     last_ca_id BIGINT,                   -- Last CA that generated cash flow
@@ -104,6 +122,82 @@ STORED AS KUDU
 TBLPROPERTIES (
     'kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251'
 );
+
+
+-- ============================================================================
+-- POSITION BASIS EXAMPLES
+-- ============================================================================
+--
+-- Example 1: BUY 100 AAPL on 2026-03-25 (trade date), settles 2026-03-27 (T+2)
+--
+-- Creates TWO position records:
+--
+-- Record 1 (Trade-Date Basis):
+--   version_id: 1001
+--   position_basis: 'TRADE_DATE'
+--   position_date: '2026-03-25'    <-- Reflects on TRADE date
+--   trade_date: '2026-03-25'
+--   settle_date: '2026-03-27'
+--   quantity: 100
+--   average_cost: 175.50
+--
+-- Record 2 (Settle-Date Basis):
+--   version_id: 1002
+--   position_basis: 'SETTLE_DATE'
+--   position_date: '2026-03-27'    <-- Reflects on SETTLE date
+--   trade_date: '2026-03-25'
+--   settle_date: '2026-03-27'
+--   quantity: 100
+--   average_cost: 175.50
+--
+-- ============================================================================
+--
+-- Example 2: Query positions by basis
+--
+-- Get TRADE DATE position (what did I buy today?):
+--   SELECT * FROM cis_trade_position
+--   WHERE portfolio_short_name = 'FUND-001'
+--     AND security_label = 'AAPL'
+--     AND position_basis = 'TRADE_DATE'
+--     AND is_latest = true;
+--
+-- Get SETTLE DATE position (what has actually settled?):
+--   SELECT * FROM cis_trade_position
+--   WHERE portfolio_short_name = 'FUND-001'
+--     AND security_label = 'AAPL'
+--     AND position_basis = 'SETTLE_DATE'
+--     AND is_latest = true;
+--
+-- ============================================================================
+--
+-- Example 3: Position differences between bases
+--
+-- Scenario: On 2026-03-26, you have:
+--   - Trade-date position: 100 shares (bought on 2026-03-25)
+--   - Settle-date position: 0 shares (settlement on 2026-03-27 not yet)
+--
+-- This is normal for T+2 settlement. On 2026-03-27 (settle date):
+--   - Trade-date position: 100 shares
+--   - Settle-date position: 100 shares (now settled)
+--
+-- ============================================================================
+--
+-- Example 4: Reporting Use Cases
+--
+-- Use TRADE_DATE for:
+--   - "What positions did I take today?"
+--   - Trade blotters and daily trading reports
+--   - NAV calculation using trade date accounting
+--   - Compliance: exposure limits at trade time
+--
+-- Use SETTLE_DATE for:
+--   - "What do I actually own (settled)?"
+--   - Custodian reconciliation
+--   - Cash settlement and funding
+--   - NAV calculation using settle date accounting
+--   - Regulatory reporting (some require settled positions)
+--
+-- ============================================================================
 
 
 -- ============================================================================
@@ -244,13 +338,85 @@ TBLPROPERTIES (
 -- Sample Queries
 -- ============================================================================
 
--- Get current position for a portfolio+security
+-- ============================================================================
+-- TRADE DATE BASIS QUERIES
+-- ============================================================================
+
+-- Get latest TRADE DATE position for a portfolio+security
 -- SELECT * FROM cis_trade_position
 -- WHERE portfolio_short_name = 'FUND-001'
 --   AND security_label = 'AAPL'
+--   AND position_basis = 'TRADE_DATE'
+--   AND is_latest = true
+--   AND status = 'OPEN';
+
+-- Get all TRADE DATE positions for a portfolio
+-- SELECT security_label, quantity, average_cost, total_cost, position_date
+-- FROM cis_trade_position
+-- WHERE portfolio_short_name = 'FUND-001'
+--   AND position_basis = 'TRADE_DATE'
+--   AND is_latest = true
 --   AND status = 'OPEN'
--- ORDER BY version_id DESC
--- LIMIT 1;
+-- ORDER BY security_label;
+
+-- ============================================================================
+-- SETTLE DATE BASIS QUERIES
+-- ============================================================================
+
+-- Get latest SETTLE DATE position for a portfolio+security
+-- SELECT * FROM cis_trade_position
+-- WHERE portfolio_short_name = 'FUND-001'
+--   AND security_label = 'AAPL'
+--   AND position_basis = 'SETTLE_DATE'
+--   AND is_latest = true
+--   AND status = 'OPEN';
+
+-- Get all SETTLE DATE positions for a portfolio (what has actually settled)
+-- SELECT security_label, quantity, average_cost, total_cost, position_date
+-- FROM cis_trade_position
+-- WHERE portfolio_short_name = 'FUND-001'
+--   AND position_basis = 'SETTLE_DATE'
+--   AND is_latest = true
+--   AND status = 'OPEN'
+-- ORDER BY security_label;
+
+-- ============================================================================
+-- COMPARISON QUERIES (TRADE DATE vs SETTLE DATE)
+-- ============================================================================
+
+-- Compare positions between bases (find unsettled trades)
+-- SELECT
+--     t.security_label,
+--     t.quantity AS trade_date_qty,
+--     COALESCE(s.quantity, 0) AS settle_date_qty,
+--     t.quantity - COALESCE(s.quantity, 0) AS unsettled_qty
+-- FROM cis_trade_position t
+-- LEFT JOIN cis_trade_position s
+--     ON t.portfolio_short_name = s.portfolio_short_name
+--     AND t.security_label = s.security_label
+--     AND s.position_basis = 'SETTLE_DATE'
+--     AND s.is_latest = true
+-- WHERE t.portfolio_short_name = 'FUND-001'
+--   AND t.position_basis = 'TRADE_DATE'
+--   AND t.is_latest = true
+--   AND t.quantity != COALESCE(s.quantity, 0);
+
+-- Get pending settlements (trades executed but not yet settled)
+-- SELECT
+--     trade_id,
+--     portfolio_short_name,
+--     security_label,
+--     quantity,
+--     trade_date,
+--     settle_date
+-- FROM cis_trade_position
+-- WHERE position_basis = 'SETTLE_DATE'
+--   AND position_date > CAST(CURRENT_DATE() AS STRING)
+--   AND is_latest = true;
+
+-- ============================================================================
+-- QUEUE QUERIES
+-- ============================================================================
 
 -- Get pending items for processing
 -- SELECT * FROM cis_position_queue

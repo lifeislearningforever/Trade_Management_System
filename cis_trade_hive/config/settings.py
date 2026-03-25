@@ -86,6 +86,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
+    'core.middleware.performance_middleware.PerformanceMonitoringMiddleware',  # Performance monitoring
     'django.contrib.sessions.middleware.SessionMiddleware',  # Required for session-based auth
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',

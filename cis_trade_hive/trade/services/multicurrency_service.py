@@ -227,6 +227,122 @@ class MultiCurrencyService:
             logger.error(f"Error getting rates for currency: {str(e)}")
             return []
 
+    def get_fx_rates_batch(
+        self,
+        currency_pairs: List[Tuple[str, str]],
+        rate_date: str = None
+    ) -> Dict[str, Tuple[Decimal, str]]:
+        """
+        Batch fetch FX rates for multiple currency pairs in a single query.
+
+        Performance optimization for trade list view.
+
+        Args:
+            currency_pairs: List of (from_currency, to_currency) tuples
+            rate_date: Optional date for historical rates
+
+        Returns:
+            Dict mapping 'FROM-TO' to (rate, date_used)
+        """
+        if not currency_pairs:
+            return {}
+
+        results = {}
+        pairs_to_fetch = []
+
+        # Check cache first, collect pairs that need fetching
+        for from_ccy, to_ccy in currency_pairs:
+            if from_ccy == to_ccy:
+                results[f"{from_ccy}-{to_ccy}"] = (Decimal('1'), rate_date or datetime.now().strftime('%Y-%m-%d'))
+                continue
+
+            if not from_ccy or not to_ccy:
+                results[f"{from_ccy}-{to_ccy}"] = (Decimal('1'), rate_date or datetime.now().strftime('%Y-%m-%d'))
+                continue
+
+            cache_key = f"{from_ccy}-{to_ccy}-{rate_date or 'latest'}"
+            cached = self._get_cached_rate(cache_key)
+            if cached:
+                results[f"{from_ccy}-{to_ccy}"] = cached
+            else:
+                pairs_to_fetch.append((from_ccy, to_ccy))
+
+        if not pairs_to_fetch:
+            return results
+
+        try:
+            # Build single query for all pairs (both directions)
+            direct_pairs = [f"'{fc}-{tc}'" for fc, tc in pairs_to_fetch]
+            reverse_pairs = [f"'{tc}-{fc}'" for fc, tc in pairs_to_fetch]
+            all_pairs = direct_pairs + reverse_pairs
+
+            if rate_date:
+                formatted_date = rate_date.replace('-', '') if '-' in rate_date else rate_date
+                query = f"""
+                SELECT ref_quot_ccy, spot_rate_d, `date`
+                FROM {self.DATABASE}.{self.FX_RATE_TABLE}
+                WHERE ref_quot_ccy IN ({','.join(all_pairs)})
+                  AND `date` <= '{formatted_date}'
+                ORDER BY `date` DESC
+                """
+            else:
+                query = f"""
+                SELECT ref_quot_ccy, spot_rate_d, `date`
+                FROM {self.DATABASE}.{self.FX_RATE_TABLE}
+                WHERE ref_quot_ccy IN ({','.join(all_pairs)})
+                ORDER BY `date` DESC
+                """
+
+            rows = impala_manager.execute_query(query, database=self.DATABASE)
+
+            # Build lookup dict (latest rate per pair)
+            rate_lookup = {}
+            for row in rows or []:
+                pair = row.get('ref_quot_ccy')
+                if pair and pair not in rate_lookup:
+                    rate_lookup[pair] = {
+                        'rate': Decimal(str(row.get('spot_rate_d', 1))),
+                        'date': row.get('date', rate_date)
+                    }
+
+            # Process each pair
+            for from_ccy, to_ccy in pairs_to_fetch:
+                direct_key = f"{from_ccy}-{to_ccy}"
+                reverse_key = f"{to_ccy}-{from_ccy}"
+
+                if direct_key in rate_lookup:
+                    rate = rate_lookup[direct_key]['rate']
+                    date_used = rate_lookup[direct_key]['date']
+                    results[direct_key] = (rate, date_used)
+                    cache_key = f"{from_ccy}-{to_ccy}-{rate_date or 'latest'}"
+                    self._cache_rate(cache_key, (rate, date_used))
+                elif reverse_key in rate_lookup:
+                    reverse_rate = rate_lookup[reverse_key]['rate']
+                    if reverse_rate and reverse_rate != Decimal('0'):
+                        rate = (Decimal('1') / reverse_rate).quantize(self.FX_PRECISION, rounding=ROUND_HALF_UP)
+                        date_used = rate_lookup[reverse_key]['date']
+                        results[direct_key] = (rate, date_used)
+                        cache_key = f"{from_ccy}-{to_ccy}-{rate_date or 'latest'}"
+                        self._cache_rate(cache_key, (rate, date_used))
+                    else:
+                        results[direct_key] = (Decimal('1'), rate_date or datetime.now().strftime('%Y-%m-%d'))
+                else:
+                    # No rate found - default to 1.0
+                    results[direct_key] = (Decimal('1'), rate_date or datetime.now().strftime('%Y-%m-%d'))
+                    logger.warning(f"[FX_BATCH] No rate found for {direct_key}, using 1.0")
+
+            logger.info(f"[FX_BATCH] Fetched {len(pairs_to_fetch)} pairs in single query, {len(results)} total results")
+
+        except Exception as e:
+            logger.error(f"Error in batch FX rate lookup: {str(e)}")
+            # Fallback to 1.0 for any unfetched pairs
+            for from_ccy, to_ccy in pairs_to_fetch:
+                key = f"{from_ccy}-{to_ccy}"
+                if key not in results:
+                    results[key] = (Decimal('1'), rate_date or datetime.now().strftime('%Y-%m-%d'))
+
+        return results
+
     # =========================================================================
     # CURRENCY CONVERSION
     # =========================================================================

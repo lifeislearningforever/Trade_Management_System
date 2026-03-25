@@ -384,7 +384,7 @@ class TradeKuduRepository:
                 'trade_id', 'trade_type', 'deal_number',
                 'portfolio_short_name', 'portfolio_full_name',
                 'security_label', 'security_full_name', 'security_type',
-                'currency_code',
+                'currency_code', 'portfolio_currency',
                 'trade_status', 'trade_date', 'settle_date',
                 'quantity', 'face_value', 'lot', 'price',
                 'commission', 'accrued_interest', 'sec_fee',
@@ -409,6 +409,16 @@ class TradeKuduRepository:
                 'created_by', 'created_at', 'updated_by', 'updated_at'
             ]
 
+            # Get currency codes from master data:
+            # - currency_code: Security's trading currency (Foreign Currency / FC)
+            # - portfolio_currency: Portfolio's base currency (Local Currency / LC)
+            security_currency = security_details.get('currency_code', '') if security_details else ''
+            portfolio_currency = portfolio_details.get('currency', '') if portfolio_details else ''
+
+            # Fallback to form input if master data is missing
+            if not security_currency:
+                security_currency = trade_data.get('currency_code', '')
+
             values = [
                 str(trade_id),
                 self.escape_value(trade_data.get('trade_type')),
@@ -418,7 +428,8 @@ class TradeKuduRepository:
                 self.escape_value(trade_data.get('security_label')),
                 self.escape_value(security_details.get('security_name', '') if security_details else ''),
                 self.escape_value(security_details.get('security_type', '') if security_details else ''),
-                self.escape_value(trade_data.get('currency_code', '')),
+                self.escape_value(security_currency),  # Security currency (FC)
+                self.escape_value(portfolio_currency),  # Portfolio currency (LC)
                 self.escape_value(trade_data.get('trade_status', '')),
                 self.escape_value(trade_data.get('trade_date')),
                 self.escape_value(trade_data.get('settle_date', '')),
@@ -962,11 +973,79 @@ class TradeKuduRepository:
                 )
                 logger.info(f"Updated trade {trade_id}, status set to MODIFIED")
 
+                # Check if position-affecting fields changed (quantity, price, charges)
+                position_fields = ['quantity', 'price', 'commission', 'sec_fee', 'other_charges', 'total_amount']
+                position_changed = any(field in changes for field in position_fields)
+
+                if position_changed:
+                    # Queue position recalculation for BUY/SELL trades
+                    trade_type = current_trade.get('trade_type', '')
+                    if trade_type in [self.TRADE_TYPE_BUY, self.TRADE_TYPE_SELL]:
+                        self._queue_position_recalculation(
+                            trade_id=trade_id,
+                            current_trade=current_trade,
+                            updated_data=trade_data,
+                            updated_by=updated_by
+                        )
+
             return success
 
         except Exception as e:
             logger.error(f"Error updating trade: {str(e)}")
             raise
+
+    def _queue_position_recalculation(
+        self,
+        trade_id: int,
+        current_trade: Dict[str, Any],
+        updated_data: Dict[str, Any],
+        updated_by: str
+    ) -> None:
+        """
+        Queue position recalculation when trade qty/price changes.
+        This handles the case where a trade is edited after creation.
+        """
+        try:
+            from trade.services.settlement_service import settlement_service
+            from decimal import Decimal
+
+            # Use updated values, fall back to current trade values
+            quantity = Decimal(str(updated_data.get('quantity', current_trade.get('quantity', 0)) or 0))
+            price = Decimal(str(updated_data.get('price', current_trade.get('price', 0)) or 0))
+            commission = Decimal(str(updated_data.get('commission', current_trade.get('commission', 0)) or 0))
+            sec_fee = Decimal(str(updated_data.get('sec_fee', current_trade.get('sec_fee', 0)) or 0))
+            other_charges = Decimal(str(updated_data.get('other_charges', current_trade.get('other_charges', 0)) or 0))
+            charges = commission + sec_fee + other_charges
+
+            settle_date = updated_data.get('settle_date') or current_trade.get('settle_date', '')
+            trade_date = updated_data.get('trade_date') or current_trade.get('trade_date', '')
+
+            # Queue via settlement service (handles T+0, T+1/T+2, backdated)
+            success, message, details = settlement_service.queue_settlement_async(
+                trade_id=trade_id,
+                portfolio_id=current_trade.get('portfolio_short_name', ''),
+                security_id=current_trade.get('security_label', ''),
+                trade_type=current_trade.get('trade_type', ''),
+                quantity=quantity,
+                price=price,
+                charges=charges,
+                settle_date=settle_date,
+                trade_date=trade_date,
+                updated_by=updated_by,
+                security_currency=current_trade.get('currency_code', ''),
+                portfolio_currency=current_trade.get('portfolio_currency', ''),
+                isin=current_trade.get('isin', ''),
+                security_name=current_trade.get('security_full_name', '')
+            )
+
+            if success:
+                logger.info(f"Position recalculation queued for edited trade {trade_id}: {message}")
+            else:
+                logger.warning(f"Failed to queue position recalculation for trade {trade_id}: {message}")
+
+        except Exception as e:
+            # Log error but don't fail the trade update
+            logger.error(f"Error queuing position recalculation for trade {trade_id}: {str(e)}")
 
     def soft_delete_trade(self, trade_id: int, deleted_by: str, reason: str = '') -> bool:
         """Soft delete a trade."""

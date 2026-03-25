@@ -10,12 +10,16 @@ from django.contrib import messages
 from django.db.models import Count, Q, Sum
 from django.db import models
 from django.utils import timezone
+from django.http import JsonResponse
 from datetime import timedelta
+import logging
 
 from .models import AuditLog
 from portfolio.models import Portfolio
 from core.audit.audit_hive_repository import audit_log_repository
 from portfolio.repositories import portfolio_hive_repository
+
+logger = logging.getLogger(__name__)
 
 
 @login_required
@@ -292,3 +296,158 @@ def audit_log(request):
     }
 
     return render(request, 'core/audit_log.html', context)
+
+
+def health_check(request):
+    """
+    Health check endpoint for monitoring long-running applications.
+
+    Returns JSON with:
+    - Application status
+    - Connection pool health
+    - Performance metrics
+    - Queue status
+
+    Use: GET /health/
+    """
+    from core.repositories.impala_connection import impala_manager
+    from core.middleware.performance_middleware import PerformanceMonitoringMiddleware
+
+    health_status = {
+        'status': 'healthy',
+        'timestamp': timezone.now().isoformat(),
+        'checks': {}
+    }
+
+    # Check Impala connection pool
+    try:
+        pool_stats = impala_manager.get_pool_stats()
+        health_status['checks']['impala_pool'] = {
+            'status': 'healthy',
+            'active_connections': pool_stats.get('active_connections', 0),
+            'pool_size': pool_stats.get('pool_size', 0),
+            'pool_available': pool_stats.get('pool_available', 0),
+            'utilization_pct': round(pool_stats.get('pool_utilization_pct', 0), 1),
+            'connection_reuse_count': pool_stats.get('connection_reuse_count', 0),
+            'validation_skip_count': pool_stats.get('validation_skip_count', 0)
+        }
+
+        # Flag if pool utilization is high
+        if pool_stats.get('pool_utilization_pct', 0) > 90:
+            health_status['checks']['impala_pool']['status'] = 'warning'
+            health_status['status'] = 'degraded'
+
+    except Exception as e:
+        health_status['checks']['impala_pool'] = {
+            'status': 'error',
+            'error': str(e)
+        }
+        health_status['status'] = 'unhealthy'
+
+    # Check async queue status
+    try:
+        async_queue_size = impala_manager.get_async_queue_size()
+        health_status['checks']['async_queue'] = {
+            'status': 'healthy' if async_queue_size < 100 else 'warning',
+            'queue_size': async_queue_size
+        }
+        if async_queue_size >= 100:
+            health_status['status'] = 'degraded'
+    except Exception as e:
+        health_status['checks']['async_queue'] = {
+            'status': 'error',
+            'error': str(e)
+        }
+
+    # Get performance stats
+    try:
+        perf_stats = PerformanceMonitoringMiddleware.get_stats_summary()
+        health_status['checks']['performance'] = {
+            'status': 'healthy' if perf_stats['slow_request_pct'] < 10 else 'warning',
+            'request_count': perf_stats['request_count'],
+            'slow_request_count': perf_stats['slow_request_count'],
+            'slow_request_pct': perf_stats['slow_request_pct'],
+            'avg_request_time_ms': perf_stats['avg_request_time_ms']
+        }
+        if perf_stats['slow_request_pct'] >= 10:
+            health_status['status'] = 'degraded'
+    except Exception as e:
+        health_status['checks']['performance'] = {
+            'status': 'error',
+            'error': str(e)
+        }
+
+    # Test Impala connectivity with a simple query
+    try:
+        results = impala_manager.execute_query("SELECT 1 AS health_check", database='gmp_cis')
+        if results:
+            health_status['checks']['impala_connectivity'] = {'status': 'healthy'}
+        else:
+            health_status['checks']['impala_connectivity'] = {'status': 'warning', 'message': 'Empty result'}
+    except Exception as e:
+        health_status['checks']['impala_connectivity'] = {
+            'status': 'error',
+            'error': str(e)
+        }
+        health_status['status'] = 'unhealthy'
+
+    # Set HTTP status code based on health
+    status_code = 200
+    if health_status['status'] == 'degraded':
+        status_code = 200  # Still return 200 for degraded (app is running)
+    elif health_status['status'] == 'unhealthy':
+        status_code = 503  # Service unavailable
+
+    return JsonResponse(health_status, status=status_code)
+
+
+def pool_stats(request):
+    """
+    Detailed pool statistics endpoint for debugging.
+
+    Use: GET /pool-stats/
+    """
+    from core.repositories.impala_connection import impala_manager
+
+    try:
+        stats = impala_manager.get_pool_stats()
+        return JsonResponse({
+            'status': 'ok',
+            'timestamp': timezone.now().isoformat(),
+            'pool_stats': stats
+        })
+    except Exception as e:
+        logger.error(f"Error getting pool stats: {e}")
+        return JsonResponse({
+            'status': 'error',
+            'error': str(e)
+        }, status=500)
+
+
+def reset_pool_stats(request):
+    """
+    Reset pool and performance statistics.
+
+    Use: POST /reset-stats/
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST method required'}, status=405)
+
+    from core.repositories.impala_connection import impala_manager
+    from core.middleware.performance_middleware import PerformanceMonitoringMiddleware
+
+    try:
+        impala_manager.reset_stats()
+        PerformanceMonitoringMiddleware.reset_stats()
+
+        return JsonResponse({
+            'status': 'ok',
+            'message': 'Stats reset successfully',
+            'timestamp': timezone.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error resetting stats: {e}")
+        return JsonResponse({
+            'status': 'error',
+            'error': str(e)
+        }, status=500)

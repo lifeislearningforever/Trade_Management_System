@@ -617,6 +617,89 @@ ORDER BY queued_at DESC;
 
 ---
 
+## 13. Performance Monitoring (Long-Running Applications)
+
+For Cloudera applications that run continuously without restarts, we provide comprehensive monitoring.
+
+### Health Check Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/core/health/` | GET | Overall health status with all checks |
+| `/core/pool-stats/` | GET | Detailed connection pool statistics |
+| `/core/reset-stats/` | POST | Reset performance counters |
+
+### Health Check Response Example
+
+```json
+{
+  "status": "healthy",
+  "timestamp": "2026-03-25T10:30:00.000Z",
+  "checks": {
+    "impala_pool": {
+      "status": "healthy",
+      "active_connections": 5,
+      "pool_size": 35,
+      "pool_available": 30,
+      "utilization_pct": 14.3
+    },
+    "async_queue": {
+      "status": "healthy",
+      "queue_size": 12
+    },
+    "performance": {
+      "status": "healthy",
+      "request_count": 1523,
+      "slow_request_count": 3,
+      "slow_request_pct": 0.2,
+      "avg_request_time_ms": 245.5
+    },
+    "impala_connectivity": {
+      "status": "healthy"
+    }
+  }
+}
+```
+
+### Performance Middleware
+
+The `PerformanceMonitoringMiddleware` automatically:
+- Logs slow requests (> 5 seconds)
+- Periodically logs pool statistics (every 5 minutes)
+- Recycles idle connections (> 5 minutes idle)
+- Adds `X-Request-Duration-Ms` header to responses
+
+### Connection Pool Optimizations
+
+| Optimization | Description | Impact |
+|--------------|-------------|--------|
+| Validation Skip | Skip SELECT 1 ping for connections used < 10 seconds ago | ~200ms saved per request |
+| Idle Recycling | Close connections idle > 5 minutes | Prevents stale connections |
+| Batch FX Rates | Single query for all currency pairs | ~500ms saved on trade list |
+| Dropdown Caching | Only load on GET, not successful POST | ~30s saved on trade create |
+| Entity Caching | Cache portfolio/security validation 15s | ~200ms saved per validation |
+
+### Monitoring Commands
+
+```python
+# Get pool statistics programmatically
+from core.repositories.impala_connection import impala_manager
+
+stats = impala_manager.get_pool_stats()
+print(f"Pool utilization: {stats['pool_utilization_pct']}%")
+
+# Log pool stats
+impala_manager.log_pool_stats()
+
+# Reset counters
+impala_manager.reset_stats()
+
+# Recycle idle connections
+impala_manager.recycle_idle_connections(max_idle_seconds=300)
+```
+
+---
+
 ## Summary
 
 The trade processing system is designed with these principles:
@@ -627,5 +710,6 @@ The trade processing system is designed with these principles:
 4. **Chain Recalculation** - Backdated trades handled correctly
 5. **SLA Monitoring** - < 5 minutes queue to completion
 6. **Retry with Dead Letter** - 3 retries before manual intervention
-7. **Connection Pooling** - Efficient database resource usage
+7. **Connection Pooling** - Efficient database resource usage with monitoring
 8. **Four-Eyes Workflow** - Maker-checker enforcement
+9. **Performance Monitoring** - Health endpoints and automatic logging for long-running apps

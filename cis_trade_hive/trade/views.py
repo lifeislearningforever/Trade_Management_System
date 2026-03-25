@@ -214,25 +214,35 @@ def trade_list(request):
     # Calculate Total Amount LC for each trade using FX rates
     # FC (Foreign Currency) = Security Currency (currency_code)
     # LC (Local Currency) = Portfolio Currency (portfolio_currency)
+    # PERFORMANCE: Batch fetch all unique currency pairs in single query
+    currency_pairs = []
     for trade in trades_data:
         fc = trade.get('currency_code', '')  # Security/Foreign Currency
         lc = trade.get('portfolio_currency', '')  # Portfolio/Local Currency
-        total_fc = Decimal(str(trade.get('total_amount', 0) or 0))
-
-        # If no portfolio currency, default to security currency
         if not lc:
             lc = fc
             trade['portfolio_currency'] = fc
+        if fc and lc and fc != lc:
+            currency_pairs.append((fc, lc))
+
+    # Batch fetch FX rates (single DB query)
+    fx_rates_batch = multicurrency_service.get_fx_rates_batch(list(set(currency_pairs))) if currency_pairs else {}
+
+    # Apply FX rates to trades
+    for trade in trades_data:
+        fc = trade.get('currency_code', '')
+        lc = trade.get('portfolio_currency', '')
+        total_fc = Decimal(str(trade.get('total_amount', 0) or 0))
 
         if fc and lc and fc != lc:
-            try:
-                # Get latest FX rate for FC->LC pair
-                fx_rate, _ = multicurrency_service.get_fx_rate(fc, lc)
+            fx_key = f"{fc}-{lc}"
+            if fx_key in fx_rates_batch:
+                fx_rate, _ = fx_rates_batch[fx_key]
                 total_lc = (total_fc * fx_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 trade['fx_rate'] = float(fx_rate)
                 trade['total_amount_lc'] = float(total_lc)
-            except Exception as e:
-                logger.warning(f"FX rate lookup failed for {fc}->{lc}: {e}")
+            else:
+                # Fallback - shouldn't happen after batch fetch
                 trade['fx_rate'] = 1.0
                 trade['total_amount_lc'] = float(total_fc)
         else:
@@ -463,7 +473,9 @@ def trade_detail(request, trade_id):
 
 def trade_create(request, trade_type=None):
     """Create a new trade (Maker action: Create -> INITIAL)."""
-    dropdown_options = trade_dropdown_service.get_all_dropdown_options()
+    # Performance: Only load dropdowns for GET requests
+    # POST requests don't need full dropdowns unless validation fails
+    dropdown_options = None
 
     if request.method == 'POST':
         try:
@@ -581,8 +593,16 @@ def trade_create(request, trade_type=None):
 
         except ValueError as e:
             messages.error(request, str(e))
+            # Only load dropdowns if validation fails and we need to re-render form
+            dropdown_options = trade_dropdown_service.get_all_dropdown_options()
         except Exception as e:
             messages.error(request, f'Error creating trade: {str(e)}')
+            # Only load dropdowns if error and we need to re-render form
+            dropdown_options = trade_dropdown_service.get_all_dropdown_options()
+
+    # GET request - load dropdowns for form display
+    if dropdown_options is None:
+        dropdown_options = trade_dropdown_service.get_all_dropdown_options()
 
     context = {
         'dropdown_options': dropdown_options,
@@ -617,7 +637,8 @@ def trade_edit(request, trade_id):
         messages.error(request, f'Cannot edit trade with status "{current_status}".')
         return redirect('trade:detail', trade_id=trade_id)
 
-    dropdown_options = trade_dropdown_service.get_all_dropdown_options()
+    # Performance: Only load dropdowns for GET or when POST fails
+    dropdown_options = None
 
     if request.method == 'POST':
         try:
@@ -730,6 +751,12 @@ def trade_edit(request, trade_id):
 
         except Exception as e:
             messages.error(request, f'Error updating trade: {str(e)}')
+            # Only load dropdowns if error and we need to re-render form
+            dropdown_options = trade_dropdown_service.get_all_dropdown_options()
+
+    # GET request or POST error - load dropdowns for form display
+    if dropdown_options is None:
+        dropdown_options = trade_dropdown_service.get_all_dropdown_options()
 
     context = {
         'trade': trade_data,

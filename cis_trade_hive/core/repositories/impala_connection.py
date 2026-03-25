@@ -131,7 +131,16 @@ class ImpalaConnectionManager:
             return None
 
     # Skip validation for connections used within this many seconds
-    VALIDATION_SKIP_THRESHOLD = 30
+    # Reduced from 30s to 10s for better connection reuse without overhead
+    VALIDATION_SKIP_THRESHOLD = 10
+
+    # Performance monitoring counters (for long-running apps)
+    _pool_wait_count = 0
+    _pool_wait_total_time = 0
+    _connection_reuse_count = 0
+    _connection_create_count = 0
+    _validation_skip_count = 0
+    _validation_ping_count = 0
 
     def _validate_connection(self, connection, force_ping: bool = False) -> bool:
         """
@@ -158,9 +167,11 @@ class ImpalaConnectionManager:
                 idle_time = time.time() - connection._last_used
                 if idle_time < self.VALIDATION_SKIP_THRESHOLD:
                     # Connection was used recently, assume it's still valid
+                    ImpalaConnectionManager._validation_skip_count += 1
                     return True
 
             # Ping the connection (only for idle connections or forced)
+            ImpalaConnectionManager._validation_ping_count += 1
             cursor = connection.cursor()
             cursor.execute("SELECT 1")
             cursor.fetchone()
@@ -187,6 +198,7 @@ class ImpalaConnectionManager:
         # Try to get connection from pool
         try:
             connection = self._pool.get(block=False)
+            ImpalaConnectionManager._connection_reuse_count += 1
 
             # Validate connection (skip ping if recently used)
             if self._validate_connection(connection):
@@ -210,13 +222,20 @@ class ImpalaConnectionManager:
                 connection = self._create_connection(database)
                 if connection:
                     self._connection_count += 1
+                    ImpalaConnectionManager._connection_create_count += 1
                     logger.debug(f"Pool stats: {self._connection_count}/{self._max_connections} connections")
                 return connection
             else:
                 # Wait for connection from pool
-                logger.warning("Connection pool exhausted, waiting for available connection")
+                wait_start = time.time()
+                logger.warning(f"Connection pool exhausted ({self._connection_count}/{self._max_connections}), waiting...")
+                ImpalaConnectionManager._pool_wait_count += 1
                 try:
                     connection = self._pool.get(timeout=30)
+                    wait_time = time.time() - wait_start
+                    ImpalaConnectionManager._pool_wait_total_time += wait_time
+                    if wait_time > 5:
+                        logger.warning(f"Pool wait took {wait_time:.1f}s - consider increasing pool size")
                     if self._validate_connection(connection):
                         connection._last_used = time.time()
                         return connection
@@ -229,7 +248,9 @@ class ImpalaConnectionManager:
                         self._connection_count -= 1
                         return self._create_connection(database)
                 except Empty:
-                    logger.error("Timeout waiting for connection from pool")
+                    wait_time = time.time() - wait_start
+                    ImpalaConnectionManager._pool_wait_total_time += wait_time
+                    logger.error(f"Timeout ({wait_time:.1f}s) waiting for connection from pool")
                     return None
 
     def return_connection(self, connection):
@@ -512,6 +533,93 @@ class ImpalaConnectionManager:
         """Get number of pending async write operations."""
         self._cleanup_futures()
         return len(self._async_futures)
+
+    def get_pool_stats(self) -> Dict[str, Any]:
+        """
+        Get connection pool health statistics for monitoring.
+        Call this periodically in long-running applications.
+        """
+        return {
+            'pool_size': self._max_connections,
+            'active_connections': self._connection_count,
+            'pool_available': self._pool.qsize(),
+            'pool_utilization_pct': (self._connection_count / self._max_connections) * 100 if self._max_connections > 0 else 0,
+            'async_queue_size': self.get_async_queue_size(),
+            # Counters since startup
+            'connection_reuse_count': ImpalaConnectionManager._connection_reuse_count,
+            'connection_create_count': ImpalaConnectionManager._connection_create_count,
+            'validation_skip_count': ImpalaConnectionManager._validation_skip_count,
+            'validation_ping_count': ImpalaConnectionManager._validation_ping_count,
+            'pool_wait_count': ImpalaConnectionManager._pool_wait_count,
+            'pool_wait_avg_time': (
+                ImpalaConnectionManager._pool_wait_total_time / ImpalaConnectionManager._pool_wait_count
+                if ImpalaConnectionManager._pool_wait_count > 0 else 0
+            ),
+        }
+
+    def log_pool_stats(self):
+        """Log pool statistics for monitoring (call periodically)."""
+        stats = self.get_pool_stats()
+        logger.info(
+            f"[POOL_STATS] active={stats['active_connections']}/{stats['pool_size']} "
+            f"utilization={stats['pool_utilization_pct']:.1f}% "
+            f"reuse={stats['connection_reuse_count']} "
+            f"create={stats['connection_create_count']} "
+            f"skip_ping={stats['validation_skip_count']} "
+            f"ping={stats['validation_ping_count']} "
+            f"waits={stats['pool_wait_count']} "
+            f"avg_wait={stats['pool_wait_avg_time']:.2f}s "
+            f"async_queue={stats['async_queue_size']}"
+        )
+
+    def reset_stats(self):
+        """Reset performance counters (call periodically for fresh metrics)."""
+        ImpalaConnectionManager._pool_wait_count = 0
+        ImpalaConnectionManager._pool_wait_total_time = 0
+        ImpalaConnectionManager._connection_reuse_count = 0
+        ImpalaConnectionManager._connection_create_count = 0
+        ImpalaConnectionManager._validation_skip_count = 0
+        ImpalaConnectionManager._validation_ping_count = 0
+        logger.info("[POOL_STATS] Counters reset")
+
+    def recycle_idle_connections(self, max_idle_seconds: int = 300):
+        """
+        Recycle connections that have been idle too long.
+        Call this periodically in long-running applications to prevent stale connections.
+        """
+        recycled = 0
+        temp_connections = []
+
+        # Drain pool and check each connection
+        while True:
+            try:
+                connection = self._pool.get(block=False)
+                if hasattr(connection, '_last_used'):
+                    idle_time = time.time() - connection._last_used
+                    if idle_time > max_idle_seconds:
+                        # Connection too old, close it
+                        try:
+                            connection.close()
+                        except:
+                            pass
+                        with self._pool_lock:
+                            self._connection_count -= 1
+                        recycled += 1
+                        continue
+                temp_connections.append(connection)
+            except Empty:
+                break
+
+        # Put back valid connections
+        for conn in temp_connections:
+            try:
+                self._pool.put(conn, block=False)
+            except:
+                pass
+
+        if recycled > 0:
+            logger.info(f"[POOL_RECYCLE] Recycled {recycled} idle connections")
+        return recycled
 
 
 # Global instance
