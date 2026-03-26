@@ -415,9 +415,44 @@ class TradeKuduRepository:
             security_currency = security_details.get('currency_code', '') if security_details else ''
             portfolio_currency = portfolio_details.get('currency', '') if portfolio_details else ''
 
+            # Debug logging for currency assignment
+            logger.debug(f"Portfolio details: {portfolio_details}")
+            logger.debug(f"Security details: {security_details}")
+            logger.debug(f"Portfolio currency from details: '{portfolio_currency}'")
+            logger.debug(f"Security currency from details: '{security_currency}'")
+
             # Fallback to form input if master data is missing
             if not security_currency:
                 security_currency = trade_data.get('currency_code', '')
+
+            # Fallback for portfolio_currency - try to fetch directly if empty
+            if not portfolio_currency and portfolio_details:
+                # The currency might be stored with different key in different queries
+                portfolio_currency = (
+                    portfolio_details.get('currency') or
+                    portfolio_details.get('currency_code') or
+                    portfolio_details.get('base_currency') or
+                    ''
+                )
+                logger.debug(f"Portfolio currency after fallback checks: '{portfolio_currency}'")
+
+            # Final fallback: Query portfolio currency directly if still empty
+            if not portfolio_currency:
+                portfolio_name = trade_data.get('portfolio_short_name', '')
+                if portfolio_name:
+                    logger.warning(f"Portfolio currency empty, querying directly for: {portfolio_name}")
+                    try:
+                        query = f"""
+                        SELECT currency FROM {self.DATABASE}.cis_portfolio
+                        WHERE name = '{portfolio_name.replace("'", "''")}'
+                        LIMIT 1
+                        """
+                        results = impala_manager.execute_query(query, database=self.DATABASE)
+                        if results and results[0].get('currency'):
+                            portfolio_currency = results[0].get('currency')
+                            logger.info(f"Retrieved portfolio currency directly: {portfolio_currency}")
+                    except Exception as e:
+                        logger.error(f"Error fetching portfolio currency: {e}")
 
             values = [
                 str(trade_id),
