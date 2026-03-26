@@ -1,8 +1,9 @@
 # Position Revaluation Status Requirement
 
-**Status:** PENDING SA CONFIRMATION
+**Status:** SA CONFIRMED - READY FOR IMPLEMENTATION
 **Date:** 2026-03-26
 **Author:** Development Team
+**SA Feedback Date:** 2026-03-26
 
 ---
 
@@ -20,36 +21,62 @@ Add logic to check portfolio `revaluation_status` when calculating trade positio
 
 ---
 
-## Proposed Logic
-
-### For NON-REVALUED Portfolios
-
-When `cis_portfolio.revaluation_status = 'NON-REVALUED'`:
-- **Skip FX conversion** for LC values
-- LC values equal FC values (historical cost basis)
-- Positions maintained at original trade cost in portfolio currency
-
-| Field | Calculation |
-|-------|-------------|
-| `average_cost_lc` | = `average_cost` (no FX) |
-| `total_cost_lc` | = `total_cost` (no FX) |
-| `realized_pnl_lc` | = `realized_pnl` (no FX) |
-| `unrealized_pnl_lc` | = `unrealized_pnl` (no FX) |
-| `market_value_lc` | = `market_value` (no FX) |
+## SA Confirmed Logic
 
 ### For REVALUED Portfolios
 
 When `cis_portfolio.revaluation_status = 'REVALUED'`:
 - **Apply FX conversion** for LC values
-- Positions marked-to-market using current FX rates
+- Positions **marked-to-market** using current FX rates
+- LC values calculated by multiplying FC values with current FX rate
 
-| Field | Calculation |
-|-------|-------------|
-| `average_cost_lc` | = `average_cost * fx_rate` |
-| `total_cost_lc` | = `total_cost * fx_rate` |
-| `realized_pnl_lc` | = `realized_pnl * fx_rate` |
-| `unrealized_pnl_lc` | = `unrealized_pnl * fx_rate` |
-| `market_value_lc` | = `market_value * fx_rate` |
+| Field | Formula |
+|-------|---------|
+| `average_cost_lc` | `average_cost * fx_rate` |
+| `total_cost_lc` | `total_cost * fx_rate` (or `average_cost_lc * qty`) |
+| `realized_pnl_lc` | `realized_pnl * fx_rate` |
+| `market_value_lc` | `market_value * fx_rate` (or `qty * market_price * fx_rate`) |
+| `unrealized_pnl_lc` | `market_value_lc - total_cost_lc` |
+
+### For NON-REVALUED Portfolios
+
+When `cis_portfolio.revaluation_status = 'NON-REVALUED'`:
+- **Use historical LC amount from trade** (NOT `LC = FC`)
+- Positions stay at **historical FC** - the LC values use the LC amount captured at trade time
+- Cost values remain at historical rates, only market value uses current FX
+
+| Field | Formula |
+|-------|---------|
+| `average_cost_lc` | Use LC amount from trade (historical rate at trade time) |
+| `total_cost_lc` | `average_cost_lc * qty` |
+| `realized_pnl_lc` | Use LC amount from trade (historical rate at trade time) |
+| `market_value_lc` | `market_value * fx_rate` (current rate for market value) |
+| `unrealized_pnl_lc` | `market_value_lc - total_cost_lc` |
+
+---
+
+## Daily Recalculation (BOTH Cases)
+
+**Important:** For BOTH REVALUED and NON-REVALUED portfolios, the following fields need to be recalculated **every day**:
+
+| Field | Daily Formula |
+|-------|---------------|
+| `market_value` | `qty * market_price` (current market price) |
+| `unrealized_pnl` | `market_value - total_cost` |
+| `market_value_lc` | `market_value * fx_rate` (current FX rate) |
+| `unrealized_pnl_lc` | `market_value_lc - total_cost_lc` |
+
+**Note:** All formulas using FX rate need to recalculate daily for accurate mark-to-market.
+
+---
+
+## Key Difference Summary
+
+| Aspect | REVALUED | NON-REVALUED |
+|--------|----------|--------------|
+| Cost LC Values | Current FX rate | Historical FX rate (from trade) |
+| Market Value LC | Current FX rate | Current FX rate |
+| P&L LC | Fully revalued | Cost at historical, market at current |
 
 ---
 
@@ -61,16 +88,21 @@ When `cis_portfolio.revaluation_status = 'REVALUED'`:
 Portfolio: ABC Fund (SGD base, NON-REVALUED)
 Security: AAPL (USD)
 Trade: BUY 100 shares @ $150 USD
+Historical FX at trade time: USD/SGD = 1.30
+Current FX: USD/SGD = 1.35
+Current Market Price: $160 USD
 
 FC Values (USD):
+- average_cost = 150 USD
 - total_cost = 15,000 USD
-- realized_pnl = 0 USD
+- market_value = 16,000 USD (100 * 160)
+- unrealized_pnl = 1,000 USD
 
-LC Values (SGD) - NO FX CONVERSION:
-- total_cost_lc = 15,000 (same as FC)
-- realized_pnl_lc = 0 (same as FC)
-
-Note: Even though portfolio is SGD, LC values stored as-is without FX conversion
+LC Values (SGD) - HISTORICAL COST, CURRENT MARKET:
+- average_cost_lc = 195 SGD (150 * 1.30 historical rate from trade)
+- total_cost_lc = 19,500 SGD (195 * 100, stays at historical)
+- market_value_lc = 21,600 SGD (16,000 * 1.35 current rate)
+- unrealized_pnl_lc = 2,100 SGD (21,600 - 19,500)
 ```
 
 ### Scenario 2: REVALUED Portfolio
@@ -79,20 +111,31 @@ Note: Even though portfolio is SGD, LC values stored as-is without FX conversion
 Portfolio: XYZ Fund (SGD base, REVALUED)
 Security: AAPL (USD)
 Trade: BUY 100 shares @ $150 USD
-FX Rate: USD/SGD = 1.35
+Current FX: USD/SGD = 1.35
+Current Market Price: $160 USD
 
 FC Values (USD):
+- average_cost = 150 USD
 - total_cost = 15,000 USD
-- realized_pnl = 0 USD
+- market_value = 16,000 USD (100 * 160)
+- unrealized_pnl = 1,000 USD
 
-LC Values (SGD) - WITH FX CONVERSION:
-- total_cost_lc = 15,000 * 1.35 = 20,250 SGD
-- realized_pnl_lc = 0 * 1.35 = 0 SGD
+LC Values (SGD) - FULLY REVALUED WITH CURRENT FX:
+- average_cost_lc = 202.50 SGD (150 * 1.35 current rate)
+- total_cost_lc = 20,250 SGD (15,000 * 1.35 current rate)
+- market_value_lc = 21,600 SGD (16,000 * 1.35 current rate)
+- unrealized_pnl_lc = 1,350 SGD (1,000 * 1.35 current rate)
 ```
 
 ---
 
-## Implementation Impact
+## Implementation Requirements
+
+### Data Requirements
+
+1. **Trade Table**: Need to store `total_amount_lc` (LC amount at trade time) for NON-REVALUED calculations
+2. **Position Table**: Store both FC and LC values
+3. **Portfolio Table**: `revaluation_status` column must be populated
 
 ### Files to Modify
 
@@ -100,42 +143,51 @@ LC Values (SGD) - WITH FX CONVERSION:
 |------|---------|
 | `trade/services/position_service.py` | Add revaluation_status check in `_save_position()` |
 | `trade/repositories/trade_validation_repository.py` | Add method to fetch portfolio revaluation_status |
+| `cis_trade` table | Ensure `total_amount_lc` is captured at trade time |
 
 ### Code Changes (Pseudocode)
 
 ```python
 def _save_position(self, position_data, updated_by):
-    # Get portfolio revaluation status
     portfolio_id = position_data['portfolio_short_name']
     revaluation_status = self._get_portfolio_revaluation_status(portfolio_id)
 
+    # Get current FX rate (always needed for market_value_lc)
+    fx_rate = self._get_fx_rate(security_currency, portfolio_currency)
+
+    # Market value always uses current price and FX
+    market_value = qty * current_market_price
+    market_value_lc = market_value * fx_rate
+
     if revaluation_status == 'NON-REVALUED':
-        # Skip FX conversion - LC = FC
-        average_cost_lc = average_cost
-        total_cost_lc = total_cost
-        realized_pnl_lc = realized_pnl
-        unrealized_pnl_lc = unrealized_pnl
-        market_value_lc = market_value
-    else:  # REVALUED or default
-        # Apply FX conversion
+        # Cost values use historical LC from trade
+        average_cost_lc = trade_data.get('average_cost_lc')  # From trade at historical rate
+        total_cost_lc = average_cost_lc * qty
+        # Unrealized P&L = current market LC - historical cost LC
+        unrealized_pnl_lc = market_value_lc - total_cost_lc
+        # Realized P&L uses historical LC from trade
+        realized_pnl_lc = trade_data.get('realized_pnl_lc')  # From trade
+    else:  # REVALUED
+        # All values use current FX rate
         average_cost_lc = average_cost * fx_rate
         total_cost_lc = total_cost * fx_rate
         realized_pnl_lc = realized_pnl * fx_rate
-        unrealized_pnl_lc = unrealized_pnl * fx_rate
-        market_value_lc = market_value * fx_rate
+        unrealized_pnl_lc = market_value_lc - total_cost_lc
 ```
 
 ---
 
-## Questions for SA
+## EOD Batch Job Requirements
 
-1. **Default Behavior:** If `revaluation_status` is NULL or empty, should we treat it as REVALUED (apply FX) or NON-REVALUED (skip FX)?
+An EOD (End-of-Day) batch job is required to recalculate daily:
 
-2. **Historical Positions:** Should existing positions be recalculated when portfolio revaluation_status changes?
-
-3. **Mixed Currency:** For NON-REVALUED portfolios with securities in different currencies, are LC values still stored without conversion (effectively mixing currencies)?
-
-4. **Reporting Impact:** How should reports handle NON-REVALUED portfolios where LC values may be in mixed currencies?
+1. Fetch latest market prices for all securities
+2. Fetch latest FX rates
+3. For each open position:
+   - Recalculate `market_value = qty * market_price`
+   - Recalculate `unrealized_pnl = market_value - total_cost`
+   - Recalculate `market_value_lc = market_value * fx_rate`
+   - Recalculate `unrealized_pnl_lc = market_value_lc - total_cost_lc`
 
 ---
 
@@ -143,7 +195,7 @@ def _save_position(self, position_data, updated_by):
 
 | Role | Name | Date | Approval |
 |------|------|------|----------|
-| SA Lead | | | [ ] Approved / [ ] Rejected |
+| SA Lead | Prakash HOSALLI | 2026-03-26 | [x] Approved |
 | Dev Lead | | | [ ] Reviewed |
 | QA Lead | | | [ ] Test Plan Ready |
 
@@ -151,6 +203,7 @@ def _save_position(self, position_data, updated_by):
 
 ## Notes
 
-- Implementation will begin after SA confirmation
-- Unit tests will cover both REVALUED and NON-REVALUED scenarios
-- Integration tests will verify end-to-end position calculation
+- SA confirmed on 2026-03-26 via Teams chat
+- Key clarification: NON-REVALUED uses historical LC from trade, NOT `LC = FC`
+- Market value LC always uses current FX rate (both cases)
+- Daily recalculation required for market value and unrealized P&L
