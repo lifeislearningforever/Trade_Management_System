@@ -261,7 +261,7 @@ JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
 JOIN pos_stage_2_portfolio p2 ON b.row_id = p2.row_id
 WHERE p4.security_status LIKE 'FAIL: Security not found%'
   AND p2.portfolio_status = 'PASS'  -- Only if portfolio is valid
-  AND b.exchange_code IS NOT NULL   -- Must have exchange
+  -- Exchange is optional for security creation
   AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)  -- Must have quantity
   AND (b.isin IS NOT NULL OR b.security_full_name IS NOT NULL OR b.security_short_name IS NOT NULL);
 
@@ -345,18 +345,19 @@ SELECT
         ELSE NULL
     END AS final_net_book_value_fc,
     -- Overall status
+    -- NOTE: Portfolio validation is now a WARNING (not blocking) to allow processing
     -- NOTE: 'FAIL: Security not found' is NOW VALID because Step 5B created the security
     CASE
-        WHEN p2.portfolio_status LIKE 'FAIL%' THEN 'INVALID: ' || p2.portfolio_status
+        -- Portfolio not found is WARNING, not blocking (use uploaded portfolio name)
         WHEN p4.security_status = 'FAIL: No identifier' THEN 'INVALID: ' || p4.security_status
         -- Security not found is OK - we created it in Step 5B (if other validations pass)
         WHEN p4.security_status = 'FAIL: Security not found'
-             AND b.exchange_code IS NOT NULL
              AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
              THEN 'VALID: New security created'
-        WHEN p4.security_status LIKE 'FAIL%' THEN 'INVALID: ' || p4.security_status
-        WHEN b.exchange_code IS NULL THEN 'INVALID: Exchange is null'
+        WHEN p4.security_status LIKE 'FAIL%' AND p4.security_status != 'FAIL: Security not found'
+             THEN 'INVALID: ' || p4.security_status
         WHEN b.quantity IS NULL AND b.cost_fc IS NULL THEN 'INVALID: No quantity'
+        WHEN p2.portfolio_status LIKE 'FAIL%' THEN 'VALID: Portfolio not in master (using uploaded)'
         ELSE 'VALID'
     END AS overall_status
 FROM pos_stage_1_base b
@@ -442,13 +443,17 @@ SELECT 'Valid (Existing Security)', COUNT(*) FROM position_upload_staging WHERE 
 UNION ALL
 SELECT 'Valid (New Security Created)', COUNT(*) FROM position_upload_staging WHERE overall_status = 'VALID: New security created'
 UNION ALL
+SELECT 'Valid (Portfolio not in master)', COUNT(*) FROM position_upload_staging WHERE overall_status = 'VALID: Portfolio not in master (using uploaded)'
+UNION ALL
+SELECT 'Total Valid (All)', COUNT(*) FROM position_upload_staging WHERE overall_status LIKE 'VALID%'
+UNION ALL
 SELECT 'Invalid', COUNT(*) FROM position_upload_staging WHERE overall_status LIKE 'INVALID%'
 UNION ALL
-SELECT 'Portfolio Fail', COUNT(*) FROM position_upload_staging WHERE portfolio_status LIKE 'FAIL%'
+SELECT 'Portfolio Not Found (Warning)', COUNT(*) FROM position_upload_staging WHERE portfolio_status LIKE 'FAIL%'
+UNION ALL
+SELECT 'Security Match (ISIN)', COUNT(*) FROM position_upload_staging WHERE security_status = 'ISIN_MATCH'
 UNION ALL
 SELECT 'Security Fail (No Identifier)', COUNT(*) FROM position_upload_staging WHERE security_status = 'FAIL: No identifier'
-UNION ALL
-SELECT 'Exchange Null', COUNT(*) FROM position_upload_staging WHERE exchange_code IS NULL
 UNION ALL
 SELECT 'Quantity Null', COUNT(*) FROM position_upload_staging WHERE quantity IS NULL AND cost_fc IS NULL;
 
