@@ -141,7 +141,9 @@
                         <div class="col-md-2 mb-3">
                             <label class="form-label text-muted">Local CCY</label>
                             <div class="fw-bold">
-                                {% if trade.currency_code %}
+                                {% if trade.portfolio_currency %}
+                                    <span class="badge bg-success">{{ trade.portfolio_currency }}</span>
+                                {% elif trade.currency_code %}
                                     <span class="badge bg-success">{{ trade.currency_code }}</span>
                                 {% else %}
                                     -
@@ -156,7 +158,9 @@
                         <div class="col-md-2 mb-3">
                             <label class="form-label text-muted">Foreign CCY</label>
                             <div class="fw-bold">
-                                {% if trade.security_currency %}
+                                {% if trade.currency_code %}
+                                    <span class="badge bg-primary">{{ trade.currency_code }}</span>
+                                {% elif trade.security_currency %}
                                     <span class="badge bg-primary">{{ trade.security_currency }}</span>
                                 {% else %}
                                     -
@@ -237,7 +241,9 @@
                             <label class="form-label text-muted">Total Amount LC</label>
                             <div class="fw-bold fs-5 text-success">
                                 {{ trade.total_amount_lc|floatformat:2|default:"0.00" }}
-                                {% if trade.currency_code %}
+                                {% if trade.portfolio_currency %}
+                                    <span class="badge bg-success">{{ trade.portfolio_currency }}</span>
+                                {% elif trade.currency_code %}
                                     <span class="badge bg-success">{{ trade.currency_code }}</span>
                                 {% endif %}
                             </div>
