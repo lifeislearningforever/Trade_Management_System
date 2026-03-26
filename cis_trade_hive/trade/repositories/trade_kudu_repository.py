@@ -436,23 +436,30 @@ class TradeKuduRepository:
                 )
                 logger.debug(f"Portfolio currency after fallback checks: '{portfolio_currency}'")
 
-            # Final fallback: Query portfolio currency directly if still empty
-            if not portfolio_currency:
-                portfolio_name = trade_data.get('portfolio_short_name', '')
-                if portfolio_name:
-                    logger.warning(f"Portfolio currency empty, querying directly for: {portfolio_name}")
-                    try:
-                        query = f"""
-                        SELECT currency FROM {self.DATABASE}.cis_portfolio
-                        WHERE name = '{portfolio_name.replace("'", "''")}'
-                        LIMIT 1
-                        """
-                        results = impala_manager.execute_query(query, database=self.DATABASE)
-                        if results and results[0].get('currency'):
-                            portfolio_currency = results[0].get('currency')
-                            logger.info(f"Retrieved portfolio currency directly: {portfolio_currency}")
-                    except Exception as e:
-                        logger.error(f"Error fetching portfolio currency: {e}")
+            # ALWAYS query portfolio currency directly - guarantees we get the value
+            # This bypasses any caching or validation flow issues
+            portfolio_name = trade_data.get('portfolio_short_name', '')
+            if portfolio_name:
+                try:
+                    query = f"""
+                    SELECT currency FROM {self.DATABASE}.cis_portfolio
+                    WHERE name = '{portfolio_name.replace("'", "''")}'
+                    LIMIT 1
+                    """
+                    logger.info(f"Querying portfolio currency for: {portfolio_name}")
+                    results = impala_manager.execute_query(query, database=self.DATABASE)
+                    logger.info(f"Portfolio currency query results: {results}")
+                    if results:
+                        db_currency = results[0].get('currency')
+                        if db_currency:
+                            portfolio_currency = db_currency
+                            logger.info(f"Portfolio currency set to: {portfolio_currency}")
+                        else:
+                            logger.warning(f"Portfolio '{portfolio_name}' has NULL/empty currency in database")
+                    else:
+                        logger.warning(f"Portfolio '{portfolio_name}' not found in cis_portfolio")
+                except Exception as e:
+                    logger.error(f"Error fetching portfolio currency: {e}")
 
             values = [
                 str(trade_id),
@@ -656,12 +663,29 @@ class TradeKuduRepository:
             deal_number = trade_data.get('deal_number') or f"DEAL-{datetime.now().strftime('%Y%m%d')}-{trade_id % 10000}"
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+            # Get portfolio currency directly from database (guaranteed to get value)
+            portfolio_currency = ''
+            portfolio_name = trade_data.get('portfolio_short_name', '')
+            if portfolio_name:
+                try:
+                    query = f"""
+                    SELECT currency FROM {self.DATABASE}.cis_portfolio
+                    WHERE name = '{portfolio_name.replace("'", "''")}'
+                    LIMIT 1
+                    """
+                    results = impala_manager.execute_query(query, database=self.DATABASE)
+                    if results and results[0].get('currency'):
+                        portfolio_currency = results[0].get('currency')
+                        logger.info(f"Portfolio currency for {portfolio_name}: {portfolio_currency}")
+                except Exception as e:
+                    logger.error(f"Error fetching portfolio currency: {e}")
+
             # Build column and value lists
             columns = [
                 'trade_id', 'trade_type', 'deal_number',
                 'portfolio_short_name', 'portfolio_full_name',
                 'security_label', 'security_full_name', 'security_type',
-                'currency_code',
+                'currency_code', 'portfolio_currency',
                 'trade_status', 'trade_date', 'settle_date',
                 'quantity', 'face_value', 'lot', 'price',
                 'commission', 'accrued_interest', 'sec_fee',
@@ -695,6 +719,7 @@ class TradeKuduRepository:
                 self.escape_value(security_details.get('security_name', '')),
                 self.escape_value(security_details.get('security_type', '')),
                 self.escape_value(trade_data.get('currency_code', '')),
+                self.escape_value(portfolio_currency),  # Portfolio currency (LC)
                 self.escape_value(trade_data.get('trade_status', '')),
                 self.escape_value(trade_data.get('trade_date')),
                 self.escape_value(trade_data.get('settle_date', '')),
