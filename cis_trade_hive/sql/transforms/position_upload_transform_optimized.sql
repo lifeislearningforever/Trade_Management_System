@@ -258,10 +258,8 @@ SELECT
     UNIX_TIMESTAMP() * 1000 AS updated_at
 FROM pos_stage_1_base b
 JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
-JOIN pos_stage_2_portfolio p2 ON b.row_id = p2.row_id
-WHERE p4.security_status LIKE 'FAIL: Security not found%'
-  AND p2.portfolio_status = 'PASS'  -- Only if portfolio is valid
-  -- Exchange is optional for security creation
+WHERE p4.security_status = 'FAIL: Security not found'
+  -- Portfolio validation is not blocking - we create security regardless
   AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)  -- Must have quantity
   AND (b.isin IS NOT NULL OR b.security_full_name IS NOT NULL OR b.security_short_name IS NOT NULL);
 
@@ -269,9 +267,7 @@ WHERE p4.security_status LIKE 'FAIL: Security not found%'
 SELECT 'New Securities Created' AS action, COUNT(*) AS cnt
 FROM pos_stage_1_base b
 JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
-JOIN pos_stage_2_portfolio p2 ON b.row_id = p2.row_id
-WHERE p4.security_status LIKE 'FAIL: Security not found%'
-  AND p2.portfolio_status = 'PASS'
+WHERE p4.security_status = 'FAIL: Security not found'
   AND b.exchange_code IS NOT NULL
   AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
   AND (b.isin IS NOT NULL OR b.security_full_name IS NOT NULL OR b.security_short_name IS NOT NULL);
