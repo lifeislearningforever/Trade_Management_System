@@ -545,7 +545,8 @@ def trade_create(request, trade_type=None):
             }
 
             # Validate trade data (includes Portfolio, Security, Counterparty validation)
-            is_valid, errors, _ = trade_kudu_repository.validate_trade_data(trade_data)
+            # entity_details contains portfolio and security dicts for reuse
+            is_valid, errors, entity_details = trade_kudu_repository.validate_trade_data(trade_data)
 
             if not is_valid:
                 for error in errors:
@@ -558,11 +559,12 @@ def trade_create(request, trade_type=None):
                 return render(request, 'trade/trade_form.html', context)
 
             # Insert trade using FAST method with skip_validation=True
-            # (validation already done above, so skip DB queries in insert)
+            # Pass entity_details to avoid duplicate DB queries for portfolio/security
             trade_id = trade_kudu_repository.insert_trade_fast(
                 trade_data,
                 created_by=user_info['username'],
-                skip_validation=True  # Already validated above
+                skip_validation=True,  # Already validated above
+                entity_details=entity_details  # Reuse portfolio/security from validation
             )
 
             if not trade_id:

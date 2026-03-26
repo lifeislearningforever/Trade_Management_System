@@ -615,20 +615,24 @@ class TradeKuduRepository:
         self,
         trade_data: Dict[str, Any],
         created_by: str,
-        skip_validation: bool = False
+        skip_validation: bool = False,
+        entity_details: Optional[Dict[str, Any]] = None
     ) -> Optional[int]:
         """
         Fast trade insert - only saves core trade data, queues everything else.
 
         This method is optimized for speed by:
         1. Optionally skipping validation (if already done in view)
-        2. Only inserting the trade record (single DB write)
-        3. Queuing history, audit, settlement, and AVP for async processing
+        2. Reusing entity_details from prior validation (no duplicate queries)
+        3. Only inserting the trade record (single DB write)
+        4. Queuing history, audit, settlement, and AVP for async processing
 
         Args:
             trade_data: Trade data dictionary
             created_by: Username of creator
             skip_validation: If True, skip DB validation (use when already validated)
+            entity_details: Pre-fetched entity details from validate_trade_data()
+                           Contains 'portfolio' and 'security' dicts
 
         Returns trade_id if successful, None otherwise.
         """
@@ -638,10 +642,14 @@ class TradeKuduRepository:
 
             if not skip_validation:
                 # Validate first - now returns entity details to avoid duplicate queries
-                is_valid, errors, entity_details = self.validate_trade_data(trade_data)
+                is_valid, errors, fetched_details = self.validate_trade_data(trade_data)
                 if not is_valid:
                     logger.error(f"Trade validation failed: {errors}")
                     raise ValueError("; ".join(errors))
+                portfolio_details = fetched_details.get('portfolio') or {}
+                security_details = fetched_details.get('security') or {}
+            elif entity_details:
+                # Use pre-fetched entity details from view (FAST PATH - no DB queries)
                 portfolio_details = entity_details.get('portfolio') or {}
                 security_details = entity_details.get('security') or {}
             else:
@@ -663,22 +671,9 @@ class TradeKuduRepository:
             deal_number = trade_data.get('deal_number') or f"DEAL-{datetime.now().strftime('%Y%m%d')}-{trade_id % 10000}"
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            # Get portfolio currency directly from database (guaranteed to get value)
-            portfolio_currency = ''
-            portfolio_name = trade_data.get('portfolio_short_name', '')
-            if portfolio_name:
-                try:
-                    query = f"""
-                    SELECT currency FROM {self.DATABASE}.cis_portfolio
-                    WHERE name = '{portfolio_name.replace("'", "''")}'
-                    LIMIT 1
-                    """
-                    results = impala_manager.execute_query(query, database=self.DATABASE)
-                    if results and results[0].get('currency'):
-                        portfolio_currency = results[0].get('currency')
-                        logger.info(f"Portfolio currency for {portfolio_name}: {portfolio_currency}")
-                except Exception as e:
-                    logger.error(f"Error fetching portfolio currency: {e}")
+            # Get portfolio currency from entity_details (already fetched during validation)
+            # NO DUPLICATE DB QUERY - reuse validation results
+            portfolio_currency = portfolio_details.get('currency', '')
 
             # Build column and value lists
             columns = [
