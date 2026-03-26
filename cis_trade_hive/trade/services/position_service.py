@@ -236,6 +236,34 @@ class PositionService:
         market_value = new_qty * market_price
         unrealized_pnl = market_value - new_total_cost
 
+        # Calculate LC values for NON-REVALUED portfolios (historical cost basis)
+        # Get current FX rate at trade time - this becomes the "historical" rate
+        fx_rate = Decimal('1')
+        if security_currency and portfolio_currency and security_currency != portfolio_currency:
+            fx_rate = self._get_fx_rate(security_currency, portfolio_currency)
+
+        # For NON-REVALUED: maintain weighted average LC cost
+        # new_total_cost_lc = old_total_cost_lc + (trade_cost * fx_rate_at_trade_time)
+        # new_avg_cost_lc = new_total_cost_lc / new_qty
+        if current:
+            old_total_cost_lc = Decimal(str(current.get('total_cost_lc', 0) or 0))
+            if old_total_cost_lc == 0:
+                # Fallback if no LC value stored - use FC * current FX
+                old_total_cost_lc = Decimal(str(current.get('total_cost', 0) or 0)) * fx_rate
+            trade_cost_lc = trade_cost * fx_rate
+            new_total_cost_lc = old_total_cost_lc + trade_cost_lc
+            new_avg_cost_lc = (new_total_cost_lc / new_qty).quantize(
+                self.AVP_PRECISION, rounding=ROUND_HALF_UP
+            )
+            old_realized_pnl_lc = Decimal(str(current.get('realized_pnl_lc', 0) or 0))
+        else:
+            trade_cost_lc = trade_cost * fx_rate
+            new_total_cost_lc = trade_cost_lc
+            new_avg_cost_lc = (new_total_cost_lc / new_qty).quantize(
+                self.AVP_PRECISION, rounding=ROUND_HALF_UP
+            )
+            old_realized_pnl_lc = Decimal('0')
+
         # Build position data
         position_data = {
             'position_id': position_id,
@@ -248,6 +276,10 @@ class PositionService:
             'market_value': float(market_value),
             'unrealized_pnl': float(unrealized_pnl),
             'realized_pnl': float(old_realized_pnl),
+            # LC values for NON-REVALUED portfolios (historical cost basis)
+            'average_cost_lc': float(new_avg_cost_lc),
+            'total_cost_lc': float(new_total_cost_lc),
+            'realized_pnl_lc': float(old_realized_pnl_lc),
             'trade_id': trade_id,
             'trade_type': 'BUY',
             'position_date': position_date,
@@ -318,9 +350,30 @@ class PositionService:
         # Calculate new position
         new_qty = old_qty - quantity
 
+        # Get FX rate for LC calculations
+        fx_rate = Decimal('1')
+        if security_currency and portfolio_currency and security_currency != portfolio_currency:
+            fx_rate = self._get_fx_rate(security_currency, portfolio_currency)
+
+        # Get existing LC values from current position
+        old_avg_cost_lc = Decimal(str(current.get('average_cost_lc', 0) or 0))
+        old_total_cost_lc = Decimal(str(current.get('total_cost_lc', 0) or 0))
+        old_realized_pnl_lc = Decimal(str(current.get('realized_pnl_lc', 0) or 0))
+
+        # Fallback if no LC values stored
+        if old_avg_cost_lc == 0 and old_avg_cost > 0:
+            old_avg_cost_lc = old_avg_cost * fx_rate
+            old_total_cost_lc = old_qty * old_avg_cost_lc
+
+        # Calculate realized P&L in LC
+        # For NON-REVALUED: use historical avg_cost_lc, current sell_price * fx_rate
+        realized_pnl_this_trade_lc = (price * fx_rate - old_avg_cost_lc) * quantity
+        new_realized_pnl_lc = old_realized_pnl_lc + realized_pnl_this_trade_lc
+
         logger.info(
             f"SELL: Selling {quantity} @ {price} from position {position_id}. "
-            f"Old: {old_qty} @ {old_avg_cost}, Realized P&L: {realized_pnl_this_trade}"
+            f"Old: {old_qty} @ {old_avg_cost}, Realized P&L: {realized_pnl_this_trade}, "
+            f"Realized P&L LC: {realized_pnl_this_trade_lc}"
         )
 
         if new_qty <= 0:
@@ -336,6 +389,10 @@ class PositionService:
                 'market_value': 0,
                 'unrealized_pnl': 0,
                 'realized_pnl': float(new_realized_pnl),
+                # LC values for NON-REVALUED
+                'average_cost_lc': 0,
+                'total_cost_lc': 0,
+                'realized_pnl_lc': float(new_realized_pnl_lc),
                 'trade_id': trade_id,
                 'trade_type': 'SELL',
                 'position_date': position_date,
@@ -349,10 +406,12 @@ class PositionService:
                 'custodian': custodian,
                 'sub_custodian': sub_custodian
             }
-            logger.info(f"Position {position_id} fully closed. Total realized P&L: {new_realized_pnl}")
+            logger.info(f"Position {position_id} fully closed. Total realized P&L: {new_realized_pnl}, LC: {new_realized_pnl_lc}")
         else:
             # Partial sell - AVP unchanged
             new_total_cost = new_qty * old_avg_cost
+            new_total_cost_lc = new_qty * old_avg_cost_lc  # LC cost unchanged per unit
+
             market_price_raw = self._get_market_price(security_id)
             market_price = Decimal(str(market_price_raw)) if market_price_raw else old_avg_cost
             market_value = new_qty * market_price
@@ -369,6 +428,10 @@ class PositionService:
                 'market_value': float(market_value),
                 'unrealized_pnl': float(unrealized_pnl),
                 'realized_pnl': float(new_realized_pnl),
+                # LC values for NON-REVALUED
+                'average_cost_lc': float(old_avg_cost_lc),  # Unchanged
+                'total_cost_lc': float(new_total_cost_lc),
+                'realized_pnl_lc': float(new_realized_pnl_lc),
                 'trade_id': trade_id,
                 'trade_type': 'SELL',
                 'position_date': position_date,
@@ -553,21 +616,65 @@ class PositionService:
             unrealized_pnl = float(position_data.get('unrealized_pnl', 0) or 0)
             market_value = float(position_data.get('market_value', 0) or 0)
 
-            # LC calculations: MULTIPLY by fx_rate to convert FC to LC
+            # Get portfolio revaluation status
+            revaluation_status = self._get_portfolio_revaluation_status(portfolio_id)
+            logger.debug(f"Portfolio {portfolio_id} revaluation_status: {revaluation_status}")
+
+            # LC calculations based on revaluation_status
             # fx_rate = security_currency -> portfolio_currency (e.g., USD/SGD = 1.35)
-            # So: value_lc = value_fc * fx_rate
-            if fx_rate and fx_rate != 0:
-                average_cost_lc = average_cost * fx_rate
-                total_cost_lc = total_cost * fx_rate
-                realized_pnl_lc = realized_pnl * fx_rate
-                unrealized_pnl_lc = unrealized_pnl * fx_rate
-                market_value_lc = market_value * fx_rate
+            if revaluation_status == 'NON-REVALUED':
+                # NON-REVALUED: Cost values use historical LC from trade (stored in position_data)
+                # Market value uses current FX rate
+                # If historical LC not available, fall back to current FX conversion
+                average_cost_lc = float(position_data.get('average_cost_lc', 0) or 0)
+                if average_cost_lc == 0 and average_cost > 0 and fx_rate:
+                    # Fallback: use current FX if historical not available
+                    average_cost_lc = average_cost * fx_rate
+                    logger.warning(f"No historical average_cost_lc for {portfolio_id}/{security_id}, using current FX")
+
+                total_cost_lc = float(position_data.get('total_cost_lc', 0) or 0)
+                if total_cost_lc == 0 and total_cost > 0 and fx_rate:
+                    # Fallback: use current FX if historical not available
+                    total_cost_lc = total_cost * fx_rate
+                    logger.warning(f"No historical total_cost_lc for {portfolio_id}/{security_id}, using current FX")
+
+                realized_pnl_lc = float(position_data.get('realized_pnl_lc', 0) or 0)
+                if realized_pnl_lc == 0 and realized_pnl != 0 and fx_rate:
+                    # Fallback: use current FX if historical not available
+                    realized_pnl_lc = realized_pnl * fx_rate
+                    logger.warning(f"No historical realized_pnl_lc for {portfolio_id}/{security_id}, using current FX")
+
+                # Market value LC always uses current FX rate (mark-to-market)
+                market_value_lc = market_value * fx_rate if fx_rate else market_value
+
+                # Unrealized P&L LC = market_value_lc - total_cost_lc
+                unrealized_pnl_lc = market_value_lc - total_cost_lc
+
+                logger.info(
+                    f"NON-REVALUED position {portfolio_id}/{security_id}: "
+                    f"cost_lc={total_cost_lc:.2f} (historical), "
+                    f"market_lc={market_value_lc:.2f} (current FX), "
+                    f"unrealized_lc={unrealized_pnl_lc:.2f}"
+                )
             else:
-                average_cost_lc = average_cost
-                total_cost_lc = total_cost
-                realized_pnl_lc = realized_pnl
-                unrealized_pnl_lc = unrealized_pnl
-                market_value_lc = market_value
+                # REVALUED (default): All values use current FX rate (mark-to-market)
+                if fx_rate and fx_rate != 0:
+                    average_cost_lc = average_cost * fx_rate
+                    total_cost_lc = total_cost * fx_rate
+                    realized_pnl_lc = realized_pnl * fx_rate
+                    market_value_lc = market_value * fx_rate
+                    unrealized_pnl_lc = market_value_lc - total_cost_lc
+                else:
+                    average_cost_lc = average_cost
+                    total_cost_lc = total_cost
+                    realized_pnl_lc = realized_pnl
+                    market_value_lc = market_value
+                    unrealized_pnl_lc = unrealized_pnl
+
+                logger.debug(
+                    f"REVALUED position {portfolio_id}/{security_id}: "
+                    f"all LC values use current FX rate {fx_rate}"
+                )
 
             # Match columns to cis_trade_position table structure (DDL: 13_avp_tables_kudu.sql)
             # FC = Foreign Currency (Security Currency)
@@ -911,6 +1018,34 @@ class PositionService:
             if strict:
                 raise ValueError(f"Error fetching FX rate for {from_ccy}-{to_ccy}: {str(e)}")
             return Decimal('1')
+
+    def _get_portfolio_revaluation_status(self, portfolio_id: str) -> str:
+        """
+        Get portfolio revaluation status from cis_portfolio table.
+
+        Args:
+            portfolio_id: Portfolio short name
+
+        Returns:
+            'REVALUED' or 'NON-REVALUED' (defaults to 'REVALUED' if not found)
+        """
+        try:
+            query = f"""
+            SELECT revaluation_status
+            FROM {self.DATABASE}.cis_portfolio
+            WHERE name = '{self._escape(portfolio_id)}'
+            LIMIT 1
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            if results and results[0].get('revaluation_status'):
+                status = results[0]['revaluation_status'].upper()
+                if status in ('REVALUED', 'NON-REVALUED'):
+                    return status
+            # Default to REVALUED if not found or invalid
+            return 'REVALUED'
+        except Exception as e:
+            logger.error(f"Error fetching revaluation status for {portfolio_id}: {str(e)}")
+            return 'REVALUED'  # Default to REVALUED on error
 
     # =========================================================================
     # VALIDATION

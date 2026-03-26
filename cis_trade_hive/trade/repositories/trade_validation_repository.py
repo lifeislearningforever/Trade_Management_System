@@ -103,7 +103,7 @@ class TradeValidationRepository:
             status_list = ", ".join([f"'{s}'" for s in self.PORTFOLIO_VALID_STATUSES])
 
             query = f"""
-            SELECT name, currency, manager, cash_balance, status, is_active
+            SELECT name, currency, manager, cash_balance, status, is_active, revaluation_status
             FROM {self.DATABASE}.{self.PORTFOLIO_TABLE}
             WHERE name = '{portfolio_name_escaped}'
             LIMIT 1
