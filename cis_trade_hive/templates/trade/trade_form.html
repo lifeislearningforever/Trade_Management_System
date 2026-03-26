@@ -165,19 +165,15 @@
                                 <small class="text-muted" id="security_info"></small>
                             </div>
 
-                            <!-- Currency (auto-populated from security selection) -->
+                            <!-- Currency (auto-populated from security selection - readonly) -->
                             <div class="col-md-2">
                                 <label class="form-label">Currency <span class="text-danger">*</span></label>
-                                <select class="form-select" name="currency_code" id="currency_code" required>
-                                    <option value="">Select Security First</option>
-                                    {% for c in dropdown_options.currencies %}
-                                    <option value="{{ c.value }}"
-                                        {% if trade.currency_code == c.value %}selected{% endif %}>
-                                        {{ c.label }}
-                                    </option>
-                                    {% endfor %}
-                                </select>
-                                <small class="text-muted" id="currency_info"></small>
+                                <input type="text" class="form-control bg-light" id="currency_code_display"
+                                       value="{{ trade.currency_code|default:'' }}"
+                                       readonly placeholder="Select Security">
+                                <input type="hidden" name="currency_code" id="currency_code"
+                                       value="{{ trade.currency_code|default:'' }}" required>
+                                <small class="text-muted" id="currency_info">Auto-set from security</small>
                             </div>
 
                             <!-- Counterparty -->
@@ -1293,14 +1289,17 @@ function resetChargeFields() {
 document.getElementById('security_label').addEventListener('change', function() {
     const securityLabel = this.value;
     const priceField = document.getElementById('price');
-    const currencyEl = document.getElementById('currency_code');
+    const currencyHidden = document.getElementById('currency_code');
+    const currencyDisplay = document.getElementById('currency_code_display');
     const currencyInfo = document.getElementById('currency_info');
     const securityInfo = document.getElementById('security_info');
 
     if (!securityLabel) {
-        // Reset currency to default
-        currencyEl.value = '';
-        currencyInfo.textContent = '';
+        // Reset currency to default (both hidden and display fields)
+        currencyHidden.value = '';
+        currencyDisplay.value = '';
+        currencyInfo.textContent = 'Auto-set from security';
+        currencyInfo.className = 'text-muted small';
         securityInfo.textContent = '';
         return;
     }
@@ -1309,7 +1308,7 @@ document.getElementById('security_label').addEventListener('change', function() 
     autoPopulateCurrencyFromSecurity();
 
     // Fetch price from equity price table via API
-    const currencyCode = currencyEl.value;
+    const currencyCode = currencyHidden.value;
     if (currencyCode) {
         fetch(`/trade/api/equity-price/?security=${encodeURIComponent(securityLabel)}&currency=${encodeURIComponent(currencyCode)}`)
             .then(response => response.json())
@@ -1329,24 +1328,27 @@ document.getElementById('security_label').addEventListener('change', function() 
     }
 });
 
-// Auto-populate currency from selected security
+// Auto-populate currency from selected security (readonly field)
 function autoPopulateCurrencyFromSecurity() {
     const securityEl = document.getElementById('security_label');
-    const currencyEl = document.getElementById('currency_code');
+    const currencyHidden = document.getElementById('currency_code');
+    const currencyDisplay = document.getElementById('currency_code_display');
     const currencyInfo = document.getElementById('currency_info');
     const selectedOption = securityEl.options[securityEl.selectedIndex];
 
     if (selectedOption && selectedOption.dataset.currency) {
         const currency = selectedOption.dataset.currency;
-        // Set currency dropdown value
-        currencyEl.value = currency;
-        currencyInfo.textContent = `Currency auto-set from security: ${currency}`;
+        // Set both hidden field (for form submission) and display field
+        currencyHidden.value = currency;
+        currencyDisplay.value = currency;
+        currencyInfo.textContent = `Auto-set from security: ${currency}`;
         currencyInfo.className = 'text-info small';
-
-        // Trigger Select2 update if present
-        if (typeof $ !== 'undefined' && $.fn.select2) {
-            $('#currency_code').val(currency).trigger('change');
-        }
+    } else {
+        // Clear currency if no security selected
+        currencyHidden.value = '';
+        currencyDisplay.value = '';
+        currencyInfo.textContent = 'Auto-set from security';
+        currencyInfo.className = 'text-muted small';
     }
 }
 
@@ -1357,12 +1359,12 @@ $(document).ready(function() {
         // Basic Info Tab
         'trade_type',
         'trade_status',
-        // Portfolio, Currency, Security, Counterparty (with validation)
+        // Portfolio, Security, Counterparty (with validation)
+        // Note: currency_code is now readonly text field, not a dropdown
         {% if not is_edit %}
         'portfolio_short_name',
         'security_label',
         {% endif %}
-        'currency_code',
         'counterparty',
         // GL & Broker Tab
         'open_close_position',
