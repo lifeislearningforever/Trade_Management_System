@@ -543,7 +543,9 @@ class PositionService:
             # Convert to float for calculations (fx_rate returns Decimal)
             fx_rate = float(fx_rate_raw) if fx_rate_raw else 1.0
 
-            # Calculate base currency values (portfolio currency)
+            # Calculate LC (portfolio currency) values from FC (security currency) values
+            # FC = Foreign Currency = Security Currency (where trade happens)
+            # LC = Local Currency = Portfolio Currency (reporting currency)
             quantity = float(position_data.get('quantity', 0) or 0)
             average_cost = float(position_data.get('average_cost', 0) or 0)
             total_cost = float(position_data.get('total_cost', 0) or 0)
@@ -551,19 +553,21 @@ class PositionService:
             unrealized_pnl = float(position_data.get('unrealized_pnl', 0) or 0)
             market_value = float(position_data.get('market_value', 0) or 0)
 
-            # Base currency calculations (divide by fx_rate to convert from local to base)
+            # LC calculations: MULTIPLY by fx_rate to convert FC to LC
+            # fx_rate = security_currency -> portfolio_currency (e.g., USD/SGD = 1.35)
+            # So: value_lc = value_fc * fx_rate
             if fx_rate and fx_rate != 0:
-                average_cost_base = average_cost / fx_rate
-                total_cost_base = total_cost / fx_rate
-                realized_pnl_base = realized_pnl / fx_rate
-                unrealized_pnl_base = unrealized_pnl / fx_rate
-                market_value_base = market_value / fx_rate
+                average_cost_lc = average_cost * fx_rate
+                total_cost_lc = total_cost * fx_rate
+                realized_pnl_lc = realized_pnl * fx_rate
+                unrealized_pnl_lc = unrealized_pnl * fx_rate
+                market_value_lc = market_value * fx_rate
             else:
-                average_cost_base = average_cost
-                total_cost_base = total_cost
-                realized_pnl_base = realized_pnl
-                unrealized_pnl_base = unrealized_pnl
-                market_value_base = market_value
+                average_cost_lc = average_cost
+                total_cost_lc = total_cost
+                realized_pnl_lc = realized_pnl
+                unrealized_pnl_lc = unrealized_pnl
+                market_value_lc = market_value
 
             # Match columns to cis_trade_position table structure (DDL: 13_avp_tables_kudu.sql)
             # FC = Foreign Currency (Security Currency)
@@ -593,12 +597,11 @@ class PositionService:
                     return 'NULL'
                 return f"CAST({val} AS DECIMAL(20,8))"
 
-            # FC P&L = same as base values (security currency)
-            # LC P&L = converted to portfolio currency using FX rate
-            realized_pnl_fc = realized_pnl  # FC = Security Currency
-            unrealized_pnl_fc = unrealized_pnl  # FC = Security Currency
-            realized_pnl_lc = realized_pnl_base  # LC = Portfolio Currency
-            unrealized_pnl_lc = unrealized_pnl_base  # LC = Portfolio Currency
+            # FC P&L = values in Security Currency (as calculated)
+            # LC P&L = values converted to Portfolio Currency using FX rate
+            realized_pnl_fc_val = realized_pnl  # FC = Security Currency
+            unrealized_pnl_fc_val = unrealized_pnl  # FC = Security Currency
+            # realized_pnl_lc and unrealized_pnl_lc already calculated above
 
             values = [
                 str(version_id),
@@ -614,12 +617,12 @@ class PositionService:
                 cast_decimal(market_value),
                 cast_decimal(unrealized_pnl),
                 # P&L in FC (Foreign Currency = Security Currency)
-                cast_decimal(realized_pnl_fc),
-                cast_decimal(unrealized_pnl_fc),
-                # P&L in LC (Local Currency = Portfolio Currency)
+                cast_decimal(realized_pnl_fc_val),
+                cast_decimal(unrealized_pnl_fc_val),
+                # P&L in LC (Local Currency = Portfolio Currency) - calculated above with FX rate
                 cast_decimal(realized_pnl_lc),
                 cast_decimal(unrealized_pnl_lc),
-                cast_decimal(market_value_base),  # market_value_lc
+                cast_decimal(market_value_lc),
                 str(position_data.get('trade_id')) if position_data.get('trade_id') else 'NULL',
                 f"'{position_data.get('trade_type', '')}'",
                 str(position_data.get('lots_held', 0)) if position_data.get('lots_held') else 'NULL',
@@ -628,9 +631,9 @@ class PositionService:
                 f"'{self._escape(security_currency)}'" if security_currency else 'NULL',
                 f"'{self._escape(portfolio_currency)}'" if portfolio_currency else 'NULL',
                 cast_decimal(fx_rate) if fx_rate else 'NULL',
-                cast_decimal(average_cost_base),
-                cast_decimal(total_cost_base),
-                cast_decimal(realized_pnl_base),
+                cast_decimal(average_cost_lc),
+                cast_decimal(total_cost_lc),
+                cast_decimal(realized_pnl_lc),
                 f"'{position_data.get('status', 'OPEN')}'",
                 str(position_data.get('is_active', True)).lower(),
                 'true',  # is_latest = true for new version
