@@ -171,6 +171,11 @@ def get_user_info(request):
 
 def trade_list(request):
     """List all trades with search, filter, and CSV export."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    perf_start = time.time()
+
     search_query = request.GET.get('search', '').strip()
     status_filter = request.GET.get('status', '').strip()
     trade_type_filter = request.GET.get('trade_type', '').strip()
@@ -198,19 +203,51 @@ def trade_list(request):
         if single_security:
             security_filter = [single_security]
 
-    trades_data = trade_kudu_repository.get_all_trades_multi_filter(
-        limit=1000,
-        trade_type=trade_type_filter if trade_type_filter else None,
-        status=status_filter if status_filter else None,
-        portfolios=portfolio_filter if portfolio_filter else None,
-        securities=security_filter if security_filter else None,
-        search=search_query if search_query else None,
-        trade_date_from=trade_date_from if trade_date_from else None,
-        trade_date_to=trade_date_to if trade_date_to else None,
-        src_system=src_system_filter if src_system_filter else None,
-        settle_date_from=settle_date_from if settle_date_from else None,
-        settle_date_to=settle_date_to if settle_date_to else None
-    )
+    # PERFORMANCE: Execute main trade query, statistics, and dropdowns in parallel
+    # This reduces total time from sequential (query + stats + dropdowns) to max(query, stats, dropdowns)
+    trades_data = []
+    stats = {}
+    dropdown_options = {}
+
+    def fetch_trades():
+        return trade_kudu_repository.get_all_trades_multi_filter(
+            limit=1000,
+            trade_type=trade_type_filter if trade_type_filter else None,
+            status=status_filter if status_filter else None,
+            portfolios=portfolio_filter if portfolio_filter else None,
+            securities=security_filter if security_filter else None,
+            search=search_query if search_query else None,
+            trade_date_from=trade_date_from if trade_date_from else None,
+            trade_date_to=trade_date_to if trade_date_to else None,
+            src_system=src_system_filter if src_system_filter else None,
+            settle_date_from=settle_date_from if settle_date_from else None,
+            settle_date_to=settle_date_to if settle_date_to else None
+        )
+
+    def fetch_stats():
+        return trade_kudu_repository.get_trade_statistics()
+
+    def fetch_dropdowns():
+        return trade_dropdown_service.get_all_dropdown_options()
+
+    try:
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            future_trades = executor.submit(fetch_trades)
+            future_stats = executor.submit(fetch_stats)
+            future_dropdowns = executor.submit(fetch_dropdowns)
+
+            # Wait for all to complete (max 30 seconds)
+            trades_data = future_trades.result(timeout=30)
+            stats = future_stats.result(timeout=30)
+            dropdown_options = future_dropdowns.result(timeout=30)
+    except Exception as e:
+        logger.error(f"[PERF] Parallel fetch failed: {e}, falling back to sequential")
+        # Fallback to sequential
+        trades_data = fetch_trades()
+        stats = fetch_stats()
+        dropdown_options = fetch_dropdowns()
+
+    logger.info(f"[PERF] Trade list parallel fetch took {(time.time() - perf_start)*1000:.0f}ms")
 
     # Calculate Total Amount LC for each trade using FX rates
     # FC (Foreign Currency) = Security Currency (currency_code)
@@ -308,9 +345,7 @@ def trade_list(request):
     except EmptyPage:
         trades = paginator.page(paginator.num_pages if paginator.num_pages > 0 else 1)
 
-    # Get statistics and dropdown options
-    stats = trade_kudu_repository.get_trade_statistics()
-    dropdown_options = trade_dropdown_service.get_all_dropdown_options()
+    # Note: stats and dropdown_options already fetched in parallel at the top of the function
 
     # Status options for filter dropdown
     status_options = [
@@ -615,7 +650,10 @@ def trade_create(request, trade_type=None):
 
     # GET request - load dropdowns for form display
     if dropdown_options is None:
+        import time
+        perf_dropdown_start = time.time()
         dropdown_options = trade_dropdown_service.get_all_dropdown_options()
+        logger.info(f"[PERF] GET /trade/create/ dropdown loading took {(time.time() - perf_dropdown_start)*1000:.0f}ms")
 
     context = {
         'dropdown_options': dropdown_options,

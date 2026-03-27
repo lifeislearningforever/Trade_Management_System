@@ -206,14 +206,19 @@ class TradeDropdownService:
         Returns:
             Dictionary with dropdown options for each field
         """
+        import time
+        perf_start = time.time()
+
         # Check full result cache first (instant return)
         try:
             cached_all = cache.get(DROPDOWN_ALL_CACHE_KEY)
             if cached_all is not None:
-                logger.debug("Full dropdown cache hit - instant return")
+                logger.info(f"[PERF] Dropdown cache HIT - {(time.time() - perf_start)*1000:.0f}ms")
                 return cached_all
         except Exception as e:
             logger.warning(f"Cache read error: {e}")
+
+        logger.info("[PERF] Dropdown cache MISS - loading from DB")
 
         # Pre-warm UDF cache first (single batch query for all UDF fields)
         self._load_all_udf_fields_batch()
@@ -292,7 +297,7 @@ class TradeDropdownService:
         # Cache the full result for instant returns on subsequent calls
         try:
             cache.set(DROPDOWN_ALL_CACHE_KEY, result, DROPDOWN_CACHE_TIMEOUT)
-            logger.debug("Full dropdown result cached")
+            logger.info(f"[PERF] Full dropdown loaded and cached in {(time.time() - perf_start)*1000:.0f}ms")
         except Exception as e:
             logger.warning(f"Failed to cache dropdown result: {e}")
 

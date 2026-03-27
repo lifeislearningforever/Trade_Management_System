@@ -565,6 +565,9 @@ class TradeKuduRepository:
                 )
                 logger.info(f"Created trade {trade_id} ({deal_number}) with INITIAL status")
 
+                # Invalidate statistics cache (new trade changes counts)
+                self.invalidate_statistics_cache()
+
                 # Process settlement - ALL settlements are queued for async processing
                 # This keeps trade save FAST (non-blocking)
                 # Background worker processes within SLA (< 5 minutes):
@@ -802,6 +805,9 @@ class TradeKuduRepository:
 
             if success:
                 logger.info(f"Created trade {trade_id} ({deal_number}) with INITIAL status (fast mode) in {(time.time() - perf_start)*1000:.0f}ms")
+
+                # Invalidate statistics cache (new trade changes counts)
+                self.invalidate_statistics_cache()
 
                 # Queue all post-trade events asynchronously
                 self._queue_trade_events(
@@ -2081,8 +2087,32 @@ class TradeKuduRepository:
     # STATISTICS
     # =========================================================================
 
-    def get_trade_statistics(self) -> Dict[str, Any]:
-        """Get trade statistics for dashboard."""
+    # Cache key and TTL for trade statistics
+    STATS_CACHE_KEY = 'trade_statistics'
+    STATS_CACHE_TTL = 30  # seconds - short TTL to keep stats fresh
+
+    def get_trade_statistics(self, use_cache: bool = True) -> Dict[str, Any]:
+        """
+        Get trade statistics for dashboard.
+
+        Args:
+            use_cache: If True, check cache first (default). Set to False to force refresh.
+
+        Returns:
+            Dict with statistics (total_trades, pending_validation, etc.)
+        """
+        import time
+        perf_start = time.time()
+
+        # Check cache first (30 second TTL)
+        if use_cache:
+            cached = query_cache.get(self.STATS_CACHE_KEY)
+            if cached is not None:
+                logger.debug(f"[PERF] Trade statistics cache HIT - {(time.time() - perf_start)*1000:.0f}ms")
+                return cached
+
+        logger.debug("[PERF] Trade statistics cache MISS - querying DB")
+
         try:
             query = f"""
             SELECT status, trade_type, COUNT(*) as count
@@ -2118,6 +2148,10 @@ class TradeKuduRepository:
                     elif status == self.STATUS_SETTLED:
                         stats['settled'] += count
 
+            # Cache the result
+            query_cache.set(self.STATS_CACHE_KEY, stats, self.STATS_CACHE_TTL)
+            logger.debug(f"[PERF] Trade statistics loaded in {(time.time() - perf_start)*1000:.0f}ms")
+
             return stats
 
         except Exception as e:
@@ -2130,6 +2164,11 @@ class TradeKuduRepository:
                 'status_breakdown': {},
                 'type_breakdown': {}
             }
+
+    def invalidate_statistics_cache(self) -> None:
+        """Invalidate statistics cache. Call after trade create/update/delete."""
+        query_cache.delete(self.STATS_CACHE_KEY)
+        logger.debug("Trade statistics cache invalidated")
 
     def get_pending_validation_trades(self, limit: int = 100, cis_only: bool = True) -> List[Dict[str, Any]]:
         """
