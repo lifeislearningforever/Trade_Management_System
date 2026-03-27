@@ -478,6 +478,8 @@ def trade_create(request, trade_type=None):
     dropdown_options = None
 
     if request.method == 'POST':
+        import time
+        perf_start = time.time()
         try:
             user_info = get_user_info(request)
 
@@ -546,7 +548,9 @@ def trade_create(request, trade_type=None):
 
             # Validate trade data (includes Portfolio, Security, Counterparty validation)
             # entity_details contains portfolio and security dicts for reuse
+            perf_validate_start = time.time()
             is_valid, errors, entity_details = trade_kudu_repository.validate_trade_data(trade_data)
+            logger.info(f"[PERF] Trade validation took {(time.time() - perf_validate_start)*1000:.0f}ms")
 
             if not is_valid:
                 for error in errors:
@@ -560,12 +564,14 @@ def trade_create(request, trade_type=None):
 
             # Insert trade using FAST method with skip_validation=True
             # Pass entity_details to avoid duplicate DB queries for portfolio/security
+            perf_insert_start = time.time()
             trade_id = trade_kudu_repository.insert_trade_fast(
                 trade_data,
                 created_by=user_info['username'],
                 skip_validation=True,  # Already validated above
                 entity_details=entity_details  # Reuse portfolio/security from validation
             )
+            logger.info(f"[PERF] Trade insert took {(time.time() - perf_insert_start)*1000:.0f}ms")
 
             if not trade_id:
                 raise Exception("Failed to create trade")
@@ -589,6 +595,8 @@ def trade_create(request, trade_type=None):
                 status='SUCCESS'
             )
 
+            total_time = (time.time() - perf_start) * 1000
+            logger.info(f"[PERF] Total trade create took {total_time:.0f}ms")
             messages.success(request, f'Trade {trade_id} created with INITIAL status. Submit for validation when ready.')
             # Redirect to trade list instead of detail to avoid Kudu sync delay issues
             return redirect('trade:list')

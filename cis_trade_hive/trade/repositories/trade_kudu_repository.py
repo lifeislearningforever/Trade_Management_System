@@ -636,6 +636,8 @@ class TradeKuduRepository:
 
         Returns trade_id if successful, None otherwise.
         """
+        import time
+        perf_start = time.time()
         try:
             portfolio_details = {}
             security_details = {}
@@ -667,7 +669,9 @@ class TradeKuduRepository:
                     raise ValueError("; ".join(errors))
 
             # Generate IDs
+            perf_id_start = time.time()
             trade_id = self.get_next_id('trade_id')
+            logger.debug(f"[PERF] get_next_id took {(time.time() - perf_id_start)*1000:.0f}ms")
             deal_number = trade_data.get('deal_number') or f"DEAL-{datetime.now().strftime('%Y%m%d')}-{trade_id % 10000}"
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -786,10 +790,12 @@ class TradeKuduRepository:
             VALUES ({', '.join(values)})
             """
 
+            perf_write_start = time.time()
             success = impala_manager.execute_write(query, database=self.DATABASE)
+            logger.debug(f"[PERF] execute_write took {(time.time() - perf_write_start)*1000:.0f}ms")
 
             if success:
-                logger.info(f"Created trade {trade_id} ({deal_number}) with INITIAL status (fast mode)")
+                logger.info(f"Created trade {trade_id} ({deal_number}) with INITIAL status (fast mode) in {(time.time() - perf_start)*1000:.0f}ms")
 
                 # Queue all post-trade events asynchronously
                 self._queue_trade_events(
