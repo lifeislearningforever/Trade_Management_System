@@ -27,6 +27,37 @@ from udf.repositories import (
 )
 
 
+def get_user_info(user) -> Dict[str, str]:
+    """
+    Extract user info from either a Django User object or a dict.
+
+    Args:
+        user: Either a Django User object or a dict with user_id, username, user_email
+
+    Returns:
+        Dict with user_id, username, user_email keys
+    """
+    if isinstance(user, dict):
+        return {
+            'user_id': str(user.get('user_id', '')),
+            'username': user.get('username', 'anonymous'),
+            'user_email': user.get('user_email', '')
+        }
+    elif hasattr(user, 'username'):
+        # Django User object
+        return {
+            'user_id': str(getattr(user, 'id', '')),
+            'username': getattr(user, 'username', 'anonymous'),
+            'user_email': getattr(user, 'email', '')
+        }
+    else:
+        return {
+            'user_id': '',
+            'username': 'anonymous',
+            'user_email': ''
+        }
+
+
 class UDFService:
     """
     Service for User-Defined Fields business logic.
@@ -296,7 +327,7 @@ class UDFService:
         entity_type: str,
         entity_id: int,
         value: Any,
-        user: User
+        user
     ) -> UDFValue:
         """
         Set UDF value for an entity.
@@ -306,7 +337,7 @@ class UDFService:
             entity_type: Type of entity (PORTFOLIO, TRADE, etc.)
             entity_id: ID of the entity
             value: Value to set
-            user: User setting the value
+            user: User object or dict with user info (user_id, username, user_email)
 
         Returns:
             Created or updated UDFValue instance
@@ -314,6 +345,9 @@ class UDFService:
         Raises:
             ValidationError: If value is invalid
         """
+        # Extract user info (works with both User object and dict)
+        user_info = get_user_info(user)
+
         # Validate entity_type matches UDF
         if entity_type != udf.entity_type:
             raise ValidationError(
@@ -321,22 +355,33 @@ class UDFService:
             )
 
         # Get or create UDFValue
-        udf_value, created = UDFValue.objects.get_or_create(
-            udf=udf,
-            entity_type=entity_type,
-            entity_id=entity_id,
-            defaults={
-                'created_by': user,
-                'updated_by': user
-            }
-        )
+        # Note: created_by/updated_by are ForeignKeys so we can't use dict user directly
+        # We'll handle this by using None for ForeignKey fields when user is a dict
+        if isinstance(user, dict):
+            udf_value, created = UDFValue.objects.get_or_create(
+                udf=udf,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                defaults={}
+            )
+        else:
+            udf_value, created = UDFValue.objects.get_or_create(
+                udf=udf,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                defaults={
+                    'created_by': user,
+                    'updated_by': user
+                }
+            )
 
         # Store old value for history
         old_value = str(udf_value.get_value()) if not created else None
 
         # Set new value
         udf_value.set_value(value)
-        udf_value.updated_by = user
+        if not isinstance(user, dict):
+            udf_value.updated_by = user
         udf_value.full_clean()  # Validate
         udf_value.save()
 
@@ -355,30 +400,31 @@ class UDFService:
                 'value_bool': udf_value.value_boolean,
                 'value_json': udf_value.value_json,
                 'is_active': True,
-                'created_by': user.username,
+                'created_by': user_info['username'],
                 'created_at': udf_value.created_at.strftime('%Y-%m-%d %H:%M:%S'),
-                'updated_by': user.username,
+                'updated_by': user_info['username'],
                 'updated_at': udf_value.updated_at.strftime('%Y-%m-%d %H:%M:%S')
             })
         except Exception as e:
             print(f"Warning: Failed to save UDF value to Hive: {e}")
 
-        # Create history record
-        UDFHistory.objects.create(
-            udf_value=udf_value,
-            action='CREATE' if created else 'UPDATE',
-            old_value=old_value,
-            new_value=str(value),
-            changed_by=user
-        )
+        # Create history record (skip if user is a dict - no changed_by ForeignKey)
+        if not isinstance(user, dict):
+            UDFHistory.objects.create(
+                udf_value=udf_value,
+                action='CREATE' if created else 'UPDATE',
+                old_value=old_value,
+                new_value=str(value),
+                changed_by=user
+            )
 
         # Log action to Kudu
         action_type = 'CREATE' if created else 'UPDATE'
 
         # General audit log
         audit_log_kudu_repository.log_action(
-            user_id=str(user.id),
-            username=user.username,
+            user_id=user_info['user_id'],
+            username=user_info['username'],
             action_type=action_type,
             entity_type='UDF_VALUE',
             entity_id=str(udf_value.id),
@@ -394,8 +440,8 @@ class UDFService:
 
         # UDF value-specific audit log
         audit_log_kudu_repository.log_udf_value_action(
-            user_id=str(user.id),
-            username=user.username,
+            user_id=user_info['user_id'],
+            username=user_info['username'],
             action_type=action_type,
             udf_id=udf.id,
             field_name=udf.field_name,

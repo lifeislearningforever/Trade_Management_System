@@ -581,11 +581,12 @@ def entity_udf_values(request, entity_type, entity_id):
 
             # Validate and set values
             UDFService.validate_udf_values(entity_type.upper(), values)
+            user_info = get_request_user_info(request)
             UDFService.set_entity_udf_values(
                 entity_type.upper(),
                 entity_id,
                 values,
-                get_request_user(request)
+                user_info
             )
 
             messages.success(request, 'UDF values saved successfully.')
