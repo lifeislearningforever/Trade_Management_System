@@ -224,7 +224,7 @@ def udf_create(request: HttpRequest) -> HttpResponse:
 
 @require_login
 @require_http_methods(["GET", "POST"])
-def udf_edit(request: HttpRequest, udf_id: int) -> HttpResponse:
+def udf_edit(request: HttpRequest, udf_id: str) -> HttpResponse:
     """
     Edit existing UDF field.
 
@@ -297,7 +297,7 @@ def udf_edit(request: HttpRequest, udf_id: int) -> HttpResponse:
 
 @require_login
 @require_http_methods(["POST"])
-def udf_delete(request: HttpRequest, udf_id: int) -> HttpResponse:
+def udf_delete(request: HttpRequest, udf_id: str) -> HttpResponse:
     """
     Soft delete UDF field (sets is_active = false).
 
@@ -326,7 +326,7 @@ def udf_delete(request: HttpRequest, udf_id: int) -> HttpResponse:
 
 @require_login
 @require_http_methods(["POST"])
-def udf_restore(request: HttpRequest, udf_id: int) -> HttpResponse:
+def udf_restore(request: HttpRequest, udf_id: str) -> HttpResponse:
     """
     Restore soft-deleted UDF field (sets is_active = true).
 

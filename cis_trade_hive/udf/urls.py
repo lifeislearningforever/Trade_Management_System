@@ -18,9 +18,9 @@ urlpatterns = [
 
     # Create/Edit/Delete/Restore
     path('create/', views.udf_create, name='create'),
-    path('<int:udf_id>/edit/', views.udf_edit, name='edit'),
-    path('<int:udf_id>/delete/', views.udf_delete, name='delete'),
-    path('<int:udf_id>/restore/', views.udf_restore, name='restore'),
+    path('<str:udf_id>/edit/', views.udf_edit, name='edit'),
+    path('<str:udf_id>/delete/', views.udf_delete, name='delete'),
+    path('<str:udf_id>/restore/', views.udf_restore, name='restore'),
 
     # API Endpoints for Cascading Dropdowns
     path('api/object-types/', views.api_get_object_types, name='api_object_types'),
