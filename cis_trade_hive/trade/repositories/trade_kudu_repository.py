@@ -2167,7 +2167,7 @@ class TradeKuduRepository:
 
     def invalidate_statistics_cache(self) -> None:
         """Invalidate statistics cache. Call after trade create/update/delete."""
-        query_cache.delete(self.STATS_CACHE_KEY)
+        query_cache.invalidate(self.STATS_CACHE_KEY)
         logger.debug("Trade statistics cache invalidated")
 
     def get_pending_validation_trades(self, limit: int = 100, cis_only: bool = True) -> List[Dict[str, Any]]:
