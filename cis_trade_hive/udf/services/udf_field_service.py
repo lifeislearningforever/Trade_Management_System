@@ -21,7 +21,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import logging
 
-from udf.repositories.udf_field_repository import udf_field_repository, UDFFieldRepositoryInterface
+from udf.repositories.udf_field_repository import udf_field_repository, UDFFieldRepository
 from core.audit.audit_kudu_repository import audit_log_kudu_repository
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 class UDFFieldService:
     """Service for UDF field business logic operations with audit logging and cache invalidation."""
 
-    def __init__(self, repository: UDFFieldRepositoryInterface):
+    def __init__(self, repository: UDFFieldRepository):
         """
         Initialize service with dependency injection.
 
