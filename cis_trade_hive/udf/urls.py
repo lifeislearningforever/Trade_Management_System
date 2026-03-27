@@ -1,5 +1,7 @@
 """
-UDF URL Configuration
+UDF URL Configuration - Simplified Free Text Approach
+
+Schema: cis_udf_field table with composite primary key (object_type, field_name, field_value)
 """
 
 from django.urls import path
@@ -8,23 +10,22 @@ from . import views
 app_name = 'udf'
 
 urlpatterns = [
-    # UDF Definition URLs
-    path('', views.udf_list, name='list'),
+    # Dashboard
+    path('', views.udf_dashboard, name='dashboard'),
+
+    # List View
+    path('list/', views.udf_list, name='list'),
+
+    # Create/Edit/Delete/Restore
     path('create/', views.udf_create, name='create'),
-    path('<str:field_name>/', views.udf_detail, name='detail'),
-    path('<str:field_name>/edit/', views.udf_edit, name='edit'),
-    path('<str:field_name>/delete/', views.udf_delete, name='delete'),
+    path('<int:udf_id>/edit/', views.udf_edit, name='edit'),
+    path('<int:udf_id>/delete/', views.udf_delete, name='delete'),
+    path('<int:udf_id>/restore/', views.udf_restore, name='restore'),
 
-    # UDF Value Management URLs
-    path('values/<str:entity_type>/<int:entity_id>/', views.entity_udf_values, name='entity_values'),
-    path('values/<str:entity_type>/<int:entity_id>/history/', views.udf_value_history, name='value_history'),
+    # API Endpoints for Cascading Dropdowns
+    path('api/object-types/', views.api_get_object_types, name='api_object_types'),
+    path('api/fields/<str:object_type>/', views.api_get_fields_by_entity, name='api_fields_by_object_new'),
 
-    # UDF Option Management URLs
-    path('<str:field_name>/options/toggle/', views.udf_option_toggle, name='option_toggle'),
-    path('<str:field_name>/options/add/', views.udf_option_add, name='option_add'),
-
-    # AJAX URLs
-    path('ajax/values/<str:entity_type>/<int:entity_id>/', views.ajax_get_entity_udf_values, name='ajax_get_values'),
-    path('ajax/validate/', views.ajax_validate_udf_values, name='ajax_validate'),
-    path('ajax/dropdown-options/<str:field_name>/', views.ajax_get_dropdown_options, name='ajax_dropdown_options'),
+    # Legacy API Endpoint (for backward compatibility with other modules)
+    path('api/<str:object_type>/fields/', views.udf_get_fields_by_entity, name='api_fields_by_object'),
 ]

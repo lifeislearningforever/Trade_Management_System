@@ -1,846 +1,419 @@
 """
-UDF Views
-Handles User-Defined Fields CRUD operations and value management.
+UDF Views - Simplified Free Text Approach
+Clean, focused views following Single Responsibility Principle
+
+Schema: cis_udf_field table with composite primary key (object_type, field_name, field_value)
 """
 
-import csv
-from django.shortcuts import render, redirect, get_object_or_404
-# from django.contrib.auth.decorators import login_required  # Commented for development
-from django.contrib import messages
-from django.http import HttpResponse, JsonResponse
-from django.core.paginator import Paginator
-from django.core.exceptions import ValidationError
-from django.db.models import Q
-from django.contrib.auth.models import User
-
-from .models import UDF, UDFValue, UDFHistory
-from .services import UDFService
-from .repositories.udf_hive_repository import (
-    udf_definition_repository,
-    udf_value_repository,
-    udf_option_repository
-)
-from core.audit.audit_kudu_repository import audit_log_kudu_repository
-from core.repositories.impala_connection import impala_manager
 import logging
+from django.shortcuts import render, redirect
+from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.views.decorators.http import require_http_methods
+
+from core.views.auth_views import require_login
+from udf.services.udf_field_service import udf_field_service
 
 logger = logging.getLogger(__name__)
 
 
-class UDFWrapper:
-    """Wrapper to convert Kudu dict data to object with attributes for template compatibility."""
-    def __init__(self, data, index=0):
-        self.data = data
-        # Map all Kudu fields to attributes
-        self.udf_id = data.get('udf_id', 0)
-        self.field_name = data.get('field_name', '')
-        self.label = data.get('label', '')
-        self.description = data.get('description', '')
-        self.field_type = data.get('field_type', 'TEXT')
-        self.entity_type = data.get('entity_type', 'PORTFOLIO')
-        self.is_required = data.get('is_required', False)
-        self.is_unique = data.get('is_unique', False)
-        self.default_value = data.get('default_value', '')
-        self.dropdown_options = data.get('dropdown_options', [])
-        self.min_value = data.get('min_value')
-        self.max_value = data.get('max_value')
-        self.max_length = data.get('max_length')
-        self.display_order = data.get('display_order', 0)
-        self.group_name = data.get('group_name', '')
-        self.is_active = data.get('is_active', True)
-        self.created_at = data.get('created_at', '')
-        self.updated_at = data.get('updated_at', '')
-        self.created_by = data.get('created_by', '-')
-        self.updated_by = data.get('updated_by', '-')
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
 
-        # For backwards compatibility with templates using pk/id
-        self.id = self.udf_id
-        self.pk = self.udf_id
-
-    def get_field_type_display(self):
-        """Get human-readable field type."""
-        type_map = {
-            'TEXT': 'Text',
-            'NUMBER': 'Number',
-            'DATE': 'Date',
-            'DATETIME': 'Date Time',
-            'BOOLEAN': 'Boolean',
-            'DROPDOWN': 'Dropdown',
-            'MULTI_SELECT': 'Multi Select',
-            'CURRENCY': 'Currency',
-            'PERCENTAGE': 'Percentage',
-        }
-        return type_map.get(self.field_type, self.field_type)
-
-    def get_entity_type_display(self):
-        """Get human-readable entity type."""
-        type_map = {
-            'PORTFOLIO': 'Portfolio',
-            'TRADE': 'Trade',
-            'POSITION': 'Position',
-            'COUNTERPARTY': 'Counterparty',
-        }
-        return type_map.get(self.entity_type, self.entity_type)
+def get_user_info_from_request(request: HttpRequest) -> dict:
+    """Extract user information from request for audit logging."""
+    return {
+        'user_id': request.session.get('user_id', 0),
+        'username': request.session.get('user_login', 'anonymous'),
+        'user_email': request.session.get('user_email', ''),
+        'ip_address': request.META.get('REMOTE_ADDR', ''),
+        'user_agent': request.META.get('HTTP_USER_AGENT', ''),
+    }
 
 
-def get_request_user_info(request):
+# ============================================================================
+# DASHBOARD VIEW
+# ============================================================================
+
+@require_login
+def udf_dashboard(request: HttpRequest) -> HttpResponse:
     """
-    Get user information from ACL session.
+    UDF Dashboard showing entity cards with field statistics.
+
+    Features:
+    - Card view for each entity type (Portfolio, Trade, Comments, etc.)
+    - Shows total fields, active count, inactive count per entity
+    - Quick "Add Field" button
+    """
+    try:
+        # Get statistics from service
+        stats = udf_field_service.get_dashboard_stats()
+
+        # Get all entity types dynamically from database
+        object_types = udf_field_service.get_object_types()
+
+        # Build stats map
+        stats_map = {stat['object_type']: stat for stat in stats}
+
+        # Ensure all entity types are present
+        dashboard_stats = []
+        for object_type in object_types:
+            if object_type in stats_map:
+                dashboard_stats.append(stats_map[object_type])
+            else:
+                dashboard_stats.append({
+                    'object_type': object_type,
+                    'total_fields': 0,
+                    'active_fields': 0,
+                    'inactive_fields': 0,
+                })
+
+        context = {
+            'stats': dashboard_stats,
+            'page_title': 'UDF Dashboard',
+        }
+
+        return render(request, 'udf/dashboard.html', context)
+
+    except Exception as e:
+        logger.error(f"Error loading UDF dashboard: {str(e)}")
+        return HttpResponse(f"Error loading dashboard: {str(e)}", status=500)
+
+
+# ============================================================================
+# LIST VIEW
+# ============================================================================
+
+@require_login
+def udf_list(request: HttpRequest) -> HttpResponse:
+    """
+    UDF List view with cascading dropdown filters.
+
+    Features:
+    - Filter by object type (dropdown 1)
+    - Filter by field name (dropdown 2 - cascades from object type)
+    - Filter by active/inactive status (dropdown 3)
+    - Actions: Edit, Soft Delete, Restore
+    """
+    try:
+        # Get query parameters
+        object_type_filter = request.GET.get('object_type', '').strip()
+        field_name_filter = request.GET.get('field_name', '').strip()
+        status_filter = request.GET.get('status', 'active')  # active, inactive, all
+
+        # Determine is_active filter
+        is_active = None
+        if status_filter == 'active':
+            is_active = True
+        elif status_filter == 'inactive':
+            is_active = False
+
+        # Get fields from service
+        fields = udf_field_service.get_all_fields(
+            object_type=object_type_filter if object_type_filter else None,
+            is_active=is_active
+        )
+
+        # Apply field_name filter if provided
+        if field_name_filter:
+            fields = [
+                f for f in fields
+                if f['field_name'] == field_name_filter
+            ]
+
+        # Get entity types dynamically
+        object_types = udf_field_service.get_object_types()
+
+        context = {
+            'fields': fields,
+            'object_type_filter': object_type_filter,
+            'field_name_filter': field_name_filter,
+            'status_filter': status_filter,
+            'object_types': object_types,
+            'page_title': 'UDF Fields',
+        }
+
+        return render(request, 'udf/list.html', context)
+
+    except Exception as e:
+        logger.error(f"Error loading UDF list: {str(e)}")
+        return HttpResponse(f"Error loading list: {str(e)}", status=500)
+
+
+# ============================================================================
+# CREATE VIEW
+# ============================================================================
+
+@require_login
+@require_http_methods(["GET", "POST"])
+def udf_create(request: HttpRequest) -> HttpResponse:
+    """
+    Create new UDF field.
+
+    GET: Display form (with optional pre-population from URL parameters)
+    POST: Process form and create field
+
+    URL Parameters (for pre-population from list page):
+    - object_type: Pre-select object type dropdown
+    - field_name: Pre-select field name dropdown
+    """
+    # Get entity types dynamically
+    object_types = udf_field_service.get_object_types()
+
+    if request.method == 'GET':
+        # Get URL parameters for pre-population
+        prepopulate_object_type = request.GET.get('object_type', '').strip()
+        prepopulate_field_name = request.GET.get('field_name', '').strip()
+
+        # Build field_data for pre-population
+        field_data = {}
+        if prepopulate_object_type:
+            field_data['object_type'] = prepopulate_object_type
+        if prepopulate_field_name:
+            field_data['field_name'] = prepopulate_field_name
+
+        context = {
+            'object_types': object_types,
+            'page_title': 'Create UDF Field',
+            'form_action': 'create',
+            'field_data': field_data if field_data else None,
+        }
+        return render(request, 'udf/form.html', context)
+
+    # POST - Process form
+    try:
+        user_info = get_user_info_from_request(request)
+
+        field_data = {
+            'field_name': request.POST.get('field_name', '').strip(),
+            'field_value': request.POST.get('field_value', '').strip(),
+            'object_type': request.POST.get('object_type', '').strip(),
+        }
+
+        # Create via service
+        success, error_msg, udf_id = udf_field_service.create_field(field_data, user_info)
+
+        if success:
+            logger.info(f"UDF field created successfully: {udf_id}")
+            return redirect('udf:list')
+
+        # Show error
+        context = {
+            'object_types': object_types,
+            'page_title': 'Create UDF Field',
+            'form_action': 'create',
+            'error': error_msg,
+            'field_data': field_data,  # Pre-fill form
+        }
+        return render(request, 'udf/form.html', context)
+
+    except Exception as e:
+        logger.error(f"Error creating UDF field: {str(e)}")
+        context = {
+            'object_types': object_types,
+            'page_title': 'Create UDF Field',
+            'form_action': 'create',
+            'error': f"System error: {str(e)}",
+        }
+        return render(request, 'udf/form.html', context)
+
+
+# ============================================================================
+# EDIT VIEW
+# ============================================================================
+
+@require_login
+@require_http_methods(["GET", "POST"])
+def udf_edit(request: HttpRequest, udf_id: int) -> HttpResponse:
+    """
+    Edit existing UDF field.
+
+    GET: Display form with existing data
+    POST: Process form and update field
+    """
+    # Get existing field
+    field = udf_field_service.get_field_by_id(udf_id)
+    if not field:
+        return HttpResponse(f"UDF field {udf_id} not found", status=404)
+
+    # Get entity types dynamically
+    object_types = udf_field_service.get_object_types()
+
+    if request.method == 'GET':
+        context = {
+            'object_types': object_types,
+            'page_title': 'Edit UDF Field',
+            'form_action': 'edit',
+            'udf_id': udf_id,
+            'field_data': field,
+        }
+        return render(request, 'udf/form.html', context)
+
+    # POST - Process form
+    try:
+        user_info = get_user_info_from_request(request)
+
+        field_data = {
+            'field_name': request.POST.get('field_name', '').strip(),
+            'field_value': request.POST.get('field_value', '').strip(),
+            'object_type': request.POST.get('object_type', '').strip(),
+            'is_active': request.POST.get('is_active') == 'on',
+        }
+
+        # Update via service
+        success, error_msg = udf_field_service.update_field(udf_id, field_data, user_info)
+
+        if success:
+            logger.info(f"UDF field updated successfully: {udf_id}")
+            return redirect('udf:list')
+
+        # Show error
+        context = {
+            'object_types': object_types,
+            'page_title': 'Edit UDF Field',
+            'form_action': 'edit',
+            'udf_id': udf_id,
+            'error': error_msg,
+            'field_data': field_data,  # Pre-fill form with submitted data
+        }
+        return render(request, 'udf/form.html', context)
+
+    except Exception as e:
+        logger.error(f"Error updating UDF field: {str(e)}")
+        context = {
+            'object_types': object_types,
+            'page_title': 'Edit UDF Field',
+            'form_action': 'edit',
+            'udf_id': udf_id,
+            'error': f"System error: {str(e)}",
+            'field_data': field,
+        }
+        return render(request, 'udf/form.html', context)
+
+
+# ============================================================================
+# DELETE VIEW (Soft Delete)
+# ============================================================================
+
+@require_login
+@require_http_methods(["POST"])
+def udf_delete(request: HttpRequest, udf_id: int) -> HttpResponse:
+    """
+    Soft delete UDF field (sets is_active = false).
+
+    POST only - requires confirmation from UI
+    """
+    try:
+        user_info = get_user_info_from_request(request)
+
+        # Delete via service
+        success, error_msg = udf_field_service.delete_field(udf_id, user_info)
+
+        if success:
+            logger.info(f"UDF field soft deleted: {udf_id}")
+            return redirect('udf:list')
+
+        return HttpResponse(f"Error deleting field: {error_msg}", status=400)
+
+    except Exception as e:
+        logger.error(f"Error deleting UDF field: {str(e)}")
+        return HttpResponse(f"Error: {str(e)}", status=500)
+
+
+# ============================================================================
+# RESTORE VIEW
+# ============================================================================
+
+@require_login
+@require_http_methods(["POST"])
+def udf_restore(request: HttpRequest, udf_id: int) -> HttpResponse:
+    """
+    Restore soft-deleted UDF field (sets is_active = true).
+
+    POST only - requires confirmation from UI
+    """
+    try:
+        user_info = get_user_info_from_request(request)
+
+        # Restore via service
+        success, error_msg = udf_field_service.restore_field(udf_id, user_info)
+
+        if success:
+            logger.info(f"UDF field restored: {udf_id}")
+            return redirect('udf:list')
+
+        return HttpResponse(f"Error restoring field: {error_msg}", status=400)
+
+    except Exception as e:
+        logger.error(f"Error restoring UDF field: {str(e)}")
+        return HttpResponse(f"Error: {str(e)}", status=500)
+
+
+# ============================================================================
+# API ENDPOINTS (For AJAX operations and cascading dropdowns)
+# ============================================================================
+
+@require_login
+@require_http_methods(["GET"])
+def api_get_object_types(request: HttpRequest) -> JsonResponse:
+    """
+    API endpoint to get all entity types for first dropdown.
+
+    Used for cascading dropdown: First level (Entity Type selection).
 
     Returns:
-        dict: Dictionary with user_id, username, user_email
-    """
-    return {
-        'username': request.session.get('user_login', 'anonymous'),
-        'user_id': str(request.session.get('user_id', '')),
-        'user_email': request.session.get('user_email', '')
-    }
-
-
-# ========================
-# UDF Definition Views
-# ========================
-
-# @login_required  # Commented for development
-def udf_list(request):
-    """
-    List all UDF definitions with search, filter, and CSV export - FROM KUDU.
-    """
-    # Get filter parameters
-    entity_type = request.GET.get('entity_type', '')
-    is_active_filter = request.GET.get('is_active', '')
-    search = request.GET.get('search', '')
-
-    # Fetch from Kudu repository
-    if is_active_filter == '1':
-        # Only active
-        udfs_data = udf_definition_repository.get_active_definitions(
-            entity_type=entity_type if entity_type else None
-        )
-    else:
-        # All or only inactive
-        udfs_data = udf_definition_repository.get_all_definitions(
-            entity_type=entity_type if entity_type else None
-        )
-
-        # Filter inactive if requested
-        if is_active_filter == '0':
-            udfs_data = [udf for udf in udfs_data if not udf.get('is_active', True)]
-
-    # Apply search filter
-    if search:
-        search_lower = search.lower()
-        udfs_data = [
-            udf for udf in udfs_data
-            if search_lower in udf.get('field_name', '').lower() or
-               search_lower in udf.get('label', '').lower() or
-               search_lower in udf.get('description', '').lower()
-        ]
-
-    # Wrap in UDFWrapper objects
-    wrapped_udfs = [UDFWrapper(udf, idx) for idx, udf in enumerate(udfs_data)]
-
-    # CSV Export
-    if request.GET.get('export') == 'csv':
-        response = HttpResponse(content_type='text/csv')
-        response['Content-Disposition'] = 'attachment; filename="udf_definitions.csv"'
-
-        writer = csv.writer(response)
-        writer.writerow([
-            'Field Name', 'Label', 'Field Type', 'Entity Type',
-            'Required', 'Unique', 'Active', 'Display Order',
-            'Group Name', 'Created By', 'Created At'
-        ])
-
-        for udf in wrapped_udfs:
-            writer.writerow([
-                udf.field_name,
-                udf.label,
-                udf.get_field_type_display(),
-                udf.get_entity_type_display(),
-                'Yes' if udf.is_required else 'No',
-                'Yes' if udf.is_unique else 'No',
-                'Yes' if udf.is_active else 'No',
-                udf.display_order,
-                udf.group_name or '',
-                udf.created_by,
-                udf.created_at
-            ])
-
-        # Log export to Kudu
-        user_info = get_request_user_info(request)
-        audit_log_kudu_repository.log_action(
-            user_id=user_info['user_id'],
-            username=user_info['username'],
-            user_email=user_info['user_email'],
-            action_type='EXPORT',
-            entity_type='UDF',
-            entity_name='UDF Definitions',
-            action_description=f'Exported {len(wrapped_udfs)} UDF definitions to CSV',
-            status='SUCCESS',
-            request_method='GET',
-            request_path=request.path,
-            ip_address=request.META.get('REMOTE_ADDR'),
-            user_agent=request.META.get('HTTP_USER_AGENT', '')
-        )
-
-        return response
-
-    # Pagination
-    paginator = Paginator(wrapped_udfs, 25)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
-
-    # Log view to Kudu - Commented out for VIEW actions (only log CREATE, UPDATE, DELETE)
-    # user_info = get_request_user_info(request)
-    # audit_log_kudu_repository.log_action(
-    #     user_id=user_info['user_id'],
-    #     username=user_info['username'],
-    #     user_email=user_info['user_email'],
-    #     action_type='VIEW' if not search else 'SEARCH',
-    #     entity_type='UDF',
-    #     entity_name='UDF List',
-    #     action_description=f'Viewed UDF list from Kudu ({len(udfs_data)} definitions)' + (f' - Search: {search}' if search else ''),
-    #     status='SUCCESS',
-    #     request_method='GET',
-    #     request_path=request.path,
-    #     ip_address=request.META.get('REMOTE_ADDR'),
-    #     user_agent=request.META.get('HTTP_USER_AGENT', '')
-    # )
-
-    context = {
-        'page_obj': page_obj,
-        'entity_type': entity_type,
-        'is_active': is_active_filter,
-        'search': search,
-        'total_count': len(udfs_data),
-        'entity_type_choices': UDF.ENTITY_TYPE_CHOICES,
-    }
-
-    return render(request, 'udf/udf_list.html', context)
-
-
-# @login_required  # Commented for development
-def udf_detail(request, field_name):
-    """
-    View UDF definition details - FROM KUDU.
-    """
-    # Fetch from Kudu by field_name
-    udf_data = udf_definition_repository.get_definition_by_name(field_name)
-
-    if not udf_data:
-        from django.http import Http404
-        raise Http404(f"UDF with field name '{field_name}' not found in Kudu")
-
-    # Wrap in UDFWrapper
-    udf = UDFWrapper(udf_data)
-
-    # Get usage statistics (Note: UDF values not yet in Kudu)
-    value_count = 0  # TODO: Implement when UDF values are in Kudu
-
-    # Log view to Kudu - Commented out for VIEW actions (only log CREATE, UPDATE, DELETE)
-    # user_info = get_request_user_info(request)
-    # audit_log_kudu_repository.log_action(
-    #     user_id=user_info['user_id'],
-    #     username=user_info['username'],
-    #     user_email=user_info['user_email'],
-    #     action_type='VIEW',
-    #     entity_type='UDF',
-    #     entity_id=field_name,
-    #     entity_name=udf.label,
-    #     action_description=f'Viewed UDF detail: {field_name}',
-    #     status='SUCCESS',
-    #     request_method='GET',
-    #     request_path=request.path,
-    #     ip_address=request.META.get('REMOTE_ADDR'),
-    #     user_agent=request.META.get('HTTP_USER_AGENT', '')
-    # )
-
-    context = {
-        'udf': udf,
-        'value_count': value_count,
-    }
-
-    return render(request, 'udf/udf_detail.html', context)
-
-
-# @login_required  # Commented for development
-def udf_create(request):
-    """
-    Create new UDF definition - INSERTS TO KUDU.
-    """
-    if request.method == 'POST':
-        try:
-            from datetime import datetime
-            import json
-
-            # Get user info from session
-            user_info = get_request_user_info(request)
-
-            # Generate new UDF ID (timestamp-based for uniqueness)
-            udf_id = int(datetime.now().timestamp() * 1000)
-            field_name = request.POST.get('field_name')
-
-            # Prepare data for Kudu
-            data = {
-                'udf_id': udf_id,
-                'field_name': field_name,
-                'label': request.POST.get('label'),
-                'description': request.POST.get('description', ''),
-                'field_type': request.POST.get('field_type'),
-                'entity_type': request.POST.get('entity_type'),
-                'is_required': request.POST.get('is_required') == 'on',
-                'is_unique': request.POST.get('is_unique') == 'on',
-                'default_value': request.POST.get('default_value', ''),
-                'display_order': int(request.POST.get('display_order', 0)),
-                'group_name': request.POST.get('group_name', ''),
-                'is_active': True,  # Always active on creation
-                'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'created_by': user_info['username'],
-                'updated_by': user_info['username'],
-            }
-
-            # Handle dropdown options (store as JSON string)
-            if data['field_type'] in ['DROPDOWN', 'MULTI_SELECT']:
-                options_str = request.POST.get('dropdown_options', '')
-                if options_str:
-                    options = [opt.strip() for opt in options_str.split(',') if opt.strip()]
-                    data['dropdown_options'] = json.dumps(options)
-
-            # Handle numeric constraints
-            if data['field_type'] in ['NUMBER', 'CURRENCY', 'PERCENTAGE']:
-                min_val = request.POST.get('min_value')
-                max_val = request.POST.get('max_value')
-                if min_val:
-                    data['min_value'] = float(min_val)
-                if max_val:
-                    data['max_value'] = float(max_val)
-
-            # Handle text constraints
-            if data['field_type'] == 'TEXT':
-                max_len = request.POST.get('max_length')
-                if max_len:
-                    data['max_length'] = int(max_len)
-
-            # Insert into Kudu
-            success = udf_definition_repository.insert_definition(data)
-
-            if success:
-                # Log to Kudu audit
-                audit_log_kudu_repository.log_action(
-                    user_id=user_info['user_id'],
-                    username=user_info['username'],
-                    user_email=user_info['user_email'],
-                    action_type='CREATE',
-                    entity_type='UDF',
-                    entity_id=field_name,
-                    entity_name=data['label'],
-                    action_description=f'Created UDF definition: {field_name}',
-                    status='SUCCESS',
-                    request_method='POST',
-                    request_path=request.path,
-                    ip_address=request.META.get('REMOTE_ADDR'),
-                    user_agent=request.META.get('HTTP_USER_AGENT', '')
-                )
-
-                messages.success(request, f'UDF "{data["label"]}" created successfully in Kudu.')
-                return redirect('udf:detail', field_name=field_name)
-            else:
-                messages.error(request, 'Failed to create UDF in Kudu.')
-
-        except ValidationError as e:
-            messages.error(request, str(e))
-        except Exception as e:
-            messages.error(request, f'Error creating UDF: {str(e)}')
-
-    context = {
-        'field_type_choices': UDF.FIELD_TYPE_CHOICES,
-        'entity_type_choices': UDF.ENTITY_TYPE_CHOICES,
-    }
-
-    return render(request, 'udf/udf_form.html', context)
-
-
-# @login_required  # Commented for development
-def udf_edit(request, field_name):
-    """
-    Edit existing UDF definition - UPDATES IN KUDU.
-    """
-    # Fetch from Kudu
-    udf_data = udf_definition_repository.get_definition_by_name(field_name)
-
-    if not udf_data:
-        from django.http import Http404
-        raise Http404(f"UDF with field name '{field_name}' not found in Kudu")
-
-    # Wrap in UDFWrapper
-    udf = UDFWrapper(udf_data)
-
-    # Fetch all options for this UDF from cis_udf_option table
-    existing_options = []
-    if udf.field_type in ['DROPDOWN', 'MULTI_SELECT']:
-        existing_options = udf_option_repository.get_options_by_udf_id(udf.udf_id)
-
-    if request.method == 'POST':
-        try:
-            from datetime import datetime
-            import json
-
-            # Get user info from session
-            user_info = get_request_user_info(request)
-
-            # Prepare update data
-            data = {
-                'udf_id': udf.udf_id,  # Keep same ID
-                'field_name': field_name,  # Field name cannot be changed
-                'field_type': udf.field_type,  # Field type cannot be changed
-                'entity_type': udf.entity_type,  # Entity type cannot be changed
-                'label': request.POST.get('label'),
-                'description': request.POST.get('description', ''),
-                'is_required': request.POST.get('is_required') == 'on',
-                'is_unique': request.POST.get('is_unique') == 'on',
-                'default_value': request.POST.get('default_value', ''),
-                'display_order': int(request.POST.get('display_order', 0)),
-                'group_name': request.POST.get('group_name', ''),
-                'is_active': request.POST.get('is_active') == 'on',
-                'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'updated_by': user_info['username'],
-                'created_at': udf.created_at,  # Preserve original
-                'created_by': udf.created_by,  # Preserve original
-            }
-
-            # Handle dropdown options
-            if udf.field_type in ['DROPDOWN', 'MULTI_SELECT']:
-                options_str = request.POST.get('dropdown_options', '')
-                if options_str:
-                    options = [opt.strip() for opt in options_str.split(',') if opt.strip()]
-                    data['dropdown_options'] = json.dumps(options)
-
-            # Handle numeric constraints
-            if udf.field_type in ['NUMBER', 'CURRENCY', 'PERCENTAGE']:
-                min_val = request.POST.get('min_value')
-                max_val = request.POST.get('max_value')
-                if min_val:
-                    data['min_value'] = float(min_val)
-                if max_val:
-                    data['max_value'] = float(max_val)
-
-            # Handle text constraints
-            if udf.field_type == 'TEXT':
-                max_len = request.POST.get('max_length')
-                if max_len:
-                    data['max_length'] = int(max_len)
-
-            # Track changes for audit
-            old_values = {}
-            new_values = {}
-            changed_fields = []
-
-            # Fields to track
-            trackable_fields = ['label', 'description', 'is_required', 'is_unique',
-                               'default_value', 'display_order', 'group_name', 'is_active']
-
-            for field in trackable_fields:
-                old_val = getattr(udf, field, None)
-                new_val = data.get(field)
-                if old_val != new_val:
-                    old_values[field] = old_val
-                    new_values[field] = new_val
-                    changed_fields.append(field)
-
-            # Update in Kudu
-            success = udf_definition_repository.update_definition(udf.udf_id, data)
-
-            if success:
-                # Log to Kudu audit with old_value and new_value
-                audit_log_kudu_repository.log_action(
-                    user_id=user_info['user_id'],
-                    username=user_info['username'],
-                    user_email=user_info['user_email'],
-                    action_type='UPDATE',
-                    entity_type='UDF',
-                    entity_id=field_name,
-                    entity_name=data['label'],
-                    action_description=f'Updated UDF definition: {field_name} - Changed fields: {", ".join(changed_fields) if changed_fields else "No changes"}',
-                    old_value=json.dumps(old_values, default=str) if old_values else None,
-                    new_value=json.dumps(new_values, default=str) if new_values else None,
-                    field_name=', '.join(changed_fields) if changed_fields else None,
-                    status='SUCCESS',
-                    request_method='POST',
-                    request_path=request.path,
-                    ip_address=request.META.get('REMOTE_ADDR'),
-                    user_agent=request.META.get('HTTP_USER_AGENT', '')
-                )
-
-                messages.success(request, f'UDF "{data["label"]}" updated successfully in Kudu.')
-                return redirect('udf:detail', field_name=field_name)
-            else:
-                messages.error(request, 'Failed to update UDF in Kudu.')
-
-        except ValidationError as e:
-            messages.error(request, str(e))
-        except Exception as e:
-            messages.error(request, f'Error updating UDF: {str(e)}')
-
-    context = {
-        'udf': udf,
-        'existing_options': existing_options,  # Pass options list to template
-        'field_type_choices': UDF.FIELD_TYPE_CHOICES,
-        'entity_type_choices': UDF.ENTITY_TYPE_CHOICES,
-    }
-
-    return render(request, 'udf/udf_form.html', context)
-
-
-# @login_required  # Commented for development
-def udf_delete(request, field_name):
-    """
-    Deactivate UDF definition (soft delete) - UPDATES IN KUDU.
-    """
-    # Fetch from Kudu
-    udf_data = udf_definition_repository.get_definition_by_name(field_name)
-
-    if not udf_data:
-        from django.http import Http404
-        raise Http404(f"UDF with field name '{field_name}' not found in Kudu")
-
-    # Wrap in UDFWrapper
-    udf = UDFWrapper(udf_data)
-
-    if request.method == 'POST':
-        try:
-            # Get user info from session
-            user_info = get_request_user_info(request)
-
-            # Soft delete in Kudu (set is_active = false)
-            success = udf_definition_repository.delete_definition(udf.udf_id)
-
-            if success:
-                # Log to Kudu audit
-                audit_log_kudu_repository.log_action(
-                    user_id=user_info['user_id'],
-                    username=user_info['username'],
-                    user_email=user_info['user_email'],
-                    action_type='DELETE',
-                    entity_type='UDF',
-                    entity_id=field_name,
-                    entity_name=udf.label,
-                    action_description=f'Deactivated UDF definition: {field_name}',
-                    status='SUCCESS',
-                    request_method='POST',
-                    request_path=request.path,
-                    ip_address=request.META.get('REMOTE_ADDR'),
-                    user_agent=request.META.get('HTTP_USER_AGENT', '')
-                )
-
-                messages.success(request, f'UDF "{udf.label}" deactivated successfully in Kudu.')
-                return redirect('udf:list')
-            else:
-                messages.error(request, 'Failed to deactivate UDF in Kudu.')
-
-        except Exception as e:
-            messages.error(request, f'Error deactivating UDF: {str(e)}')
-
-    return redirect('udf:detail', field_name=field_name)
-
-
-# ========================
-# UDF Value Management Views
-# ========================
-
-# @login_required  # Commented for development
-def entity_udf_values(request, entity_type, entity_id):
-    """
-    View and manage UDF values for an entity.
-    """
-    # Get all UDFs for this entity type
-    udfs = UDF.objects.filter(
-        entity_type=entity_type.upper(),
-        is_active=True
-    ).order_by('display_order', 'field_name')
-
-    # Get current values
-    current_values = UDFService.get_entity_udf_values(entity_type.upper(), entity_id)
-
-    if request.method == 'POST':
-        try:
-            # Collect values from form
-            values = {}
-            for udf in udfs:
-                field_name = udf.field_name
-
-                if udf.field_type == 'BOOLEAN':
-                    values[field_name] = request.POST.get(field_name) == 'on'
-                elif udf.field_type == 'MULTI_SELECT':
-                    values[field_name] = request.POST.getlist(field_name)
-                else:
-                    value = request.POST.get(field_name)
-                    if value:  # Only include non-empty values
-                        values[field_name] = value
-
-            # Validate and set values
-            UDFService.validate_udf_values(entity_type.upper(), values)
-            user_info = get_request_user_info(request)
-            UDFService.set_entity_udf_values(
-                entity_type.upper(),
-                entity_id,
-                values,
-                user_info
-            )
-
-            messages.success(request, 'UDF values saved successfully.')
-            return redirect(request.path)
-
-        except ValidationError as e:
-            messages.error(request, str(e))
-        except Exception as e:
-            messages.error(request, f'Error saving UDF values: {str(e)}')
-
-    # Combine UDFs with their current values
-    udf_data = []
-    for udf in udfs:
-        udf_data.append({
-            'udf': udf,
-            'value': current_values.get(udf.field_name),
-        })
-
-    context = {
-        'entity_type': entity_type,
-        'entity_id': entity_id,
-        'udf_data': udf_data,
-    }
-
-    return render(request, 'udf/entity_udf_values.html', context)
-
-
-# @login_required  # Commented for development
-def udf_value_history(request, entity_type, entity_id):
-    """
-    View UDF value change history for an entity.
-    """
-    history = UDFService.get_entity_udf_history(entity_type.upper(), entity_id)
-
-    # Pagination
-    paginator = Paginator(history, 50)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
-
-    context = {
-        'entity_type': entity_type,
-        'entity_id': entity_id,
-        'page_obj': page_obj,
-    }
-
-    return render(request, 'udf/udf_value_history.html', context)
-
-
-# ========================
-# UDF Option Management Views
-# ========================
-
-def udf_option_toggle(request, field_name):
-    """
-    Toggle active/inactive status for a UDF option.
-    """
-    if request.method == 'POST':
-        try:
-            import json
-            from datetime import datetime
-
-            data = json.loads(request.body)
-            option_value = data.get('option_value')
-            is_active = data.get('is_active', True)
-
-            # Get UDF definition
-            udf_data = udf_definition_repository.get_definition_by_name(field_name)
-            if not udf_data:
-                return JsonResponse({'success': False, 'error': 'UDF not found'}, status=404)
-
-            udf_id = udf_data['udf_id']
-
-            # Get user info
-            user_info = get_request_user_info(request)
-            timestamp = int(datetime.now().timestamp() * 1000)
-
-            # Escape single quotes
-            escaped_value = option_value.replace("'", "''")
-
-            # Update option status
-            query = f"""
-            UPDATE gmp_cis.cis_udf_option
-            SET is_active = {str(is_active).lower()},
-                updated_by = '{user_info['username']}',
-                updated_at = {timestamp}
-            WHERE udf_id = {udf_id} AND option_value = '{escaped_value}'
-            """
-
-            # Track old value (opposite of new)
-            old_is_active = not is_active
-
-            success = impala_manager.execute_write(query, database='gmp_cis')
-
-            if success:
-                # Log audit with old_value and new_value
-                audit_log_kudu_repository.log_action(
-                    user_id=user_info['user_id'],
-                    username=user_info['username'],
-                    user_email=user_info['user_email'],
-                    action_type='UPDATE',
-                    entity_type='UDF_OPTION',
-                    entity_id=f"{field_name}:{option_value}",
-                    action_description=f'{"Activated" if is_active else "Deactivated"} option: {option_value}',
-                    old_value=json.dumps({'is_active': old_is_active}),
-                    new_value=json.dumps({'is_active': is_active}),
-                    field_name='is_active',
-                    status='SUCCESS',
-                    request_method='POST',
-                    request_path=request.path,
-                    ip_address=request.META.get('REMOTE_ADDR'),
-                    user_agent=request.META.get('HTTP_USER_AGENT', '')
-                )
-
-                return JsonResponse({'success': True, 'message': 'Option status updated'})
-            else:
-                return JsonResponse({'success': False, 'error': 'Failed to update option'}, status=500)
-
-        except Exception as e:
-            logger.error(f"Error toggling option: {str(e)}")
-            return JsonResponse({'success': False, 'error': str(e)}, status=500)
-
-    return JsonResponse({'success': False, 'error': 'Invalid request method'}, status=405)
-
-
-def udf_option_add(request, field_name):
-    """
-    Add a new option to a UDF.
-    """
-    if request.method == 'POST':
-        try:
-            import json
-            from datetime import datetime
-
-            data = json.loads(request.body)
-            option_value = data.get('option_value', '').strip()
-
-            if not option_value:
-                return JsonResponse({'success': False, 'error': 'Option value is required'}, status=400)
-
-            # Get UDF definition
-            udf_data = udf_definition_repository.get_definition_by_name(field_name)
-            if not udf_data:
-                return JsonResponse({'success': False, 'error': 'UDF not found'}, status=404)
-
-            udf_id = udf_data['udf_id']
-
-            # Get user info
-            user_info = get_request_user_info(request)
-            timestamp = int(datetime.now().timestamp() * 1000)
-
-            # Get max display_order
-            existing_options = udf_option_repository.get_options_by_udf_id(udf_id)
-            max_order = max([opt.get('display_order', 0) for opt in existing_options], default=0)
-
-            # Escape single quotes
-            escaped_value = option_value.replace("'", "''")
-
-            # Insert new option
-            query = f"""
-            UPSERT INTO gmp_cis.cis_udf_option
-            (udf_id, option_value, display_order, is_active, created_by, created_at, updated_by, updated_at)
-            VALUES (
-                {udf_id},
-                '{escaped_value}',
-                {max_order + 1},
-                true,
-                '{user_info['username']}',
-                {timestamp},
-                '{user_info['username']}',
-                {timestamp}
-            )
-            """
-
-            success = impala_manager.execute_write(query, database='gmp_cis')
-
-            if success:
-                # Log audit
-                audit_log_kudu_repository.log_action(
-                    user_id=user_info['user_id'],
-                    username=user_info['username'],
-                    user_email=user_info['user_email'],
-                    action_type='CREATE',
-                    entity_type='UDF_OPTION',
-                    entity_id=f"{field_name}:{option_value}",
-                    action_description=f'Added new option: {option_value}',
-                    status='SUCCESS',
-                    request_method='POST',
-                    request_path=request.path,
-                    ip_address=request.META.get('REMOTE_ADDR'),
-                    user_agent=request.META.get('HTTP_USER_AGENT', '')
-                )
-
-                return JsonResponse({'success': True, 'message': 'Option added successfully'})
-            else:
-                return JsonResponse({'success': False, 'error': 'Failed to add option'}, status=500)
-
-        except Exception as e:
-            logger.error(f"Error adding option: {str(e)}")
-            return JsonResponse({'success': False, 'error': str(e)}, status=500)
-
-    return JsonResponse({'success': False, 'error': 'Invalid request method'}, status=405)
-
-
-# ========================
-# AJAX Views
-# ========================
-
-# @login_required  # Commented for development
-def ajax_get_entity_udf_values(request, entity_type, entity_id):
-    """
-    AJAX endpoint to get UDF values for an entity.
+        JSON with success flag and object_types array
     """
     try:
-        values = UDFService.get_entity_udf_values(entity_type.upper(), entity_id)
-        return JsonResponse({'success': True, 'values': values})
+        object_types = udf_field_service.get_object_types()
+        return JsonResponse({'success': True, 'object_types': object_types})
+
     except Exception as e:
-        return JsonResponse({'success': False, 'error': str(e)}, status=400)
+        logger.error(f"Error fetching entity types: {str(e)}")
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
 
 
-# @login_required  # Commented for development
-def ajax_validate_udf_values(request):
+@require_login
+@require_http_methods(["GET"])
+def api_get_fields_by_entity(request: HttpRequest, object_type: str) -> JsonResponse:
     """
-    AJAX endpoint to validate UDF values.
-    """
-    if request.method == 'POST':
-        try:
-            import json
-            data = json.loads(request.body)
-            entity_type = data.get('entity_type')
-            values = data.get('values', {})
+    API endpoint to get all fields for a specific entity type.
 
-            UDFService.validate_udf_values(entity_type.upper(), values)
-            return JsonResponse({'success': True, 'message': 'Validation successful'})
+    Used for cascading dropdown: Second level (Field Name selection based on Entity Type).
 
-        except ValidationError as e:
-            return JsonResponse({'success': False, 'errors': str(e)}, status=400)
-        except Exception as e:
-            return JsonResponse({'success': False, 'error': str(e)}, status=400)
+    Args:
+        object_type: Entity type to filter by (e.g., PORTFOLIO, EQUITY_PRICE, SECURITY)
 
-    return JsonResponse({'success': False, 'error': 'Invalid request method'}, status=405)
-
-
-# @login_required  # Commented for development
-def ajax_get_dropdown_options(request, field_name):
-    """
-    AJAX endpoint to get dropdown options for a UDF field from Hive.
+    Returns:
+        JSON with success flag and fields array (each field has field_name, field_value, udf_id, etc.)
     """
     try:
-        options = UDFService.get_udf_dropdown_options(field_name)
-        return JsonResponse({
-            'success': True,
-            'field_name': field_name,
-            'options': options,
-            'count': len(options)
-        })
+        fields = udf_field_service.get_fields_by_entity(object_type.upper())
+        return JsonResponse({'success': True, 'fields': fields})
+
     except Exception as e:
-        return JsonResponse({'success': False, 'error': str(e)}, status=400)
+        logger.error(f"Error fetching fields for entity {object_type}: {str(e)}")
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+@require_login
+@require_http_methods(["GET"])
+def udf_get_fields_by_entity(request: HttpRequest, object_type: str) -> JsonResponse:
+    """
+    Legacy API endpoint to get all active fields for a specific entity type.
+
+    DEPRECATED: Use api_get_fields_by_entity instead.
+    Kept for backward compatibility with existing modules.
+
+    Used by other modules (Portfolio, Trade, etc.) to fetch UDF fields dynamically.
+
+    Returns:
+        JSON array of field objects
+    """
+    try:
+        fields = udf_field_service.get_all_fields(object_type=object_type.upper(), is_active=True)
+        return JsonResponse({'success': True, 'fields': fields})
+
+    except Exception as e:
+        logger.error(f"Error fetching fields for entity {object_type}: {str(e)}")
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
