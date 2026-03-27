@@ -424,28 +424,37 @@ def trade_detail(request, trade_id):
         if security_details:
             trade_data['security_currency'] = security_details.get('currency_code', '')
 
-    # Calculate Total Amount LC for trade detail
-    fc = trade_data.get('currency_code', '')  # Security/Foreign Currency
-    lc = trade_data.get('portfolio_currency', '')  # Portfolio/Local Currency
-    total_fc = Decimal(str(trade_data.get('total_amount', 0) or 0))
+    # Use stored total_amount_lc if available, otherwise calculate
+    # total_amount_fc = Security Currency amount, total_amount_lc = Portfolio Currency amount
+    stored_lc = trade_data.get('total_amount_lc')
+    if stored_lc and float(stored_lc) != 0:
+        # Use the stored value from database
+        trade_data['total_amount_lc'] = float(stored_lc)
+        trade_data['fx_rate'] = trade_data.get('open_fx_rate', 1.0)
+    else:
+        # Calculate Total Amount LC if not stored
+        fc = trade_data.get('currency_code', '')  # Security/Foreign Currency
+        lc = trade_data.get('portfolio_currency', '')  # Portfolio/Local Currency
+        # Use total_amount_fc if available, fallback to total_amount
+        total_fc = Decimal(str(trade_data.get('total_amount_fc') or trade_data.get('total_amount', 0) or 0))
 
-    if not lc:
-        lc = fc
-        trade_data['portfolio_currency'] = fc
+        if not lc:
+            lc = fc
+            trade_data['portfolio_currency'] = fc
 
-    if fc and lc and fc != lc:
-        try:
-            fx_rate, _ = multicurrency_service.get_fx_rate(fc, lc)
-            total_lc = (total_fc * fx_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            trade_data['fx_rate'] = float(fx_rate)
-            trade_data['total_amount_lc'] = float(total_lc)
-        except Exception as e:
-            logger.warning(f"FX rate lookup failed for {fc}->{lc}: {e}")
+        if fc and lc and fc != lc:
+            try:
+                fx_rate, _ = multicurrency_service.get_fx_rate(fc, lc)
+                total_lc = (total_fc * fx_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                trade_data['fx_rate'] = float(fx_rate)
+                trade_data['total_amount_lc'] = float(total_lc)
+            except Exception as e:
+                logger.warning(f"FX rate lookup failed for {fc}->{lc}: {e}")
+                trade_data['fx_rate'] = 1.0
+                trade_data['total_amount_lc'] = float(total_fc)
+        else:
             trade_data['fx_rate'] = 1.0
             trade_data['total_amount_lc'] = float(total_fc)
-    else:
-        trade_data['fx_rate'] = 1.0
-        trade_data['total_amount_lc'] = float(total_fc)
 
     trade = TradeWrapper(trade_data)
     status = trade.status
