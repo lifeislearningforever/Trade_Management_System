@@ -110,15 +110,22 @@ class SecurityDropdownRepository:
     def get_countries() -> List[Dict[str, str]]:
         """
         Get countries from country table.
+        Filters by max(processing_date) to avoid duplicates.
 
         Returns:
             List of country dictionaries with 'code' and 'name' keys
         """
         try:
+            # Filter by max(processing_date) to avoid duplicates from multiple dates
             query = f"""
-            SELECT label, full_name
+            SELECT DISTINCT `label`, `full_name`
             FROM {SecurityDropdownRepository.DATABASE}.{SecurityDropdownRepository.COUNTRY_TABLE}
-            ORDER BY full_name
+            WHERE `label` IS NOT NULL AND `label` != ''
+              AND processing_date = (
+                  SELECT MAX(processing_date)
+                  FROM {SecurityDropdownRepository.DATABASE}.{SecurityDropdownRepository.COUNTRY_TABLE}
+              )
+            ORDER BY `full_name`
             """
 
             result = impala_manager.execute_query(query, database=SecurityDropdownRepository.DATABASE)
@@ -126,7 +133,7 @@ class SecurityDropdownRepository:
             if not result:
                 return []
 
-            return [{'code': row.get('label', ''), 'name': row.get('full_name', '')} for row in result]
+            return [{'code': row.get('label', ''), 'name': row.get('full_name', '')} for row in result if row.get('label')]
 
         except Exception as e:
             logger.error(f"Error fetching countries: {str(e)}")
@@ -136,6 +143,7 @@ class SecurityDropdownRepository:
     def get_currencies() -> List[Dict[str, str]]:
         """
         Get currencies from gmp_cis_sta_dly_currency table.
+        Filters by max(processing_date) to avoid duplicates.
 
         Schema (from office environment):
         - name: Currency code (e.g., 'SGD', 'USD')
@@ -147,10 +155,15 @@ class SecurityDropdownRepository:
         """
         try:
             # Note: 'symbol' is a reserved word in Impala, must use backticks
+            # Filter by max(processing_date) to avoid duplicates from multiple dates
             query = f"""
             SELECT DISTINCT name, full_name, `symbol`
             FROM {SecurityDropdownRepository.DATABASE}.{SecurityDropdownRepository.CURRENCY_TABLE}
             WHERE name IS NOT NULL AND name != ''
+              AND processing_date = (
+                  SELECT MAX(processing_date)
+                  FROM {SecurityDropdownRepository.DATABASE}.{SecurityDropdownRepository.CURRENCY_TABLE}
+              )
             ORDER BY name
             """
 
@@ -159,7 +172,7 @@ class SecurityDropdownRepository:
             if not result:
                 return []
 
-            return [{'code': row.get('name', ''), 'name': row.get('full_name', '')} for row in result]
+            return [{'code': row.get('name', ''), 'name': row.get('full_name', '')} for row in result if row.get('name')]
 
         except Exception as e:
             logger.error(f"Error fetching currencies: {str(e)}")
