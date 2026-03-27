@@ -71,8 +71,9 @@ class TradeWrapper:
 
         # Multi-currency fields (FC = Security CCY, LC = Portfolio CCY)
         self.portfolio_currency = data.get('portfolio_currency', '')  # Local Currency
-        self.fx_rate = data.get('fx_rate', 1.0)  # FX Rate (FC->LC)
-        self.total_amount_fc = data.get('total_amount', 0)  # Total Amount FC (Foreign Currency = Security CCY)
+        self.fx_rate = data.get('open_fx_rate', 1.0)  # FX Rate (FC->LC)
+        # total_amount_fc: Use new column if available, fallback to total_amount for backward compatibility
+        self.total_amount_fc = data.get('total_amount_fc') or data.get('total_amount', 0)
         self.total_amount_lc = data.get('total_amount_lc', 0)  # Total Amount LC (Local Currency)
 
         # GL & Broker

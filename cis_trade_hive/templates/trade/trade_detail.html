@@ -231,9 +231,9 @@
                         <div class="col-md-3 mb-3">
                             <label class="form-label text-muted">Total Amount FC</label>
                             <div class="fw-bold fs-5 text-primary">
-                                {{ trade.total_amount|floatformat:2|default:"0.00" }}
-                                {% if trade.security_currency %}
-                                    <span class="badge bg-primary">{{ trade.security_currency }}</span>
+                                {{ trade.total_amount_fc|floatformat:2|default:"0.00" }}
+                                {% if trade.currency_code %}
+                                    <span class="badge bg-primary">{{ trade.currency_code }}</span>
                                 {% endif %}
                             </div>
                         </div>
