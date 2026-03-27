@@ -255,9 +255,8 @@ class UDFFieldService:
                 audit_log_kudu_repository.log_action(
                     user_id=str(user_info['user_id']),
                     username=user_info['username'],
-                    user_email=user_info.get('user_email', ''),
                     action_type='CREATE',
-                    object_type='UDF',
+                    entity_type='UDF_FIELD',
                     entity_name=create_data['field_value'],
                     entity_id=str(udf_id),
                     action_description=f"Created UDF field '{create_data['field_value']}' ({create_data['field_name']}) for {create_data['object_type']}",
@@ -330,9 +329,8 @@ class UDFFieldService:
                 audit_log_kudu_repository.log_action(
                     user_id=str(user_info['user_id']),
                     username=user_info['username'],
-                    user_email=user_info.get('user_email', ''),
                     action_type='UPDATE',
-                    object_type='UDF',
+                    entity_type='UDF_FIELD',
                     entity_name=update_data['field_value'],
                     entity_id=str(udf_id),
                     action_description=f"Updated UDF field '{update_data['field_value']}' ({update_data['field_name']}) for {update_data['object_type']}",
@@ -388,9 +386,8 @@ class UDFFieldService:
                 audit_log_kudu_repository.log_action(
                     user_id=str(user_info['user_id']),
                     username=user_info['username'],
-                    user_email=user_info.get('user_email', ''),
                     action_type='DELETE',
-                    object_type='UDF',
+                    entity_type='UDF_FIELD',
                     entity_name=existing['field_value'],
                     entity_id=str(udf_id),
                     action_description=f"Deleted UDF field '{existing['field_value']}' ({existing['field_name']}) for {existing['object_type']}",
@@ -446,9 +443,8 @@ class UDFFieldService:
                 audit_log_kudu_repository.log_action(
                     user_id=str(user_info['user_id']),
                     username=user_info['username'],
-                    user_email=user_info.get('user_email', ''),
                     action_type='RESTORE',
-                    object_type='UDF',
+                    entity_type='UDF_FIELD',
                     entity_name=existing['field_value'],
                     entity_id=str(udf_id),
                     action_description=f"Restored UDF field '{existing['field_value']}' ({existing['field_name']}) for {existing['object_type']}",
