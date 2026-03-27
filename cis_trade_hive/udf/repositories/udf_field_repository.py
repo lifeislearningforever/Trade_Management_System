@@ -42,13 +42,13 @@ class UDFFieldRepository:
 
     def _generate_composite_id(self, object_type: str, field_name: str, field_value: str) -> str:
         """
-        Generate a unique ID from composite key for URL routing.
-        Uses timestamp + hash of composite key.
+        Generate a deterministic ID from composite key for URL routing.
+        Uses MD5 hash of composite key (always same for same inputs).
         """
         import hashlib
         key = f"{object_type}|{field_name}|{field_value}"
-        hash_part = hashlib.md5(key.encode()).hexdigest()[:8]
-        return f"{int(datetime.now().timestamp() * 1000)}{hash_part}"
+        # Use full hash for uniqueness - deterministic, same ID every time
+        return hashlib.md5(key.encode()).hexdigest()
 
     # ========================================================================
     # READ OPERATIONS
@@ -268,15 +268,15 @@ class UDFFieldRepository:
             logger.error(f"Error retrieving UDF field by key {object_type}.{field_name}.{field_value}: {str(e)}")
             return None
 
-    def get_by_id(self, udf_id: int) -> Optional[Dict[str, Any]]:
+    def get_by_id(self, udf_id: str) -> Optional[Dict[str, Any]]:
         """
-        Get UDF field by generated ID.
+        Get UDF field by generated ID (MD5 hash of composite key).
 
         NOTE: Since table uses composite key, we search all records and match by generated ID.
         This is not efficient for large datasets - consider using get_by_key instead.
 
         Args:
-            udf_id: Generated UDF ID (from URL)
+            udf_id: Generated UDF ID (MD5 hash string from URL)
 
         Returns:
             UDF field dictionary or None
@@ -300,7 +300,7 @@ class UDFFieldRepository:
     # WRITE OPERATIONS
     # ========================================================================
 
-    def create(self, field_data: Dict[str, Any]) -> int:
+    def create(self, field_data: Dict[str, Any]) -> Optional[str]:
         """
         Create a new UDF field using UPSERT.
 
@@ -310,7 +310,7 @@ class UDFFieldRepository:
                 Optional: field_value (defaults to empty for definitions)
 
         Returns:
-            Generated udf_id if successful, 0 otherwise
+            Generated udf_id (hash string) if successful, None otherwise
         """
         try:
             # Validate required fields
@@ -350,24 +350,24 @@ class UDFFieldRepository:
             success = impala_manager.execute_write(upsert_query, database=self.DATABASE)
 
             if success:
-                # Generate ID for return value
-                udf_id = int(self._generate_composite_id(
+                # Generate ID for return value (hash string)
+                udf_id = self._generate_composite_id(
                     field_data.get('object_type', ''),
                     field_data.get('field_name', ''),
                     field_data.get('field_value', '')
-                )[:13])  # Use timestamp portion
+                )
 
                 logger.info(f"Created UDF field: {object_type}.{field_name}.{field_value}")
                 return udf_id
 
-            return 0
+            return None
 
         except Exception as e:
             logger.error(f"Error creating UDF field: {str(e)}")
             logger.error(f"Field data: {field_data}")
-            return 0
+            return None
 
-    def update(self, udf_id: int, field_data: Dict[str, Any]) -> bool:
+    def update(self, udf_id: str, field_data: Dict[str, Any]) -> bool:
         """
         Update existing UDF field.
         Since table uses composite key, we need the original key to update.
@@ -428,7 +428,7 @@ class UDFFieldRepository:
             logger.error(f"Error updating UDF field: {str(e)}")
             return False
 
-    def soft_delete(self, udf_id: int, updated_by: str) -> bool:
+    def soft_delete(self, udf_id: str, updated_by: str) -> bool:
         """
         Soft delete UDF field by setting is_active = false.
 
@@ -458,7 +458,7 @@ class UDFFieldRepository:
             logger.error(f"Error soft deleting UDF field: {str(e)}")
             return False
 
-    def restore(self, udf_id: int, updated_by: str) -> bool:
+    def restore(self, udf_id: str, updated_by: str) -> bool:
         """
         Restore soft-deleted UDF field by setting is_active = true.
 

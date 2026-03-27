@@ -126,12 +126,12 @@ class UDFFieldService:
             logger.error(f"Service error getting UDF fields: {str(e)}")
             return []
 
-    def get_field_by_id(self, udf_id: int) -> Optional[Dict[str, Any]]:
+    def get_field_by_id(self, udf_id: str) -> Optional[Dict[str, Any]]:
         """
-        Get UDF field by ID.
+        Get UDF field by ID (MD5 hash of composite key).
 
         Args:
-            udf_id: UDF field ID
+            udf_id: UDF field ID (hash string)
 
         Returns:
             UDF field dictionary or None
@@ -218,7 +218,7 @@ class UDFFieldService:
     # CREATE OPERATION
     # ========================================================================
 
-    def create_field(self, field_data: Dict[str, Any], user_info: Dict[str, Any]) -> tuple[bool, Optional[str], Optional[int]]:
+    def create_field(self, field_data: Dict[str, Any], user_info: Dict[str, Any]) -> tuple[bool, Optional[str], Optional[str]]:
         """
         Create a new UDF field with validation and audit logging.
 
@@ -281,7 +281,7 @@ class UDFFieldService:
     # UPDATE OPERATION
     # ========================================================================
 
-    def update_field(self, udf_id: int, field_data: Dict[str, Any], user_info: Dict[str, Any]) -> tuple[bool, Optional[str]]:
+    def update_field(self, udf_id: str, field_data: Dict[str, Any], user_info: Dict[str, Any]) -> tuple[bool, Optional[str]]:
         """
         Update existing UDF field with validation and audit logging.
 
@@ -355,7 +355,7 @@ class UDFFieldService:
     # DELETE OPERATION (Soft Delete)
     # ========================================================================
 
-    def delete_field(self, udf_id: int, user_info: Dict[str, Any]) -> tuple[bool, Optional[str]]:
+    def delete_field(self, udf_id: str, user_info: Dict[str, Any]) -> tuple[bool, Optional[str]]:
         """
         Soft delete UDF field with audit logging.
 
@@ -412,7 +412,7 @@ class UDFFieldService:
     # RESTORE OPERATION
     # ========================================================================
 
-    def restore_field(self, udf_id: int, user_info: Dict[str, Any]) -> tuple[bool, Optional[str]]:
+    def restore_field(self, udf_id: str, user_info: Dict[str, Any]) -> tuple[bool, Optional[str]]:
         """
         Restore soft-deleted UDF field with audit logging.
 
