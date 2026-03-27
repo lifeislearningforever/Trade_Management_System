@@ -327,13 +327,13 @@
                             <div class="col-md-3">
                                 <label class="form-label">Total Amount FC</label>
                                 <input type="number" class="form-control fw-bold bg-light" name="total_amount_fc" id="total_amount_fc"
-                                       step="0.01" value="{{ trade.total_amount_fc|default:trade.total_amount|default:'' }}" readonly>
+                                       step="0.01" value="{% if trade.total_amount_fc %}{{ trade.total_amount_fc }}{% elif trade.total_amount %}{{ trade.total_amount }}{% endif %}" readonly>
                                 <small class="text-muted">Gross + Fees (Security CCY)</small>
                             </div>
                             <div class="col-md-3">
                                 <label class="form-label">Total Amount LC</label>
                                 <input type="number" class="form-control fw-bold bg-light" name="total_amount_lc" id="total_amount_lc"
-                                       step="0.01" value="{{ trade.total_amount_lc|default:'' }}" readonly>
+                                       step="0.01" value="{% if trade.total_amount_lc %}{{ trade.total_amount_lc }}{% endif %}" readonly>
                                 <small class="text-muted">FC × FX Rate (Portfolio CCY)</small>
                             </div>
                         </div>
