@@ -114,7 +114,7 @@
 
                         <div class="row g-3">
                             <!-- Portfolio -->
-                            <div class="col-md-3">
+                            <div class="col-md-4">
                                 <label class="form-label">Portfolio <span class="text-danger">*</span></label>
                                 <div class="input-group">
                                     <select class="form-select" name="portfolio_short_name" id="portfolio_short_name" required
@@ -140,7 +140,7 @@
                             </div>
 
                             <!-- Portfolio Currency (auto-populated from portfolio selection - readonly) -->
-                            <div class="col-md-1">
+                            <div class="col-md-2">
                                 <label class="form-label">Port CCY</label>
                                 <input type="text" class="form-control bg-light" id="portfolio_currency_display"
                                        value="{{ trade.portfolio_currency|default:'' }}"
@@ -150,7 +150,7 @@
                             </div>
 
                             <!-- Security (primary dropdown - select first) -->
-                            <div class="col-md-3">
+                            <div class="col-md-4">
                                 <label class="form-label">Security <span class="text-danger">*</span></label>
                                 <div class="input-group">
                                     <select class="form-select" name="security_label" id="security_label" required
@@ -176,18 +176,20 @@
                             </div>
 
                             <!-- Currency (auto-populated from security selection - readonly) -->
-                            <div class="col-md-1">
+                            <div class="col-md-2">
                                 <label class="form-label">Sec CCY <span class="text-danger">*</span></label>
                                 <input type="text" class="form-control bg-light" id="currency_code_display"
                                        value="{{ trade.currency_code|default:'' }}"
-                                       readonly placeholder="Select Security">
+                                       readonly placeholder="-">
                                 <input type="hidden" name="currency_code" id="currency_code"
                                        value="{{ trade.currency_code|default:'' }}" required>
-                                <small class="text-muted" id="currency_info">Auto-set from security</small>
                             </div>
+                        </div>
 
+                        <!-- Counterparty Row -->
+                        <div class="row g-3 mt-2">
                             <!-- Counterparty -->
-                            <div class="col-md-3">
+                            <div class="col-md-4">
                                 <label class="form-label">Counterparty</label>
                                 <div class="input-group">
                                     <select class="form-select" name="counterparty" id="counterparty">
@@ -204,6 +206,14 @@
                                         <i class="bi bi-question-circle text-muted"></i>
                                     </span>
                                 </div>
+                            </div>
+
+                            <!-- FX Rate (auto-populated from security/portfolio currencies) -->
+                            <div class="col-md-2">
+                                <label class="form-label">FX Rate</label>
+                                <input type="number" class="form-control bg-light" name="open_fx_rate" id="open_fx_rate"
+                                       step="0.000001" value="{{ trade.open_fx_rate|default:'' }}" readonly>
+                                <small class="text-muted" id="fx_rate_info">Auto-set from currencies</small>
                             </div>
                         </div>
 
@@ -314,11 +324,17 @@
                             </div>
                             <!-- Accrued Interest removed per SA feedback #13 -->
                             <input type="hidden" name="accrued_interest" value="0">
-                            <div class="col-md-4">
-                                <label class="form-label">Total Amount</label>
-                                <input type="number" class="form-control fw-bold bg-light" name="total_amount" id="total_amount"
-                                       step="0.01" value="{{ trade.total_amount|default:'' }}" readonly>
-                                <small class="text-muted">Gross + Commission + SEC Fee + Other Charges</small>
+                            <div class="col-md-3">
+                                <label class="form-label">Total Amount FC</label>
+                                <input type="number" class="form-control fw-bold bg-light" name="total_amount_fc" id="total_amount_fc"
+                                       step="0.01" value="{{ trade.total_amount_fc|default:trade.total_amount|default:'' }}" readonly>
+                                <small class="text-muted">Gross + Fees (Security CCY)</small>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Total Amount LC</label>
+                                <input type="number" class="form-control fw-bold bg-light" name="total_amount_lc" id="total_amount_lc"
+                                       step="0.01" value="{{ trade.total_amount_lc|default:'' }}" readonly>
+                                <small class="text-muted">FC × FX Rate (Portfolio CCY)</small>
                             </div>
                         </div>
                     </div>
@@ -410,11 +426,6 @@
                     </div>
                     <div class="card-body">
                         <div class="row g-3">
-                            <div class="col-md-3">
-                                <label class="form-label">Open FX Rate</label>
-                                <input type="number" class="form-control" name="open_fx_rate" id="open_fx_rate"
-                                       step="0.000001" value="{{ trade.open_fx_rate|default:'' }}">
-                            </div>
                             <div class="col-md-3">
                                 <label class="form-label">Curr Dealing</label>
                                 <input type="number" class="form-control" name="curr_dealing" id="curr_dealing"
@@ -894,24 +905,38 @@ function calculateGrossAmount() {
 }
 
 // Calculate total amount: Gross Amount + Commission + SEC Fee + Other Charges
+// Calculates both FC (Foreign/Security Currency) and LC (Local/Portfolio Currency)
 function calculateTotal() {
     const grossAmount = calculateGrossAmount();
     const commission = parseFloat(document.getElementById('commission').value) || 0;
     const secFee = parseFloat(document.getElementById('sec_fee').value) || 0;
     const otherCharges = parseFloat(document.getElementById('other_charges').value) || 0;
+    const fxRate = parseFloat(document.getElementById('open_fx_rate').value) || 1;
 
     const tradeType = document.getElementById('trade_type').value;
-    let total = grossAmount;
+    let totalFC = grossAmount;
 
     if (tradeType === 'BUY') {
-        total = grossAmount + commission + secFee + otherCharges;
+        totalFC = grossAmount + commission + secFee + otherCharges;
     } else if (tradeType === 'SELL') {
-        total = grossAmount - commission - secFee - otherCharges;
+        totalFC = grossAmount - commission - secFee - otherCharges;
     } else {
-        total = grossAmount + commission + secFee + otherCharges;
+        totalFC = grossAmount + commission + secFee + otherCharges;
     }
 
-    document.getElementById('total_amount').value = total.toFixed(2);
+    // Calculate LC amount (FC × FX Rate)
+    const totalLC = totalFC * fxRate;
+
+    // Update both FC and LC fields
+    const totalFCField = document.getElementById('total_amount_fc');
+    const totalLCField = document.getElementById('total_amount_lc');
+
+    if (totalFCField) {
+        totalFCField.value = totalFC.toFixed(2);
+    }
+    if (totalLCField) {
+        totalLCField.value = totalLC.toFixed(2);
+    }
 }
 
 // Update total broker charges when individual charge fields change
@@ -1352,7 +1377,6 @@ function autoPopulateCurrencyFromSecurity() {
     const securityEl = document.getElementById('security_label');
     const currencyHidden = document.getElementById('currency_code');
     const currencyDisplay = document.getElementById('currency_code_display');
-    const currencyInfo = document.getElementById('currency_info');
     const selectedOption = securityEl.options[securityEl.selectedIndex];
 
     if (selectedOption && selectedOption.dataset.currency) {
@@ -1360,15 +1384,14 @@ function autoPopulateCurrencyFromSecurity() {
         // Set both hidden field (for form submission) and display field
         currencyHidden.value = currency;
         currencyDisplay.value = currency;
-        currencyInfo.textContent = `Auto-set from security: ${currency}`;
-        currencyInfo.className = 'text-info small';
     } else {
         // Clear currency if no security selected
         currencyHidden.value = '';
         currencyDisplay.value = '';
-        currencyInfo.textContent = 'Auto-set from security';
-        currencyInfo.className = 'text-muted small';
     }
+
+    // Trigger FX rate lookup after security currency is set
+    fetchFxRate();
 }
 
 // Auto-populate currency from selected portfolio (readonly field)
@@ -1388,6 +1411,75 @@ function autoPopulateCurrencyFromPortfolio() {
         currencyHidden.value = '';
         currencyDisplay.value = '';
     }
+
+    // Trigger FX rate lookup after portfolio currency is set
+    fetchFxRate();
+}
+
+// Fetch FX rate from API based on security currency (FC) and portfolio currency (LC)
+function fetchFxRate() {
+    const securityCurrency = document.getElementById('currency_code').value;
+    const portfolioCurrency = document.getElementById('portfolio_currency').value;
+    const fxRateField = document.getElementById('open_fx_rate');
+    const fxRateInfo = document.getElementById('fx_rate_info');
+
+    // Both currencies must be set
+    if (!securityCurrency || !portfolioCurrency) {
+        if (fxRateInfo) {
+            fxRateInfo.textContent = 'Select portfolio and security';
+            fxRateInfo.className = 'text-muted small';
+        }
+        return;
+    }
+
+    // Same currency - rate is 1.0
+    if (securityCurrency === portfolioCurrency) {
+        fxRateField.value = '1.000000';
+        if (fxRateInfo) {
+            fxRateInfo.textContent = 'Same currency (1.0)';
+            fxRateInfo.className = 'text-info small';
+        }
+        calculateTotal();
+        return;
+    }
+
+    // Show loading
+    if (fxRateInfo) {
+        fxRateInfo.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Fetching...';
+        fxRateInfo.className = 'text-muted small';
+    }
+
+    // Fetch FX rate from API
+    fetch(`/trade/api/fx-rate/?from=${encodeURIComponent(securityCurrency)}&to=${encodeURIComponent(portfolioCurrency)}`)
+        .then(response => response.json())
+        .then(data => {
+            console.log('FX Rate API response:', data);
+            if (data.rate && data.rate > 0) {
+                fxRateField.value = parseFloat(data.rate).toFixed(6);
+                if (fxRateInfo) {
+                    fxRateInfo.textContent = `${securityCurrency}-${portfolioCurrency}: ${data.rate} (${data.date || 'latest'})`;
+                    fxRateInfo.className = 'text-success small';
+                }
+            } else {
+                // No rate found - default to 1.0
+                fxRateField.value = '1.000000';
+                if (fxRateInfo) {
+                    fxRateInfo.textContent = `No rate found for ${securityCurrency}-${portfolioCurrency}, using 1.0`;
+                    fxRateInfo.className = 'text-warning small';
+                }
+            }
+            // Recalculate total with new FX rate
+            calculateTotal();
+        })
+        .catch(error => {
+            console.error('Error fetching FX rate:', error);
+            fxRateField.value = '1.000000';
+            if (fxRateInfo) {
+                fxRateInfo.textContent = 'Error fetching rate, using 1.0';
+                fxRateInfo.className = 'text-danger small';
+            }
+            calculateTotal();
+        });
 }
 
 // Initialize Select2 on ALL dropdowns using project-level init

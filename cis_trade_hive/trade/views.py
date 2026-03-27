@@ -1240,6 +1240,62 @@ def api_get_equity_price(request):
 
 
 @require_http_methods(["GET"])
+def api_get_fx_rate(request):
+    """
+    API: Get FX rate between two currencies.
+    Uses cis_fx_rate table, spot_rate_d column.
+
+    Query params:
+        - from: Source currency code (e.g., 'USD') - security currency
+        - to: Target currency code (e.g., 'SGD') - portfolio currency
+        - date: Optional date for historical rate (YYYY-MM-DD)
+
+    Returns:
+        JSON with rate, date, and fx_pair (e.g., 'USD-SGD')
+    """
+    from_currency = request.GET.get('from', '').strip().upper()
+    to_currency = request.GET.get('to', '').strip().upper()
+    rate_date = request.GET.get('date', '').strip() or None
+
+    if not from_currency or not to_currency:
+        return JsonResponse({
+            'rate': 1.0,
+            'error': 'Both from and to currencies are required',
+            'fx_pair': ''
+        })
+
+    # Same currency - rate is 1.0
+    if from_currency == to_currency:
+        return JsonResponse({
+            'rate': 1.0,
+            'fx_pair': f'{from_currency}-{to_currency}',
+            'date': rate_date or 'N/A',
+            'message': 'Same currency'
+        })
+
+    try:
+        # Use multicurrency service to get the FX rate
+        rate, date_used = multicurrency_service.get_fx_rate(
+            from_currency, to_currency, rate_date
+        )
+
+        return JsonResponse({
+            'rate': float(rate),
+            'fx_pair': f'{from_currency}-{to_currency}',
+            'date': str(date_used) if date_used else 'latest',
+            'found': True
+        })
+    except Exception as e:
+        logger.error(f"Error getting FX rate for {from_currency}-{to_currency}: {str(e)}")
+        return JsonResponse({
+            'rate': 1.0,
+            'fx_pair': f'{from_currency}-{to_currency}',
+            'error': str(e),
+            'found': False
+        })
+
+
+@require_http_methods(["GET"])
 def api_currencies(request):
     """
     API: Get available currencies for dropdown.

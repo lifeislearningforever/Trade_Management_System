@@ -67,6 +67,7 @@ urlpatterns = [
     path('api/currencies/', views.api_currencies, name='api_currencies'),
     path('api/securities-by-currency/', views.api_securities_by_currency, name='api_securities_by_currency'),
     path('api/equity-price/', views.api_get_equity_price, name='api_get_equity_price'),
+    path('api/fx-rate/', views.api_get_fx_rate, name='api_get_fx_rate'),
 
     # Trade charge API endpoints
     path('api/broker-charges/', views.api_get_broker_charges, name='api_get_broker_charges'),
