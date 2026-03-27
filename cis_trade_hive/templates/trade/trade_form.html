@@ -139,8 +139,18 @@
                                 <small class="text-muted" id="portfolio_info"></small>
                             </div>
 
+                            <!-- Portfolio Currency (auto-populated from portfolio selection - readonly) -->
+                            <div class="col-md-1">
+                                <label class="form-label">Port CCY</label>
+                                <input type="text" class="form-control bg-light" id="portfolio_currency_display"
+                                       value="{{ trade.portfolio_currency|default:'' }}"
+                                       readonly placeholder="-">
+                                <input type="hidden" name="portfolio_currency" id="portfolio_currency"
+                                       value="{{ trade.portfolio_currency|default:'' }}">
+                            </div>
+
                             <!-- Security (primary dropdown - select first) -->
-                            <div class="col-md-4">
+                            <div class="col-md-3">
                                 <label class="form-label">Security <span class="text-danger">*</span></label>
                                 <div class="input-group">
                                     <select class="form-select" name="security_label" id="security_label" required
@@ -166,8 +176,8 @@
                             </div>
 
                             <!-- Currency (auto-populated from security selection - readonly) -->
-                            <div class="col-md-2">
-                                <label class="form-label">Currency <span class="text-danger">*</span></label>
+                            <div class="col-md-1">
+                                <label class="form-label">Sec CCY <span class="text-danger">*</span></label>
                                 <input type="text" class="form-control bg-light" id="currency_code_display"
                                        value="{{ trade.currency_code|default:'' }}"
                                        readonly placeholder="Select Security">
@@ -714,6 +724,9 @@ document.getElementById('portfolio_short_name').addEventListener('change', funct
         pendingPortfolioRequest.abort();
     }
 
+    // Auto-populate portfolio currency from selected option
+    autoPopulateCurrencyFromPortfolio();
+
     if (!portfolioName) {
         statusIcon.innerHTML = '<i class="bi bi-question-circle text-muted"></i>';
         infoText.textContent = '';
@@ -962,6 +975,12 @@ document.addEventListener('DOMContentLoaded', function() {
         const mm = String(today.getMonth() + 1).padStart(2, '0');
         const dd = String(today.getDate()).padStart(2, '0');
         tradeDateEl.value = `${yyyy}-${mm}-${dd}`;
+    }
+
+    // If editing and portfolio is already set, auto-populate portfolio currency
+    const portfolioEl = document.getElementById('portfolio_short_name');
+    if (portfolioEl && portfolioEl.value) {
+        autoPopulateCurrencyFromPortfolio();
     }
 
     // If editing and security is already set, auto-populate currency
@@ -1352,6 +1371,25 @@ function autoPopulateCurrencyFromSecurity() {
     }
 }
 
+// Auto-populate currency from selected portfolio (readonly field)
+function autoPopulateCurrencyFromPortfolio() {
+    const portfolioEl = document.getElementById('portfolio_short_name');
+    const currencyHidden = document.getElementById('portfolio_currency');
+    const currencyDisplay = document.getElementById('portfolio_currency_display');
+    const selectedOption = portfolioEl.options[portfolioEl.selectedIndex];
+
+    if (selectedOption && selectedOption.dataset.currency) {
+        const currency = selectedOption.dataset.currency;
+        // Set both hidden field (for form submission) and display field
+        currencyHidden.value = currency;
+        currencyDisplay.value = currency;
+    } else {
+        // Clear currency if no portfolio selected
+        currencyHidden.value = '';
+        currencyDisplay.value = '';
+    }
+}
+
 // Initialize Select2 on ALL dropdowns using project-level init
 $(document).ready(function() {
     // List of ALL dropdown IDs to initialize with Select2
@@ -1399,6 +1437,13 @@ $(document).ready(function() {
     $('#quantity, #price').on('change input', function() {
         console.log('Quantity/Price changed, recalculating charges...');
         calculateBrokerCharges();
+    });
+
+    // Add Select2 change event for portfolio dropdown to trigger currency update
+    $('#portfolio_short_name').on('select2:select', function(e) {
+        console.log('=== PORTFOLIO SELECT2 CHANGED ===');
+        console.log('Selected portfolio:', $(this).val());
+        autoPopulateCurrencyFromPortfolio();
     });
 
     // Add Select2 change event for security dropdown to trigger currency and price update
