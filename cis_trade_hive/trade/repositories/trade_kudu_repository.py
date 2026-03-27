@@ -19,7 +19,7 @@ import uuid
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
-from core.repositories.impala_connection import impala_manager
+from core.repositories.impala_connection import impala_manager, query_cache
 from trade.repositories.trade_validation_repository import trade_validation_repository
 
 logger = logging.getLogger(__name__)
