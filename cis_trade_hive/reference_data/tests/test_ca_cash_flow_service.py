@@ -144,9 +144,11 @@ class CACashFlowServiceTestCase(TestCase):
         self.assertTrue(success)
 
     @patch('reference_data.services.ca_cash_flow_service.ca_cash_flow_queue_repository')
-    def test_queue_ca_for_processing_stock_split_skipped(self, mock_repo):
-        """Test queue_ca_for_processing skips STOCK_SPLIT type"""
+    def test_queue_ca_for_processing_stock_split_queued(self, mock_repo):
+        """Test queue_ca_for_processing queues STOCK_SPLIT type for position adjustment"""
         from reference_data.services.ca_cash_flow_service import CACashFlowService
+
+        mock_repo.insert.return_value = (True, 1710758400000)
 
         ca_data = self.sample_ca_data.copy()
         ca_data['ca_type'] = 'STOCK_SPLIT'
@@ -159,16 +161,37 @@ class CACashFlowServiceTestCase(TestCase):
         )
 
         self.assertTrue(success)
-        self.assertIsNone(queue_id)
-        mock_repo.insert.assert_not_called()
+        self.assertEqual(queue_id, 1710758400000)
+        mock_repo.insert.assert_called_once()
 
     @patch('reference_data.services.ca_cash_flow_service.ca_cash_flow_queue_repository')
-    def test_queue_ca_for_processing_bonus_issue_skipped(self, mock_repo):
-        """Test queue_ca_for_processing skips BONUS_ISSUE type"""
+    def test_queue_ca_for_processing_bonus_issue_queued(self, mock_repo):
+        """Test queue_ca_for_processing queues BONUS_ISSUE type for position adjustment"""
         from reference_data.services.ca_cash_flow_service import CACashFlowService
+
+        mock_repo.insert.return_value = (True, 1710758400000)
 
         ca_data = self.sample_ca_data.copy()
         ca_data['ca_type'] = 'BONUS_ISSUE'
+
+        service = CACashFlowService()
+        success, queue_id = service.queue_ca_for_processing(
+            ca_id=1710758300000,
+            ca_data=ca_data,
+            username='test_user'
+        )
+
+        self.assertTrue(success)
+        self.assertEqual(queue_id, 1710758400000)
+        mock_repo.insert.assert_called_once()
+
+    @patch('reference_data.services.ca_cash_flow_service.ca_cash_flow_queue_repository')
+    def test_queue_ca_for_processing_unknown_type_skipped(self, mock_repo):
+        """Test queue_ca_for_processing skips unknown CA types"""
+        from reference_data.services.ca_cash_flow_service import CACashFlowService
+
+        ca_data = self.sample_ca_data.copy()
+        ca_data['ca_type'] = 'UNKNOWN_TYPE'
 
         service = CACashFlowService()
         success, queue_id = service.queue_ca_for_processing(
@@ -236,21 +259,24 @@ class CACashFlowServiceTestCase(TestCase):
         self.assertEqual(result[0]['portfolio_short_name'], 'EQUITY_FUND_A')
 
     @patch('reference_data.services.ca_cash_flow_service.impala_manager')
-    def test_get_holdings_for_ca_with_portfolio_filter(self, mock_impala):
-        """Test get_holdings_for_ca filters by portfolio"""
+    def test_get_holdings_for_ca_returns_all_portfolios(self, mock_impala):
+        """Test get_holdings_for_ca returns all portfolios holding security (no filter)"""
         from reference_data.services.ca_cash_flow_service import CACashFlowService
 
-        mock_impala.execute_query.return_value = [self.sample_holdings[0]]
+        # CA applies at security level - returns ALL portfolios holding the security
+        mock_impala.execute_query.return_value = self.sample_holdings
 
         service = CACashFlowService()
         result = service.get_holdings_for_ca(
             security_name='AAPL',
-            portfolio_name='EQUITY_FUND_A',
             as_of_date='2026-03-15'
         )
 
+        # Should return all portfolios holding AAPL
+        self.assertEqual(len(result), 2)
         call_args = mock_impala.execute_query.call_args[0][0]
-        self.assertIn('portfolio_short_name', call_args)
+        # Query should filter by security but not portfolio
+        self.assertIn('security_label', call_args)
 
     @patch('reference_data.services.ca_cash_flow_service.impala_manager')
     def test_get_holdings_for_ca_multiple_securities(self, mock_impala):
@@ -270,22 +296,24 @@ class CACashFlowServiceTestCase(TestCase):
         self.assertIn('MSFT', call_args)
 
     @patch('reference_data.services.ca_cash_flow_service.impala_manager')
-    def test_get_holdings_for_ca_multiple_portfolios(self, mock_impala):
-        """Test get_holdings_for_ca with multiple portfolios"""
+    def test_get_holdings_for_ca_finds_multiple_portfolios(self, mock_impala):
+        """Test get_holdings_for_ca finds all portfolios holding security"""
         from reference_data.services.ca_cash_flow_service import CACashFlowService
 
+        # Simulate multiple portfolios holding the same security
         mock_impala.execute_query.return_value = self.sample_holdings
 
         service = CACashFlowService()
         result = service.get_holdings_for_ca(
             security_name='AAPL',
-            portfolio_name='EQUITY_FUND_A,GROWTH_FUND_B',
             as_of_date='2026-03-15'
         )
 
-        call_args = mock_impala.execute_query.call_args[0][0]
-        self.assertIn('EQUITY_FUND_A', call_args)
-        self.assertIn('GROWTH_FUND_B', call_args)
+        # Should return both portfolios holding AAPL
+        self.assertEqual(len(result), 2)
+        portfolio_names = [h['portfolio_short_name'] for h in result]
+        self.assertIn('EQUITY_FUND_A', portfolio_names)
+        self.assertIn('GROWTH_FUND_B', portfolio_names)
 
     @patch('reference_data.services.ca_cash_flow_service.impala_manager')
     def test_get_holdings_for_ca_no_date(self, mock_impala):
@@ -365,8 +393,11 @@ class CACashFlowServiceTestCase(TestCase):
             portfolio_short_name='EQUITY_FUND_A',
             security_name='AAPL',
             quantity=Decimal('10000'),
-            amount=Decimal('2500.00'),
-            currency='USD',
+            amount_fc=Decimal('2500.00'),
+            amount_lc=Decimal('2500.00'),
+            foreign_currency='USD',
+            local_currency='USD',
+            fx_rate=Decimal('1.0'),
             ex_date='2026-03-15',
             record_date='2026-03-16',
             payment_date='2026-03-20',
@@ -392,8 +423,11 @@ class CACashFlowServiceTestCase(TestCase):
             portfolio_short_name='EQUITY_FUND_A',
             security_name='AAPL',
             quantity=Decimal('10000'),
-            amount=Decimal('2500.00'),
-            currency='USD',
+            amount_fc=Decimal('2500.00'),
+            amount_lc=Decimal('2500.00'),
+            foreign_currency='USD',
+            local_currency='USD',
+            fx_rate=Decimal('1.0'),
             ex_date='2026-03-15',
             record_date='2026-03-16',
             payment_date='2026-03-20',
@@ -419,8 +453,11 @@ class CACashFlowServiceTestCase(TestCase):
             portfolio_short_name='EQUITY_FUND_A',
             security_name='AAPL',
             quantity=Decimal('10000'),
-            amount=Decimal('2500.00'),
-            currency='USD',
+            amount_fc=Decimal('2500.00'),
+            amount_lc=Decimal('2500.00'),
+            foreign_currency='USD',
+            local_currency='USD',
+            fx_rate=Decimal('1.0'),
             ex_date='2026-03-15',
             record_date='2026-03-16',
             payment_date='2026-03-20',
@@ -558,7 +595,9 @@ class CACashFlowServiceTestCase(TestCase):
         mock_queue_repo.mark_processing.return_value = True
         mock_queue_repo.mark_failed.return_value = True
         mock_queue_repo.insert_log.return_value = (True, 123)
-        mock_impala.execute_query.return_value = self.sample_holdings
+        # First returns holdings, subsequent calls for position updates return empty
+        mock_impala.execute_query.side_effect = [self.sample_holdings, None, None, None, None]
+        mock_impala.execute_write.return_value = True
         # First succeeds, second fails
         mock_cf_repo.insert.side_effect = [(True, 123), (False, None)]
 
@@ -722,7 +761,8 @@ class CACashFlowServiceTestCase(TestCase):
         """Test CASH_FLOW_CA_TYPES constant"""
         from reference_data.services.ca_cash_flow_service import CACashFlowService
 
-        expected_types = ['DIVIDEND', 'INTEREST', 'COUPON', 'CAPITAL_DISTRIBUTION']
+        # Cash flow CA types include various dividend and interest types
+        expected_types = ['DIVIDEND', 'SPECIAL_DIVIDEND', 'INTEREST', 'COUPON', 'ROC', 'CAPITAL_DISTRIBUTION']
         self.assertEqual(CACashFlowService.CASH_FLOW_CA_TYPES, expected_types)
 
     def test_ca_to_cf_type_map(self):

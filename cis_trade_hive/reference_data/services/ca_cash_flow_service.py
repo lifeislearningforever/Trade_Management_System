@@ -25,10 +25,19 @@ class CACashFlowService:
     POSITION_TABLE = 'cis_trade_position'
 
     # CA types that generate cash flows (payment to holder)
-    CASH_FLOW_CA_TYPES = ['DIVIDEND', 'SPECIAL_DIVIDEND', 'INTEREST', 'COUPON', 'ROC']
+    # Includes both internal names and dropdown values
+    CASH_FLOW_CA_TYPES = [
+        'DIVIDEND', 'SPECIAL_DIVIDEND', 'INTEREST', 'COUPON', 'ROC',
+        'CAPITAL_DISTRIBUTION',  # From dropdown
+    ]
 
     # CA types that affect position quantity (no cash flow)
-    POSITION_ADJUSTMENT_CA_TYPES = ['BONUS_ISSUE', 'SPLIT', 'RIGHTS_ENTITLEMENT', 'WARRANT_ENTITLEMENT']
+    # Includes both internal names and dropdown values
+    POSITION_ADJUSTMENT_CA_TYPES = [
+        'BONUS_ISSUE', 'SPLIT', 'STOCK_SPLIT', 'REVERSE_SPLIT',
+        'RIGHTS_ENTITLEMENT', 'RIGHTS_ISSUE',
+        'WARRANT_ENTITLEMENT', 'CONSOLIDATION',
+    ]
 
     # CA type to Cash Flow type mapping
     CA_TO_CF_TYPE_MAP = {
@@ -912,14 +921,14 @@ class CACashFlowService:
                             updated_by=created_by,
                             dry_run=dry_run
                         )
-                    elif ca_type == 'SPLIT':
-                        # qty_new = qty_old × ratio, AVP = AVP_old / ratio
+                    elif ca_type in ['SPLIT', 'STOCK_SPLIT', 'CONSOLIDATION']:
+                        # Forward split: qty_new = qty_old × ratio, AVP = AVP_old / ratio
                         success = self._process_split(
                             portfolio_short_name=portfolio_short_name,
                             security_name=security_name,
                             old_quantity=quantity,
                             old_avg_cost=avg_cost,
-                            ratio=price,  # price field stores the split ratio
+                            ratio=price,  # price field stores the split ratio (e.g., 2 for 2:1 split)
                             ca_id=ca_id,
                             ca_number=ca_number,
                             ex_date=ex_date,
@@ -928,7 +937,25 @@ class CACashFlowService:
                             updated_by=created_by,
                             dry_run=dry_run
                         )
-                    elif ca_type in ['RIGHTS_ENTITLEMENT', 'WARRANT_ENTITLEMENT']:
+                    elif ca_type == 'REVERSE_SPLIT':
+                        # Reverse split: qty_new = qty_old / ratio, AVP = AVP_old × ratio
+                        # For reverse split, invert the ratio
+                        reverse_ratio = Decimal('1') / price if price > 0 else Decimal('1')
+                        success = self._process_split(
+                            portfolio_short_name=portfolio_short_name,
+                            security_name=security_name,
+                            old_quantity=quantity,
+                            old_avg_cost=avg_cost,
+                            ratio=reverse_ratio,  # Inverted ratio for reverse split
+                            ca_id=ca_id,
+                            ca_number=ca_number,
+                            ex_date=ex_date,
+                            security_currency=security_currency,
+                            portfolio_currency=portfolio_currency,
+                            updated_by=created_by,
+                            dry_run=dry_run
+                        )
+                    elif ca_type in ['RIGHTS_ENTITLEMENT', 'RIGHTS_ISSUE', 'WARRANT_ENTITLEMENT']:
                         # Creates new position for the rights/warrant security
                         # For now, just log - actual implementation would need the new security details
                         logger.info(f"[POS_ADJ] {ca_type}: Would create new position for rights/warrant. "
