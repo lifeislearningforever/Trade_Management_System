@@ -110,6 +110,22 @@ CREATE TABLE cis_trade (
     total_amount_lc DECIMAL(20,6),   -- Total amount in Local Currency (Portfolio Currency)
 
     -- ========================================
+    -- AUTO-CALCULATED CHARGES (from Charge LUT)
+    -- ========================================
+    charge_fee_type STRING,              -- Fee type from charge lookup table
+    charge_exchange STRING,              -- Exchange code for charge lookup
+    charge_country STRING,               -- Country code for charge lookup
+    charge_fee_rule STRING,              -- Fee rule applied
+    charge_fee_value DECIMAL(20,6),      -- Fee value from lookup
+    calculated_commission DECIMAL(20,6), -- Brokerage Fee (auto-calculated)
+    calculated_clearing_fee DECIMAL(20,6), -- Clearing Fee (auto-calculated)
+    calculated_trading_fee DECIMAL(20,6),  -- Trading Fee (auto-calculated)
+    calculated_gst DECIMAL(20,6),        -- GST (auto-calculated)
+    calculated_other_fees DECIMAL(20,6), -- FFP/SGX SI FEE, etc. (auto-calculated)
+    total_calculated_charges DECIMAL(20,6), -- Sum of all auto-calculated charges
+    charges_auto_calculated BOOLEAN,     -- Flag: true if charges were auto-calculated
+
+    -- ========================================
     -- GL & ACCOUNTING (from Buy_part2.JPG)
     -- ========================================
     open_close_position STRING,      -- Dropdown: Open/Close
