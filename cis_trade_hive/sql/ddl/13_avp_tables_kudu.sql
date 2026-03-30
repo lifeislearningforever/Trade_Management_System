@@ -58,8 +58,14 @@ CREATE TABLE cis_trade_position (
 
     -- Position State (8 decimal precision for AVP)
     quantity DECIMAL(20,8),              -- Current holding quantity
-    average_cost DECIMAL(20,8),          -- Weighted average cost (AVP)
-    total_cost DECIMAL(20,8),            -- Total cost basis
+
+    -- Cost in Foreign Currency (FC = Security Currency)
+    average_cost_fc DECIMAL(20,8),       -- Weighted average cost (AVP) in FC
+    total_cost_fc DECIMAL(20,8),         -- Total cost basis in FC
+
+    -- Cost in Local Currency (LC = Portfolio Currency)
+    average_cost_lc DECIMAL(20,8),       -- Weighted average cost (AVP) in LC
+    total_cost_lc DECIMAL(20,8),         -- Total cost basis in LC
 
     -- P&L in Foreign Currency (Security Currency)
     realized_pnl_fc DECIMAL(20,8),       -- Cumulative realized P&L in FC
@@ -69,14 +75,14 @@ CREATE TABLE cis_trade_position (
     realized_pnl_lc DECIMAL(20,8),       -- Cumulative realized P&L in LC
     unrealized_pnl_lc DECIMAL(20,8),     -- Unrealized P&L in LC
 
-    -- Legacy P&L columns (for backward compatibility, same as FC)
-    realized_pnl DECIMAL(20,8),          -- Cumulative realized P&L (= realized_pnl_fc)
-    unrealized_pnl DECIMAL(20,8),        -- Unrealized P&L (= unrealized_pnl_fc)
-
     -- Market Value
-    current_price DECIMAL(20,8),         -- Latest market price in FC
-    market_value DECIMAL(20,8),          -- qty * current_price (in FC)
+    market_price DECIMAL(20,8),          -- Latest market price in FC
+    market_value_fc DECIMAL(20,8),       -- qty * market_price (in FC)
     market_value_lc DECIMAL(20,8),       -- Market value in LC
+
+    -- Dividend Tracking (accumulated from Corporate Actions)
+    dividend_fc DECIMAL(20,8),           -- Accumulated dividends in FC
+    dividend_lc DECIMAL(20,8),           -- Accumulated dividends in LC
 
     -- Trade that caused this version
     trade_id BIGINT,
@@ -88,12 +94,9 @@ CREATE TABLE cis_trade_position (
     sub_custodian STRING,
 
     -- Multi-currency support
-    security_currency STRING,            -- Security's trading currency
-    portfolio_currency STRING,           -- Portfolio's base currency
-    fx_rate DECIMAL(20,8),               -- FX rate used
-    average_cost_base DECIMAL(20,8),     -- AVP in base currency
-    total_cost_base DECIMAL(20,8),       -- Total cost in base currency
-    realized_pnl_base DECIMAL(20,8),     -- Realized P&L in base currency
+    security_currency STRING,            -- Security's trading currency (FC)
+    portfolio_currency STRING,           -- Portfolio's base currency (LC)
+    fx_rate DECIMAL(20,8),               -- FX rate used (FC to LC)
 
     -- Status
     status STRING,                       -- OPEN, CLOSED
@@ -107,7 +110,8 @@ CREATE TABLE cis_trade_position (
     last_ca_date STRING,                 -- Date of last CA (ex_date)
     last_cash_flow_id BIGINT,            -- Last cash flow ID generated from CA
     last_cash_flow_number STRING,        -- Last cash flow number
-    last_cash_flow_amount DECIMAL(20,8), -- Amount of last cash flow (in local currency)
+    last_cash_flow_amount_fc DECIMAL(20,8), -- Amount of last cash flow in FC (foreign_ccy_amt)
+    last_cash_flow_amount_lc DECIMAL(20,8), -- Amount of last cash flow in LC (local_ccy_amt)
 
     -- Metadata
     created_by STRING,
@@ -351,7 +355,8 @@ TBLPROPERTIES (
 --   AND status = 'OPEN';
 
 -- Get all TRADE DATE positions for a portfolio
--- SELECT security_label, quantity, average_cost, total_cost, position_date
+-- SELECT security_label, quantity, average_cost_fc, total_cost_fc, position_date,
+--        dividend_fc, dividend_lc
 -- FROM cis_trade_position
 -- WHERE portfolio_short_name = 'FUND-001'
 --   AND position_basis = 'TRADE_DATE'

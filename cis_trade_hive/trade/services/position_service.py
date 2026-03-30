@@ -195,9 +195,11 @@ class PositionService:
         if current:
             # Existing position - add to it
             old_qty = Decimal(str(current.get('quantity', 0) or 0))
-            old_avg_cost = Decimal(str(current.get('average_cost', 0) or 0))
+            # Use new column name average_cost_fc (fallback to average_cost for backward compat)
+            old_avg_cost = Decimal(str(current.get('average_cost_fc') or current.get('average_cost', 0) or 0))
             old_total_cost = old_qty * old_avg_cost
-            old_realized_pnl = Decimal(str(current.get('realized_pnl', 0) or 0))
+            # Use new column name realized_pnl_fc (fallback to realized_pnl for backward compat)
+            old_realized_pnl = Decimal(str(current.get('realized_pnl_fc') or current.get('realized_pnl', 0) or 0))
             position_id = current.get('position_id')
 
             # Calculate new values
@@ -249,7 +251,7 @@ class PositionService:
             old_total_cost_lc = Decimal(str(current.get('total_cost_lc', 0) or 0))
             if old_total_cost_lc == 0:
                 # Fallback if no LC value stored - use FC * current FX
-                old_total_cost_lc = Decimal(str(current.get('total_cost', 0) or 0)) * fx_rate
+                old_total_cost_lc = Decimal(str(current.get('total_cost_fc') or current.get('total_cost', 0) or 0)) * fx_rate
             trade_cost_lc = trade_cost * fx_rate
             new_total_cost_lc = old_total_cost_lc + trade_cost_lc
             new_avg_cost_lc = (new_total_cost_lc / new_qty).quantize(
@@ -265,21 +267,30 @@ class PositionService:
             old_realized_pnl_lc = Decimal('0')
 
         # Build position data
+        # FC = Foreign Currency (Security Currency)
+        # LC = Local Currency (Portfolio Currency)
         position_data = {
             'position_id': position_id,
             'portfolio_short_name': portfolio_id,
             'security_label': security_id,
             'quantity': float(new_qty),
-            'average_cost': float(new_avg_cost),
-            'total_cost': float(new_total_cost),
-            'current_price': float(market_price),
-            'market_value': float(market_value),
-            'unrealized_pnl': float(unrealized_pnl),
-            'realized_pnl': float(old_realized_pnl),
-            # LC values for NON-REVALUED portfolios (historical cost basis)
+            # Cost in FC (Foreign Currency = Security Currency)
+            'average_cost_fc': float(new_avg_cost),
+            'total_cost_fc': float(new_total_cost),
+            # Cost in LC (Local Currency = Portfolio Currency)
             'average_cost_lc': float(new_avg_cost_lc),
             'total_cost_lc': float(new_total_cost_lc),
+            # Market value
+            'market_price': float(market_price),
+            'market_value_fc': float(market_value),
+            # P&L
+            'unrealized_pnl_fc': float(unrealized_pnl),
+            'realized_pnl_fc': float(old_realized_pnl),
             'realized_pnl_lc': float(old_realized_pnl_lc),
+            # Dividend tracking (initialized to 0 or carry forward)
+            'dividend_fc': float(current.get('dividend_fc', 0) or 0) if current else 0,
+            'dividend_lc': float(current.get('dividend_lc', 0) or 0) if current else 0,
+            # Trade reference
             'trade_id': trade_id,
             'trade_type': 'BUY',
             'position_date': position_date,
@@ -335,8 +346,10 @@ class PositionService:
             return False, f"No position found for {security_id} in portfolio {portfolio_id}", None
 
         old_qty = Decimal(str(current.get('quantity', 0) or 0))
-        old_avg_cost = Decimal(str(current.get('average_cost', 0) or 0))
-        old_realized_pnl = Decimal(str(current.get('realized_pnl', 0) or 0))
+        # Use new column name average_cost_fc (fallback to average_cost for backward compat)
+        old_avg_cost = Decimal(str(current.get('average_cost_fc') or current.get('average_cost', 0) or 0))
+        # Use new column name realized_pnl_fc (fallback to realized_pnl for backward compat)
+        old_realized_pnl = Decimal(str(current.get('realized_pnl_fc') or current.get('realized_pnl', 0) or 0))
         position_id = current.get('position_id')
 
         # Validate: no short selling
@@ -378,21 +391,30 @@ class PositionService:
 
         if new_qty <= 0:
             # Position fully closed
+            # FC = Foreign Currency (Security Currency)
+            # LC = Local Currency (Portfolio Currency)
             position_data = {
                 'position_id': position_id,
                 'portfolio_short_name': portfolio_id,
                 'security_label': security_id,
                 'quantity': 0,
-                'average_cost': 0,
-                'total_cost': 0,
-                'current_price': 0,
-                'market_value': 0,
-                'unrealized_pnl': 0,
-                'realized_pnl': float(new_realized_pnl),
-                # LC values for NON-REVALUED
+                # Cost in FC
+                'average_cost_fc': 0,
+                'total_cost_fc': 0,
+                # Cost in LC
                 'average_cost_lc': 0,
                 'total_cost_lc': 0,
+                # Market value
+                'market_price': 0,
+                'market_value_fc': 0,
+                # P&L
+                'unrealized_pnl_fc': 0,
+                'realized_pnl_fc': float(new_realized_pnl),
                 'realized_pnl_lc': float(new_realized_pnl_lc),
+                # Dividend tracking - carry forward from current position
+                'dividend_fc': float(current.get('dividend_fc', 0) or 0),
+                'dividend_lc': float(current.get('dividend_lc', 0) or 0),
+                # Trade reference
                 'trade_id': trade_id,
                 'trade_type': 'SELL',
                 'position_date': position_date,
@@ -417,21 +439,30 @@ class PositionService:
             market_value = new_qty * market_price
             unrealized_pnl = market_value - new_total_cost
 
+            # FC = Foreign Currency (Security Currency)
+            # LC = Local Currency (Portfolio Currency)
             position_data = {
                 'position_id': position_id,
                 'portfolio_short_name': portfolio_id,
                 'security_label': security_id,
                 'quantity': float(new_qty),
-                'average_cost': float(old_avg_cost),  # Unchanged
-                'total_cost': float(new_total_cost),
-                'current_price': float(market_price),
-                'market_value': float(market_value),
-                'unrealized_pnl': float(unrealized_pnl),
-                'realized_pnl': float(new_realized_pnl),
-                # LC values for NON-REVALUED
-                'average_cost_lc': float(old_avg_cost_lc),  # Unchanged
+                # Cost in FC - unchanged for SELL
+                'average_cost_fc': float(old_avg_cost),
+                'total_cost_fc': float(new_total_cost),
+                # Cost in LC - unchanged for SELL
+                'average_cost_lc': float(old_avg_cost_lc),
                 'total_cost_lc': float(new_total_cost_lc),
+                # Market value
+                'market_price': float(market_price),
+                'market_value_fc': float(market_value),
+                # P&L
+                'unrealized_pnl_fc': float(unrealized_pnl),
+                'realized_pnl_fc': float(new_realized_pnl),
                 'realized_pnl_lc': float(new_realized_pnl_lc),
+                # Dividend tracking - carry forward from current position
+                'dividend_fc': float(current.get('dividend_fc', 0) or 0),
+                'dividend_lc': float(current.get('dividend_lc', 0) or 0),
+                # Trade reference
                 'trade_id': trade_id,
                 'trade_type': 'SELL',
                 'position_date': position_date,
@@ -679,21 +710,29 @@ class PositionService:
             # Match columns to cis_trade_position table structure (DDL: 13_avp_tables_kudu.sql)
             # FC = Foreign Currency (Security Currency)
             # LC = Local Currency (Portfolio Currency)
-            # Added: is_latest column for version tracking
-            # Added: realized_pnl_fc, unrealized_pnl_fc, realized_pnl_lc, unrealized_pnl_lc, market_value_lc
+            # Updated column names: average_cost_fc, total_cost_fc, average_cost_lc, total_cost_lc
+            # Added: market_price, market_value_fc, dividend_fc, dividend_lc
+            # Added: last_cash_flow_amount_fc, last_cash_flow_amount_lc
             columns = [
                 'version_id', 'position_id', 'position_date',
                 'portfolio_short_name', 'security_label',
-                'quantity', 'average_cost', 'total_cost',
-                'realized_pnl', 'current_price', 'market_value', 'unrealized_pnl',
-                # P&L in FC (Foreign Currency = Security Currency)
+                'quantity',
+                # Cost in FC (Foreign Currency = Security Currency)
+                'average_cost_fc', 'total_cost_fc',
+                # Cost in LC (Local Currency = Portfolio Currency)
+                'average_cost_lc', 'total_cost_lc',
+                # P&L in FC
                 'realized_pnl_fc', 'unrealized_pnl_fc',
-                # P&L in LC (Local Currency = Portfolio Currency)
-                'realized_pnl_lc', 'unrealized_pnl_lc', 'market_value_lc',
+                # P&L in LC
+                'realized_pnl_lc', 'unrealized_pnl_lc',
+                # Market value
+                'market_price', 'market_value_fc', 'market_value_lc',
+                # Dividend tracking
+                'dividend_fc', 'dividend_lc',
+                # Trade reference
                 'trade_id', 'trade_type',
                 'lots_held', 'custodian', 'sub_custodian',
                 'security_currency', 'portfolio_currency', 'fx_rate',
-                'average_cost_base', 'total_cost_base', 'realized_pnl_base',
                 'status', 'is_active', 'is_latest',
                 'created_by', 'created_at', 'updated_by', 'updated_at'
             ]
@@ -704,11 +743,20 @@ class PositionService:
                     return 'NULL'
                 return f"CAST({val} AS DECIMAL(20,8))"
 
-            # FC P&L = values in Security Currency (as calculated)
-            # LC P&L = values converted to Portfolio Currency using FX rate
-            realized_pnl_fc_val = realized_pnl  # FC = Security Currency
-            unrealized_pnl_fc_val = unrealized_pnl  # FC = Security Currency
-            # realized_pnl_lc and unrealized_pnl_lc already calculated above
+            # Get values from position_data (already set with _fc and _lc suffixes)
+            # Fall back to calculated local values for LC values if not in position_data
+            average_cost_fc_val = float(position_data.get('average_cost_fc', 0) or 0)
+            total_cost_fc_val = float(position_data.get('total_cost_fc', 0) or 0)
+            realized_pnl_fc_val = float(position_data.get('realized_pnl_fc', 0) or 0)
+            unrealized_pnl_fc_val = float(position_data.get('unrealized_pnl_fc', 0) or 0)
+            market_price_val = float(position_data.get('market_price', 0) or 0)
+            market_value_fc_val = float(position_data.get('market_value_fc', 0) or 0)
+            dividend_fc_val = float(position_data.get('dividend_fc', 0) or 0)
+            dividend_lc_val = float(position_data.get('dividend_lc', 0) or 0)
+
+            # Use LC values from position_data if available, otherwise use calculated values
+            average_cost_lc_val = float(position_data.get('average_cost_lc', 0) or 0) or average_cost_lc
+            total_cost_lc_val = float(position_data.get('total_cost_lc', 0) or 0) or total_cost_lc
 
             values = [
                 str(version_id),
@@ -717,19 +765,26 @@ class PositionService:
                 f"'{self._escape(portfolio_id)}'",
                 f"'{self._escape(security_id)}'",
                 cast_decimal(quantity),
-                cast_decimal(average_cost),
-                cast_decimal(total_cost),
-                cast_decimal(realized_pnl),
-                cast_decimal(position_data.get('current_price', 0) or 0),
-                cast_decimal(market_value),
-                cast_decimal(unrealized_pnl),
-                # P&L in FC (Foreign Currency = Security Currency)
+                # Cost in FC
+                cast_decimal(average_cost_fc_val),
+                cast_decimal(total_cost_fc_val),
+                # Cost in LC
+                cast_decimal(average_cost_lc_val),
+                cast_decimal(total_cost_lc_val),
+                # P&L in FC
                 cast_decimal(realized_pnl_fc_val),
                 cast_decimal(unrealized_pnl_fc_val),
-                # P&L in LC (Local Currency = Portfolio Currency) - calculated above with FX rate
+                # P&L in LC
                 cast_decimal(realized_pnl_lc),
                 cast_decimal(unrealized_pnl_lc),
+                # Market value
+                cast_decimal(market_price_val),
+                cast_decimal(market_value_fc_val),
                 cast_decimal(market_value_lc),
+                # Dividend tracking
+                cast_decimal(dividend_fc_val),
+                cast_decimal(dividend_lc_val),
+                # Trade reference
                 str(position_data.get('trade_id')) if position_data.get('trade_id') else 'NULL',
                 f"'{position_data.get('trade_type', '')}'",
                 str(position_data.get('lots_held', 0)) if position_data.get('lots_held') else 'NULL',
@@ -738,9 +793,6 @@ class PositionService:
                 f"'{self._escape(security_currency)}'" if security_currency else 'NULL',
                 f"'{self._escape(portfolio_currency)}'" if portfolio_currency else 'NULL',
                 cast_decimal(fx_rate) if fx_rate else 'NULL',
-                cast_decimal(average_cost_lc),
-                cast_decimal(total_cost_lc),
-                cast_decimal(realized_pnl_lc),
                 f"'{position_data.get('status', 'OPEN')}'",
                 str(position_data.get('is_active', True)).lower(),
                 'true',  # is_latest = true for new version
@@ -786,17 +838,19 @@ class PositionService:
         """
         try:
             # Get existing versions for this date that are marked is_latest=true
+            # Using new column names: average_cost_fc, total_cost_fc, market_price, market_value_fc, etc.
             query = f"""
             SELECT version_id, position_id, position_date,
                    portfolio_short_name, security_label,
-                   quantity, average_cost, total_cost,
-                   realized_pnl, current_price, market_value, unrealized_pnl,
+                   quantity, average_cost_fc, total_cost_fc,
+                   average_cost_lc, total_cost_lc,
                    realized_pnl_fc, unrealized_pnl_fc,
-                   realized_pnl_lc, unrealized_pnl_lc, market_value_lc,
+                   realized_pnl_lc, unrealized_pnl_lc,
+                   market_price, market_value_fc, market_value_lc,
+                   dividend_fc, dividend_lc,
                    trade_id, trade_type,
                    lots_held, custodian, sub_custodian,
                    security_currency, portfolio_currency, fx_rate,
-                   average_cost_base, total_cost_base, realized_pnl_base,
                    status, is_active,
                    created_by, created_at, updated_by, updated_at
             FROM {self.DATABASE}.{self.POSITION_TABLE}
@@ -816,35 +870,39 @@ class PositionService:
 
             for row in existing:
                 # Re-insert with is_latest=false (UPSERT by version_id)
+                # Using new column names
                 update_query = f"""
                 UPSERT INTO {self.DATABASE}.{self.POSITION_TABLE}
                 (version_id, position_id, position_date,
                  portfolio_short_name, security_label,
-                 quantity, average_cost, total_cost,
-                 realized_pnl, current_price, market_value, unrealized_pnl,
+                 quantity, average_cost_fc, total_cost_fc,
+                 average_cost_lc, total_cost_lc,
                  realized_pnl_fc, unrealized_pnl_fc,
-                 realized_pnl_lc, unrealized_pnl_lc, market_value_lc,
+                 realized_pnl_lc, unrealized_pnl_lc,
+                 market_price, market_value_fc, market_value_lc,
+                 dividend_fc, dividend_lc,
                  trade_id, trade_type,
                  lots_held, custodian, sub_custodian,
                  security_currency, portfolio_currency, fx_rate,
-                 average_cost_base, total_cost_base, realized_pnl_base,
                  status, is_active, is_latest,
                  created_by, created_at, updated_by, updated_at)
                 VALUES (
                     {row['version_id']}, {row['position_id']}, '{row['position_date']}',
                     '{self._escape(row['portfolio_short_name'])}', '{self._escape(row['security_label'])}',
                     CAST({row.get('quantity') or 0} AS DECIMAL(20,8)),
-                    CAST({row.get('average_cost') or 0} AS DECIMAL(20,8)),
-                    CAST({row.get('total_cost') or 0} AS DECIMAL(20,8)),
-                    CAST({row.get('realized_pnl') or 0} AS DECIMAL(20,8)),
-                    CAST({row.get('current_price') or 0} AS DECIMAL(20,8)),
-                    CAST({row.get('market_value') or 0} AS DECIMAL(20,8)),
-                    CAST({row.get('unrealized_pnl') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('average_cost_fc') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('total_cost_fc') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('average_cost_lc') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('total_cost_lc') or 0} AS DECIMAL(20,8)),
                     CAST({row.get('realized_pnl_fc') or 0} AS DECIMAL(20,8)),
                     CAST({row.get('unrealized_pnl_fc') or 0} AS DECIMAL(20,8)),
                     CAST({row.get('realized_pnl_lc') or 0} AS DECIMAL(20,8)),
                     CAST({row.get('unrealized_pnl_lc') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('market_price') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('market_value_fc') or 0} AS DECIMAL(20,8)),
                     CAST({row.get('market_value_lc') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('dividend_fc') or 0} AS DECIMAL(20,8)),
+                    CAST({row.get('dividend_lc') or 0} AS DECIMAL(20,8)),
                     {row.get('trade_id') or 'NULL'},
                     '{row.get('trade_type', '')}',
                     {row.get('lots_held') or 'NULL'},
@@ -853,9 +911,6 @@ class PositionService:
                     {f"'{self._escape(row.get('security_currency', ''))}'" if row.get('security_currency') else 'NULL'},
                     {f"'{self._escape(row.get('portfolio_currency', ''))}'" if row.get('portfolio_currency') else 'NULL'},
                     {f"CAST({row.get('fx_rate')} AS DECIMAL(20,8))" if row.get('fx_rate') else 'NULL'},
-                    CAST({row.get('average_cost_base') or 0} AS DECIMAL(20,8)),
-                    CAST({row.get('total_cost_base') or 0} AS DECIMAL(20,8)),
-                    CAST({row.get('realized_pnl_base') or 0} AS DECIMAL(20,8)),
                     '{row.get('status', 'OPEN')}',
                     {str(row.get('is_active', True)).lower()},
                     false,
