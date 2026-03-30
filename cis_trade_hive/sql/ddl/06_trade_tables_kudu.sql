@@ -102,7 +102,11 @@ CREATE TABLE cis_trade (
     accrued_interest DECIMAL(20,6),  -- Calculated: Interest accrued till trade date
     sec_fee DECIMAL(20,6),           -- Regulatory/security fee
     other_charges DECIMAL(20,6),     -- Other charges
-    total_amount DECIMAL(20,6),      -- Calculated: Final amount
+    total_amount DECIMAL(20,6),      -- Calculated: Final amount (legacy, same as total_amount_fc)
+
+    -- Multi-Currency Total Amount (FC = Foreign/Security Currency, LC = Local/Portfolio Currency)
+    total_amount_fc DECIMAL(20,6),   -- Total amount in Foreign Currency (Security Currency)
+    total_amount_lc DECIMAL(20,6),   -- Total amount in Local Currency (Portfolio Currency)
 
     -- ========================================
     -- GL & ACCOUNTING (from Buy_part2.JPG)
@@ -354,6 +358,10 @@ TBLPROPERTIES (
 -- Latest position = MAX(version_id) per position_id.
 -- Replaces both old cis_trade_details and cis_trade_details_history tables.
 -- Position created on trade create (not settle).
+--
+-- CURRENCY NAMING CONVENTION:
+--   FC = Foreign Currency = Security Currency (e.g., USD for AAPL)
+--   LC = Local Currency = Portfolio Currency (e.g., SGD for Singapore fund)
 -- ============================================================================
 
 DROP TABLE IF EXISTS cis_trade_position;
@@ -362,11 +370,19 @@ CREATE TABLE cis_trade_position (
     -- Primary Key (auto-increment per snapshot)
     version_id BIGINT NOT NULL,
 
-    -- Position Identity (same across all versions for a portfolio+security)
+    -- Position Identity (same across all versions for a portfolio+security+basis)
     position_id BIGINT NOT NULL,
 
-    -- Snapshot date
+    -- POSITION BASIS: 'TRADE_DATE' or 'SETTLE_DATE'
+    -- Determines when this position record takes effect
+    position_basis STRING NOT NULL DEFAULT 'TRADE_DATE',
+
+    -- Snapshot date (trade_date or settle_date depending on position_basis)
     position_date STRING NOT NULL,
+
+    -- Reference dates from the trade
+    trade_date STRING,                   -- Original trade date
+    settle_date STRING,                  -- Original settlement date
 
     -- Portfolio Reference
     portfolio_short_name STRING NOT NULL,
@@ -374,37 +390,72 @@ CREATE TABLE cis_trade_position (
     -- Security Reference
     security_label STRING NOT NULL,
 
-    -- Position State
-    quantity DECIMAL(20,6),              -- Current holding quantity
-    average_cost DECIMAL(20,6),          -- Weighted average cost
-    total_cost DECIMAL(20,6),            -- Total cost basis
+    -- Position State (8 decimal precision for AVP)
+    quantity DECIMAL(20,8),              -- Current holding quantity
 
-    -- P&L
-    realized_pnl DECIMAL(20,6),          -- Cumulative realized P&L
-    current_price DECIMAL(20,6),         -- Latest market price
-    market_value DECIMAL(20,6),          -- qty * current_price
-    unrealized_pnl DECIMAL(20,6),        -- market_value - total_cost
+    -- Cost in Foreign Currency (FC = Security Currency)
+    average_cost_fc DECIMAL(20,8),       -- Weighted average cost (AVP) in FC
+    total_cost_fc DECIMAL(20,8),         -- Total cost basis in FC
+
+    -- Cost in Local Currency (LC = Portfolio Currency)
+    average_cost_lc DECIMAL(20,8),       -- Weighted average cost (AVP) in LC
+    total_cost_lc DECIMAL(20,8),         -- Total cost basis in LC
+
+    -- P&L in Foreign Currency (Security Currency)
+    realized_pnl_fc DECIMAL(20,8),       -- Cumulative realized P&L in FC
+    unrealized_pnl_fc DECIMAL(20,8),     -- Unrealized P&L in FC (market_value - total_cost)
+
+    -- P&L in Local Currency (Portfolio Currency)
+    realized_pnl_lc DECIMAL(20,8),       -- Cumulative realized P&L in LC
+    unrealized_pnl_lc DECIMAL(20,8),     -- Unrealized P&L in LC
+
+    -- Market Value
+    market_price DECIMAL(20,8),          -- Latest market price in FC
+    market_value_fc DECIMAL(20,8),       -- qty * market_price (in FC)
+    market_value_lc DECIMAL(20,8),       -- Market value in LC
+
+    -- Dividend Tracking (accumulated from Corporate Actions)
+    dividend_fc DECIMAL(20,8),           -- Accumulated dividends in FC
+    dividend_lc DECIMAL(20,8),           -- Accumulated dividends in LC
 
     -- Trade that caused this version
     trade_id BIGINT,
-    trade_type STRING,                   -- BUY, SELL, ADD_LONG, DELIVER_LONG, MARKET_REFRESH
+    trade_type STRING,                   -- BUY, SELL
 
     -- Additional Info
     lots_held INT,
     custodian STRING,
     sub_custodian STRING,
 
+    -- Multi-currency support
+    security_currency STRING,            -- Security's trading currency (FC)
+    portfolio_currency STRING,           -- Portfolio's base currency (LC)
+    fx_rate DECIMAL(20,8),               -- FX rate used (FC to LC)
+
     -- Status
     status STRING,                       -- OPEN, CLOSED
     is_active BOOLEAN,
+    is_latest BOOLEAN DEFAULT TRUE,      -- Latest version for this portfolio+security+basis
+
+    -- Last Corporate Action / Cash Flow tracking
+    last_ca_id BIGINT,                   -- Last CA that generated cash flow
+    last_ca_number STRING,               -- Last CA number
+    last_ca_type STRING,                 -- Last CA type (DIVIDEND, INTEREST, etc.)
+    last_ca_date STRING,                 -- Date of last CA (ex_date)
+    last_cash_flow_id BIGINT,            -- Last cash flow ID generated from CA
+    last_cash_flow_number STRING,        -- Last cash flow number
+    last_cash_flow_amount_fc DECIMAL(20,8), -- Amount of last cash flow in FC (foreign_ccy_amt)
+    last_cash_flow_amount_lc DECIMAL(20,8), -- Amount of last cash flow in LC (local_ccy_amt)
 
     -- Metadata
     created_by STRING,
     created_at STRING,
+    updated_by STRING,
+    updated_at STRING,
 
     PRIMARY KEY (version_id)
 )
-PARTITION BY HASH PARTITIONS 4
+PARTITION BY HASH (version_id) PARTITIONS 4
 STORED AS KUDU
 TBLPROPERTIES (
     'kudu.master_addresses' = 'kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251'
