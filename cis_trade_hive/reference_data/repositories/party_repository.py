@@ -45,8 +45,9 @@ class PartyRepository(ImpalaReferenceRepository):
             query += f" AND (LOWER(party_short_name) LIKE '%{search_escaped.lower()}%' OR LOWER(party_full_name) LIKE '%{search_escaped.lower()}%')"
 
         if country:
-            country_escaped = country.replace("'", "''")
-            query += f" AND country = '{country_escaped}'"
+            country_escaped = country.replace("'", "''").upper()
+            # Case-insensitive country filter to handle inconsistent data (SG, singapore, SINGAPORE)
+            query += f" AND UPPER(country) = '{country_escaped}'"
 
         if is_active is not None:
             query += f" AND is_active = {str(is_active).upper()}"
@@ -99,7 +100,7 @@ class PartyRepository(ImpalaReferenceRepository):
             'other_contact', 'other_number',
             'industry', 'industry_group',
             'subsidiary_level', 'party_grandparent', 'party_parent',
-            'resident_y_n', 'mas_industry_code', 'country_of_incorporation', 'gics_code',
+            'resident_y_n', 'mas_industry_code', 'country_of_incorporation', 'cels_code',
             'src_system', 'sub_system', 'data_cat', 'data_frq', 'src_id',
             'processing_date', 'created_by', 'updated_by'
         ]

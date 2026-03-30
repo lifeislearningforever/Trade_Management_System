@@ -1203,7 +1203,7 @@ def party_list(request):
 
             writer = csv.writer(response)
             writer.writerow([
-                'Short Name', 'Full Name', 'GICS Code', 'Industry', 'Industry Group',
+                'Short Name', 'Full Name', 'CELS Code', 'Industry', 'Industry Group',
                 'MAS Industry Code', 'Resident Y/N', 'Subsidiary Level',
                 'Party Grandparent', 'Party Parent',
                 'Address Line 1', 'Address Line 2', 'Address Line 3', 'Address Line 4',
@@ -1218,7 +1218,7 @@ def party_list(request):
                 writer.writerow([
                     party.get('party_short_name', ''),
                     party.get('party_full_name', ''),
-                    party.get('gics_code', ''),
+                    party.get('cels_code', ''),
                     party.get('industry', ''),
                     party.get('industry_group', ''),
                     party.get('mas_industry_code', ''),
@@ -1356,7 +1356,7 @@ def party_create(request):
                 # Basic Information
                 'party_short_name': request.POST.get('party_short_name', '').strip(),
                 'party_full_name': request.POST.get('party_full_name', '').strip(),
-                'gics_code': request.POST.get('gics_code', '').strip(),
+                'cels_code': request.POST.get('cels_code', '').strip(),
                 'industry': request.POST.get('industry', '').strip(),
                 'industry_group': request.POST.get('industry_group', '').strip(),
                 'mas_industry_code': request.POST.get('mas_industry_code', '').strip(),
@@ -1473,7 +1473,7 @@ def party_edit(request, short_name):
             party_data = {
                 # Basic Information
                 'party_full_name': request.POST.get('party_full_name', '').strip(),
-                'gics_code': request.POST.get('gics_code', '').strip(),
+                'cels_code': request.POST.get('cels_code', '').strip(),
                 'industry': request.POST.get('industry', '').strip(),
                 'industry_group': request.POST.get('industry_group', '').strip(),
                 'mas_industry_code': request.POST.get('mas_industry_code', '').strip(),
@@ -1539,7 +1539,7 @@ def party_edit(request, short_name):
 
                 trackable_fields = ['party_full_name', 'record_type', 'city', 'country',
                                    'postal_code', 'primary_contact', 'primary_number', 'industry',
-                                   'gics_code', 'party_grandparent', 'party_parent',
+                                   'cels_code', 'party_grandparent', 'party_parent',
                                    'is_bank', 'is_broker', 'is_custodian', 'is_issuer',
                                    'is_corporate', 'is_subsidiary']
 
