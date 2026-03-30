@@ -1272,8 +1272,8 @@ def party_list(request):
         paginator = Paginator(parties, 25)
         page_obj = paginator.get_page(page_number)
 
-        # Get distinct countries for filter dropdown
-        countries = party_service.get_distinct_countries()
+        # Get countries from reference table for filter dropdown (consistent with form)
+        countries = country_service.list_all()
 
         # Get pending approval count for header badge
         pending_parties = party_service.get_pending_approval_parties()

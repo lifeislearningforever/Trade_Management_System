@@ -4,8 +4,7 @@
 {% block title %}Parties - CisTrade{% endblock %}
 
 {% block breadcrumb %}
-    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
-    <li class="breadcrumb-item"><a href="#">Reference Data</a></li>
+    <li class="breadcrumb-item">Reference Data</li>
     <li class="breadcrumb-item active">Parties</li>
 {% endblock %}
 
@@ -57,9 +56,9 @@
                     <label class="form-label">Country</label>
                     <select class="form-select" name="country">
                         <option value="">All Countries</option>
-                        {% for country in countries %}
-                            <option value="{{ country }}" {% if selected_country == country %}selected{% endif %}>
-                                {{ country }}
+                        {% for c in countries %}
+                            <option value="{{ c.code }}" {% if selected_country == c.code %}selected{% endif %}>
+                                {{ c.code }} - {{ c.name }}
                             </option>
                         {% endfor %}
                     </select>
