@@ -49,6 +49,11 @@ CREATE TABLE IF NOT EXISTS cis_party (
     data_frq STRING,
     src_id STRING,
     processing_date STRING,
+    -- Maker-checker workflow columns
+    status STRING,                  -- INITIAL, MODIFIED, VALIDATED
+    validated_by STRING,            -- User who approved/validated
+    validation_comments STRING,     -- Approval notes
+    -- Standard audit columns
     is_active BOOLEAN,
     is_deleted BOOLEAN,
     created_by STRING,
