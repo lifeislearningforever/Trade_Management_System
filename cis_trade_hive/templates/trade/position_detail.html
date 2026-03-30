@@ -121,12 +121,22 @@
                     <hr class="my-2">
                     <div class="row">
                         <div class="col-6">
-                            <label class="form-label text-muted small">Avg Cost</label>
-                            <div class="fw-bold">{{ position.average_cost|floatformat:4|default:"0.0000" }}</div>
+                            <label class="form-label text-muted small">Avg Cost (FC)</label>
+                            <div class="fw-bold">{{ position.average_cost_fc|default:position.average_cost|floatformat:4|default:"0.0000" }}</div>
                         </div>
                         <div class="col-6">
-                            <label class="form-label text-muted small">Total Cost (Legacy)</label>
-                            <div class="fw-bold">{{ position.total_cost|floatformat:2|default:"0.00" }}</div>
+                            <label class="form-label text-muted small">Total Cost (FC)</label>
+                            <div class="fw-bold">{{ position.total_cost_fc|default:position.total_cost|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                    </div>
+                    <div class="row mt-2">
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Dividend (FC)</label>
+                            <div class="fw-bold text-info">{{ position.dividend_fc|floatformat:2|default:"0.00" }}</div>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label text-muted small">Dividend (LC)</label>
+                            <div class="fw-bold text-info">{{ position.dividend_lc|floatformat:2|default:"0.00" }}</div>
                         </div>
                     </div>
                 </div>
@@ -143,8 +153,8 @@
                 </div>
                 <div class="card-body">
                     <div class="mb-3">
-                        <label class="form-label text-muted small">Current Price / Market Unit Price</label>
-                        <div class="fw-bold fs-4">{{ position.market_unit_price|default:position.current_price|floatformat:4|default:"0.0000" }}</div>
+                        <label class="form-label text-muted small">Market Price</label>
+                        <div class="fw-bold fs-4">{{ position.market_price|default:position.market_unit_price|default:position.current_price|floatformat:4|default:"0.0000" }}</div>
                     </div>
                     <div class="row">
                         <div class="col-6">
@@ -158,8 +168,8 @@
                     </div>
                     <hr class="my-2">
                     <div>
-                        <label class="form-label text-muted small">Market Value (Legacy)</label>
-                        <div class="fw-bold">{{ position.market_value|floatformat:2|default:"0.00" }}</div>
+                        <label class="form-label text-muted small">Market Value (FC)</label>
+                        <div class="fw-bold">{{ position.market_value_fc|default:position.market_value|floatformat:2|default:"0.00" }}</div>
                     </div>
                 </div>
             </div>
@@ -228,11 +238,11 @@
                             <th>Date</th>
                             <th>Trade Type</th>
                             <th class="text-end">Quantity</th>
-                            <th class="text-end">Avg Cost</th>
-                            <th class="text-end">Total Cost</th>
-                            <th class="text-end">Realized P&L</th>
-                            <th class="text-end">Market Value</th>
+                            <th class="text-end">Avg Cost (FC)</th>
+                            <th class="text-end">Total Cost (FC)</th>
+                            <th class="text-end">Market Value (FC)</th>
                             <th class="text-end">Unrealized P&L</th>
+                            <th class="text-end">Dividend (FC)</th>
                             <th>Status</th>
                             <th>Created By</th>
                         </tr>
@@ -256,27 +266,19 @@
                                 {% endif %}
                             </td>
                             <td class="text-end">{{ ver.quantity|floatformat:2|default:"0.00" }}</td>
-                            <td class="text-end">{{ ver.average_cost|floatformat:4|default:"0.0000" }}</td>
-                            <td class="text-end">{{ ver.total_cost|floatformat:2|default:"0.00" }}</td>
+                            <td class="text-end">{{ ver.average_cost_fc|default:ver.average_cost|floatformat:4|default:"0.0000" }}</td>
+                            <td class="text-end">{{ ver.total_cost_fc|default:ver.total_cost|floatformat:2|default:"0.00" }}</td>
+                            <td class="text-end">{{ ver.market_value_fc|default:ver.market_value|floatformat:2|default:"0.00" }}</td>
                             <td class="text-end">
-                                {% if ver.realized_pnl > 0 %}
-                                    <span class="text-success fw-bold">{{ ver.realized_pnl|floatformat:2 }}</span>
-                                {% elif ver.realized_pnl < 0 %}
-                                    <span class="text-danger fw-bold">{{ ver.realized_pnl|floatformat:2 }}</span>
+                                {% if ver.unrealized_pnl_fc > 0 %}
+                                    <span class="text-success fw-bold">{{ ver.unrealized_pnl_fc|floatformat:2 }}</span>
+                                {% elif ver.unrealized_pnl_fc < 0 %}
+                                    <span class="text-danger fw-bold">{{ ver.unrealized_pnl_fc|floatformat:2 }}</span>
                                 {% else %}
-                                    {{ ver.realized_pnl|floatformat:2|default:"0.00" }}
+                                    {{ ver.unrealized_pnl_fc|default:ver.unrealized_pnl|floatformat:2|default:"0.00" }}
                                 {% endif %}
                             </td>
-                            <td class="text-end">{{ ver.market_value|floatformat:2|default:"0.00" }}</td>
-                            <td class="text-end">
-                                {% if ver.unrealized_pnl > 0 %}
-                                    <span class="text-success fw-bold">{{ ver.unrealized_pnl|floatformat:2 }}</span>
-                                {% elif ver.unrealized_pnl < 0 %}
-                                    <span class="text-danger fw-bold">{{ ver.unrealized_pnl|floatformat:2 }}</span>
-                                {% else %}
-                                    {{ ver.unrealized_pnl|floatformat:2|default:"0.00" }}
-                                {% endif %}
-                            </td>
+                            <td class="text-end text-info">{{ ver.dividend_fc|floatformat:2|default:"0.00" }}</td>
                             <td>
                                 {% if ver.status == 'OPEN' %}
                                     <span class="badge badge-success">Open</span>
