@@ -78,7 +78,8 @@ CREATE TABLE cis_trade (
     security_type STRING,       -- Output: auto-populated from security
 
     -- Currency (for filtering securities and auto-filling price)
-    currency_code STRING,       -- Currency for the trade (USD, SGD, etc.)
+    currency_code STRING,       -- Currency for the trade (USD, SGD, etc.) - same as security currency
+    portfolio_currency STRING,  -- Portfolio's base currency (LC) - auto-populated from portfolio
 
     -- Trade Status (workflow status, different from trading status)
     trade_status STRING,  -- Dropdown: from UDF Trade Status options
