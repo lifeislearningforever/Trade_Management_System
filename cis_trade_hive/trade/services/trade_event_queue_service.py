@@ -237,17 +237,19 @@ class TradeEventQueueService:
                                          error_message="Trade not found (may have been deleted)")
                 return True
 
-            # Process based on event type
-            if event_type == 'HISTORY':
+            # Process based on event type (normalize to handle whitespace/case)
+            event_type_normalized = (event_type or '').strip().upper()
+
+            if event_type_normalized == 'HISTORY':
                 success = self._process_history_event(event, event_data, trade)
-            elif event_type == 'SETTLEMENT':
+            elif event_type_normalized == 'SETTLEMENT':
                 success = self._process_settlement_event(event, event_data, trade)
-            elif event_type == 'POSITION_MODIFY':
+            elif event_type_normalized == 'POSITION_MODIFY':
                 success = self._process_position_modify_event(event, event_data, trade)
-            elif event_type == 'POSITION_CANCEL':
+            elif event_type_normalized == 'POSITION_CANCEL':
                 success = self._process_position_cancel_event(event, event_data, trade)
             else:
-                logger.warning(f"Unknown event type: {event_type}")
+                logger.warning(f"Unknown event type: '{event_type}' (normalized: '{event_type_normalized}')")
                 success = False
 
             if success:
