@@ -752,13 +752,14 @@ function validateCIFCountries() {
 <script>
 // Initialize Select2 on ALL party form dropdowns
 $(document).ready(function() {
-    // Initialize country dropdowns with Select2
+    // Initialize country dropdowns with Select2 (NOT the hidden template)
     $('.select2-country').each(function() {
         CISSelect2.initElement($(this));
     });
 
-    // Initialize existing CIF country dropdowns with Select2
-    $('.cif-country').each(function() {
+    // DO NOT initialize Select2 on hidden template .cif-country elements
+    // Only initialize on visible CIF rows (existing CIFs in edit mode)
+    $('.cif-row-active .cif-country').each(function() {
         CISSelect2.initElement($(this));
     });
 });
@@ -769,11 +770,16 @@ window.addCIFRow = function() {
     originalAddCIFRow();
     // Initialize Select2 on the newly added country dropdown
     var container = document.getElementById('cif-rows-container');
-    var rows = container.querySelectorAll('.cif-row');
+    var rows = container.querySelectorAll('.cif-row:not(.cif-row-template .cif-row)');
     if (rows.length > 0) {
         var lastRow = rows[rows.length - 1];
         var newCountrySelect = lastRow.querySelector('.cif-country');
         if (newCountrySelect && typeof $ !== 'undefined') {
+            // Destroy any existing Select2 instance first (from cloned template)
+            if ($(newCountrySelect).hasClass('select2-hidden-accessible')) {
+                $(newCountrySelect).select2('destroy');
+            }
+            // Now initialize Select2 on the visible element
             CISSelect2.initElement($(newCountrySelect));
         }
     }
