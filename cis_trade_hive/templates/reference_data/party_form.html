@@ -499,9 +499,10 @@
                                     <div class="row g-3 mb-3 pb-3 border-bottom cif-row">
                                         <div class="col-md-4">
                                             <label class="form-label">Country <span class="text-danger">*</span></label>
+                                            <!-- NOTE: No 'required' on template - added dynamically when cloned -->
                                             <select class="form-select cif-country"
                                                     name="cif_country[]"
-                                                    required>
+                                                    disabled>
                                                 <option value="">Select Country...</option>
                                                 {% for c in countries %}
                                                 <option value="{{ c.code }}">{{ c.code }} - {{ c.name }}</option>
@@ -615,8 +616,12 @@ function addCIFRow() {
     const rowId = `cif-row-${cifRowCounter}`;
     newRow.querySelector('.cif-row').id = rowId;
 
-    // Add change event to country dropdown for duplicate detection
+    // Enable the country select (was disabled in template to prevent form validation issues)
     const countrySelect = newRow.querySelector('.cif-country');
+    countrySelect.disabled = false;
+    countrySelect.required = true;
+
+    // Add change event to country dropdown for duplicate detection
     countrySelect.addEventListener('change', checkDuplicateCountries);
 
     // Insert before the "no CIFs" message
