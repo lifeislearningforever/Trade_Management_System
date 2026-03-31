@@ -146,13 +146,12 @@ class CountryRepository(ImpalaReferenceRepository):
 
     TABLE_NAME = 'gmp_cis_sta_dly_country'
 
-    def _get_max_processing_date_subquery(self) -> str:
-        """Get subquery for max processing_date filter"""
-        return f"(SELECT MAX(processing_date) FROM {self.TABLE_NAME})"
-
     def list_all(self, search: Optional[str] = None) -> List[Dict]:
         """
-        Fetch all countries from Kudu/Impala for the latest processing_date.
+        Fetch all countries from Kudu/Impala.
+
+        Note: Simple table with label and full_name columns only.
+        No processing_date filter needed (unlike production Hive tables).
 
         Args:
             search: Optional search term for code or name
@@ -160,11 +159,7 @@ class CountryRepository(ImpalaReferenceRepository):
         Returns:
             List of country dictionaries
         """
-        # Filter by max(processing_date) to get only latest data
-        query = f"""
-        SELECT * FROM {self.TABLE_NAME}
-        WHERE processing_date = {self._get_max_processing_date_subquery()}
-        """
+        query = f"SELECT * FROM {self.TABLE_NAME} WHERE 1=1"
 
         if search:
             search_escaped = search.replace("'", "''").lower()
@@ -177,17 +172,19 @@ class CountryRepository(ImpalaReferenceRepository):
         return [{'code': r.get('label', ''), 'name': r.get('full_name', ''), **r} for r in results]
 
     def get_by_code(self, code: str) -> Optional[Dict]:
-        """Get specific country by code for the latest processing_date"""
+        """Get specific country by code"""
         code_escaped = code.replace("'", "''")
         query = f"""
         SELECT * FROM {self.TABLE_NAME}
         WHERE label = '{code_escaped}'
-          AND processing_date = {self._get_max_processing_date_subquery()}
         LIMIT 1
         """
 
         results = self._execute_query(query)
-        return results[0] if results else None
+        if results:
+            r = results[0]
+            return {'code': r.get('label', ''), 'name': r.get('full_name', ''), **r}
+        return None
 
 
 class CalendarRepository(ImpalaReferenceRepository):
