@@ -446,12 +446,19 @@ class TradeEventQueueService:
             old_data = event_data.get('old_trade', {})
             new_data = event_data.get('new_trade', {})
 
+            logger.info(f"POSITION_MODIFY: event_data keys={list(event_data.keys())}")
+            logger.info(f"POSITION_MODIFY: old_data type={type(old_data)}, has data={bool(old_data)}")
+            logger.info(f"POSITION_MODIFY: new_data type={type(new_data)}, has data={bool(new_data)}")
+
             if not old_data or not new_data:
                 logger.warning(f"POSITION_MODIFY event missing old/new trade data for {trade_id}")
+                logger.warning(f"POSITION_MODIFY: raw event_data={str(event_data)[:500]}")
                 return True  # Mark as completed to avoid retries
 
             portfolio_id = old_data.get('portfolio_short_name', '')
             security_id = old_data.get('security_label', '')
+
+            logger.info(f"POSITION_MODIFY: portfolio={portfolio_id}, security={security_id}")
 
             # Check if position already exists for this trade
             position_exists = self.check_position_exists(trade_id)
