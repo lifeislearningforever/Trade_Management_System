@@ -155,14 +155,17 @@ class CashFlowService:
 
             # Validate portfolio
             portfolio_validation = self.validate_portfolio(cf_data['portfolio_short_name'])
-            if not portfolio_validation.get('valid', False):
-                return False, None, portfolio_validation.get('message', 'Invalid portfolio')
+            # ValidationResult is a dataclass, use is_valid attribute not dict.get()
+            if not portfolio_validation.is_valid:
+                return False, None, portfolio_validation.message or 'Invalid portfolio'
 
             # Validate security if provided
-            if cf_data.get('security_name'):
-                security_validation = self.validate_security(cf_data['security_name'])
-                if not security_validation.get('valid', False):
-                    return False, None, security_validation.get('message', 'Invalid security')
+            if cf_data.get('security_name') or cf_data.get('security_label'):
+                security_name = cf_data.get('security_name') or cf_data.get('security_label')
+                security_validation = self.validate_security(security_name)
+                # ValidationResult is a dataclass, use is_valid attribute not dict.get()
+                if not security_validation.is_valid:
+                    return False, None, security_validation.message or 'Invalid security'
 
             # Generate CF number if not provided
             if not cf_data.get('cash_flow_number'):
@@ -249,14 +252,18 @@ class CashFlowService:
             # Validate portfolio if changed
             if cf_data.get('portfolio_short_name') and cf_data['portfolio_short_name'] != cf.get('portfolio_short_name'):
                 portfolio_validation = self.validate_portfolio(cf_data['portfolio_short_name'])
-                if not portfolio_validation.get('valid', False):
-                    return False, portfolio_validation.get('message', 'Invalid portfolio')
+                # ValidationResult is a dataclass, use is_valid attribute not dict.get()
+                if not portfolio_validation.is_valid:
+                    return False, portfolio_validation.message or 'Invalid portfolio'
 
             # Validate security if changed
-            if cf_data.get('security_name') and cf_data['security_name'] != cf.get('security_name'):
-                security_validation = self.validate_security(cf_data['security_name'])
-                if not security_validation.get('valid', False):
-                    return False, security_validation.get('message', 'Invalid security')
+            security_name = cf_data.get('security_name') or cf_data.get('security_label')
+            old_security = cf.get('security_name') or cf.get('security_label')
+            if security_name and security_name != old_security:
+                security_validation = self.validate_security(security_name)
+                # ValidationResult is a dataclass, use is_valid attribute not dict.get()
+                if not security_validation.is_valid:
+                    return False, security_validation.message or 'Invalid security'
 
             # Track changes
             changes = {}
