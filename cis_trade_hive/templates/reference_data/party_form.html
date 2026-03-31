@@ -635,11 +635,12 @@ function removeCIFRow(button) {
     const row = button.closest('.cif-row');
     row.remove();
 
-    // Check if there are any CIF rows left
+    // Check if there are any visible CIF rows left (not in template)
     const container = document.getElementById('cif-rows-container');
-    const rows = container.querySelectorAll('.cif-row');
+    const allRows = container.querySelectorAll('.cif-row');
+    const visibleRows = Array.from(allRows).filter(row => !row.closest('.cif-row-template'));
 
-    if (rows.length === 0) {
+    if (visibleRows.length === 0) {
         document.getElementById('no-cifs-message').style.display = 'block';
     }
 
@@ -719,14 +720,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function validateCIFCountries() {
     const container = document.getElementById('cif-rows-container');
-    // Only validate visible CIF rows, NOT the hidden template
-    const rows = container.querySelectorAll('.cif-row-active .cif-row, .cif-row:not(.cif-row-template .cif-row)');
+    // Get all .cif-row elements directly from container (not inside hidden template)
+    const allRows = container.querySelectorAll('.cif-row');
     let isValid = true;
 
     // Filter out rows that are inside the hidden template
-    const visibleRows = Array.from(rows).filter(row => {
+    const visibleRows = Array.from(allRows).filter(row => {
         return !row.closest('.cif-row-template');
     });
+
+    // If no CIF rows exist, that's valid (CIFs are optional)
+    if (visibleRows.length === 0) {
+        return true;
+    }
 
     visibleRows.forEach(row => {
         const select = row.querySelector('.cif-country');
@@ -769,8 +775,12 @@ $(document).ready(function() {
 
     // DO NOT initialize Select2 on hidden template .cif-country elements
     // Only initialize on visible CIF rows (existing CIFs in edit mode)
-    $('.cif-row-active .cif-country').each(function() {
-        CISSelect2.initElement($(this));
+    // Note: Added rows have .cif-row directly inserted into container, not inside .cif-row-active
+    $('#cif-rows-container .cif-country').each(function() {
+        // Skip elements inside the hidden template
+        if (!$(this).closest('.cif-row-template').length) {
+            CISSelect2.initElement($(this));
+        }
     });
 });
 
