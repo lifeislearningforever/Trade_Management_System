@@ -983,6 +983,7 @@ class TradeKuduRepository:
                 'quantity', 'face_value', 'lot', 'price',
                 'commission', 'accrued_interest', 'sec_fee',
                 'other_charges', 'total_amount',
+                'total_amount_fc', 'total_amount_lc',  # FC and LC totals
                 'open_fx_rate', 'curr_dealing', 'open_dealing',
                 'input_tax_oth', 'qty_entitled', 'cash_balance',
                 # Charge decimal fields (matches cis_trade_charge_lut fee types)
