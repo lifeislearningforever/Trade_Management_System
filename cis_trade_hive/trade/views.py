@@ -788,11 +788,13 @@ def trade_edit(request, trade_id):
             if not success:
                 raise Exception('Failed to update trade')
 
-            # Only queue POSITION_MODIFY if trade was already SETTLED (has a position)
-            # For INITIAL/MODIFIED trades, position will be calculated when settled
-            if current_status == 'SETTLED':
-                from trade.services.trade_event_queue_service import trade_event_queue_service
+            # Check if position exists for this trade (was previously settled)
+            from trade.services.trade_event_queue_service import trade_event_queue_service
 
+            position_exists = trade_event_queue_service.check_position_exists(trade_id)
+            logger.info(f"Trade {trade_id} position_exists={position_exists}")
+
+            if position_exists:
                 # Merge updated data with original trade data
                 merged_trade_data = {**trade_data, **updated_data}
 
@@ -804,9 +806,9 @@ def trade_edit(request, trade_id):
                     new_trade_data=merged_trade_data,  # Merged with updates
                     created_by=user_info['username']
                 )
-                logger.info(f"Queued POSITION_MODIFY event for SETTLED trade {trade_id}")
+                logger.info(f"Queued POSITION_MODIFY event for trade {trade_id} (position exists)")
             else:
-                logger.info(f"Trade {trade_id} status is {current_status}, position will be calculated on settlement")
+                logger.info(f"Trade {trade_id} has no position yet, will be calculated on settlement")
 
             # Use async audit logging for fast UI response
             audit_log_kudu_repository.log_action_async(
