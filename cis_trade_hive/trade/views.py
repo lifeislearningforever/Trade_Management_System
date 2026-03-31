@@ -788,6 +788,19 @@ def trade_edit(request, trade_id):
             if not success:
                 raise Exception('Failed to update trade')
 
+            # Check if position was already calculated - queue reversal if needed
+            from trade.services.trade_event_queue_service import trade_event_queue_service
+            if trade_event_queue_service.check_position_exists(trade_id):
+                # Position exists - queue POSITION_MODIFY event to reverse and recalculate
+                trade_event_queue_service.queue_position_modify_event(
+                    trade_id=trade_id,
+                    deal_number=trade_data.get('deal_number', ''),
+                    old_trade_data=trade_data,  # Original values
+                    new_trade_data={**trade_data, **updated_data},  # Merged with updates
+                    created_by=user_info['username']
+                )
+                logger.info(f"Queued POSITION_MODIFY event for trade {trade_id}")
+
             audit_log_kudu_repository.log_action(
                 user_id=user_info['user_id'],
                 username=user_info['username'],
@@ -995,6 +1008,24 @@ def trade_cancel(request, trade_id):
 
         if not success:
             raise Exception('Failed to cancel trade')
+
+        # Handle position: either reverse or cancel pending events
+        from trade.services.trade_event_queue_service import trade_event_queue_service
+
+        if trade_event_queue_service.check_position_exists(trade_id):
+            # Position exists - queue POSITION_CANCEL event to reverse
+            trade_event_queue_service.queue_position_cancel_event(
+                trade_id=trade_id,
+                deal_number=trade_data.get('deal_number', ''),
+                trade_data=trade_data,
+                created_by=user_info['username']
+            )
+            logger.info(f"Queued POSITION_CANCEL event for trade {trade_id}")
+        else:
+            # Position not calculated yet - cancel any pending events
+            cancelled_count, _ = trade_event_queue_service.cancel_pending_events(trade_id)
+            if cancelled_count > 0:
+                logger.info(f"Cancelled {cancelled_count} pending events for trade {trade_id}")
 
         # Prepare old values for audit (key trade details before cancellation)
         old_values = {
@@ -1559,6 +1590,190 @@ def api_worker_health(request):
         logger.error(f"Health check error: {str(e)}")
         return JsonResponse({
             'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }, status=500)
+
+
+# ==========================================================================
+# TRADE EVENT QUEUE MANAGEMENT APIs
+# ==========================================================================
+
+@require_http_methods(["GET"])
+def api_trade_event_queue_health(request):
+    """
+    API: Get trade event queue health status.
+
+    GET /trade/api/event-queue-health/
+
+    Returns queue health metrics for monitoring.
+    """
+    try:
+        from trade.services.trade_event_queue_service import trade_event_queue_service
+
+        health = trade_event_queue_service.get_queue_health()
+
+        return JsonResponse({
+            'status': 'ok',
+            'queue_health': health,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+
+    except Exception as e:
+        logger.error(f"Event queue health check error: {str(e)}")
+        return JsonResponse({
+            'status': 'error',
+            'error': str(e),
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }, status=500)
+
+
+@require_http_methods(["GET"])
+def api_trade_event_queue_failed(request):
+    """
+    API: Get failed/dead-letter events for review.
+
+    GET /trade/api/event-queue-failed/
+
+    Returns list of failed events that need attention.
+    """
+    try:
+        from trade.services.trade_event_queue_service import trade_event_queue_service
+
+        limit = int(request.GET.get('limit', 100))
+        failed_events = trade_event_queue_service.get_failed_events(limit=limit)
+
+        return JsonResponse({
+            'status': 'ok',
+            'count': len(failed_events),
+            'events': failed_events,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+
+    except Exception as e:
+        logger.error(f"Get failed events error: {str(e)}")
+        return JsonResponse({
+            'status': 'error',
+            'error': str(e),
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }, status=500)
+
+
+@require_http_methods(["POST"])
+def api_trade_event_reprocess(request, event_id):
+    """
+    API: Reprocess a failed/dead-letter event.
+
+    POST /trade/api/event-queue-reprocess/<event_id>/
+
+    Resets the event to PENDING for reprocessing.
+    """
+    try:
+        from trade.services.trade_event_queue_service import trade_event_queue_service
+
+        success, message = trade_event_queue_service.reprocess_event(int(event_id))
+
+        return JsonResponse({
+            'status': 'ok' if success else 'error',
+            'success': success,
+            'message': message,
+            'event_id': event_id,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+
+    except Exception as e:
+        logger.error(f"Reprocess event error: {str(e)}")
+        return JsonResponse({
+            'status': 'error',
+            'error': str(e),
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }, status=500)
+
+
+@require_http_methods(["POST"])
+def api_trade_event_reprocess_all_failed(request):
+    """
+    API: Reprocess all failed events (not dead-letter).
+
+    POST /trade/api/event-queue-reprocess-all-failed/
+
+    Resets all FAILED events to PENDING for reprocessing.
+    """
+    try:
+        from trade.services.trade_event_queue_service import trade_event_queue_service
+
+        success_count, error_count = trade_event_queue_service.reprocess_all_failed()
+
+        return JsonResponse({
+            'status': 'ok',
+            'success_count': success_count,
+            'error_count': error_count,
+            'message': f'Requeued {success_count} events, {error_count} errors',
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+
+    except Exception as e:
+        logger.error(f"Reprocess all failed error: {str(e)}")
+        return JsonResponse({
+            'status': 'error',
+            'error': str(e),
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }, status=500)
+
+
+@require_http_methods(["POST"])
+def api_trade_event_worker_start(request):
+    """
+    API: Start the trade event queue worker.
+
+    POST /trade/api/event-worker-start/
+
+    Note: In production, use the management command instead.
+    """
+    try:
+        from trade.services.trade_event_queue_service import trade_event_queue_service
+
+        started = trade_event_queue_service.start_worker()
+
+        return JsonResponse({
+            'status': 'ok',
+            'started': started,
+            'message': 'Worker started' if started else 'Worker already running',
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+
+    except Exception as e:
+        logger.error(f"Start worker error: {str(e)}")
+        return JsonResponse({
+            'status': 'error',
+            'error': str(e),
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }, status=500)
+
+
+@require_http_methods(["POST"])
+def api_trade_event_worker_stop(request):
+    """
+    API: Stop the trade event queue worker.
+
+    POST /trade/api/event-worker-stop/
+    """
+    try:
+        from trade.services.trade_event_queue_service import trade_event_queue_service
+
+        stopped = trade_event_queue_service.stop_worker()
+
+        return JsonResponse({
+            'status': 'ok',
+            'stopped': stopped,
+            'message': 'Worker stopped' if stopped else 'Worker not running',
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+
+    except Exception as e:
+        logger.error(f"Stop worker error: {str(e)}")
+        return JsonResponse({
+            'status': 'error',
             'error': str(e),
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }, status=500)

@@ -376,7 +376,7 @@ UPSERT INTO cis_position (
     src_system,
     processing_date,
     quantity,
-    average_cost,
+    average_cost_fc,       -- Renamed from average_cost (FC = Foreign/Security Currency)
     cost_fc,
     market_value_fc,
     net_book_value_fc,
@@ -392,7 +392,7 @@ UPSERT INTO cis_position (
     realized_pnl_fc,
     realized_pnl_lc,
     isin,
-    placeholder_2,
+    average_cost_lc,       -- Renamed from placeholder_2 (LC = Local/Portfolio Currency)
     placeholder_3,
     placeholder_4
 )
@@ -406,7 +406,7 @@ SELECT
     src_system,
     processing_date,
     final_quantity AS quantity,
-    average_cost,
+    average_cost AS average_cost_fc,   -- Avg cost in Foreign Currency
     cost_fc,
     final_market_value_fc AS market_value_fc,
     final_net_book_value_fc AS net_book_value_fc,
@@ -422,7 +422,7 @@ SELECT
     0 AS realized_pnl_fc,
     0 AS realized_pnl_lc,
     COALESCE(final_isin, isin) AS isin,
-    '' AS placeholder_2,
+    CAST(0 AS DECIMAL(18,4)) AS average_cost_lc,  -- Avg cost in Local Currency (to be calculated)
     '' AS placeholder_3,
     '' AS placeholder_4
 FROM position_upload_staging

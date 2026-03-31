@@ -814,10 +814,152 @@ class PositionService:
                     f"Saved position version {version_id} for position {position_data['position_id']} "
                     f"(date={position_date}, is_latest=true)"
                 )
+
+                # Sync to cis_position gold table
+                sync_data = {
+                    'position_id': position_data['position_id'],
+                    'version_id': version_id,
+                    'portfolio': portfolio_id,
+                    'security_label': security_id,
+                    'position_basis': 'TRADE_DATE',
+                    'position_date': position_date,
+                    'src_system': 'CIS',
+                    'processing_date': timestamp[:10].replace('-', ''),  # YYYYMMDD
+                    'quantity': quantity,
+                    'average_cost_fc': average_cost,
+                    'cost_fc': total_cost,
+                    'market_value_fc': market_value,
+                    'net_book_value_fc': total_cost,  # cost - provision (no provision for now)
+                    'unrealized_pnl_fc': unrealized_pnl,
+                    'average_cost_lc': average_cost_lc,
+                    'cost_lc': total_cost_lc,
+                    'market_value_lc': market_value_lc,
+                    'net_book_value_lc': total_cost_lc,
+                    'unrealized_pnl_lc': unrealized_pnl_lc,
+                    'provision_fc': 0,
+                    'provision_lc': 0,
+                    'dividend_fc': dividend_fc_val,
+                    'dividend_lc': dividend_lc_val,
+                    'realized_pnl_fc': realized_pnl,
+                    'realized_pnl_lc': realized_pnl_lc,
+                    'isin': position_data.get('isin', ''),
+                }
+                self._sync_to_cis_position(sync_data, updated_by)
+
             return success
 
         except Exception as e:
             logger.error(f"Error saving position: {str(e)}")
+            return False
+
+    def _sync_to_cis_position(self, position_data: Dict[str, Any], updated_by: str) -> bool:
+        """
+        Sync CIS position to cis_position gold/master table.
+
+        This is called whenever a position is saved to cis_trade_position with is_latest=true.
+        The cis_position table is the consolidated view from all source systems.
+
+        Schema from production (cis_position):
+            position_id, version_id, portfolio, security_label, position_basis,
+            position_date, src_system, processing_date, quantity, average_cost_fc,
+            cost_fc, market_value_fc, net_book_value_fc, unrealized_pnl_fc,
+            cost_lc, market_value_lc, net_book_value_lc, unrealized_pnl_lc,
+            provision_fc, provision_lc, dividend_fc, dividend_lc,
+            realized_pnl_fc, realized_pnl_lc, isin, average_cost_lc,
+            placeholder_3, placeholder_4
+
+        Args:
+            position_data: Position data to sync
+            updated_by: User performing the update
+
+        Returns:
+            True if sync successful, False otherwise
+        """
+        try:
+            # cis_position table columns (matching actual production schema)
+            # Note: average_cost renamed to average_cost_fc, placeholder_2 renamed to average_cost_lc
+            columns = [
+                'position_id', 'version_id', 'portfolio', 'security_label',
+                'position_basis', 'position_date', 'src_system', 'processing_date',
+                'quantity',
+                'average_cost_fc',      # Avg cost in Security Currency (renamed from average_cost)
+                'cost_fc',              # Total cost in Security Currency
+                'market_value_fc',
+                'net_book_value_fc',
+                'unrealized_pnl_fc',
+                'cost_lc',              # Total cost in Portfolio Currency
+                'market_value_lc',
+                'net_book_value_lc',
+                'unrealized_pnl_lc',
+                'provision_fc', 'provision_lc',
+                'dividend_fc', 'dividend_lc',
+                'realized_pnl_fc', 'realized_pnl_lc',
+                'isin',
+                'average_cost_lc',      # Avg cost in Portfolio Currency (renamed from placeholder_2)
+                'placeholder_3', 'placeholder_4'
+            ]
+
+            # Helper for decimal formatting
+            def cast_decimal(val, precision=4):
+                if val is None:
+                    return 'CAST(0 AS DECIMAL(18,4))'
+                try:
+                    return f"CAST({float(val)} AS DECIMAL(18,{precision}))"
+                except (ValueError, TypeError):
+                    return 'CAST(0 AS DECIMAL(18,4))'
+
+            values = [
+                str(position_data.get('position_id', 0)),
+                str(position_data.get('version_id', 0)),
+                f"'{self._escape(position_data.get('portfolio', ''))}'",
+                f"'{self._escape(position_data.get('security_label', ''))}'",
+                f"'{position_data.get('position_basis', 'TRADE_DATE')}'",
+                f"'{position_data.get('position_date', '')}'",
+                "'CIS'",  # src_system - always CIS for CIS-generated positions
+                f"'{position_data.get('processing_date', '')}'",
+                cast_decimal(position_data.get('quantity', 0)),
+                cast_decimal(position_data.get('average_cost_fc', 0), 6),  # DECIMAL(18,6) for avg cost
+                cast_decimal(position_data.get('cost_fc', 0)),
+                cast_decimal(position_data.get('market_value_fc', 0)),
+                cast_decimal(position_data.get('net_book_value_fc', 0)),
+                cast_decimal(position_data.get('unrealized_pnl_fc', 0)),
+                cast_decimal(position_data.get('cost_lc', 0)),
+                cast_decimal(position_data.get('market_value_lc', 0)),
+                cast_decimal(position_data.get('net_book_value_lc', 0)),
+                cast_decimal(position_data.get('unrealized_pnl_lc', 0)),
+                cast_decimal(position_data.get('provision_fc', 0)),
+                cast_decimal(position_data.get('provision_lc', 0)),
+                cast_decimal(position_data.get('dividend_fc', 0)),
+                cast_decimal(position_data.get('dividend_lc', 0)),
+                cast_decimal(position_data.get('realized_pnl_fc', 0)),
+                cast_decimal(position_data.get('realized_pnl_lc', 0)),
+                f"'{self._escape(position_data.get('isin', ''))}'",
+                cast_decimal(position_data.get('average_cost_lc', 0)),
+                "''",  # placeholder_3
+                "''"   # placeholder_4
+            ]
+
+            query = f"""
+            UPSERT INTO {self.DATABASE}.cis_position
+            ({', '.join(columns)})
+            VALUES ({', '.join(values)})
+            """
+
+            success = impala_manager.execute_write(query, database=self.DATABASE)
+            if success:
+                logger.info(
+                    f"Synced to cis_position: {position_data.get('portfolio')}/{position_data.get('security_label')}"
+                )
+            else:
+                logger.warning(
+                    f"Failed to sync to cis_position: {position_data.get('portfolio')}/{position_data.get('security_label')}"
+                )
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Error syncing to cis_position: {str(e)}")
+            # Don't fail the main operation if gold table sync fails
             return False
 
     def _mark_old_versions_not_latest(

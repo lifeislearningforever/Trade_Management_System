@@ -46,8 +46,18 @@ class PartyRepository(ImpalaReferenceRepository):
 
         if country:
             country_escaped = country.replace("'", "''").upper()
-            # Case-insensitive country filter to handle inconsistent data (SG, singapore, SINGAPORE)
-            query += f" AND UPPER(country) = '{country_escaped}'"
+            # Match by country code OR country name (case-insensitive)
+            # This handles cases where party.country might be "SG" or "Singapore" or "SINGAPORE"
+            # The dropdown uses country codes from cis_country table
+            query += f""" AND (
+                UPPER(country) = '{country_escaped}'
+                OR UPPER(country) IN (
+                    SELECT UPPER(name) FROM cis_country WHERE UPPER(code) = '{country_escaped}'
+                )
+                OR UPPER(country) IN (
+                    SELECT UPPER(code) FROM cis_country WHERE UPPER(code) = '{country_escaped}'
+                )
+            )"""
 
         if is_active is not None:
             query += f" AND is_active = {str(is_active).upper()}"

@@ -79,6 +79,16 @@ urlpatterns = [
     path('api/worker-health/', views.api_worker_health, name='api_worker_health'),
 
     # =========================================================================
+    # Trade Event Queue Management APIs (for async processing recovery)
+    # =========================================================================
+    path('api/event-queue/health/', views.api_trade_event_queue_health, name='api_trade_event_queue_health'),
+    path('api/event-queue/failed/', views.api_trade_event_queue_failed, name='api_trade_event_queue_failed'),
+    path('api/event-queue/reprocess/<int:event_id>/', views.api_trade_event_reprocess, name='api_trade_event_reprocess'),
+    path('api/event-queue/reprocess-all-failed/', views.api_trade_event_reprocess_all_failed, name='api_trade_event_reprocess_all_failed'),
+    path('api/event-queue/worker/start/', views.api_trade_event_worker_start, name='api_trade_event_worker_start'),
+    path('api/event-queue/worker/stop/', views.api_trade_event_worker_stop, name='api_trade_event_worker_stop'),
+
+    # =========================================================================
     # Cash Flow URLs
     # =========================================================================
     path('cash-flow/', views_cash_flow.cash_flow_list, name='cash_flow_list'),

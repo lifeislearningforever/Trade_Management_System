@@ -365,7 +365,7 @@ UPSERT INTO cis_position (
     src_system,
     processing_date,
     quantity,
-    average_cost,
+    average_cost_fc,       -- Renamed from average_cost (FC = Foreign/Security Currency)
     cost_fc,
     market_value_fc,
     net_book_value_fc,
@@ -381,7 +381,7 @@ UPSERT INTO cis_position (
     realized_pnl_fc,
     realized_pnl_lc,
     isin,
-    placeholder_2,
+    average_cost_lc,       -- Renamed from placeholder_2 (LC = Local/Portfolio Currency)
     placeholder_3,
     placeholder_4
 )
@@ -408,7 +408,7 @@ SELECT
     -- Quantity: Validated (use final_quantity)
     final_quantity AS quantity,
 
-    average_cost,
+    average_cost AS average_cost_fc,   -- Avg cost in Foreign Currency (from upload)
     cost_fc,
 
     -- Market Value FC: Use calculated if original is null
@@ -435,7 +435,9 @@ SELECT
     -- Use resolved ISIN from validation
     final_isin AS isin,
 
-    '' AS placeholder_2,
+    -- Average cost in Local Currency (Portfolio Currency)
+    -- Calculate from average_cost * FX rate if portfolio_currency != security_currency
+    CAST(0 AS DECIMAL(18,4)) AS average_cost_lc,  -- To be calculated via FX rate
     '' AS placeholder_3,
     '' AS placeholder_4
 
