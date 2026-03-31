@@ -46,16 +46,13 @@ class PartyRepository(ImpalaReferenceRepository):
 
         if country:
             country_escaped = country.replace("'", "''").upper()
-            # Match by country code OR country name (case-insensitive)
+            # Match by country label (code) OR country full_name (case-insensitive)
             # This handles cases where party.country might be "SG" or "Singapore" or "SINGAPORE"
-            # The dropdown uses country codes from cis_country table
+            # The dropdown uses country labels (codes) from gmp_cis_sta_dly_country table
             query += f""" AND (
                 UPPER(country) = '{country_escaped}'
                 OR UPPER(country) IN (
-                    SELECT UPPER(name) FROM cis_country WHERE UPPER(code) = '{country_escaped}'
-                )
-                OR UPPER(country) IN (
-                    SELECT UPPER(code) FROM cis_country WHERE UPPER(code) = '{country_escaped}'
+                    SELECT UPPER(full_name) FROM gmp_cis_sta_dly_country WHERE UPPER(label) = '{country_escaped}'
                 )
             )"""
 

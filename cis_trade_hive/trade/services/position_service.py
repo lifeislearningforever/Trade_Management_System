@@ -266,6 +266,9 @@ class PositionService:
             )
             old_realized_pnl_lc = Decimal('0')
 
+        # Calculate market_value_lc using FX rate
+        market_value_lc = market_value * fx_rate
+
         # Build position data
         # FC = Foreign Currency (Security Currency)
         # LC = Local Currency (Portfolio Currency)
@@ -283,6 +286,7 @@ class PositionService:
             # Market value
             'market_price': float(market_price),
             'market_value_fc': float(market_value),
+            'market_value_lc': float(market_value_lc),
             # P&L
             'unrealized_pnl_fc': float(unrealized_pnl),
             'realized_pnl_fc': float(old_realized_pnl),
@@ -407,6 +411,7 @@ class PositionService:
                 # Market value
                 'market_price': 0,
                 'market_value_fc': 0,
+                'market_value_lc': 0,
                 # P&L
                 'unrealized_pnl_fc': 0,
                 'realized_pnl_fc': float(new_realized_pnl),
@@ -437,6 +442,7 @@ class PositionService:
             market_price_raw = self._get_market_price(security_id)
             market_price = Decimal(str(market_price_raw)) if market_price_raw else old_avg_cost
             market_value = new_qty * market_price
+            market_value_lc = market_value * fx_rate  # Calculate market_value_lc
             unrealized_pnl = market_value - new_total_cost
 
             # FC = Foreign Currency (Security Currency)
@@ -455,6 +461,7 @@ class PositionService:
                 # Market value
                 'market_price': float(market_price),
                 'market_value_fc': float(market_value),
+                'market_value_lc': float(market_value_lc),
                 # P&L
                 'unrealized_pnl_fc': float(unrealized_pnl),
                 'realized_pnl_fc': float(new_realized_pnl),
@@ -641,11 +648,12 @@ class PositionService:
             # FC = Foreign Currency = Security Currency (where trade happens)
             # LC = Local Currency = Portfolio Currency (reporting currency)
             quantity = float(position_data.get('quantity', 0) or 0)
-            average_cost = float(position_data.get('average_cost', 0) or 0)
-            total_cost = float(position_data.get('total_cost', 0) or 0)
-            realized_pnl = float(position_data.get('realized_pnl', 0) or 0)
-            unrealized_pnl = float(position_data.get('unrealized_pnl', 0) or 0)
-            market_value = float(position_data.get('market_value', 0) or 0)
+            # Use _fc suffixed fields (set by _process_buy/_process_sell), fallback to non-suffixed for backward compat
+            average_cost = float(position_data.get('average_cost_fc') or position_data.get('average_cost', 0) or 0)
+            total_cost = float(position_data.get('total_cost_fc') or position_data.get('total_cost', 0) or 0)
+            realized_pnl = float(position_data.get('realized_pnl_fc') or position_data.get('realized_pnl', 0) or 0)
+            unrealized_pnl = float(position_data.get('unrealized_pnl_fc') or position_data.get('unrealized_pnl', 0) or 0)
+            market_value = float(position_data.get('market_value_fc') or position_data.get('market_value', 0) or 0)
 
             # Get portfolio revaluation status
             revaluation_status = self._get_portfolio_revaluation_status(portfolio_id)

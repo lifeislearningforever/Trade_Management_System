@@ -967,7 +967,8 @@ def trade_settle(request, trade_id):
         if not success:
             raise Exception('Failed to settle trade')
 
-        audit_log_kudu_repository.log_action(
+        # Use async audit logging to avoid blocking UI
+        audit_log_kudu_repository.log_action_async(
             user_id=user_info['user_id'],
             username=user_info['username'],
             user_email=user_info['user_email'],
