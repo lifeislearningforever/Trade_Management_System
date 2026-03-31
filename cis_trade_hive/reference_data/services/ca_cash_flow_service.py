@@ -951,14 +951,19 @@ class CACashFlowService:
                             updated_by=created_by,
                             dry_run=dry_run
                         )
-                    elif ca_type in ['SPLIT', 'STOCK_SPLIT', 'CONSOLIDATION']:
-                        # Forward split: qty_new = qty_old × ratio, AVP = AVP_old / ratio
-                        success = self._process_split(
+                    elif ca_type in ['SPLIT', 'STOCK_SPLIT']:
+                        # Stock Split (Forward): 1:3 means 1 share becomes 3 shares
+                        # Price field stores the FRACTION (e.g., 0.33 for 1:3 split)
+                        # So ratio = 1/price (e.g., 1/0.33 = 3)
+                        # qty_new = qty_old × ratio, AVP = AVP_old / ratio
+                        split_ratio = Decimal('1') / price if price > 0 else Decimal('1')
+                        logger.info(f"[STOCK_SPLIT] Price={price}, calculated ratio={split_ratio}")
+                        success = self._process_stock_split(
                             portfolio_short_name=portfolio_short_name,
                             security_name=security_name,
                             old_quantity=quantity,
                             old_avg_cost=avg_cost,
-                            ratio=price,  # price field stores the split ratio (e.g., 2 for 2:1 split)
+                            ratio=split_ratio,  # e.g., 3 for 1:3 split
                             ca_id=ca_id,
                             ca_number=ca_number,
                             ex_date=ex_date,
@@ -968,15 +973,34 @@ class CACashFlowService:
                             dry_run=dry_run
                         )
                     elif ca_type == 'REVERSE_SPLIT':
-                        # Reverse split: qty_new = qty_old / ratio, AVP = AVP_old × ratio
-                        # For reverse split, invert the ratio
-                        reverse_ratio = Decimal('1') / price if price > 0 else Decimal('1')
-                        success = self._process_split(
+                        # Reverse Split: 3:1 means 3 shares become 1 share
+                        # Price field stores the ratio directly (e.g., 3.00 for 3:1 reverse split)
+                        # qty_new = qty_old / ratio, AVP = AVP_old × ratio
+                        reverse_ratio = price  # e.g., 3 for 3:1 reverse split
+                        logger.info(f"[REVERSE_SPLIT] Price={price}, ratio={reverse_ratio}")
+                        success = self._process_reverse_split(
                             portfolio_short_name=portfolio_short_name,
                             security_name=security_name,
                             old_quantity=quantity,
                             old_avg_cost=avg_cost,
-                            ratio=reverse_ratio,  # Inverted ratio for reverse split
+                            ratio=reverse_ratio,  # e.g., 3 for 3:1 reverse split
+                            ca_id=ca_id,
+                            ca_number=ca_number,
+                            ex_date=ex_date,
+                            security_currency=security_currency,
+                            portfolio_currency=portfolio_currency,
+                            updated_by=created_by,
+                            dry_run=dry_run
+                        )
+                    elif ca_type == 'CONSOLIDATION':
+                        # Consolidation is same as reverse split
+                        reverse_ratio = price
+                        success = self._process_reverse_split(
+                            portfolio_short_name=portfolio_short_name,
+                            security_name=security_name,
+                            old_quantity=quantity,
+                            old_avg_cost=avg_cost,
+                            ratio=reverse_ratio,
                             ca_id=ca_id,
                             ca_number=ca_number,
                             ex_date=ex_date,
@@ -1083,7 +1107,7 @@ class CACashFlowService:
             logger.error(f"[BONUS] Error processing bonus issue: {str(e)}")
             return False
 
-    def _process_split(
+    def _process_stock_split(
         self,
         portfolio_short_name: str,
         security_name: str,
@@ -1099,12 +1123,12 @@ class CACashFlowService:
         dry_run: bool = False
     ) -> bool:
         """
-        Process SPLIT: qty_new = qty_old × ratio, AVP = AVP_old / ratio
+        Process STOCK SPLIT (Forward Split): qty_new = qty_old × ratio, AVP = AVP_old / ratio
 
-        Example: 2:1 split (ratio=2) with 100 shares @ $100
-        - New qty = 100 × 2 = 200 shares
-        - New AVP = $100 / 2 = $50
-        - Total cost stays same = $10,000
+        Example: 1:3 stock split (ratio=3) with 88 shares @ $49.67
+        - New qty = 88 × 3 = 264 shares
+        - New AVP = $49.67 / 3 = $16.56
+        - Total cost stays same = $4,370.96
         """
         try:
             # Calculate new quantity and AVP
@@ -1116,14 +1140,14 @@ class CACashFlowService:
             ) if ratio > 0 else Decimal('0')
             old_total_cost = old_quantity * old_avg_cost
 
-            logger.info(f"[SPLIT] Portfolio={portfolio_short_name}, Security={security_name}")
-            logger.info(f"[SPLIT] Old: qty={old_quantity}, avg_cost={old_avg_cost}, total={old_total_cost}")
-            logger.info(f"[SPLIT] New: qty={new_quantity}, avg_cost={new_avg_cost} (ratio={ratio})")
+            logger.info(f"[STOCK_SPLIT] Portfolio={portfolio_short_name}, Security={security_name}")
+            logger.info(f"[STOCK_SPLIT] Old: qty={old_quantity}, avg_cost={old_avg_cost}, total={old_total_cost}")
+            logger.info(f"[STOCK_SPLIT] New: qty={new_quantity}, avg_cost={new_avg_cost} (ratio={ratio})")
 
             if dry_run:
                 return True
 
-            # Create new position version
+            # Create new position version with STOCK_SPLIT type
             return self._create_position_adjustment_version(
                 portfolio_short_name=portfolio_short_name,
                 security_name=security_name,
@@ -1132,7 +1156,7 @@ class CACashFlowService:
                 new_total_cost=old_total_cost,  # Total cost unchanged for split
                 ca_id=ca_id,
                 ca_number=ca_number,
-                ca_type='SPLIT',
+                ca_type='STOCK_SPLIT',  # Distinct type name
                 ex_date=ex_date,
                 security_currency=security_currency,
                 portfolio_currency=portfolio_currency,
@@ -1140,7 +1164,67 @@ class CACashFlowService:
             )
 
         except Exception as e:
-            logger.error(f"[SPLIT] Error processing split: {str(e)}")
+            logger.error(f"[STOCK_SPLIT] Error processing stock split: {str(e)}")
+            return False
+
+    def _process_reverse_split(
+        self,
+        portfolio_short_name: str,
+        security_name: str,
+        old_quantity: Decimal,
+        old_avg_cost: Decimal,
+        ratio: Decimal,
+        ca_id: int,
+        ca_number: str,
+        ex_date: str,
+        security_currency: str,
+        portfolio_currency: str,
+        updated_by: str,
+        dry_run: bool = False
+    ) -> bool:
+        """
+        Process REVERSE SPLIT: qty_new = qty_old / ratio, AVP = AVP_old × ratio
+
+        Example: 3:1 reverse split (ratio=3) with 88 shares @ $49.67
+        - New qty = 88 / 3 = 29.33 shares
+        - New AVP = $49.67 × 3 = $149.01
+        - Total cost stays same = $4,370.96
+        """
+        try:
+            # Calculate new quantity and AVP
+            new_quantity = (old_quantity / ratio).quantize(
+                Decimal('0.00000001'), rounding=ROUND_HALF_UP
+            ) if ratio > 0 else old_quantity
+            new_avg_cost = (old_avg_cost * ratio).quantize(
+                Decimal('0.00000001'), rounding=ROUND_HALF_UP
+            )
+            old_total_cost = old_quantity * old_avg_cost
+
+            logger.info(f"[REVERSE_SPLIT] Portfolio={portfolio_short_name}, Security={security_name}")
+            logger.info(f"[REVERSE_SPLIT] Old: qty={old_quantity}, avg_cost={old_avg_cost}, total={old_total_cost}")
+            logger.info(f"[REVERSE_SPLIT] New: qty={new_quantity}, avg_cost={new_avg_cost} (ratio={ratio})")
+
+            if dry_run:
+                return True
+
+            # Create new position version with REVERSE_SPLIT type
+            return self._create_position_adjustment_version(
+                portfolio_short_name=portfolio_short_name,
+                security_name=security_name,
+                new_quantity=new_quantity,
+                new_avg_cost=new_avg_cost,
+                new_total_cost=old_total_cost,  # Total cost unchanged for reverse split
+                ca_id=ca_id,
+                ca_number=ca_number,
+                ca_type='REVERSE_SPLIT',  # Distinct type name
+                ex_date=ex_date,
+                security_currency=security_currency,
+                portfolio_currency=portfolio_currency,
+                updated_by=updated_by
+            )
+
+        except Exception as e:
+            logger.error(f"[REVERSE_SPLIT] Error processing reverse split: {str(e)}")
             return False
 
     def _create_position_adjustment_version(

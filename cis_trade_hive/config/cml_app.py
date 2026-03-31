@@ -326,6 +326,173 @@ def start_trade_event_worker():
             else:
                 print(f"==> Trade Event Worker: SETTLEMENT warning for trade {trade_id}: {msg}")
 
+        def process_position_modify_event(event, event_data):
+            """Process a POSITION_MODIFY event - update position when trade is modified.
+
+            For trade modifications:
+            1. Reverse the old position effect (treat old BUY as SELL, vice versa)
+            2. Apply the new position effect
+
+            This ensures the position correctly reflects the new trade values.
+
+            Event data structure:
+            {
+                'old_trade': { ... original trade data ... },
+                'new_trade': { ... updated trade data ... }
+            }
+            """
+            from trade.services.position_service import position_service
+
+            # Extract old and new trade data from nested structure
+            old_trade = event_data.get('old_trade', {})
+            new_trade = event_data.get('new_trade', {})
+
+            trade_id = event['trade_id']
+            created_by = event['created_by']
+
+            # Get new trade values
+            portfolio_id = new_trade.get('portfolio_short_name', '')
+            security_id = new_trade.get('security_label', '')
+            trade_type = new_trade.get('trade_type', '')
+            quantity = Decimal(str(new_trade.get('quantity', 0) or 0))
+            price = Decimal(str(new_trade.get('price', 0) or 0))
+            trade_date = new_trade.get('trade_date', '')
+            settle_date = new_trade.get('settle_date', '')
+            position_date = settle_date or trade_date
+
+            # Calculate total charges for new trade (manual + auto-calculated)
+            manual_charges = (
+                Decimal(str(new_trade.get('commission', 0) or 0)) +
+                Decimal(str(new_trade.get('sec_fee', 0) or 0)) +
+                Decimal(str(new_trade.get('other_charges', 0) or 0))
+            )
+            auto_charges = (
+                Decimal(str(new_trade.get('calculated_commission', 0) or 0)) +
+                Decimal(str(new_trade.get('calculated_clearing_fee', 0) or 0)) +
+                Decimal(str(new_trade.get('calculated_trading_fee', 0) or 0)) +
+                Decimal(str(new_trade.get('calculated_gst', 0) or 0)) +
+                Decimal(str(new_trade.get('calculated_other_fees', 0) or 0))
+            )
+            charges = manual_charges + auto_charges
+
+            # Get old values from old_trade
+            old_quantity = Decimal(str(old_trade.get('quantity', 0) or 0))
+            old_price = Decimal(str(old_trade.get('price', 0) or 0))
+            old_manual_charges = (
+                Decimal(str(old_trade.get('commission', 0) or 0)) +
+                Decimal(str(old_trade.get('sec_fee', 0) or 0)) +
+                Decimal(str(old_trade.get('other_charges', 0) or 0))
+            )
+            old_charges = old_manual_charges
+
+            print(f"==> Trade Event Worker: POSITION_MODIFY processing trade {trade_id}")
+            print(f"    Portfolio: {portfolio_id}, Security: {security_id}")
+            print(f"    Old: qty={old_quantity}, price={old_price}, type={trade_type}")
+            print(f"    New: qty={quantity}, price={price}, type={trade_type}")
+
+            # Step 1: Reverse the old trade effect
+            # If original was BUY, reverse with SELL. If original was SELL, reverse with BUY.
+            reverse_type = 'SELL' if trade_type == 'BUY' else 'BUY'
+
+            if old_quantity > 0 and old_price > 0:
+                print(f"==> Trade Event Worker: Reversing old position ({reverse_type} {old_quantity}@{old_price})")
+                success1, msg1, _ = position_service.calculate_position(
+                    portfolio_id=portfolio_id,
+                    security_id=security_id,
+                    trade_type=reverse_type,
+                    quantity=old_quantity,
+                    price=old_price,
+                    charges=old_charges,
+                    position_date=position_date,
+                    trade_id=trade_id,
+                    updated_by=created_by,
+                    security_currency=new_trade.get('security_currency'),
+                    portfolio_currency=new_trade.get('portfolio_currency'),
+                    isin=new_trade.get('isin'),
+                    security_name=new_trade.get('security_name'),
+                    custodian=new_trade.get('custodian', ''),
+                    sub_custodian=new_trade.get('sub_custodian', ''),
+                )
+                if not success1:
+                    print(f"==> Trade Event Worker: Reversal warning: {msg1}")
+
+            # Step 2: Apply the new trade effect
+            print(f"==> Trade Event Worker: Applying new position ({trade_type} {quantity}@{price})")
+            success, msg, result = position_service.calculate_position(
+                portfolio_id=portfolio_id,
+                security_id=security_id,
+                trade_type=trade_type,
+                quantity=quantity,
+                price=price,
+                charges=charges,
+                position_date=position_date,
+                trade_id=trade_id,
+                updated_by=created_by,
+                security_currency=new_trade.get('security_currency'),
+                portfolio_currency=new_trade.get('portfolio_currency'),
+                isin=new_trade.get('isin'),
+                security_name=new_trade.get('security_name'),
+                custodian=new_trade.get('custodian', ''),
+                sub_custodian=new_trade.get('sub_custodian', ''),
+            )
+
+            if success:
+                print(f"==> Trade Event Worker: POSITION_MODIFY completed for trade {trade_id}: {msg}")
+            else:
+                print(f"==> Trade Event Worker: POSITION_MODIFY warning for trade {trade_id}: {msg}")
+
+        def process_position_cancel_event(event, event_data):
+            """Process a POSITION_CANCEL event - reverse position when trade is cancelled.
+
+            Steps:
+            1. Get the original trade details
+            2. Apply opposite trade (BUY -> SELL, SELL -> BUY) to reverse
+            """
+            from trade.services.position_service import position_service
+
+            trade_id = event['trade_id']
+            created_by = event['created_by']
+
+            # Get trade data (POSITION_CANCEL passes trade data directly, not nested)
+            portfolio_id = event_data.get('portfolio_short_name', '')
+            security_id = event_data.get('security_label', '')
+            original_trade_type = event_data.get('trade_type', '')
+            quantity = Decimal(str(event_data.get('quantity', 0) or 0))
+            price = Decimal(str(event_data.get('price', 0) or 0))
+            trade_date = event_data.get('trade_date', '')
+            settle_date = event_data.get('settle_date', '')
+            position_date = settle_date or trade_date
+
+            # Determine reversal type
+            reverse_type = 'SELL' if original_trade_type == 'BUY' else 'BUY'
+
+            print(f"==> Trade Event Worker: POSITION_CANCEL processing trade {trade_id}")
+            print(f"    Reversing {original_trade_type} with {reverse_type} ({quantity}@{price})")
+
+            # Process reversal (no charges on cancellation reversal)
+            success, msg, result = position_service.calculate_position(
+                portfolio_id=portfolio_id,
+                security_id=security_id,
+                trade_type=reverse_type,
+                quantity=quantity,
+                price=price,
+                charges=Decimal('0'),  # No charges on reversal
+                position_date=position_date,
+                trade_id=trade_id,
+                updated_by=created_by,
+                security_currency=event_data.get('security_currency'),
+                portfolio_currency=event_data.get('portfolio_currency'),
+                isin=event_data.get('isin'),
+                security_name=event_data.get('security_name'),
+                custodian=event_data.get('custodian', ''),
+                sub_custodian=event_data.get('sub_custodian', ''),
+            )
+
+            if success:
+                print(f"==> Trade Event Worker: POSITION_CANCEL completed for trade {trade_id}: {msg}")
+            else:
+                print(f"==> Trade Event Worker: POSITION_CANCEL warning for trade {trade_id}: {msg}")
+
         def mark_completed(event_id, event):
             """Mark event as completed."""
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -402,6 +569,10 @@ def start_trade_event_worker():
                                 process_history_event(event, event_data)
                             elif event_type == 'SETTLEMENT':
                                 process_settlement_event(event, event_data)
+                            elif event_type == 'POSITION_MODIFY':
+                                process_position_modify_event(event, event_data)
+                            elif event_type == 'POSITION_CANCEL':
+                                process_position_cancel_event(event, event_data)
                             else:
                                 print(f"==> Trade Event Worker: Unknown event type: {event_type}")
 

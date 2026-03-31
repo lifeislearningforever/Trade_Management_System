@@ -297,12 +297,12 @@ class TradeKuduRepository:
             where_clause = " AND ".join(where_clauses)
 
             # Join with portfolio table to get portfolio currency for LC calculation
-            # Portfolio table uses 'code' as identifier which matches trade's 'portfolio_short_name'
+            # Portfolio table uses 'name' as identifier which matches trade's 'portfolio_short_name'
             query = f"""
             SELECT t.*,
                    COALESCE(p.currency, t.currency_code) as portfolio_currency
             FROM {self.DATABASE}.{self.TABLE_NAME} t
-            LEFT JOIN {self.DATABASE}.cis_portfolio p ON t.portfolio_short_name = p.code
+            LEFT JOIN {self.DATABASE}.cis_portfolio p ON t.portfolio_short_name = p.name
             WHERE {where_clause}
             ORDER BY CASE WHEN UPPER(t.src_system) = 'CIS' THEN 0 ELSE 1 END,
                      t.created_at DESC
@@ -561,7 +561,7 @@ class TradeKuduRepository:
                     changes={},
                     comments='Trade created',
                     performed_by=created_by,
-                    async_write=False  # Sync write for history reliability
+                    async_write=True  # Async write for fast UI response
                 )
                 logger.info(f"Created trade {trade_id} ({deal_number}) with INITIAL status")
 
@@ -1142,7 +1142,7 @@ class TradeKuduRepository:
                     changes={},
                     comments=f'Trade soft deleted. Reason: {reason}',
                     performed_by=deleted_by,
-                    async_write=False  # Sync write for history reliability
+                    async_write=True  # Async write for fast UI response
                 )
                 logger.info(f"Soft deleted trade {trade_id}")
 
@@ -1191,7 +1191,7 @@ class TradeKuduRepository:
                     changes={},
                     comments='Submitted for validation',
                     performed_by=submitted_by,
-                    async_write=False  # Sync write for history reliability
+                    async_write=True  # Async write for fast UI response
                 )
                 logger.info(f"Trade {trade_id} submitted for validation")
 
@@ -1242,7 +1242,7 @@ class TradeKuduRepository:
                     changes={},
                     comments=comments or 'Trade validated',
                     performed_by=validated_by,
-                    async_write=False  # Sync write for history reliability
+                    async_write=True  # Async write for fast UI response
                 )
                 logger.info(f"Trade {trade_id} validated")
 
@@ -1288,7 +1288,7 @@ class TradeKuduRepository:
                     changes={},
                     comments=f'Trade rejected. Reason: {reason}',
                     performed_by=rejected_by,
-                    async_write=False  # Sync write for history reliability
+                    async_write=True  # Async write for fast UI response
                 )
                 logger.info(f"Trade {trade_id} rejected")
 
@@ -1335,7 +1335,7 @@ class TradeKuduRepository:
                     changes={},
                     comments=comments or 'Trade settled',
                     performed_by=settled_by,
-                    async_write=False  # Sync write for history reliability
+                    async_write=True  # Async write for fast UI response
                 )
                 logger.info(f"Trade {trade_id} settled")
 

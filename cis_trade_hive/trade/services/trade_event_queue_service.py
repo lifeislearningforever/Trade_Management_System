@@ -878,7 +878,8 @@ class TradeEventQueueService:
         deal_number: str,
         event_type: str,
         event_data: Dict,
-        created_by: str
+        created_by: str,
+        async_mode: bool = False
     ) -> Tuple[bool, str]:
         """
         Queue a new event for background processing.
@@ -889,6 +890,7 @@ class TradeEventQueueService:
             event_type: HISTORY, SETTLEMENT, POSITION_MODIFY, POSITION_CANCEL
             event_data: JSON-serializable dict with event details
             created_by: User who triggered the event
+            async_mode: If True, queue asynchronously (fire-and-forget) for fast UI response
 
         Returns:
             Tuple of (success, message)
@@ -916,13 +918,23 @@ class TradeEventQueueService:
             )
             """
 
-            success = impala_manager.execute_write(query, database=self.DATABASE)
+            if async_mode:
+                # Fire-and-forget for fast UI response
+                def on_failure(success: bool):
+                    if not success:
+                        logger.error(f"CRITICAL: Failed to queue {event_type} event for trade {trade_id}")
 
-            if success:
-                logger.info(f"Queued {event_type} event for trade {trade_id}")
-                return True, f"Event {event_id} queued"
+                impala_manager.execute_write_async(query, database=self.DATABASE, callback=on_failure)
+                logger.info(f"Queued {event_type} event for trade {trade_id} (async)")
+                return True, f"Event {event_id} queued (async)"
             else:
-                return False, "Failed to queue event"
+                success = impala_manager.execute_write(query, database=self.DATABASE)
+
+                if success:
+                    logger.info(f"Queued {event_type} event for trade {trade_id}")
+                    return True, f"Event {event_id} queued"
+                else:
+                    return False, "Failed to queue event"
 
         except Exception as e:
             logger.error(f"Error queuing event for trade {trade_id}: {e}")
@@ -938,6 +950,8 @@ class TradeEventQueueService:
     ) -> Tuple[bool, str]:
         """
         Queue a POSITION_MODIFY event when trade is edited after position calculated.
+
+        Uses async mode for fast UI response - the event is queued in the background.
 
         Args:
             trade_id: Trade ID
@@ -958,7 +972,8 @@ class TradeEventQueueService:
             deal_number=deal_number,
             event_type='POSITION_MODIFY',
             event_data=event_data,
-            created_by=created_by
+            created_by=created_by,
+            async_mode=True  # Fast UI response
         )
 
     def queue_position_cancel_event(
@@ -970,6 +985,8 @@ class TradeEventQueueService:
     ) -> Tuple[bool, str]:
         """
         Queue a POSITION_CANCEL event when trade is cancelled after position calculated.
+
+        Uses async mode for fast UI response - the event is queued in the background.
 
         Args:
             trade_id: Trade ID
@@ -985,7 +1002,8 @@ class TradeEventQueueService:
             deal_number=deal_number,
             event_type='POSITION_CANCEL',
             event_data=trade_data,
-            created_by=created_by
+            created_by=created_by,
+            async_mode=True  # Fast UI response
         )
 
     def check_position_exists(self, trade_id: int) -> bool:
@@ -1011,6 +1029,8 @@ class TradeEventQueueService:
         """
         Cancel all pending events for a trade (when trade is deleted before processing).
 
+        Uses async write for fast UI response.
+
         Returns:
             Tuple of (cancelled_count, message)
         """
@@ -1028,7 +1048,7 @@ class TradeEventQueueService:
             if count == 0:
                 return 0, "No pending events to cancel"
 
-            # Update pending events to COMPLETED with note
+            # Update pending events to COMPLETED with note (async for fast UI)
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             update_query = f"""
             UPDATE {self.DATABASE}.{self.EVENT_QUEUE_TABLE}
@@ -1039,13 +1059,14 @@ class TradeEventQueueService:
             AND status = '{self.STATUS_PENDING}'
             """
 
-            success = impala_manager.execute_write(update_query, database=self.DATABASE)
+            # Fire-and-forget for fast UI response
+            def on_failure(success: bool):
+                if not success:
+                    logger.error(f"CRITICAL: Failed to cancel pending events for trade {trade_id}")
 
-            if success:
-                logger.info(f"Cancelled {count} pending events for trade {trade_id}")
-                return count, f"Cancelled {count} pending events"
-            else:
-                return 0, "Failed to cancel pending events"
+            impala_manager.execute_write_async(update_query, database=self.DATABASE, callback=on_failure)
+            logger.info(f"Cancelled {count} pending events for trade {trade_id} (async)")
+            return count, f"Cancelled {count} pending events"
 
         except Exception as e:
             logger.error(f"Error cancelling pending events for trade {trade_id}: {e}")

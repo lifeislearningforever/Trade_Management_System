@@ -344,16 +344,41 @@ class CashFlowRepository:
             VALUES ({', '.join(values)})
             """
 
+            # Debug logging - log the SQL being executed
+            logger.info(f"[CF_INSERT] Executing cash flow insert SQL:")
+            logger.info(f"[CF_INSERT] Columns: {columns}")
+            logger.info(f"[CF_INSERT] Values: {values}")
+            logger.info(f"[CF_INSERT] SQL: {upsert_sql.strip()}")
+
             success = impala_manager.execute_write(upsert_sql, database=CashFlowRepository.DATABASE)
+            logger.info(f"[CF_INSERT] execute_write returned: {success}")
 
             if success:
-                logger.info(f"Successfully inserted cash flow {cash_flow_id}")
+                logger.info(f"[CF_INSERT] SUCCESS - Inserted cash flow {cash_flow_id}")
+                # Verify the insert by reading it back
+                verify_query = f"""
+                SELECT cash_flow_id, cash_flow_number, status
+                FROM {CashFlowRepository.DATABASE}.{CashFlowRepository.TABLE_NAME}
+                WHERE cash_flow_id = {cash_flow_id}
+                """
+                try:
+                    verify_result = impala_manager.execute_query(verify_query, database=CashFlowRepository.DATABASE)
+                    if verify_result and len(verify_result) > 0:
+                        logger.info(f"[CF_INSERT] VERIFIED - Cash flow {cash_flow_id} found in table: {verify_result[0]}")
+                    else:
+                        logger.warning(f"[CF_INSERT] VERIFY FAILED - Cash flow {cash_flow_id} NOT found in table after insert!")
+                except Exception as ve:
+                    logger.warning(f"[CF_INSERT] Could not verify insert: {ve}")
                 return True, cash_flow_id
+            else:
+                logger.error(f"[CF_INSERT] FAILED - execute_write returned False for cash flow {cash_flow_id}")
 
             return False, None
 
         except Exception as e:
-            logger.error(f"Error inserting cash flow: {str(e)}")
+            logger.error(f"[CF_INSERT] EXCEPTION - Error inserting cash flow: {str(e)}")
+            import traceback
+            logger.error(f"[CF_INSERT] Traceback: {traceback.format_exc()}")
             return False, None
 
     @staticmethod
