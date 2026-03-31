@@ -788,24 +788,25 @@ def trade_edit(request, trade_id):
             if not success:
                 raise Exception('Failed to update trade')
 
-            # Always queue POSITION_MODIFY event when trade is modified
-            # This handles both cases:
-            # 1. Position exists (SETTLED trade) - reverse old position and apply new values
-            # 2. Position doesn't exist yet (INITIAL/MODIFIED) - will be calculated on settlement
-            from trade.services.trade_event_queue_service import trade_event_queue_service
+            # Only queue POSITION_MODIFY if trade was already SETTLED (has a position)
+            # For INITIAL/MODIFIED trades, position will be calculated when settled
+            if current_status == 'SETTLED':
+                from trade.services.trade_event_queue_service import trade_event_queue_service
 
-            # Merge updated data with original trade data
-            merged_trade_data = {**trade_data, **updated_data}
+                # Merge updated data with original trade data
+                merged_trade_data = {**trade_data, **updated_data}
 
-            # Queue position modify event (works for any status)
-            trade_event_queue_service.queue_position_modify_event(
-                trade_id=trade_id,
-                deal_number=trade_data.get('deal_number', ''),
-                old_trade_data=trade_data,  # Original values
-                new_trade_data=merged_trade_data,  # Merged with updates
-                created_by=user_info['username']
-            )
-            logger.info(f"Queued POSITION_MODIFY event for trade {trade_id}")
+                # Queue position modify event to recalculate position
+                trade_event_queue_service.queue_position_modify_event(
+                    trade_id=trade_id,
+                    deal_number=trade_data.get('deal_number', ''),
+                    old_trade_data=trade_data,  # Original values
+                    new_trade_data=merged_trade_data,  # Merged with updates
+                    created_by=user_info['username']
+                )
+                logger.info(f"Queued POSITION_MODIFY event for SETTLED trade {trade_id}")
+            else:
+                logger.info(f"Trade {trade_id} status is {current_status}, position will be calculated on settlement")
 
             # Use async audit logging for fast UI response
             audit_log_kudu_repository.log_action_async(
