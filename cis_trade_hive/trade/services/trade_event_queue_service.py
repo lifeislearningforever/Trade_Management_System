@@ -428,12 +428,11 @@ class TradeEventQueueService:
 
     def _process_position_modify_event(self, event: Dict, event_data: Dict, trade: Dict) -> bool:
         """
-        Process POSITION_MODIFY event - reverse old position and recalculate with new values.
+        Process POSITION_MODIFY event - reverse old position (if exists) and recalculate with new values.
 
-        This is used when a trade is modified after position has been calculated.
-        Steps:
-        1. Reverse the OLD trade (opposite trade_type)
-        2. Apply the NEW trade values (normal settlement)
+        This is used when a trade is modified. Works for any trade status:
+        - If position exists (SETTLED): Reverse old position, then apply new values
+        - If no position yet (INITIAL/MODIFIED): Just calculate new position directly
         """
         trade_id = event.get('trade_id')
         created_by = event.get('created_by', 'system')
@@ -452,36 +451,42 @@ class TradeEventQueueService:
             portfolio_id = old_data.get('portfolio_short_name', '')
             security_id = old_data.get('security_label', '')
 
-            # Step 1: REVERSE the old position
-            # If old was BUY, we do a SELL to reverse; if old was SELL, we do a BUY
-            old_trade_type = old_data.get('trade_type', '')
-            reverse_type = 'SELL' if old_trade_type == 'BUY' else 'BUY'
-            old_quantity = Decimal(str(old_data.get('quantity', 0) or 0))
-            old_price = Decimal(str(old_data.get('price', 0) or 0))
-            old_charges = self._calculate_charges(old_data)
+            # Check if position already exists for this trade
+            position_exists = self.check_position_exists(trade_id)
 
-            logger.info(f"POSITION_MODIFY: Reversing old {old_trade_type} for trade {trade_id}")
+            # Step 1: REVERSE the old position (only if position exists)
+            if position_exists:
+                # If old was BUY, we do a SELL to reverse; if old was SELL, we do a BUY
+                old_trade_type = old_data.get('trade_type', '')
+                reverse_type = 'SELL' if old_trade_type == 'BUY' else 'BUY'
+                old_quantity = Decimal(str(old_data.get('quantity', 0) or 0))
+                old_price = Decimal(str(old_data.get('price', 0) or 0))
+                old_charges = self._calculate_charges(old_data)
 
-            # Process reversal (no charges on reversal - we're undoing)
-            success_reverse, msg_reverse, _ = settlement_service.process_trade_settlement(
-                trade_id=trade_id,
-                portfolio_id=portfolio_id,
-                security_id=security_id,
-                trade_type=reverse_type,
-                quantity=old_quantity,
-                price=old_price,
-                charges=Decimal('0'),  # No charges on reversal
-                trade_date=old_data.get('trade_date', ''),
-                settle_date=old_data.get('settle_date', ''),
-                updated_by=created_by,
-                security_currency=old_data.get('security_currency'),
-                portfolio_currency=old_data.get('portfolio_currency'),
-                async_mode=False
-            )
+                logger.info(f"POSITION_MODIFY: Reversing old {old_trade_type} for trade {trade_id}")
 
-            if not success_reverse:
-                logger.error(f"Failed to reverse position for trade {trade_id}: {msg_reverse}")
-                raise Exception(f"Reversal failed: {msg_reverse}")
+                # Process reversal (no charges on reversal - we're undoing)
+                success_reverse, msg_reverse, _ = settlement_service.process_trade_settlement(
+                    trade_id=trade_id,
+                    portfolio_id=portfolio_id,
+                    security_id=security_id,
+                    trade_type=reverse_type,
+                    quantity=old_quantity,
+                    price=old_price,
+                    charges=Decimal('0'),  # No charges on reversal
+                    trade_date=old_data.get('trade_date', ''),
+                    settle_date=old_data.get('settle_date', ''),
+                    updated_by=created_by,
+                    security_currency=old_data.get('security_currency'),
+                    portfolio_currency=old_data.get('portfolio_currency'),
+                    async_mode=False
+                )
+
+                if not success_reverse:
+                    logger.error(f"Failed to reverse position for trade {trade_id}: {msg_reverse}")
+                    raise Exception(f"Reversal failed: {msg_reverse}")
+            else:
+                logger.info(f"POSITION_MODIFY: No existing position for trade {trade_id}, skipping reversal")
 
             # Step 2: Apply NEW trade values
             new_trade_type = new_data.get('trade_type', '')

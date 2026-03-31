@@ -317,7 +317,7 @@ def trade_list(request):
             ])
 
         user_info = get_user_info(request)
-        audit_log_kudu_repository.log_action(
+        audit_log_kudu_repository.log_action_async(
             user_id=user_info['user_id'],
             username=user_info['username'],
             user_email=user_info['user_email'],
@@ -788,20 +788,27 @@ def trade_edit(request, trade_id):
             if not success:
                 raise Exception('Failed to update trade')
 
-            # Check if position was already calculated - queue reversal if needed
+            # Always queue POSITION_MODIFY event when trade is modified
+            # This handles both cases:
+            # 1. Position exists (SETTLED trade) - reverse old position and apply new values
+            # 2. Position doesn't exist yet (INITIAL/MODIFIED) - will be calculated on settlement
             from trade.services.trade_event_queue_service import trade_event_queue_service
-            if trade_event_queue_service.check_position_exists(trade_id):
-                # Position exists - queue POSITION_MODIFY event to reverse and recalculate
-                trade_event_queue_service.queue_position_modify_event(
-                    trade_id=trade_id,
-                    deal_number=trade_data.get('deal_number', ''),
-                    old_trade_data=trade_data,  # Original values
-                    new_trade_data={**trade_data, **updated_data},  # Merged with updates
-                    created_by=user_info['username']
-                )
-                logger.info(f"Queued POSITION_MODIFY event for trade {trade_id}")
 
-            audit_log_kudu_repository.log_action(
+            # Merge updated data with original trade data
+            merged_trade_data = {**trade_data, **updated_data}
+
+            # Queue position modify event (works for any status)
+            trade_event_queue_service.queue_position_modify_event(
+                trade_id=trade_id,
+                deal_number=trade_data.get('deal_number', ''),
+                old_trade_data=trade_data,  # Original values
+                new_trade_data=merged_trade_data,  # Merged with updates
+                created_by=user_info['username']
+            )
+            logger.info(f"Queued POSITION_MODIFY event for trade {trade_id}")
+
+            # Use async audit logging for fast UI response
+            audit_log_kudu_repository.log_action_async(
                 user_id=user_info['user_id'],
                 username=user_info['username'],
                 user_email=user_info['user_email'],
@@ -864,7 +871,7 @@ def trade_submit(request, trade_id):
         if not success:
             raise Exception('Failed to submit trade for validation')
 
-        audit_log_kudu_repository.log_action(
+        audit_log_kudu_repository.log_action_async(
             user_id=user_info['user_id'],
             username=user_info['username'],
             user_email=user_info['user_email'],
@@ -921,7 +928,7 @@ def trade_validate(request, trade_id):
         if not success:
             raise Exception(f'Failed to {action} trade')
 
-        audit_log_kudu_repository.log_action(
+        audit_log_kudu_repository.log_action_async(
             user_id=user_info['user_id'],
             username=user_info['username'],
             user_email=user_info['user_email'],
@@ -1039,7 +1046,7 @@ def trade_cancel(request, trade_id):
             'status': trade_data.get('status', ''),
         }
 
-        audit_log_kudu_repository.log_action(
+        audit_log_kudu_repository.log_action_async(
             user_id=user_info['user_id'],
             username=user_info['username'],
             user_email=user_info['user_email'],

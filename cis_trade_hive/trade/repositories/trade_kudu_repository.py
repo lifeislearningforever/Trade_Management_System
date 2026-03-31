@@ -1032,7 +1032,7 @@ class TradeKuduRepository:
             success = impala_manager.execute_write(query, database=self.DATABASE)
 
             if success:
-                # Insert history record (synchronous for reliability)
+                # Insert history record (async for fast UI response)
                 self.insert_trade_history(
                     trade_id=trade_id,
                     deal_number=current_trade.get('deal_number', ''),
@@ -1042,24 +1042,11 @@ class TradeKuduRepository:
                     changes=changes,
                     comments='Trade updated',
                     performed_by=updated_by,
-                    async_write=False  # Sync write for history reliability
+                    async_write=True  # IMPORTANT: Async write for fast UI response
                 )
+
+                # Position recalculation is now handled by views.py via queue_position_modify_event
                 logger.info(f"Updated trade {trade_id}, status set to MODIFIED")
-
-                # Check if position-affecting fields changed (quantity, price, charges)
-                position_fields = ['quantity', 'price', 'commission', 'sec_fee', 'other_charges', 'total_amount']
-                position_changed = any(field in changes for field in position_fields)
-
-                if position_changed:
-                    # Queue position recalculation for BUY/SELL trades
-                    trade_type = current_trade.get('trade_type', '')
-                    if trade_type in [self.TRADE_TYPE_BUY, self.TRADE_TYPE_SELL]:
-                        self._queue_position_recalculation(
-                            trade_id=trade_id,
-                            current_trade=current_trade,
-                            updated_data=trade_data,
-                            updated_by=updated_by
-                        )
 
             return success
 
