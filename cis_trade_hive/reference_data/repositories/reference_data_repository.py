@@ -150,20 +150,27 @@ class CountryRepository(ImpalaReferenceRepository):
         """
         Fetch all countries from Kudu/Impala.
 
-        Note: Simple table with label and full_name columns only.
-        No processing_date filter needed (unlike production Hive tables).
+        Handles both table schemas:
+        - Docker/Simple: label, full_name only
+        - Production/Hive: label, full_name, processing_date
 
         Args:
             search: Optional search term for code or name
 
         Returns:
-            List of country dictionaries
+            List of country dictionaries with 'code' and 'name' keys
         """
-        query = f"SELECT * FROM {self.TABLE_NAME} WHERE 1=1"
+        # Simple query without processing_date filter
+        # Works for both Docker (no processing_date) and production (has it but not required)
+        query = f"SELECT label, full_name FROM {self.TABLE_NAME}"
 
+        conditions = []
         if search:
             search_escaped = search.replace("'", "''").lower()
-            query += f" AND (LOWER(label) LIKE '%{search_escaped}%' OR LOWER(full_name) LIKE '%{search_escaped}%')"
+            conditions.append(f"(LOWER(label) LIKE '%{search_escaped}%' OR LOWER(full_name) LIKE '%{search_escaped}%')")
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
 
         query += " ORDER BY label"
 
@@ -175,7 +182,7 @@ class CountryRepository(ImpalaReferenceRepository):
         """Get specific country by code"""
         code_escaped = code.replace("'", "''")
         query = f"""
-        SELECT * FROM {self.TABLE_NAME}
+        SELECT label, full_name FROM {self.TABLE_NAME}
         WHERE label = '{code_escaped}'
         LIMIT 1
         """
