@@ -296,8 +296,10 @@ def cash_flow_create(request):
 
             cf_data = {
                 'cf_number': request.POST.get('cf_number', '').strip(),
+                'cash_flow_number': request.POST.get('cf_number', '').strip(),  # Alias for repository
                 'portfolio_short_name': request.POST.get('portfolio_short_name', '').strip(),
                 'security_name': request.POST.get('security_name', '').strip(),
+                'security_label': request.POST.get('security_name', '').strip(),  # Repository uses security_label
                 'cash_flow_type': request.POST.get('cash_flow_type', '').strip(),
                 'send_receive': request.POST.get('send_receive', '').strip(),
                 'value_date': request.POST.get('value_date', '').strip(),
@@ -307,17 +309,17 @@ def cash_flow_create(request):
                 'record_date': request.POST.get('record_date', '').strip(),
                 'gl_acc_no': request.POST.get('gl_acc_no', '').strip(),
                 'local_ccy': request.POST.get('local_ccy', '').strip(),
-                'local_amount': request.POST.get('local_amount', '').strip() or None,
+                'local_ccy_amt': request.POST.get('local_amount', '').strip() or None,  # Repository uses local_ccy_amt
                 'flow_amount_local': request.POST.get('flow_amount_local', '').strip() or None,
                 'foreign_ccy': request.POST.get('foreign_ccy', '').strip(),
-                'foreign_ccy_amount': request.POST.get('foreign_ccy_amount', '').strip() or None,
+                'foreign_ccy_amt': request.POST.get('foreign_ccy_amount', '').strip() or None,  # Repository uses foreign_ccy_amt
                 # Note: cash_flow_status is NOT taken from form - backend sets INITIAL on create
                 # Status follows Four-Eyes workflow: INITIAL -> APPROVED/REJECTED
             }
 
             # Convert numeric fields
-            for field in ['local_amount', 'flow_amount_local', 'foreign_ccy_amount']:
-                if cf_data[field]:
+            for field in ['local_ccy_amt', 'flow_amount_local', 'foreign_ccy_amt']:
+                if cf_data.get(field):
                     try:
                         cf_data[field] = float(cf_data[field])
                     except ValueError:
@@ -375,6 +377,7 @@ def cash_flow_edit(request, cash_flow_id):
             cf_data = {
                 'portfolio_short_name': request.POST.get('portfolio_short_name', '').strip(),
                 'security_name': request.POST.get('security_name', '').strip(),
+                'security_label': request.POST.get('security_name', '').strip(),  # Repository uses security_label
                 'cash_flow_type': request.POST.get('cash_flow_type', '').strip(),
                 'send_receive': request.POST.get('send_receive', '').strip(),
                 'value_date': request.POST.get('value_date', '').strip(),
@@ -384,16 +387,16 @@ def cash_flow_edit(request, cash_flow_id):
                 'record_date': request.POST.get('record_date', '').strip(),
                 'gl_acc_no': request.POST.get('gl_acc_no', '').strip(),
                 'local_ccy': request.POST.get('local_ccy', '').strip(),
-                'local_amount': request.POST.get('local_amount', '').strip() or None,
+                'local_ccy_amt': request.POST.get('local_amount', '').strip() or None,  # Repository uses local_ccy_amt
                 'flow_amount_local': request.POST.get('flow_amount_local', '').strip() or None,
                 'foreign_ccy': request.POST.get('foreign_ccy', '').strip(),
-                'foreign_ccy_amount': request.POST.get('foreign_ccy_amount', '').strip() or None,
+                'foreign_ccy_amt': request.POST.get('foreign_ccy_amount', '').strip() or None,  # Repository uses foreign_ccy_amt
                 'cash_flow_status': request.POST.get('cash_flow_status', '').strip(),
             }
 
             # Convert numeric fields
-            for field in ['local_amount', 'flow_amount_local', 'foreign_ccy_amount']:
-                if cf_data[field]:
+            for field in ['local_ccy_amt', 'flow_amount_local', 'foreign_ccy_amt']:
+                if cf_data.get(field):
                     try:
                         cf_data[field] = float(cf_data[field])
                     except ValueError:

@@ -649,7 +649,10 @@ function removeCIFRow(button) {
 
 function checkDuplicateCountries() {
     const container = document.getElementById('cif-rows-container');
-    const rows = container.querySelectorAll('.cif-row');
+    // Only check visible CIF rows, NOT the hidden template
+    const allRows = container.querySelectorAll('.cif-row');
+    const rows = Array.from(allRows).filter(row => !row.closest('.cif-row-template'));
+
     const countries = {};
     let hasDuplicates = false;
 
@@ -657,13 +660,14 @@ function checkDuplicateCountries() {
     rows.forEach(row => {
         const select = row.querySelector('.cif-country');
         const errorDiv = row.querySelector('.country-duplicate-error');
-        select.classList.remove('is-invalid');
-        errorDiv.style.display = 'none';
+        if (select) select.classList.remove('is-invalid');
+        if (errorDiv) errorDiv.style.display = 'none';
     });
 
     // Check for duplicates
     rows.forEach(row => {
         const select = row.querySelector('.cif-country');
+        if (!select) return;
         const country = select.value;
 
         if (country) {
@@ -671,15 +675,15 @@ function checkDuplicateCountries() {
                 // Duplicate found
                 const errorDiv = row.querySelector('.country-duplicate-error');
                 select.classList.add('is-invalid');
-                errorDiv.style.display = 'block';
+                if (errorDiv) errorDiv.style.display = 'block';
                 hasDuplicates = true;
 
                 // Also mark the first occurrence
                 const firstRow = countries[country];
                 const firstSelect = firstRow.querySelector('.cif-country');
                 const firstErrorDiv = firstRow.querySelector('.country-duplicate-error');
-                firstSelect.classList.add('is-invalid');
-                firstErrorDiv.style.display = 'block';
+                if (firstSelect) firstSelect.classList.add('is-invalid');
+                if (firstErrorDiv) firstErrorDiv.style.display = 'block';
             } else {
                 countries[country] = row;
             }
@@ -715,20 +719,26 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function validateCIFCountries() {
     const container = document.getElementById('cif-rows-container');
-    const rows = container.querySelectorAll('.cif-row');
+    // Only validate visible CIF rows, NOT the hidden template
+    const rows = container.querySelectorAll('.cif-row-active .cif-row, .cif-row:not(.cif-row-template .cif-row)');
     let isValid = true;
 
-    rows.forEach(row => {
+    // Filter out rows that are inside the hidden template
+    const visibleRows = Array.from(rows).filter(row => {
+        return !row.closest('.cif-row-template');
+    });
+
+    visibleRows.forEach(row => {
         const select = row.querySelector('.cif-country');
         const errorDiv = row.querySelector('.country-required-error');
 
-        if (!select.value) {
+        if (select && !select.value) {
             select.classList.add('is-invalid');
             if (errorDiv) {
                 errorDiv.style.display = 'block';
             }
             isValid = false;
-        } else {
+        } else if (select) {
             select.classList.remove('is-invalid');
             if (errorDiv) {
                 errorDiv.style.display = 'none';
