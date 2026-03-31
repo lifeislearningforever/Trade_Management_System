@@ -887,7 +887,8 @@ class TradeEventQueueService:
         try:
             event_id = int(datetime.now().timestamp() * 1000000)  # Microsecond precision
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            event_json = json.dumps(event_data)
+            # Use default=str to handle Decimal and other non-JSON-serializable types
+            event_json = json.dumps(event_data, default=str)
 
             query = f"""
             UPSERT INTO {self.DATABASE}.{self.EVENT_QUEUE_TABLE}

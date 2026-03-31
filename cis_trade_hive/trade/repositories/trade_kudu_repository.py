@@ -2028,7 +2028,8 @@ class TradeKuduRepository:
         try:
             history_id = self.get_next_id('trade_history_id')
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            changes_json = json.dumps(changes).replace("'", "''") if changes else '{}'
+            # Use default=str to handle Decimal and other non-JSON-serializable types
+            changes_json = json.dumps(changes, default=str).replace("'", "''") if changes else '{}'
 
             query = f"""
             UPSERT INTO {self.DATABASE}.{self.HISTORY_TABLE}
