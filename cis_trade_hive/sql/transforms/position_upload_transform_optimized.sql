@@ -265,10 +265,21 @@ SELECT
     b.reporting_date,
     b.market_price AS upload_market_price,
     ep.main_closing_price,
-    COALESCE(ep.main_closing_price, b.market_price) AS final_market_price,
+    -- Treat price = 0 as NULL (omit zero prices)
     CASE
-        WHEN ep.main_closing_price IS NOT NULL THEN 'PASS: Using cis_equity_price'
-        WHEN b.market_price IS NOT NULL THEN 'PASS: Using uploaded'
+        WHEN ep.main_closing_price IS NOT NULL AND ep.main_closing_price != 0
+            THEN ep.main_closing_price
+        WHEN b.market_price IS NOT NULL AND b.market_price != 0
+            THEN b.market_price
+        ELSE NULL
+    END AS final_market_price,
+    CASE
+        WHEN ep.main_closing_price IS NOT NULL AND ep.main_closing_price != 0
+            THEN 'PASS: Using cis_equity_price'
+        WHEN b.market_price IS NOT NULL AND b.market_price != 0
+            THEN 'PASS: Using uploaded'
+        WHEN ep.main_closing_price = 0 OR b.market_price = 0
+            THEN 'WARN: Price is zero (omitted)'
         ELSE 'WARN: No price'
     END AS price_status
 FROM pos_stage_1_base b
@@ -278,6 +289,8 @@ LEFT JOIN (
            ROW_NUMBER() OVER (PARTITION BY isin, price_date ORDER BY price_timestamp DESC) AS rn
     FROM cis_equity_price
     WHERE is_active = true
+      AND main_closing_price IS NOT NULL
+      AND main_closing_price != 0  -- Exclude zero prices from source
 ) ep ON b.isin = ep.isin AND b.reporting_date = ep.price_date AND ep.rn = 1
 -- Only process records that passed security validation (not FAIL status)
 WHERE p4.security_status NOT LIKE 'FAIL%';
@@ -420,9 +433,10 @@ SELECT
         WHEN b.exchange_code IS NULL OR TRIM(b.exchange_code) = '' THEN 'FAIL: Exchange is null'
         ELSE 'PASS'
     END AS exchange_status,
-    -- Calculated fields
+    -- Calculated fields (treat 0 as NULL for market_value_fc)
     CASE
-        WHEN b.market_value_fc IS NOT NULL THEN b.market_value_fc
+        WHEN b.market_value_fc IS NOT NULL AND b.market_value_fc != 0
+            THEN b.market_value_fc
         WHEN b.quantity IS NOT NULL AND p5.final_market_price IS NOT NULL
             THEN b.quantity * p5.final_market_price
         ELSE NULL
