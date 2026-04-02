@@ -619,6 +619,125 @@ WHERE overall_status LIKE 'VALID%';
 
 
 -- ============================================================================
+-- STEP 7B: Create Upload Report (ALL records - Pass and Fail)
+-- ============================================================================
+-- Report format requested by SA:
+--   Reporting Date | FileName | Reporting Entity | Portfolio | Security full name | Status | Exception detail
+DROP TABLE IF EXISTS position_upload_report;
+
+CREATE TABLE position_upload_report
+STORED AS PARQUET AS
+-- Valid records (from staging - passed all validations)
+SELECT
+    b.reporting_date,
+    b.data_src AS file_name,
+    b.src_system AS reporting_entity,
+    b.portfolio,
+    COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
+    'Uploaded' AS status,
+    -- Exception detail: show what validation passed and any warnings
+    CASE
+        WHEN s.overall_status = 'VALID: New security created'
+            THEN 'New security created. ' || COALESCE(s.price_status, '')
+        WHEN s.price_status LIKE 'WARN%'
+            THEN s.price_status
+        ELSE NULL
+    END AS exception_detail,
+    -- Additional detail columns for traceability
+    s.portfolio_status AS step1_portfolio,
+    s.security_status AS step2_security,
+    s.price_status AS step3_price,
+    s.quantity_status AS step4_quantity,
+    s.exchange_status AS step5_exchange,
+    s.overall_status
+FROM pos_stage_1_base b
+JOIN position_upload_staging s ON b.row_id = s.row_id
+WHERE s.overall_status LIKE 'VALID%'
+
+UNION ALL
+
+-- Invalid records from staging (passed portfolio but failed elsewhere)
+SELECT
+    b.reporting_date,
+    b.data_src AS file_name,
+    b.src_system AS reporting_entity,
+    b.portfolio,
+    COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
+    'Fail' AS status,
+    -- Exception detail: show the failure reason
+    s.overall_status AS exception_detail,
+    s.portfolio_status AS step1_portfolio,
+    s.security_status AS step2_security,
+    s.price_status AS step3_price,
+    s.quantity_status AS step4_quantity,
+    s.exchange_status AS step5_exchange,
+    s.overall_status
+FROM pos_stage_1_base b
+JOIN position_upload_staging s ON b.row_id = s.row_id
+WHERE s.overall_status LIKE 'INVALID%'
+
+UNION ALL
+
+-- Failed portfolio records (never made it to staging)
+SELECT
+    b.reporting_date,
+    b.data_src AS file_name,
+    b.src_system AS reporting_entity,
+    b.portfolio,
+    COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
+    'Fail' AS status,
+    'Step 1 FAIL: Portfolio not found in cis_portfolio' AS exception_detail,
+    p2.portfolio_status AS step1_portfolio,
+    NULL AS step2_security,
+    NULL AS step3_price,
+    NULL AS step4_quantity,
+    NULL AS step5_exchange,
+    'FAIL: Portfolio validation' AS overall_status
+FROM pos_stage_1_base b
+JOIN pos_stage_2_portfolio p2 ON b.row_id = p2.row_id
+WHERE p2.portfolio_status LIKE 'FAIL%'
+
+UNION ALL
+
+-- Records that failed security validation (Multiple ISINs, etc.)
+SELECT
+    b.reporting_date,
+    b.data_src AS file_name,
+    b.src_system AS reporting_entity,
+    b.portfolio,
+    COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
+    'Fail' AS status,
+    'Step 2 FAIL: ' || p4.security_status AS exception_detail,
+    'PASS' AS step1_portfolio,
+    p4.security_status AS step2_security,
+    NULL AS step3_price,
+    NULL AS step4_quantity,
+    NULL AS step5_exchange,
+    'FAIL: Security validation' AS overall_status
+FROM pos_stage_1_base b
+JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
+WHERE p4.security_status LIKE 'FAIL%';
+
+-- Show report preview (first 100 rows)
+SELECT 'POSITION UPLOAD REPORT PREVIEW' AS info;
+SELECT * FROM position_upload_report LIMIT 100;
+
+-- Report summary by status
+SELECT 'REPORT SUMMARY BY STATUS' AS info;
+SELECT status, COUNT(*) AS record_count
+FROM position_upload_report
+GROUP BY status;
+
+-- Failed records by exception detail
+SELECT 'FAILED RECORDS BY REASON' AS info;
+SELECT exception_detail, COUNT(*) AS cnt
+FROM position_upload_report
+WHERE status = 'Fail'
+GROUP BY exception_detail
+ORDER BY cnt DESC;
+
+
+-- ============================================================================
 -- STEP 8: Summary Statistics (STRICT VALIDATION)
 -- ============================================================================
 
