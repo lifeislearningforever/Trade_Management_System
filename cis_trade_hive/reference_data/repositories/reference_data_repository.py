@@ -146,12 +146,26 @@ class CountryRepository(ImpalaReferenceRepository):
 
     TABLE_NAME = 'gmp_cis_sta_dly_country'
 
+    def _get_max_processing_date_subquery(self) -> str:
+        """Get subquery for max processing_date filter to avoid duplicates"""
+        return f"(SELECT MAX(processing_date) FROM {self.TABLE_NAME})"
+
+    def _has_processing_date_column(self) -> bool:
+        """Check if the table has processing_date column (production vs docker)"""
+        try:
+            check_query = f"SELECT processing_date FROM {self.TABLE_NAME} LIMIT 1"
+            self._execute_query(check_query)
+            return True
+        except Exception:
+            return False
+
     def list_all(self, search: Optional[str] = None) -> List[Dict]:
         """
         Fetch all countries from Kudu/Impala.
 
+        Uses max(processing_date) filter to avoid duplicates in production.
         Handles both table schemas:
-        - Docker/Simple: label, full_name only
+        - Docker/Simple: label, full_name only (no processing_date)
         - Production/Hive: label, full_name, processing_date
 
         Args:
@@ -160,11 +174,22 @@ class CountryRepository(ImpalaReferenceRepository):
         Returns:
             List of country dictionaries with 'code' and 'name' keys
         """
-        # Simple query without processing_date filter
-        # Works for both Docker (no processing_date) and production (has it but not required)
-        query = f"SELECT label, full_name FROM {self.TABLE_NAME}"
+        # Use DISTINCT and filter by max processing_date to avoid duplicates
+        query = f"SELECT DISTINCT label, full_name FROM {self.TABLE_NAME}"
 
         conditions = []
+
+        # Try to filter by max processing_date (production schema)
+        # This avoids duplicates when multiple processing dates exist
+        try:
+            max_date_query = f"SELECT MAX(processing_date) as max_date FROM {self.TABLE_NAME}"
+            max_date_result = self._execute_query(max_date_query)
+            if max_date_result and max_date_result[0].get('max_date'):
+                conditions.append(f"processing_date = {self._get_max_processing_date_subquery()}")
+        except Exception:
+            # Docker schema doesn't have processing_date column - skip this filter
+            pass
+
         if search:
             search_escaped = search.replace("'", "''").lower()
             conditions.append(f"(LOWER(label) LIKE '%{search_escaped}%' OR LOWER(full_name) LIKE '%{search_escaped}%')")
@@ -179,8 +204,25 @@ class CountryRepository(ImpalaReferenceRepository):
         return [{'code': r.get('label', ''), 'name': r.get('full_name', ''), **r} for r in results]
 
     def get_by_code(self, code: str) -> Optional[Dict]:
-        """Get specific country by code"""
+        """Get specific country by code (using max processing_date to avoid duplicates)"""
         code_escaped = code.replace("'", "''")
+
+        # Try with max processing_date filter first (production)
+        try:
+            query = f"""
+            SELECT label, full_name FROM {self.TABLE_NAME}
+            WHERE label = '{code_escaped}'
+              AND processing_date = {self._get_max_processing_date_subquery()}
+            LIMIT 1
+            """
+            results = self._execute_query(query)
+            if results:
+                r = results[0]
+                return {'code': r.get('label', ''), 'name': r.get('full_name', ''), **r}
+        except Exception:
+            pass
+
+        # Fallback for Docker schema (no processing_date)
         query = f"""
         SELECT label, full_name FROM {self.TABLE_NAME}
         WHERE label = '{code_escaped}'
