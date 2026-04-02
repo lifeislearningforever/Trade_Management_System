@@ -347,6 +347,12 @@ def portfolio_create(request):
             if not portfolio_name:
                 raise ValidationError("Portfolio name is required")
 
+            # Validate portfolio name is alphanumeric only (no special characters)
+            # Allow letters, numbers, and underscores
+            import re
+            if not re.match(r'^[a-zA-Z0-9_]+$', portfolio_name):
+                raise ValidationError("Portfolio name must be alphanumeric only (letters, numbers, and underscores). No special characters or spaces allowed.")
+
             # Case-insensitive check for existing portfolio
             existing = portfolio_hive_repository.get_portfolio_by_code_case_insensitive(portfolio_name)
             if existing:

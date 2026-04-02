@@ -47,9 +47,11 @@
                                value="{{ portfolio.name|default:'' }}"
                                {% if portfolio %}readonly{% endif %}
                                required maxlength="200"
-                               placeholder="Enter unique portfolio name (e.g., 'UOB SINGAPORE TRADING')">
+                               pattern="^[a-zA-Z0-9_]+$"
+                               title="Only letters, numbers, and underscores allowed. No spaces or special characters."
+                               placeholder="Enter unique portfolio name (e.g., 'UOB_SINGAPORE_TRADING')">
                         <div class="form-text">
-                            <i class="bi bi-info-circle"></i> Unique identifier for the portfolio. Cannot be changed after creation.
+                            <i class="bi bi-info-circle"></i> Alphanumeric only (letters, numbers, underscores). No spaces or special characters. Cannot be changed after creation.
                         </div>
                     </div>
                     <div class="col-12 mb-4">
@@ -546,6 +548,45 @@ $(document).ready(function() {
         $(this).next('.validation-error').remove();
         $(this).next('.select2-container').removeClass('is-invalid');
         $(this).next('.select2-container').next('.validation-error').remove();
+    });
+
+    // Portfolio name validation - alphanumeric only (no special characters)
+    $('#name').on('input', function() {
+        var value = $(this).val();
+        var regex = /^[a-zA-Z0-9_]*$/;
+
+        // Remove any invalid characters as user types
+        if (!regex.test(value)) {
+            // Remove invalid characters
+            var cleanValue = value.replace(/[^a-zA-Z0-9_]/g, '');
+            $(this).val(cleanValue);
+
+            // Show warning
+            if (!$(this).next('.alphanumeric-warning').length) {
+                $(this).after('<div class="alphanumeric-warning text-warning small mt-1"><i class="bi bi-exclamation-triangle"></i> Only letters, numbers, and underscores allowed. Invalid characters removed.</div>');
+                setTimeout(function() {
+                    $('.alphanumeric-warning').fadeOut(function() { $(this).remove(); });
+                }, 3000);
+            }
+        }
+    });
+
+    // Prevent paste of invalid characters
+    $('#name').on('paste', function(e) {
+        var $input = $(this);
+        setTimeout(function() {
+            var value = $input.val();
+            var cleanValue = value.replace(/[^a-zA-Z0-9_]/g, '');
+            if (value !== cleanValue) {
+                $input.val(cleanValue);
+                if (!$input.next('.alphanumeric-warning').length) {
+                    $input.after('<div class="alphanumeric-warning text-warning small mt-1"><i class="bi bi-exclamation-triangle"></i> Invalid characters removed from pasted text.</div>');
+                    setTimeout(function() {
+                        $('.alphanumeric-warning').fadeOut(function() { $(this).remove(); });
+                    }, 3000);
+                }
+            }
+        }, 10);
     });
 });
 </script>
