@@ -87,8 +87,8 @@
                             {% for cf in cash_flows %}
                             <tr>
                                 <td>
-                                    <a href="{% url 'trade:cash_flow_detail' cf.cf_id %}" class="text-primary fw-bold">
-                                        {{ cf.cf_number|default:"-" }}
+                                    <a href="{% url 'trade:cash_flow_detail' cf.cash_flow_id %}" class="text-primary fw-bold">
+                                        {{ cf.cash_flow_number|default:"-" }}
                                     </a>
                                 </td>
                                 <td>{{ cf.portfolio_short_name|default:"-" }}</td>
@@ -107,20 +107,20 @@
                                 <td>{{ cf.created_at|default:"-" }}</td>
                                 <td>
                                     <div class="btn-group" role="group">
-                                        <a href="{% url 'trade:cash_flow_detail' cf.cf_id %}"
+                                        <a href="{% url 'trade:cash_flow_detail' cf.cash_flow_id %}"
                                            class="btn btn-sm btn-outline-info" title="View Details">
                                             <i class="bi bi-eye"></i>
                                         </a>
                                         {% if cf.can_approve %}
                                             <button type="button" class="btn btn-sm btn-success"
                                                     data-bs-toggle="modal"
-                                                    data-bs-target="#approveModal{{ cf.cf_id }}"
+                                                    data-bs-target="#approveModal{{ cf.cash_flow_id }}"
                                                     title="Approve">
                                                 <i class="bi bi-check-circle"></i>
                                             </button>
                                             <button type="button" class="btn btn-sm btn-danger"
                                                     data-bs-toggle="modal"
-                                                    data-bs-target="#rejectModal{{ cf.cf_id }}"
+                                                    data-bs-target="#rejectModal{{ cf.cash_flow_id }}"
                                                     title="Reject">
                                                 <i class="bi bi-x-circle"></i>
                                             </button>
@@ -158,7 +158,7 @@
 {% for cf in cash_flows %}
 {% if cf.can_approve %}
 <!-- Approve Modal -->
-<div class="modal fade" id="approveModal{{ cf.cf_id }}" tabindex="-1" aria-hidden="true">
+<div class="modal fade" id="approveModal{{ cf.cash_flow_id }}" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header bg-success text-white">
@@ -167,13 +167,13 @@
                 </h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
-            <form method="post" action="{% url 'trade:cash_flow_approve' cf.cf_id %}">
+            <form method="post" action="{% url 'trade:cash_flow_approve' cf.cash_flow_id %}">
                 {% csrf_token %}
                 <input type="hidden" name="action" value="approve">
                 <div class="modal-body">
                     <p>You are about to approve:</p>
                     <ul>
-                        <li><strong>CF Number:</strong> {{ cf.cf_number }}</li>
+                        <li><strong>CF Number:</strong> {{ cf.cash_flow_number }}</li>
                         <li><strong>Portfolio:</strong> {{ cf.portfolio_short_name }}</li>
                         <li><strong>Type:</strong> {{ cf.cash_flow_type }}</li>
                         <li><strong>Amount:</strong> {{ cf.local_amount }} {{ cf.local_ccy }}</li>
@@ -195,7 +195,7 @@
 </div>
 
 <!-- Reject Modal -->
-<div class="modal fade" id="rejectModal{{ cf.cf_id }}" tabindex="-1" aria-hidden="true">
+<div class="modal fade" id="rejectModal{{ cf.cash_flow_id }}" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header bg-danger text-white">
@@ -204,13 +204,13 @@
                 </h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
-            <form method="post" action="{% url 'trade:cash_flow_approve' cf.cf_id %}">
+            <form method="post" action="{% url 'trade:cash_flow_approve' cf.cash_flow_id %}">
                 {% csrf_token %}
                 <input type="hidden" name="action" value="reject">
                 <div class="modal-body">
                     <p>You are about to reject:</p>
                     <ul>
-                        <li><strong>CF Number:</strong> {{ cf.cf_number }}</li>
+                        <li><strong>CF Number:</strong> {{ cf.cash_flow_number }}</li>
                         <li><strong>Portfolio:</strong> {{ cf.portfolio_short_name }}</li>
                         <li><strong>Type:</strong> {{ cf.cash_flow_type }}</li>
                         <li><strong>Amount:</strong> {{ cf.local_amount }} {{ cf.local_ccy }}</li>
