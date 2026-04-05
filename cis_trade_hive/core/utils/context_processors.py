@@ -41,7 +41,62 @@ def sidebar_permissions(request):
 
     These flags control which menu items are visible based on user permissions.
     Uses session-stored permissions from RBAC v2 login.
+
+    When SKIP_PERMISSION_CHECKS is True, all permissions return True (show all menu items).
     """
+    # Check if permission checks should be skipped (dev mode)
+    skip_checks = getattr(settings, 'SKIP_PERMISSION_CHECKS', False)
+
+    if skip_checks:
+        # In dev mode, show all menu items
+        return {
+            # Portfolio permissions
+            'sidebar_portfolio_view': True,
+            'sidebar_portfolio_create': True,
+            'sidebar_portfolio_approve': True,
+
+            # Trade permissions
+            'sidebar_trade_view': True,
+            'sidebar_trade_create': True,
+            'sidebar_trade_approve': True,
+
+            # Cash Flow permissions
+            'sidebar_cash_flow_view': True,
+            'sidebar_cash_flow_create': True,
+            'sidebar_cash_flow_approve': True,
+
+            # Position permissions
+            'sidebar_position_view': True,
+
+            # Market Data permissions
+            'sidebar_market_data_view': True,
+            'sidebar_fx_rates_view': True,
+            'sidebar_equity_prices_view': True,
+            'sidebar_equity_prices_create': True,
+
+            # Reference Data permissions
+            'sidebar_currencies_view': True,
+            'sidebar_countries_view': True,
+            'sidebar_calendars_view': True,
+            'sidebar_parties_view': True,
+            'sidebar_parties_create': True,
+            'sidebar_securities_view': True,
+            'sidebar_securities_create': True,
+            'sidebar_corp_actions_view': True,
+            'sidebar_corp_actions_create': True,
+
+            # Configuration permissions
+            'sidebar_lookup_view': True,
+            'sidebar_lookup_edit': True,
+            'sidebar_udf_view': True,
+            'sidebar_udf_create': True,
+            'sidebar_upload_view': True,
+
+            # System permissions
+            'sidebar_audit_view': True,
+            'sidebar_docs_view': True,
+        }
+
     # Get permission map from session
     permission_map = request.session.get('user_permissions', {})
 
