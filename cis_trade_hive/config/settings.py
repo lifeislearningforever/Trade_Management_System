@@ -362,3 +362,31 @@ APP_DESCRIPTION = 'Enterprise Trade Management System'
 
 # Four-Eyes Principle (Maker-Checker)
 MAKER_CHECKER_ENABLED = os.environ.get('MAKER_CHECKER_ENABLED', 'true').lower() == 'true'
+
+# ============================================================================
+# RBAC (Role-Based Access Control) Configuration
+# ============================================================================
+# Version: Determines which ACL tables to use
+#   'v1' - Legacy tables: cis_user, cis_user_group, cis_group_permissions
+#          - Single group per user (cis_user_group_id)
+#          - Uses ACLRepository class
+#
+#   'v2' - New tables: cis_user_info, cis_user_group_info, cis_permission_info,
+#                      cis_user_group_mapping_info, cis_group_permission_map
+#          - Multi-group support (users can belong to multiple groups)
+#          - Permission aggregation (READ_WRITE > READ)
+#          - Uses ACLRepositoryV2 class
+#
+# Rollback: To rollback to v1, simply set RBAC_VERSION=v1 and restart.
+#           No database changes required for rollback.
+#
+# Migration: When ready to switch:
+#   1. Ensure new tables are populated with data
+#   2. Test with RBAC_VERSION=v2 in development
+#   3. Deploy with RBAC_VERSION=v2 in production
+#   4. Monitor for issues, rollback to v1 if needed
+#
+RBAC_VERSION = os.environ.get('RBAC_VERSION', 'v1')
+
+# RBAC Cache TTL (seconds) - How long to cache user permissions
+RBAC_CACHE_TTL = int(os.environ.get('RBAC_CACHE_TTL', '300'))  # 5 minutes default

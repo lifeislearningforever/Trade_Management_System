@@ -221,14 +221,97 @@ class ACLRepository:
 _acl_repository = None
 
 
-def get_acl_repository() -> ACLRepository:
+def get_acl_repository():
     """
-    Get singleton ACL repository instance.
+    Factory function to get appropriate ACL repository based on RBAC_VERSION setting.
+
+    This factory enables seamless switching between legacy (v1) and new (v2) RBAC systems
+    via the RBAC_VERSION environment variable or Django setting.
+
+    Configuration:
+        Set RBAC_VERSION in environment or settings.py:
+        - 'v1' (default): Uses legacy ACLRepository (cis_user, cis_user_group, cis_group_permissions)
+        - 'v2': Uses new ACLRepositoryV2 (cis_user_info, cis_user_group_info, cis_permission_info,
+                cis_user_group_mapping_info, cis_group_permission_map)
 
     Returns:
-        ACLRepository instance
+        ACLRepository or ACLRepositoryV2: Singleton instance based on RBAC_VERSION
+
+    Rollback:
+        To rollback from v2 to v1:
+        1. Set RBAC_VERSION=v1 in environment
+        2. Restart the application
+        No database changes required.
+
+    Example:
+        >>> from core.repositories.acl_repository import get_acl_repository
+        >>> acl_repo = get_acl_repository()
+        >>> auth_data = acl_repo.authenticate_user('TMP3RC')
+
+    Note:
+        - Both v1 and v2 return compatible auth_data structures
+        - v2 adds 'groups' (list) and 'group_names' keys
+        - v2 supports multi-group membership
+        - The factory caches the singleton based on version
+
+    Migration Checklist:
+        1. Populate new RBAC tables in production
+        2. Test with RBAC_VERSION=v2 in development
+        3. Deploy with RBAC_VERSION=v2
+        4. Monitor for issues
+        5. If issues, rollback by setting RBAC_VERSION=v1 and restart
     """
     global _acl_repository
+
+    from django.conf import settings
+
+    rbac_version = getattr(settings, 'RBAC_VERSION', 'v1')
+
+    # Check if we need to create or switch repository
+    if _acl_repository is not None:
+        # Check if version changed (for hot-reload scenarios)
+        current_version = getattr(_acl_repository, '_rbac_version', 'v1')
+        if current_version != rbac_version:
+            logger.info(f"RBAC version changed from {current_version} to {rbac_version}, recreating repository")
+            _acl_repository = None
+
     if _acl_repository is None:
-        _acl_repository = ACLRepository()
+        if rbac_version == 'v2':
+            from .acl_repository_v2 import ACLRepositoryV2
+            _acl_repository = ACLRepositoryV2()
+            _acl_repository._rbac_version = 'v2'
+            logger.info("Initialized ACL Repository V2 (new RBAC tables with multi-group support)")
+        else:
+            _acl_repository = ACLRepository()
+            _acl_repository._rbac_version = 'v1'
+            logger.info("Initialized ACL Repository V1 (legacy tables)")
+
     return _acl_repository
+
+
+def get_rbac_version() -> str:
+    """
+    Get the current RBAC version from settings.
+
+    Returns:
+        str: 'v1' or 'v2'
+    """
+    from django.conf import settings
+    return getattr(settings, 'RBAC_VERSION', 'v1')
+
+
+def reset_acl_repository() -> None:
+    """
+    Reset the singleton ACL repository.
+
+    Useful for testing or when RBAC_VERSION changes.
+    The next call to get_acl_repository() will create a new instance.
+
+    Example:
+        >>> from core.repositories.acl_repository import reset_acl_repository
+        >>> reset_acl_repository()
+        >>> repo = get_acl_repository()  # Creates new instance
+    """
+    global _acl_repository
+    _acl_repository = None
+    logger.info("ACL repository singleton reset")
