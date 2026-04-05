@@ -27,10 +27,12 @@
             </li>
         </ul>
 
-        <!-- Portfolio & Trade Management Section (Combined like Security) -->
+        <!-- Portfolio & Trade Management Section -->
+        {% if sidebar_portfolio_view or sidebar_trade_view or sidebar_cash_flow_view %}
         <div class="nav-section-title">Portfolio & Trade</div>
         <ul class="nav flex-column">
             <!-- Portfolio with submenu -->
+            {% if sidebar_portfolio_view %}
             <li class="nav-item">
                 <a class="nav-link nav-link-toggle {% if 'portfolio' in request.path %}active{% endif %}" href="#portfolioSubmenu" data-bs-toggle="collapse" aria-expanded="{% if 'portfolio' in request.path %}true{% else %}false{% endif %}">
                     <i class="bi bi-briefcase"></i>
@@ -44,12 +46,15 @@
                             <span>All Portfolios</span>
                         </a>
                     </li>
+                    {% if sidebar_portfolio_create %}
                     <li class="nav-item">
                         <a class="nav-link {% if 'create' in request.path and 'portfolio' in request.path %}active{% endif %}" href="{% url 'portfolio:create' %}">
                             <i class="bi bi-plus-circle"></i>
                             <span>New Portfolio</span>
                         </a>
                     </li>
+                    {% endif %}
+                    {% if sidebar_portfolio_approve %}
                     <li class="nav-item">
                         <a class="nav-link {% if 'pending-validation' in request.path and 'portfolio' in request.path %}active{% endif %}" href="{% url 'portfolio:pending_validation' %}">
                             <i class="bi bi-clock-history"></i>
@@ -59,10 +64,13 @@
                             {% endif %}
                         </a>
                     </li>
+                    {% endif %}
                 </ul>
             </li>
+            {% endif %}
 
             <!-- Trade with submenu -->
+            {% if sidebar_trade_view %}
             <li class="nav-item">
                 <a class="nav-link nav-link-toggle {% if 'trade' in request.path %}active{% endif %}" href="#tradeSubmenu" data-bs-toggle="collapse" aria-expanded="{% if 'trade' in request.path %}true{% else %}false{% endif %}">
                     <i class="bi bi-graph-up"></i>
@@ -76,12 +84,15 @@
                             <span>All Trades</span>
                         </a>
                     </li>
+                    {% if sidebar_trade_create %}
                     <li class="nav-item">
                         <a class="nav-link {% if 'create' in request.path and 'trade' in request.path %}active{% endif %}" href="{% url 'trade:create' %}">
                             <i class="bi bi-plus-circle"></i>
                             <span>New Trade</span>
                         </a>
                     </li>
+                    {% endif %}
+                    {% if sidebar_trade_approve %}
                     <li class="nav-item">
                         <a class="nav-link {% if 'pending-validation' in request.path %}active{% endif %}" href="{% url 'trade:pending_validation' %}">
                             <i class="bi bi-clock-history"></i>
@@ -94,23 +105,13 @@
                             <span>Pending Settlement</span>
                         </a>
                     </li>
-                    {# ============================================================ #}
-                    {# POSITIONS LINK - DISABLED #}
-                    {# To re-enable, uncomment the link below and also: #}
-                    {#   1. Uncomment position URLs in trade/urls.py #}
-                    {#   2. Uncomment position views in trade/views.py #}
-                    {#   3. See docs/DISABLED_POSITION_CODE.md for full details #}
-                    {# ============================================================ #}
-                    {# <li class="nav-item"> #}
-                    {#     <a class="nav-link {% if 'positions' in request.path %}active{% endif %}" href="{% url 'trade:position_list' %}"> #}
-                    {#         <i class="bi bi-pie-chart"></i> #}
-                    {#         <span>Positions</span> #}
-                    {#     </a> #}
-                    {# </li> #}
+                    {% endif %}
                 </ul>
             </li>
+            {% endif %}
 
             <!-- Cash Flows -->
+            {% if sidebar_cash_flow_view %}
             <li class="nav-item">
                 <a class="nav-link nav-link-toggle {% if 'cash-flow' in request.path %}active{% endif %}" href="#cashFlowSubmenu" data-bs-toggle="collapse" aria-expanded="{% if 'cash-flow' in request.path %}true{% else %}false{% endif %}">
                     <i class="bi bi-cash-stack"></i>
@@ -124,118 +125,158 @@
                             <span>All Cash Flows</span>
                         </a>
                     </li>
+                    {% if sidebar_cash_flow_create %}
                     <li class="nav-item">
                         <a class="nav-link {% if request.resolver_match.url_name == 'cash_flow_create' %}active{% endif %}" href="{% url 'trade:cash_flow_create' %}">
                             <i class="bi bi-plus-circle"></i>
                             <span>New Cash Flow</span>
                         </a>
                     </li>
+                    {% endif %}
+                    {% if sidebar_cash_flow_approve %}
                     <li class="nav-item">
                         <a class="nav-link {% if request.resolver_match.url_name == 'cash_flow_pending_approvals' %}active{% endif %}" href="{% url 'trade:cash_flow_pending_approvals' %}">
                             <i class="bi bi-clock-history"></i>
                             <span>Pending Approval</span>
                         </a>
                     </li>
+                    {% endif %}
                 </ul>
             </li>
+            {% endif %}
         </ul>
+        {% endif %}
 
         <!-- Market Data Section -->
+        {% if sidebar_market_data_view or sidebar_fx_rates_view or sidebar_equity_prices_view %}
         <div class="nav-section-title">Market Data</div>
         <ul class="nav flex-column">
+            {% if sidebar_market_data_view %}
             <li class="nav-item">
                 <a class="nav-link {% if 'market-data/dashboard' in request.path %}active{% endif %}" href="{% url 'market_data:market_data_dashboard' %}">
                     <i class="bi bi-graph-up"></i>
                     <span>Market Data Dashboard</span>
                 </a>
             </li>
+            {% endif %}
+            {% if sidebar_fx_rates_view %}
             <li class="nav-item">
                 <a class="nav-link {% if 'market-data/fx-rates' in request.path and 'dashboard' not in request.path %}active{% endif %}" href="{% url 'market_data:fx_rate_list' %}">
                     <i class="bi bi-cash-coin"></i>
                     <span>FX Rates</span>
                 </a>
             </li>
+            {% endif %}
+            {% if sidebar_equity_prices_view %}
             <li class="nav-item">
                 <a class="nav-link {% if 'market-data/equity-prices' in request.path %}active{% endif %}" href="{% url 'market_data:equity_price_list' %}">
                     <i class="bi bi-graph-up-arrow"></i>
                     <span>Equity Prices</span>
                 </a>
             </li>
+            {% endif %}
         </ul>
+        {% endif %}
 
         <!-- Reference Data Section -->
+        {% if sidebar_currencies_view or sidebar_countries_view or sidebar_calendars_view or sidebar_parties_view or sidebar_securities_view or sidebar_corp_actions_view %}
         <div class="nav-section-title">Reference Data</div>
         <ul class="nav flex-column">
+            {% if sidebar_currencies_view %}
             <li class="nav-item">
                 <a class="nav-link {% if 'currency' in request.path %}active{% endif %}" href="{% url 'reference_data:currency_list' %}">
                     <i class="bi bi-currency-exchange"></i>
                     <span>Currencies</span>
                 </a>
             </li>
+            {% endif %}
+            {% if sidebar_countries_view %}
             <li class="nav-item">
                 <a class="nav-link {% if 'country' in request.path %}active{% endif %}" href="{% url 'reference_data:country_list' %}">
                     <i class="bi bi-globe"></i>
                     <span>Countries</span>
                 </a>
             </li>
+            {% endif %}
+            {% if sidebar_calendars_view %}
             <li class="nav-item">
                 <a class="nav-link {% if 'calendar' in request.path %}active{% endif %}" href="{% url 'reference_data:calendar_list' %}">
                     <i class="bi bi-calendar3"></i>
                     <span>Calendars</span>
                 </a>
             </li>
+            {% endif %}
+            {% if sidebar_parties_view %}
             <li class="nav-item">
                 <a class="nav-link {% if 'party' in request.path %}active{% endif %}" href="{% url 'reference_data:party_list' %}">
                     <i class="bi bi-people"></i>
                     <span>Parties</span>
                 </a>
             </li>
+            {% endif %}
+            {% if sidebar_securities_view %}
             <li class="nav-item">
                 <a class="nav-link {% if 'security' in request.path %}active{% endif %}" href="{% url 'security:list' %}">
                     <i class="bi bi-shield-check"></i>
                     <span>Securities</span>
                 </a>
             </li>
+            {% endif %}
+            {% if sidebar_corp_actions_view %}
             <li class="nav-item">
                 <a class="nav-link {% if 'corporate-action' in request.path %}active{% endif %}" href="{% url 'reference_data:corporate_action_list' %}">
                     <i class="bi bi-building"></i>
                     <span>Corporate Actions</span>
                 </a>
             </li>
+            {% endif %}
         </ul>
+        {% endif %}
 
         <!-- Configuration Section -->
+        {% if sidebar_lookup_view or sidebar_udf_view or sidebar_upload_view %}
         <div class="nav-section-title">Configuration</div>
         <ul class="nav flex-column">
+            {% if sidebar_lookup_view %}
             <li class="nav-item">
                 <a class="nav-link {% if 'lookup' in request.path %}active{% endif %}" href="{% url 'lookup:table_list' %}">
                     <i class="bi bi-gear"></i>
                     <span>Lookup Tables</span>
                 </a>
             </li>
+            {% endif %}
+            {% if sidebar_udf_view %}
             <li class="nav-item">
                 <a class="nav-link {% if 'udf' in request.path %}active{% endif %}" href="{% url 'udf:list' %}">
                     <i class="bi bi-sliders"></i>
                     <span>User Defined Fields</span>
                 </a>
             </li>
+            {% endif %}
+            {% if sidebar_upload_view %}
             <li class="nav-item">
                 <a class="nav-link {% if 'upload' in request.path %}active{% endif %}" href="{% url 'upload:list' %}">
                     <i class="bi bi-cloud-upload"></i>
                     <span>File Upload</span>
                 </a>
             </li>
+            {% endif %}
         </ul>
+        {% endif %}
 
         <!-- System Section -->
+        {% if sidebar_audit_view or sidebar_docs_view %}
         <div class="nav-section-title">System</div>
         <ul class="nav flex-column">
+            {% if sidebar_audit_view %}
             <li class="nav-item">
                 <a class="nav-link {% if 'audit' in request.path %}active{% endif %}" href="{% url 'core:audit_log' %}">
                     <i class="bi bi-file-text"></i>
                     <span>Audit Logs</span>
                 </a>
             </li>
+            {% endif %}
+            {% if sidebar_docs_view %}
             <li class="nav-item">
                 <a class="nav-link" href="/static/docs/index.html" target="_blank">
                     <i class="bi bi-book"></i>
@@ -243,7 +284,9 @@
                     <i class="bi bi-box-arrow-up-right" style="font-size: 0.75rem; margin-left: 0.25rem; opacity: 0.6;"></i>
                 </a>
             </li>
+            {% endif %}
         </ul>
+        {% endif %}
 
         <!-- Divider -->
         <hr style="margin: 1rem 1.5rem; border-color: rgba(255,255,255,0.1);">

@@ -109,6 +109,7 @@ TEMPLATES = [
                 'django.contrib.messages.context_processors.messages',  # Required for flash messages
                 # Custom context processors
                 'core.utils.context_processors.app_context',
+                'core.utils.context_processors.sidebar_permissions',  # RBAC sidebar permissions
             ],
         },
     },
