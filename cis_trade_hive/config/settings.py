@@ -50,7 +50,8 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-CHANGE-ME-IN-P
 DEBUG = os.environ.get('DJANGO_DEBUG', str(CURRENT_CONFIG.get('DEBUG', True))).lower() == 'true'
 
 # Development mode settings
-SKIP_PERMISSION_CHECKS = DEBUG  # Skip permission checks in dev mode
+# Set SKIP_PERMISSION_CHECKS=false in .env to enforce permission checks
+SKIP_PERMISSION_CHECKS = os.environ.get('SKIP_PERMISSION_CHECKS', str(DEBUG)).lower() == 'true'
 
 ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1,0.0.0.0').split(',')
 
