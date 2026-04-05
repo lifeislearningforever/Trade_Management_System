@@ -236,116 +236,15 @@ class SecurityDropdownService:
 
     # ==========================================================================
     # UDF-based dropdowns (object_type='SECURITY')
-    # Field names match the Excel spreadsheet provided
+    # Field names MUST match production cis_udf_field.field_value exactly:
+    # Industry, Country of Incorporation, Exchange Code, Security Type,
+    # Investment Type, Price Source of Issue, Country of Issue,
+    # Country of Primary Exchange, BWCIIF, BWCIIF Others, Issuer Type,
+    # Approved S32, BASEL IV - FUND, Business Unit Head, Core/Non Core,
+    # Fund / Index Fund, Management Limit Classification, MAS 643 Entity Type,
+    # Person In Charge, Substantial >10%, PEWC, S32 Representative,
+    # Quoted/Unquoted, Fin/Non-Fin IND, Relative Index
     # ==========================================================================
-
-    def get_exchange_codes(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get Exchange Code dropdown options (field_name='Exchange Code')"""
-        options = self.repository.get_udf_options_by_field_name('Exchange Code', 'SECURITY')
-        self._log_dropdown_fetch('exchange_code', len(options), user)
-        return options
-
-    def get_country_of_issue_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get Country of Issue dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('Country of Issue', 'SECURITY')
-        self._log_dropdown_fetch('country_of_issue', len(options), user)
-        return options
-
-    def get_security_types(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get Security Type dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('Security Type', 'SECURITY')
-        self._log_dropdown_fetch('security_type', len(options), user)
-        return options
-
-    def get_investment_types(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get Investment Type dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('investment type', 'SECURITY')
-        self._log_dropdown_fetch('investment_type', len(options), user)
-        return options
-
-    def get_issuer_types(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get Issuer Type dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('Issuer Type', 'SECURITY')
-        self._log_dropdown_fetch('issuer_type', len(options), user)
-        return options
-
-    def get_basel_iv_fund_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get BASEL IV - FUND dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('BASEL IV - FUND', 'SECURITY')
-        self._log_dropdown_fetch('basel_iv_fund', len(options), user)
-        return options
-
-    def get_business_unit_head_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get Business Unit Head (BSU) dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('Business Unit Head (BSU)', 'SECURITY')
-        self._log_dropdown_fetch('business_unit_head', len(options), user)
-        return options
-
-    def get_core_non_core_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get Core/Non-core dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('Core/ Non-core', 'SECURITY')
-        self._log_dropdown_fetch('core_non_core', len(options), user)
-        return options
-
-    def get_fund_index_fund_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get Fund / Index Fund dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('Fund / Index Fund', 'SECURITY')
-        self._log_dropdown_fetch('fund_index_fund', len(options), user)
-        return options
-
-    def get_investment_type_mas610_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get Investment type (MAS610) dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('Investment type', 'SECURITY')
-        self._log_dropdown_fetch('investment_type_mas610', len(options), user)
-        return options
-
-    def get_management_limit_classification_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get Management Limit classification dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('Management Limit classification', 'SECURITY')
-        self._log_dropdown_fetch('management_limit_classification', len(options), user)
-        return options
-
-    def get_mas_643_entity_type_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get MAS 643 Entity Type dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('MAS 643 Entity Type', 'SECURITY')
-        self._log_dropdown_fetch('mas_643_entity_type', len(options), user)
-        return options
-
-    def get_person_in_charge_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get Person In charge (PIC) dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('Person In charge (PIC)', 'SECURITY')
-        self._log_dropdown_fetch('person_in_charge', len(options), user)
-        return options
-
-    def get_pevc_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get PEVC dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('PEVC', 'SECURITY')
-        self._log_dropdown_fetch('pevc', len(options), user)
-        return options
-
-    def get_s32_representative_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get S32 Representative dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('S32 Representative', 'SECURITY')
-        self._log_dropdown_fetch('s32_representative', len(options), user)
-        return options
-
-    def get_substantial_gt_10_percent_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get Substantial >10% dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('Substantial >10%', 'SECURITY')
-        self._log_dropdown_fetch('substantial_gt_10_percent', len(options), user)
-        return options
-
-    def get_relative_index_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get relative index dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('relative index', 'SECURITY')
-        self._log_dropdown_fetch('relative_index', len(options), user)
-        return options
-
-    def get_fin_non_fin_ind_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get fin/non-fin IND dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('fin/non-fin IND', 'SECURITY')
-        self._log_dropdown_fetch('fin_non_fin_ind', len(options), user)
-        return options
 
     def get_industries(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
         """Get Industry dropdown options"""
@@ -359,22 +258,142 @@ class SecurityDropdownService:
         self._log_dropdown_fetch('country_of_incorporation', len(options), user)
         return options
 
+    def get_exchange_codes(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get Exchange Code dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('Exchange Code', 'SECURITY')
+        self._log_dropdown_fetch('exchange_code', len(options), user)
+        return options
+
+    def get_security_types(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get Security Type dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('Security Type', 'SECURITY')
+        self._log_dropdown_fetch('security_type', len(options), user)
+        return options
+
+    def get_investment_types(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get Investment Type dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('Investment Type', 'SECURITY')
+        self._log_dropdown_fetch('investment_type', len(options), user)
+        return options
+
+    def get_price_source_of_issue_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get Price Source of Issue dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('Price Source of Issue', 'SECURITY')
+        self._log_dropdown_fetch('price_source_of_issue', len(options), user)
+        return options
+
+    def get_country_of_issue_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get Country of Issue dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('Country of Issue', 'SECURITY')
+        self._log_dropdown_fetch('country_of_issue', len(options), user)
+        return options
+
+    def get_country_of_primary_exchange_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get Country of Primary Exchange dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('Country of Primary Exchange', 'SECURITY')
+        self._log_dropdown_fetch('country_of_primary_exchange', len(options), user)
+        return options
+
+    def get_bwciif_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get BWCIIF dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('BWCIIF', 'SECURITY')
+        self._log_dropdown_fetch('bwciif', len(options), user)
+        return options
+
+    def get_bwciif_others_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get BWCIIF Others dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('BWCIIF Others', 'SECURITY')
+        self._log_dropdown_fetch('bwciif_others', len(options), user)
+        return options
+
+    def get_issuer_types(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get Issuer Type dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('Issuer Type', 'SECURITY')
+        self._log_dropdown_fetch('issuer_type', len(options), user)
+        return options
+
+    def get_approved_s32_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get Approved S32 dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('Approved S32', 'SECURITY')
+        self._log_dropdown_fetch('approved_s32', len(options), user)
+        return options
+
+    def get_basel_iv_fund_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get BASEL IV - FUND dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('BASEL IV - FUND', 'SECURITY')
+        self._log_dropdown_fetch('basel_iv_fund', len(options), user)
+        return options
+
+    def get_business_unit_head_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get Business Unit Head dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('Business Unit Head', 'SECURITY')
+        self._log_dropdown_fetch('business_unit_head', len(options), user)
+        return options
+
+    def get_core_non_core_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get Core/Non Core dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('Core/Non Core', 'SECURITY')
+        self._log_dropdown_fetch('core_non_core', len(options), user)
+        return options
+
+    def get_fund_index_fund_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get Fund / Index Fund dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('Fund / Index Fund', 'SECURITY')
+        self._log_dropdown_fetch('fund_index_fund', len(options), user)
+        return options
+
+    def get_management_limit_classification_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get Management Limit Classification dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('Management Limit Classification', 'SECURITY')
+        self._log_dropdown_fetch('management_limit_classification', len(options), user)
+        return options
+
+    def get_mas_643_entity_type_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get MAS 643 Entity Type dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('MAS 643 Entity Type', 'SECURITY')
+        self._log_dropdown_fetch('mas_643_entity_type', len(options), user)
+        return options
+
+    def get_person_in_charge_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get Person In Charge dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('Person In Charge', 'SECURITY')
+        self._log_dropdown_fetch('person_in_charge', len(options), user)
+        return options
+
+    def get_substantial_gt_10_percent_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get Substantial >10% dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('Substantial >10%', 'SECURITY')
+        self._log_dropdown_fetch('substantial_gt_10_percent', len(options), user)
+        return options
+
+    def get_pewc_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get PEWC dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('PEWC', 'SECURITY')
+        self._log_dropdown_fetch('pewc', len(options), user)
+        return options
+
+    def get_s32_representative_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get S32 Representative dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('S32 Representative', 'SECURITY')
+        self._log_dropdown_fetch('s32_representative', len(options), user)
+        return options
+
     def get_quoted_unquoted_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
         """Get Quoted/Unquoted dropdown options"""
         options = self.repository.get_udf_options_by_field_name('Quoted/Unquoted', 'SECURITY')
         self._log_dropdown_fetch('quoted_unquoted', len(options), user)
         return options
 
-    def get_record_type_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get Record Type dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('Record Type', 'SECURITY')
-        self._log_dropdown_fetch('record_type', len(options), user)
+    def get_fin_non_fin_ind_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get Fin/Non-Fin IND dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('Fin/Non-Fin IND', 'SECURITY')
+        self._log_dropdown_fetch('fin_non_fin_ind', len(options), user)
         return options
 
-    def get_pevc_s32_devest_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get PEVC/S32/Devest dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('PEVC_S32_DEVEST', 'SECURITY')
-        self._log_dropdown_fetch('pevc_s32_devest', len(options), user)
+    def get_relative_index_options(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
+        """Get Relative Index dropdown options"""
+        options = self.repository.get_udf_options_by_field_name('Relative Index', 'SECURITY')
+        self._log_dropdown_fetch('relative_index', len(options), user)
         return options
 
     # ==========================================================================
@@ -413,36 +432,40 @@ class SecurityDropdownService:
         """
         Get all dropdown options for security forms.
 
+        UDF field names match production cis_udf_field.field_value exactly.
+
         Returns:
             Dictionary containing all dropdown lists
         """
         logger.info(f"Fetching all security dropdown options for user: {user}")
 
         return {
-            # UDF-based dropdowns (from Excel field names)
-            'exchange_codes': self.get_exchange_codes(user),
-            'country_of_issue_options': self.get_country_of_issue_options(user),
-            'security_types': self.get_security_types(user),
-            'investment_types': self.get_investment_types(user),
-            'issuer_types': self.get_issuer_types(user),
-            'basel_iv_fund_options': self.get_basel_iv_fund_options(user),
-            'business_unit_head_options': self.get_business_unit_head_options(user),
-            'core_non_core_options': self.get_core_non_core_options(user),
-            'fund_index_fund_options': self.get_fund_index_fund_options(user),
-            'investment_type_mas610_options': self.get_investment_type_mas610_options(user),
-            'management_limit_classification_options': self.get_management_limit_classification_options(user),
-            'mas_643_entity_type_options': self.get_mas_643_entity_type_options(user),
-            'person_in_charge_options': self.get_person_in_charge_options(user),
-            'pevc_options': self.get_pevc_options(user),
-            's32_representative_options': self.get_s32_representative_options(user),
-            'substantial_gt_10_percent_options': self.get_substantial_gt_10_percent_options(user),
-            'relative_index_options': self.get_relative_index_options(user),
-            'fin_non_fin_ind_options': self.get_fin_non_fin_ind_options(user),
-            'industries': self.get_industries(user),
-            'country_of_incorporation_options': self.get_country_of_incorporation_options(user),
-            'quoted_unquoted_options': self.get_quoted_unquoted_options(user),
-            'record_type_options': self.get_record_type_options(user),
-            'pevc_s32_devest_options': self.get_pevc_s32_devest_options(user),
+            # UDF-based dropdowns - field names match production exactly
+            'industries': self.get_industries(user),                                         # Industry
+            'country_of_incorporation_options': self.get_country_of_incorporation_options(user),  # Country of Incorporation
+            'exchange_codes': self.get_exchange_codes(user),                                 # Exchange Code
+            'security_types': self.get_security_types(user),                                 # Security Type
+            'investment_types': self.get_investment_types(user),                             # Investment Type
+            'price_source_of_issue_options': self.get_price_source_of_issue_options(user),   # Price Source of Issue
+            'country_of_issue_options': self.get_country_of_issue_options(user),             # Country of Issue
+            'country_of_primary_exchange_options': self.get_country_of_primary_exchange_options(user),  # Country of Primary Exchange
+            'bwciif_options': self.get_bwciif_options(user),                                 # BWCIIF
+            'bwciif_others_options': self.get_bwciif_others_options(user),                   # BWCIIF Others
+            'issuer_types': self.get_issuer_types(user),                                     # Issuer Type
+            'approved_s32_options': self.get_approved_s32_options(user),                     # Approved S32
+            'basel_iv_fund_options': self.get_basel_iv_fund_options(user),                   # BASEL IV - FUND
+            'business_unit_head_options': self.get_business_unit_head_options(user),         # Business Unit Head
+            'core_non_core_options': self.get_core_non_core_options(user),                   # Core/Non Core
+            'fund_index_fund_options': self.get_fund_index_fund_options(user),               # Fund / Index Fund
+            'management_limit_classification_options': self.get_management_limit_classification_options(user),  # Management Limit Classification
+            'mas_643_entity_type_options': self.get_mas_643_entity_type_options(user),       # MAS 643 Entity Type
+            'person_in_charge_options': self.get_person_in_charge_options(user),             # Person In Charge
+            'substantial_gt_10_percent_options': self.get_substantial_gt_10_percent_options(user),  # Substantial >10%
+            'pewc_options': self.get_pewc_options(user),                                     # PEWC
+            's32_representative_options': self.get_s32_representative_options(user),         # S32 Representative
+            'quoted_unquoted_options': self.get_quoted_unquoted_options(user),               # Quoted/Unquoted
+            'fin_non_fin_ind_options': self.get_fin_non_fin_ind_options(user),               # Fin/Non-Fin IND
+            'relative_index_options': self.get_relative_index_options(user),                 # Relative Index
 
             # Reference data dropdowns
             'issuers': self.get_issuers(user),
