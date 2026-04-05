@@ -386,7 +386,7 @@ MAKER_CHECKER_ENABLED = os.environ.get('MAKER_CHECKER_ENABLED', 'true').lower() 
 #   3. Deploy with RBAC_VERSION=v2 in production
 #   4. Monitor for issues, rollback to v1 if needed
 #
-RBAC_VERSION = os.environ.get('RBAC_VERSION', 'v1')
+RBAC_VERSION = os.environ.get('RBAC_VERSION', 'v2')
 
 # RBAC Cache TTL (seconds) - How long to cache user permissions
 RBAC_CACHE_TTL = int(os.environ.get('RBAC_CACHE_TTL', '300'))  # 5 minutes default
