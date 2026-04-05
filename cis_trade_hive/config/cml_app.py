@@ -688,17 +688,23 @@ def start_worker_health_monitor():
         while not _shutdown_requested:
             time.sleep(60)  # Check every minute
 
-            # Monitor Trade Event Worker
-            if TRADE_EVENT_WORKER_ENABLED:
-                if _trade_event_worker_thread and not _trade_event_worker_thread.is_alive():
-                    print("==> Trade Event Worker: Thread died! Restarting...")
-                    start_trade_event_worker()
+            try:
+                # Monitor Trade Event Worker
+                if TRADE_EVENT_WORKER_ENABLED:
+                    if _trade_event_worker_thread and not _trade_event_worker_thread.is_alive():
+                        print("==> Trade Event Worker: Thread died! Restarting...")
+                        start_trade_event_worker()
 
-            # Monitor Position Worker
-            if POSITION_WORKER_ENABLED:
-                if _position_worker_thread and not _position_worker_thread.is_alive():
-                    print("==> Position Worker: Thread died! Restarting...")
-                    start_position_worker()
+                # Monitor Position Worker
+                if POSITION_WORKER_ENABLED:
+                    if _position_worker_thread and not _position_worker_thread.is_alive():
+                        print("==> Position Worker: Thread died! Restarting...")
+                        start_position_worker()
+            except NameError as e:
+                # Handle case where global variables aren't accessible (e.g., in Jupyter/IPykernel)
+                print(f"==> WorkerHealthMonitor: NameError - {e}. Workers may not be initialized.")
+            except Exception as e:
+                print(f"==> WorkerHealthMonitor: Error - {e}")
 
     monitor_thread = threading.Thread(target=_monitor, daemon=True, name="WorkerHealthMonitor")
     monitor_thread.start()
