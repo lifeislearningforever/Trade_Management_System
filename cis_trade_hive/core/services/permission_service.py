@@ -346,6 +346,8 @@ def build_permission_context(
     Automatically generates can_list, can_view, can_create, can_edit,
     can_delete, can_approve, can_download flags for a module.
 
+    When SKIP_PERMISSION_CHECKS is True (dev mode), all permissions return True.
+
     Args:
         request: Django HttpRequest object
         module: Module name (e.g., 'trade', 'portfolio', 'securities')
@@ -367,6 +369,23 @@ def build_permission_context(
         >>> # }
         >>> return render(request, 'trade/list.html', context)
     """
+    from django.conf import settings
+
+    # Check if permission checks should be skipped (dev mode)
+    skip_checks = getattr(settings, 'SKIP_PERMISSION_CHECKS', False)
+
+    if skip_checks:
+        # In dev mode, grant all permissions
+        return {
+            'can_list': True,
+            'can_view': True,
+            'can_create': True,
+            'can_edit': True,
+            'can_delete': True,
+            'can_approve': True,
+            'can_download': True,
+        }
+
     module_lower = module.lower()
 
     return {
@@ -387,6 +406,8 @@ def build_custom_permission_context(
     """
     Build a custom permission context with specified permissions.
 
+    When SKIP_PERMISSION_CHECKS is True (dev mode), all permissions return True.
+
     Args:
         request: Django HttpRequest object
         permissions: Dictionary mapping context key to permission spec.
@@ -402,6 +423,15 @@ def build_custom_permission_context(
         ...     'can_manage_fx': 'fx-rates-edit:READ_WRITE',
         ... })
     """
+    from django.conf import settings
+
+    # Check if permission checks should be skipped (dev mode)
+    skip_checks = getattr(settings, 'SKIP_PERMISSION_CHECKS', False)
+
+    if skip_checks:
+        # In dev mode, grant all permissions
+        return {key: True for key in permissions.keys()}
+
     result = {}
 
     for key, spec in permissions.items():
