@@ -294,22 +294,17 @@ class PortfolioDropdownService:
         """
         Get account group options from UDF system.
 
-        Note: Filtered to only show UOB GROUP and UOB ASSOC GROUP per business requirement.
+        Returns all account group values defined in UDF (no filtering).
 
         Args:
             user: Username for audit logging
 
         Returns:
-            List of account group names (filtered to allowed values)
+            List of account group names
         """
         try:
             results = PortfolioDropdownRepository.get_dropdown_options_by_field_name('Account Group', 'PORTFOLIO')
-            all_groups = [r.get('field_value') for r in results if r.get('field_value')]
-
-            # Filter to only allowed values per business requirement
-            allowed_groups = ['UOB GROUP', 'UOB ASSOC GROUP']
-            account_groups = [g for g in all_groups if g in allowed_groups]
-
+            account_groups = [r.get('field_value') for r in results if r.get('field_value')]
             self._log_dropdown_fetch('account_groups', len(account_groups), user)
             return account_groups
         except Exception as e:

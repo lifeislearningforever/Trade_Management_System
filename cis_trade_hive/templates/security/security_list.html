@@ -1,11 +1,16 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}Security Master Data - CisTrade{% endblock %}
+{% block title %}{% if is_pending_view %}Pending Validation{% else %}Security Master Data{% endif %} - CisTrade{% endblock %}
 
 {% block breadcrumb %}
     <li class="breadcrumb-item">Reference Data</li>
+    {% if is_pending_view %}
+    <li class="breadcrumb-item"><a href="{% url 'security:list' %}">Securities</a></li>
+    <li class="breadcrumb-item active">Pending Validation</li>
+    {% else %}
     <li class="breadcrumb-item active">Securities</li>
+    {% endif %}
 {% endblock %}
 
 {% block content %}
@@ -13,28 +18,54 @@
     <!-- Page Header -->
     <div class="content-header">
         <h1 class="content-title">
+            {% if is_pending_view %}
+            <i class="bi bi-clock-history text-warning"></i> Securities Pending Validation
+            {% else %}
             <i class="bi bi-shield-check text-primary"></i> Security Master Data
+            {% endif %}
         </h1>
-        <p class="content-subtitle">Manage securities with Maker-Checker workflow</p>
+        <p class="content-subtitle">
+            {% if is_pending_view %}
+            Review and validate securities created by Makers (Four-Eyes principle)
+            {% else %}
+            Manage securities with Maker-Checker workflow
+            {% endif %}
+        </p>
     </div>
 
     <!-- Action Buttons -->
     <div class="mb-4">
+        {% if is_pending_view %}
+        <a href="{% url 'security:list' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to All Securities
+        </a>
+        {% else %}
+        {% if can_create %}
         <a href="{% url 'security:create' %}" class="btn btn-primary">
             <i class="bi bi-plus-circle"></i> Create New Security
         </a>
+        {% endif %}
+        {% if can_approve %}
         <a href="{% url 'security:pending_approvals' %}" class="btn btn-warning">
             <i class="bi bi-clock-history"></i> Pending Validation
             {% if pending_count %}
                 <span class="badge bg-danger">{{ pending_count }}</span>
             {% endif %}
         </a>
+        {% endif %}
+        {% endif %}
         <a href="{% url 'security:dashboard' %}" class="btn btn-info">
             <i class="bi bi-graph-up"></i> Dashboard
         </a>
+        {% if can_download and not is_pending_view %}
+        <a href="{% url 'security:list' %}?export=csv{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}" class="btn btn-outline-success">
+            <i class="bi bi-download"></i> Export CSV
+        </a>
+        {% endif %}
     </div>
 
-    <!-- Search & Filter Card -->
+    <!-- Search & Filter Card (hide on pending view) -->
+    {% if not is_pending_view %}
     <div class="card mb-4">
         <div class="card-header">
             <h5 class="card-title mb-0">
@@ -76,13 +107,19 @@
             </form>
         </div>
     </div>
+    {% endif %}
 
     <!-- Securities Table -->
     <div class="card">
         <div class="card-header">
             <h5 class="card-title mb-0">
+                {% if is_pending_view %}
+                Pending Securities
+                <span class="badge badge-warning ms-2">{{ total_count }} securit{{ total_count|pluralize:"y,ies" }} awaiting validation</span>
+                {% else %}
                 Security List
                 <span class="badge badge-primary ms-2">{{ total_count }} securit{{ total_count|pluralize:"y,ies" }}</span>
+                {% endif %}
             </h5>
         </div>
         <div class="card-body p-0">
@@ -149,10 +186,12 @@
                                 <td style="font-size: 0.85rem;">{{ security.created_at|default:"-" }}</td>
                                 <td class="sticky-action-column" style="background-color: white;">
                                     <div class="btn-group btn-group-sm" role="group">
+                                        {% if can_view %}
                                         <a href="{% url 'security:detail' security.security_id %}" class="btn btn-sm btn-outline-primary" title="View Details">
                                             <i class="bi bi-eye"></i>
                                         </a>
-                                        {% if security.src_system == 'CIS' or security.src_system == 'cis' %}
+                                        {% endif %}
+                                        {% if can_edit and security.src_system|upper == 'CIS' %}
                                             <a href="{% url 'security:edit' security.security_id %}" class="btn btn-sm btn-outline-warning" title="Edit">
                                                 <i class="bi bi-pencil"></i>
                                             </a>

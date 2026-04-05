@@ -5,6 +5,7 @@ HTTP request handlers for security master data.
 All data operations use Kudu tables (no Django ORM).
 """
 
+import csv
 import logging
 from django.shortcuts import render, redirect
 from django.contrib import messages
@@ -12,8 +13,8 @@ from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from django.views.decorators.http import require_http_methods
 from django.http import HttpRequest, HttpResponse
 
-from core.views.auth_views import require_login
-# from core.decorators import check_permission  # Commented for demo
+from core.views.auth_views import require_login, require_permission
+from core.services.permission_service import build_permission_context
 from security.repositories.security_hive_repository import security_hive_repository
 from security.services.security_service import security_service
 from security.services.security_dropdown_service import security_dropdown_service
@@ -23,10 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 @require_login
-# @check_permission('cis-security', 'READ')  # Commented for demo
+@require_permission('securities-list', 'READ')
 def security_list(request: HttpRequest) -> HttpResponse:
     """
-    List all securities with pagination and filters.
+    List all securities with pagination, filters, and CSV export.
     """
     # Get user session info
     user_id = str(request.session.get('user_id', ''))
@@ -38,6 +39,7 @@ def security_list(request: HttpRequest) -> HttpResponse:
     search_term = request.GET.get('search', '')
     currency_filter = request.GET.get('currency', '')
     security_type_filter = request.GET.get('security_type', '')
+    export = request.GET.get('export', '').strip()
 
     # Fetch securities
     securities = security_hive_repository.get_all_securities(
@@ -47,6 +49,59 @@ def security_list(request: HttpRequest) -> HttpResponse:
         currency=currency_filter if currency_filter else None,
         security_type=security_type_filter if security_type_filter else None
     )
+
+    # CSV Export
+    if export == 'csv':
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="securities.csv"'
+
+        writer = csv.writer(response)
+        writer.writerow([
+            'Security ID', 'Security Name', 'Record Type', 'ISIN', 'Ticker',
+            'Description', 'Issuer', 'Industry', 'Security Type', 'Investment Type',
+            'Currency', 'Country of Inc.', 'Exchange Code', 'Quoted/Unquoted',
+            'Status', 'Source System', 'Created At', 'Created By'
+        ])
+
+        for security in securities:
+            writer.writerow([
+                security.get('security_id', ''),
+                security.get('security_name', ''),
+                security.get('record_type', ''),
+                security.get('isin', ''),
+                security.get('ticker', ''),
+                security.get('security_description', ''),
+                security.get('issuer', ''),
+                security.get('industry', ''),
+                security.get('security_type', ''),
+                security.get('investment_type', ''),
+                security.get('currency_code', ''),
+                security.get('country_of_incorporation', ''),
+                security.get('exchange_code', ''),
+                security.get('quoted_unquoted', ''),
+                security.get('status', ''),
+                security.get('src_system', ''),
+                security.get('created_at', ''),
+                security.get('created_by', ''),
+            ])
+
+        # Log audit for export
+        AuditLogKuduRepository.log_action(
+            user_id=user_id,
+            username=username,
+            user_email=user_email,
+            action_type='EXPORT',
+            entity_type='SECURITY',
+            entity_name='Security List',
+            action_description=f'Exported {len(securities)} securities to CSV',
+            status='SUCCESS',
+            request_method='GET',
+            request_path=request.path,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', '')
+        )
+
+        return response
 
     # Add status color to each security
     for security in securities:
@@ -63,20 +118,11 @@ def security_list(request: HttpRequest) -> HttpResponse:
     except EmptyPage:
         securities_page = paginator.page(paginator.num_pages if paginator.num_pages > 0 else 1)
 
-    # Log audit - Commented out for VIEW actions (only log CREATE, UPDATE, DELETE)
-    # AuditLogKuduRepository.log_action(
-    #     user_id=user_id,
-    #     username=username,
-    #     user_email=user_email,
-    #     action_type='VIEW',
-    #     entity_type='SECURITY',
-    #     action_description=f'Viewed security list ({len(securities)} securities)',
-    #     status='SUCCESS',
-    #     request_method='GET',
-    #     request_path=request.path,
-    #     ip_address=request.META.get('REMOTE_ADDR'),
-    #     user_agent=request.META.get('HTTP_USER_AGENT', '')
-    # )
+    # Build permission context for template
+    perms = build_permission_context(request, 'securities')
+
+    # Get pending count for badge
+    pending_count = len([s for s in securities if s.get('status') in ('INITIAL', 'MODIFIED') and s.get('src_system', '').upper() == 'CIS'])
 
     context = {
         'securities': securities_page,
@@ -86,6 +132,9 @@ def security_list(request: HttpRequest) -> HttpResponse:
         'search': search_term,
         'currency': currency_filter,
         'security_type': security_type_filter,
+        'pending_count': pending_count,
+        # Permission flags
+        **perms,
     }
 
     return render(request, 'security/security_list.html', context)
@@ -396,10 +445,10 @@ def security_validate(request: HttpRequest, security_id: int) -> HttpResponse:
 
 
 @require_login
-# @check_permission('cis-security', 'READ')  # Commented for demo
+@require_permission('securities-approval', 'READ')
 def pending_approvals(request: HttpRequest) -> HttpResponse:
     """
-    List securities pending approval.
+    List securities pending approval (only CIS records with INITIAL or MODIFIED status).
     """
     # Get user session info
     user_id = str(request.session.get('user_id', ''))
@@ -415,7 +464,10 @@ def pending_approvals(request: HttpRequest) -> HttpResponse:
         limit=1000,
         status='MODIFIED'
     )
-    securities = initial_securities + modified_securities
+
+    # Only include CIS records (records created in CIS, not imported from GMP)
+    all_securities = initial_securities + modified_securities
+    securities = [s for s in all_securities if s.get('src_system', '').upper() == 'CIS']
 
     # Add status color
     for security in securities:
@@ -432,22 +484,17 @@ def pending_approvals(request: HttpRequest) -> HttpResponse:
     except EmptyPage:
         securities_page = paginator.page(paginator.num_pages if paginator.num_pages > 0 else 1)
 
-    # Log audit - Commented out for VIEW actions (only log CREATE, UPDATE, DELETE)
-    # AuditLogKuduRepository.log_action(
-    #     user_id=user_id,
-    #     username=username,
-    #     user_email=user_email,
-    #     action_type='VIEW',
-    #     entity_type='SECURITY',
-    #     action_description=f'Viewed pending approvals ({len(securities)} securities)',
-    #     status='SUCCESS'
-    # )
+    # Build permission context for template
+    perms = build_permission_context(request, 'securities')
 
     context = {
         'securities': securities_page,
         'page_obj': securities_page,
         'total_count': len(securities),
         'is_pending_view': True,
+        'pending_count': len(securities),
+        # Permission flags
+        **perms,
     }
 
     return render(request, 'security/security_list.html', context)
