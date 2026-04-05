@@ -12,6 +12,15 @@ Workflow:
   CHECKER Side:
     - Validate -> VALIDATED (or CANCELLED if rejected)
     - Settle -> SETTLED (final active state)
+
+Permission Annotations (RBAC v2):
+    portfolio-list: View portfolio list (READ)
+    portfolio-view: View portfolio details (READ)
+    portfolio-create: Create new portfolios (READ_WRITE)
+    portfolio-edit: Edit portfolios (READ_WRITE)
+    portfolio-delete: Delete portfolios (READ_WRITE)
+    portfolio-approval: Validate/Settle portfolios (READ_WRITE)
+    portfolio-download: Export portfolios (READ)
 """
 
 from django.shortcuts import render, redirect
@@ -22,6 +31,8 @@ from django.core.exceptions import ValidationError
 import csv
 
 from core.audit.audit_kudu_repository import audit_log_kudu_repository
+from core.views.auth_views import require_login, require_permission
+from core.services.permission_service import has_permission, build_permission_context
 from portfolio.repositories.portfolio_hive_repository import (
     portfolio_hive_repository,
     PortfolioHiveRepository
@@ -129,6 +140,8 @@ def get_user_info(request):
     }
 
 
+@require_login
+@require_permission('portfolio-list', 'READ')
 def portfolio_list(request):
     """List all portfolios with search, filter, and CSV export."""
     search_query = request.GET.get('search', '').strip()
@@ -253,6 +266,8 @@ def portfolio_list(request):
     return render(request, 'portfolio/portfolio_list.html', context)
 
 
+@require_login
+@require_permission('portfolio-list', 'READ')
 def portfolio_dashboard(request):
     """Portfolio dashboard with statistics."""
     stats = portfolio_hive_repository.get_portfolio_statistics()
@@ -264,6 +279,8 @@ def portfolio_dashboard(request):
     return render(request, 'portfolio/portfolio_dashboard.html', context)
 
 
+@require_login
+@require_permission('portfolio-view', 'READ')
 def portfolio_detail(request, portfolio_name):
     """View portfolio details."""
     portfolio_data = portfolio_hive_repository.get_portfolio_by_code(portfolio_name)
@@ -335,6 +352,8 @@ def portfolio_detail(request, portfolio_name):
     return render(request, 'portfolio/portfolio_detail.html', context)
 
 
+@require_login
+@require_permission('portfolio-create', 'READ_WRITE')
 def portfolio_create(request):
     """Create a new portfolio (Maker action: Create -> INITIAL)."""
     from portfolio.services.portfolio_dropdown_service import portfolio_dropdown_service
@@ -445,6 +464,8 @@ def portfolio_create(request):
     return render(request, 'portfolio/portfolio_form.html', context)
 
 
+@require_login
+@require_permission('portfolio-edit', 'READ_WRITE')
 def portfolio_edit(request, portfolio_name):
     """Edit portfolio (Maker action: Update -> MODIFIED)."""
     from portfolio.services.portfolio_dropdown_service import portfolio_dropdown_service
@@ -573,6 +594,8 @@ def portfolio_edit(request, portfolio_name):
     return render(request, 'portfolio/portfolio_form.html', context)
 
 
+@require_login
+@require_permission('portfolio-edit', 'READ_WRITE')
 def portfolio_submit(request, portfolio_name):
     """Submit portfolio for validation (Maker action: Submit -> PENDING_VALIDATION)."""
     if request.method != 'POST':
@@ -625,6 +648,8 @@ def portfolio_submit(request, portfolio_name):
     return redirect('portfolio:detail', portfolio_name=portfolio_name)
 
 
+@require_login
+@require_permission('portfolio-approval', 'READ_WRITE')
 def portfolio_validate(request, portfolio_name):
     """Validate or reject portfolio (Checker action: Validate -> VALIDATED or Reject -> CANCELLED)."""
     if request.method != 'POST':
@@ -697,6 +722,8 @@ def portfolio_validate(request, portfolio_name):
     return redirect('portfolio:detail', portfolio_name=portfolio_name)
 
 
+@require_login
+@require_permission('portfolio-approval', 'READ_WRITE')
 def portfolio_settle(request, portfolio_name):
     """Settle portfolio (Checker action: Settle -> SETTLED)."""
     if request.method != 'POST':
@@ -746,6 +773,8 @@ def portfolio_settle(request, portfolio_name):
     return redirect('portfolio:detail', portfolio_name=portfolio_name)
 
 
+@require_login
+@require_permission('portfolio-edit', 'READ_WRITE')
 def portfolio_cancel(request, portfolio_name):
     """Cancel portfolio (Maker/Checker action: Cancel -> CANCELLED)."""
     if request.method != 'POST':
@@ -800,6 +829,8 @@ def portfolio_cancel(request, portfolio_name):
     return redirect('portfolio:detail', portfolio_name=portfolio_name)
 
 
+@require_login
+@require_permission('portfolio-edit', 'READ_WRITE')
 def portfolio_reactivate(request, portfolio_name):
     """Reactivate cancelled portfolio (sets back to INITIAL)."""
     if request.method != 'POST':
@@ -849,6 +880,8 @@ def portfolio_reactivate(request, portfolio_name):
     return redirect('portfolio:detail', portfolio_name=portfolio_name)
 
 
+@require_login
+@require_permission('portfolio-approval', 'READ')
 def pending_validation(request):
     """List portfolios pending validation (for Checkers)."""
     portfolios_data = portfolio_hive_repository.get_pending_validation_portfolios()
@@ -888,6 +921,8 @@ def pending_validation(request):
     return render(request, 'portfolio/pending_approvals.html', context)
 
 
+@require_login
+@require_permission('portfolio-approval', 'READ')
 def pending_settlement(request):
     """List validated portfolios ready for settlement (for Checkers)."""
     portfolios_data = portfolio_hive_repository.get_validated_portfolios()
@@ -928,21 +963,29 @@ def pending_settlement(request):
 
 
 # Legacy views for backward compatibility
+@require_login
+@require_permission('portfolio-approval', 'READ')
 def pending_approvals(request):
     """Redirect to pending_validation for backward compatibility."""
     return pending_validation(request)
 
 
+@require_login
+@require_permission('portfolio-approval', 'READ_WRITE')
 def portfolio_approve(request, portfolio_name):
     """Legacy: Redirect to validate."""
     return portfolio_validate(request, portfolio_name)
 
 
+@require_login
+@require_permission('portfolio-edit', 'READ_WRITE')
 def portfolio_reject(request, portfolio_name):
     """Legacy: Redirect to cancel."""
     return portfolio_cancel(request, portfolio_name)
 
 
+@require_login
+@require_permission('portfolio-edit', 'READ_WRITE')
 def portfolio_close(request, portfolio_name):
     """Legacy: Redirect to cancel."""
     return portfolio_cancel(request, portfolio_name)
