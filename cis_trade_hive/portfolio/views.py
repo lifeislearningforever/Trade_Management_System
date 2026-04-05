@@ -250,6 +250,9 @@ def portfolio_list(request):
     pending_settlement_data = portfolio_hive_repository.get_validated_portfolios()
     pending_settlement_count = len(pending_settlement_data) if pending_settlement_data else 0
 
+    # Build permission context for template
+    perms = build_permission_context(request, 'portfolio')
+
     context = {
         'page_obj': portfolios,
         'search': search_query,
@@ -261,6 +264,8 @@ def portfolio_list(request):
         'stats': stats,
         'pending_validation_count': pending_validation_count,
         'pending_settlement_count': pending_settlement_count,
+        # Permission flags for template
+        **perms,
     }
 
     return render(request, 'portfolio/portfolio_list.html', context)
@@ -295,29 +300,34 @@ def portfolio_detail(request, portfolio_name):
     # Determine allowed actions based on status and source system
     is_cis_record = src_system and src_system.upper() == 'CIS'
 
-    # Maker actions (only for CIS records)
+    # Get permission flags
+    perms = build_permission_context(request, 'portfolio')
+    has_edit_permission = perms.get('can_edit', False)
+    has_approve_permission = perms.get('can_approve', False)
+
+    # Maker actions (only for CIS records AND user has permission)
     # Allow edits during PENDING_VALIDATION (Maker can modify while awaiting approval)
-    can_edit = is_cis_record and status in [
+    can_edit = has_edit_permission and is_cis_record and status in [
         PortfolioHiveRepository.STATUS_INITIAL,
         PortfolioHiveRepository.STATUS_MODIFIED,
         PortfolioHiveRepository.STATUS_PENDING_VALIDATION,
         PortfolioHiveRepository.STATUS_CANCELLED
     ]
-    can_submit = is_cis_record and status in [
+    can_submit = has_edit_permission and is_cis_record and status in [
         PortfolioHiveRepository.STATUS_INITIAL,
         PortfolioHiveRepository.STATUS_MODIFIED
     ]
-    can_cancel = is_cis_record and status in [
+    can_cancel = has_edit_permission and is_cis_record and status in [
         PortfolioHiveRepository.STATUS_INITIAL,
         PortfolioHiveRepository.STATUS_MODIFIED,
         PortfolioHiveRepository.STATUS_PENDING_VALIDATION
     ]
-    can_reactivate = is_cis_record and status == PortfolioHiveRepository.STATUS_CANCELLED
+    can_reactivate = has_edit_permission and is_cis_record and status == PortfolioHiveRepository.STATUS_CANCELLED
 
-    # Checker actions (only for CIS records)
-    can_validate = is_cis_record and status == PortfolioHiveRepository.STATUS_PENDING_VALIDATION
-    can_reject = is_cis_record and status == PortfolioHiveRepository.STATUS_PENDING_VALIDATION
-    can_settle = is_cis_record and status == PortfolioHiveRepository.STATUS_VALIDATED
+    # Checker actions (only for CIS records AND user has approval permission)
+    can_validate = has_approve_permission and is_cis_record and status == PortfolioHiveRepository.STATUS_PENDING_VALIDATION
+    can_reject = has_approve_permission and is_cis_record and status == PortfolioHiveRepository.STATUS_PENDING_VALIDATION
+    can_settle = has_approve_permission and is_cis_record and status == PortfolioHiveRepository.STATUS_VALIDATED
 
     # Commented out VIEW audit logging (only log CREATE, UPDATE, DELETE)
     # user_info = get_user_info(request)
@@ -347,6 +357,8 @@ def portfolio_detail(request, portfolio_name):
         'can_reject': can_reject,
         'can_settle': can_settle,
         'is_cis_record': is_cis_record,
+        # Permission flags for template
+        **perms,
     }
 
     return render(request, 'portfolio/portfolio_detail.html', context)
@@ -910,12 +922,17 @@ def pending_validation(request):
     settlement_data = portfolio_hive_repository.get_validated_portfolios()
     settlement_count = len(settlement_data) if settlement_data else 0
 
+    # Build permission context for template
+    perms = build_permission_context(request, 'portfolio')
+
     context = {
         'portfolios': wrapped_portfolios,
         'pending_count': len(portfolios_data),
         'view_type': 'validation',
         'pending_validation_count': validation_count,
         'pending_settlement_count': settlement_count,
+        # Permission flags for template
+        **perms,
     }
 
     return render(request, 'portfolio/pending_approvals.html', context)
@@ -951,12 +968,17 @@ def pending_settlement(request):
     validation_data = portfolio_hive_repository.get_pending_validation_portfolios()
     validation_count = len(validation_data) if validation_data else 0
 
+    # Build permission context for template
+    perms = build_permission_context(request, 'portfolio')
+
     context = {
         'portfolios': wrapped_portfolios,
         'pending_count': len(portfolios_data),
         'view_type': 'settlement',
         'pending_validation_count': validation_count,
         'pending_settlement_count': settlement_count,
+        # Permission flags for template
+        **perms,
     }
 
     return render(request, 'portfolio/pending_approvals.html', context)

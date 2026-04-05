@@ -20,15 +20,19 @@
 
     <!-- Action Buttons -->
     <div class="mb-4">
+        {% if can_create %}
         <a href="{% url 'portfolio:create' %}" class="btn btn-primary">
             <i class="bi bi-plus-circle"></i> Create New Portfolio
         </a>
+        {% endif %}
+        {% if can_approve %}
         <a href="{% url 'portfolio:pending_validation' %}" class="btn btn-warning">
             <i class="bi bi-clock-history"></i> Pending Approval
             {% if pending_validation_count %}
                 <span class="badge bg-danger">{{ pending_validation_count }}</span>
             {% endif %}
         </a>
+        {% endif %}
         <a href="{% url 'portfolio:dashboard' %}" class="btn btn-info">
             <i class="bi bi-graph-up"></i> Dashboard
         </a>
@@ -179,10 +183,12 @@
                                 <td style="font-size: 0.85rem;">{{ portfolio.closure_date_formatted|default:"-" }}</td>
                                 <td class="sticky-action-column">
                                     <div class="btn-group btn-group-sm" role="group">
+                                        {% if can_view %}
                                         <a href="{% url 'portfolio:detail' portfolio.name %}" class="btn btn-sm btn-outline-primary" title="View Details">
                                             <i class="bi bi-eye"></i>
                                         </a>
-                                        {% if portfolio.src_system|upper == 'CIS' %}
+                                        {% endif %}
+                                        {% if can_edit and portfolio.src_system|upper == 'CIS' %}
                                             {% if portfolio.status == 'INITIAL' or portfolio.status == 'MODIFIED' or portfolio.status == 'PENDING_VALIDATION' %}
                                                 <a href="{% url 'portfolio:edit' portfolio.name %}" class="btn btn-sm btn-outline-warning" title="Edit">
                                                     <i class="bi bi-pencil"></i>
@@ -252,11 +258,15 @@
                     {% if search or status or currency %}
                         <p class="text-muted">Try adjusting your filters</p>
                     {% else %}
+                        {% if can_create %}
                         <p class="text-muted mt-2">
                             <a href="{% url 'portfolio:create' %}" class="btn btn-primary">
                                 <i class="bi bi-plus-circle"></i> Create your first portfolio
                             </a>
                         </p>
+                        {% else %}
+                        <p class="text-muted mt-2">No portfolios available</p>
+                        {% endif %}
                     {% endif %}
                 </div>
             {% endif %}

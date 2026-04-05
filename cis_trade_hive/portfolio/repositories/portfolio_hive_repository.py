@@ -141,24 +141,46 @@ class PortfolioHiveRepository:
     def get_portfolio_statistics() -> Dict[str, Any]:
         """Get portfolio statistics from Kudu."""
         try:
-            all_query = f"SELECT `status`, `currency` FROM {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}"
+            all_query = f"SELECT `status`, `currency`, `is_active`, `src_system` FROM {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}"
             all_result = impala_manager.execute_query(all_query, database=PortfolioHiveRepository.DATABASE)
 
             total_portfolios = len(all_result)
 
             # Count by status
             status_counts = {}
-            currency_counts = {}
+            currency_counts = {}  # For active portfolios by currency
+            all_currency_counts = {}  # For all portfolios by currency
+            active_count = 0
+
             for row in all_result:
-                status = row.get('status', 'Unknown')
+                status = row.get('status') or 'Unknown'
+                is_active = row.get('is_active')
+                src_system = row.get('src_system', '').upper() if row.get('src_system') else ''
+                curr = row.get('currency') or 'Unknown'
+
+                # Count by status
                 status_counts[status] = status_counts.get(status, 0) + 1
 
-                if row.get('status') == PortfolioHiveRepository.STATUS_SETTLED:
-                    curr = row.get('currency', 'Unknown')
+                # Count all portfolios by currency
+                all_currency_counts[curr] = all_currency_counts.get(curr, 0) + 1
+
+                # Determine if portfolio is "active":
+                # - CIS portfolios: status == SETTLED
+                # - GMP portfolios: is_active == True OR status is NULL/empty (legacy active)
+                is_portfolio_active = False
+                if src_system == 'CIS':
+                    is_portfolio_active = (status == PortfolioHiveRepository.STATUS_SETTLED)
+                else:
+                    # GMP portfolios: consider active if is_active=True or if no status set (legacy)
+                    is_portfolio_active = (is_active is True) or (status in (None, '', 'Unknown', 'NULL'))
+
+                if is_portfolio_active:
+                    active_count += 1
                     currency_counts[curr] = currency_counts.get(curr, 0) + 1
 
             return {
                 'total_portfolios': total_portfolios,
+                'active_portfolios': active_count,
                 'settled_portfolios': status_counts.get(PortfolioHiveRepository.STATUS_SETTLED, 0),
                 'pending_validation': status_counts.get(PortfolioHiveRepository.STATUS_PENDING_VALIDATION, 0),
                 'validated': status_counts.get(PortfolioHiveRepository.STATUS_VALIDATED, 0),
@@ -169,6 +191,10 @@ class PortfolioHiveRepository:
                 'currency_breakdown': [
                     {'currency': k, 'count': v}
                     for k, v in sorted(currency_counts.items())
+                ],
+                'all_currency_breakdown': [
+                    {'currency': k, 'count': v}
+                    for k, v in sorted(all_currency_counts.items())
                 ]
             }
 
@@ -176,11 +202,13 @@ class PortfolioHiveRepository:
             logger.error(f"Error getting portfolio statistics from Kudu: {str(e)}")
             return {
                 'total_portfolios': 0,
+                'active_portfolios': 0,
                 'settled_portfolios': 0,
                 'pending_validation': 0,
                 'validated': 0,
                 'status_breakdown': [],
-                'currency_breakdown': []
+                'currency_breakdown': [],
+                'all_currency_breakdown': []
             }
 
     @staticmethod

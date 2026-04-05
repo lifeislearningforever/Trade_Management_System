@@ -55,8 +55,8 @@
                 <div class="card-body">
                     <div class="d-flex align-items-center">
                         <div class="flex-grow-1">
-                            <h6 class="card-title text-white">Settled</h6>
-                            <h2 class="mb-0">{{ stats.settled_portfolios|default:0 }}</h2>
+                            <h6 class="card-title text-white">Active</h6>
+                            <h2 class="mb-0">{{ stats.active_portfolios|default:0 }}</h2>
                         </div>
                         <div class="flex-shrink-0">
                             <i class="bi bi-check-circle" style="font-size: 3rem; opacity: 0.3;"></i>
@@ -163,11 +163,11 @@
             <div class="card h-100">
                 <div class="card-header">
                     <h5 class="card-title mb-0">
-                        <i class="bi bi-currency-exchange"></i> Portfolios by Currency
+                        <i class="bi bi-currency-exchange"></i> All Portfolios by Currency
                     </h5>
                 </div>
                 <div class="card-body" style="max-height: 400px; overflow-y: auto;">
-                    {% if stats.currency_breakdown %}
+                    {% if stats.all_currency_breakdown %}
                         <table class="table table-sm table-hover">
                             <thead>
                                 <tr>
@@ -177,7 +177,7 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                {% for item in stats.currency_breakdown %}
+                                {% for item in stats.all_currency_breakdown %}
                                 <tr>
                                     <td>
                                         <span class="badge badge-info">{{ item.currency|default:"N/A" }}</span>
