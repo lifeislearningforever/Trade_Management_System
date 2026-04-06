@@ -40,8 +40,8 @@ class TradeValidationRepository:
 
     # Portfolio table
     PORTFOLIO_TABLE = 'cis_portfolio'
-    # Only SETTLED portfolios can be used for trading (completed maker-checker workflow)
-    PORTFOLIO_VALID_STATUSES = ['SETTLED', 'settled']
+    # VALIDATED or SETTLED portfolios can be used for trading (approved by checker)
+    PORTFOLIO_VALID_STATUSES = ['VALIDATED', 'validated', 'SETTLED', 'settled']
 
     # Security table
     SECURITY_TABLE = 'cis_security'
@@ -192,6 +192,7 @@ class TradeValidationRepository:
                     return cached
 
             # Use UPPER() for case-insensitive status matching
+            # Include both VALIDATED and SETTLED portfolios for trade entry
             query = f"""
             SELECT name AS portfolio_short_name,
                    name AS portfolio_full_name,
@@ -200,7 +201,7 @@ class TradeValidationRepository:
                    cash_balance,
                    status
             FROM {self.DATABASE}.{self.PORTFOLIO_TABLE}
-            WHERE UPPER(status) = 'SETTLED'
+            WHERE UPPER(status) IN ('VALIDATED', 'SETTLED')
               AND is_active = true
             """
 
