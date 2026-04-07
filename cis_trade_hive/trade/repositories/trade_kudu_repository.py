@@ -2130,7 +2130,8 @@ class TradeKuduRepository:
                     stats['status_breakdown'][status] = stats['status_breakdown'].get(status, 0) + count
                     stats['type_breakdown'][trade_type] = stats['type_breakdown'].get(trade_type, 0) + count
 
-                    if status == self.STATUS_PENDING_VALIDATION:
+                    # Count INITIAL, MODIFIED, and PENDING_VALIDATION as pending validation
+                    if status in (self.STATUS_INITIAL, self.STATUS_MODIFIED, self.STATUS_PENDING_VALIDATION):
                         stats['pending_validation'] += count
                     elif status == self.STATUS_VALIDATED:
                         stats['pending_settlement'] += count
@@ -2163,6 +2164,11 @@ class TradeKuduRepository:
         """
         Get trades pending validation.
 
+        Includes trades with status:
+        - INITIAL: Newly created trades awaiting validation
+        - MODIFIED: Edited trades awaiting re-validation
+        - PENDING_VALIDATION: Trades explicitly submitted for validation
+
         Per SA feedback (2026-03-04):
         - By default, only show CIS trades (exclude GMP trades)
         - Set cis_only=False to show all trades
@@ -2175,9 +2181,13 @@ class TradeKuduRepository:
             List of trades pending validation
         """
         try:
+            # Include INITIAL, MODIFIED, and PENDING_VALIDATION statuses
+            pending_statuses = [self.STATUS_INITIAL, self.STATUS_MODIFIED, self.STATUS_PENDING_VALIDATION]
+            status_list = ", ".join([f"'{s}'" for s in pending_statuses])
+
             where_clauses = [
                 "(is_deleted = false OR is_deleted IS NULL)",
-                f"status = '{self.STATUS_PENDING_VALIDATION}'"
+                f"status IN ({status_list})"
             ]
 
             if cis_only:
