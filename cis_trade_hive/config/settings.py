@@ -141,7 +141,12 @@ DATABASES = {
 # Can be overridden by environment variables
 
 # Use IMPALA_CONFIG from environments.py (already environment-aware)
-IMPALA_CONFIG = ENV_IMPALA_CONFIG
+# Re-evaluate USE_SSL from env var to ensure it picks up latest value after load_dotenv()
+IMPALA_CONFIG = ENV_IMPALA_CONFIG.copy()
+_use_ssl_env = os.environ.get('IMPALA_USE_SSL', '').lower()
+if _use_ssl_env:
+    # Explicitly set from environment variable (overrides environments.py default)
+    IMPALA_CONFIG['USE_SSL'] = _use_ssl_env == 'true'
 
 # ============================================================================
 # Hive Configuration (Environment-aware)
