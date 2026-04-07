@@ -91,6 +91,11 @@ class ImpalaConnectionManager:
             config = settings.IMPALA_CONFIG
             db_name = database or config['DATABASE']
             auth_mode = config.get('AUTH_MECHANISM', config.get('AUTH', 'NOSASL'))
+            use_ssl = config.get('USE_SSL', False)
+
+            # Log SSL config for debugging
+            import os
+            logger.info(f"IMPALA_CONFIG USE_SSL={use_ssl}, env IMPALA_USE_SSL={os.environ.get('IMPALA_USE_SSL', 'NOT_SET')}, CIS_ENV={os.environ.get('CIS_ENV', 'NOT_SET')}")
 
             # Build connection parameters
             conn_params = {
@@ -101,7 +106,7 @@ class ImpalaConnectionManager:
             }
 
             # Add SSL if enabled (for Work/CML environments)
-            if config.get('USE_SSL', False):
+            if use_ssl:
                 conn_params['use_ssl'] = True
 
             # Add Kerberos service name if using GSSAPI
