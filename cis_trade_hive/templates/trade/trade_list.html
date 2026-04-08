@@ -307,10 +307,10 @@
                                             <i class="bi bi-eye"></i>
                                         </a>
                                         {% if trade.src_system|upper == 'CIS' %}
+                                            <a href="{% url 'trade:edit' trade.trade_id %}" class="btn btn-sm btn-outline-warning" title="Edit">
+                                                <i class="bi bi-pencil"></i>
+                                            </a>
                                             {% if trade.status == 'INITIAL' or trade.status == 'MODIFIED' %}
-                                                <a href="{% url 'trade:edit' trade.trade_id %}" class="btn btn-sm btn-outline-warning" title="Edit">
-                                                    <i class="bi bi-pencil"></i>
-                                                </a>
                                                 <form method="post" action="{% url 'trade:submit' trade.trade_id %}" class="d-inline">
                                                     {% csrf_token %}
                                                     <button type="submit" class="btn btn-sm btn-outline-info" title="Submit for Validation" onclick="return confirm('Submit for validation?')">
