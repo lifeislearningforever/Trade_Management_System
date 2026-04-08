@@ -463,48 +463,55 @@ class TradeEventQueueService:
             # Check if position already exists for this trade
             position_exists = self.check_position_exists(trade_id)
 
-            # Step 1: REVERSE the old position (only if position exists)
+            # Step 1: REVERSE the old position for BOTH bases (only if position exists)
+            # We must reverse both TRADE_DATE and SETTLE_DATE chains that were originally created.
             if position_exists:
-                # If old was BUY, we do a SELL to reverse; if old was SELL, we do a BUY
                 old_trade_type = old_data.get('trade_type', '')
                 reverse_type = 'SELL' if old_trade_type == 'BUY' else 'BUY'
                 old_quantity = Decimal(str(old_data.get('quantity', 0) or 0))
                 old_price = Decimal(str(old_data.get('price', 0) or 0))
-                old_charges = self._calculate_charges(old_data)
+                old_trade_date = old_data.get('trade_date', '')
+                old_settle_date = old_data.get('settle_date', '')
 
-                logger.info(f"POSITION_MODIFY: Reversing old {old_trade_type} for trade {trade_id}")
+                logger.info(f"POSITION_MODIFY: Reversing old {old_trade_type} for trade {trade_id} (both bases)")
 
-                # Process reversal (no charges on reversal - we're undoing)
-                success_reverse, msg_reverse, _ = settlement_service.process_trade_settlement(
-                    trade_id=trade_id,
-                    portfolio_id=portfolio_id,
-                    security_id=security_id,
-                    trade_type=reverse_type,
-                    quantity=old_quantity,
-                    price=old_price,
-                    charges=Decimal('0'),  # No charges on reversal
-                    trade_date=old_data.get('trade_date', ''),
-                    settle_date=old_data.get('settle_date', ''),
-                    updated_by=created_by,
-                    security_currency=old_data.get('security_currency'),
-                    portfolio_currency=old_data.get('portfolio_currency'),
-                    async_mode=False
-                )
-
-                if not success_reverse:
-                    logger.error(f"Failed to reverse position for trade {trade_id}: {msg_reverse}")
-                    raise Exception(f"Reversal failed: {msg_reverse}")
+                for basis in ['TRADE_DATE', 'SETTLE_DATE']:
+                    pos_date = old_trade_date if basis == 'TRADE_DATE' else old_settle_date
+                    success_reverse, msg_reverse, _ = settlement_service.process_trade_settlement(
+                        trade_id=trade_id,
+                        portfolio_id=portfolio_id,
+                        security_id=security_id,
+                        trade_type=reverse_type,
+                        quantity=old_quantity,
+                        price=old_price,
+                        charges=Decimal('0'),  # No charges on reversal
+                        trade_date=old_trade_date,
+                        settle_date=old_settle_date,
+                        updated_by=created_by,
+                        security_currency=old_data.get('security_currency'),
+                        portfolio_currency=old_data.get('portfolio_currency'),
+                        async_mode=False,
+                        position_basis=basis
+                    )
+                    if not success_reverse:
+                        logger.error(
+                            f"Failed to reverse {basis} position for trade {trade_id}: {msg_reverse}"
+                        )
+                        raise Exception(f"Reversal failed ({basis}): {msg_reverse}")
             else:
                 logger.info(f"POSITION_MODIFY: No existing position for trade {trade_id}, skipping reversal")
 
-            # Step 2: Apply NEW trade values
+            # Step 2: Apply NEW trade values for BOTH bases
             new_trade_type = new_data.get('trade_type', '')
             new_quantity = Decimal(str(new_data.get('quantity', 0) or 0))
             new_price = Decimal(str(new_data.get('price', 0) or 0))
             new_charges = self._calculate_charges(new_data)
+            new_trade_date = new_data.get('trade_date', '')
+            new_settle_date = new_data.get('settle_date', '')
 
-            logger.info(f"POSITION_MODIFY: Applying new {new_trade_type} for trade {trade_id}")
+            logger.info(f"POSITION_MODIFY: Applying new {new_trade_type} for trade {trade_id} (both bases)")
 
+            # position_basis=None → dual mode (both bases created)
             success_new, msg_new, _ = settlement_service.process_trade_settlement(
                 trade_id=trade_id,
                 portfolio_id=portfolio_id,
@@ -513,8 +520,8 @@ class TradeEventQueueService:
                 quantity=new_quantity,
                 price=new_price,
                 charges=new_charges,
-                trade_date=new_data.get('trade_date', ''),
-                settle_date=new_data.get('settle_date', ''),
+                trade_date=new_trade_date,
+                settle_date=new_settle_date,
                 updated_by=created_by,
                 security_currency=new_data.get('security_currency'),
                 portfolio_currency=new_data.get('portfolio_currency'),
@@ -522,7 +529,8 @@ class TradeEventQueueService:
                 security_name=new_data.get('security_name'),
                 custodian=new_data.get('custodian', ''),
                 sub_custodian=new_data.get('sub_custodian', ''),
-                async_mode=False
+                async_mode=False,
+                position_basis=None  # dual — creates both TRADE_DATE and SETTLE_DATE
             )
 
             if success_new:
@@ -565,10 +573,11 @@ class TradeEventQueueService:
 
             logger.info(
                 f"POSITION_CANCEL: Reversing {original_trade_type} with {reverse_type} "
-                f"for trade {trade_id}"
+                f"for trade {trade_id} (both bases)"
             )
 
-            # Process reversal (no charges on cancellation reversal)
+            # Reverse BOTH bases — mirrors what was created on trade creation.
+            # position_basis=None triggers dual mode in process_trade_settlement.
             success, msg, _ = settlement_service.process_trade_settlement(
                 trade_id=trade_id,
                 portfolio_id=portfolio_id,
@@ -576,20 +585,20 @@ class TradeEventQueueService:
                 trade_type=reverse_type,
                 quantity=quantity,
                 price=price,
-                charges=Decimal('0'),  # No charges on reversal
+                charges=Decimal('0'),  # No charges on cancellation reversal
                 trade_date=trade_date,
                 settle_date=settle_date,
                 updated_by=created_by,
                 security_currency=event_data.get('security_currency'),
                 portfolio_currency=event_data.get('portfolio_currency'),
-                async_mode=False
+                async_mode=False,
+                position_basis=None  # dual — reverses both TRADE_DATE and SETTLE_DATE
             )
 
             if success:
                 logger.info(f"POSITION_CANCEL completed for trade {trade_id}")
             else:
                 logger.warning(f"POSITION_CANCEL note for trade {trade_id}: {msg}")
-                # Non-critical warnings are still success
                 if 'queued' in msg.lower() or 'future' in msg.lower():
                     return True
 

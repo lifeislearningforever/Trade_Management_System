@@ -568,6 +568,13 @@ class TradeKuduRepository:
                 # Invalidate statistics cache (new trade changes counts)
                 self.invalidate_statistics_cache()
 
+                # DUAL POSITION LOGIC implemented.
+                # process_trade_settlement(position_basis=None) creates TWO queue entries:
+                #   1. TRADE_DATE basis → position_date=trade_date  (committed exposure)
+                #   2. SETTLE_DATE basis → position_date=settle_date (settled position)
+                # T+1/T+2: TRADE_DATE → cis_position_queue (immediate), SETTLE_DATE → cis_settlement_queue (EOD)
+                # Backdated: chain recalculation handles both bases in worker.
+                #
                 # Process settlement - ALL settlements are queued for async processing
                 # This keeps trade save FAST (non-blocking)
                 # Background worker processes within SLA (< 5 minutes):
@@ -583,7 +590,8 @@ class TradeKuduRepository:
                           Decimal(str(trade_data.get('sec_fee', 0) or 0)) + \
                           Decimal(str(trade_data.get('other_charges', 0) or 0))
 
-                # async_mode=True ensures non-blocking settlement processing
+                # position_basis=None → dual mode: creates TRADE_DATE + SETTLE_DATE positions
+                # async_mode=True → non-blocking, queued for background worker
                 settlement_success, settlement_msg, settlement_result = settlement_service.process_trade_settlement(
                     trade_id=trade_id,
                     portfolio_id=trade_data.get('portfolio_short_name', ''),
@@ -601,7 +609,8 @@ class TradeKuduRepository:
                     security_name=security_details.get('security_name') if security_details else None,
                     custodian=trade_data.get('custodian', ''),
                     sub_custodian=trade_data.get('udf_sub_custodian', ''),
-                    async_mode=True  # Non-blocking - queue for background processing
+                    async_mode=True,
+                    position_basis=None  # dual: TRADE_DATE + SETTLE_DATE
                 )
 
                 if settlement_success:

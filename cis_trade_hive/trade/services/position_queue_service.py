@@ -82,7 +82,9 @@ class PositionQueueService:
         isin: str = None,
         security_name: str = None,
         use_db_queue: bool = True,
-        chain_recalc_metadata: str = None
+        chain_recalc_metadata: str = None,
+        position_basis: str = 'TRADE_DATE',
+        position_date: str = None
     ) -> Tuple[bool, str, Optional[int]]:
         """
         Add trade to position calculation queue.
@@ -106,6 +108,11 @@ class PositionQueueService:
             queue_id = self._generate_id()
             timestamp = datetime.now()
 
+            # position_date: the actual date for this position record.
+            # For TRADE_DATE basis: position_date = trade_date (passed by caller)
+            # For SETTLE_DATE basis: position_date = settle_date (default)
+            effective_position_date = position_date or settle_date
+
             queue_item = {
                 'queue_id': queue_id,
                 'trade_id': trade_id,
@@ -116,6 +123,8 @@ class PositionQueueService:
                 'price': float(price),
                 'charges': float(charges),
                 'settle_date': settle_date,
+                'position_date': effective_position_date,
+                'position_basis': position_basis,
                 'security_currency': security_currency,
                 'portfolio_currency': portfolio_currency,
                 'isin': isin,
@@ -160,10 +169,13 @@ class PositionQueueService:
             error_message = item.get('error_message')
             error_message_sql = f"'{self._escape(error_message)}'" if error_message else 'NULL'
 
+            position_basis = item.get('position_basis', 'TRADE_DATE')
+            position_date = item.get('position_date') or item['settle_date']
+
             query = f"""
             INSERT INTO {self.DATABASE}.{self.QUEUE_TABLE}
             (queue_id, trade_id, portfolio_id, security_id, trade_type,
-             quantity, price, charges, settle_date,
+             quantity, price, charges, settle_date, position_date, position_basis,
              security_currency, portfolio_currency, isin, security_name,
              status, retry_count, queued_at, queued_by, processing_date, error_message)
             VALUES (
@@ -173,6 +185,8 @@ class PositionQueueService:
                 '{item['trade_type']}',
                 {quantity}, {price}, {charges},
                 '{item['settle_date']}',
+                '{position_date}',
+                '{position_basis}',
                 {self._null_or_str(item.get('security_currency'))},
                 {self._null_or_str(item.get('portfolio_currency'))},
                 {self._null_or_str(item.get('isin'))},
@@ -332,7 +346,12 @@ class PositionQueueService:
                 )
                 return
 
-            # For T+0 (non-backdated): Calculate position directly
+            # For T+0 / TRADE_DATE basis: Calculate position directly
+            # position_date comes from queue (trade_date for TRADE_DATE basis,
+            # settle_date for SETTLE_DATE basis)
+            position_basis = item.get('position_basis', 'TRADE_DATE')
+            position_date = item.get('position_date') or item['settle_date']
+
             success, message, position = self.position_service.calculate_position(
                 portfolio_id=item['portfolio_id'],
                 security_id=item['security_id'],
@@ -340,13 +359,14 @@ class PositionQueueService:
                 quantity=Decimal(str(item['quantity'])),
                 price=Decimal(str(item['price'])),
                 charges=Decimal(str(item.get('charges', 0) or 0)),
-                position_date=item['settle_date'],
+                position_date=position_date,
                 trade_id=trade_id,
                 updated_by='SYSTEM',
                 security_currency=item.get('security_currency'),
                 portfolio_currency=item.get('portfolio_currency'),
                 isin=item.get('isin'),
-                security_name=item.get('security_name')
+                security_name=item.get('security_name'),
+                position_basis=position_basis
             )
 
             if success:
@@ -478,39 +498,57 @@ class PositionQueueService:
                     logger.info(f"  Trade found: id={t.get('trade_id')}, settle_date={t.get('settle_date')}, type={t.get('trade_type')}")
 
             if trades:
-                logger.info(f"Recalculating {len(trades)} trades from {from_date} to {today}")
+                logger.info(f"Recalculating {len(trades)} trades (both bases) from {from_date} to {today}")
 
                 for trade in trades:
-                    try:
-                        success, msg, _ = self.position_service.calculate_position(
-                            portfolio_id=portfolio_id,
-                            security_id=security_id,
-                            trade_type=trade['trade_type'],
-                            quantity=Decimal(str(trade['quantity'])),
-                            price=Decimal(str(trade['price'])),
-                            charges=Decimal(str(trade.get('charges', 0) or 0)),
-                            position_date=trade['settle_date'],
-                            trade_id=trade['trade_id'],
-                            updated_by='SYSTEM',
-                            security_currency=trade.get('security_currency'),
-                            portfolio_currency=trade.get('portfolio_currency'),
-                            isin=trade.get('isin'),
-                            security_name=trade.get('security_name'),
-                            custodian=trade.get('custodian'),
-                            sub_custodian=trade.get('sub_custodian'),
-                            is_chain_recalc=True  # Use position BEFORE this date
-                        )
+                    trade_date = trade.get('trade_date') or trade['settle_date']
 
-                        if success:
-                            counters['recalculated'] += 1
-                            logger.info(f"Recalculated trade {trade['trade_id']} for {trade['settle_date']}")
-                        else:
+                    # Recalculate BOTH position bases per trade so each chain stays correct.
+                    # TRADE_DATE basis uses trade_date as position_date.
+                    # SETTLE_DATE basis uses settle_date as position_date.
+                    for basis, pos_date in [
+                        ('TRADE_DATE', trade_date),
+                        ('SETTLE_DATE', trade['settle_date'])
+                    ]:
+                        try:
+                            success, msg, _ = self.position_service.calculate_position(
+                                portfolio_id=portfolio_id,
+                                security_id=security_id,
+                                trade_type=trade['trade_type'],
+                                quantity=Decimal(str(trade['quantity'])),
+                                price=Decimal(str(trade['price'])),
+                                charges=Decimal(str(trade.get('charges', 0) or 0)),
+                                position_date=pos_date,
+                                trade_id=trade['trade_id'],
+                                updated_by='SYSTEM',
+                                security_currency=trade.get('security_currency'),
+                                portfolio_currency=trade.get('portfolio_currency'),
+                                isin=trade.get('isin'),
+                                security_name=trade.get('security_name'),
+                                custodian=trade.get('custodian'),
+                                sub_custodian=trade.get('sub_custodian'),
+                                is_chain_recalc=True,
+                                position_basis=basis
+                            )
+
+                            if success:
+                                counters['recalculated'] += 1
+                                logger.info(
+                                    f"Recalculated trade {trade['trade_id']} "
+                                    f"basis={basis} date={pos_date}"
+                                )
+                            else:
+                                counters['errors'] += 1
+                                logger.error(
+                                    f"Failed to recalculate trade {trade['trade_id']} "
+                                    f"basis={basis}: {msg}"
+                                )
+
+                        except Exception as e:
+                            logger.error(
+                                f"Error recalculating trade {trade['trade_id']} basis={basis}: {str(e)}"
+                            )
                             counters['errors'] += 1
-                            logger.error(f"Failed to recalculate trade {trade['trade_id']}: {msg}")
-
-                    except Exception as e:
-                        logger.error(f"Error recalculating trade {trade['trade_id']}: {str(e)}")
-                        counters['errors'] += 1
             else:
                 logger.warning(f"No trades found for recalculation from {from_date}")
 
@@ -702,6 +740,8 @@ class PositionQueueService:
         charges: Decimal,
         settle_date: str,
         updated_by: str,
+        position_basis: str = 'TRADE_DATE',
+        position_date: str = None,
         **kwargs
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """
@@ -715,13 +755,14 @@ class PositionQueueService:
             quantity=quantity,
             price=price,
             charges=charges,
-            position_date=settle_date,
+            position_date=position_date or settle_date,
             trade_id=trade_id,
             updated_by=updated_by,
             security_currency=kwargs.get('security_currency'),
             portfolio_currency=kwargs.get('portfolio_currency'),
             isin=kwargs.get('isin'),
-            security_name=kwargs.get('security_name')
+            security_name=kwargs.get('security_name'),
+            position_basis=position_basis
         )
 
     # =========================================================================

@@ -9,8 +9,9 @@
 --   - position_type: Position type classification
 --
 -- Tables affected:
---   - cis_trade_position (Kudu)
---   - cis_position_master (Hive/Parquet)
+--   - cis_position (Kudu - gold/master position table)
+--   - cis_trade_position (Kudu - AVP position tracking)
+--   - cis_position_master (Hive/Parquet - consolidated positions)
 --
 -- Database: gmp_cis
 -- Created: 2026-04-08
@@ -19,7 +20,19 @@
 USE gmp_cis;
 
 -- ============================================================================
--- ALTER cis_trade_position (Kudu table)
+-- ALTER cis_position (Kudu table - gold/master position table)
+-- ============================================================================
+-- Note: Kudu ALTER TABLE ADD COLUMNS syntax
+-- Uses DECIMAL(18,4) to match existing cis_position column precision
+
+ALTER TABLE cis_position ADD COLUMNS (uncall_fc DECIMAL(18,4));
+ALTER TABLE cis_position ADD COLUMNS (uncall_lc DECIMAL(18,4));
+ALTER TABLE cis_position ADD COLUMNS (pipeline_fc DECIMAL(18,4));
+ALTER TABLE cis_position ADD COLUMNS (pipeline_lc DECIMAL(18,4));
+ALTER TABLE cis_position ADD COLUMNS (position_type STRING);
+
+-- ============================================================================
+-- ALTER cis_trade_position (Kudu table - AVP position tracking)
 -- ============================================================================
 -- Note: Kudu ALTER TABLE ADD COLUMNS syntax
 
@@ -44,6 +57,7 @@ ALTER TABLE cis_position_master ADD COLUMNS (position_type STRING);
 -- VERIFICATION
 -- ============================================================================
 
+DESCRIBE cis_position;
 DESCRIBE cis_trade_position;
 DESCRIBE cis_position_master;
 

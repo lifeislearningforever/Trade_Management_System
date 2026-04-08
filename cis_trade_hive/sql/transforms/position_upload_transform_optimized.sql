@@ -555,6 +555,18 @@ ORDER BY cnt DESC;
 -- ============================================================================
 -- Only records with overall_status = 'VALID' or 'VALID: New security created'
 
+-- TODO: Logic change required before next run
+--   The 5 new columns added to cis_position (ALTER TABLE in DDL 21) are NOT yet
+--   included in this UPSERT. Uploaded positions will have NULL for these columns.
+--   Need to:
+--     1. Determine source columns in position_upload_standardized for:
+--            uncall_fc, uncall_lc  (Uncalled capital FC/LC)
+--            pipeline_fc, pipeline_lc  (Pipeline/pending amounts FC/LC)
+--            position_type  (LONG / SHORT / COMMITTED / PIPELINE / HEDGE / SYNTHETIC)
+--     2. Add those columns to the UPSERT column list and SELECT below
+--     3. Default to 0 / 'LONG' if source data does not carry these fields
+--   Tracked for follow-up — do NOT run this transform against production until resolved.
+
 UPSERT INTO cis_position (
     position_id,
     version_id,

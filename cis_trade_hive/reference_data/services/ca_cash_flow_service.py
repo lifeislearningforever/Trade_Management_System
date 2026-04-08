@@ -663,6 +663,13 @@ class CACashFlowService:
             realized_pnl_fc = Decimal(str(current_position.get('realized_pnl_fc', 0) or 0))
             realized_pnl_lc = Decimal(str(current_position.get('realized_pnl_lc', 0) or 0))
 
+            # Carry forward the 5 new columns — CA events don't change these
+            uncall_fc = float(current_position.get('uncall_fc', 0) or 0)
+            uncall_lc = float(current_position.get('uncall_lc', 0) or 0)
+            pipeline_fc = float(current_position.get('pipeline_fc', 0) or 0)
+            pipeline_lc = float(current_position.get('pipeline_lc', 0) or 0)
+            position_type = current_position.get('position_type') or 'NORMAL'
+
             logger.info(f"[UPDATE_POS] Current position: qty={quantity}, total_cost_fc={old_total_cost_fc}, "
                        f"avg_cost_fc={old_avg_cost_fc}, dividend_fc={old_dividend_fc}, dividend_lc={old_dividend_lc}")
 
@@ -760,7 +767,7 @@ class CACashFlowService:
 
             insert_sql = f"""
             UPSERT INTO {self.DATABASE}.{self.POSITION_TABLE} (
-                version_id, position_id, position_date,
+                version_id, position_id, position_date, position_basis,
                 portfolio_short_name, security_label,
                 quantity,
                 average_cost_fc, total_cost_fc,
@@ -769,6 +776,9 @@ class CACashFlowService:
                 realized_pnl_fc, unrealized_pnl_fc,
                 realized_pnl_lc, unrealized_pnl_lc,
                 dividend_fc, dividend_lc,
+                uncall_fc, uncall_lc,
+                pipeline_fc, pipeline_lc,
+                position_type,
                 trade_id, trade_type,
                 security_currency, portfolio_currency, fx_rate,
                 status, is_active, is_latest,
@@ -780,6 +790,7 @@ class CACashFlowService:
                 {new_version_id},
                 {position_id},
                 '{ex_date}',
+                'SETTLE_DATE',
                 '{self._escape(portfolio_short_name)}',
                 '{self._escape(security_name)}',
                 {float(quantity)},
@@ -796,6 +807,11 @@ class CACashFlowService:
                 {float(new_unrealized_pnl_lc)},
                 {float(new_dividend_fc)},
                 {float(new_dividend_lc)},
+                {uncall_fc},
+                {uncall_lc},
+                {pipeline_fc},
+                {pipeline_lc},
+                '{self._escape(position_type)}',
                 NULL,
                 'CA_{ca_type}',
                 '{self._escape(security_currency)}',
@@ -839,13 +855,18 @@ class CACashFlowService:
         portfolio_short_name: str,
         security_name: str
     ) -> Optional[Dict[str, Any]]:
-        """Get the current open position for a portfolio/security combination."""
+        """Get the current open SETTLE_DATE position for a portfolio/security combination.
+
+        CA effects (dividends, splits, etc.) apply to the settled position only.
+        TRADE_DATE positions track committed exposure and are not adjusted by CA events.
+        """
         try:
             query = f"""
             SELECT *
             FROM {self.DATABASE}.{self.POSITION_TABLE}
             WHERE portfolio_short_name = '{self._escape(portfolio_short_name)}'
               AND security_label = '{self._escape(security_name)}'
+              AND position_basis = 'SETTLE_DATE'
               AND status = 'OPEN'
               AND is_active = true
               AND (is_latest = true OR is_latest IS NULL)
@@ -1256,6 +1277,12 @@ class CACashFlowService:
             # Carry forward dividend values
             dividend_fc = Decimal(str(current_position.get('dividend_fc', 0) or 0))
             dividend_lc = Decimal(str(current_position.get('dividend_lc', 0) or 0))
+            # Carry forward the 5 new columns — CA events don't change these
+            uncall_fc = float(current_position.get('uncall_fc', 0) or 0)
+            uncall_lc = float(current_position.get('uncall_lc', 0) or 0)
+            pipeline_fc = float(current_position.get('pipeline_fc', 0) or 0)
+            pipeline_lc = float(current_position.get('pipeline_lc', 0) or 0)
+            position_type = current_position.get('position_type') or 'NORMAL'
 
             # Get FX rate for LC calculations
             fx_rate = Decimal('1')
@@ -1285,7 +1312,7 @@ class CACashFlowService:
 
             insert_sql = f"""
             UPSERT INTO {self.DATABASE}.{self.POSITION_TABLE} (
-                version_id, position_id, position_date,
+                version_id, position_id, position_date, position_basis,
                 portfolio_short_name, security_label,
                 quantity,
                 average_cost_fc, total_cost_fc,
@@ -1294,6 +1321,9 @@ class CACashFlowService:
                 realized_pnl_fc, unrealized_pnl_fc,
                 realized_pnl_lc, unrealized_pnl_lc,
                 dividend_fc, dividend_lc,
+                uncall_fc, uncall_lc,
+                pipeline_fc, pipeline_lc,
+                position_type,
                 trade_type,
                 security_currency, portfolio_currency, fx_rate,
                 status, is_active, is_latest,
@@ -1303,6 +1333,7 @@ class CACashFlowService:
                 {new_version_id},
                 {position_id},
                 '{ex_date}',
+                'SETTLE_DATE',
                 '{self._escape(portfolio_short_name)}',
                 '{self._escape(security_name)}',
                 {float(new_quantity)},
@@ -1319,6 +1350,11 @@ class CACashFlowService:
                 {float(unrealized_pnl_lc)},
                 {float(dividend_fc)},
                 {float(dividend_lc)},
+                {uncall_fc},
+                {uncall_lc},
+                {pipeline_fc},
+                {pipeline_lc},
+                '{self._escape(position_type)}',
                 'CA_{ca_type}',
                 '{self._escape(security_currency or "")}',
                 '{self._escape(portfolio_currency or "")}',

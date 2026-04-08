@@ -79,7 +79,8 @@ class SettlementService:
         security_name: str = None,
         custodian: str = None,
         sub_custodian: str = None,
-        async_mode: bool = True
+        async_mode: bool = True,
+        position_basis: str = None  # None = dual (both bases). 'TRADE_DATE' or 'SETTLE_DATE' = single.
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """
         Process trade settlement based on settlement date.
@@ -125,9 +126,36 @@ class SettlementService:
             else:
                 settlement_type = 'BACKDATED'
 
-            # ASYNC MODE: Queue ALL settlements for background processing
-            if async_mode:
-                return self._queue_for_async_processing(
+            trade_dt = self._parse_date(trade_date)
+
+            # DUAL POSITION LOGIC
+            # position_basis=None (default) means create BOTH bases.
+            # position_basis='TRADE_DATE' or 'SETTLE_DATE' means a targeted single-basis call
+            # (used by POSITION_MODIFY reversal and POSITION_CANCEL which must mirror what
+            #  was originally created).
+            #
+            # Corner cases:
+            # 1. T+0 (trade_date == settle_date): Both bases land on same date — we still
+            #    create two rows so queries by position_basis remain consistent.
+            # 2. FUTURE settle_date (> today): TRADE_DATE position is queued immediately
+            #    (async), SETTLE_DATE position is queued to cis_settlement_queue for EOD.
+            # 3. BACKDATED: Chain recalculation runs for BOTH bases (handled in worker).
+            # 4. Single-basis calls (modify/cancel reversals): pass position_basis explicitly.
+
+            bases_to_process = (
+                ['TRADE_DATE', 'SETTLE_DATE'] if position_basis is None
+                else [position_basis]
+            )
+
+            results = {}
+            overall_success = True
+
+            for basis in bases_to_process:
+                # For TRADE_DATE basis: position_date = trade_date
+                # For SETTLE_DATE basis: position_date = settle_date
+                pos_date = trade_date if basis == 'TRADE_DATE' else settle_date
+
+                kwargs = dict(
                     trade_id=trade_id,
                     portfolio_id=portfolio_id,
                     security_id=security_id,
@@ -143,62 +171,51 @@ class SettlementService:
                     security_name=security_name,
                     custodian=custodian,
                     sub_custodian=sub_custodian,
+                    position_basis=basis,
+                    position_date=pos_date,
                     settlement_type=settlement_type
                 )
 
-            # SYNC MODE: Process immediately (for EOD job or manual processing)
-            if settle_dt == today:
-                return self._process_immediate_settlement(
-                    trade_id=trade_id,
-                    portfolio_id=portfolio_id,
-                    security_id=security_id,
-                    trade_type=trade_type,
-                    quantity=quantity,
-                    price=price,
-                    charges=charges,
-                    position_date=settle_date,
-                    updated_by=updated_by,
-                    security_currency=security_currency,
-                    portfolio_currency=portfolio_currency,
-                    isin=isin,
-                    security_name=security_name
-                )
+                if async_mode:
+                    if basis == 'SETTLE_DATE' and settle_dt > today:
+                        # SETTLE_DATE future: queue to settlement queue (processed on settle_date)
+                        success, msg, result = self._queue_for_settlement(**kwargs)
+                    else:
+                        # TRADE_DATE (any timing) + SETTLE_DATE T+0/backdated: async position queue
+                        success, msg, result = self._queue_for_async_processing(**kwargs)
+                else:
+                    # SYNC MODE (worker / EOD job)
+                    if settle_dt == today or basis == 'TRADE_DATE':
+                        success, msg, result = self._process_immediate_settlement(
+                            position_date=pos_date, **{
+                                k: v for k, v in kwargs.items()
+                                if k not in ('settle_date', 'settlement_type', 'position_date')
+                            }
+                        )
+                    elif settle_dt > today:
+                        success, msg, result = self._queue_for_settlement(**kwargs)
+                    else:
+                        success, msg, result = self._process_backdated_settlement(**kwargs)
 
-            elif settle_dt > today:
-                # Future settlement - queue in settlement_queue table for EOD processing
-                return self._queue_for_settlement(
-                    trade_id=trade_id,
-                    portfolio_id=portfolio_id,
-                    security_id=security_id,
-                    trade_type=trade_type,
-                    quantity=quantity,
-                    price=price,
-                    charges=charges,
-                    settle_date=settle_date,
-                    updated_by=updated_by,
-                    security_currency=security_currency,
-                    portfolio_currency=portfolio_currency,
-                    isin=isin,
-                    security_name=security_name
-                )
+                results[basis] = (success, msg, result)
+                if not success:
+                    overall_success = False
+                logger.info(f"Trade {trade_id} basis={basis} date={pos_date}: {msg}")
 
-            else:
-                # Backdated settlement - process with chain recalculation
-                return self._process_backdated_settlement(
-                    trade_id=trade_id,
-                    portfolio_id=portfolio_id,
-                    security_id=security_id,
-                    trade_type=trade_type,
-                    quantity=quantity,
-                    price=price,
-                    charges=charges,
-                    settle_date=settle_date,
-                    updated_by=updated_by,
-                    security_currency=security_currency,
-                    portfolio_currency=portfolio_currency,
-                    isin=isin,
-                    security_name=security_name
-                )
+            # Return combined result
+            if len(bases_to_process) == 1:
+                basis = bases_to_process[0]
+                return results[basis]
+
+            # Dual basis: return success only if both succeeded
+            td_success, td_msg, td_result = results.get('TRADE_DATE', (False, 'not run', None))
+            sd_success, sd_msg, sd_result = results.get('SETTLE_DATE', (False, 'not run', None))
+            combined_msg = f"TRADE_DATE: {td_msg} | SETTLE_DATE: {sd_msg}"
+            return overall_success, combined_msg, {
+                'trade_date_result': td_result,
+                'settle_date_result': sd_result,
+                'settlement_type': settlement_type
+            }
 
         except Exception as e:
             logger.error(f"Error processing trade settlement: {str(e)}")
@@ -220,42 +237,30 @@ class SettlementService:
         settle_date: str,
         updated_by: str,
         settlement_type: str,
+        position_basis: str = 'TRADE_DATE',
+        position_date: str = None,
         **kwargs
     ) -> Tuple[bool, str, Dict[str, Any]]:
         """
         Queue settlement for async background processing.
         This is NON-BLOCKING - returns immediately after queuing.
 
-        For T+0 and backdated: Queued to cis_position_queue for immediate async processing
-        For Future (T+1/T+2): Queued to cis_settlement_queue for EOD processing on settle_date
+        position_basis determines which chain this queue item belongs to.
+        position_date is the effective date for this basis (trade_date or settle_date).
         """
         try:
-            today = datetime.now().date()
-            settle_dt = self._parse_date(settle_date)
-
-            if settle_dt > today:
-                # Future settlement - use settlement_queue (processed by EOD job)
-                return self._queue_for_settlement(
-                    trade_id=trade_id,
-                    portfolio_id=portfolio_id,
-                    security_id=security_id,
-                    trade_type=trade_type,
-                    quantity=quantity,
-                    price=price,
-                    charges=charges,
-                    settle_date=settle_date,
-                    updated_by=updated_by,
-                    **kwargs
-                )
-
             # For backdated, generate CHAIN_RECALC metadata upfront
-            # This is included in the INSERT to avoid race conditions
             chain_recalc_metadata = None
             if settlement_type == 'BACKDATED':
-                chain_recalc_metadata = f"CHAIN_RECALC:{portfolio_id}:{security_id}:{settle_date}"
-                logger.info(f"Backdated trade detected, chain_recalc_metadata: {chain_recalc_metadata}")
+                chain_recalc_metadata = (
+                    f"CHAIN_RECALC:{portfolio_id}:{security_id}:{settle_date}"
+                )
+                logger.info(
+                    f"Backdated trade detected basis={position_basis}, "
+                    f"chain_recalc_metadata: {chain_recalc_metadata}"
+                )
 
-            # T+0 or Backdated - use position_queue for async processing
+            # Enqueue to position_queue (processed by background worker)
             success, message, queue_id = self.position_queue_service.enqueue_position_calculation(
                 trade_id=trade_id,
                 portfolio_id=portfolio_id,
@@ -270,8 +275,10 @@ class SettlementService:
                 portfolio_currency=kwargs.get('portfolio_currency'),
                 isin=kwargs.get('isin'),
                 security_name=kwargs.get('security_name'),
-                use_db_queue=True,  # Persist to database for reliability
-                chain_recalc_metadata=chain_recalc_metadata  # Include metadata in INSERT
+                use_db_queue=True,
+                chain_recalc_metadata=chain_recalc_metadata,
+                position_basis=position_basis,
+                position_date=position_date or settle_date
             )
 
             if success:
@@ -380,24 +387,28 @@ class SettlementService:
         charges: Decimal,
         settle_date: str,
         updated_by: str,
+        position_basis: str = 'SETTLE_DATE',
+        position_date: str = None,
         **kwargs
     ) -> Tuple[bool, str, Dict[str, Any]]:
-        """Queue trade for future settlement."""
+        """Queue trade for future settlement (EOD job processes on settle_date).
+        Only SETTLE_DATE basis goes here — TRADE_DATE is always queued immediately."""
         try:
             queue_id = self._generate_id()
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             processing_date = datetime.now().strftime('%Y%m%d')
+            effective_position_date = position_date or settle_date
 
             # Cast decimal values to avoid precision errors
             qty_cast = f"CAST({float(quantity)} AS DECIMAL(20,8))"
             price_cast = f"CAST({float(price)} AS DECIMAL(20,8))"
             charges_cast = f"CAST({float(charges)} AS DECIMAL(20,8))"
 
-            # Insert into settlement queue
+            # Insert into settlement queue (position_basis + position_date stored for worker)
             query = f"""
             INSERT INTO {self.DATABASE}.{self.SETTLEMENT_QUEUE_TABLE}
             (queue_id, trade_id, portfolio_id, security_id, trade_type,
-             quantity, price, charges, settle_date,
+             quantity, price, charges, settle_date, position_basis,
              status, retry_count, queued_at, queued_by,
              security_currency, portfolio_currency, isin, security_name,
              custodian, sub_custodian,
@@ -408,6 +419,7 @@ class SettlementService:
                 '{trade_type}',
                 {qty_cast}, {price_cast}, {charges_cast},
                 '{settle_date}',
+                '{position_basis}',
                 '{self.STATUS_PENDING}', CAST(0 AS INT),
                 '{timestamp}', '{self._escape(updated_by)}',
                 {self._null_or_str(kwargs.get('security_currency'))},
@@ -495,7 +507,11 @@ class SettlementService:
                         item['queue_id'], self.STATUS_PROCESSING
                     )
 
-                    # Calculate position
+                    # Calculate position — use basis stored in queue row
+                    # EOD job processes SETTLE_DATE basis (the main use case for this queue)
+                    basis = item.get('position_basis', 'SETTLE_DATE')
+                    pos_date = item.get('position_date') or item['settle_date']
+
                     success, message, position = self.position_service.calculate_position(
                         portfolio_id=item['portfolio_id'],
                         security_id=item['security_id'],
@@ -503,7 +519,7 @@ class SettlementService:
                         quantity=Decimal(str(item['quantity'])),
                         price=Decimal(str(item['price'])),
                         charges=Decimal(str(item.get('charges', 0) or 0)),
-                        position_date=item['settle_date'],
+                        position_date=pos_date,
                         trade_id=item['trade_id'],
                         updated_by='SYSTEM',
                         security_currency=item.get('security_currency'),
@@ -511,7 +527,8 @@ class SettlementService:
                         isin=item.get('isin'),
                         security_name=item.get('security_name'),
                         custodian=item.get('custodian'),
-                        sub_custodian=item.get('sub_custodian')
+                        sub_custodian=item.get('sub_custodian'),
+                        position_basis=basis
                     )
 
                     if success:

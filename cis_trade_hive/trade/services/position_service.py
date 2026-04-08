@@ -67,7 +67,13 @@ class PositionService:
         security_name: str = None,
         custodian: str = None,
         sub_custodian: str = None,
-        is_chain_recalc: bool = False
+        is_chain_recalc: bool = False,
+        uncall_fc: Decimal = None,
+        uncall_lc: Decimal = None,
+        pipeline_fc: Decimal = None,
+        pipeline_lc: Decimal = None,
+        position_type: str = None,
+        position_basis: str = 'TRADE_DATE'
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """
         Calculate position using weighted average method.
@@ -111,17 +117,20 @@ class PositionService:
             # to avoid picking up the old position for the same date
             # For normal trades, we include same date positions
             if is_chain_recalc:
-                # Chain recalc: get position strictly BEFORE this date
+                # Chain recalc: get position strictly BEFORE this date, scoped to same basis
                 current = self._get_position_as_of_date(
-                    portfolio_id, security_id, position_date, include_same_date=False
+                    portfolio_id, security_id, position_date,
+                    include_same_date=False, position_basis=position_basis
                 )
                 logger.info(
                     f"Chain recalc mode: Getting position BEFORE {position_date} for "
-                    f"{portfolio_id}/{security_id}. Found: {current is not None}"
+                    f"{portfolio_id}/{security_id} basis={position_basis}. Found: {current is not None}"
                 )
             else:
-                # Normal mode: include same date positions
-                current = self._get_position_as_of_date(portfolio_id, security_id, position_date)
+                # Normal mode: include same date positions, scoped to same basis
+                current = self._get_position_as_of_date(
+                    portfolio_id, security_id, position_date, position_basis=position_basis
+                )
 
             # If no position before this date, this is the first trade for this date range
             # (which is correct for backdated trades creating a new earliest position)
@@ -142,7 +151,13 @@ class PositionService:
                     isin=isin,
                     security_name=security_name,
                     custodian=custodian,
-                    sub_custodian=sub_custodian
+                    sub_custodian=sub_custodian,
+                    uncall_fc=uncall_fc,
+                    uncall_lc=uncall_lc,
+                    pipeline_fc=pipeline_fc,
+                    pipeline_lc=pipeline_lc,
+                    position_type=position_type,
+                    position_basis=position_basis
                 )
             elif trade_type == 'SELL':
                 return self._process_sell(
@@ -159,7 +174,13 @@ class PositionService:
                     isin=isin,
                     security_name=security_name,
                     custodian=custodian,
-                    sub_custodian=sub_custodian
+                    sub_custodian=sub_custodian,
+                    uncall_fc=uncall_fc,
+                    uncall_lc=uncall_lc,
+                    pipeline_fc=pipeline_fc,
+                    pipeline_lc=pipeline_lc,
+                    position_type=position_type,
+                    position_basis=position_basis
                 )
 
         except Exception as e:
@@ -182,7 +203,13 @@ class PositionService:
         isin: str = None,
         security_name: str = None,
         custodian: str = None,
-        sub_custodian: str = None
+        sub_custodian: str = None,
+        uncall_fc: Decimal = None,
+        uncall_lc: Decimal = None,
+        pipeline_fc: Decimal = None,
+        pipeline_lc: Decimal = None,
+        position_type: str = None,
+        position_basis: str = 'TRADE_DATE'
     ) -> Tuple[bool, str, Dict[str, Any]]:
         """
         Process BUY trade - increase position, recalculate AVP.
@@ -306,7 +333,13 @@ class PositionService:
             'isin': isin,
             'security_name': security_name,
             'custodian': custodian,
-            'sub_custodian': sub_custodian
+            'sub_custodian': sub_custodian,
+            'uncall_fc': float(uncall_fc) if uncall_fc is not None else 0,
+            'uncall_lc': float(uncall_lc) if uncall_lc is not None else 0,
+            'pipeline_fc': float(pipeline_fc) if pipeline_fc is not None else 0,
+            'pipeline_lc': float(pipeline_lc) if pipeline_lc is not None else 0,
+            'position_type': position_type or 'LONG',
+            'position_basis': position_basis
         }
 
         # Save to cis_trade_position
@@ -335,7 +368,13 @@ class PositionService:
         isin: str = None,
         security_name: str = None,
         custodian: str = None,
-        sub_custodian: str = None
+        sub_custodian: str = None,
+        uncall_fc: Decimal = None,
+        uncall_lc: Decimal = None,
+        pipeline_fc: Decimal = None,
+        pipeline_lc: Decimal = None,
+        position_type: str = None,
+        position_basis: str = 'TRADE_DATE'
     ) -> Tuple[bool, str, Dict[str, Any]]:
         """
         Process SELL trade - decrease position, AVP unchanged.
@@ -431,7 +470,13 @@ class PositionService:
                 'isin': isin,
                 'security_name': security_name,
                 'custodian': custodian,
-                'sub_custodian': sub_custodian
+                'sub_custodian': sub_custodian,
+                'uncall_fc': 0,
+                'uncall_lc': 0,
+                'pipeline_fc': 0,
+                'pipeline_lc': 0,
+                'position_type': position_type or 'LONG',
+                'position_basis': position_basis
             }
             logger.info(f"Position {position_id} fully closed. Total realized P&L: {new_realized_pnl}, LC: {new_realized_pnl_lc}")
         else:
@@ -481,7 +526,13 @@ class PositionService:
                 'isin': isin,
                 'security_name': security_name,
                 'custodian': custodian,
-                'sub_custodian': sub_custodian
+                'sub_custodian': sub_custodian,
+                'uncall_fc': float(uncall_fc) if uncall_fc is not None else float(current.get('uncall_fc', 0) or 0),
+                'uncall_lc': float(uncall_lc) if uncall_lc is not None else float(current.get('uncall_lc', 0) or 0),
+                'pipeline_fc': float(pipeline_fc) if pipeline_fc is not None else float(current.get('pipeline_fc', 0) or 0),
+                'pipeline_lc': float(pipeline_lc) if pipeline_lc is not None else float(current.get('pipeline_lc', 0) or 0),
+                'position_type': position_type or current.get('position_type') or 'LONG',
+                'position_basis': position_basis
             }
 
         # Save to cis_trade_position
@@ -528,10 +579,15 @@ class PositionService:
         portfolio_id: str,
         security_id: str,
         as_of_date: str,
-        include_same_date: bool = True
+        include_same_date: bool = True,
+        position_basis: str = 'TRADE_DATE'
     ) -> Optional[Dict[str, Any]]:
         """
-        Get position as of a specific date.
+        Get position as of a specific date, scoped to a specific position_basis.
+
+        Critical for dual-position logic: TRADE_DATE and SETTLE_DATE positions are
+        stored separately. Each basis chain must only look at its own prior positions
+        to avoid cross-contamination of AVP calculations.
 
         Args:
             portfolio_id: Portfolio short name
@@ -539,12 +595,11 @@ class PositionService:
             as_of_date: Date to check (YYYY-MM-DD)
             include_same_date: If True, includes positions with position_date <= as_of_date
                               If False, only positions with position_date < as_of_date (for backdated)
+            position_basis: 'TRADE_DATE' or 'SETTLE_DATE' — scope lookup to this basis only
 
         Returns the latest version (is_latest=true) with position_date <= or < as_of_date.
         """
         try:
-            # For SELL or same-day trades: include positions on the same date
-            # For backdated calculations: use < to get base position before the date
             date_operator = '<=' if include_same_date else '<'
 
             query = f"""
@@ -553,6 +608,7 @@ class PositionService:
             WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
               AND security_label = '{self._escape(security_id)}'
               AND position_date {date_operator} '{as_of_date}'
+              AND position_basis = '{position_basis}'
               AND (is_latest = true OR is_latest IS NULL)
             ORDER BY position_date DESC, version_id DESC
             LIMIT 1
@@ -625,7 +681,8 @@ class PositionService:
 
             # Step 1: Mark existing versions for this date as is_latest=false
             # This is done via UPSERT with the same version_id but is_latest=false
-            self._mark_old_versions_not_latest(portfolio_id, security_id, position_date)
+            position_basis = position_data.get('position_basis', 'TRADE_DATE')
+            self._mark_old_versions_not_latest(portfolio_id, security_id, position_date, position_basis)
 
             # Get FX rate for multi-currency calculations
             # Use strict=True for cross-currency positions to ensure accurate AVP
@@ -838,12 +895,16 @@ class PositionService:
                 )
 
                 # Sync to cis_position gold table
+                # TODO: DUAL POSITION LOGIC — position_basis hardcoded 'TRADE_DATE' here is WRONG.
+                # Once dual position logic is implemented, position_basis must come from
+                # position_data (set by caller via calculate_position's position_basis param).
+                # See trade_kudu_repository.py TODO for full implementation plan.
                 sync_data = {
                     'position_id': position_data['position_id'],
                     'version_id': version_id,
                     'portfolio': portfolio_id,
                     'security_label': security_id,
-                    'position_basis': 'TRADE_DATE',
+                    'position_basis': position_data.get('position_basis', 'TRADE_DATE'),  # TODO: pass from caller
                     'position_date': position_date,
                     'src_system': 'CIS',
                     'processing_date': timestamp[:10].replace('-', ''),  # YYYYMMDD
@@ -918,7 +979,10 @@ class PositionService:
                 'realized_pnl_fc', 'realized_pnl_lc',
                 'isin',
                 'average_cost_lc',      # Avg cost in Portfolio Currency (renamed from placeholder_2)
-                'placeholder_3', 'placeholder_4'
+                'placeholder_3', 'placeholder_4',
+                'uncall_fc', 'uncall_lc',
+                'pipeline_fc', 'pipeline_lc',
+                'position_type'
             ]
 
             # Helper for decimal formatting
@@ -958,7 +1022,12 @@ class PositionService:
                 f"'{self._escape(position_data.get('isin', ''))}'",
                 cast_decimal(position_data.get('average_cost_lc', 0)),
                 "''",  # placeholder_3
-                "''"   # placeholder_4
+                "''",  # placeholder_4
+                cast_decimal(position_data.get('uncall_fc', 0)),
+                cast_decimal(position_data.get('uncall_lc', 0)),
+                cast_decimal(position_data.get('pipeline_fc', 0)),
+                cast_decimal(position_data.get('pipeline_lc', 0)),
+                f"'{position_data.get('position_type', 'LONG')}'" if position_data.get('position_type') else "'LONG'"
             ]
 
             query = f"""
@@ -988,21 +1057,20 @@ class PositionService:
         self,
         portfolio_id: str,
         security_id: str,
-        position_date: str
+        position_date: str,
+        position_basis: str = 'TRADE_DATE'
     ) -> bool:
         """
-        Mark existing versions for a position_date as is_latest=false.
+        Mark existing versions for a position_date+basis as is_latest=false.
 
-        This is called before inserting a new version to ensure only one
-        version per date has is_latest=true.
+        Scoped to position_basis so TRADE_DATE and SETTLE_DATE chains are
+        independently versioned — recalculating one basis never stomps on the other.
 
         Note: Kudu doesn't support UPDATE with complex WHERE, so we need to:
-        1. Query existing versions for this date
+        1. Query existing versions for this date+basis
         2. Re-insert each with is_latest=false
         """
         try:
-            # Get existing versions for this date that are marked is_latest=true
-            # Using new column names: average_cost_fc, total_cost_fc, market_price, market_value_fc, etc.
             query = f"""
             SELECT version_id, position_id, position_date,
                    portfolio_short_name, security_label,
@@ -1021,6 +1089,7 @@ class PositionService:
             WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
               AND security_label = '{self._escape(security_id)}'
               AND position_date = '{position_date}'
+              AND position_basis = '{position_basis}'
               AND is_latest = true
             """
 
@@ -1037,7 +1106,7 @@ class PositionService:
                 # Using new column names
                 update_query = f"""
                 UPSERT INTO {self.DATABASE}.{self.POSITION_TABLE}
-                (version_id, position_id, position_date,
+                (version_id, position_id, position_date, position_basis,
                  portfolio_short_name, security_label,
                  quantity, average_cost_fc, total_cost_fc,
                  average_cost_lc, total_cost_lc,
@@ -1052,6 +1121,7 @@ class PositionService:
                  created_by, created_at, updated_by, updated_at)
                 VALUES (
                     {row['version_id']}, {row['position_id']}, '{row['position_date']}',
+                    '{position_basis}',
                     '{self._escape(row['portfolio_short_name'])}', '{self._escape(row['security_label'])}',
                     CAST({row.get('quantity') or 0} AS DECIMAL(20,8)),
                     CAST({row.get('average_cost_fc') or 0} AS DECIMAL(20,8)),
