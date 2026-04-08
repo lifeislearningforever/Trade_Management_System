@@ -110,6 +110,7 @@ TEMPLATES = [
                 # Custom context processors
                 'core.utils.context_processors.app_context',
                 'core.utils.context_processors.sidebar_permissions',  # RBAC sidebar permissions
+                'core.utils.context_processors.system_date_context',  # System date from GMP
             ],
         },
     },

@@ -551,6 +551,52 @@ small, .text-small, .text-sm {
 }
 
 /* =====================================================
+   System Date Display (Navbar)
+   ===================================================== */
+
+.system-date-display {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    background: var(--bg-secondary);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+    text-decoration: none;
+    color: var(--gray-700);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    transition: all var(--transition-fast);
+    margin-left: var(--spacing-sm);
+}
+
+.system-date-display:hover {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+    text-decoration: none;
+}
+
+.system-date-display:hover i,
+.system-date-display:hover .system-date-value {
+    color: white !important;
+}
+
+.system-date-display i {
+    font-size: var(--font-size-md);
+}
+
+.system-date-value {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    letter-spacing: 0.02em;
+}
+
+/* Override active state */
+.system-date-display .text-warning {
+    color: var(--warning) !important;
+}
+
+/* =====================================================
    Screen Size Breakpoints
    ===================================================== */
 
