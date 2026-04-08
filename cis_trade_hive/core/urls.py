@@ -14,12 +14,6 @@ urlpatterns = [
     path('pool-stats/', old_views.pool_stats, name='pool_stats'),
     path('reset-stats/', old_views.reset_pool_stats, name='reset_stats'),
 
-    # System Date Management
-    path('system-date/', old_views.system_date_dashboard, name='system_date_dashboard'),
+    # System Date API (from GMP file)
     path('system-date/api/', old_views.system_date_api, name='system_date_api'),
-    path('system-date/user-override/set/', old_views.system_date_set_user_override, name='system_date_set_user_override'),
-    path('system-date/user-override/clear/', old_views.system_date_clear_user_override, name='system_date_clear_user_override'),
-    path('system-date/global-override/set/', old_views.system_date_set_global_override, name='system_date_set_global_override'),
-    path('system-date/global-override/clear/', old_views.system_date_clear_global_override, name='system_date_clear_global_override'),
-    path('system-date/eod-lock/', old_views.system_date_eod_lock, name='system_date_eod_lock'),
 ]

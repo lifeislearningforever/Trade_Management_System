@@ -18,20 +18,11 @@
         <span class="font-size-indicator" id="font-size-indicator">100%</span>
     </div>
 
-    <!-- System Date Display -->
-    <a href="{% url 'core:system_date_dashboard' %}" class="system-date-display d-none d-md-flex"
-       title="System Date{% if system_date_is_override %} (Override Active){% endif %}{% if is_eod_locked %} - EOD LOCKED{% endif %}">
-        <i class="bi bi-calendar-date{% if system_date_is_override %} text-warning{% endif %}"></i>
-        <span class="system-date-value{% if system_date_is_override %} text-warning{% endif %}">
-            {{ system_date_display|default:"Loading..." }}
-        </span>
-        {% if system_date_is_override %}
-            <span class="badge bg-warning text-dark ms-1" style="font-size: 0.65rem;">OVR</span>
-        {% endif %}
-        {% if is_eod_locked %}
-            <i class="bi bi-lock-fill text-danger ms-1" title="EOD Locked"></i>
-        {% endif %}
-    </a>
+    <!-- System Date Display (from GMP file) -->
+    <div class="system-date-display d-none d-md-flex" title="System Date: {{ system_date_display }} ({{ system_date_source }})">
+        <i class="bi bi-calendar-date"></i>
+        <span class="system-date-value">{{ system_date_display|default:"Loading..." }}</span>
+    </div>
 
     <!-- Icons -->
     <div class="navbar-icons">

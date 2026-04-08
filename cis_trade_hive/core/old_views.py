@@ -454,242 +454,32 @@ def reset_pool_stats(request):
 
 
 # =========================================================================
-# SYSTEM DATE MANAGEMENT VIEWS
+# SYSTEM DATE API
 # =========================================================================
-
-def system_date_dashboard(request):
-    """
-    System date dashboard showing current date info and override controls.
-
-    Shows:
-    - Current system date, report date, processing date
-    - Override status and controls
-    - Date change history
-    """
-    from core.services.system_date_service import system_date_service
-
-    # Get username from session
-    username = request.session.get('username')
-
-    # Get system date info
-    date_info = system_date_service.get_system_date_info(username)
-
-    # Get history
-    history = system_date_service.get_history(limit=20)
-
-    # Check if user can set global override (admin only)
-    # For now, allow if SKIP_PERMISSION_CHECKS is True or user has admin role
-    from django.conf import settings
-    skip_checks = getattr(settings, 'SKIP_PERMISSION_CHECKS', False)
-    can_set_global_override = skip_checks or request.session.get('is_admin', False)
-
-    context = {
-        'date_info': date_info,
-        'history': history,
-        'can_set_global_override': can_set_global_override,
-        'is_eod_locked': system_date_service.is_eod_locked(),
-    }
-
-    return render(request, 'core/system_date_dashboard.html', context)
-
-
-def system_date_set_user_override(request):
-    """
-    Set user-specific date override.
-
-    POST parameters:
-    - override_date: Date in YYYYMMDD format
-    - reason: Optional reason for override
-    """
-    if request.method != 'POST':
-        return JsonResponse({'error': 'POST method required'}, status=405)
-
-    from core.services.system_date_service import system_date_service
-
-    username = request.session.get('username')
-    if not username:
-        return JsonResponse({'error': 'User not logged in'}, status=401)
-
-    override_date = request.POST.get('override_date', '').strip()
-    reason = request.POST.get('reason', '').strip()
-
-    if not override_date:
-        return JsonResponse({'error': 'Override date is required'}, status=400)
-
-    # Convert YYYY-MM-DD to YYYYMMDD if needed
-    if '-' in override_date:
-        override_date = override_date.replace('-', '')
-
-    success, message = system_date_service.set_user_override(
-        username=username,
-        override_date=override_date,
-        reason=reason,
-        valid_hours=24
-    )
-
-    if success:
-        messages.success(request, message)
-        return JsonResponse({'status': 'success', 'message': message})
-    else:
-        return JsonResponse({'status': 'error', 'message': message}, status=400)
-
-
-def system_date_clear_user_override(request):
-    """
-    Clear user-specific date override.
-    """
-    if request.method != 'POST':
-        return JsonResponse({'error': 'POST method required'}, status=405)
-
-    from core.services.system_date_service import system_date_service
-
-    username = request.session.get('username')
-    if not username:
-        return JsonResponse({'error': 'User not logged in'}, status=401)
-
-    success, message = system_date_service.clear_user_override(username)
-
-    if success:
-        messages.success(request, message)
-        return JsonResponse({'status': 'success', 'message': message})
-    else:
-        return JsonResponse({'status': 'error', 'message': message}, status=400)
-
-
-def system_date_set_global_override(request):
-    """
-    Set global date override (admin only).
-
-    POST parameters:
-    - override_date: Date in YYYYMMDD format
-    - reason: Required reason for override
-    """
-    if request.method != 'POST':
-        return JsonResponse({'error': 'POST method required'}, status=405)
-
-    from django.conf import settings
-    from core.services.system_date_service import system_date_service
-
-    # Check admin permission
-    skip_checks = getattr(settings, 'SKIP_PERMISSION_CHECKS', False)
-    is_admin = request.session.get('is_admin', False)
-
-    if not skip_checks and not is_admin:
-        return JsonResponse({'error': 'Admin permission required'}, status=403)
-
-    username = request.session.get('username', 'admin')
-    override_date = request.POST.get('override_date', '').strip()
-    reason = request.POST.get('reason', '').strip()
-
-    if not override_date:
-        return JsonResponse({'error': 'Override date is required'}, status=400)
-
-    if not reason:
-        return JsonResponse({'error': 'Reason is required for global override'}, status=400)
-
-    # Convert YYYY-MM-DD to YYYYMMDD if needed
-    if '-' in override_date:
-        override_date = override_date.replace('-', '')
-
-    success, message = system_date_service.set_global_override(
-        override_date=override_date,
-        admin_user=username,
-        reason=reason
-    )
-
-    if success:
-        messages.success(request, message)
-        return JsonResponse({'status': 'success', 'message': message})
-    else:
-        return JsonResponse({'status': 'error', 'message': message}, status=400)
-
-
-def system_date_clear_global_override(request):
-    """
-    Clear global date override (admin only).
-    """
-    if request.method != 'POST':
-        return JsonResponse({'error': 'POST method required'}, status=405)
-
-    from django.conf import settings
-    from core.services.system_date_service import system_date_service
-
-    # Check admin permission
-    skip_checks = getattr(settings, 'SKIP_PERMISSION_CHECKS', False)
-    is_admin = request.session.get('is_admin', False)
-
-    if not skip_checks and not is_admin:
-        return JsonResponse({'error': 'Admin permission required'}, status=403)
-
-    username = request.session.get('username', 'admin')
-
-    success, message = system_date_service.clear_global_override(username)
-
-    if success:
-        messages.success(request, message)
-        return JsonResponse({'status': 'success', 'message': message})
-    else:
-        return JsonResponse({'status': 'error', 'message': message}, status=400)
-
 
 def system_date_api(request):
     """
-    API endpoint to get current system date info.
+    API endpoint to get current system date info from GMP file.
 
-    Returns JSON with system date, report date, source, override status, etc.
+    Returns JSON with:
+    - system_date: Business date T (YYYYMMDD)
+    - report_date: Report date T-1 (YYYYMMDD)
+    - processing_date: Processing date (YYYYMMDD)
+    - source: 'GMP_FILE' or 'FALLBACK'
+    - is_business_day: Whether system_date is a business day
     """
     from core.services.system_date_service import system_date_service
 
-    username = request.session.get('username')
-    date_info = system_date_service.get_system_date_info(username)
+    date_info = system_date_service.get_system_date_info()
 
     return JsonResponse({
         'system_date': date_info.system_date_str,
         'system_date_display': date_info.system_date_display,
         'report_date': date_info.report_date_str,
-        'report_date_display': date_info.report_date.strftime('%Y-%m-%d') if date_info.report_date else None,
+        'report_date_display': date_info.report_date_display,
         'processing_date': date_info.processing_date_str,
         'source': date_info.source,
-        'is_override': date_info.is_override,
-        'override_reason': date_info.override_reason,
         'is_business_day': date_info.is_business_day,
-        'warnings': date_info.warnings,
-        'is_eod_locked': system_date_service.is_eod_locked(),
+        'source_file': date_info.source_file,
+        'loaded_at': date_info.loaded_at.isoformat() if date_info.loaded_at else None,
     })
-
-
-def system_date_eod_lock(request):
-    """
-    Toggle EOD lock (admin only).
-
-    POST parameters:
-    - action: 'lock' or 'unlock'
-    """
-    if request.method != 'POST':
-        return JsonResponse({'error': 'POST method required'}, status=405)
-
-    from django.conf import settings
-    from core.services.system_date_service import system_date_service
-
-    # Check admin permission
-    skip_checks = getattr(settings, 'SKIP_PERMISSION_CHECKS', False)
-    is_admin = request.session.get('is_admin', False)
-
-    if not skip_checks and not is_admin:
-        return JsonResponse({'error': 'Admin permission required'}, status=403)
-
-    username = request.session.get('username', 'admin')
-    action = request.POST.get('action', '').strip().lower()
-
-    if action == 'lock':
-        success, message = system_date_service.set_eod_lock(username)
-    elif action == 'unlock':
-        success, message = system_date_service.clear_eod_lock(username)
-    else:
-        return JsonResponse({'error': 'Invalid action. Use "lock" or "unlock"'}, status=400)
-
-    if success:
-        messages.success(request, message)
-        return JsonResponse({'status': 'success', 'message': message})
-    else:
-        return JsonResponse({'status': 'error', 'message': message}, status=400)

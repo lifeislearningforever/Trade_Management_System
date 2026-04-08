@@ -15,26 +15,21 @@ def system_date_context(request):
     Add system date context to all templates.
 
     Makes system date info available for display in header and forms.
-    Uses the SystemDateService to get the effective date considering overrides.
+    Uses the SystemDateService to get the date from GMP file.
 
     Template variables:
-        system_date: Effective system date (date object)
+        system_date: System date (date object)
         system_date_str: System date as YYYYMMDD string
         system_date_display: System date as YYYY-MM-DD string
         report_date: Report date (T-1)
         report_date_display: Report date as YYYY-MM-DD string
-        system_date_source: Source of the date (GMP_FILE, USER_OVERRIDE, GLOBAL_OVERRIDE, FALLBACK)
-        system_date_is_override: True if date is overridden
-        system_date_warnings: List of warnings
+        system_date_source: Source ('GMP_FILE' or 'FALLBACK')
     """
     try:
         from core.services.system_date_service import system_date_service
 
-        # Get username from session if logged in
-        username = request.session.get('username')
-
-        # Get full system date info
-        date_info = system_date_service.get_system_date_info(username)
+        # Get system date info
+        date_info = system_date_service.get_system_date_info()
 
         return {
             'system_date': date_info.system_date,
@@ -42,15 +37,10 @@ def system_date_context(request):
             'system_date_display': date_info.system_date_display,
             'report_date': date_info.report_date,
             'report_date_str': date_info.report_date_str,
-            'report_date_display': date_info.report_date.strftime('%Y-%m-%d') if date_info.report_date else None,
+            'report_date_display': date_info.report_date_display,
             'processing_date': date_info.processing_date,
-            'processing_date_display': date_info.processing_date.strftime('%Y-%m-%d') if date_info.processing_date else None,
             'system_date_source': date_info.source,
-            'system_date_is_override': date_info.is_override,
-            'system_date_override_reason': date_info.override_reason,
             'system_date_is_business_day': date_info.is_business_day,
-            'system_date_warnings': date_info.warnings,
-            'is_eod_locked': system_date_service.is_eod_locked(),
         }
 
     except Exception as e:
@@ -66,13 +56,8 @@ def system_date_context(request):
             'report_date_str': None,
             'report_date_display': None,
             'processing_date': None,
-            'processing_date_display': None,
             'system_date_source': 'ERROR',
-            'system_date_is_override': False,
-            'system_date_override_reason': None,
             'system_date_is_business_day': today.weekday() < 5,
-            'system_date_warnings': [f'Error loading system date: {str(e)}'],
-            'is_eod_locked': False,
         }
 
 
