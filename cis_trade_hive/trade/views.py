@@ -685,17 +685,14 @@ def trade_edit(request, trade_id):
         return redirect('trade:list')
 
     user_info = get_user_info(request)
-    current_status = trade_data.get('status', '')
     src_system = trade_data.get('src_system', '')
 
-    # Only CIS records in editable status can be edited
+    # Only CIS records can be edited (GMP records are read-only)
     if src_system and src_system.upper() != 'CIS':
         messages.error(request, 'Cannot edit GMP records. Only CIS records can be edited.')
         return redirect('trade:detail', trade_id=trade_id)
 
-    if current_status not in TradeKuduRepository.MAKER_EDITABLE_STATUSES:
-        messages.error(request, f'Cannot edit trade with status "{current_status}".')
-        return redirect('trade:detail', trade_id=trade_id)
+    # CIS trades can be edited in any status
 
     # Performance: Only load dropdowns for GET or when POST fails
     dropdown_options = None

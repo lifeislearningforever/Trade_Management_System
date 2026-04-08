@@ -949,9 +949,7 @@ class TradeKuduRepository:
             if not current_trade:
                 raise ValueError(f"Trade {trade_id} not found")
 
-            current_status = current_trade.get('status', '')
-            if current_status not in self.MAKER_EDITABLE_STATUSES:
-                raise ValueError(f"Cannot edit trade with status '{current_status}'")
+            # CIS trades can be edited in any status (no status restriction)
 
             # Validate (entity_details not needed for update as we don't auto-populate)
             is_valid, errors, _ = self.validate_trade_data(trade_data, is_update=True)
