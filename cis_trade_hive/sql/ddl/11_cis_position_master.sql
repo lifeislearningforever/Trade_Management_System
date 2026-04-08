@@ -142,6 +142,23 @@ CREATE EXTERNAL TABLE gmp_cis.cis_position_master (
     match_status STRING,                      -- EXACT, FUZZY, NEW, UNMATCHED
 
     -- ========================================
+    -- UNCALLED CAPITAL (PE/VC)
+    -- ========================================
+    uncall_fc DECIMAL(20,6),                  -- Uncalled amount in Foreign Currency
+    uncall_lc DECIMAL(20,6),                  -- Uncalled amount in Local Currency
+
+    -- ========================================
+    -- PIPELINE (Pending trades/commitments)
+    -- ========================================
+    pipeline_fc DECIMAL(20,6),                -- Pipeline amount in Foreign Currency
+    pipeline_lc DECIMAL(20,6),                -- Pipeline amount in Local Currency
+
+    -- ========================================
+    -- POSITION CLASSIFICATION
+    -- ========================================
+    position_type STRING,                     -- LONG, SHORT, COMMITTED, PIPELINE, HEDGE, SYNTHETIC
+
+    -- ========================================
     -- SOURCE TRACKING
     -- ========================================
     src_table STRING,                         -- Original source table name

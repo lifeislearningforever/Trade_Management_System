@@ -742,6 +742,12 @@ class PositionService:
                 'lots_held', 'custodian', 'sub_custodian',
                 'security_currency', 'portfolio_currency', 'fx_rate',
                 'status', 'is_active', 'is_latest',
+                # Uncalled capital (PE/VC)
+                'uncall_fc', 'uncall_lc',
+                # Pipeline (pending trades/commitments)
+                'pipeline_fc', 'pipeline_lc',
+                # Position classification
+                'position_type',
                 'created_by', 'created_at', 'updated_by', 'updated_at'
             ]
 
@@ -804,6 +810,14 @@ class PositionService:
                 f"'{position_data.get('status', 'OPEN')}'",
                 str(position_data.get('is_active', True)).lower(),
                 'true',  # is_latest = true for new version
+                # Uncalled capital (PE/VC)
+                cast_decimal(position_data.get('uncall_fc', 0) or 0),
+                cast_decimal(position_data.get('uncall_lc', 0) or 0),
+                # Pipeline (pending trades/commitments)
+                cast_decimal(position_data.get('pipeline_fc', 0) or 0),
+                cast_decimal(position_data.get('pipeline_lc', 0) or 0),
+                # Position classification
+                f"'{position_data.get('position_type', 'LONG')}'" if position_data.get('position_type') else "'LONG'",
                 f"'{self._escape(updated_by)}'",
                 f"'{timestamp}'",
                 f"'{self._escape(updated_by)}'",

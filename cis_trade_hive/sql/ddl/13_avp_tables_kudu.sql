@@ -113,6 +113,17 @@ CREATE TABLE cis_trade_position (
     last_cash_flow_amount_fc DECIMAL(20,8), -- Amount of last cash flow in FC (foreign_ccy_amt)
     last_cash_flow_amount_lc DECIMAL(20,8), -- Amount of last cash flow in LC (local_ccy_amt)
 
+    -- Uncalled Capital (for PE/VC investments)
+    uncall_fc DECIMAL(20,8),             -- Uncalled amount in Foreign Currency
+    uncall_lc DECIMAL(20,8),             -- Uncalled amount in Local Currency
+
+    -- Pipeline (pending trades/commitments)
+    pipeline_fc DECIMAL(20,8),           -- Pipeline amount in Foreign Currency
+    pipeline_lc DECIMAL(20,8),           -- Pipeline amount in Local Currency
+
+    -- Position Classification
+    position_type STRING,                -- LONG, SHORT, COMMITTED, PIPELINE, HEDGE, SYNTHETIC
+
     -- Metadata
     created_by STRING,
     created_at STRING,
