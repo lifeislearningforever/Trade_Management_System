@@ -985,14 +985,14 @@ class PositionService:
                 'position_type'
             ]
 
-            # Helper for decimal formatting
-            def cast_decimal(val, precision=8):
+            # Helper for decimal formatting — cis_position uses DECIMAL(18,4)
+            def cast_decimal(val, precision=4):
                 if val is None:
-                    return 'CAST(0 AS DECIMAL(20,8))'
+                    return 'CAST(0 AS DECIMAL(18,4))'
                 try:
-                    return f"CAST({float(val)} AS DECIMAL(20,{precision}))"
+                    return f"CAST({float(val)} AS DECIMAL(18,{precision}))"
                 except (ValueError, TypeError):
-                    return 'CAST(0 AS DECIMAL(20,8))'
+                    return 'CAST(0 AS DECIMAL(18,4))'
 
             values = [
                 str(position_data.get('position_id', 0)),
