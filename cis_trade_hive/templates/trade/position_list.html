@@ -5,244 +5,300 @@
 
 {% block breadcrumb %}
     <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
-    <li class="breadcrumb-item"><a href="{% url 'trade:list' %}">Trades</a></li>
     <li class="breadcrumb-item active">Positions</li>
 {% endblock %}
 
 {% block content %}
-<div class="position-list-container" style="max-width: 100%; overflow-x: hidden;">
-    <!-- Page Header -->
-    <div class="content-header">
+<div class="content-header d-flex justify-content-between align-items-start">
+    <div>
         <h1 class="content-title">
-            <i class="bi bi-pie-chart text-primary"></i> Portfolio Positions
+            <i class="bi bi-pie-chart text-primary"></i> Positions
         </h1>
-        <p class="content-subtitle">Current holdings with P&L calculations</p>
+        <p class="content-subtitle">Read-only view of cis_position &mdash; {{ total }} record{{ total|pluralize }} found</p>
     </div>
+    <div class="d-flex gap-2">
+        <a href="?{{ request.GET.urlencode }}&export=csv" class="btn btn-success">
+            <i class="bi bi-download"></i> Export CSV
+        </a>
+    </div>
+</div>
 
-    <!-- Summary Cards -->
-    <div class="row mb-4">
-        <div class="col-md-2 mb-3">
-            <div class="card border-primary">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="text-muted mb-1">Total Positions</h6>
-                            <h3 class="mb-0 text-primary">{{ stats.total_positions|default:0 }}</h3>
-                        </div>
-                        <div class="text-primary" style="font-size: 2rem; opacity: 0.3;">
-                            <i class="bi bi-pie-chart"></i>
-                        </div>
-                    </div>
-                </div>
+<!-- Summary Cards -->
+<div class="row mb-3">
+    <div class="col-md-2 mb-2">
+        <div class="card border-primary h-100">
+            <div class="card-body py-2">
+                <div class="text-muted small">Positions</div>
+                <div class="fw-bold text-primary fs-5">{{ total }}</div>
             </div>
         </div>
-        <div class="col-md-2 mb-3">
-            <div class="card border-success">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="text-muted mb-1">Market Value (Base)</h6>
-                            <h3 class="mb-0 text-success">{{ stats.total_market_value_base|default:stats.total_market_value|default:"0.00"|floatformat:2 }}</h3>
-                        </div>
-                        <div class="text-success" style="font-size: 2rem; opacity: 0.3;">
-                            <i class="bi bi-cash-stack"></i>
-                        </div>
-                    </div>
-                </div>
+    </div>
+    <div class="col-md-2 mb-2">
+        <div class="card border-success h-100">
+            <div class="card-body py-2">
+                <div class="text-muted small">Mkt Val FC</div>
+                <div class="fw-bold text-success fs-6">{{ stats.total_market_value_fc|default:0|floatformat:2 }}</div>
             </div>
         </div>
-        <div class="col-md-2 mb-3">
-            <div class="card border-secondary">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="text-muted mb-1">Cost Value (Base)</h6>
-                            <h3 class="mb-0 text-secondary">{{ stats.total_cost_value_base|default:"0.00"|floatformat:2 }}</h3>
-                        </div>
-                        <div class="text-secondary" style="font-size: 2rem; opacity: 0.3;">
-                            <i class="bi bi-wallet2"></i>
-                        </div>
-                    </div>
-                </div>
+    </div>
+    <div class="col-md-2 mb-2">
+        <div class="card border-info h-100">
+            <div class="card-body py-2">
+                <div class="text-muted small">Mkt Val LC</div>
+                <div class="fw-bold text-info fs-6">{{ stats.total_market_value_lc|default:0|floatformat:2 }}</div>
             </div>
         </div>
-        <div class="col-md-2 mb-3">
-            <div class="card border-info">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="text-muted mb-1">Unrealized P&L (Base)</h6>
-                            <h3 class="mb-0 {% if stats.total_unrealized_pnl_base > 0 %}text-success{% elif stats.total_unrealized_pnl_base < 0 %}text-danger{% else %}text-info{% endif %}">{{ stats.total_unrealized_pnl_base|default:stats.total_unrealized_pnl|default:"0.00"|floatformat:2 }}</h3>
-                        </div>
-                        <div class="text-info" style="font-size: 2rem; opacity: 0.3;">
-                            <i class="bi bi-graph-up-arrow"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-2 mb-3">
-            <div class="card border-warning">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="text-muted mb-1">Market Value (Local)</h6>
-                            <h3 class="mb-0 text-warning">{{ stats.total_market_value_local|default:"0.00"|floatformat:2 }}</h3>
-                        </div>
-                        <div class="text-warning" style="font-size: 2rem; opacity: 0.3;">
-                            <i class="bi bi-currency-exchange"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-2 mb-3">
-            <div class="card border-dark">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="text-muted mb-1">Unrealized P&L (Local)</h6>
-                            <h3 class="mb-0 {% if stats.total_unrealized_pnl_local > 0 %}text-success{% elif stats.total_unrealized_pnl_local < 0 %}text-danger{% else %}text-dark{% endif %}">{{ stats.total_unrealized_pnl_local|default:"0.00"|floatformat:2 }}</h3>
-                        </div>
-                        <div class="text-dark" style="font-size: 2rem; opacity: 0.3;">
-                            <i class="bi bi-bar-chart"></i>
-                        </div>
-                    </div>
+    </div>
+    <div class="col-md-2 mb-2">
+        <div class="card h-100">
+            <div class="card-body py-2">
+                <div class="text-muted small">Unrealized PnL FC</div>
+                <div class="fw-bold fs-6
+                    {% if stats.total_unrealized_pnl_fc > 0 %}text-success
+                    {% elif stats.total_unrealized_pnl_fc < 0 %}text-danger
+                    {% else %}text-secondary{% endif %}">
+                    {{ stats.total_unrealized_pnl_fc|default:0|floatformat:2 }}
                 </div>
             </div>
         </div>
     </div>
-
-    <!-- Search Bar -->
-    <div class="mb-4">
-        <form method="get" action="{% url 'trade:position_list' %}" class="d-flex align-items-center gap-2">
-            <div class="input-group" style="max-width: 400px;">
-                <span class="input-group-text"><i class="bi bi-search"></i></span>
-                <input type="text" name="q" class="form-control" placeholder="Search by portfolio or security name..."
-                       value="{{ search_query|default:'' }}" autocomplete="off">
+    <div class="col-md-2 mb-2">
+        <div class="card border-warning h-100">
+            <div class="card-body py-2">
+                <div class="text-muted small">Uncall FC</div>
+                <div class="fw-bold text-warning fs-6">{{ stats.total_uncall_fc|default:0|floatformat:2 }}</div>
             </div>
-            <button type="submit" class="btn btn-primary">Search</button>
-            {% if search_query %}
-                <a href="{% url 'trade:position_list' %}" class="btn btn-outline-secondary">Clear</a>
-            {% endif %}
+        </div>
+    </div>
+    <div class="col-md-2 mb-2">
+        <div class="card border-secondary h-100">
+            <div class="card-body py-2">
+                <div class="text-muted small">Pipeline FC</div>
+                <div class="fw-bold text-secondary fs-6">{{ stats.total_pipeline_fc|default:0|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="card mb-3">
+    <div class="card-header">
+        <h6 class="mb-0"><i class="bi bi-funnel"></i> Filters</h6>
+    </div>
+    <div class="card-body">
+        <form method="get" class="row g-2 align-items-end">
+            <!-- Portfolio -->
+            <div class="col-md-2">
+                <label class="form-label form-label-sm">Portfolio</label>
+                <input type="text" name="portfolio" class="form-control form-control-sm"
+                       placeholder="Portfolio..." value="{{ f_portfolio }}">
+            </div>
+
+            <!-- Security -->
+            <div class="col-md-2">
+                <label class="form-label form-label-sm">Security</label>
+                <input type="text" name="security" class="form-control form-control-sm"
+                       placeholder="Security label..." value="{{ f_security }}">
+            </div>
+
+            <!-- Src System -->
+            <div class="col-md-1">
+                <label class="form-label form-label-sm">Src System</label>
+                <select name="src_system" class="form-select form-select-sm">
+                    <option value="">All</option>
+                    {% for s in src_systems %}
+                        <option value="{{ s }}" {% if f_src_system == s %}selected{% endif %}>{{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Position Basis -->
+            <div class="col-md-2">
+                <label class="form-label form-label-sm">Position Basis</label>
+                <select name="position_basis" class="form-select form-select-sm">
+                    <option value="">All</option>
+                    {% for b in position_basis_choices %}
+                        <option value="{{ b }}" {% if f_position_basis == b %}selected{% endif %}>{{ b }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Position Type -->
+            <div class="col-md-1">
+                <label class="form-label form-label-sm">Type</label>
+                <select name="position_type" class="form-select form-select-sm">
+                    <option value="">All</option>
+                    {% for t in position_type_choices %}
+                        <option value="{{ t }}" {% if f_position_type == t %}selected{% endif %}>{{ t }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Date From -->
+            <div class="col-md-1">
+                <label class="form-label form-label-sm">Date From</label>
+                <input type="date" name="date_from" class="form-control form-control-sm" value="{{ f_date_from }}">
+            </div>
+
+            <!-- Date To -->
+            <div class="col-md-1">
+                <label class="form-label form-label-sm">Date To</label>
+                <input type="date" name="date_to" class="form-control form-control-sm" value="{{ f_date_to }}">
+            </div>
+
+            <!-- Buttons -->
+            <div class="col-md-2 d-flex gap-1">
+                <button type="submit" class="btn btn-primary btn-sm">
+                    <i class="bi bi-search"></i> Filter
+                </button>
+                <a href="{% url 'trade:position_list' %}" class="btn btn-outline-secondary btn-sm">
+                    <i class="bi bi-x-circle"></i> Clear
+                </a>
+            </div>
         </form>
     </div>
+</div>
 
-    <!-- Positions Table -->
-    <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <h5 class="card-title mb-0">
-                Position List
-                <span class="badge badge-primary ms-2">{{ positions|length }} position{{ positions|length|pluralize }}</span>
-                {% if search_query %}
-                    <span class="badge bg-info ms-1">filtered: "{{ search_query }}"</span>
-                {% endif %}
-            </h5>
-            <a href="?export=csv" class="btn btn-sm btn-success">
-                <i class="bi bi-download"></i> Download CSV
-            </a>
+<!-- Table -->
+<div class="card">
+    <div class="card-body p-0">
+        {% if positions %}
+        <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
+            <table class="table table-hover table-sm mb-0" style="width: max-content; min-width: 100%;">
+                <thead class="table-light" style="position: sticky; top: 0; z-index: 10;">
+                    <tr>
+                        <th style="min-width: 120px; position: sticky; left: 0; background:#f8f9fa; z-index:11;">Portfolio</th>
+                        <th style="min-width: 180px;">Security</th>
+                        <th style="min-width: 100px;">ISIN</th>
+                        <th style="min-width: 100px;">Basis</th>
+                        <th style="min-width: 100px;">Pos Date</th>
+                        <th style="min-width: 80px;">Src</th>
+                        <th style="min-width: 90px;">Type</th>
+                        <th class="text-end" style="min-width: 110px;">Quantity</th>
+                        <th class="text-end" style="min-width: 110px;">Avg Cost FC</th>
+                        <th class="text-end" style="min-width: 110px;">Cost FC</th>
+                        <th class="text-end" style="min-width: 110px;">Cost LC</th>
+                        <th class="text-end" style="min-width: 120px;">Mkt Val FC</th>
+                        <th class="text-end" style="min-width: 120px;">Mkt Val LC</th>
+                        <th class="text-end" style="min-width: 120px;">NBV FC</th>
+                        <th class="text-end" style="min-width: 120px;">Unreal PnL FC</th>
+                        <th class="text-end" style="min-width: 120px;">Unreal PnL LC</th>
+                        <th class="text-end" style="min-width: 110px;">Real PnL FC</th>
+                        <th class="text-end" style="min-width: 100px;">Provision FC</th>
+                        <th class="text-end" style="min-width: 100px;">Dividend FC</th>
+                        <th class="text-end" style="min-width: 100px;">Uncall FC</th>
+                        <th class="text-end" style="min-width: 100px;">Pipeline FC</th>
+                        <th style="min-width: 100px;">Proc Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in positions %}
+                    <tr>
+                        <td style="position: sticky; left: 0; background:#fff; z-index:1;">
+                            <strong class="text-primary">{{ p.portfolio|default:"-" }}</strong>
+                        </td>
+                        <td style="max-width:180px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"
+                            title="{{ p.security_label }}">
+                            {{ p.security_label|default:"-" }}
+                        </td>
+                        <td><code class="small">{{ p.isin|default:"-" }}</code></td>
+                        <td>
+                            {% if p.position_basis == 'TRADE_DATE' %}
+                                <span class="badge bg-primary">TD</span>
+                            {% elif p.position_basis == 'SETTLE_DATE' %}
+                                <span class="badge bg-success">SD</span>
+                            {% else %}
+                                <span class="badge bg-secondary">{{ p.position_basis|default:"-" }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ p.position_date|default:"-" }}</td>
+                        <td><span class="badge bg-light text-dark">{{ p.src_system|default:"-" }}</span></td>
+                        <td>
+                            {% if p.position_type == 'LONG' %}
+                                <span class="badge bg-success">LONG</span>
+                            {% elif p.position_type == 'SHORT' %}
+                                <span class="badge bg-danger">SHORT</span>
+                            {% elif p.position_type == 'COMMITTED' %}
+                                <span class="badge bg-warning text-dark">COMMITTED</span>
+                            {% elif p.position_type == 'PIPELINE' %}
+                                <span class="badge bg-info">PIPELINE</span>
+                            {% else %}
+                                <span class="badge bg-secondary">{{ p.position_type|default:"-" }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">{{ p.quantity|default:0|floatformat:4 }}</td>
+                        <td class="text-end">{{ p.average_cost_fc|default:0|floatformat:4 }}</td>
+                        <td class="text-end">{{ p.cost_fc|default:0|floatformat:2 }}</td>
+                        <td class="text-end">{{ p.cost_lc|default:0|floatformat:2 }}</td>
+                        <td class="text-end fw-semibold">{{ p.market_value_fc|default:0|floatformat:2 }}</td>
+                        <td class="text-end fw-semibold">{{ p.market_value_lc|default:0|floatformat:2 }}</td>
+                        <td class="text-end">{{ p.net_book_value_fc|default:0|floatformat:2 }}</td>
+                        <td class="text-end
+                            {% if p.unrealized_pnl_fc > 0 %}text-success fw-bold
+                            {% elif p.unrealized_pnl_fc < 0 %}text-danger fw-bold{% endif %}">
+                            {{ p.unrealized_pnl_fc|default:0|floatformat:2 }}
+                        </td>
+                        <td class="text-end
+                            {% if p.unrealized_pnl_lc > 0 %}text-success
+                            {% elif p.unrealized_pnl_lc < 0 %}text-danger{% endif %}">
+                            {{ p.unrealized_pnl_lc|default:0|floatformat:2 }}
+                        </td>
+                        <td class="text-end">{{ p.realized_pnl_fc|default:0|floatformat:2 }}</td>
+                        <td class="text-end">{{ p.provision_fc|default:0|floatformat:2 }}</td>
+                        <td class="text-end">{{ p.dividend_fc|default:0|floatformat:2 }}</td>
+                        <td class="text-end">{{ p.uncall_fc|default:0|floatformat:2 }}</td>
+                        <td class="text-end">{{ p.pipeline_fc|default:0|floatformat:2 }}</td>
+                        <td class="small text-muted">{{ p.processing_date|default:"-" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
-        <div class="card-body p-0">
-            {% if positions %}
-                <div class="table-responsive" style="display: block; width: 100%; max-height: 600px; overflow-x: auto; overflow-y: auto;">
-                    <table class="table table-hover table-sm mb-0 sortable-table" style="width: max-content;">
-                        <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
-                            <tr>
-                                <th class="sortable sticky-first-column" data-sort-type="text" style="min-width: 120px; position: sticky; left: 0; z-index: 11; background-color: #f8f9fa;">Portfolio</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 180px;">Security</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 120px;">ISIN</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 80px;">Sec Ccy</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 80px;">Port Ccy</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 100px; text-align: right;">Qty</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 100px; text-align: right;">% Ratio</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 110px; text-align: right;">Mkt Price</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 130px; text-align: right;">Cost (Local)</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 130px; text-align: right;">Cost (Base)</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 140px; text-align: right;">Mkt Val (Local)</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 140px; text-align: right;">Mkt Val (Base)</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 130px; text-align: right;">P&L (Local)</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 130px; text-align: right;">P&L (Base)</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 80px;">Country</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 100px;">Asset Class</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 90px;">Listing</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 100px;">Val Date</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 80px;">Source</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 80px;">Status</th>
-                                <th class="sticky-action-column" style="min-width: 80px;">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for position in positions %}
-                            <tr>
-                                <td class="sticky-first-column" style="position: sticky; left: 0; z-index: 1; background-color: #fff;"><strong class="text-primary">{{ position.portfolio_short_name|default:"-" }}</strong></td>
-                                <td style="max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
-                                    title="{{ position.security_label }}">
-                                    {{ position.security_label|default:"-" }}
-                                </td>
-                                <td><code>{{ position.isin|default:"-" }}</code></td>
-                                <td><span class="badge bg-secondary">{{ position.security_currency|default:"-" }}</span></td>
-                                <td><span class="badge bg-info">{{ position.portfolio_currency|default:"-" }}</span></td>
-                                <td class="text-end">{{ position.quantity|floatformat:2|default:"0.00" }}</td>
-                                <td class="text-end">{{ position.pct_ratio|floatformat:4|default:"-" }}%</td>
-                                <td class="text-end">{{ position.market_unit_price|floatformat:4|default:"-" }}</td>
-                                <td class="text-end">{{ position.cost_value_local|floatformat:2|default:"0.00" }}</td>
-                                <td class="text-end">{{ position.cost_value_base|floatformat:2|default:"0.00" }}</td>
-                                <td class="text-end">{{ position.market_value_local|floatformat:2|default:"0.00" }}</td>
-                                <td class="text-end">{{ position.market_value_base|floatformat:2|default:"0.00" }}</td>
-                                <td class="text-end">
-                                    {% if position.unrealized_pnl_local > 0 %}
-                                        <span class="text-success fw-bold">{{ position.unrealized_pnl_local|floatformat:2 }}</span>
-                                    {% elif position.unrealized_pnl_local < 0 %}
-                                        <span class="text-danger fw-bold">{{ position.unrealized_pnl_local|floatformat:2 }}</span>
-                                    {% else %}
-                                        {{ position.unrealized_pnl_local|floatformat:2|default:"0.00" }}
-                                    {% endif %}
-                                </td>
-                                <td class="text-end">
-                                    {% if position.unrealized_pnl_base > 0 %}
-                                        <span class="text-success fw-bold">{{ position.unrealized_pnl_base|floatformat:2 }}</span>
-                                    {% elif position.unrealized_pnl_base < 0 %}
-                                        <span class="text-danger fw-bold">{{ position.unrealized_pnl_base|floatformat:2 }}</span>
-                                    {% else %}
-                                        {{ position.unrealized_pnl_base|floatformat:2|default:"0.00" }}
-                                    {% endif %}
-                                </td>
-                                <td>{{ position.country|default:"-" }}</td>
-                                <td>{{ position.asset_class|default:"-" }}</td>
-                                <td>{{ position.listing_status|default:"-" }}</td>
-                                <td>{{ position.valuation_date|default:"-" }}</td>
-                                <td><span class="badge bg-light text-dark">{{ position.src_system|default:"-" }}</span></td>
-                                <td>
-                                    {% if position.status == 'OPEN' %}
-                                        <span class="badge badge-success">Open</span>
-                                    {% elif position.status == 'CLOSED' %}
-                                        <span class="badge badge-secondary">Closed</span>
-                                    {% else %}
-                                        <span class="badge badge-secondary">{{ position.status|default:"-" }}</span>
-                                    {% endif %}
-                                </td>
-                                <td class="sticky-action-column">
-                                    <a href="{% url 'trade:position_detail' position.position_id %}" class="btn btn-sm btn-outline-primary" title="View Position Details">
-                                        <i class="bi bi-eye"></i>
-                                    </a>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            {% else %}
-                <div class="text-center py-5" style="color: var(--gray-500);">
-                    <i class="bi bi-pie-chart" style="font-size: 3rem; opacity: 0.3;"></i>
-                    <p class="mt-3 mb-0">No positions found</p>
-                    <p class="text-muted mt-2">
-                        <a href="{% url 'trade:list' %}" class="btn btn-primary">
-                            <i class="bi bi-graph-up"></i> View Trades
+
+        <!-- Pagination -->
+        {% if total_pages > 1 %}
+        <div class="d-flex justify-content-between align-items-center px-3 py-2 border-top">
+            <div class="text-muted small">
+                Showing {{ positions|length }} of {{ total }} records
+                &nbsp;|&nbsp; Page {{ page }} of {{ total_pages }}
+            </div>
+            <nav>
+                <ul class="pagination pagination-sm mb-0">
+                    {% if page > 1 %}
+                    <li class="page-item">
+                        <a class="page-link" href="?{% for k,v in request.GET.items %}{% if k != 'page' %}{{ k }}={{ v }}&{% endif %}{% endfor %}page={{ page|add:"-1" }}">
+                            &laquo;
                         </a>
-                    </p>
-                </div>
-            {% endif %}
+                    </li>
+                    {% endif %}
+
+                    {% for p in page_range %}
+                    <li class="page-item {% if p == page %}active{% endif %}">
+                        <a class="page-link" href="?{% for k,v in request.GET.items %}{% if k != 'page' %}{{ k }}={{ v }}&{% endif %}{% endfor %}page={{ p }}">
+                            {{ p }}
+                        </a>
+                    </li>
+                    {% endfor %}
+
+                    {% if page < total_pages %}
+                    <li class="page-item">
+                        <a class="page-link" href="?{% for k,v in request.GET.items %}{% if k != 'page' %}{{ k }}={{ v }}&{% endif %}{% endfor %}page={{ page|add:"1" }}">
+                            &raquo;
+                        </a>
+                    </li>
+                    {% endif %}
+                </ul>
+            </nav>
         </div>
+        {% endif %}
+
+        {% else %}
+        <div class="text-center py-5 text-muted">
+            <i class="bi bi-pie-chart" style="font-size: 3rem; opacity: 0.3;"></i>
+            <p class="mt-3 mb-1">No positions found</p>
+            <p class="small">Adjust your filters and try again.</p>
+        </div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

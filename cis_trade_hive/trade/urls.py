@@ -7,6 +7,7 @@ URL patterns for trade management module.
 from django.urls import path
 from trade import views
 from trade import views_cash_flow
+from trade import views_position
 
 app_name = 'trade'
 
@@ -35,16 +36,8 @@ urlpatterns = [
     path('pending-validation/', views.pending_validation, name='pending_validation'),
     path('pending-settlement/', views.pending_settlement, name='pending_settlement'),
 
-    # ==========================================================================
-    # POSITIONS - DISABLED
-    # To re-enable, uncomment the following 3 lines and the sidebar link in
-    # templates/components/sidebar.html (lines 97-102)
-    # Also uncomment the position views in trade/views.py (lines 1041-1139)
-    # See: docs/DISABLED_POSITION_CODE.md for full details
-    # ==========================================================================
-    # path('positions/', views.position_list, name='position_list'),
-    # path('positions/<int:position_id>/', views.position_detail, name='position_detail'),
-    # path('positions/refresh/', views.refresh_positions, name='refresh_positions'),
+    # Positions (read-only, cis_position)
+    path('positions/', views_position.position_list, name='position_list'),
 
     # History
     path('<int:trade_id>/history/', views.trade_history, name='history'),

@@ -110,6 +110,16 @@
             </li>
             {% endif %}
 
+            <!-- Positions -->
+            {% if sidebar_position_view %}
+            <li class="nav-item">
+                <a class="nav-link {% if request.resolver_match.url_name == 'position_list' %}active{% endif %}" href="{% url 'trade:position_list' %}">
+                    <i class="bi bi-pie-chart"></i>
+                    <span>Positions</span>
+                </a>
+            </li>
+            {% endif %}
+
             <!-- Cash Flows -->
             {% if sidebar_cash_flow_view %}
             <li class="nav-item">
