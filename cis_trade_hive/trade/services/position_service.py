@@ -1004,7 +1004,7 @@ class PositionService:
                 "'CIS'",  # src_system - always CIS for CIS-generated positions
                 f"'{position_data.get('processing_date', '')}'",
                 cast_decimal(position_data.get('quantity', 0)),
-                cast_decimal(position_data.get('average_cost_fc', 0)),
+                cast_decimal(position_data.get('average_cost_fc', 0), 6),  # DECIMAL(18,6)
                 cast_decimal(position_data.get('cost_fc', 0)),
                 cast_decimal(position_data.get('market_value_fc', 0)),
                 cast_decimal(position_data.get('net_book_value_fc', 0)),
