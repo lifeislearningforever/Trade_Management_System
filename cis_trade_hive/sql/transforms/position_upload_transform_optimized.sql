@@ -555,17 +555,9 @@ ORDER BY cnt DESC;
 -- ============================================================================
 -- Only records with overall_status = 'VALID' or 'VALID: New security created'
 
--- TODO: Logic change required before next run
---   The 5 new columns added to cis_position (ALTER TABLE in DDL 21) are NOT yet
---   included in this UPSERT. Uploaded positions will have NULL for these columns.
---   Need to:
---     1. Determine source columns in position_upload_standardized for:
---            uncall_fc, uncall_lc  (Uncalled capital FC/LC)
---            pipeline_fc, pipeline_lc  (Pipeline/pending amounts FC/LC)
---            position_type  (LONG / SHORT / COMMITTED / PIPELINE / HEDGE / SYNTHETIC)
---     2. Add those columns to the UPSERT column list and SELECT below
---     3. Default to 0 / 'LONG' if source data does not carry these fields
---   Tracked for follow-up — do NOT run this transform against production until resolved.
+-- Note: uncall_fc/lc, pipeline_fc/lc are not present in the upload source file.
+--       Defaulting to 0. position_type defaults to 'LONG'.
+--       If future upload files include these columns, map them here.
 
 UPSERT INTO cis_position (
     position_id,
@@ -595,7 +587,12 @@ UPSERT INTO cis_position (
     isin,
     average_cost_lc,
     placeholder_3,
-    placeholder_4
+    placeholder_4,
+    uncall_fc,
+    uncall_lc,
+    pipeline_fc,
+    pipeline_lc,
+    position_type
 )
 SELECT
     (UNIX_TIMESTAMP() * 1000000) + row_id AS position_id,
@@ -625,7 +622,12 @@ SELECT
     COALESCE(final_isin, isin) AS isin,
     CAST(0 AS DECIMAL(18,4)) AS average_cost_lc,
     '' AS placeholder_3,
-    '' AS placeholder_4
+    '' AS placeholder_4,
+    CAST(0 AS DECIMAL(18,4)) AS uncall_fc,
+    CAST(0 AS DECIMAL(18,4)) AS uncall_lc,
+    CAST(0 AS DECIMAL(18,4)) AS pipeline_fc,
+    CAST(0 AS DECIMAL(18,4)) AS pipeline_lc,
+    'LONG' AS position_type
 FROM position_upload_staging
 WHERE overall_status LIKE 'VALID%';
 
