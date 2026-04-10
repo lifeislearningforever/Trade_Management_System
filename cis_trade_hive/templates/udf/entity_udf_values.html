@@ -4,6 +4,7 @@
 {% block title %}UDF Values for {{ entity_type|title }} - CIS Trade{% endblock %}
 
 {% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
     <li class="breadcrumb-item">Configuration</li>
     <li class="breadcrumb-item"><a href="{% url 'udf:list' %}">User Defined Fields</a></li>
     <li class="breadcrumb-item active">{{ entity_type|title }} Values</li>

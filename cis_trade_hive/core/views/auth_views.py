@@ -26,9 +26,9 @@ Usage:
         user_login = request.session.get('user_login')
         permissions = request.session.get('user_permissions', {})
 
-    @require_permission('trade-create', 'READ_WRITE')
+    @require_permission('trade-create', 'WRITE')
     def create_trade(request):
-        # Only users with trade-create READ_WRITE permission can access
+        # Only users with trade-create WRITE permission can access
         pass
 
 Author: CIS Trade Hive Team
@@ -323,11 +323,9 @@ def require_permission(permission: str, access_level: str = 'READ'):
 
             has_access = False
             if access_level == 'READ':
-                has_access = user_access in ['READ', 'WRITE', 'READ_WRITE']
+                has_access = user_access in ['READ', 'WRITE']
             elif access_level == 'WRITE':
-                has_access = user_access in ['WRITE', 'READ_WRITE']
-            elif access_level == 'READ_WRITE':
-                has_access = user_access == 'READ_WRITE'
+                has_access = user_access == 'WRITE'
 
             if not has_access:
                 # Log permission denial to Kudu audit

@@ -56,7 +56,7 @@ class ACLRepositoryV2:
     - User authentication
     - Group membership lookup (multi-group support)
     - Permission aggregation across all user groups
-    - Permission checking with mode (READ, READ_WRITE)
+    - Permission checking with mode (READ, WRITE)
 
     Attributes:
         connection_manager: Impala connection manager for database queries
@@ -315,7 +315,7 @@ class ACLRepositoryV2:
         Returns:
             List of permission dictionaries with keys:
             - permission_name: Name of permission (e.g., 'trade-create')
-            - mode: Access mode ('READ' or 'READ_WRITE')
+            - mode: Access mode ('READ' or 'WRITE')
             - description: Permission description
 
         Example:
@@ -359,7 +359,7 @@ class ACLRepositoryV2:
         For users belonging to multiple groups, this method:
         1. Fetches all groups the user belongs to
         2. Fetches permissions for each group
-        3. Aggregates permissions (READ_WRITE takes precedence over READ)
+        3. Aggregates permissions (WRITE takes precedence over READ)
 
         Args:
             user_id: User ID
@@ -367,15 +367,15 @@ class ACLRepositoryV2:
 
         Returns:
             Dictionary mapping permission_name to highest access mode.
-            Example: {'trade-create': 'READ_WRITE', 'trade-list': 'READ'}
+            Example: {'trade-create': 'WRITE', 'trade-list': 'READ'}
 
         Note:
-            If a user has READ from one group and READ_WRITE from another,
-            READ_WRITE is used (highest privilege wins).
+            If a user has READ from one group and WRITE from another,
+            WRITE is used (highest privilege wins).
 
         Example:
             >>> perms = repo.get_aggregated_permissions('1773384561790')
-            >>> if perms.get('trade-create') == 'READ_WRITE':
+            >>> if perms.get('trade-create') == 'WRITE':
             ...     print("User can create trades")
         """
         try:
@@ -403,9 +403,9 @@ class ACLRepositoryV2:
                     if not perm_name:
                         continue
 
-                    # Use highest privilege (READ_WRITE > READ)
+                    # Use highest privilege (WRITE > READ)
                     existing_mode = permission_map.get(perm_name)
-                    if existing_mode is None or mode == 'READ_WRITE':
+                    if existing_mode is None or mode == 'WRITE':
                         permission_map[perm_name] = mode
 
             logger.debug(f"Aggregated {len(permission_map)} permissions for user {user_id}")
@@ -429,18 +429,18 @@ class ACLRepositoryV2:
         Args:
             user_id: User ID
             permission: Permission name (e.g., 'trade-create')
-            required_mode: Required access level ('READ' or 'READ_WRITE')
+            required_mode: Required access level ('READ' or 'WRITE')
             entity: Optional entity filter
 
         Returns:
             bool: True if user has permission with required or higher access
 
         Access Level Hierarchy:
-            - READ_WRITE includes READ access
+            - WRITE includes READ access
             - READ does not include WRITE access
 
         Example:
-            >>> if repo.has_permission('123', 'trade-create', 'READ_WRITE'):
+            >>> if repo.has_permission('123', 'trade-create', 'WRITE'):
             ...     print("User can create trades")
         """
         try:
@@ -451,9 +451,9 @@ class ACLRepositoryV2:
                 return False
 
             if required_mode == 'READ':
-                return user_mode in ('READ', 'READ_WRITE')
-            elif required_mode in ('WRITE', 'READ_WRITE'):
-                return user_mode == 'READ_WRITE'
+                return user_mode in ('READ', 'WRITE')
+            elif required_mode == 'WRITE':
+                return user_mode == 'WRITE'
 
             return False
 
@@ -493,11 +493,11 @@ class ACLRepositoryV2:
                     {'group_name': 'CIS-OPS', 'entity': 'UOBS', ...}
                 ],
                 'permissions': [
-                    {'permission_name': 'trade-create', 'mode': 'READ_WRITE', ...},
+                    {'permission_name': 'trade-create', 'mode': 'WRITE', ...},
                     ...
                 ],
                 'permission_map': {
-                    'trade-create': 'READ_WRITE',
+                    'trade-create': 'WRITE',
                     'trade-list': 'READ',
                     ...
                 },
@@ -513,7 +513,7 @@ class ACLRepositoryV2:
             >>> if auth:
             ...     print(f"Welcome {auth['user']['name']}")
             ...     print(f"Groups: {auth['group_names']}")
-            ...     if auth['permission_map'].get('trade-create') == 'READ_WRITE':
+            ...     if auth['permission_map'].get('trade-create') == 'WRITE':
             ...         print("You can create trades")
         """
         login_upper = login.upper()

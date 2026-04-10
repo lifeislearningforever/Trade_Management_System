@@ -4,6 +4,7 @@
 {% block title %}{% if is_pending_view %}Pending Validation{% else %}Security Master Data{% endif %} - CisTrade{% endblock %}
 
 {% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
     <li class="breadcrumb-item">Reference Data</li>
     {% if is_pending_view %}
     <li class="breadcrumb-item"><a href="{% url 'security:list' %}">Securities</a></li>

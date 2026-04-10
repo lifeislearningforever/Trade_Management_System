@@ -244,7 +244,7 @@
         {% endif %}
 
         <!-- Configuration Section -->
-        {% if sidebar_lookup_view or sidebar_udf_view or sidebar_upload_view %}
+        {% if sidebar_lookup_view or sidebar_udf_view or sidebar_upload_view or sidebar_rbac_admin %}
         <div class="nav-section-title">Configuration</div>
         <ul class="nav flex-column">
             {% if sidebar_lookup_view %}
@@ -269,6 +269,41 @@
                     <i class="bi bi-cloud-upload"></i>
                     <span>File Upload</span>
                 </a>
+            </li>
+            {% endif %}
+            {% if sidebar_rbac_admin %}
+            <li class="nav-item">
+                <a class="nav-link nav-link-toggle {% if 'rbac' in request.path %}active{% endif %}" href="#rbacSubmenu" data-bs-toggle="collapse" aria-expanded="{% if 'rbac' in request.path %}true{% else %}false{% endif %}">
+                    <i class="bi bi-shield-lock"></i>
+                    <span>RBAC Admin</span>
+                    <i class="bi bi-chevron-down submenu-icon"></i>
+                </a>
+                <ul class="collapse nav-submenu {% if 'rbac' in request.path %}show{% endif %}" id="rbacSubmenu">
+                    <li class="nav-item">
+                        <a class="nav-link {% if 'rbac/users' in request.path %}active{% endif %}" href="{% url 'core:rbac_user_list' %}">
+                            <i class="bi bi-people"></i>
+                            <span>Users</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if 'rbac/groups' in request.path %}active{% endif %}" href="{% url 'core:rbac_group_list' %}">
+                            <i class="bi bi-collection"></i>
+                            <span>Groups</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if 'rbac/permissions' in request.path %}active{% endif %}" href="{% url 'core:rbac_permission_list' %}">
+                            <i class="bi bi-key"></i>
+                            <span>Permissions</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if 'rbac/audit' in request.path %}active{% endif %}" href="{% url 'core:rbac_audit' %}">
+                            <i class="bi bi-journal-check"></i>
+                            <span>RBAC Audit</span>
+                        </a>
+                    </li>
+                </ul>
             </li>
             {% endif %}
         </ul>

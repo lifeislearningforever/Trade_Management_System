@@ -145,6 +145,7 @@ def sidebar_permissions(request):
             'sidebar_udf_view': True,
             'sidebar_udf_create': True,
             'sidebar_upload_view': True,
+            'sidebar_rbac_admin': True,
 
             # System permissions
             'sidebar_audit_view': True,
@@ -160,25 +161,25 @@ def sidebar_permissions(request):
         if user_mode is None:
             return False
         if mode == 'READ':
-            return user_mode in ('READ', 'READ_WRITE')
-        return user_mode == 'READ_WRITE'
+            return user_mode in ('READ', 'WRITE')
+        return user_mode == 'WRITE'
 
     # Build sidebar permission context
     # Each module gets: can_view (list access), can_create, can_approve
     return {
         # Portfolio permissions
         'sidebar_portfolio_view': has_perm('portfolio-list', 'READ'),
-        'sidebar_portfolio_create': has_perm('portfolio-create', 'READ_WRITE'),
+        'sidebar_portfolio_create': has_perm('portfolio-create', 'WRITE'),
         'sidebar_portfolio_approve': has_perm('portfolio-approval', 'READ'),
 
         # Trade permissions
         'sidebar_trade_view': has_perm('trade-list', 'READ'),
-        'sidebar_trade_create': has_perm('trade-create', 'READ_WRITE'),
+        'sidebar_trade_create': has_perm('trade-create', 'WRITE'),
         'sidebar_trade_approve': has_perm('trade-approval', 'READ'),
 
         # Cash Flow permissions
         'sidebar_cash_flow_view': has_perm('cash-flow-list', 'READ'),
-        'sidebar_cash_flow_create': has_perm('cash-flow-create', 'READ_WRITE'),
+        'sidebar_cash_flow_create': has_perm('cash-flow-create', 'WRITE'),
         'sidebar_cash_flow_approve': has_perm('cash-flow-approval', 'READ'),
 
         # Position permissions
@@ -188,25 +189,26 @@ def sidebar_permissions(request):
         'sidebar_market_data_view': has_perm('market-data-dashboard', 'READ') or has_perm('fx-rates-list', 'READ') or has_perm('equity-prices-list', 'READ'),
         'sidebar_fx_rates_view': has_perm('fx-rates-list', 'READ'),
         'sidebar_equity_prices_view': has_perm('equity-prices-list', 'READ'),
-        'sidebar_equity_prices_create': has_perm('equity-prices-create', 'READ_WRITE'),
+        'sidebar_equity_prices_create': has_perm('equity-prices-create', 'WRITE'),
 
         # Reference Data permissions
         'sidebar_currencies_view': has_perm('currencies-list', 'READ'),
         'sidebar_countries_view': has_perm('countries-list', 'READ'),
         'sidebar_calendars_view': has_perm('calendars-list', 'READ'),
         'sidebar_parties_view': has_perm('parties-list', 'READ'),
-        'sidebar_parties_create': has_perm('parties-create', 'READ_WRITE'),
+        'sidebar_parties_create': has_perm('parties-create', 'WRITE'),
         'sidebar_securities_view': has_perm('securities-list', 'READ'),
-        'sidebar_securities_create': has_perm('securities-create', 'READ_WRITE'),
+        'sidebar_securities_create': has_perm('securities-create', 'WRITE'),
         'sidebar_corp_actions_view': has_perm('corp-action-list', 'READ'),
-        'sidebar_corp_actions_create': has_perm('corp-action-create', 'READ_WRITE'),
+        'sidebar_corp_actions_create': has_perm('corp-action-create', 'WRITE'),
 
         # Configuration permissions
         'sidebar_lookup_view': has_perm('lookup-tables-list', 'READ'),
-        'sidebar_lookup_edit': has_perm('lookup-tables-edit', 'READ_WRITE'),
+        'sidebar_lookup_edit': has_perm('lookup-tables-edit', 'WRITE'),
         'sidebar_udf_view': has_perm('udf-list', 'READ'),
-        'sidebar_udf_create': has_perm('udf-create', 'READ_WRITE'),
+        'sidebar_udf_create': has_perm('udf-create', 'WRITE'),
         'sidebar_upload_view': has_perm('upload-list', 'READ') or True,  # Allow upload for now
+        'sidebar_rbac_admin': has_perm('rbac-admin', 'WRITE'),
 
         # System permissions
         'sidebar_audit_view': has_perm('audit-logs-read', 'READ'),

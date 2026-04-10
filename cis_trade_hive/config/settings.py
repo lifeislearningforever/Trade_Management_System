@@ -93,6 +93,8 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',  # Required for flash messages
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # URL-level permission enforcement — must be after SessionMiddleware
+    'core.middleware.permission_middleware.PermissionMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'

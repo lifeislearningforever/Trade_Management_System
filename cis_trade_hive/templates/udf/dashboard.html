@@ -4,6 +4,7 @@
 {% block title %}{{ page_title }}{% endblock %}
 
 {% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
     <li class="breadcrumb-item">Configuration</li>
     <li class="breadcrumb-item active">UDF Dashboard</li>
 {% endblock %}

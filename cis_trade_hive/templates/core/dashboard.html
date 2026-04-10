@@ -494,7 +494,7 @@
                         </div>
                         <h5 class="card-title">{{ module.name }}</h5>
                         <p class="text-muted mb-3">
-                            <span class="badge {% if module.access == 'WRITE' or module.access == 'READ_WRITE' %}bg-success{% else %}bg-info{% endif %}">
+                            <span class="badge {% if module.access == 'WRITE' or module.access == 'WRITE' %}bg-success{% else %}bg-info{% endif %}">
                                 {{ module.access }}
                             </span>
                         </p>
@@ -533,7 +533,7 @@
                                         <i class="bi bi-key"></i> {{ perm }}
                                     </td>
                                     <td>
-                                        <span class="badge {% if access == 'WRITE' or access == 'READ_WRITE' %}bg-success{% else %}bg-info{% endif %}">
+                                        <span class="badge {% if access == 'WRITE' or access == 'WRITE' %}bg-success{% else %}bg-info{% endif %}">
                                             {{ access }}
                                         </span>
                                     </td>

@@ -119,7 +119,7 @@ class ACLRepository:
         Args:
             cis_user_group_id: User group ID
             permission: Permission name (e.g., 'cis-portfolio')
-            access_level: Required access level ('READ', 'WRITE', 'READ_WRITE')
+            access_level: Required access level ('READ', 'WRITE')
 
         Returns:
             bool: True if user has permission, False otherwise
@@ -132,11 +132,9 @@ class ACLRepository:
 
                 # Check access level
                 if access_level == 'READ':
-                    return user_access in ['READ', 'WRITE', 'READ_WRITE']
+                    return user_access in ['READ', 'WRITE']
                 elif access_level == 'WRITE':
-                    return user_access in ['WRITE', 'READ_WRITE']
-                elif access_level == 'READ_WRITE':
-                    return user_access == 'READ_WRITE'
+                    return user_access == 'WRITE'
 
         return False
 

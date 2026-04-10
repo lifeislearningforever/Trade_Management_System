@@ -4,6 +4,7 @@
 {% block title %}{% if is_edit %}Edit{% else %}Add{% endif %} Row - {{ table_info.display_name }}{% endblock %}
 
 {% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
     <li class="breadcrumb-item">Configuration</li>
     <li class="breadcrumb-item"><a href="{% url 'lookup:table_list' %}">Lookup Tables</a></li>
     <li class="breadcrumb-item"><a href="{% url 'lookup:table_detail' table_name %}">{{ table_info.display_name }}</a></li>

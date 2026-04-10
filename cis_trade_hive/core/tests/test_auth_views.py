@@ -41,7 +41,7 @@ class LoginViewTestCase(TestCase):
                 'description': 'Test group description'
             },
             'permission_map': {
-                'cis-portfolio': 'READ_WRITE',
+                'cis-portfolio': 'WRITE',
                 'cis-reference-data': 'READ'
             }
         }
@@ -184,7 +184,7 @@ class AutoLoginTestCase(TestCase):
                 'description': 'Administrator group'
             },
             'permission_map': {
-                'cis-portfolio': 'READ_WRITE'
+                'cis-portfolio': 'WRITE'
             }
         }
 
@@ -275,7 +275,7 @@ class RequirePermissionDecoratorTestCase(TestCase):
         session['user_email'] = 'test@example.com'
         session['user_permissions'] = {
             'cis-portfolio': 'READ',
-            'cis-reference-data': 'READ_WRITE'
+            'cis-reference-data': 'WRITE'
         }
         session.save()
 

@@ -4,6 +4,7 @@
 {% block title %}{{ security.security_name }} - CisTrade{% endblock %}
 
 {% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
     <li class="breadcrumb-item">Reference Data</li>
     <li class="breadcrumb-item"><a href="{% url 'security:list' %}">Securities</a></li>
     <li class="breadcrumb-item active">{{ security.security_name|truncatewords:3 }}</li>

@@ -22,7 +22,7 @@ Usage:
     # In a view
     @require_login
     def trade_list(request):
-        if has_permission(request, 'trade-create', 'READ_WRITE'):
+        if has_permission(request, 'trade-create', 'WRITE'):
             context['can_create'] = True
 
 Author: CIS Trade Hive Team
@@ -55,8 +55,8 @@ class PermissionMode:
             # User can create trades
     """
     READ = 'READ'
-    WRITE = 'READ_WRITE'
-    READ_WRITE = 'READ_WRITE'
+    WRITE = 'WRITE'
+    WRITE = 'WRITE'  # Alias: WRITE means WRITE
 
 
 # ============================================================================
@@ -79,18 +79,18 @@ def has_permission(
         permission_name: Permission name to check (e.g., 'trade-create')
         required_mode: Required access level:
             - 'READ': User needs at least READ access
-            - 'READ_WRITE' or 'WRITE': User needs READ_WRITE access
+            - 'WRITE' or 'WRITE': User needs WRITE access
 
     Returns:
         bool: True if user has permission, False otherwise
 
     Access Level Rules:
-        - READ_WRITE permission satisfies both READ and WRITE requirements
+        - WRITE permission satisfies both READ and WRITE requirements
         - READ permission only satisfies READ requirements
 
     Example:
         >>> # In a view
-        >>> if has_permission(request, 'trade-create', 'READ_WRITE'):
+        >>> if has_permission(request, 'trade-create', 'WRITE'):
         ...     # Show create button
         ...     pass
         >>>
@@ -115,9 +115,9 @@ def has_permission(
 
         # Check access level
         if required_mode == 'READ':
-            return user_mode in ('READ', 'READ_WRITE')
-        elif required_mode in ('WRITE', 'READ_WRITE'):
-            return user_mode == 'READ_WRITE'
+            return user_mode in ('READ', 'WRITE')
+        elif required_mode == 'WRITE':
+            return user_mode == 'WRITE'
 
         return False
 
@@ -179,7 +179,7 @@ def has_all_permissions(
 
     Example:
         >>> # User can bulk approve only if they have both permissions
-        >>> if has_all_permissions(request, ['trade-approval', 'trade-edit'], 'READ_WRITE'):
+        >>> if has_all_permissions(request, ['trade-approval', 'trade-edit'], 'WRITE'):
         ...     # Show bulk approve button
         ...     pass
     """
@@ -281,7 +281,7 @@ def can_approve_entity(
         ...     show_approve_button = True
     """
     # Check permission
-    if not has_permission(request, approval_permission, 'READ_WRITE'):
+    if not has_permission(request, approval_permission, 'WRITE'):
         return False
 
     # Four-eyes: Cannot approve own entity
@@ -391,10 +391,10 @@ def build_permission_context(
     return {
         'can_list': has_permission(request, f'{module_lower}-list', 'READ'),
         'can_view': has_permission(request, f'{module_lower}-view', 'READ'),
-        'can_create': has_permission(request, f'{module_lower}-create', 'READ_WRITE'),
-        'can_edit': has_permission(request, f'{module_lower}-edit', 'READ_WRITE'),
-        'can_delete': has_permission(request, f'{module_lower}-delete', 'READ_WRITE'),
-        'can_approve': has_permission(request, f'{module_lower}-approval', 'READ_WRITE'),
+        'can_create': has_permission(request, f'{module_lower}-create', 'WRITE'),
+        'can_edit': has_permission(request, f'{module_lower}-edit', 'WRITE'),
+        'can_delete': has_permission(request, f'{module_lower}-delete', 'WRITE'),
+        'can_approve': has_permission(request, f'{module_lower}-approval', 'WRITE'),
         'can_download': has_permission(request, f'{module_lower}-download', 'READ'),
     }
 
@@ -418,9 +418,9 @@ def build_custom_permission_context(
 
     Example:
         >>> context = build_custom_permission_context(request, {
-        ...     'can_create_trade': 'trade-create:READ_WRITE',
+        ...     'can_create_trade': 'trade-create:WRITE',
         ...     'can_view_audit': 'audit-logs-read:READ',
-        ...     'can_manage_fx': 'fx-rates-edit:READ_WRITE',
+        ...     'can_manage_fx': 'fx-rates-edit:WRITE',
         ... })
     """
     from django.conf import settings
@@ -458,13 +458,13 @@ def permission_required(permission: str, mode: str = 'READ'):
 
     Args:
         permission: Permission name required
-        mode: Access mode required ('READ' or 'READ_WRITE')
+        mode: Access mode required ('READ' or 'WRITE')
 
     Returns:
         Decorator function
 
     Example:
-        >>> @permission_required('trade-create', 'READ_WRITE')
+        >>> @permission_required('trade-create', 'WRITE')
         ... def create_trade(request):
         ...     pass
     """
@@ -529,7 +529,7 @@ def all_permissions_required(permissions: List[str], mode: str = 'READ'):
         mode: Access mode required
 
     Example:
-        >>> @all_permissions_required(['trade-approval', 'trade-edit'], 'READ_WRITE')
+        >>> @all_permissions_required(['trade-approval', 'trade-edit'], 'WRITE')
         ... def bulk_approve_trades(request):
         ...     pass
     """
@@ -572,7 +572,7 @@ def log_permission_check(
         context: Additional context (e.g., 'trade creation')
 
     Example:
-        >>> result = has_permission(request, 'trade-create', 'READ_WRITE')
+        >>> result = has_permission(request, 'trade-create', 'WRITE')
         >>> log_permission_check(request, 'trade-create', result, 'creating trade')
     """
     user = request.session.get('user_login', 'anonymous')

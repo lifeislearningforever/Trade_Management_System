@@ -63,7 +63,7 @@ class Command(BaseCommand):
             perm_query = """
             UPSERT INTO gmp_cis.cis_group_permissions
             (cis_group_permissions_id, cis_user_group_id, permission, read_write, is_deleted, updated_on, updated_by)
-            VALUES (100001, 100, 'cis-portfolio', 'READ_WRITE', false, unix_timestamp() * 1000, 'system')
+            VALUES (100001, 100, 'cis-portfolio', 'WRITE', false, unix_timestamp() * 1000, 'system')
             """
             impala_manager.execute_write(perm_query, database='gmp_cis')
 
@@ -72,7 +72,7 @@ class Command(BaseCommand):
             perm_query = """
             UPSERT INTO gmp_cis.cis_group_permissions
             (cis_group_permissions_id, cis_user_group_id, permission, read_write, is_deleted, updated_on, updated_by)
-            VALUES (200001, 200, 'cis-portfolio', 'READ_WRITE', false, unix_timestamp() * 1000, 'system')
+            VALUES (200001, 200, 'cis-portfolio', 'WRITE', false, unix_timestamp() * 1000, 'system')
             """
             impala_manager.execute_write(perm_query, database='gmp_cis')
 
