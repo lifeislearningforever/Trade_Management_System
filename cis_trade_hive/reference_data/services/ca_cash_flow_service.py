@@ -198,7 +198,8 @@ class CACashFlowService:
             ex_date = queue_entry.get('ex_date')
             price = Decimal(str(queue_entry.get('price') or 0))
             currency = queue_entry.get('currency')
-            ca_id = queue_entry.get('ca_id')
+            # ca_id comes back from Impala as string — cast to int for BIGINT compatibility
+            ca_id = int(queue_entry.get('ca_id')) if queue_entry.get('ca_id') else None
             ca_number = queue_entry.get('ca_number')
             payment_date = queue_entry.get('payment_date')
             record_date = queue_entry.get('record_date')

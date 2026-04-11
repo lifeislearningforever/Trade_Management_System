@@ -300,6 +300,12 @@ class CashFlowRepository:
                     columns.append(field)
                     if field_type == float:
                         values.append(CashFlowRepository.to_decimal(cf_data[field]))
+                    elif field_type == int:
+                        # Cast to int to avoid string-quoted values being rejected by BIGINT columns
+                        try:
+                            values.append(str(int(float(str(cf_data[field])))))
+                        except (ValueError, TypeError):
+                            values.append('NULL')
                     elif field_type == bool:
                         values.append('true' if cf_data[field] else 'false')
                     else:
