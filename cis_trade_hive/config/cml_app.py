@@ -682,24 +682,24 @@ def start_worker_health_monitor():
     if not TRADE_EVENT_WORKER_ENABLED and not POSITION_WORKER_ENABLED:
         return
 
-    def _monitor():
-        import sys
-        module = sys.modules[__name__]
+    import sys as _sys
+    _this_module = _sys.modules[__name__]
 
-        while not _shutdown_requested:
+    def _monitor():
+        while not getattr(_this_module, '_shutdown_requested', False):
             time.sleep(60)  # Check every minute
 
             try:
                 # Monitor Trade Event Worker
                 if TRADE_EVENT_WORKER_ENABLED:
-                    t = getattr(module, '_trade_event_worker_thread', None)
+                    t = getattr(_this_module, '_trade_event_worker_thread', None)
                     if t and not t.is_alive():
                         print("==> Trade Event Worker: Thread died! Restarting...")
                         start_trade_event_worker()
 
                 # Monitor Position Worker
                 if POSITION_WORKER_ENABLED:
-                    p = getattr(module, '_position_worker_thread', None)
+                    p = getattr(_this_module, '_position_worker_thread', None)
                     if p and not p.is_alive():
                         print("==> Position Worker: Thread died! Restarting...")
                         start_position_worker()
