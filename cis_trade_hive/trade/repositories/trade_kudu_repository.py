@@ -249,50 +249,50 @@ class TradeKuduRepository:
             List of trade dictionaries
         """
         try:
-            where_clauses = ["(is_deleted = false OR is_deleted IS NULL)"]
+            where_clauses = ["(t.is_deleted = false OR t.is_deleted IS NULL)"]
 
             if trade_type:
-                where_clauses.append(f"trade_type = {self.escape_value(trade_type)}")
+                where_clauses.append(f"t.trade_type = {self.escape_value(trade_type)}")
 
             if status:
-                where_clauses.append(f"status = {self.escape_value(status)}")
+                where_clauses.append(f"t.status = {self.escape_value(status)}")
 
             # Source system filter (per SA feedback #2)
             if src_system:
-                where_clauses.append(f"UPPER(src_system) = {self.escape_value(src_system.upper())}")
+                where_clauses.append(f"UPPER(t.src_system) = {self.escape_value(src_system.upper())}")
 
             # Multi-select portfolios with OR logic
             if portfolios and len(portfolios) > 0:
                 portfolio_values = ", ".join([self.escape_value(p) for p in portfolios if p])
                 if portfolio_values:
-                    where_clauses.append(f"portfolio_short_name IN ({portfolio_values})")
+                    where_clauses.append(f"t.portfolio_short_name IN ({portfolio_values})")
 
             # Multi-select securities with OR logic
             if securities and len(securities) > 0:
                 security_values = ", ".join([self.escape_value(s) for s in securities if s])
                 if security_values:
-                    where_clauses.append(f"security_label IN ({security_values})")
+                    where_clauses.append(f"t.security_label IN ({security_values})")
 
             if search:
                 search_escaped = search.replace("'", "''")
                 where_clauses.append(
-                    f"(deal_number LIKE '%{search_escaped}%' OR "
-                    f"security_label LIKE '%{search_escaped}%' OR "
-                    f"portfolio_short_name LIKE '%{search_escaped}%')"
+                    f"(t.deal_number LIKE '%{search_escaped}%' OR "
+                    f"t.security_label LIKE '%{search_escaped}%' OR "
+                    f"t.portfolio_short_name LIKE '%{search_escaped}%')"
                 )
 
             if trade_date_from:
-                where_clauses.append(f"trade_date >= {self.escape_value(trade_date_from)}")
+                where_clauses.append(f"t.trade_date >= {self.escape_value(trade_date_from)}")
 
             if trade_date_to:
-                where_clauses.append(f"trade_date <= {self.escape_value(trade_date_to)}")
+                where_clauses.append(f"t.trade_date <= {self.escape_value(trade_date_to)}")
 
             # Settlement date filters (per SA feedback #2)
             if settle_date_from:
-                where_clauses.append(f"settle_date >= {self.escape_value(settle_date_from)}")
+                where_clauses.append(f"t.settle_date >= {self.escape_value(settle_date_from)}")
 
             if settle_date_to:
-                where_clauses.append(f"settle_date <= {self.escape_value(settle_date_to)}")
+                where_clauses.append(f"t.settle_date <= {self.escape_value(settle_date_to)}")
 
             where_clause = " AND ".join(where_clauses)
 
