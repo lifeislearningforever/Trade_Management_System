@@ -19,8 +19,13 @@ from market_data.repositories.fx_rate_hive_repository import fx_rate_hive_reposi
 from market_data.repositories.equity_price_hive_repository import EquityPriceHiveRepository
 from security.repositories.security_hive_repository import security_hive_repository
 from trade.repositories.trade_kudu_repository import trade_kudu_repository
+from core.repositories.impala_connection import query_cache
 
 logger = logging.getLogger(__name__)
+
+# Dashboard stats cache TTL — 60 seconds keeps numbers fresh without
+# hammering Kudu on every page hit in a busy CML session.
+_DASHBOARD_CACHE_TTL = 60
 
 # Initialize repositories
 udf_repository = UDFDefinitionRepository()
@@ -100,71 +105,53 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         },
     }
 
-    # Get portfolio analytics (always show in dev phase)
-    portfolio_stats = {}
-    try:
-        portfolio_stats = portfolio_hive_repository.get_portfolio_statistics()
-    except Exception as e:
-        logger.error(f"Error fetching portfolio statistics: {str(e)}")
-        portfolio_stats = {
-            'total_portfolios': 0,
-            'active_portfolios': 0,
-            'currency_breakdown': []
-        }
+    # Get portfolio analytics — cached 60s
+    portfolio_stats = query_cache.get('dashboard_portfolio_stats')
+    if portfolio_stats is None:
+        try:
+            portfolio_stats = portfolio_hive_repository.get_portfolio_statistics()
+        except Exception as e:
+            logger.error(f"Error fetching portfolio statistics: {str(e)}")
+            portfolio_stats = {'total_portfolios': 0, 'active_portfolios': 0, 'currency_breakdown': []}
+        query_cache.set('dashboard_portfolio_stats', portfolio_stats, _DASHBOARD_CACHE_TTL)
 
-    # Get FX rate analytics
-    fx_stats = {}
-    try:
-        fx_stats = fx_rate_hive_repository.get_statistics()
-    except Exception as e:
-        logger.error(f"Error fetching FX rate statistics: {str(e)}")
-        fx_stats = {
-            'total_records': 0,
-            'unique_pairs': 0,
-            'latest_processing_date': 'N/A',
-            'processing_date_breakdown': []
-        }
+    # Get FX rate analytics — cached 60s
+    fx_stats = query_cache.get('dashboard_fx_stats')
+    if fx_stats is None:
+        try:
+            fx_stats = fx_rate_hive_repository.get_statistics()
+        except Exception as e:
+            logger.error(f"Error fetching FX rate statistics: {str(e)}")
+            fx_stats = {'total_records': 0, 'unique_pairs': 0, 'latest_processing_date': 'N/A', 'processing_date_breakdown': []}
+        query_cache.set('dashboard_fx_stats', fx_stats, _DASHBOARD_CACHE_TTL)
 
-    # Get security analytics
-    security_stats = {}
-    try:
-        security_stats = security_hive_repository.get_statistics()
-    except Exception as e:
-        logger.error(f"Error fetching security statistics: {str(e)}")
-        security_stats = {
-            'total_securities': 0,
-            'active_securities': 0,
-            'pending_approvals': 0,
-        }
+    # Get security analytics — cached 60s
+    security_stats = query_cache.get('dashboard_security_stats')
+    if security_stats is None:
+        try:
+            security_stats = security_hive_repository.get_statistics()
+        except Exception as e:
+            logger.error(f"Error fetching security statistics: {str(e)}")
+            security_stats = {'total_securities': 0, 'active_securities': 0, 'pending_approvals': 0}
+        query_cache.set('dashboard_security_stats', security_stats, _DASHBOARD_CACHE_TTL)
 
-    # Get equity price analytics
-    equity_price_stats = {}
-    try:
-        equity_price_stats = EquityPriceHiveRepository.get_statistics()
-    except Exception as e:
-        logger.error(f"Error fetching equity price statistics: {str(e)}")
-        equity_price_stats = {
-            'total_prices': 0,
-            'unique_securities': 0,
-            'unique_currencies': 0,
-            'unique_markets': 0,
-            'latest_date': 'N/A',
-        }
+    # Get equity price analytics — cached 60s
+    equity_price_stats = query_cache.get('dashboard_equity_price_stats')
+    if equity_price_stats is None:
+        try:
+            equity_price_stats = EquityPriceHiveRepository.get_statistics()
+        except Exception as e:
+            logger.error(f"Error fetching equity price statistics: {str(e)}")
+            equity_price_stats = {'total_prices': 0, 'unique_securities': 0, 'unique_currencies': 0, 'unique_markets': 0, 'latest_date': 'N/A'}
+        query_cache.set('dashboard_equity_price_stats', equity_price_stats, _DASHBOARD_CACHE_TTL)
 
-    # Get trade analytics
+    # Get trade analytics — trade repo has its own 30s cache internally
     trade_stats = {}
     try:
         trade_stats = trade_kudu_repository.get_trade_statistics()
     except Exception as e:
         logger.error(f"Error fetching trade statistics: {str(e)}")
-        trade_stats = {
-            'total_trades': 0,
-            'pending_validation': 0,
-            'pending_settlement': 0,
-            'settled': 0,
-            'status_breakdown': {},
-            'type_breakdown': {},
-        }
+        trade_stats = {'total_trades': 0, 'pending_validation': 0, 'pending_settlement': 0, 'settled': 0, 'status_breakdown': {}, 'type_breakdown': {}}
 
     context = {
         'user': user_info,
