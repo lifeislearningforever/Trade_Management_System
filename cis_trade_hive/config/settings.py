@@ -180,8 +180,12 @@ USE_REST_PROXY = os.environ.get('USE_REST_PROXY', str(CURRENT_CONFIG.get('USE_RE
 HIVE_PROXY_URL = os.environ.get('HIVE_PROXY_URL', CURRENT_CONFIG.get('HIVE_PROXY_URL'))
 
 # Impala Connection Pool Configuration
-# Increased from 10 to 35 to support Gunicorn workers (4 workers x 4 threads + margin)
-IMPALA_POOL_SIZE = int(os.environ.get('IMPALA_POOL_SIZE', '35'))
+# IMPORTANT: Impala HS2 pool hard limit = 64 total across ALL Gunicorn workers.
+# Formula: IMPALA_POOL_SIZE × gunicorn_workers must be < 64.
+# With 4 Gunicorn workers: max 15 per worker (4×15=60, leaves 4 headroom).
+# With 2 Gunicorn workers: max 25 per worker (2×25=50).
+# Default 10 is safe for any worker count (4×10=40 < 64).
+IMPALA_POOL_SIZE = int(os.environ.get('IMPALA_POOL_SIZE', '10'))
 
 # Async Audit Queue Configuration
 # Enables non-blocking audit logging for production performance

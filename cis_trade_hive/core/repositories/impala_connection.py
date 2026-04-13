@@ -55,23 +55,26 @@ class ImpalaConnectionManager:
 
     def __init__(self):
         if not hasattr(self, '_initialized'):
-            # Get pool size from settings, default to 35 for production (4 workers x 4 threads + margin)
             from django.conf import settings
-            max_pool_size = getattr(settings, 'IMPALA_POOL_SIZE', 35)
+            # Hard ceiling: Impala HS2 pool is 64 total across ALL app processes.
+            # Gunicorn runs N workers (typically 4); each worker gets an equal share.
+            # Default: 10 per worker → 40 total, safely under 64.
+            # Override via IMPALA_POOL_SIZE in .env if worker count changes.
+            max_pool_size = getattr(settings, 'IMPALA_POOL_SIZE', 10)
 
             self._pool = Queue(maxsize=max_pool_size)
             self._pool_lock = threading.Lock()
             self._connection_count = 0
             self._max_connections = max_pool_size
-            self._connection_timeout = 3600  # 1 hour in seconds
+            self._connection_timeout = 1800  # 30 minutes — recycle before Impala idle-timeout
 
-            # Thread pool for async writes (audit logs, history, event queue)
-            # Using 15 workers to handle event queue throughput during high trade volume
-            self._async_executor = ThreadPoolExecutor(max_workers=15, thread_name_prefix='kudu_async_')
+            # Async write workers share connections from the same pool.
+            # Keep small (4) so async tasks don't starve request threads.
+            self._async_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix='kudu_async_')
             self._async_futures = []
 
             self._initialized = True
-            logger.info(f"Impala connection pool initialized (max: {max_pool_size} connections, async workers: 15)")
+            logger.info(f"Impala connection pool initialized (max: {max_pool_size} connections, async workers: 4)")
 
     def _create_connection(self, database: Optional[str] = None):
         """
@@ -200,94 +203,87 @@ class ImpalaConnectionManager:
         if not IMPALA_AVAILABLE:
             return None
 
-        # Try to get connection from pool
+        # 1. Try pool first (non-blocking)
         try:
             connection = self._pool.get(block=False)
             ImpalaConnectionManager._connection_reuse_count += 1
-
-            # Validate connection (skip ping if recently used)
             if self._validate_connection(connection):
                 connection._last_used = time.time()
                 return connection
-            else:
-                # Connection is stale, close it
-                try:
-                    connection.close()
-                except:
-                    pass
-                with self._pool_lock:
-                    self._connection_count -= 1
-
+            # Stale — discard and decrement so we can create a fresh one below
+            try:
+                connection.close()
+            except Exception:
+                pass
+            with self._pool_lock:
+                self._connection_count -= 1
         except Empty:
-            pass  # Pool is empty, create new connection
+            pass  # Pool empty — fall through to create
 
-        # Create new connection if under limit
+        # 2. Create new connection if under limit
         with self._pool_lock:
             if self._connection_count < self._max_connections:
-                connection = self._create_connection(database)
-                if connection:
-                    self._connection_count += 1
-                    ImpalaConnectionManager._connection_create_count += 1
-                    logger.debug(f"Pool stats: {self._connection_count}/{self._max_connections} connections")
+                self._connection_count += 1   # Reserve slot before releasing lock
+                do_create = True
+            else:
+                do_create = False
+
+        if do_create:
+            connection = self._create_connection(database)
+            if connection:
+                ImpalaConnectionManager._connection_create_count += 1
+                logger.debug(f"Pool stats: {self._connection_count}/{self._max_connections} connections")
                 return connection
             else:
-                # Wait for connection from pool
-                wait_start = time.time()
-                logger.warning(f"Connection pool exhausted ({self._connection_count}/{self._max_connections}), waiting...")
-                ImpalaConnectionManager._pool_wait_count += 1
-                try:
-                    connection = self._pool.get(timeout=30)
-                    wait_time = time.time() - wait_start
-                    ImpalaConnectionManager._pool_wait_total_time += wait_time
-                    if wait_time > 5:
-                        logger.warning(f"Pool wait took {wait_time:.1f}s - consider increasing pool size")
-                    if self._validate_connection(connection):
-                        connection._last_used = time.time()
-                        return connection
-                    else:
-                        # Stale connection, create new one
-                        try:
-                            connection.close()
-                        except:
-                            pass
-                        self._connection_count -= 1
-                        return self._create_connection(database)
-                except Empty:
-                    wait_time = time.time() - wait_start
-                    ImpalaConnectionManager._pool_wait_total_time += wait_time
-                    logger.error(f"Timeout ({wait_time:.1f}s) waiting for connection from pool")
-                    return None
+                # Creation failed — release the reserved slot
+                with self._pool_lock:
+                    self._connection_count -= 1
+                return None
+
+        # 3. Pool exhausted — wait for a returned connection (max 20s)
+        wait_start = time.time()
+        logger.warning(f"Connection pool exhausted ({self._connection_count}/{self._max_connections}), waiting...")
+        ImpalaConnectionManager._pool_wait_count += 1
+        try:
+            connection = self._pool.get(timeout=20)
+            wait_time = time.time() - wait_start
+            ImpalaConnectionManager._pool_wait_total_time += wait_time
+            if wait_time > 5:
+                logger.warning(f"Pool wait took {wait_time:.1f}s")
+            if self._validate_connection(connection):
+                connection._last_used = time.time()
+                return connection
+            # Stale — close and give up (don't try to create; still at limit)
+            try:
+                connection.close()
+            except Exception:
+                pass
+            with self._pool_lock:
+                self._connection_count -= 1
+            return None
+        except Empty:
+            wait_time = time.time() - wait_start
+            ImpalaConnectionManager._pool_wait_total_time += wait_time
+            logger.error(f"Timeout ({wait_time:.1f}s) waiting for connection from pool")
+            return None
 
     def return_connection(self, connection):
         """
         Return a connection to the pool.
-
-        Args:
-            connection: Connection to return
+        No validation ping on return — connection was just used so it is live.
+        Only close if the pool queue is already full (shouldn't happen in normal flow).
         """
         if connection is None:
             return
 
         try:
-            # Mark connection as just used and return to pool
-            # Skip full validation (ping) since we just used it
             connection._last_used = time.time()
-            if self._validate_connection(connection):
-                self._pool.put(connection, block=False)
-            else:
-                # Connection is bad, close it
-                try:
-                    connection.close()
-                except:
-                    pass
-                with self._pool_lock:
-                    self._connection_count -= 1
-
-        except Exception as e:
-            logger.debug(f"Failed to return connection to pool: {str(e)}")
+            self._pool.put(connection, block=False)
+        except Exception:
+            # Queue full or other error — close and decrement count
             try:
                 connection.close()
-            except:
+            except Exception:
                 pass
             with self._pool_lock:
                 self._connection_count -= 1
