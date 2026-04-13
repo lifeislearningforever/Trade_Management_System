@@ -233,9 +233,19 @@ class CorporateActionRepository:
             }
 
             for field, field_type in field_mapping.items():
-                if field in ca_data and ca_data[field]:
+                if field in ca_data and ca_data[field] is not None and ca_data[field] != '':
                     columns.append(field)
-                    values.append(CorporateActionRepository.escape_value(ca_data[field]))
+                    raw = ca_data[field]
+                    # Numeric fields: cast to float to guarantee unquoted SQL literal
+                    if field_type == float:
+                        try:
+                            raw = float(str(raw))
+                        except (ValueError, TypeError):
+                            raw = None
+                    if raw is None:
+                        values.append('NULL')
+                    else:
+                        values.append(CorporateActionRepository.escape_value(raw))
 
             # Add status
             columns.append('status')
