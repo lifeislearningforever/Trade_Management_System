@@ -72,10 +72,14 @@ GMP_CA_TYPE_MAP = {
     'coupon':                 'COUPON',
     'coupon payment':         'COUPON',
 
-    # Return of Capital
+    # Return of Capital / Capital events
     'roc':                    'ROC',
     'return of capital':      'ROC',
     'capital distribution':   'CAPITAL_DISTRIBUTION',
+    'capital reduction':      'CAPITAL_REDUCTION',
+    'cap reduction':          'CAPITAL_REDUCTION',
+    'capital red':            'CAPITAL_REDUCTION',
+    'cap red':                'CAPITAL_REDUCTION',
 
     # Bonus / Split
     'bonus issue':            'BONUS_ISSUE',
@@ -92,6 +96,18 @@ GMP_CA_TYPE_MAP = {
     'warrant':                'WARRANT_ENTITLEMENT',
     'warrant entitlement':    'WARRANT_ENTITLEMENT',
 
+    # Merger / Acquisition
+    'merger':                 'MERGER',
+    'acquisition':            'ACQUISITION',
+    'takeover':               'ACQUISITION',
+    'scheme of arrangement':  'MERGER',
+
+    # Redemption / Maturity
+    'redemption':             'REDEMPTION',
+    'maturity':               'REDEMPTION',
+    'full redemption':        'REDEMPTION',
+    'partial redemption':     'REDEMPTION',
+
     # GMP specific codes
     'clas sp':                'SPECIAL_DIVIDEND',   # Classification Special
     'd':                      'DIVIDEND',
@@ -99,6 +115,7 @@ GMP_CA_TYPE_MAP = {
     'c':                      'COUPON',
     'b':                      'BONUS_ISSUE',
     's':                      'SPLIT',
+    'r':                      'RIGHTS_ENTITLEMENT',
 }
 
 # GMP date formats to try
@@ -366,7 +383,7 @@ class Command(BaseCommand):
             'ex_date':            ex_date,
             'record_date':        record_date,
             'payment_date':       payment_date,
-            'price':              str(price) if price is not None else None,
+            'price':              price,   # Decimal — escape_value handles unquoted emit
             'currency':           None,    # GMP table has no currency column; enrich if needed
             'src_system':         'GMP',
             'status':             'VALIDATED',  # GMP records are pre-validated; skip four-eyes

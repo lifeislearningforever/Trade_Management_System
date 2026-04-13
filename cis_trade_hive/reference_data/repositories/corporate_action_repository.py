@@ -34,8 +34,19 @@ class CorporateActionRepository:
             return 'true' if value else 'false'
         if isinstance(value, (int, float)):
             return str(value)
-        # String - escape backslashes and single quotes
-        escaped = str(value).replace('\\', '\\\\').replace("'", "\\'")
+        # Decimal — emit as unquoted numeric literal for Kudu DECIMAL columns
+        try:
+            from decimal import Decimal
+            if isinstance(value, Decimal):
+                return str(value)
+        except ImportError:
+            pass
+        # String — if it looks purely numeric, emit unquoted (handles str(Decimal))
+        s = str(value).strip()
+        if s and s.lstrip('-').replace('.', '', 1).isdigit():
+            return s
+        # General string — escape backslashes and single quotes
+        escaped = s.replace('\\', '\\\\').replace("'", "\\'")
         return f"'{escaped}'"
 
     @staticmethod
