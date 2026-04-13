@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load static %}
+{% load static core_filters %}
 
 {% block title %}Parties - CisTrade{% endblock %}
 
@@ -233,21 +233,19 @@
                                            class="btn btn-sm btn-outline-info" title="View Details">
                                             <i class="bi bi-eye"></i>
                                         </a>
-                                        {% if party.src_system|lower == 'cis' %}
-                                            {# CIS records - fully editable #}
+                                        {% can_act party "party" as pa %}
+                                        {% if pa.can_edit %}
                                             <a href="{% url 'reference_data:party_edit' party.party_short_name %}?next={{ request.get_full_path|urlencode }}"
                                                class="btn btn-sm btn-outline-primary" title="Edit">
                                                 <i class="bi bi-pencil"></i>
                                             </a>
                                         {% else %}
-                                            {# GMP records - read-only #}
                                             <button class="btn btn-sm btn-outline-secondary" disabled title="Read-only: {{ party.src_system|upper }} record">
                                                 <i class="bi bi-pencil"></i>
                                             </button>
                                         {% endif %}
 
-                                        {% if party.src_system|lower == 'cis' %}
-                                            {# Only allow delete/restore for CIS records #}
+                                        {% if pa.can_delete %}
                                             {% if party.is_deleted %}
                                                 <form method="post" action="{% url 'reference_data:party_restore' party.party_short_name %}"
                                                       style="display: inline;" onsubmit="return confirm('Restore this party?');">
@@ -266,7 +264,6 @@
                                                 </form>
                                             {% endif %}
                                         {% else %}
-                                            {# GMP records - no delete option #}
                                             <button class="btn btn-sm btn-outline-secondary" disabled title="Read-only: {{ party.src_system|upper }} record">
                                                 <i class="bi bi-trash"></i>
                                             </button>

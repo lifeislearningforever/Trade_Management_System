@@ -159,18 +159,7 @@ def portfolio_list(request):
         currency=currency_filter if currency_filter else None
     )
 
-    wrapped_portfolios = []
-    for idx, p in enumerate(portfolios_data):
-        wrapper = PortfolioWrapper(p, idx)
-        # Annotate each row with per-portfolio action flags from central service
-        actions = get_portfolio_action_permissions(request, wrapper)
-        wrapper.can_edit = actions['can_edit']
-        wrapper.can_submit = actions['can_submit']
-        wrapper.can_cancel = actions['can_cancel']
-        wrapper.can_reactivate = actions['can_reactivate']
-        wrapper.can_validate = actions['can_validate']
-        wrapper.can_settle = actions['can_settle']
-        wrapped_portfolios.append(wrapper)
+    wrapped_portfolios = [PortfolioWrapper(p, idx) for idx, p in enumerate(portfolios_data)]
 
     # CSV Export
     if export == 'csv':

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load static %}
+{% load static core_filters %}
 
 {% block title %}{% if is_pending_view %}Pending Validation{% else %}Security Master Data{% endif %} - CisTrade{% endblock %}
 
@@ -192,7 +192,8 @@
                                             <i class="bi bi-eye"></i>
                                         </a>
                                         {% endif %}
-                                        {% if can_edit and security.src_system|upper == 'CIS' %}
+                                        {% can_act security "security" as sa %}
+                                        {% if sa.can_edit %}
                                             <a href="{% url 'security:edit' security.security_id %}" class="btn btn-sm btn-outline-warning" title="Edit">
                                                 <i class="bi bi-pencil"></i>
                                             </a>

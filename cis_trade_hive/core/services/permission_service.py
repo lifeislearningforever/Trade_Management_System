@@ -734,6 +734,149 @@ def get_portfolio_action_permissions(request: HttpRequest, portfolio_data: Any) 
     }
 
 
+def get_trade_action_permissions(request: HttpRequest, trade_data: Any) -> Dict[str, bool]:
+    """
+    Compute per-trade action flags: RBAC permission + status + src_system.
+
+    Single source of truth for trade edit/submit/cancel/validate/settle icons.
+    Use in trade_detail view (context flags) and trade_list view (annotate wrapper).
+
+    Maker statuses (editable): INITIAL, MODIFIED, CANCELLED
+    Checker statuses:          PENDING_VALIDATION → validate/reject
+                               VALIDATED          → settle
+    """
+    from django.conf import settings
+
+    if hasattr(trade_data, 'status'):
+        status = trade_data.status
+        src_system = trade_data.src_system or ''
+    else:
+        status = trade_data.get('status', '')
+        src_system = trade_data.get('src_system', '') or ''
+
+    is_cis = src_system.upper() == 'CIS'
+
+    if getattr(settings, 'SKIP_PERMISSION_CHECKS', False):
+        return {
+            'can_edit': is_cis and status in ('INITIAL', 'MODIFIED', 'CANCELLED'),
+            'can_submit': is_cis and status in ('INITIAL', 'MODIFIED'),
+            'can_cancel': is_cis and status in ('INITIAL', 'MODIFIED', 'PENDING_VALIDATION'),
+            'can_reactivate': is_cis and status == 'CANCELLED',
+            'can_validate': is_cis and status == 'PENDING_VALIDATION',
+            'can_reject': is_cis and status == 'PENDING_VALIDATION',
+            'can_settle': is_cis and status == 'VALIDATED',
+        }
+
+    has_edit = has_permission(request, 'trade-edit', 'WRITE')
+    has_approve = has_permission(request, 'trade-approval', 'WRITE')
+
+    return {
+        'can_edit': has_edit and is_cis and status in ('INITIAL', 'MODIFIED', 'CANCELLED'),
+        'can_submit': has_edit and is_cis and status in ('INITIAL', 'MODIFIED'),
+        'can_cancel': has_edit and is_cis and status in ('INITIAL', 'MODIFIED', 'PENDING_VALIDATION'),
+        'can_reactivate': has_edit and is_cis and status == 'CANCELLED',
+        'can_validate': has_approve and is_cis and status == 'PENDING_VALIDATION',
+        'can_reject': has_approve and is_cis and status == 'PENDING_VALIDATION',
+        'can_settle': has_approve and is_cis and status == 'VALIDATED',
+    }
+
+
+def get_security_action_permissions(request: HttpRequest, security_data: Any) -> Dict[str, bool]:
+    """
+    Compute per-security action flags: RBAC permission + status + src_system.
+
+    Security uses 'securities-create' permission for both create and edit
+    (matches URL_PERMISSION_MAP: security:edit → securities-create WRITE).
+    Approval is also 'securities-create' WRITE (security:validate).
+    """
+    from django.conf import settings
+
+    if hasattr(security_data, 'status'):
+        status = security_data.status
+        src_system = security_data.src_system or ''
+    else:
+        status = security_data.get('status', '')
+        src_system = security_data.get('src_system', '') or ''
+
+    is_cis = src_system.upper() == 'CIS'
+
+    if getattr(settings, 'SKIP_PERMISSION_CHECKS', False):
+        return {
+            'can_edit': is_cis and status in ('INITIAL', 'MODIFIED'),
+            'can_validate': is_cis and status in ('INITIAL', 'MODIFIED'),
+        }
+
+    has_edit = has_permission(request, 'securities-create', 'WRITE')
+
+    return {
+        'can_edit': has_edit and is_cis and status in ('INITIAL', 'MODIFIED'),
+        'can_validate': has_edit and is_cis and status in ('INITIAL', 'MODIFIED'),
+    }
+
+
+def get_party_action_permissions(request: HttpRequest, party_data: Any) -> Dict[str, bool]:
+    """
+    Compute per-party/counterparty action flags: RBAC permission + src_system.
+
+    Parties have no status-based workflow beyond CIS vs GMP ownership.
+    'parties-create' WRITE covers both edit and delete (matches URL_PERMISSION_MAP).
+    """
+    from django.conf import settings
+
+    if hasattr(party_data, 'src_system'):
+        src_system = party_data.src_system or ''
+    else:
+        src_system = party_data.get('src_system', '') or ''
+
+    is_cis = src_system.upper() == 'CIS'
+
+    if getattr(settings, 'SKIP_PERMISSION_CHECKS', False):
+        return {
+            'can_edit': is_cis,
+            'can_delete': is_cis,
+        }
+
+    has_write = has_permission(request, 'parties-create', 'WRITE')
+
+    return {
+        'can_edit': has_write and is_cis,
+        'can_delete': has_write and is_cis,
+    }
+
+
+def get_corporate_action_action_permissions(request: HttpRequest, ca_data: Any) -> Dict[str, bool]:
+    """
+    Compute per-corporate-action flags: RBAC permission + src_system + status.
+
+    'corp-action-create' WRITE covers edit, delete, validate (matches URL_PERMISSION_MAP).
+    """
+    from django.conf import settings
+
+    if hasattr(ca_data, 'status'):
+        status = ca_data.status
+        src_system = ca_data.src_system or ''
+    else:
+        status = ca_data.get('status', '')
+        src_system = ca_data.get('src_system', '') or ''
+
+    is_cis = src_system.upper() == 'CIS'
+
+    if getattr(settings, 'SKIP_PERMISSION_CHECKS', False):
+        return {
+            'can_edit': is_cis and status in ('INITIAL', 'MODIFIED'),
+            'can_delete': is_cis,
+            'can_validate': is_cis and status in ('INITIAL', 'MODIFIED'),
+        }
+
+    has_write = has_permission(request, 'corp-action-create', 'WRITE')
+
+    return {
+        'can_edit': has_write and is_cis and status in ('INITIAL', 'MODIFIED'),
+        'can_delete': has_write and is_cis,
+        'can_validate': has_write and is_cis and status in ('INITIAL', 'MODIFIED'),
+    }
+
+
 def get_user_accessible_modules(request: HttpRequest) -> List[str]:
     """
     Get list of modules user has any access to.

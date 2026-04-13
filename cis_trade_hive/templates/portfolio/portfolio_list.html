@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load static %}
+{% load static core_filters %}
 
 {% block title %}Portfolios - CisTrade{% endblock %}
 
@@ -188,12 +188,13 @@
                                             <i class="bi bi-eye"></i>
                                         </a>
                                         {% endif %}
-                                        {% if portfolio.can_edit %}
+                                        {% can_act portfolio "portfolio" as pfa %}
+                                        {% if pfa.can_edit %}
                                             <a href="{% url 'portfolio:edit' portfolio.name %}" class="btn btn-sm btn-outline-warning" title="Edit">
                                                 <i class="bi bi-pencil"></i>
                                             </a>
                                         {% endif %}
-                                        {% if portfolio.can_submit %}
+                                        {% if pfa.can_submit %}
                                             <form method="post" action="{% url 'portfolio:submit' portfolio.name %}" class="d-inline">
                                                 {% csrf_token %}
                                                 <button type="submit" class="btn btn-sm btn-outline-info" title="Submit for Validation" onclick="return confirm('Submit for validation?')">
@@ -201,7 +202,7 @@
                                                 </button>
                                             </form>
                                         {% endif %}
-                                        {% if portfolio.can_reactivate %}
+                                        {% if pfa.can_reactivate %}
                                             <form method="post" action="{% url 'portfolio:reactivate' portfolio.name %}" class="d-inline">
                                                 {% csrf_token %}
                                                 <button type="submit" class="btn btn-sm btn-outline-success" title="Reactivate" onclick="return confirm('Reactivate this portfolio?')">

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load static %}
+{% load static core_filters %}
 
 {% block title %}{{ security.security_name }} - CisTrade{% endblock %}
 
@@ -22,12 +22,13 @@
         </div>
         <div>
             <!-- Workflow Action Buttons -->
-            {% if can_edit %}
+            {% can_act security "security" as sa %}
+            {% if sa.can_edit %}
                 <a href="{% url 'security:edit' security.security_id %}" class="btn btn-warning">
                     <i class="bi bi-pencil"></i> Edit
                 </a>
             {% endif %}
-            {% if can_validate %}
+            {% if sa.can_validate %}
                 <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#validateModal">
                     <i class="bi bi-check-circle"></i> Validate
                 </button>

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load static %}
+{% load static core_filters %}
 
 {% block title %}Counterparties - CisTrade{% endblock %}
 
@@ -197,21 +197,19 @@
                                            class="btn btn-sm btn-outline-info" title="View Details">
                                             <i class="bi bi-eye"></i>
                                         </a>
-                                        {% if cp.src_system|lower == 'cis' %}
-                                            {# CIS records - fully editable #}
+                                        {% can_act cp "party" as cpa %}
+                                        {% if cpa.can_edit %}
                                             <a href="{% url 'reference_data:counterparty_edit' cp.counterparty_short_name %}?next={{ request.get_full_path|urlencode }}"
                                                class="btn btn-sm btn-outline-primary" title="Edit">
                                                 <i class="bi bi-pencil"></i>
                                             </a>
                                         {% else %}
-                                            {# GMP records - read-only #}
                                             <button class="btn btn-sm btn-outline-secondary" disabled title="Read-only: {{ cp.src_system|upper }} record">
                                                 <i class="bi bi-pencil"></i>
                                             </button>
                                         {% endif %}
 
-                                        {% if cp.src_system|lower == 'cis' %}
-                                            {# Only allow delete/restore for CIS records #}
+                                        {% if cpa.can_delete %}
                                             {% if cp.is_deleted %}
                                                 <form method="post" action="{% url 'reference_data:counterparty_restore' cp.counterparty_short_name %}"
                                                       style="display: inline;" onsubmit="return confirm('Restore this counterparty?');">
@@ -230,7 +228,6 @@
                                                 </form>
                                             {% endif %}
                                         {% else %}
-                                            {# GMP records - no delete option #}
                                             <button class="btn btn-sm btn-outline-secondary" disabled title="Read-only: {{ cp.src_system|upper }} record">
                                                 <i class="bi bi-trash"></i>
                                             </button>
