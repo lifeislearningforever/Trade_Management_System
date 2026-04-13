@@ -663,6 +663,77 @@ def get_module_permissions(module: str) -> List[str]:
     return PERMISSION_GROUPS.get(module.lower(), [])
 
 
+def get_portfolio_action_permissions(request: HttpRequest, portfolio_data: Any) -> Dict[str, bool]:
+    """
+    Compute per-portfolio action flags combining RBAC permission + status + src_system.
+
+    This is the single source of truth for what actions a user can take on a
+    given portfolio. Both the list view (per-row icons) and the detail view
+    (action buttons) must call this function — never duplicate the status/src logic
+    inline in views or templates.
+
+    Args:
+        request: Django HttpRequest with session permissions
+        portfolio_data: Portfolio dict (from Kudu) or PortfolioWrapper instance.
+                        Must expose .status and .src_system (attribute or dict key).
+
+    Returns:
+        Dict with boolean flags:
+            can_edit        — pencil icon / edit page (INITIAL, MODIFIED, PENDING_VALIDATION, CANCELLED)
+            can_submit      — send for validation (INITIAL, MODIFIED)
+            can_cancel      — cancel action (INITIAL, MODIFIED, PENDING_VALIDATION)
+            can_reactivate  — reactivate from CANCELLED
+            can_validate    — checker: approve (PENDING_VALIDATION)
+            can_reject      — checker: reject  (PENDING_VALIDATION)
+            can_settle      — checker: settle  (VALIDATED)
+
+    Example:
+        >>> actions = get_portfolio_action_permissions(request, portfolio_data)
+        >>> # In view context: context.update(actions)
+        >>> # On wrapper:      wrapper.can_edit = actions['can_edit']
+    """
+    from django.conf import settings
+
+    # Dict or object access
+    if hasattr(portfolio_data, 'status'):
+        status = portfolio_data.status
+        src_system = portfolio_data.src_system or ''
+    else:
+        status = portfolio_data.get('status', '')
+        src_system = portfolio_data.get('src_system', '') or ''
+
+    is_cis = src_system.upper() == 'CIS'
+
+    # Dev bypass — grant all actions (permission check is separate concern)
+    if getattr(settings, 'SKIP_PERMISSION_CHECKS', False):
+        return {
+            'can_edit': is_cis,
+            'can_submit': is_cis and status in ('INITIAL', 'MODIFIED'),
+            'can_cancel': is_cis and status in ('INITIAL', 'MODIFIED', 'PENDING_VALIDATION'),
+            'can_reactivate': is_cis and status == 'CANCELLED',
+            'can_validate': is_cis and status == 'PENDING_VALIDATION',
+            'can_reject': is_cis and status == 'PENDING_VALIDATION',
+            'can_settle': is_cis and status == 'VALIDATED',
+        }
+
+    has_edit = has_permission(request, 'portfolio-edit', 'WRITE')
+    has_approve = has_permission(request, 'portfolio-approval', 'WRITE')
+
+    return {
+        'can_edit': has_edit and is_cis and status in (
+            'INITIAL', 'MODIFIED', 'PENDING_VALIDATION', 'CANCELLED'
+        ),
+        'can_submit': has_edit and is_cis and status in ('INITIAL', 'MODIFIED'),
+        'can_cancel': has_edit and is_cis and status in (
+            'INITIAL', 'MODIFIED', 'PENDING_VALIDATION'
+        ),
+        'can_reactivate': has_edit and is_cis and status == 'CANCELLED',
+        'can_validate': has_approve and is_cis and status == 'PENDING_VALIDATION',
+        'can_reject': has_approve and is_cis and status == 'PENDING_VALIDATION',
+        'can_settle': has_approve and is_cis and status == 'VALIDATED',
+    }
+
+
 def get_user_accessible_modules(request: HttpRequest) -> List[str]:
     """
     Get list of modules user has any access to.

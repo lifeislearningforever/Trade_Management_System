@@ -32,7 +32,11 @@ import csv
 
 from core.audit.audit_kudu_repository import audit_log_kudu_repository
 from core.views.auth_views import require_login
-from core.services.permission_service import has_permission, build_permission_context
+from core.services.permission_service import (
+    has_permission,
+    build_permission_context,
+    get_portfolio_action_permissions,
+)
 from portfolio.repositories.portfolio_hive_repository import (
     portfolio_hive_repository,
     PortfolioHiveRepository
@@ -155,7 +159,18 @@ def portfolio_list(request):
         currency=currency_filter if currency_filter else None
     )
 
-    wrapped_portfolios = [PortfolioWrapper(p, idx) for idx, p in enumerate(portfolios_data)]
+    wrapped_portfolios = []
+    for idx, p in enumerate(portfolios_data):
+        wrapper = PortfolioWrapper(p, idx)
+        # Annotate each row with per-portfolio action flags from central service
+        actions = get_portfolio_action_permissions(request, wrapper)
+        wrapper.can_edit = actions['can_edit']
+        wrapper.can_submit = actions['can_submit']
+        wrapper.can_cancel = actions['can_cancel']
+        wrapper.can_reactivate = actions['can_reactivate']
+        wrapper.can_validate = actions['can_validate']
+        wrapper.can_settle = actions['can_settle']
+        wrapped_portfolios.append(wrapper)
 
     # CSV Export
     if export == 'csv':
@@ -291,40 +306,18 @@ def portfolio_detail(request, portfolio_name):
         raise Http404(f"Portfolio '{portfolio_name}' not found")
 
     portfolio = PortfolioWrapper(portfolio_data)
-    status = portfolio.status
-    src_system = portfolio.src_system
+    is_cis_record = (portfolio.src_system or '').upper() == 'CIS'
 
-    # Determine allowed actions based on status and source system
-    is_cis_record = src_system and src_system.upper() == 'CIS'
-
-    # Get permission flags
+    # All action flags computed centrally — single source of truth
     perms = build_permission_context(request, 'portfolio')
-    has_edit_permission = perms.get('can_edit', False)
-    has_approve_permission = perms.get('can_approve', False)
-
-    # Maker actions (only for CIS records AND user has permission)
-    # Allow edits during PENDING_VALIDATION (Maker can modify while awaiting approval)
-    can_edit = has_edit_permission and is_cis_record and status in [
-        PortfolioHiveRepository.STATUS_INITIAL,
-        PortfolioHiveRepository.STATUS_MODIFIED,
-        PortfolioHiveRepository.STATUS_PENDING_VALIDATION,
-        PortfolioHiveRepository.STATUS_CANCELLED
-    ]
-    can_submit = has_edit_permission and is_cis_record and status in [
-        PortfolioHiveRepository.STATUS_INITIAL,
-        PortfolioHiveRepository.STATUS_MODIFIED
-    ]
-    can_cancel = has_edit_permission and is_cis_record and status in [
-        PortfolioHiveRepository.STATUS_INITIAL,
-        PortfolioHiveRepository.STATUS_MODIFIED,
-        PortfolioHiveRepository.STATUS_PENDING_VALIDATION
-    ]
-    can_reactivate = has_edit_permission and is_cis_record and status == PortfolioHiveRepository.STATUS_CANCELLED
-
-    # Checker actions (only for CIS records AND user has approval permission)
-    can_validate = has_approve_permission and is_cis_record and status == PortfolioHiveRepository.STATUS_PENDING_VALIDATION
-    can_reject = has_approve_permission and is_cis_record and status == PortfolioHiveRepository.STATUS_PENDING_VALIDATION
-    can_settle = has_approve_permission and is_cis_record and status == PortfolioHiveRepository.STATUS_VALIDATED
+    actions = get_portfolio_action_permissions(request, portfolio)
+    can_edit = actions['can_edit']
+    can_submit = actions['can_submit']
+    can_cancel = actions['can_cancel']
+    can_reactivate = actions['can_reactivate']
+    can_validate = actions['can_validate']
+    can_reject = actions['can_reject']
+    can_settle = actions['can_settle']
 
     # Commented out VIEW audit logging (only log CREATE, UPDATE, DELETE)
     # user_info = get_user_info(request)
