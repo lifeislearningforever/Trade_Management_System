@@ -156,7 +156,8 @@ SELECT
     CASE
         WHEN dup.isin IS NOT NULL THEN 'FAIL: Multiple ISINs found in master'
         WHEN s.security_id IS NOT NULL THEN 'ISIN_MATCH'
-        ELSE NULL
+        WHEN b.isin IS NULL OR TRIM(b.isin) = '' THEN 'NO_ISIN'
+        ELSE 'ISIN_NO_MATCH'
     END AS match_type
 FROM pos_stage_1_base b
 JOIN pos_stage_2_portfolio p2 ON b.row_id = p2.row_id
@@ -224,7 +225,7 @@ SELECT
         ELSE 'NOT_FOUND: Create new security'
     END AS security_status
 FROM pos_stage_3_security s3
--- Description/Fullname match (only if ISIN didn't match and not duplicate)
+-- Description/Fullname match (only if ISIN didn't match or upload had no ISIN, and not duplicate)
 LEFT JOIN cis_security_kudu s_desc
     ON s3.security_full_name = s_desc.security_description
     AND s_desc.is_active = true
@@ -466,8 +467,8 @@ SELECT
         -- Security not found but we created it (exchange is valid at this point)
         WHEN p4.security_status = 'NOT_FOUND: Create new security'
             THEN 'VALID: New security created'
-        -- Security matched
-        WHEN p4.security_status IN ('ISIN_MATCH', 'DESC_MATCH', 'NAME_MATCH')
+        -- Security matched (ISIN, description/fullname, or short name)
+        WHEN p4.security_status IN ('ISIN_MATCH', 'FULLNAME_MATCH', 'SHORTNAME_MATCH', 'DESC_MATCH', 'NAME_MATCH')
             THEN 'VALID'
         -- Any other security failure
         WHEN p4.security_status LIKE 'FAIL%'
