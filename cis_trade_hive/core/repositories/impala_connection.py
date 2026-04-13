@@ -131,7 +131,14 @@ class ImpalaConnectionManager:
             connection._created_at = time.time()
             connection._database = db_name
 
-            logger.info(f"Created new Impala connection to database: {db_name}")
+            # Log caller for connection leak tracing
+            import traceback
+            stack = ''.join(traceback.format_stack(limit=6)[:-2])
+            caller = stack.strip().split('\n')[-1].strip()
+            logger.info(
+                f"[CONN_OPEN] New Impala connection to {db_name} | "
+                f"pool={self._connection_count}/{self._max_connections} | caller: {caller}"
+            )
             return connection
 
         except Exception as e:
