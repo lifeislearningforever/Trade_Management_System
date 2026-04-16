@@ -168,6 +168,19 @@ def upload_create(request):
                             'description': f"{description}\n[Datasource: {datasource_config.get('source_id', '')}]"
                         }, user_info['username'])
 
+                        # Save file to temp directory so full data is available at ingest time
+                        # (DB record only stores MAX_PREVIEW_ROWS=100 rows in sample_data_json)
+                        import uuid as _uuid
+                        temp_dir = os.path.join(settings.BASE_DIR, 'temp_uploads')
+                        os.makedirs(temp_dir, exist_ok=True)
+                        temp_file_path = os.path.join(temp_dir, f"{upload_id}_{file_name}")
+                        uploaded_file.seek(0)
+                        with open(temp_file_path, 'wb') as _f:
+                            for chunk in uploaded_file.chunks():
+                                _f.write(chunk)
+                        # Keep temp path in session so ingest view can find it
+                        request.session[f'temp_path_{upload_id}'] = temp_file_path
+
                         messages.success(request, f'File "{file_name}" validated using datasource config. Target: {datasource_config.get("target_table", "")}')
                         return redirect('upload:preview', upload_id=upload_id)
                     else:
@@ -505,8 +518,12 @@ def upload_ingest(request, upload_id: str):
             # Get ingestion mode (overwrite or append)
             ingestion_mode = request.POST.get('ingestion_mode', 'overwrite').strip()
 
-            # Get temp file path and sample data for session uploads
-            temp_file_path = upload.get('temp_file_path') if is_session_upload else None
+            # Get temp file path: session uploads store it in the upload dict;
+            # DB uploads save it separately in session under temp_path_<id>
+            if is_session_upload:
+                temp_file_path = upload.get('temp_file_path')
+            else:
+                temp_file_path = request.session.get(f'temp_path_{upload_id}')
             sample_data = None
             if is_session_upload:
                 sample_data_json = upload.get('sample_data_json', [])
@@ -528,6 +545,10 @@ def upload_ingest(request, upload_id: str):
                 session_key = f'upload_{upload_id}'
                 if session_key in request.session:
                     del request.session[session_key]
+            # Clean up DB-upload temp path key regardless
+            temp_path_key = f'temp_path_{upload_id}'
+            if success and temp_path_key in request.session:
+                del request.session[temp_path_key]
         else:
             # Standard ingestion - create new external table
             table_name = request.POST.get('table_name', '').strip()

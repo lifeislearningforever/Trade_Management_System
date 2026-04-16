@@ -976,6 +976,7 @@ class UploadService:
         Returns:
             Tuple of (success, message)
         """
+        is_session_upload = False  # default; set properly after DB lookup
         try:
             # Get upload record (may be None for session uploads)
             upload = self.repository.get_upload_by_id(upload_id)
@@ -1045,6 +1046,22 @@ class UploadService:
 
             # If we have either a local file or sample_data, use INSERT VALUES
             if local_file or sample_data:
+                # ----------------------------------------------------------------
+                # Kudu UPSERT path: cis_equity_price is a Kudu table, not a
+                # Hive external/partitioned table — INSERT OVERWRITE won't work.
+                # Route to dedicated Kudu upsert method instead.
+                # ----------------------------------------------------------------
+                if target_table.lower() in ('cis_equity_price', 'gmp_cis.cis_equity_price'):
+                    return self._ingest_kudu_equity_price(
+                        datasource_config=datasource_config,
+                        intake_columns=intake_columns,
+                        sample_data=sample_data if sample_data else [],
+                        updated_by=updated_by,
+                        upload_id=upload_id,
+                        is_session_upload=is_session_upload,
+                        temp_file_path=local_file,
+                    )
+
                 return self._ingest_using_insert_values(
                     target_table=target_table,
                     datasource_config=datasource_config,
@@ -1065,6 +1082,222 @@ class UploadService:
             if not is_session_upload:
                 self.repository.update_status(upload_id, UploadKuduRepository.STATUS_FAILED, updated_by, str(e))
             return False, f"Ingestion error: {str(e)}"
+
+    def _ingest_kudu_equity_price(
+        self,
+        datasource_config: Dict[str, Any],
+        intake_columns: List[Dict[str, str]],
+        sample_data: List[Dict[str, Any]],
+        updated_by: str,
+        upload_id: str,
+        is_session_upload: bool = False,
+        temp_file_path: str = None,
+    ) -> Tuple[bool, str]:
+        """
+        Ingest equity price CSV rows directly into cis_equity_price (Kudu) via UPSERT.
+
+        cis_equity_price is a Kudu table — INSERT OVERWRITE / partitions don't apply.
+        Each row is upserted using the existing EquityPriceHiveRepository so that
+        currency_code + isin are looked up from cis_security and all audit fields
+        are populated consistently.
+
+        CSV columns used (case-insensitive via intake_columns):
+            price_date, security_label, closing_price
+            (shares_outstanding and market_value are ignored)
+
+        Args:
+            datasource_config: Datasource configuration from cis_datasource_mng
+            intake_columns:    Parsed column list from datasource config
+            sample_data:       Rows already parsed (used if temp_file_path not available)
+            updated_by:        Username performing the ingestion
+            upload_id:         Upload record ID for status tracking
+            is_session_upload: True when upload record lives in session, not DB
+            temp_file_path:    Path to local temp file (full data, preferred over sample_data)
+
+        Returns:
+            Tuple of (success, message)
+        """
+        from decimal import Decimal, InvalidOperation
+        from market_data.repositories.equity_price_hive_repository import equity_price_hive_repository
+        from security.repositories.security_hive_repository import SecurityHiveRepository
+        import time as _time
+
+        counters = {'inserted': 0, 'skipped': 0, 'errors': []}
+
+        # ---- Build full data list from file or sample_data ----
+        separator = datasource_config.get('separator', ',')
+        has_header = str(datasource_config.get('header', 'true')).lower() == 'true'
+        col_names = [col['name'] for col in intake_columns]
+
+        all_data = list(sample_data) if sample_data else []
+
+        if temp_file_path and os.path.exists(temp_file_path):
+            logger.info(f"[equity_price] Reading full file from {temp_file_path}")
+            try:
+                all_data = []
+                with open(temp_file_path, 'r', encoding='utf-8-sig', errors='replace') as f:
+                    reader = csv.reader(f, delimiter=separator or ',')
+                    rows = list(reader)
+                if has_header and rows:
+                    rows = rows[1:]
+                for row in rows:
+                    row_dict = {col: (row[i] if i < len(row) else '') for i, col in enumerate(col_names)}
+                    all_data.append(row_dict)
+                logger.info(f"[equity_price] Read {len(all_data)} rows from file")
+            except Exception as e:
+                logger.error(f"[equity_price] Failed to read file: {e}")
+                all_data = list(sample_data) if sample_data else []
+
+        if not all_data:
+            return False, "No data to ingest"
+
+        # ---- Column name map (normalise to lowercase for lookup) ----
+        # intake_columns names are already cleaned by FileValidationService._clean_column_name
+        # Expected cleaned names from CSV headers:
+        #   "Price Date"       -> "price_date"
+        #   "Security label"   -> "security_label"
+        #   "Closing Price"    -> "closing_price"
+        def _find_col(row_dict: dict, *candidates) -> str:
+            """Return value for the first matching key (case-insensitive)."""
+            lower_map = {k.lower(): v for k, v in row_dict.items()}
+            for cand in candidates:
+                v = lower_map.get(cand.lower(), '')
+                if v:
+                    return str(v).strip()
+            return ''
+
+        # Per-upload security lookup cache (avoids N Impala round-trips for same security)
+        security_cache: Dict[str, Optional[Dict]] = {}
+
+        for row_num, row in enumerate(all_data, start=2):
+            price_date    = _find_col(row, 'price_date', 'price date')
+            security_label = _find_col(row, 'security_label', 'security label', 'security_name')
+            closing_price_str = _find_col(row, 'closing_price', 'closing price', 'main_closing_price')
+
+            # Basic validation
+            if not price_date or not security_label or not closing_price_str:
+                counters['errors'].append({
+                    'row': row_num,
+                    'reason': 'Missing price_date, security_label, or closing_price'
+                })
+                counters['skipped'] += 1
+                continue
+
+            try:
+                price_decimal = Decimal(closing_price_str)
+                if price_decimal <= 0:
+                    raise ValueError("non-positive")
+            except (InvalidOperation, ValueError):
+                counters['errors'].append({
+                    'row': row_num,
+                    'reason': f"Invalid closing price: '{closing_price_str}'"
+                })
+                counters['skipped'] += 1
+                continue
+
+            # Security lookup for currency_code + isin
+            if security_label not in security_cache:
+                try:
+                    securities = SecurityHiveRepository.get_all_securities(
+                        search=security_label, limit=5
+                    )
+                    match = next(
+                        (s for s in securities
+                         if s.get('security_name', '').strip() == security_label),
+                        None
+                    )
+                    security_cache[security_label] = match
+                except Exception as e:
+                    security_cache[security_label] = None
+                    logger.warning(f"[equity_price] Security lookup failed for '{security_label}': {e}")
+
+            sec_rec = security_cache.get(security_label)
+            currency_code = sec_rec.get('currency_code', '') if sec_rec else ''
+            isin = sec_rec.get('isin', '') if sec_rec else ''
+
+            if not currency_code:
+                logger.warning(
+                    f"[equity_price] Row {row_num}: no currency_code for '{security_label}', using empty"
+                )
+
+            equity_price_data = {
+                'currency_code': currency_code,
+                'security_label': security_label,
+                'price_date': price_date,
+                'main_closing_price': float(price_decimal),
+                'isin': isin,
+                'src_system': 'CIS',
+                'created_by': updated_by,
+                'price_timestamp': int(_time.time() * 1000),
+            }
+
+            try:
+                success = equity_price_hive_repository.upsert_equity_price(
+                    equity_price_data, username=updated_by
+                )
+                if success:
+                    counters['inserted'] += 1
+                else:
+                    counters['errors'].append({'row': row_num, 'reason': 'Upsert returned False'})
+                    counters['skipped'] += 1
+            except Exception as e:
+                counters['errors'].append({'row': row_num, 'reason': str(e)})
+                counters['skipped'] += 1
+
+        # ---- Update upload record status ----
+        if not is_session_upload:
+            if counters['inserted'] > 0:
+                self.repository.update_upload(upload_id, {
+                    'status': UploadKuduRepository.STATUS_COMPLETED,
+                    'target_table_name': 'cis_equity_price',
+                    'row_count': counters['inserted'],
+                    'description': (
+                        f"Kudu UPSERT: {counters['inserted']} inserted, "
+                        f"{counters['skipped']} skipped"
+                    ),
+                }, updated_by)
+            else:
+                self.repository.update_status(
+                    upload_id, UploadKuduRepository.STATUS_FAILED, updated_by,
+                    f"0 rows inserted. Errors: {counters['errors'][:5]}"
+                )
+
+        # ---- Trigger position market value refresh ----
+        if counters['inserted'] > 0:
+            try:
+                from trade.repositories.trade_kudu_repository import trade_kudu_repository
+                trade_kudu_repository.refresh_market_values()
+            except Exception:
+                pass  # Non-blocking
+
+        # ---- Clear equity price cache ----
+        if counters['inserted'] > 0:
+            try:
+                from market_data.services.equity_price_service import EquityPriceService
+                EquityPriceService.clear_cache()
+            except Exception:
+                pass
+
+        logger.info(
+            f"[equity_price] upload_id={upload_id} by {updated_by}: "
+            f"inserted={counters['inserted']}, skipped={counters['skipped']}, "
+            f"errors={len(counters['errors'])}"
+        )
+
+        if counters['inserted'] > 0:
+            msg = (
+                f"Successfully upserted {counters['inserted']} equity price"
+                f"{'s' if counters['inserted'] != 1 else ''} into cis_equity_price"
+            )
+            if counters['skipped']:
+                msg += f" ({counters['skipped']} skipped — see upload detail for errors)"
+            return True, msg
+
+        return False, (
+            f"No rows inserted into cis_equity_price. "
+            f"{counters['skipped']} skipped. "
+            f"First error: {counters['errors'][0]['reason'] if counters['errors'] else 'unknown'}"
+        )
 
     def _upload_file_to_hdfs(self, local_path: str, hdfs_dir: str) -> bool:
         """
