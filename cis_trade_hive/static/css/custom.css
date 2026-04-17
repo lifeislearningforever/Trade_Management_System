@@ -2280,9 +2280,16 @@ body {
     white-space: nowrap;
 }
 
-/* Fix: Prevent card hover effects from scaling */
+/* Fix: Prevent card hover effects from scaling — data cards only slide shadow */
 .card:hover {
-    transform: translateY(-2px) !important;
+    transform: none !important;
+    box-shadow: var(--card-shadow-hover) !important;
+}
+
+/* Stat/KPI cards keep the lift — scope to .stat-card only */
+.stat-card:hover {
+    transform: translateY(-3px) !important;
+    box-shadow: var(--shadow-2xl) !important;
 }
 
 /* Dark Mode Preparation (for future) */
@@ -2299,4 +2306,648 @@ body {
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
     }
+}
+
+/* =====================================================
+   FINANCIAL UI ENHANCEMENTS
+   Audience: Singapore users, all age ranges, some with
+   weaker eyesight. Designed for WCAG AA (4.5:1+).
+   Status distinguished by shape + colour + icon (not
+   colour alone — colourblind safe).
+   ===================================================== */
+
+/* ── Inter + JetBrains Mono already loaded via base.html ── */
+:root {
+    --font-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', monospace;
+
+    /* P&L semantic tokens — WCAG AA on white */
+    --pnl-positive: #047857;   /* green-700  5.1:1 */
+    --pnl-negative: #b91c1c;   /* red-700    5.9:1 */
+    --pnl-neutral:  #475569;   /* slate-600  4.6:1 */
+    --pnl-positive-bg: #ecfdf5;
+    --pnl-negative-bg: #fef2f2;
+
+    /* Trade type */
+    --buy-bg: #d1fae5; --buy-color: #065f46; --buy-border: #6ee7b7;
+    --sell-bg: #fee2e2; --sell-color: #991b1b; --sell-border: #fecaca;
+
+    /* Status lifecycle */
+    --status-initial-bg:   #f1f5f9; --status-initial-color:   #334155; --status-initial-border:   #cbd5e1;
+    --status-modified-bg:  #eff6ff; --status-modified-color:  #1e40af; --status-modified-border:  #bfdbfe;
+    --status-pending-bg:   #fef3c7; --status-pending-color:   #b45309; --status-pending-border:   #fcd34d;
+    --status-validated-bg: #dbeafe; --status-validated-color: #1e40af; --status-validated-border: #93c5fd;
+    --status-settled-bg:   #d1fae5; --status-settled-color:   #065f46; --status-settled-border:   #6ee7b7;
+    --status-cancelled-bg: #f1f5f9; --status-cancelled-color: #64748b; --status-cancelled-border: #e2e8f0;
+    --status-rejected-bg:  #fee2e2; --status-rejected-color:  #991b1b; --status-rejected-border:  #fecaca;
+    --status-approved-bg:  #d1fae5; --status-approved-color:  #065f46; --status-approved-border:  #6ee7b7;
+    --status-active-bg:    #dbeafe; --status-active-color:    #1e40af; --status-active-border:    #93c5fd;
+    --status-closed-bg:    #f1f5f9; --status-closed-color:    #64748b; --status-closed-border:    #e2e8f0;
+    --status-inactive-bg:  #f9fafb; --status-inactive-color:  #9ca3af; --status-inactive-border:  #e5e7eb;
+}
+
+/* ─────────────────────────────────────────────
+   1. BADGE FIXES — solid hex, no alpha
+   (consistent rendering across macOS/Windows)
+   ───────────────────────────────────────────── */
+.badge-primary   { background: #dbeafe !important; color: #1e40af !important; border: 1px solid #bfdbfe !important; }
+.badge-success   { background: #d1fae5 !important; color: #065f46 !important; border: 1px solid #6ee7b7 !important; }
+.badge-warning   { background: #fef3c7 !important; color: #b45309 !important; border: 1px solid #fcd34d !important; }
+.badge-danger    { background: #fee2e2 !important; color: #991b1b !important; border: 1px solid #fecaca !important; }
+.badge-info      { background: #cffafe !important; color: #0e7490 !important; border: 1px solid #a5f3fc !important; }
+.badge-secondary { background: #f1f5f9 !important; color: #475569 !important; border: 1px solid #cbd5e1 !important; }
+.badge-dark      { background: #e2e8f0 !important; color: #334155 !important; border: 1px solid #cbd5e1 !important; }
+
+/* muted text — bump to gray-500 for eyesight accessibility */
+.text-muted { color: #64748b !important; }
+.form-control::placeholder,
+.form-select::placeholder { color: #94a3b8; }
+
+/* ─────────────────────────────────────────────
+   2. TRADE-TYPE BADGES
+   icon + colour so colourblind users can read
+   ───────────────────────────────────────────── */
+.badge-buy {
+    background: var(--buy-bg) !important;
+    color: var(--buy-color) !important;
+    border: 1px solid var(--buy-border) !important;
+    font-weight: 700 !important;
+}
+.badge-sell {
+    background: var(--sell-bg) !important;
+    color: var(--sell-color) !important;
+    border: 1px solid var(--sell-border) !important;
+    font-weight: 700 !important;
+}
+
+/* ─────────────────────────────────────────────
+   3. STATUS PILLS — lifecycle-aware
+   Round pill + animated dot + icon + colour.
+   Colourblind safe: three distinct signals.
+   ───────────────────────────────────────────── */
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.28rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    line-height: 1;
+}
+/* animated dot before each pill */
+.status-pill::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.status-pill.status-initial   { background: var(--status-initial-bg);   color: var(--status-initial-color);   border: 1px solid var(--status-initial-border); }
+.status-pill.status-initial::before   { background: #94a3b8; }
+
+.status-pill.status-modified  { background: var(--status-modified-bg);  color: var(--status-modified-color);  border: 1px solid var(--status-modified-border); }
+.status-pill.status-modified::before  { background: #3b82f6; animation: pill-pulse 2s infinite; }
+
+.status-pill.status-pending   { background: var(--status-pending-bg);   color: var(--status-pending-color);   border: 1px solid var(--status-pending-border); }
+.status-pill.status-pending::before   { background: #f59e0b; animation: pill-pulse 1.4s infinite; }
+
+.status-pill.status-validated { background: var(--status-validated-bg); color: var(--status-validated-color); border: 1px solid var(--status-validated-border); }
+.status-pill.status-validated::before { background: #2563eb; }
+
+.status-pill.status-settled   { background: var(--status-settled-bg);   color: var(--status-settled-color);   border: 1px solid var(--status-settled-border); }
+.status-pill.status-settled::before   { background: #059669; }
+
+.status-pill.status-approved  { background: var(--status-approved-bg);  color: var(--status-approved-color);  border: 1px solid var(--status-approved-border); }
+.status-pill.status-approved::before  { background: #059669; }
+
+.status-pill.status-active    { background: var(--status-active-bg);    color: var(--status-active-color);    border: 1px solid var(--status-active-border); }
+.status-pill.status-active::before    { background: #2563eb; }
+
+.status-pill.status-cancelled { background: var(--status-cancelled-bg); color: var(--status-cancelled-color); border: 1px solid var(--status-cancelled-border); }
+.status-pill.status-cancelled::before { background: #cbd5e1; }
+
+.status-pill.status-rejected  { background: var(--status-rejected-bg);  color: var(--status-rejected-color);  border: 1px solid var(--status-rejected-border); }
+.status-pill.status-rejected::before  { background: #dc2626; animation: pill-pulse 1.4s infinite; }
+
+.status-pill.status-closed    { background: var(--status-closed-bg);    color: var(--status-closed-color);    border: 1px solid var(--status-closed-border); }
+.status-pill.status-closed::before    { background: #94a3b8; }
+
+.status-pill.status-inactive  { background: var(--status-inactive-bg);  color: var(--status-inactive-color);  border: 1px solid var(--status-inactive-border); }
+.status-pill.status-inactive::before  { background: #d1d5db; }
+
+@keyframes pill-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.4; transform: scale(1.5); }
+}
+
+/* ─────────────────────────────────────────────
+   4. P&L VALUE COLOURS — WCAG AA on white
+   Also uses +/- prefix so colourblind safe
+   ───────────────────────────────────────────── */
+.pnl-positive, .text-pnl-positive { color: var(--pnl-positive) !important; font-weight: 600; }
+.pnl-negative, .text-pnl-negative { color: var(--pnl-negative) !important; font-weight: 600; }
+.pnl-neutral,  .text-pnl-neutral  { color: var(--pnl-neutral)  !important; }
+
+/* delta arrows — arrow + colour + sign (3 signals) */
+.delta-up   { color: var(--pnl-positive) !important; }
+.delta-down { color: var(--pnl-negative) !important; }
+.delta-up::before   { content: '▲ '; font-size: 0.6em; vertical-align: 0.1em; }
+.delta-down::before { content: '▼ '; font-size: 0.6em; vertical-align: 0.1em; }
+
+/* ─────────────────────────────────────────────
+   5. MONOSPACED NUMERIC TABLE CELLS
+   Right-aligned, tabular-nums — decimals align
+   across macOS, Windows, Linux
+   ───────────────────────────────────────────── */
+.table td.num,
+.table td.price,
+.table td.qty,
+.table td.amount,
+.table th.num {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+    text-align: right;
+    letter-spacing: 0.01em;
+}
+.table th.num { font-family: inherit; font-size: 0.7rem; } /* keep header in Inter */
+
+/* ─────────────────────────────────────────────
+   6. FOUR-EYES ROW HIGHLIGHTS
+   Left border + background by trade lifecycle
+   ───────────────────────────────────────────── */
+tr.row-pending-approval td,
+tr.row-pending td {
+    background: linear-gradient(to right, #fffbeb, transparent) !important;
+    border-left: 3px solid #f59e0b;
+}
+tr.row-pending-approval:hover td,
+tr.row-pending:hover td {
+    background: linear-gradient(to right, #fef3c7, #fffbeb) !important;
+}
+tr.row-pending-approval .sticky-action-column,
+tr.row-pending .sticky-action-column {
+    background: #fffbeb !important;
+}
+
+tr.row-settled td { border-left: 3px solid #059669; }
+tr.row-settled:hover td { background: linear-gradient(to right, #ecfdf5, transparent) !important; }
+tr.row-settled .sticky-action-column { background: #ecfdf5 !important; }
+
+tr.row-rejected td {
+    background: #fef2f2 !important;
+    border-left: 3px solid #dc2626;
+    opacity: 0.75;
+}
+tr.row-rejected .sticky-action-column { background: #fef2f2 !important; }
+
+tr.row-validated td { border-left: 3px solid #2563eb; }
+
+/* ─────────────────────────────────────────────
+   7. STICKY TOTALS FOOTER
+   ───────────────────────────────────────────── */
+tfoot.table-totals {
+    position: sticky;
+    bottom: 0;
+    z-index: 6;
+}
+tfoot.table-totals td {
+    padding: 0.55rem 0.75rem;
+    background: #f1f5f9;
+    border-top: 2px solid #cbd5e1;
+    border-bottom: none !important;
+    font-weight: 700;
+    font-size: 0.8rem;
+    color: #1e293b;
+}
+tfoot.table-totals td.num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+    text-align: right;
+}
+.table-totals-label {
+    font-size: 0.65rem;
+    color: #64748b;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+/* ─────────────────────────────────────────────
+   8. DENSITY TOGGLE — compact / spacious
+   ───────────────────────────────────────────── */
+.table-density-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.2rem 0.5rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+}
+.table-density-bar span {
+    font-size: 0.62rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--gray-500);
+}
+.density-btn {
+    width: 24px; height: 22px;
+    border: none; background: transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--gray-400);
+    font-size: 0.78rem;
+    transition: all var(--transition-fast);
+}
+.density-btn:hover,
+.density-btn.active { background: var(--gray-200); color: var(--primary); }
+
+/* spacious mode — add padding back */
+.table-spacious td,
+.table-spacious th { padding: 0.75rem 1rem !important; }
+
+/* ─────────────────────────────────────────────
+   9. MARKET MINI-TICKER
+   Horizontal strip in navbar / top of page
+   ───────────────────────────────────────────── */
+.market-ticker {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 0.75rem;
+    color: var(--gray-600);
+    overflow: hidden;
+}
+.ticker-item {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    white-space: nowrap;
+}
+.ticker-symbol { font-weight: 700; color: var(--gray-700); }
+.ticker-value {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+    color: var(--gray-700);
+}
+.ticker-sep { color: var(--gray-300); }
+
+/* ─────────────────────────────────────────────
+   10. KPI STAT CARDS — multi-colour variants
+   (stat-card already lifts on hover in cistrade.css)
+   ───────────────────────────────────────────── */
+.stat-card.stat-blue   { background: linear-gradient(135deg, #1d4ed8, #2563eb) !important; }
+.stat-card.stat-green  { background: linear-gradient(135deg, #047857, #059669) !important; }
+.stat-card.stat-amber  { background: linear-gradient(135deg, #b45309, #d97706) !important; }
+.stat-card.stat-purple { background: linear-gradient(135deg, #5b21b6, #7c3aed) !important; }
+.stat-card.stat-red    { background: linear-gradient(135deg, #b91c1c, #dc2626) !important; }
+.stat-card.stat-teal   { background: linear-gradient(135deg, #0f766e, #14b8a6) !important; }
+
+/* large readable value for all age groups */
+.stat-value { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+/* delta inside stat card */
+.stat-delta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    margin-top: 0.5rem;
+    padding: 0.15rem 0.5rem;
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 9999px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: #fff;
+}
+.stat-delta.up::before   { content: '▲ '; font-size: 0.55em; }
+.stat-delta.down::before { content: '▼ '; font-size: 0.55em; }
+.stat-delta.flat::before { content: '● '; font-size: 0.55em; opacity: 0.7; }
+
+/* ─────────────────────────────────────────────
+   11. SCROLLBAR POLISH — table scrollbars
+   ───────────────────────────────────────────── */
+.table-responsive {
+    scrollbar-width: thin;
+    scrollbar-color: var(--gray-400) var(--gray-100);
+}
+.table-responsive::-webkit-scrollbar { height: 9px; width: 9px; }
+.table-responsive::-webkit-scrollbar-track {
+    background: var(--gray-100);
+    border-radius: 9999px;
+}
+.table-responsive::-webkit-scrollbar-thumb {
+    background: var(--gray-400);
+    border-radius: 9999px;
+    border: 2px solid var(--gray-100);
+}
+.table-responsive::-webkit-scrollbar-thumb:hover { background: var(--gray-500); }
+
+/* ─────────────────────────────────────────────
+   12. ACCESSIBILITY — focus rings & min targets
+   Critical for all-age Singapore users
+   ───────────────────────────────────────────── */
+.btn:focus-visible,
+.page-link:focus-visible,
+.nav-link:focus-visible,
+.form-control:focus-visible,
+.form-select:focus-visible {
+    outline: 3px solid var(--primary-400, #60a5fa) !important;
+    outline-offset: 2px !important;
+}
+/* minimum 44×44 touch/click targets on interactive elements */
+.btn { min-height: 36px; }
+.btn-sm { min-height: 30px; }
+.page-link { min-width: 34px; min-height: 34px; }
+
+/* =====================================================
+   FINANCIAL UI v3 — Visual Refinements
+   Singapore all-age users · WCAG AA · 2025 trends
+   Pure CSS — zero functionality change.
+   ===================================================== */
+
+/* ── 13. Inter optical-size body — already loaded via base.html ── */
+body {
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-optical-sizing: auto;
+}
+
+/* ── 14. Content header — tighter, more modern ─────────────── */
+.content-title {
+    font-size: 1.6rem;          /* slightly smaller than 1.875rem for cleaner look */
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+    background: linear-gradient(135deg, var(--gray-900) 0%, var(--gray-700) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.content-title i {
+    /* icon keeps a solid color — gradient clip only on text */
+    -webkit-text-fill-color: var(--primary-600);
+    background: none;
+    -webkit-background-clip: unset;
+    background-clip: unset;
+}
+
+/* ── 15. Card header — accent top bar ──────────────────────── */
+.card-header {
+    position: relative;
+}
+.card-header::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--primary-600) 0%, var(--primary-400) 60%, transparent 100%);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    opacity: 0.7;
+}
+
+/* ── 16. Table header — sharper contrast, tighter height ───── */
+.table th {
+    padding: 0.55rem 0.85rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--gray-600);
+    letter-spacing: 0.07em;
+    background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+    border-bottom: 2px solid var(--gray-300);
+    white-space: nowrap;
+}
+
+/* ── 17. Table row hover — clean blue wash (no gradient fade) ─ */
+.table tbody tr:hover {
+    background: #eff6ff !important;
+    box-shadow: inset 3px 0 0 var(--primary-500);
+}
+
+/* ── 18. Table cells — slightly tighter padding, readable size  */
+.table td {
+    padding: 0.6rem 0.85rem;
+    font-size: 0.84rem;
+    color: var(--gray-800);
+    vertical-align: middle;
+}
+
+/* ── 19. Cancelled row — muted with diagonal pattern ─────────── */
+tr.row-can td {
+    background: repeating-linear-gradient(
+        135deg,
+        #f8fafc,
+        #f8fafc 8px,
+        #f1f5f9 8px,
+        #f1f5f9 16px
+    ) !important;
+    color: var(--gray-400) !important;
+    border-left: 3px solid var(--gray-300);
+}
+tr.row-can .sticky-action-column {
+    background: #f1f5f9 !important;
+}
+
+/* ── 20. Badge size bump for readability (Singapore seniors) ── */
+.badge {
+    font-size: 0.72rem;
+    padding: 0.28rem 0.6rem;
+    letter-spacing: 0.04em;
+}
+
+/* ── 21. Status pill font — slightly larger for readability ─── */
+.status-pill {
+    font-size: 0.72rem;
+    padding: 0.3rem 0.8rem;
+}
+
+/* ── 22. Filter card — tighter, no hover lift ─────────────── */
+.card.mb-4:hover {
+    transform: none !important;
+    box-shadow: var(--card-shadow) !important;
+}
+
+/* ── 23. Action button group — consistent size ─────────────── */
+.btn-group.btn-group-sm .btn {
+    min-height: 28px;
+    padding: 0.22rem 0.55rem;
+    font-size: 0.78rem;
+}
+
+/* ── 24. Pagination — modern pill style ────────────────────── */
+.page-link {
+    border-radius: var(--radius-md) !important;
+    border-width: 1px !important;
+    font-size: 0.82rem;
+    min-width: 36px;
+    min-height: 36px;
+}
+.page-item.active .page-link {
+    border-radius: var(--radius-md) !important;
+}
+
+/* ── 25. Form labels — uppercase micro-labels ──────────────── */
+.form-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--gray-500);
+    margin-bottom: 0.3rem;
+}
+
+/* ── 26. Input / select — tighter height ───────────────────── */
+.form-control,
+.form-select {
+    height: 36px;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.84rem;
+    border-width: 1px;
+}
+.input-group-text {
+    height: 36px;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.84rem;
+    border-width: 1px;
+}
+/* multiline textareas keep auto height */
+textarea.form-control { height: auto; }
+
+/* ── 27. Modal header — accent line ────────────────────────── */
+.modal-header {
+    border-bottom: 2px solid var(--gray-200);
+    padding: 1rem 1.25rem 0.85rem;
+}
+.modal-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--gray-800);
+}
+
+/* ── 28. Card title badge — financial blue ─────────────────── */
+.card-title .badge {
+    font-size: 0.68rem;
+    font-weight: 700;
+    vertical-align: middle;
+}
+
+/* ── 29. Active filter badge — cleaner remove button ────────── */
+.badge .btn-close {
+    width: 14px;
+    height: 14px;
+    opacity: 0.7;
+}
+.badge .btn-close:hover { opacity: 1; }
+
+/* ── 30. Table search / filter card — glass-lite surface ─────── */
+.card .card-header {
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+/* ── 31. Row-can badge colors — grey everything ─────────────── */
+tr.row-can .badge,
+tr.row-can .status-pill,
+tr.row-can .badge-buy,
+tr.row-can .badge-sell {
+    opacity: 0.55;
+    filter: grayscale(0.6);
+}
+
+/* ── 32. Security name cell — two-line layout ───────────────── */
+.security-cell-name {
+    font-weight: 600;
+    font-size: 0.84rem;
+    color: var(--gray-800);
+    display: block;
+    line-height: 1.2;
+}
+.security-cell-sub {
+    font-size: 0.7rem;
+    color: var(--gray-400);
+    font-family: var(--font-mono);
+    display: block;
+    line-height: 1.2;
+    margin-top: 1px;
+}
+
+/* ── 33. Empty state — larger icon, better spacing ──────────── */
+.text-center.py-5 {
+    padding: 3rem 1rem !important;
+}
+.text-center.py-5 > i {
+    font-size: 3.5rem;
+    opacity: 0.2;
+    display: block;
+    margin-bottom: 1rem;
+}
+
+/* ── 34. Scrollbar thumb — blue tint for branded feel ───────── */
+.table-responsive::-webkit-scrollbar-thumb {
+    background: var(--gray-300);
+}
+.table-responsive::-webkit-scrollbar-thumb:hover {
+    background: var(--primary-400);
+}
+
+/* ── 35. Badge-buy / badge-sell — icon spacing ─────────────── */
+.badge-buy i,
+.badge-sell i {
+    font-size: 0.75em;
+}
+
+/* ── 36. Breadcrumb — active item colour ──────────────────── */
+.breadcrumb-item.active {
+    color: var(--gray-800);
+    font-weight: 600;
+}
+
+/* ── 37. Card bottom-left trade count — monospaced ──────────── */
+.card-title .badge-primary {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── 38. Dropdown menu — modern rounded shadow ──────────────── */
+.dropdown-menu {
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 8px 24px rgba(0,0,0,.1), 0 2px 6px rgba(0,0,0,.06);
+    padding: 0.35rem;
+    font-size: 0.84rem;
+}
+.dropdown-item {
+    border-radius: var(--radius-md);
+    padding: 0.45rem 0.75rem;
+    font-size: 0.84rem;
+    font-weight: 500;
+    color: var(--gray-700);
+    transition: background var(--transition-fast), color var(--transition-fast);
+}
+.dropdown-item:hover {
+    background: var(--primary-50);
+    color: var(--primary-700);
+}
+
+/* ── 39. Row-validated — blue accent (already has border, add bg) */
+tr.row-validated td {
+    background: linear-gradient(to right, #eff6ff, transparent) !important;
+}
+tr.row-validated:hover td {
+    background: linear-gradient(to right, #dbeafe, #eff6ff) !important;
+}
+tr.row-validated .sticky-action-column {
+    background: #eff6ff !important;
+}
+
+/* ── 40. Ensure body font is Inter with optical sizing ──────── */
+.content-area, .top-navbar, .modal-content, .dropdown-menu {
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
 }

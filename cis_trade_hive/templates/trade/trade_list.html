@@ -239,7 +239,7 @@
                         </thead>
                         <tbody>
                             {% for trade in page_obj %}
-                            <tr {% if trade.status == 'CANCELLED' %}style="opacity: 0.6; background-color: #f8f9fa;"{% endif %}>
+                            <tr class="{% if trade.status == 'PENDING_VALIDATION' %}row-pending-approval{% elif trade.status == 'SETTLED' %}row-settled{% elif trade.status == 'VALIDATED' %}row-validated{% elif trade.status == 'CANCELLED' %}row-can{% elif trade.status == 'REJECTED' %}row-rejected{% endif %}" {% if trade.status == 'CANCELLED' %}style="opacity:0.6"{% endif %}>
                                 <td>
                                     {% if trade.src_system|upper == 'CIS' %}
                                         <span class="badge badge-success">CIS</span>
@@ -250,17 +250,17 @@
                                 <td><strong class="text-primary">{{ trade.deal_number|default:"-" }}</strong></td>
                                 <td>
                                     {% if trade.trade_type == 'BUY' %}
-                                        <span class="badge bg-success">Buy</span>
+                                        <span class="badge badge-buy"><i class="bi bi-arrow-up-circle"></i> Buy</span>
                                     {% elif trade.trade_type == 'SELL' %}
-                                        <span class="badge bg-danger">Sell</span>
+                                        <span class="badge badge-sell"><i class="bi bi-arrow-down-circle"></i> Sell</span>
                                     {% else %}
-                                        <span class="badge bg-secondary">{{ trade.trade_type }}</span>
+                                        <span class="badge badge-secondary">{{ trade.trade_type }}</span>
                                     {% endif %}
                                 </td>
                                 <td>{{ trade.portfolio_short_name|default:"-" }}</td>
                                 <td>
                                     {% if trade.currency_code %}
-                                        <span class="badge bg-info">{{ trade.currency_code }}</span>
+                                        <span class="badge badge-info">{{ trade.currency_code }}</span>
                                     {% else %}
                                         -
                                     {% endif %}
@@ -271,36 +271,38 @@
                                 </td>
                                 <td>{{ trade.trade_date|default:"-" }}</td>
                                 <td>{{ trade.settle_date|default:"-" }}</td>
-                                <td class="text-end">{{ trade.quantity|floatformat:2|default:"0.00" }}</td>
-                                <td class="text-end">{{ trade.price|floatformat:4|default:"0.0000" }}</td>
-                                <td class="text-end">{{ trade.total_amount|floatformat:2|default:"0.00" }}</td>
+                                <td class="num">{{ trade.quantity|floatformat:2|default:"0.00" }}</td>
+                                <td class="num">{{ trade.price|floatformat:4|default:"0.0000" }}</td>
+                                <td class="num">{{ trade.total_amount|floatformat:2|default:"0.00" }}</td>
                                 <td>
                                     {% if trade.portfolio_currency %}
-                                        <span class="badge bg-secondary">{{ trade.portfolio_currency }}</span>
+                                        <span class="badge badge-secondary">{{ trade.portfolio_currency }}</span>
                                     {% else %}
                                         -
                                     {% endif %}
                                 </td>
-                                <td class="text-end">{{ trade.total_amount_lc|floatformat:2|default:"0.00" }}</td>
+                                <td class="num">{{ trade.total_amount_lc|floatformat:2|default:"0.00" }}</td>
                                 <td>
                                     {% if trade.status == 'INITIAL' %}
-                                        <span class="badge badge-secondary">Initial</span>
+                                        <span class="status-pill status-initial"><i class="bi bi-pencil-square"></i> Initial</span>
                                     {% elif trade.status == 'MODIFIED' %}
-                                        <span class="badge badge-info">Modified</span>
+                                        <span class="status-pill status-modified"><i class="bi bi-pencil"></i> Modified</span>
                                     {% elif trade.status == 'PENDING_VALIDATION' %}
-                                        <span class="badge badge-warning">Pending Validation</span>
+                                        <span class="status-pill status-pending"><i class="bi bi-clock"></i> Pending</span>
                                     {% elif trade.status == 'VALIDATED' %}
-                                        <span class="badge badge-primary">Validated</span>
+                                        <span class="status-pill status-validated"><i class="bi bi-check-circle"></i> Validated</span>
                                     {% elif trade.status == 'SETTLED' %}
-                                        <span class="badge badge-success">Settled</span>
+                                        <span class="status-pill status-settled"><i class="bi bi-check2-all"></i> Settled</span>
                                     {% elif trade.status == 'CANCELLED' %}
-                                        <span class="badge badge-dark">Cancelled</span>
+                                        <span class="status-pill status-cancelled"><i class="bi bi-x-circle"></i> Cancelled</span>
+                                    {% elif trade.status == 'REJECTED' %}
+                                        <span class="status-pill status-rejected"><i class="bi bi-x-octagon"></i> Rejected</span>
                                     {% else %}
-                                        <span class="badge badge-secondary">{{ trade.status|default:"-" }}</span>
+                                        <span class="status-pill status-initial">{{ trade.status|default:"-" }}</span>
                                     {% endif %}
                                 </td>
                                 <td>{{ trade.counterparty|default:"-" }}</td>
-                                <td style="font-size: 0.85rem;">{{ trade.created_at|default:"-" }}</td>
+                                <td style="font-size: 0.8rem; color: var(--gray-500);">{{ trade.created_at|default:"-" }}</td>
                                 <td class="sticky-action-column" style="background-color: {% if trade.status == 'CANCELLED' %}#f8f9fa{% else %}white{% endif %};">
                                     <div class="btn-group btn-group-sm" role="group">
                                         <a href="{% url 'trade:detail' trade.trade_id %}" class="btn btn-sm btn-outline-primary" title="View Details">
