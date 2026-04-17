@@ -10,52 +10,167 @@
 
 {% block content %}
 <div class="trade-list-container" style="max-width: 100%; overflow-x: hidden;">
-    <!-- Page Header -->
-    <div class="content-header">
-        <h1 class="content-title">
-            <i class="bi bi-graph-up text-primary"></i> Trades
-        </h1>
-        <p class="content-subtitle">Manage trades with Four-Eyes principle (Maker-Checker)</p>
+
+    <!-- ── KPI STRIP ──────────────────────────────────────────── -->
+    <div class="tl-kpi-strip">
+        <div class="tl-kpi-card tl-kpi-primary">
+            <div class="tl-kpi-label">Total Trades</div>
+            <div class="tl-kpi-value">{{ total_count|default:"0" }}</div>
+            <div class="tl-kpi-sub">across all portfolios</div>
+            <i class="bi bi-bar-chart-line tl-kpi-icon"></i>
+        </div>
+        <div class="tl-kpi-card tl-kpi-pending">
+            <div class="tl-kpi-label">Pending Validation</div>
+            <div class="tl-kpi-value">{{ pending_validation_count|default:"0" }}</div>
+            <div class="tl-kpi-sub">
+                <a href="{% url 'trade:pending_validation' %}" class="tl-kpi-link">
+                    <i class="bi bi-clock-history"></i> Review now
+                </a>
+            </div>
+            <i class="bi bi-hourglass-split tl-kpi-icon"></i>
+        </div>
+        <div class="tl-kpi-card tl-kpi-settlement">
+            <div class="tl-kpi-label">Pending Settlement</div>
+            <div class="tl-kpi-value">{{ pending_settlement_count|default:"0" }}</div>
+            <div class="tl-kpi-sub">
+                <a href="{% url 'trade:pending_settlement' %}" class="tl-kpi-link">
+                    <i class="bi bi-check2-circle"></i> View queue
+                </a>
+            </div>
+            <i class="bi bi-send-check tl-kpi-icon"></i>
+        </div>
+        <div class="tl-kpi-card tl-kpi-neutral">
+            <div class="tl-kpi-label">Trade Dashboard</div>
+            <div class="tl-kpi-value"><i class="bi bi-graph-up" style="font-size:1.4rem;opacity:.7"></i></div>
+            <div class="tl-kpi-sub">
+                <a href="{% url 'trade:dashboard' %}" class="tl-kpi-link">
+                    <i class="bi bi-graph-up"></i> Open dashboard
+                </a>
+            </div>
+            <i class="bi bi-pie-chart tl-kpi-icon"></i>
+        </div>
     </div>
 
-    <!-- Action Buttons -->
-    <div class="mb-4">
-        <div class="dropdown d-inline-block me-2">
-            <button class="btn btn-primary dropdown-toggle" type="button" data-bs-toggle="dropdown">
-                <i class="bi bi-plus-circle"></i> Create New Trade
-            </button>
-            <ul class="dropdown-menu">
-                {% for tt in trade_types %}
-                <li><a class="dropdown-item" href="{% url 'trade:create_type' tt.value %}">{{ tt.label }}</a></li>
-                {% endfor %}
-            </ul>
+    <!-- ── SECTION HEADER ─────────────────────────────────────── -->
+    <div class="tl-section-hdr">
+        <div>
+            <div class="tl-section-title">Trade List</div>
+            <div class="tl-section-sub">Manage trades with Four-Eyes principle (Maker-Checker)</div>
         </div>
-        <a href="{% url 'trade:pending_validation' %}" class="btn btn-warning">
-            <i class="bi bi-clock-history"></i> Pending Validation
-            {% if pending_validation_count %}
-                <span class="badge bg-danger">{{ pending_validation_count }}</span>
-            {% endif %}
-        </a>
-        <a href="{% url 'trade:pending_settlement' %}" class="btn btn-info">
-            <i class="bi bi-check2-circle"></i> Pending Settlement
-            {% if pending_settlement_count %}
-                <span class="badge bg-danger">{{ pending_settlement_count }}</span>
-            {% endif %}
-        </a>
-        <a href="{% url 'trade:dashboard' %}" class="btn btn-info">
-            <i class="bi bi-graph-up"></i> Dashboard
-        </a>
+        <div class="tl-section-actions">
+            <a href="?export=csv{% if search_query %}&search={{ search_query }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if trade_type_filter %}&trade_type={{ trade_type_filter }}{% endif %}" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-download"></i> Export CSV
+            </a>
+            <div class="dropdown">
+                <button class="btn btn-sm btn-primary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                    <i class="bi bi-plus-circle"></i> New Trade
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    {% for tt in trade_types %}
+                    <li><a class="dropdown-item" href="{% url 'trade:create_type' tt.value %}">{{ tt.label }}</a></li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
     </div>
 
-    <!-- Enhanced Search & Filter Card -->
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="card-title mb-0">
-                <i class="bi bi-funnel"></i> Search & Filter
-            </h5>
+    <!-- ── COMPACT INLINE FILTER BAR ─────────────────────────── -->
+    <form method="get" action="{% url 'trade:list' %}" id="tradeSearchForm">
+        <div class="tl-filter-bar">
+            <!-- Trade Type -->
+            <div class="tl-filter-group">
+                <span class="tl-filter-label">Type</span>
+                <select class="tl-filter-select" name="trade_type" onchange="this.form.submit()">
+                    <option value="">All Types</option>
+                    {% for tt in trade_types %}
+                    <option value="{{ tt.value }}" {% if trade_type_filter == tt.value %}selected{% endif %}>{{ tt.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <!-- Status -->
+            <div class="tl-filter-group">
+                <span class="tl-filter-label">Status</span>
+                <select class="tl-filter-select" name="status" onchange="this.form.submit()">
+                    {% for value, label in status_options %}
+                    <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <!-- Source -->
+            <div class="tl-filter-group">
+                <span class="tl-filter-label">Source</span>
+                <select class="tl-filter-select" name="src_system" onchange="this.form.submit()">
+                    <option value="">All Sources</option>
+                    <option value="CIS" {% if src_system_filter == 'CIS' %}selected{% endif %}>CIS</option>
+                    <option value="GMP" {% if src_system_filter == 'GMP' %}selected{% endif %}>GMP</option>
+                </select>
+            </div>
+            <!-- Portfolios button (opens modal) -->
+            <div class="tl-filter-group">
+                <span class="tl-filter-label">Portfolio</span>
+                <button type="button" class="tl-filter-select tl-filter-btn" data-bs-toggle="modal" data-bs-target="#portfolioModal">
+                    {% if selected_portfolios %}{{ selected_portfolios|length }} selected{% else %}All{% endif %}
+                    <i class="bi bi-chevron-down" style="font-size:.65rem;margin-left:auto"></i>
+                </button>
+                <div id="selectedPortfoliosInputs">
+                    {% for p in selected_portfolios %}<input type="hidden" name="portfolios" value="{{ p }}">{% endfor %}
+                </div>
+            </div>
+            <!-- Securities button -->
+            <div class="tl-filter-group">
+                <span class="tl-filter-label">Security</span>
+                <button type="button" class="tl-filter-select tl-filter-btn" data-bs-toggle="modal" data-bs-target="#securityModal">
+                    {% if selected_securities %}{{ selected_securities|length }} selected{% else %}All{% endif %}
+                    <i class="bi bi-chevron-down" style="font-size:.65rem;margin-left:auto"></i>
+                </button>
+                <div id="selectedSecuritiesInputs">
+                    {% for s in selected_securities %}<input type="hidden" name="securities" value="{{ s }}">{% endfor %}
+                </div>
+            </div>
+            <!-- Date range (trade) -->
+            <div class="tl-filter-group">
+                <span class="tl-filter-label">Trade Date</span>
+                <input type="date" class="tl-filter-select" name="trade_date_from" value="{{ trade_date_from }}" style="width:130px" onchange="this.form.submit()">
+                <span style="color:var(--gray-400);font-size:.75rem">–</span>
+                <input type="date" class="tl-filter-select" name="trade_date_to" value="{{ trade_date_to }}" style="width:130px" onchange="this.form.submit()">
+            </div>
+            <div class="tl-filter-divider"></div>
+            <!-- Search -->
+            <div class="tl-search-wrap">
+                <i class="bi bi-search"></i>
+                <input class="tl-search-input" type="text" name="search" value="{{ search_query }}" placeholder="Deal number, remarks…">
+            </div>
+            <!-- Settle date (collapsed) -->
+            <input type="hidden" name="settle_date_from" value="{{ settle_date_from }}">
+            <input type="hidden" name="settle_date_to" value="{{ settle_date_to }}">
+            <button type="submit" class="btn btn-sm btn-primary" title="Apply filters"><i class="bi bi-search"></i></button>
+            <a href="{% url 'trade:list' %}" class="btn btn-sm btn-outline-secondary" title="Clear all filters"><i class="bi bi-x-circle"></i></a>
         </div>
-        <div class="card-body">
-            <form method="get" action="{% url 'trade:list' %}" id="tradeSearchForm">
+
+        <!-- Active filter badges -->
+        {% if selected_portfolios or selected_securities %}
+        <div class="tl-active-filters">
+            <span class="tl-active-label">Filters:</span>
+            {% for p in selected_portfolios %}
+            <span class="tl-active-badge">
+                <i class="bi bi-briefcase"></i> {{ p }}
+                <button type="button" class="tl-badge-remove" onclick="removePortfolioFilter('{{ p }}')" title="Remove">×</button>
+            </span>
+            {% endfor %}
+            {% for s in selected_securities %}
+            <span class="tl-active-badge tl-active-badge-sec">
+                <i class="bi bi-file-earmark-text"></i> {{ s }}
+                <button type="button" class="tl-badge-remove" onclick="removeSecurityFilter('{{ s }}')" title="Remove">×</button>
+            </span>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+    </form>
+
+    <!-- Legacy hidden form (kept for JS modal submit compatibility only) -->
+    <div style="display:none">
+        <form id="tradeSearchFormLegacy" method="get" action="{% url 'trade:list' %}">
                 <div class="row g-3">
                     <!-- Text Search -->
                     <div class="col-md-3">
@@ -201,16 +316,19 @@
         </div>
     </div>
 
-    <!-- Trades Table -->
-    <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <h5 class="card-title mb-0">
-                Trade List
-                <span class="badge badge-primary ms-2">{{ total_count }} trade{{ total_count|pluralize }}</span>
-            </h5>
-            <a href="?export=csv{% if search_query %}&search={{ search_query }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if trade_type_filter %}&trade_type={{ trade_type_filter }}{% endif %}" class="btn btn-sm btn-success">
-                <i class="bi bi-download"></i> Download CSV
-            </a>
+    <!-- ── TRADES TABLE ───────────────────────────────────────── -->
+    <div class="card tl-table-card">
+        <div class="tl-table-card-header">
+            <div style="display:flex;align-items:center;gap:.5rem">
+                <span class="tl-tc-title">Trades</span>
+                <span class="tl-tc-count">{{ total_count }} trade{{ total_count|pluralize }}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:.4rem">
+                <a href="?export=csv{% if search_query %}&search={{ search_query }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if trade_type_filter %}&trade_type={{ trade_type_filter }}{% endif %}" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-download"></i> CSV
+                </a>
+                <button class="btn btn-sm btn-ghost-sm" onclick="location.reload()" title="Refresh"><i class="bi bi-arrow-repeat"></i></button>
+            </div>
         </div>
         <div class="card-body p-0">
             {% if page_obj %}
