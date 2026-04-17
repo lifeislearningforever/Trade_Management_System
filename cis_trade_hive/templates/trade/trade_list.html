@@ -9,7 +9,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="trade-list-container" style="max-width: 100%; overflow-x: hidden;">
+<div class="trade-list-container">
 
     <!-- ── KPI STRIP ──────────────────────────────────────────── -->
     <div class="tl-kpi-strip">
@@ -41,7 +41,7 @@
         </div>
         <div class="tl-kpi-card tl-kpi-neutral">
             <div class="tl-kpi-label">Trade Dashboard</div>
-            <div class="tl-kpi-value"><i class="bi bi-graph-up" style="font-size:1.4rem;opacity:.7"></i></div>
+            <div class="tl-kpi-value" style="font-size:1.4rem;opacity:.65"><i class="bi bi-graph-up"></i></div>
             <div class="tl-kpi-sub">
                 <a href="{% url 'trade:dashboard' %}" class="tl-kpi-link">
                     <i class="bi bi-graph-up"></i> Open dashboard
@@ -58,7 +58,8 @@
             <div class="tl-section-sub">Manage trades with Four-Eyes principle (Maker-Checker)</div>
         </div>
         <div class="tl-section-actions">
-            <a href="?export=csv{% if search_query %}&search={{ search_query }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if trade_type_filter %}&trade_type={{ trade_type_filter }}{% endif %}" class="btn btn-sm btn-outline-secondary">
+            <a href="?export=csv{% if search_query %}&search={{ search_query }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if trade_type_filter %}&trade_type={{ trade_type_filter }}{% endif %}"
+               class="btn btn-sm btn-outline-secondary">
                 <i class="bi bi-download"></i> Export CSV
             </a>
             <div class="dropdown">
@@ -76,8 +77,9 @@
 
     <!-- ── COMPACT INLINE FILTER BAR ─────────────────────────── -->
     <form method="get" action="{% url 'trade:list' %}" id="tradeSearchForm">
+
         <div class="tl-filter-bar">
-            <!-- Trade Type -->
+            <!-- Type -->
             <div class="tl-filter-group">
                 <span class="tl-filter-label">Type</span>
                 <select class="tl-filter-select" name="trade_type" onchange="this.form.submit()">
@@ -105,52 +107,64 @@
                     <option value="GMP" {% if src_system_filter == 'GMP' %}selected{% endif %}>GMP</option>
                 </select>
             </div>
-            <!-- Portfolios button (opens modal) -->
+            <!-- Portfolio modal trigger -->
             <div class="tl-filter-group">
                 <span class="tl-filter-label">Portfolio</span>
-                <button type="button" class="tl-filter-select tl-filter-btn" data-bs-toggle="modal" data-bs-target="#portfolioModal">
-                    {% if selected_portfolios %}{{ selected_portfolios|length }} selected{% else %}All{% endif %}
-                    <i class="bi bi-chevron-down" style="font-size:.65rem;margin-left:auto"></i>
+                <button type="button" class="tl-filter-select tl-filter-btn"
+                        data-bs-toggle="modal" data-bs-target="#portfolioModal">
+                    <span id="selectedPortfoliosLabel">{% if selected_portfolios %}{{ selected_portfolios|length }} selected{% else %}All{% endif %}</span>
+                    <i class="bi bi-chevron-down" style="font-size:.6rem;margin-left:auto;opacity:.6"></i>
                 </button>
                 <div id="selectedPortfoliosInputs">
                     {% for p in selected_portfolios %}<input type="hidden" name="portfolios" value="{{ p }}">{% endfor %}
                 </div>
             </div>
-            <!-- Securities button -->
+            <!-- Security modal trigger -->
             <div class="tl-filter-group">
                 <span class="tl-filter-label">Security</span>
-                <button type="button" class="tl-filter-select tl-filter-btn" data-bs-toggle="modal" data-bs-target="#securityModal">
-                    {% if selected_securities %}{{ selected_securities|length }} selected{% else %}All{% endif %}
-                    <i class="bi bi-chevron-down" style="font-size:.65rem;margin-left:auto"></i>
+                <button type="button" class="tl-filter-select tl-filter-btn"
+                        data-bs-toggle="modal" data-bs-target="#securityModal">
+                    <span id="selectedSecuritiesLabel">{% if selected_securities %}{{ selected_securities|length }} selected{% else %}All{% endif %}</span>
+                    <i class="bi bi-chevron-down" style="font-size:.6rem;margin-left:auto;opacity:.6"></i>
                 </button>
                 <div id="selectedSecuritiesInputs">
                     {% for s in selected_securities %}<input type="hidden" name="securities" value="{{ s }}">{% endfor %}
                 </div>
             </div>
-            <!-- Date range (trade) -->
+            <!-- Trade date range -->
             <div class="tl-filter-group">
                 <span class="tl-filter-label">Trade Date</span>
-                <input type="date" class="tl-filter-select" name="trade_date_from" value="{{ trade_date_from }}" style="width:130px" onchange="this.form.submit()">
-                <span style="color:var(--gray-400);font-size:.75rem">–</span>
-                <input type="date" class="tl-filter-select" name="trade_date_to" value="{{ trade_date_to }}" style="width:130px" onchange="this.form.submit()">
+                <input type="date" class="tl-filter-select" name="trade_date_from"
+                       value="{{ trade_date_from }}" style="width:128px" onchange="this.form.submit()">
+                <span style="color:var(--gray-400);font-size:.8rem;padding:0 2px">–</span>
+                <input type="date" class="tl-filter-select" name="trade_date_to"
+                       value="{{ trade_date_to }}" style="width:128px" onchange="this.form.submit()">
             </div>
+            <!-- hidden settle dates preserved -->
+            <input type="hidden" name="settle_date_from" value="{{ settle_date_from }}">
+            <input type="hidden" name="settle_date_to" value="{{ settle_date_to }}">
+
             <div class="tl-filter-divider"></div>
+
             <!-- Search -->
             <div class="tl-search-wrap">
                 <i class="bi bi-search"></i>
-                <input class="tl-search-input" type="text" name="search" value="{{ search_query }}" placeholder="Deal number, remarks…">
+                <input class="tl-search-input" type="text" name="search"
+                       value="{{ search_query }}" placeholder="Deal number, remarks…">
             </div>
-            <!-- Settle date (collapsed) -->
-            <input type="hidden" name="settle_date_from" value="{{ settle_date_from }}">
-            <input type="hidden" name="settle_date_to" value="{{ settle_date_to }}">
-            <button type="submit" class="btn btn-sm btn-primary" title="Apply filters"><i class="bi bi-search"></i></button>
-            <a href="{% url 'trade:list' %}" class="btn btn-sm btn-outline-secondary" title="Clear all filters"><i class="bi bi-x-circle"></i></a>
+
+            <button type="submit" class="btn btn-sm btn-primary" title="Search">
+                <i class="bi bi-search"></i>
+            </button>
+            <a href="{% url 'trade:list' %}" class="btn btn-sm btn-outline-secondary" title="Clear filters">
+                <i class="bi bi-x-circle"></i>
+            </a>
         </div>
 
         <!-- Active filter badges -->
         {% if selected_portfolios or selected_securities %}
         <div class="tl-active-filters">
-            <span class="tl-active-label">Filters:</span>
+            <span class="tl-active-label">Active filters:</span>
             {% for p in selected_portfolios %}
             <span class="tl-active-badge">
                 <i class="bi bi-briefcase"></i> {{ p }}
@@ -168,154 +182,6 @@
 
     </form>
 
-    <!-- Legacy hidden form (kept for JS modal submit compatibility only) -->
-    <div style="display:none">
-        <form id="tradeSearchFormLegacy" method="get" action="{% url 'trade:list' %}">
-                <div class="row g-3">
-                    <!-- Text Search -->
-                    <div class="col-md-3">
-                        <label class="form-label">Search</label>
-                        <div class="input-group">
-                            <span class="input-group-text"><i class="bi bi-search"></i></span>
-                            <input type="text" class="form-control" name="search" value="{{ search_query }}"
-                                   placeholder="Deal number, remarks...">
-                        </div>
-                    </div>
-
-                    <!-- Trade Type -->
-                    <div class="col-md-2">
-                        <label class="form-label">Trade Type</label>
-                        <select class="form-select" name="trade_type">
-                            <option value="">All Types</option>
-                            {% for tt in trade_types %}
-                            <option value="{{ tt.value }}" {% if trade_type_filter == tt.value %}selected{% endif %}>{{ tt.label }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-
-                    <!-- Status -->
-                    <div class="col-md-2">
-                        <label class="form-label">Status</label>
-                        <select class="form-select" name="status">
-                            {% for value, label in status_options %}
-                            <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-
-                    <!-- Portfolio Multi-Select Button -->
-                    <div class="col-md-2">
-                        <label class="form-label">Portfolios</label>
-                        <button type="button" class="btn btn-outline-secondary w-100 d-flex justify-content-between align-items-center"
-                                data-bs-toggle="modal" data-bs-target="#portfolioModal">
-                            <span id="selectedPortfoliosLabel">
-                                {% if selected_portfolios %}
-                                    {{ selected_portfolios|length }} selected
-                                {% else %}
-                                    All Portfolios
-                                {% endif %}
-                            </span>
-                            <i class="bi bi-chevron-down"></i>
-                        </button>
-                        <!-- Hidden inputs for selected portfolios -->
-                        <div id="selectedPortfoliosInputs">
-                            {% for p in selected_portfolios %}
-                            <input type="hidden" name="portfolios" value="{{ p }}">
-                            {% endfor %}
-                        </div>
-                    </div>
-
-                    <!-- Security Multi-Select Button -->
-                    <div class="col-md-2">
-                        <label class="form-label">Securities</label>
-                        <button type="button" class="btn btn-outline-secondary w-100 d-flex justify-content-between align-items-center"
-                                data-bs-toggle="modal" data-bs-target="#securityModal">
-                            <span id="selectedSecuritiesLabel">
-                                {% if selected_securities %}
-                                    {{ selected_securities|length }} selected
-                                {% else %}
-                                    All Securities
-                                {% endif %}
-                            </span>
-                            <i class="bi bi-chevron-down"></i>
-                        </button>
-                        <!-- Hidden inputs for selected securities -->
-                        <div id="selectedSecuritiesInputs">
-                            {% for s in selected_securities %}
-                            <input type="hidden" name="securities" value="{{ s }}">
-                            {% endfor %}
-                        </div>
-                    </div>
-
-                    <!-- Action Buttons -->
-                    <div class="col-md-1 d-flex align-items-end">
-                        <button type="submit" class="btn btn-primary w-100">
-                            <i class="bi bi-search"></i>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Second Row: Date Filters and Source (per SA feedback #2) -->
-                <div class="row g-3 mt-2">
-                    <div class="col-md-2">
-                        <label class="form-label">Source</label>
-                        <select class="form-select" name="src_system">
-                            <option value="">All Sources</option>
-                            <option value="CIS" {% if src_system_filter == 'CIS' %}selected{% endif %}>CIS</option>
-                            <option value="GMP" {% if src_system_filter == 'GMP' %}selected{% endif %}>GMP</option>
-                        </select>
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label">Trade Date From</label>
-                        <input type="date" class="form-control" name="trade_date_from" value="{{ trade_date_from }}">
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label">Trade Date To</label>
-                        <input type="date" class="form-control" name="trade_date_to" value="{{ trade_date_to }}">
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label">Settle Date From</label>
-                        <input type="date" class="form-control" name="settle_date_from" value="{{ settle_date_from }}">
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label">Settle Date To</label>
-                        <input type="date" class="form-control" name="settle_date_to" value="{{ settle_date_to }}">
-                    </div>
-                    <div class="col-md-2 d-flex align-items-end justify-content-end gap-2">
-                        <a href="{% url 'trade:list' %}" class="btn btn-outline-secondary">
-                            <i class="bi bi-x-circle"></i> Clear
-                        </a>
-                    </div>
-                </div>
-
-                <!-- Selected Filters Display -->
-                {% if selected_portfolios or selected_securities %}
-                <div class="row mt-3">
-                    <div class="col-12">
-                        <div class="d-flex flex-wrap gap-2 align-items-center">
-                            <span class="text-muted">Active Filters:</span>
-                            {% for p in selected_portfolios %}
-                            <span class="badge bg-primary d-flex align-items-center gap-1">
-                                <i class="bi bi-briefcase"></i> {{ p }}
-                                <button type="button" class="btn-close btn-close-white btn-sm"
-                                        onclick="removePortfolioFilter('{{ p }}')" style="font-size: 0.6rem;"></button>
-                            </span>
-                            {% endfor %}
-                            {% for s in selected_securities %}
-                            <span class="badge bg-success d-flex align-items-center gap-1">
-                                <i class="bi bi-file-earmark-text"></i> {{ s }}
-                                <button type="button" class="btn-close btn-close-white btn-sm"
-                                        onclick="removeSecurityFilter('{{ s }}')" style="font-size: 0.6rem;"></button>
-                            </span>
-                            {% endfor %}
-                        </div>
-                    </div>
-                </div>
-                {% endif %}
-            </form>
-        </div>
-    </div>
-
     <!-- ── TRADES TABLE ───────────────────────────────────────── -->
     <div class="card tl-table-card">
         <div class="tl-table-card-header">
@@ -324,40 +190,43 @@
                 <span class="tl-tc-count">{{ total_count }} trade{{ total_count|pluralize }}</span>
             </div>
             <div style="display:flex;align-items:center;gap:.4rem">
-                <a href="?export=csv{% if search_query %}&search={{ search_query }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if trade_type_filter %}&trade_type={{ trade_type_filter }}{% endif %}" class="btn btn-sm btn-outline-secondary">
+                <a href="?export=csv{% if search_query %}&search={{ search_query }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if trade_type_filter %}&trade_type={{ trade_type_filter }}{% endif %}"
+                   class="btn btn-sm btn-outline-secondary">
                     <i class="bi bi-download"></i> CSV
                 </a>
-                <button class="btn btn-sm btn-ghost-sm" onclick="location.reload()" title="Refresh"><i class="bi bi-arrow-repeat"></i></button>
+                <button class="btn-ghost-sm" onclick="location.reload()" title="Refresh">
+                    <i class="bi bi-arrow-repeat"></i>
+                </button>
             </div>
         </div>
         <div class="card-body p-0">
             {% if page_obj %}
-                <div class="table-responsive" style="display: block; width: 100%; max-height: 600px; overflow-x: auto; overflow-y: auto;">
-                    <table class="table table-hover table-sm mb-0 sortable-table" style="width: max-content;">
-                        <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
+                <div class="table-responsive" style="max-height:600px;overflow-x:auto;overflow-y:auto;">
+                    <table class="table table-hover table-sm mb-0 sortable-table" style="width:max-content;">
+                        <thead class="table-light" style="position:sticky;top:0;z-index:10;background:#f8f9fa;">
                             <tr>
-                                <th class="sortable" data-sort-type="text" style="min-width: 80px;">Source</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 120px;">Trade ID</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 100px;">Type</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Portfolio</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 70px;">Ccy</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 180px;">Security</th>
-                                <th class="sortable" data-sort-type="date" style="min-width: 110px;">Trade Date</th>
-                                <th class="sortable" data-sort-type="date" style="min-width: 110px;">Settle Date</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 100px; text-align: right;">Quantity</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 100px; text-align: right;">Price</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 120px; text-align: right;">Total Amt FC</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 70px;">Port CCY</th>
-                                <th class="sortable" data-sort-type="number" style="min-width: 120px; text-align: right;">Total Amt LC</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 130px;">Status</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 120px;">Counterparty</th>
-                                <th class="sortable" data-sort-type="date" style="min-width: 140px;">Created At</th>
-                                <th class="sticky-action-column" style="min-width: 200px;">Actions</th>
+                                <th class="sortable" data-sort-type="text" style="min-width:80px;">Source</th>
+                                <th class="sortable" data-sort-type="text" style="min-width:150px;">Trade ID</th>
+                                <th class="sortable" data-sort-type="text" style="min-width:90px;">Type</th>
+                                <th class="sortable" data-sort-type="text" style="min-width:150px;">Portfolio</th>
+                                <th class="sortable" data-sort-type="text" style="min-width:65px;">Ccy</th>
+                                <th class="sortable" data-sort-type="text" style="min-width:180px;">Security</th>
+                                <th class="sortable" data-sort-type="date" style="min-width:105px;">Trade Date</th>
+                                <th class="sortable" data-sort-type="date" style="min-width:105px;">Settle Date</th>
+                                <th class="sortable" data-sort-type="number" style="min-width:100px;text-align:right;">Quantity</th>
+                                <th class="sortable" data-sort-type="number" style="min-width:100px;text-align:right;">Price</th>
+                                <th class="sortable" data-sort-type="number" style="min-width:120px;text-align:right;">Total FC</th>
+                                <th class="sortable" data-sort-type="number" style="min-width:120px;text-align:right;">Total LC</th>
+                                <th class="sortable" data-sort-type="text" style="min-width:130px;">Status</th>
+                                <th class="sortable" data-sort-type="text" style="min-width:120px;">Counterparty</th>
+                                <th class="sortable" data-sort-type="date" style="min-width:135px;">Created At</th>
+                                <th class="sticky-action-column" style="min-width:160px;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for trade in page_obj %}
-                            <tr class="{% if trade.status == 'PENDING_VALIDATION' %}row-pending-approval{% elif trade.status == 'SETTLED' %}row-settled{% elif trade.status == 'VALIDATED' %}row-validated{% elif trade.status == 'CANCELLED' %}row-can{% elif trade.status == 'REJECTED' %}row-rejected{% endif %}" {% if trade.status == 'CANCELLED' %}style="opacity:0.6"{% endif %}>
+                            <tr class="{% if trade.status == 'PENDING_VALIDATION' %}row-pending-approval{% elif trade.status == 'SETTLED' %}row-settled{% elif trade.status == 'VALIDATED' %}row-validated{% elif trade.status == 'CANCELLED' %}row-can{% elif trade.status == 'REJECTED' %}row-rejected{% endif %}"
+                                {% if trade.status == 'CANCELLED' %}style="opacity:0.6"{% endif %}>
                                 <td>
                                     {% if trade.src_system|upper == 'CIS' %}
                                         <span class="badge badge-success">CIS</span>
@@ -379,11 +248,9 @@
                                 <td>
                                     {% if trade.currency_code %}
                                         <span class="badge badge-info">{{ trade.currency_code }}</span>
-                                    {% else %}
-                                        -
-                                    {% endif %}
+                                    {% else %}-{% endif %}
                                 </td>
-                                <td style="max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
+                                <td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
                                     title="{{ trade.security_full_name }}">
                                     {{ trade.security_label|default:"-" }}
                                 </td>
@@ -392,13 +259,6 @@
                                 <td class="num">{{ trade.quantity|floatformat:2|default:"0.00" }}</td>
                                 <td class="num">{{ trade.price|floatformat:4|default:"0.0000" }}</td>
                                 <td class="num">{{ trade.total_amount|floatformat:2|default:"0.00" }}</td>
-                                <td>
-                                    {% if trade.portfolio_currency %}
-                                        <span class="badge badge-secondary">{{ trade.portfolio_currency }}</span>
-                                    {% else %}
-                                        -
-                                    {% endif %}
-                                </td>
                                 <td class="num">{{ trade.total_amount_lc|floatformat:2|default:"0.00" }}</td>
                                 <td>
                                     {% if trade.status == 'INITIAL' %}
@@ -420,10 +280,11 @@
                                     {% endif %}
                                 </td>
                                 <td>{{ trade.counterparty|default:"-" }}</td>
-                                <td style="font-size: 0.8rem; color: var(--gray-500);">{{ trade.created_at|default:"-" }}</td>
-                                <td class="sticky-action-column" style="background-color: {% if trade.status == 'CANCELLED' %}#f8f9fa{% else %}white{% endif %};">
+                                <td style="font-size:0.8rem;color:var(--gray-500);">{{ trade.created_at|default:"-" }}</td>
+                                <td class="sticky-action-column"
+                                    style="background-color:{% if trade.status == 'CANCELLED' %}#f8f9fa{% else %}white{% endif %};">
                                     <div class="btn-group btn-group-sm" role="group">
-                                        <a href="{% url 'trade:detail' trade.trade_id %}" class="btn btn-sm btn-outline-primary" title="View Details">
+                                        <a href="{% url 'trade:detail' trade.trade_id %}" class="btn btn-sm btn-outline-primary" title="View">
                                             <i class="bi bi-eye"></i>
                                         </a>
                                         {% can_act trade "trade" as ta %}
@@ -435,7 +296,8 @@
                                         {% if ta.can_submit %}
                                             <form method="post" action="{% url 'trade:submit' trade.trade_id %}" class="d-inline">
                                                 {% csrf_token %}
-                                                <button type="submit" class="btn btn-sm btn-outline-info" title="Submit for Validation" onclick="return confirm('Submit for validation?')">
+                                                <button type="submit" class="btn btn-sm btn-outline-info" title="Submit for Validation"
+                                                        onclick="return confirm('Submit for validation?')">
                                                     <i class="bi bi-send"></i>
                                                 </button>
                                             </form>
@@ -443,7 +305,8 @@
                                         {% if ta.can_reactivate %}
                                             <form method="post" action="{% url 'trade:reactivate' trade.trade_id %}" class="d-inline">
                                                 {% csrf_token %}
-                                                <button type="submit" class="btn btn-sm btn-outline-success" title="Reactivate" onclick="return confirm('Reactivate this trade?')">
+                                                <button type="submit" class="btn btn-sm btn-outline-success" title="Reactivate"
+                                                        onclick="return confirm('Reactivate this trade?')">
                                                     <i class="bi bi-arrow-clockwise"></i>
                                                 </button>
                                             </form>
@@ -466,16 +329,12 @@
                                     <a class="page-link" href="?page=1{% if search_query %}&search={{ search_query }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if trade_type_filter %}&trade_type={{ trade_type_filter }}{% endif %}">First</a>
                                 </li>
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search_query %}&search={{ search_query }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if trade_type_filter %}&trade_type={{ trade_type_filter }}{% endif %}">Previous</a>
+                                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search_query %}&search={{ search_query }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if trade_type_filter %}&trade_type={{ trade_type_filter }}{% endif %}">Prev</a>
                                 </li>
                             {% endif %}
-
                             <li class="page-item active">
-                                <span class="page-link">
-                                    Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
-                                </span>
+                                <span class="page-link">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
                             </li>
-
                             {% if page_obj.has_next %}
                                 <li class="page-item">
                                     <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search_query %}&search={{ search_query }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if trade_type_filter %}&trade_type={{ trade_type_filter }}{% endif %}">Next</a>
@@ -488,9 +347,10 @@
                     </nav>
                 </div>
                 {% endif %}
+
             {% else %}
-                <div class="text-center py-5" style="color: var(--gray-500);">
-                    <i class="bi bi-graph-up" style="font-size: 3rem; opacity: 0.3;"></i>
+                <div class="text-center py-5" style="color:var(--gray-500);">
+                    <i class="bi bi-graph-up" style="font-size:3rem;opacity:.3;"></i>
                     <p class="mt-3 mb-0">No trades found</p>
                     {% if search_query or status_filter or trade_type_filter or selected_portfolios or selected_securities %}
                         <p class="text-muted">Try adjusting your filters</p>
@@ -507,7 +367,7 @@
     </div>
 </div>
 
-<!-- Portfolio Selection Modal -->
+<!-- ── Portfolio Selection Modal ──────────────────────────────── -->
 <div class="modal fade" id="portfolioModal" tabindex="-1" aria-labelledby="portfolioModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
@@ -518,7 +378,6 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <!-- Search in Modal -->
                 <div class="mb-3">
                     <div class="input-group">
                         <span class="input-group-text"><i class="bi bi-search"></i></span>
@@ -526,8 +385,6 @@
                                placeholder="Search portfolios by name, currency, manager...">
                     </div>
                 </div>
-
-                <!-- Quick Actions -->
                 <div class="mb-3 d-flex gap-2">
                     <button type="button" class="btn btn-sm btn-outline-primary" onclick="selectAllPortfolios()">
                         <i class="bi bi-check-all"></i> Select All
@@ -537,13 +394,11 @@
                     </button>
                     <span class="ms-auto text-muted" id="portfolioSelectedCount">0 selected</span>
                 </div>
-
-                <!-- Portfolio Table -->
-                <div class="table-responsive" style="max-height: 400px;">
+                <div class="table-responsive" style="max-height:400px;">
                     <table class="table table-hover table-sm" id="portfolioModalTable">
-                        <thead class="table-light" style="position: sticky; top: 0;">
+                        <thead class="table-light" style="position:sticky;top:0;">
                             <tr>
-                                <th style="width: 40px;">
+                                <th style="width:40px;">
                                     <input type="checkbox" class="form-check-input" id="portfolioSelectAllCheckbox"
                                            onchange="toggleAllPortfolioCheckboxes(this)">
                                 </th>
@@ -577,7 +432,7 @@
     </div>
 </div>
 
-<!-- Security Selection Modal -->
+<!-- ── Security Selection Modal ───────────────────────────────── -->
 <div class="modal fade" id="securityModal" tabindex="-1" aria-labelledby="securityModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content">
@@ -588,7 +443,6 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <!-- Search in Modal -->
                 <div class="mb-3">
                     <div class="input-group">
                         <span class="input-group-text"><i class="bi bi-search"></i></span>
@@ -596,8 +450,6 @@
                                placeholder="Search securities by label, ISIN, ticker, issuer...">
                     </div>
                 </div>
-
-                <!-- Quick Actions -->
                 <div class="mb-3 d-flex gap-2">
                     <button type="button" class="btn btn-sm btn-outline-primary" onclick="selectAllSecurities()">
                         <i class="bi bi-check-all"></i> Select All
@@ -607,13 +459,11 @@
                     </button>
                     <span class="ms-auto text-muted" id="securitySelectedCount">0 selected</span>
                 </div>
-
-                <!-- Security Table -->
-                <div class="table-responsive" style="max-height: 400px;">
+                <div class="table-responsive" style="max-height:400px;">
                     <table class="table table-hover table-sm" id="securityModalTable">
-                        <thead class="table-light" style="position: sticky; top: 0;">
+                        <thead class="table-light" style="position:sticky;top:0;">
                             <tr>
-                                <th style="width: 40px;">
+                                <th style="width:40px;">
                                     <input type="checkbox" class="form-check-input" id="securitySelectAllCheckbox"
                                            onchange="toggleAllSecurityCheckboxes(this)">
                                 </th>
@@ -654,359 +504,195 @@
 
 {% block extra_js %}
 <script>
-// ============================================================
-// Global Variables
-// ============================================================
+// ── Global state ─────────────────────────────────────────────
 let portfolioData = [];
 let securityData = [];
 let selectedPortfolios = new Set([{% for p in selected_portfolios %}'{{ p }}',{% endfor %}]);
 let selectedSecurities = new Set([{% for s in selected_securities %}'{{ s }}',{% endfor %}]);
 
-// ============================================================
-// Portfolio Modal Functions
-// ============================================================
-
-// Load portfolios when modal opens
+// ── Portfolio Modal ───────────────────────────────────────────
 document.getElementById('portfolioModal').addEventListener('show.bs.modal', function() {
     loadPortfolios();
 });
 
 function loadPortfolios(search = '') {
     const tbody = document.getElementById('portfolioModalTableBody');
-    tbody.innerHTML = `
-        <tr>
-            <td colspan="6" class="text-center py-4">
-                <div class="spinner-border spinner-border-sm text-primary" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
-                <span class="ms-2">Loading portfolios...</span>
-            </td>
-        </tr>
-    `;
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4">
+        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+        <span class="ms-2">Loading portfolios...</span></td></tr>`;
 
     fetch(`{% url 'trade:api_portfolios_detailed' %}?search=${encodeURIComponent(search)}`)
-        .then(response => response.json())
-        .then(data => {
-            portfolioData = data.results || [];
-            renderPortfolioTable();
-        })
-        .catch(error => {
-            console.error('Error loading portfolios:', error);
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="6" class="text-center py-4 text-danger">
-                        <i class="bi bi-exclamation-triangle"></i> Error loading portfolios
-                    </td>
-                </tr>
-            `;
+        .then(r => r.json())
+        .then(data => { portfolioData = data.results || []; renderPortfolioTable(); })
+        .catch(() => {
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-danger">
+                <i class="bi bi-exclamation-triangle"></i> Error loading portfolios</td></tr>`;
         });
 }
 
 function renderPortfolioTable() {
     const tbody = document.getElementById('portfolioModalTableBody');
-    const searchTerm = document.getElementById('portfolioModalSearch').value.toLowerCase();
-
-    const filteredData = portfolioData.filter(p => {
-        const searchStr = `${p.portfolio_short_name} ${p.portfolio_full_name} ${p.currency} ${p.manager}`.toLowerCase();
-        return searchStr.includes(searchTerm);
-    });
-
-    if (filteredData.length === 0) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="6" class="text-center py-4 text-muted">
-                    <i class="bi bi-inbox"></i> No portfolios found
-                </td>
-            </tr>
-        `;
+    const term = document.getElementById('portfolioModalSearch').value.toLowerCase();
+    const data = portfolioData.filter(p =>
+        `${p.portfolio_short_name} ${p.portfolio_full_name} ${p.currency} ${p.manager}`.toLowerCase().includes(term)
+    );
+    if (!data.length) {
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-muted"><i class="bi bi-inbox"></i> No portfolios found</td></tr>`;
         return;
     }
-
-    tbody.innerHTML = filteredData.map(p => `
+    tbody.innerHTML = data.map(p => `
         <tr class="${selectedPortfolios.has(p.portfolio_short_name) ? 'table-primary' : ''}"
             onclick="togglePortfolioRow('${p.portfolio_short_name}', this)">
-            <td>
-                <input type="checkbox" class="form-check-input portfolio-checkbox"
-                       value="${p.portfolio_short_name}"
-                       ${selectedPortfolios.has(p.portfolio_short_name) ? 'checked' : ''}
-                       onclick="event.stopPropagation(); togglePortfolio('${p.portfolio_short_name}')">
-            </td>
+            <td><input type="checkbox" class="form-check-input portfolio-checkbox" value="${p.portfolio_short_name}"
+                ${selectedPortfolios.has(p.portfolio_short_name) ? 'checked' : ''}
+                onclick="event.stopPropagation(); togglePortfolio('${p.portfolio_short_name}')"></td>
             <td><strong>${p.portfolio_short_name}</strong></td>
             <td>${p.portfolio_full_name || '-'}</td>
             <td><span class="badge badge-info">${p.currency || '-'}</span></td>
             <td>${p.manager || '-'}</td>
-            <td>
-                <span class="badge ${getStatusBadgeClass(p.status)}">${p.status || '-'}</span>
-            </td>
-        </tr>
-    `).join('');
-
+            <td><span class="badge ${getStatusBadgeClass(p.status)}">${p.status || '-'}</span></td>
+        </tr>`).join('');
     updatePortfolioCount();
 }
 
-function togglePortfolioRow(portfolioName, row) {
-    togglePortfolio(portfolioName);
+function togglePortfolioRow(name, row) {
+    togglePortfolio(name);
     row.classList.toggle('table-primary');
-    const checkbox = row.querySelector('.portfolio-checkbox');
-    checkbox.checked = selectedPortfolios.has(portfolioName);
+    row.querySelector('.portfolio-checkbox').checked = selectedPortfolios.has(name);
 }
-
-function togglePortfolio(portfolioName) {
-    if (selectedPortfolios.has(portfolioName)) {
-        selectedPortfolios.delete(portfolioName);
-    } else {
-        selectedPortfolios.add(portfolioName);
-    }
+function togglePortfolio(name) {
+    selectedPortfolios.has(name) ? selectedPortfolios.delete(name) : selectedPortfolios.add(name);
     updatePortfolioCount();
 }
-
 function selectAllPortfolios() {
-    const searchTerm = document.getElementById('portfolioModalSearch').value.toLowerCase();
+    const term = document.getElementById('portfolioModalSearch').value.toLowerCase();
     portfolioData.forEach(p => {
-        const searchStr = `${p.portfolio_short_name} ${p.portfolio_full_name} ${p.currency} ${p.manager}`.toLowerCase();
-        if (searchStr.includes(searchTerm)) {
+        if (`${p.portfolio_short_name} ${p.portfolio_full_name} ${p.currency} ${p.manager}`.toLowerCase().includes(term))
             selectedPortfolios.add(p.portfolio_short_name);
-        }
     });
     renderPortfolioTable();
 }
-
-function clearAllPortfolios() {
-    selectedPortfolios.clear();
-    renderPortfolioTable();
-}
-
-function toggleAllPortfolioCheckboxes(masterCheckbox) {
-    if (masterCheckbox.checked) {
-        selectAllPortfolios();
-    } else {
-        clearAllPortfolios();
-    }
-}
-
+function clearAllPortfolios() { selectedPortfolios.clear(); renderPortfolioTable(); }
+function toggleAllPortfolioCheckboxes(cb) { cb.checked ? selectAllPortfolios() : clearAllPortfolios(); }
 function updatePortfolioCount() {
     document.getElementById('portfolioSelectedCount').textContent = `${selectedPortfolios.size} selected`;
 }
-
 function applyPortfolioSelection() {
-    // Update the hidden inputs
-    const container = document.getElementById('selectedPortfoliosInputs');
-    container.innerHTML = Array.from(selectedPortfolios)
-        .map(p => `<input type="hidden" name="portfolios" value="${p}">`)
-        .join('');
-
-    // Update the label
-    const label = document.getElementById('selectedPortfoliosLabel');
-    if (selectedPortfolios.size === 0) {
-        label.textContent = 'All Portfolios';
-    } else {
-        label.textContent = `${selectedPortfolios.size} selected`;
-    }
-
-    // Close modal
-    const modal = bootstrap.Modal.getInstance(document.getElementById('portfolioModal'));
-    modal.hide();
+    document.getElementById('selectedPortfoliosInputs').innerHTML =
+        Array.from(selectedPortfolios).map(p => `<input type="hidden" name="portfolios" value="${p}">`).join('');
+    const lbl = document.getElementById('selectedPortfoliosLabel');
+    lbl.textContent = selectedPortfolios.size ? `${selectedPortfolios.size} selected` : 'All';
+    bootstrap.Modal.getInstance(document.getElementById('portfolioModal')).hide();
 }
 
-// Portfolio search with debounce
 let portfolioSearchTimeout;
 document.getElementById('portfolioModalSearch').addEventListener('input', function() {
     clearTimeout(portfolioSearchTimeout);
-    portfolioSearchTimeout = setTimeout(() => {
-        renderPortfolioTable();
-    }, 300);
+    portfolioSearchTimeout = setTimeout(renderPortfolioTable, 300);
 });
 
-// ============================================================
-// Security Modal Functions
-// ============================================================
-
-// Load securities when modal opens
+// ── Security Modal ────────────────────────────────────────────
 document.getElementById('securityModal').addEventListener('show.bs.modal', function() {
     loadSecurities();
 });
 
 function loadSecurities(search = '') {
     const tbody = document.getElementById('securityModalTableBody');
-    tbody.innerHTML = `
-        <tr>
-            <td colspan="9" class="text-center py-4">
-                <div class="spinner-border spinner-border-sm text-primary" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
-                <span class="ms-2">Loading securities...</span>
-            </td>
-        </tr>
-    `;
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center py-4">
+        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+        <span class="ms-2">Loading securities...</span></td></tr>`;
 
     fetch(`{% url 'trade:api_securities_detailed' %}?search=${encodeURIComponent(search)}`)
-        .then(response => response.json())
-        .then(data => {
-            securityData = data.results || [];
-            renderSecurityTable();
-        })
-        .catch(error => {
-            console.error('Error loading securities:', error);
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="9" class="text-center py-4 text-danger">
-                        <i class="bi bi-exclamation-triangle"></i> Error loading securities
-                    </td>
-                </tr>
-            `;
+        .then(r => r.json())
+        .then(data => { securityData = data.results || []; renderSecurityTable(); })
+        .catch(() => {
+            tbody.innerHTML = `<tr><td colspan="9" class="text-center py-4 text-danger">
+                <i class="bi bi-exclamation-triangle"></i> Error loading securities</td></tr>`;
         });
 }
 
 function renderSecurityTable() {
     const tbody = document.getElementById('securityModalTableBody');
-    const searchTerm = document.getElementById('securityModalSearch').value.toLowerCase();
-
-    const filteredData = securityData.filter(s => {
-        const searchStr = `${s.security_label} ${s.security_full_name} ${s.isin} ${s.ticker} ${s.issuer} ${s.security_type}`.toLowerCase();
-        return searchStr.includes(searchTerm);
-    });
-
-    if (filteredData.length === 0) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="9" class="text-center py-4 text-muted">
-                    <i class="bi bi-inbox"></i> No securities found
-                </td>
-            </tr>
-        `;
+    const term = document.getElementById('securityModalSearch').value.toLowerCase();
+    const data = securityData.filter(s =>
+        `${s.security_label} ${s.security_full_name} ${s.isin} ${s.ticker} ${s.issuer} ${s.security_type}`.toLowerCase().includes(term)
+    );
+    if (!data.length) {
+        tbody.innerHTML = `<tr><td colspan="9" class="text-center py-4 text-muted"><i class="bi bi-inbox"></i> No securities found</td></tr>`;
         return;
     }
-
-    tbody.innerHTML = filteredData.map(s => `
+    tbody.innerHTML = data.map(s => `
         <tr class="${selectedSecurities.has(s.security_label) ? 'table-success' : ''}"
             onclick="toggleSecurityRow('${s.security_label}', this)">
-            <td>
-                <input type="checkbox" class="form-check-input security-checkbox"
-                       value="${s.security_label}"
-                       ${selectedSecurities.has(s.security_label) ? 'checked' : ''}
-                       onclick="event.stopPropagation(); toggleSecurity('${s.security_label}')">
-            </td>
+            <td><input type="checkbox" class="form-check-input security-checkbox" value="${s.security_label}"
+                ${selectedSecurities.has(s.security_label) ? 'checked' : ''}
+                onclick="event.stopPropagation(); toggleSecurity('${s.security_label}')"></td>
             <td><strong>${s.security_label}</strong></td>
-            <td style="max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
+            <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
                 title="${s.security_full_name || ''}">${s.security_full_name || '-'}</td>
             <td><span class="badge bg-secondary">${s.security_type || '-'}</span></td>
             <td>${s.isin || '-'}</td>
             <td>${s.ticker || '-'}</td>
             <td><span class="badge badge-info">${s.currency_code || '-'}</span></td>
             <td>${s.issuer || '-'}</td>
-            <td>
-                <span class="badge ${getStatusBadgeClass(s.status)}">${s.status || '-'}</span>
-            </td>
-        </tr>
-    `).join('');
-
+            <td><span class="badge ${getStatusBadgeClass(s.status)}">${s.status || '-'}</span></td>
+        </tr>`).join('');
     updateSecurityCount();
 }
 
-function toggleSecurityRow(securityLabel, row) {
-    toggleSecurity(securityLabel);
+function toggleSecurityRow(label, row) {
+    toggleSecurity(label);
     row.classList.toggle('table-success');
-    const checkbox = row.querySelector('.security-checkbox');
-    checkbox.checked = selectedSecurities.has(securityLabel);
+    row.querySelector('.security-checkbox').checked = selectedSecurities.has(label);
 }
-
-function toggleSecurity(securityLabel) {
-    if (selectedSecurities.has(securityLabel)) {
-        selectedSecurities.delete(securityLabel);
-    } else {
-        selectedSecurities.add(securityLabel);
-    }
+function toggleSecurity(label) {
+    selectedSecurities.has(label) ? selectedSecurities.delete(label) : selectedSecurities.add(label);
     updateSecurityCount();
 }
-
 function selectAllSecurities() {
-    const searchTerm = document.getElementById('securityModalSearch').value.toLowerCase();
+    const term = document.getElementById('securityModalSearch').value.toLowerCase();
     securityData.forEach(s => {
-        const searchStr = `${s.security_label} ${s.security_full_name} ${s.isin} ${s.ticker} ${s.issuer}`.toLowerCase();
-        if (searchStr.includes(searchTerm)) {
+        if (`${s.security_label} ${s.security_full_name} ${s.isin} ${s.ticker} ${s.issuer}`.toLowerCase().includes(term))
             selectedSecurities.add(s.security_label);
-        }
     });
     renderSecurityTable();
 }
-
-function clearAllSecurities() {
-    selectedSecurities.clear();
-    renderSecurityTable();
-}
-
-function toggleAllSecurityCheckboxes(masterCheckbox) {
-    if (masterCheckbox.checked) {
-        selectAllSecurities();
-    } else {
-        clearAllSecurities();
-    }
-}
-
+function clearAllSecurities() { selectedSecurities.clear(); renderSecurityTable(); }
+function toggleAllSecurityCheckboxes(cb) { cb.checked ? selectAllSecurities() : clearAllSecurities(); }
 function updateSecurityCount() {
     document.getElementById('securitySelectedCount').textContent = `${selectedSecurities.size} selected`;
 }
-
 function applySecuritySelection() {
-    // Update the hidden inputs
-    const container = document.getElementById('selectedSecuritiesInputs');
-    container.innerHTML = Array.from(selectedSecurities)
-        .map(s => `<input type="hidden" name="securities" value="${s}">`)
-        .join('');
-
-    // Update the label
-    const label = document.getElementById('selectedSecuritiesLabel');
-    if (selectedSecurities.size === 0) {
-        label.textContent = 'All Securities';
-    } else {
-        label.textContent = `${selectedSecurities.size} selected`;
-    }
-
-    // Close modal
-    const modal = bootstrap.Modal.getInstance(document.getElementById('securityModal'));
-    modal.hide();
+    document.getElementById('selectedSecuritiesInputs').innerHTML =
+        Array.from(selectedSecurities).map(s => `<input type="hidden" name="securities" value="${s}">`).join('');
+    const lbl = document.getElementById('selectedSecuritiesLabel');
+    lbl.textContent = selectedSecurities.size ? `${selectedSecurities.size} selected` : 'All';
+    bootstrap.Modal.getInstance(document.getElementById('securityModal')).hide();
 }
 
-// Security search with debounce
 let securitySearchTimeout;
 document.getElementById('securityModalSearch').addEventListener('input', function() {
     clearTimeout(securitySearchTimeout);
-    securitySearchTimeout = setTimeout(() => {
-        renderSecurityTable();
-    }, 300);
+    securitySearchTimeout = setTimeout(renderSecurityTable, 300);
 });
 
-// ============================================================
-// Helper Functions
-// ============================================================
-
+// ── Helpers ───────────────────────────────────────────────────
 function getStatusBadgeClass(status) {
-    switch(status) {
-        case 'INITIAL': return 'badge-secondary';
-        case 'MODIFIED': return 'badge-info';
-        case 'PENDING_VALIDATION': return 'badge-warning';
-        case 'VALIDATED': return 'badge-primary';
-        case 'SETTLED': return 'badge-success';
-        case 'ACTIVE': return 'badge-success';
-        case 'APPROVED': return 'badge-success';
-        case 'CANCELLED': return 'badge-dark';
-        default: return 'badge-secondary';
-    }
+    const m = { INITIAL:'badge-secondary', MODIFIED:'badge-info', PENDING_VALIDATION:'badge-warning',
+                VALIDATED:'badge-primary', SETTLED:'badge-success', ACTIVE:'badge-success',
+                APPROVED:'badge-success', CANCELLED:'badge-dark' };
+    return m[status] || 'badge-secondary';
 }
-
-function removePortfolioFilter(portfolioName) {
-    selectedPortfolios.delete(portfolioName);
+function removePortfolioFilter(name) {
+    selectedPortfolios.delete(name);
     applyPortfolioSelection();
     document.getElementById('tradeSearchForm').submit();
 }
-
-function removeSecurityFilter(securityName) {
-    selectedSecurities.delete(securityName);
+function removeSecurityFilter(name) {
+    selectedSecurities.delete(name);
     applySecuritySelection();
     document.getElementById('tradeSearchForm').submit();
 }
-
-// Initialize counts on page load
 document.addEventListener('DOMContentLoaded', function() {
     updatePortfolioCount();
     updateSecurityCount();
