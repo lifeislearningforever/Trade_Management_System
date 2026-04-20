@@ -493,13 +493,38 @@ def start_trade_event_worker():
             else:
                 print(f"==> Trade Event Worker: POSITION_CANCEL warning for trade {trade_id}: {msg}")
 
-        def mark_completed(event_id, event):
-            """Mark event as completed."""
+        def mark_processing(event_id, event):
+            """Mark event as PROCESSING before starting work (prevents double-processing)."""
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             upsert_query = f"""
             UPSERT INTO {DATABASE}.{EVENT_QUEUE_TABLE}
             (event_id, trade_id, deal_number, event_type, event_data, status,
-             retry_count, error_message, created_by, created_at, processed_at)
+             retry_count, error_message, created_by, created_at, processing_started_at, processed_at)
+            VALUES (
+                {event_id},
+                {event['trade_id']},
+                '{event['deal_number']}',
+                '{event['event_type']}',
+                '{event['event_data'].replace("'", "''")}',
+                'PROCESSING',
+                {event.get('retry_count', 0)},
+                NULL,
+                '{event['created_by']}',
+                '{event['created_at']}',
+                '{timestamp}',
+                NULL
+            )
+            """
+            impala_manager.execute_write(upsert_query, database=DATABASE)
+
+        def mark_completed(event_id, event):
+            """Mark event as completed."""
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            processing_started_at = event.get('processing_started_at') or timestamp
+            upsert_query = f"""
+            UPSERT INTO {DATABASE}.{EVENT_QUEUE_TABLE}
+            (event_id, trade_id, deal_number, event_type, event_data, status,
+             retry_count, error_message, created_by, created_at, processing_started_at, processed_at)
             VALUES (
                 {event_id},
                 {event['trade_id']},
@@ -511,6 +536,7 @@ def start_trade_event_worker():
                 NULL,
                 '{event['created_by']}',
                 '{event['created_at']}',
+                '{processing_started_at}',
                 '{timestamp}'
             )
             """
@@ -522,11 +548,12 @@ def start_trade_event_worker():
             new_retry_count = retry_count + 1
             status = 'FAILED' if new_retry_count >= 3 else 'PENDING'
             error_escaped = error_message.replace("'", "''")[:500]
+            processing_started_at = event.get('processing_started_at') or timestamp
 
             upsert_query = f"""
             UPSERT INTO {DATABASE}.{EVENT_QUEUE_TABLE}
             (event_id, trade_id, deal_number, event_type, event_data, status,
-             retry_count, error_message, created_by, created_at, processed_at)
+             retry_count, error_message, created_by, created_at, processing_started_at, processed_at)
             VALUES (
                 {event_id},
                 {event['trade_id']},
@@ -538,6 +565,7 @@ def start_trade_event_worker():
                 '{error_escaped}',
                 '{event['created_by']}',
                 '{event['created_at']}',
+                '{processing_started_at}',
                 '{timestamp}'
             )
             """
@@ -545,10 +573,10 @@ def start_trade_event_worker():
 
         while not _shutdown_requested:
             try:
-                # Get pending events
+                # Get pending events (exclude PROCESSING to prevent double-processing)
                 query = f"""
                 SELECT event_id, trade_id, deal_number, event_type, event_data,
-                       retry_count, created_by, created_at
+                       retry_count, created_by, created_at, processing_started_at
                 FROM {DATABASE}.{EVENT_QUEUE_TABLE}
                 WHERE status = 'PENDING'
                 ORDER BY created_at
@@ -561,7 +589,13 @@ def start_trade_event_worker():
                     for event in events:
                         if _shutdown_requested:
                             break
+                        event_id = event['event_id']
                         try:
+                            # Mark as PROCESSING first — prevents other workers/threads picking same event
+                            mark_processing(event_id, event)
+                            # Store processing_started_at on event dict for mark_completed/mark_failed
+                            event['processing_started_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
                             event_type = event.get('event_type')
                             event_data = json.loads(event.get('event_data', '{}'))
 
@@ -576,11 +610,11 @@ def start_trade_event_worker():
                             else:
                                 print(f"==> Trade Event Worker: Unknown event type: {event_type}")
 
-                            mark_completed(event['event_id'], event)
+                            mark_completed(event_id, event)
 
                         except Exception as e:
-                            print(f"==> Trade Event Worker: Error processing event {event['event_id']}: {e}")
-                            mark_failed(event['event_id'], event, str(e), event.get('retry_count', 0))
+                            print(f"==> Trade Event Worker: Error processing event {event_id}: {e}")
+                            mark_failed(event_id, event, str(e), event.get('retry_count', 0))
                 else:
                     # No events, sleep
                     time.sleep(TRADE_EVENT_WORKER_POLL_INTERVAL)
