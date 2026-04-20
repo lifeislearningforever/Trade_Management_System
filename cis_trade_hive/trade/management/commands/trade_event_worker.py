@@ -139,13 +139,13 @@ class Command(BaseCommand):
     def _process_batch(self, batch_size: int) -> int:
         """Process a batch of pending events."""
         try:
-            # Get pending events
+            # Get pending events only — exclude PROCESSING to prevent double-processing
             query = f"""
             SELECT event_id, trade_id, deal_number, event_type, event_data,
                    retry_count, created_by
             FROM {self.DATABASE}.{self.EVENT_QUEUE_TABLE}
             WHERE status = 'PENDING'
-            ORDER BY created_at
+            ORDER BY created_at ASC
             LIMIT {batch_size}
             """
             events = impala_manager.execute_query(query, database=self.DATABASE)
@@ -156,6 +156,9 @@ class Command(BaseCommand):
             processed = 0
             for event in events:
                 try:
+                    # Mark PROCESSING before starting — prevents second worker/poll
+                    # from picking up the same event and double-processing it
+                    self._mark_processing(event['event_id'])
                     self._process_event(event)
                     self._mark_completed(event['event_id'])
                     processed += 1
@@ -424,16 +427,13 @@ class Command(BaseCommand):
         else:
             logger.warning(f"POSITION_CANCEL warning for trade {trade_id}: {msg}")
 
-    def _mark_completed(self, event_id: int):
-        """Mark event as completed."""
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        query = f"""
-        UPDATE {self.DATABASE}.{self.EVENT_QUEUE_TABLE}
-        SET status = 'COMPLETED', processed_at = '{timestamp}'
-        WHERE event_id = {event_id}
+    def _mark_processing(self, event_id: int):
         """
-        # Kudu doesn't support UPDATE, use UPSERT pattern
-        # First get the event, then upsert with new status
+        Mark event as PROCESSING before starting work.
+        Critical: prevents second worker/poll from picking up same event.
+        Uses processing_started_at (not created_at) for stale timeout checks.
+        """
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         get_query = f"""
         SELECT * FROM {self.DATABASE}.{self.EVENT_QUEUE_TABLE}
         WHERE event_id = {event_id}
@@ -444,7 +444,40 @@ class Command(BaseCommand):
             upsert_query = f"""
             UPSERT INTO {self.DATABASE}.{self.EVENT_QUEUE_TABLE}
             (event_id, trade_id, deal_number, event_type, event_data, status,
-             retry_count, error_message, created_by, created_at, processed_at)
+             retry_count, error_message, created_by, created_at,
+             processing_started_at, processed_at)
+            VALUES (
+                {event_id},
+                {event['trade_id']},
+                '{event['deal_number']}',
+                '{event['event_type']}',
+                '{event['event_data'].replace("'", "''")}',
+                'PROCESSING',
+                {event.get('retry_count', 0)},
+                NULL,
+                '{event['created_by']}',
+                '{event['created_at']}',
+                '{timestamp}',
+                NULL
+            )
+            """
+            impala_manager.execute_write(upsert_query, database=self.DATABASE)
+
+    def _mark_completed(self, event_id: int):
+        """Mark event as completed."""
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        get_query = f"""
+        SELECT * FROM {self.DATABASE}.{self.EVENT_QUEUE_TABLE}
+        WHERE event_id = {event_id}
+        """
+        results = impala_manager.execute_query(get_query, database=self.DATABASE)
+        if results:
+            event = results[0]
+            upsert_query = f"""
+            UPSERT INTO {self.DATABASE}.{self.EVENT_QUEUE_TABLE}
+            (event_id, trade_id, deal_number, event_type, event_data, status,
+             retry_count, error_message, created_by, created_at,
+             processing_started_at, processed_at)
             VALUES (
                 {event_id},
                 {event['trade_id']},
@@ -456,6 +489,7 @@ class Command(BaseCommand):
                 NULL,
                 '{event['created_by']}',
                 '{event['created_at']}',
+                {f"'{event['processing_started_at']}'" if event.get('processing_started_at') else 'NULL'},
                 '{timestamp}'
             )
             """
@@ -474,11 +508,12 @@ class Command(BaseCommand):
         results = impala_manager.execute_query(get_query, database=self.DATABASE)
         if results:
             event = results[0]
-            error_escaped = error_message.replace("'", "''")[:500]  # Limit error length
+            error_escaped = error_message.replace("'", "''")[:500]
             upsert_query = f"""
             UPSERT INTO {self.DATABASE}.{self.EVENT_QUEUE_TABLE}
             (event_id, trade_id, deal_number, event_type, event_data, status,
-             retry_count, error_message, created_by, created_at, processed_at)
+             retry_count, error_message, created_by, created_at,
+             processing_started_at, processed_at)
             VALUES (
                 {event_id},
                 {event['trade_id']},
@@ -490,7 +525,8 @@ class Command(BaseCommand):
                 '{error_escaped}',
                 '{event['created_by']}',
                 '{event['created_at']}',
-                '{timestamp}'
+                {f"'{event['processing_started_at']}'" if event.get('processing_started_at') else 'NULL'},
+                NULL
             )
             """
             impala_manager.execute_write(upsert_query, database=self.DATABASE)
