@@ -173,18 +173,26 @@ class TradeEventQueueService:
         """
         Fetch pending events from queue, ordered by creation time.
         Also picks up stale PROCESSING events (timeout recovery).
+
+        Timeout uses processing_started_at (not created_at) so events that sit
+        in the queue for a long time before being picked up are never mistaken
+        for stale — only events where the worker itself has been running too long
+        are recovered. This prevents double-processing and qty doubling.
         """
         try:
-            # Calculate timeout threshold
+            # Calculate timeout threshold based on when processing STARTED, not created
             timeout_threshold = datetime.now().timestamp() - self.PROCESSING_TIMEOUT_SECONDS
             timeout_str = datetime.fromtimestamp(timeout_threshold).strftime('%Y-%m-%d %H:%M:%S')
 
             query = f"""
             SELECT event_id, trade_id, deal_number, event_type, event_data,
-                   status, retry_count, error_message, created_by, created_at
+                   status, retry_count, error_message, created_by, created_at,
+                   processing_started_at, processed_at
             FROM {self.DATABASE}.{self.EVENT_QUEUE_TABLE}
             WHERE status = '{self.STATUS_PENDING}'
-               OR (status = '{self.STATUS_PROCESSING}' AND created_at < '{timeout_str}')
+               OR (status = '{self.STATUS_PROCESSING}'
+                   AND processing_started_at IS NOT NULL
+                   AND processing_started_at < '{timeout_str}')
             ORDER BY created_at ASC
             LIMIT {self.BATCH_SIZE}
             """
@@ -661,6 +669,11 @@ class TradeEventQueueService:
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             set_clauses = [f"status = '{status}'"]
+
+            if status == self.STATUS_PROCESSING:
+                # Record exactly when worker started — used for stale timeout check
+                # (prevents double-processing when event sits in queue > PROCESSING_TIMEOUT_SECONDS)
+                set_clauses.append(f"processing_started_at = '{timestamp}'")
 
             if status == self.STATUS_COMPLETED:
                 set_clauses.append(f"processed_at = '{timestamp}'")

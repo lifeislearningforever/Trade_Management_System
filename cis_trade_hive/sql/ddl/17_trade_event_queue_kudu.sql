@@ -56,6 +56,7 @@ CREATE TABLE cis_trade_event_queue (
     -- Audit trail
     created_by STRING,                        -- User who created the trade
     created_at STRING,                        -- When event was queued (YYYY-MM-DD HH:MM:SS)
+    processing_started_at STRING,             -- When worker started processing (YYYY-MM-DD HH:MM:SS)
     processed_at STRING,                      -- When event was completed (YYYY-MM-DD HH:MM:SS)
 
     PRIMARY KEY (event_id)
