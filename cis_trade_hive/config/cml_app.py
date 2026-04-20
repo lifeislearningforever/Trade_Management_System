@@ -199,12 +199,18 @@ def start_kerberos_renewal_loop(keytab, principal, interval_sec=3600, cache=None
     t.start()
 
 
+_worker_lock_fd = None  # File descriptor held for the lifetime of the process
+
+
 def start_trade_event_worker():
     """
     Start the Trade Event Worker in a background thread.
 
-    This worker processes trade events (HISTORY, SETTLEMENT) asynchronously,
-    decoupling them from trade save for faster response times.
+    Only ONE gunicorn worker process runs the thread at a time.  A process-level
+    file lock (/tmp/cis_trade_event_worker.lock) ensures that when gunicorn spawns
+    multiple worker processes only the first one to acquire the lock actually starts
+    the background thread.  All others print a skip message and return — they still
+    serve HTTP requests normally.
 
     Queue Table: cis_trade_event_queue
     Event Types:
@@ -215,13 +221,28 @@ def start_trade_event_worker():
     - Processes events from cis_trade_event_queue
     - SLA: < 5 minutes from queue to completion
     - Auto-retry with max 3 attempts
+    - Stale PROCESSING recovery (events stuck > 5 min re-queued)
     - Graceful shutdown on SIGTERM/SIGINT
     """
-    global _trade_event_worker_thread, _shutdown_requested
+    global _trade_event_worker_thread, _shutdown_requested, _worker_lock_fd
 
     if not TRADE_EVENT_WORKER_ENABLED:
         print("==> Trade Event Worker: DISABLED (TRADE_EVENT_WORKER_ENABLED=0)")
         return
+
+    # --- Process-level lock: only ONE gunicorn worker runs the background thread ---
+    import fcntl as _fcntl
+    _lock_path = '/tmp/cis_trade_event_worker.lock'
+    try:
+        _worker_lock_fd = open(_lock_path, 'w')
+        _fcntl.flock(_worker_lock_fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+        _worker_lock_fd.write(str(os.getpid()))
+        _worker_lock_fd.flush()
+        print(f"==> Trade Event Worker: Acquired process lock (pid={os.getpid()})")
+    except BlockingIOError:
+        print(f"==> Trade Event Worker: Another gunicorn worker already holds the lock — skipping thread start (pid={os.getpid()})")
+        return
+    # ---------------------------------------------------------------------------
 
     print("==> Starting Trade Event Worker...")
     print(f"    Poll Interval: {TRADE_EVENT_WORKER_POLL_INTERVAL}s")
@@ -571,14 +592,25 @@ def start_trade_event_worker():
             """
             impala_manager.execute_write(upsert_query, database=DATABASE)
 
+        STALE_PROCESSING_TIMEOUT_SECONDS = 300  # 5 minutes
+        from datetime import timedelta as _timedelta
+
         while not _shutdown_requested:
             try:
-                # Get pending events (exclude PROCESSING to prevent double-processing)
+                # Compute stale-PROCESSING threshold (events running > 5 min are re-fetched)
+                stale_threshold = (
+                    datetime.now() - _timedelta(seconds=STALE_PROCESSING_TIMEOUT_SECONDS)
+                ).strftime('%Y-%m-%d %H:%M:%S')
+
+                # Fetch PENDING events AND stale PROCESSING events (stuck > 5 min)
                 query = f"""
                 SELECT event_id, trade_id, deal_number, event_type, event_data,
                        retry_count, created_by, created_at, processing_started_at
                 FROM {DATABASE}.{EVENT_QUEUE_TABLE}
                 WHERE status = 'PENDING'
+                   OR (status = 'PROCESSING'
+                       AND processing_started_at IS NOT NULL
+                       AND processing_started_at < '{stale_threshold}')
                 ORDER BY created_at
                 LIMIT {TRADE_EVENT_WORKER_BATCH_SIZE}
                 """
