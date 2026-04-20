@@ -258,7 +258,7 @@
                                 <td>{{ trade.settle_date|default:"-" }}</td>
                                 <td class="num">{{ trade.quantity|floatformat:2|default:"0.00" }}</td>
                                 <td class="num">{{ trade.price|floatformat:4|default:"0.0000" }}</td>
-                                <td class="num">{{ trade.total_amount|floatformat:2|default:"0.00" }}</td>
+                                <td class="num">{{ trade.total_amount_fc|floatformat:2|default:"0.00" }}</td>
                                 <td class="num">{{ trade.total_amount_lc|floatformat:2|default:"0.00" }}</td>
                                 <td>
                                     {% if trade.status == 'INITIAL' %}

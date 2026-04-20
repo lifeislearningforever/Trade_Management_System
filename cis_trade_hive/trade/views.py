@@ -272,7 +272,10 @@ def trade_list(request):
     for trade in trades_data:
         fc = trade.get('currency_code', '')
         lc = trade.get('portfolio_currency', '')
-        total_fc = Decimal(str(trade.get('total_amount', 0) or 0))
+        total_fc = Decimal(str(trade.get('total_amount_fc') or trade.get('total_amount', 0) or 0))
+
+        # Always write resolved FC value back so TradeWrapper.total_amount reflects it
+        trade['total_amount_fc'] = float(total_fc)
 
         if fc and lc and fc != lc:
             fx_key = f"{fc}-{lc}"
