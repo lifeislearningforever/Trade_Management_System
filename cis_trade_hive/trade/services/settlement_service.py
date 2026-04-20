@@ -364,7 +364,8 @@ class SettlementService:
             isin=kwargs.get('isin'),
             security_name=kwargs.get('security_name'),
             custodian=kwargs.get('custodian'),
-            sub_custodian=kwargs.get('sub_custodian')
+            sub_custodian=kwargs.get('sub_custodian'),
+            position_basis=kwargs.get('position_basis', 'TRADE_DATE')
         )
 
         if success:
@@ -652,7 +653,8 @@ class SettlementService:
             isin=kwargs.get('isin'),
             security_name=kwargs.get('security_name'),
             custodian=kwargs.get('custodian'),
-            sub_custodian=kwargs.get('sub_custodian')
+            sub_custodian=kwargs.get('sub_custodian'),
+            position_basis=kwargs.get('position_basis', 'TRADE_DATE')
         )
 
         if not success:
