@@ -685,6 +685,13 @@ function initAjaxForms() {
  * @param {HTMLFormElement} form - The form element
  */
 function submitWithPopup(operation, entity, form) {
+    // Disable all submit buttons immediately to prevent double-submit
+    var submitBtns = form.querySelectorAll('[type="submit"]');
+    submitBtns.forEach(function(btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> Saving...';
+    });
+
     showOperationPopup(getOperationMessage(operation, 'processing', entity), 'processing');
 
     // Allow the popup to render before form submits

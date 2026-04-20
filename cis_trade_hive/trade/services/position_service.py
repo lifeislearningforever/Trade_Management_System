@@ -779,7 +779,7 @@ class PositionService:
             # Added: market_price, market_value_fc, dividend_fc, dividend_lc
             # Added: last_cash_flow_amount_fc, last_cash_flow_amount_lc
             columns = [
-                'version_id', 'position_id', 'position_date',
+                'version_id', 'position_id', 'position_date', 'position_basis',
                 'portfolio_short_name', 'security_label',
                 'quantity',
                 # Cost in FC (Foreign Currency = Security Currency)
@@ -833,6 +833,7 @@ class PositionService:
                 str(version_id),
                 str(position_data['position_id']),
                 f"'{position_date}'",
+                f"'{position_basis}'",
                 f"'{self._escape(portfolio_id)}'",
                 f"'{self._escape(security_id)}'",
                 cast_decimal(quantity),

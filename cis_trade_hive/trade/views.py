@@ -18,12 +18,14 @@ Workflow:
 
 import json
 import logging
+import hashlib
 from decimal import Decimal, ROUND_HALF_UP
 from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from django.http import HttpResponse, Http404, JsonResponse
 from django.views.decorators.http import require_http_methods
+from django.core.cache import cache
 import csv
 
 logger = logging.getLogger(__name__)
@@ -592,6 +594,26 @@ def trade_create(request, trade_type=None):
                 'total_calculated_charges': request.POST.get('total_calculated_charges', 0),
                 'charges_auto_calculated': request.POST.get('charges_auto_calculated', 'false') == 'true',
             }
+
+            # --- Double-submit guard (in-memory, zero DB cost) ---
+            # Build a fingerprint from the fields that uniquely identify a trade intent.
+            # If the same user submits the same trade within 10s, reject as duplicate.
+            _dedup_raw = (
+                f"{user_info['username']}:"
+                f"{trade_data['portfolio_short_name']}:"
+                f"{trade_data['security_label']}:"
+                f"{trade_data['trade_type']}:"
+                f"{trade_data['quantity']}:"
+                f"{trade_data['price']}:"
+                f"{trade_data['trade_date']}"
+            )
+            _dedup_key = "trade_create_dedup:" + hashlib.md5(_dedup_raw.encode()).hexdigest()
+            if cache.get(_dedup_key):
+                messages.warning(request, 'Duplicate submission detected — your trade was already saved. Please check the trade list.')
+                return redirect('trade:list')
+            # Mark this fingerprint for 10 seconds — cleared automatically by LocMemCache TTL
+            cache.set(_dedup_key, True, timeout=10)
+            # --- End double-submit guard ---
 
             # Validate trade data (includes Portfolio, Security, Counterparty validation)
             # entity_details contains portfolio and security dicts for reuse
