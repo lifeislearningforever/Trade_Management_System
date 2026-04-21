@@ -78,22 +78,31 @@ class CACashFlowService:
             Cash flow dict if exists, None otherwise
         """
         try:
-            # Check by matching ex_date, portfolio, security, and cash flow type
+            # Check by CA number + portfolio + security + ex_date to prevent duplicates
+            # per portfolio per CA run. Must include ca_number so different CAs on the
+            # same security/ex_date are not blocked by each other.
             query = f"""
             SELECT cash_flow_id, cash_flow_number
             FROM {self.DATABASE}.cis_cash_flow
-            WHERE portfolio_short_name = '{self._escape(portfolio_short_name)}'
+            WHERE ca_number = '{self._escape(ca_number)}'
+              AND portfolio_short_name = '{self._escape(portfolio_short_name)}'
               AND security_label = '{self._escape(security_name)}'
               AND ex_date = '{ex_date}'
-              AND cash_flow_type IN ('DIVIDEND', 'INTEREST', 'COUPON', 'CAPITAL_DISTRIBUTION')
               AND (is_deleted = false OR is_deleted IS NULL)
             LIMIT 1
             """
-            logger.info(f"[CHECK_DUP] Checking for existing cash flow with query: {query.strip()}")
+            logger.info(f"[CHECK_DUP] Checking for existing cash flow: ca={ca_number}, portfolio={portfolio_short_name}, security={security_name}, ex_date={ex_date}")
             results = impala_manager.execute_query(query, database=self.DATABASE)
-            logger.info(f"[CHECK_DUP] Query returned {len(results) if results else 0} results: {results}")
+            logger.info(f"[CHECK_DUP] Query returned {len(results) if results else 0} results")
             if results and len(results) > 0:
-                return results[0]
+                row = results[0]
+                # Validate the result has actual cash_flow columns (not a mis-mapped result)
+                if row.get('cash_flow_id') is not None or row.get('cash_flow_number') is not None:
+                    logger.info(f"[CHECK_DUP] Duplicate found: cash_flow_id={row.get('cash_flow_id')}, cf_number={row.get('cash_flow_number')}")
+                    return row
+                else:
+                    logger.warning(f"[CHECK_DUP] Result row has no cash_flow_id/cash_flow_number — ignoring as mis-mapped result: {row}")
+                    return None
             return None
         except Exception as e:
             logger.warning(f"[CHECK_DUP] Error checking existing cash flow: {e}")
