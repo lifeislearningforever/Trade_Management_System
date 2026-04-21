@@ -409,18 +409,21 @@
 
 <script>
 // CIF Modal Functionality with client-side caching
+// Uses Bootstrap 5 native Modal API — handles backdrop, keyboard, z-index correctly
+// and allows repeated sequential opens without state corruption.
 let cifCache = new Map();
+let _cifModalInstance = null;
+
+function _getCIFModal() {
+    const el = document.getElementById('cifModal');
+    if (!_cifModalInstance) {
+        _cifModalInstance = new bootstrap.Modal(el, { backdrop: true, keyboard: true });
+    }
+    return _cifModalInstance;
+}
 
 function viewCIFs(partyShortName) {
-    console.log('viewCIFs called for:', partyShortName);
-
-    const modal = document.getElementById('cifModal');
-
-    // Remove ALL existing backdrops
-    const allBackdrops = document.querySelectorAll('.modal-backdrop');
-    allBackdrops.forEach(backdrop => backdrop.remove());
-
-    // Reset modal state
+    // Reset content before showing
     document.getElementById('cifList').innerHTML = '';
     document.getElementById('cifLoadingSpinner').style.display = 'block';
     document.getElementById('cifContent').style.display = 'none';
@@ -428,26 +431,13 @@ function viewCIFs(partyShortName) {
     document.getElementById('noCIFsMessage').style.display = 'none';
     document.getElementById('cifPartyName').textContent = partyShortName;
 
-    // Show modal
-    modal.classList.add('show');
-    modal.style.display = 'block';
-    document.body.classList.add('modal-open');
-    document.body.style.overflow = '';
-    document.body.style.paddingRight = '';
+    _getCIFModal().show();
 
-    // Add backdrop
-    const newBackdrop = document.createElement('div');
-    newBackdrop.className = 'modal-backdrop show';
-    newBackdrop.onclick = closeCIFModal;
-    document.body.appendChild(newBackdrop);
-
-    // Check cache first
+    // Serve from cache if available — instant display
     if (cifCache.has(partyShortName)) {
-        console.log('Using cached data for:', partyShortName);
         const cachedData = cifCache.get(partyShortName);
         document.getElementById('cifLoadingSpinner').style.display = 'none';
         document.getElementById('cifContent').style.display = 'block';
-
         if (cachedData.cifs && cachedData.cifs.length > 0) {
             displayCIFs(cachedData.cifs);
         } else {
@@ -456,54 +446,29 @@ function viewCIFs(partyShortName) {
         return;
     }
 
-    // Fetch CIFs via AJAX
-    console.log('Fetching from server for:', partyShortName);
     fetchCIFsFromServer(partyShortName);
 }
 
 function closeCIFModal() {
-    console.log('closeCIFModal called');
-
-    const modal = document.getElementById('cifModal');
-
-    const allBackdrops = document.querySelectorAll('.modal-backdrop');
-    allBackdrops.forEach(backdrop => backdrop.remove());
-
-    modal.classList.remove('show');
-    modal.style.display = 'none';
-    document.body.classList.remove('modal-open');
-    document.body.style.overflow = '';
-    document.body.style.paddingRight = '';
-
-    console.log('Modal closed successfully');
+    _getCIFModal().hide();
 }
-
-window.addEventListener('error', function(e) {
-    console.error('JavaScript Error:', e.message, 'at', e.filename, ':', e.lineno);
-});
 
 function fetchCIFsFromServer(partyShortName) {
     const url = `/reference-data/party/${encodeURIComponent(partyShortName)}/cif/`;
 
     fetch(url, {
         method: 'GET',
-        headers: {
-            'X-Requested-With': 'XMLHttpRequest',
-        },
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
         credentials: 'same-origin'
     })
     .then(response => {
-        if (!response.ok) {
-            throw new Error('Failed to fetch CIFs');
-        }
+        if (!response.ok) throw new Error('Failed to fetch CIFs');
         return response.json();
     })
     .then(data => {
         cifCache.set(partyShortName, data);
-
         document.getElementById('cifLoadingSpinner').style.display = 'none';
         document.getElementById('cifContent').style.display = 'block';
-
         if (data.success && data.cifs && data.cifs.length > 0) {
             displayCIFs(data.cifs);
             document.getElementById('noCIFsMessage').style.display = 'none';

@@ -372,19 +372,22 @@
 </div>
 
 <script>
-// CIF Modal Functionality with client-side caching - NO BOOTSTRAP JS, PURE DOM
-let cifCache = new Map(); // Cache CIF data to avoid redundant requests
+// CIF Modal Functionality with client-side caching
+// Uses Bootstrap 5 native Modal API — handles backdrop, keyboard, z-index correctly
+// and allows repeated sequential opens without state corruption.
+let cifCache = new Map();
+let _cifModalInstance = null;
+
+function _getCIFModal() {
+    const el = document.getElementById('cifModal');
+    if (!_cifModalInstance) {
+        _cifModalInstance = new bootstrap.Modal(el, { backdrop: true, keyboard: true });
+    }
+    return _cifModalInstance;
+}
 
 function viewCIFs(counterpartyShortName) {
-    console.log('viewCIFs called for:', counterpartyShortName);
-
-    const modal = document.getElementById('cifModal');
-
-    // CRITICAL: Remove ALL existing backdrops (there might be multiple)
-    const allBackdrops = document.querySelectorAll('.modal-backdrop');
-    allBackdrops.forEach(backdrop => backdrop.remove());
-
-    // Reset modal state - clear any previous content
+    // Reset content before showing
     document.getElementById('cifList').innerHTML = '';
     document.getElementById('cifLoadingSpinner').style.display = 'block';
     document.getElementById('cifContent').style.display = 'none';
@@ -392,110 +395,54 @@ function viewCIFs(counterpartyShortName) {
     document.getElementById('noCIFsMessage').style.display = 'none';
     document.getElementById('cifCounterpartyName').textContent = counterpartyShortName;
 
-    // Show modal using direct DOM manipulation (bypass Bootstrap JS)
-    modal.classList.add('show');
-    modal.style.display = 'block';
-    document.body.classList.add('modal-open');
+    _getCIFModal().show();
 
-    // Remove any scroll lock styles that might interfere
-    document.body.style.overflow = '';
-    document.body.style.paddingRight = '';
-
-    // Add backdrop manually with click handler
-    const newBackdrop = document.createElement('div');
-    newBackdrop.className = 'modal-backdrop show';
-    newBackdrop.onclick = closeCIFModal;
-    document.body.appendChild(newBackdrop);
-
-    // Check cache first
+    // Serve from cache if available — instant display
     if (cifCache.has(counterpartyShortName)) {
-        console.log('Using cached data for:', counterpartyShortName);
-        // Use cached data - instant display!
         const cachedData = cifCache.get(counterpartyShortName);
         document.getElementById('cifLoadingSpinner').style.display = 'none';
         document.getElementById('cifContent').style.display = 'block';
-
         if (cachedData.cifs && cachedData.cifs.length > 0) {
             displayCIFs(cachedData.cifs);
         } else {
             document.getElementById('noCIFsMessage').style.display = 'block';
         }
-        return; // Exit early - no network request needed!
+        return;
     }
 
-    // Fetch CIFs via AJAX
-    console.log('Fetching from server for:', counterpartyShortName);
     fetchCIFsFromServer(counterpartyShortName);
 }
 
-// Close modal function
 function closeCIFModal() {
-    console.log('closeCIFModal called');
-
-    const modal = document.getElementById('cifModal');
-
-    // Remove ALL backdrops (in case multiple were created)
-    const allBackdrops = document.querySelectorAll('.modal-backdrop');
-    allBackdrops.forEach(backdrop => backdrop.remove());
-
-    // Hide modal
-    modal.classList.remove('show');
-    modal.style.display = 'none';
-    document.body.classList.remove('modal-open');
-
-    // Restore body scroll
-    document.body.style.overflow = '';
-    document.body.style.paddingRight = '';
-
-    console.log('Modal closed successfully');
+    _getCIFModal().hide();
 }
 
-// Global error handler to catch any JavaScript errors
-window.addEventListener('error', function(e) {
-    console.error('JavaScript Error:', e.message, 'at', e.filename, ':', e.lineno);
-});
-
 function fetchCIFsFromServer(counterpartyShortName) {
-
-    // Fetch CIFs via AJAX
     const url = `/reference-data/counterparty/${encodeURIComponent(counterpartyShortName)}/cif/`;
 
     fetch(url, {
         method: 'GET',
-        headers: {
-            'X-Requested-With': 'XMLHttpRequest',
-        },
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
         credentials: 'same-origin'
     })
     .then(response => {
-        if (!response.ok) {
-            throw new Error('Failed to fetch CIFs');
-        }
+        if (!response.ok) throw new Error('Failed to fetch CIFs');
         return response.json();
     })
     .then(data => {
-        // Cache the result for instant future access
         cifCache.set(counterpartyShortName, data);
-
-        // Hide loading spinner
         document.getElementById('cifLoadingSpinner').style.display = 'none';
         document.getElementById('cifContent').style.display = 'block';
-
         if (data.success && data.cifs && data.cifs.length > 0) {
-            // Display CIFs
             displayCIFs(data.cifs);
             document.getElementById('noCIFsMessage').style.display = 'none';
         } else {
-            // No CIFs found
             document.getElementById('cifList').innerHTML = '';
             document.getElementById('noCIFsMessage').style.display = 'block';
         }
     })
     .catch(error => {
-        // Hide loading spinner
         document.getElementById('cifLoadingSpinner').style.display = 'none';
-
-        // Show error message
         document.getElementById('cifErrorMessage').style.display = 'block';
         document.getElementById('cifErrorText').textContent = 'Error loading CIFs: ' + error.message;
     });
