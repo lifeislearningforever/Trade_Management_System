@@ -959,6 +959,7 @@ class TradeKuduRepository:
                 raise ValueError(f"Trade {trade_id} not found")
 
             # CIS trades can be edited in any status (no status restriction)
+            current_status = current_trade.get('status', '')
 
             # Validate (entity_details not needed for update as we don't auto-populate)
             is_valid, errors, _ = self.validate_trade_data(trade_data, is_update=True)
