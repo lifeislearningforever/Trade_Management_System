@@ -372,32 +372,40 @@
 </div>
 
 <script>
-// CIF Modal Functionality with client-side caching
-// Uses Bootstrap 5 getOrCreateInstance — safe for repeated opens.
+// CIF Modal — Bootstrap 5, safe for repeated clicks.
+// All inner elements are looked up via the modal element itself so
+// Bootstrap moving the modal in the DOM never causes getElementById null errors.
 let cifCache = new Map();
 
+function _modal()   { return document.getElementById('cifModal'); }
+function _el(id)    { return _modal() && _modal().querySelector('#' + id); }
+function _show(id)  { const e = _el(id); if (e) e.style.display = 'block'; }
+function _hide(id)  { const e = _el(id); if (e) e.style.display = 'none';  }
+
+function _resetModal(name) {
+    const list = _el('cifList');            if (list)  list.innerHTML = '';
+    const label = _el('cifCounterpartyName'); if (label) label.textContent = name;
+    _show('cifLoadingSpinner');
+    _hide('cifContent');
+    _hide('cifErrorMessage');
+    _hide('noCIFsMessage');
+}
+
 function viewCIFs(counterpartyShortName) {
-    const el = document.getElementById('cifModal');
+    const el = _modal();
+    if (!el) return;
 
-    // Reset content before showing
-    document.getElementById('cifList').innerHTML = '';
-    document.getElementById('cifLoadingSpinner').style.display = 'block';
-    document.getElementById('cifContent').style.display = 'none';
-    document.getElementById('cifErrorMessage').style.display = 'none';
-    document.getElementById('noCIFsMessage').style.display = 'none';
-    document.getElementById('cifCounterpartyName').textContent = counterpartyShortName;
-
+    _resetModal(counterpartyShortName);
     bootstrap.Modal.getOrCreateInstance(el).show();
 
-    // Serve from cache if available — instant display
     if (cifCache.has(counterpartyShortName)) {
+        _hide('cifLoadingSpinner');
+        _show('cifContent');
         const cachedData = cifCache.get(counterpartyShortName);
-        document.getElementById('cifLoadingSpinner').style.display = 'none';
-        document.getElementById('cifContent').style.display = 'block';
         if (cachedData.cifs && cachedData.cifs.length > 0) {
             displayCIFs(cachedData.cifs);
         } else {
-            document.getElementById('noCIFsMessage').style.display = 'block';
+            _show('noCIFsMessage');
         }
         return;
     }
@@ -406,7 +414,8 @@ function viewCIFs(counterpartyShortName) {
 }
 
 function closeCIFModal() {
-    const el = document.getElementById('cifModal');
+    const el = _modal();
+    if (!el) return;
     const instance = bootstrap.Modal.getInstance(el);
     if (instance) instance.hide();
 }
@@ -425,20 +434,21 @@ function fetchCIFsFromServer(counterpartyShortName) {
     })
     .then(data => {
         cifCache.set(counterpartyShortName, data);
-        document.getElementById('cifLoadingSpinner').style.display = 'none';
-        document.getElementById('cifContent').style.display = 'block';
+        _hide('cifLoadingSpinner');
+        _show('cifContent');
         if (data.success && data.cifs && data.cifs.length > 0) {
             displayCIFs(data.cifs);
-            document.getElementById('noCIFsMessage').style.display = 'none';
+            _hide('noCIFsMessage');
         } else {
-            document.getElementById('cifList').innerHTML = '';
-            document.getElementById('noCIFsMessage').style.display = 'block';
+            const list = _el('cifList'); if (list) list.innerHTML = '';
+            _show('noCIFsMessage');
         }
     })
     .catch(error => {
-        document.getElementById('cifLoadingSpinner').style.display = 'none';
-        document.getElementById('cifErrorMessage').style.display = 'block';
-        document.getElementById('cifErrorText').textContent = 'Error loading CIFs: ' + error.message;
+        _hide('cifLoadingSpinner');
+        _show('cifErrorMessage');
+        const errText = _el('cifErrorText');
+        if (errText) errText.textContent = 'Error loading CIFs: ' + error.message;
     });
 }
 
