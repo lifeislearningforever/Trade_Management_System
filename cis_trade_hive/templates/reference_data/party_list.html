@@ -408,135 +408,177 @@
 </div>
 
 <script>
-// CIF Modal — Bootstrap 5, safe for repeated clicks.
-// All inner elements are looked up via the modal element itself so
-// Bootstrap moving the modal in the DOM never causes getElementById null errors.
-let cifCache = new Map();
+(function () {
+    // ── CIF Modal controller ──────────────────────────────────────────────────
+    // Handles every corner-case:
+    //  1. Bootstrap moves #cifModal to <body> on show → querySelector on el, not document
+    //  2. Fast repeated clicks while modal is animating → queue next party, open after hidden
+    //  3. Stale fetch response arriving after user switched party → AbortController
+    //  4. Any inner element temporarily null during transition → null-guarded helpers
+    // ─────────────────────────────────────────────────────────────────────────
 
-// Helpers — always look up relative to the modal element
-function _modal()   { return document.getElementById('cifModal'); }
-function _el(id)    { return _modal() && _modal().querySelector('#' + id); }
-function _show(id)  { const e = _el(id); if (e) e.style.display = 'block'; }
-function _hide(id)  { const e = _el(id); if (e) e.style.display = 'none';  }
+    const cifCache   = new Map();
+    let   _pending   = null;   // party queued while modal is mid-animation
+    let   _current   = null;   // party whose data is shown right now
+    let   _abortCtrl = null;   // AbortController for the in-flight fetch
 
-function _resetModal(partyShortName) {
-    const list = _el('cifList');       if (list)  list.innerHTML = '';
-    const name = _el('cifPartyName'); if (name)  name.textContent = partyShortName;
-    _show('cifLoadingSpinner');
-    _hide('cifContent');
-    _hide('cifErrorMessage');
-    _hide('noCIFsMessage');
-}
+    // ── DOM helpers (always scoped to the modal element) ─────────────────────
+    function el()         { return document.getElementById('cifModal'); }
+    function q(id)        { const m = el(); return m ? m.querySelector('#'+id) : null; }
+    function show(id)     { const e = q(id); if (e) e.style.display = 'block'; }
+    function hide(id)     { const e = q(id); if (e) e.style.display = 'none';  }
+    function text(id, t)  { const e = q(id); if (e) e.textContent = t; }
+    function html(id, h)  { const e = q(id); if (e) e.innerHTML = h;   }
 
-function viewCIFs(partyShortName) {
-    const el = _modal();
-    if (!el) return;
-
-    _resetModal(partyShortName);
-    bootstrap.Modal.getOrCreateInstance(el).show();
-
-    if (cifCache.has(partyShortName)) {
-        _hide('cifLoadingSpinner');
-        _show('cifContent');
-        const cachedData = cifCache.get(partyShortName);
-        if (cachedData.cifs && cachedData.cifs.length > 0) {
-            displayCIFs(cachedData.cifs);
-        } else {
-            _show('noCIFsMessage');
-        }
-        return;
+    function resetContent(partyName) {
+        html('cifList', '');
+        text('cifPartyName', partyName);
+        show('cifLoadingSpinner');
+        hide('cifContent');
+        hide('cifErrorMessage');
+        hide('noCIFsMessage');
     }
 
-    fetchCIFsFromServer(partyShortName);
-}
-
-function closeCIFModal() {
-    const el = _modal();
-    if (!el) return;
-    const instance = bootstrap.Modal.getInstance(el);
-    if (instance) instance.hide();
-}
-
-function fetchCIFsFromServer(partyShortName) {
-    const url = `/reference-data/party/${encodeURIComponent(partyShortName)}/cif/`;
-
-    fetch(url, {
-        method: 'GET',
-        headers: { 'X-Requested-With': 'XMLHttpRequest' },
-        credentials: 'same-origin'
-    })
-    .then(response => {
-        if (!response.ok) throw new Error('Failed to fetch CIFs');
-        return response.json();
-    })
-    .then(data => {
-        cifCache.set(partyShortName, data);
-        _hide('cifLoadingSpinner');
-        _show('cifContent');
+    function renderData(partyName, data) {
+        // Only render if the modal is still showing THIS party's data
+        if (_current !== partyName) return;
+        hide('cifLoadingSpinner');
+        show('cifContent');
         if (data.success && data.cifs && data.cifs.length > 0) {
-            displayCIFs(data.cifs);
-            _hide('noCIFsMessage');
+            hide('noCIFsMessage');
+            html('cifList', buildCIFHtml(data.cifs));
         } else {
-            const list = _el('cifList'); if (list) list.innerHTML = '';
-            _show('noCIFsMessage');
+            html('cifList', '');
+            show('noCIFsMessage');
         }
-    })
-    .catch(error => {
-        _hide('cifLoadingSpinner');
-        _show('cifErrorMessage');
-        const errText = _el('cifErrorText');
-        if (errText) errText.textContent = 'Error loading CIFs: ' + error.message;
+    }
+
+    function renderError(partyName, message) {
+        if (_current !== partyName) return;
+        hide('cifLoadingSpinner');
+        show('cifErrorMessage');
+        text('cifErrorText', 'Error loading CIFs: ' + message);
+    }
+
+    // ── Fetch ─────────────────────────────────────────────────────────────────
+    function fetchCIFs(partyName) {
+        // Cancel any previous in-flight request
+        if (_abortCtrl) { _abortCtrl.abort(); }
+        _abortCtrl = new AbortController();
+
+        fetch(`/reference-data/party/${encodeURIComponent(partyName)}/cif/`, {
+            method: 'GET',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+            signal: _abortCtrl.signal
+        })
+        .then(r => { if (!r.ok) throw new Error('Server error ' + r.status); return r.json(); })
+        .then(data => {
+            cifCache.set(partyName, data);
+            renderData(partyName, data);
+        })
+        .catch(err => {
+            if (err.name === 'AbortError') return; // intentionally cancelled — ignore
+            renderError(partyName, err.message);
+        });
+    }
+
+    // ── Open modal for a party ────────────────────────────────────────────────
+    function openFor(partyName) {
+        _current = partyName;
+        resetContent(partyName);
+
+        if (cifCache.has(partyName)) {
+            renderData(partyName, cifCache.get(partyName));
+        } else {
+            fetchCIFs(partyName);
+        }
+    }
+
+    // ── Bootstrap modal event wiring (done once on DOMContentLoaded) ─────────
+    document.addEventListener('DOMContentLoaded', function () {
+        const modalEl = el();
+        if (!modalEl) return;
+
+        // After modal fully hidden: if another party was queued, open immediately
+        modalEl.addEventListener('hidden.bs.modal', function () {
+            if (_pending !== null) {
+                const next = _pending;
+                _pending = null;
+                // Small tick so Bootstrap finishes cleanup before re-opening
+                setTimeout(function () {
+                    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+                    openFor(next);
+                }, 50);
+            }
+        });
     });
-}
 
-function displayCIFs(cifs) {
-    const cifListContainer = document.getElementById('cifList');
+    // ── Public API ────────────────────────────────────────────────────────────
+    window.viewCIFs = function (partyName) {
+        const modalEl = el();
+        if (!modalEl) return;
 
-    const htmlContent = cifs.map(cif => `
-        <div class="card mb-3">
-            <div class="card-body">
-                <div class="row">
-                    <div class="col-md-6">
-                        <p class="mb-2">
-                            <strong>Country:</strong> ${cif.country || '-'}
-                        </p>
-                        <p class="mb-2">
-                            <strong>Source:</strong>
-                            ${(cif.src_system || '').toUpperCase() === 'CIS' ? '<span class="badge badge-success">CIS</span>' : '<span class="badge badge-secondary">' + ((cif.src_system || 'GMP').toUpperCase()) + '</span>'}
-                        </p>
+        const bsModal  = bootstrap.Modal.getOrCreateInstance(modalEl);
+        const isOpen   = modalEl.classList.contains('show');
+        const isHiding = modalEl.classList.contains('hiding') ||
+                         document.body.classList.contains('modal-open') && !isOpen;
+
+        if (isOpen || isHiding) {
+            // Modal is visible or mid-close animation — queue next party
+            // and close; hidden.bs.modal handler will open next one
+            _pending = partyName;
+            if (_abortCtrl) { _abortCtrl.abort(); _abortCtrl = null; }
+            bsModal.hide();
+        } else {
+            // Modal is fully closed — open straight away
+            bsModal.show();
+            openFor(partyName);
+        }
+    };
+
+    window.closeCIFModal = function () {
+        const modalEl = el();
+        if (!modalEl) return;
+        _pending = null; // discard any queued party on explicit close
+        if (_abortCtrl) { _abortCtrl.abort(); _abortCtrl = null; }
+        const instance = bootstrap.Modal.getInstance(modalEl);
+        if (instance) instance.hide();
+    };
+
+    // ── HTML builder ──────────────────────────────────────────────────────────
+    function buildCIFHtml(cifs) {
+        return cifs.map(cif => `
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p class="mb-2"><strong>Country:</strong> ${cif.country || '-'}</p>
+                            <p class="mb-2"><strong>Source:</strong>
+                                ${(cif.src_system||'').toUpperCase()==='CIS'
+                                    ? '<span class="badge badge-success">CIS</span>'
+                                    : '<span class="badge badge-secondary">'+((cif.src_system||'GMP').toUpperCase())+'</span>'}
+                            </p>
+                        </div>
+                        <div class="col-md-6">
+                            <p class="mb-2"><strong>ISIN:</strong> ${cif.isin || '-'}</p>
+                            <p class="mb-2"><strong>Status:</strong>
+                                ${cif.is_active
+                                    ? '<span class="badge badge-success">Active</span>'
+                                    : '<span class="badge badge-warning">Inactive</span>'}
+                            </p>
+                        </div>
                     </div>
-                    <div class="col-md-6">
-                        <p class="mb-2">
-                            <strong>ISIN:</strong> ${cif.isin || '-'}
-                        </p>
-                        <p class="mb-2">
-                            <strong>Status:</strong>
-                            ${cif.is_active ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-warning">Inactive</span>'}
-                        </p>
+                    ${cif.description ? `<div class="row mt-2"><div class="col-12"><p class="mb-0"><strong>Description:</strong> ${cif.description}</p></div></div>` : ''}
+                    <div class="row mt-2">
+                        <div class="col-12">
+                            <small class="text-muted">Created by: ${cif.created_by||'-'} | Updated by: ${cif.updated_by||'-'}</small>
+                        </div>
                     </div>
                 </div>
-                ${cif.description ? `
-                <div class="row mt-2">
-                    <div class="col-12">
-                        <p class="mb-0">
-                            <strong>Description:</strong> ${cif.description}
-                        </p>
-                    </div>
-                </div>
-                ` : ''}
-                <div class="row mt-2">
-                    <div class="col-12">
-                        <small class="text-muted">
-                            Created by: ${cif.created_by || '-'} |
-                            Updated by: ${cif.updated_by || '-'}
-                        </small>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `).join('');
+            </div>`).join('');
+    }
 
-    cifListContainer.innerHTML = htmlContent;
-}
+})(); // end IIFE — no globals polluted except viewCIFs / closeCIFModal
 </script>
 {% endblock %}
