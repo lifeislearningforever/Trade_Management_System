@@ -860,27 +860,57 @@ class UploadService:
             file_header = rows[0] if has_header else [f'col_{i+1}' for i in range(len(rows[0]))]
             data_rows = rows[1:] if has_header else rows
 
+            # Columns that are injected at ingest time and are NOT present in the
+            # uploaded file. These are excluded from file column validation and
+            # their default values are injected into sample_data for preview.
+            SERVER_INJECTED_COLS = {'position_basis'}
+
+            # Determine position_basis default for this datasource's target table
+            POSITION_TABLE_BASIS = {
+                'cis_user_sta_adhoc_position_1': 'TRADE_DATE',
+                'cis_user_sta_adhoc_position_2': 'TRADE_DATE',
+                'cis_user_sta_adhoc_position_3': 'TRADE_DATE',
+                'cis_user_sta_adhoc_position_4': 'SETTLE_DATE',
+                'cis_user_sta_adhoc_position_5': 'SETTLE_DATE',
+            }
+            target_table = datasource_config.get('target_table', '')
+            target_table_key = target_table.lower().split('.')[-1]
+            injected_defaults = {}
+            if target_table_key in POSITION_TABLE_BASIS:
+                injected_defaults['position_basis'] = POSITION_TABLE_BASIS[target_table_key]
+
             # Use intake_columns from datasource config OR file header
             if intake_columns:
-                # Strict column validation: count AND names must match
-                expected_col_names = [col['name'].lower().strip() for col in intake_columns]
+                # Split intake_columns into file columns (present in file) and
+                # server-injected columns (not in file, added at ingest time).
+                file_intake_columns = [
+                    col for col in intake_columns
+                    if col['name'].lower().strip() not in SERVER_INJECTED_COLS
+                ]
+                injected_intake_columns = [
+                    col for col in intake_columns
+                    if col['name'].lower().strip() in SERVER_INJECTED_COLS
+                ]
+
+                # Strict column validation against FILE columns only
+                expected_col_names = [col['name'].lower().strip() for col in file_intake_columns]
                 actual_col_names = [self.validation_service._clean_column_name(h).lower().strip() for h in file_header]
 
-                # Check column count
-                if len(intake_columns) != len(file_header):
+                # Check column count (file columns only)
+                if len(file_intake_columns) != len(file_header):
                     result.is_valid = False
                     result.errors.append(
                         f"Column count mismatch: File has {len(file_header)} columns, "
-                        f"but datasource config expects {len(intake_columns)} columns. "
+                        f"but datasource config expects {len(file_intake_columns)} columns. "
                         f"Expected columns: {', '.join(expected_col_names)}"
                     )
                     logger.error(
                         f"INVALID: Column count mismatch for {file_name}. "
-                        f"Expected {len(intake_columns)}, got {len(file_header)}."
+                        f"Expected {len(file_intake_columns)}, got {len(file_header)}."
                     )
                     return result
 
-                # Check column names match (order matters)
+                # Check column names match (order matters, file columns only)
                 mismatched_columns = []
                 for idx, (expected, actual) in enumerate(zip(expected_col_names, actual_col_names)):
                     if expected != actual:
@@ -898,10 +928,14 @@ class UploadService:
                     )
                     return result
 
-                # All validations passed - use intake_columns
+                # All validations passed - use full intake_columns (including injected)
                 result.columns = intake_columns
                 result.column_count = len(result.columns)
-                logger.info(f"Column validation passed for {file_name}: {len(intake_columns)} columns match")
+                logger.info(
+                    f"Column validation passed for {file_name}: "
+                    f"{len(file_intake_columns)} file columns match"
+                    + (f", {len(injected_intake_columns)} server-injected col(s) skipped from file check" if injected_intake_columns else "")
+                )
             else:
                 # Fall back to detection - but force STRING for external tables
                 result.columns = self.validation_service._infer_column_types(
@@ -917,16 +951,23 @@ class UploadService:
             result.delimiter = separator
             result.has_header = has_header
 
-            # Generate sample data using actual column names from result.columns
-            header_names = [col['name'] for col in result.columns]
+            # Generate sample data.
+            # File columns are mapped by position; injected columns get their
+            # default value so the preview table shows what will actually land
+            # in the target table after ingest.
+            file_col_names = [
+                col['name'] for col in result.columns
+                if col['name'].lower() not in SERVER_INJECTED_COLS
+            ]
             result.sample_data = []
             for row in data_rows[:self.validation_service.MAX_PREVIEW_ROWS]:
                 row_dict = {}
-                for idx, col_name in enumerate(header_names):
-                    if idx < len(row):
-                        row_dict[col_name] = row[idx]
-                    else:
-                        row_dict[col_name] = ''
+                # Map file columns by position
+                for idx, col_name in enumerate(file_col_names):
+                    row_dict[col_name] = row[idx] if idx < len(row) else ''
+                # Inject server-side defaults for preview
+                for col_name, default_val in injected_defaults.items():
+                    row_dict[col_name] = f'[{default_val}]'  # bracketed to show it's auto-set
                 result.sample_data.append(row_dict)
 
             result.is_valid = True
@@ -1452,6 +1493,21 @@ class UploadService:
                 'data_cat': datasource_config.get('data_cat', 'sta'),
                 'data_frq': datasource_config.get('data_frq', 'adhoc'),
             }
+
+            # position_basis: defaulted at ingest time — not present in uploaded file.
+            # Tables 1-3 (trade date based) → TRADE_DATE
+            # Tables 4-5 (settled date based) → SETTLE_DATE
+            POSITION_TABLE_BASIS = {
+                'cis_user_sta_adhoc_position_1': 'TRADE_DATE',
+                'cis_user_sta_adhoc_position_2': 'TRADE_DATE',
+                'cis_user_sta_adhoc_position_3': 'TRADE_DATE',
+                'cis_user_sta_adhoc_position_4': 'SETTLE_DATE',
+                'cis_user_sta_adhoc_position_5': 'SETTLE_DATE',
+            }
+            table_lower = target_table.lower().split('.')[-1]  # strip db prefix if present
+            if table_lower in POSITION_TABLE_BASIS and 'position_basis' in [c.lower() for c in target_table_cols]:
+                additional_cols_map['position_basis'] = POSITION_TABLE_BASIS[table_lower]
+                logger.info(f"Defaulting position_basis='{additional_cols_map['position_basis']}' for {target_table}")
 
             logger.info(f"Using src_system={src_system}, sub_system={sub_system} for {target_table}")
 

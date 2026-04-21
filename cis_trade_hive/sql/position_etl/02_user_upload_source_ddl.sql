@@ -2,12 +2,15 @@
 -- User Upload Source Tables DDL (1-5)
 -- Source System: USER_UPLOAD
 -- Format: Parquet external tables
+-- Note: position_basis is NOT in the uploaded file — it is defaulted at
+--       ingest time (TRADE_DATE for tables 1-3, SETTLE_DATE for tables 4-5)
 -- ============================================================================
 
 -- ============================================================================
 -- USER_UPLOAD_1: Basic Position Data
 -- Fields: Portfolio, Client_Num, Exchange_Quoted, ISIN_Code, Counter,
---         Quantity_Yesterday, Movement, Quantity_Today, trade_date
+--         Quantity_Yesterday, Movement, Quantity_Today
+-- position_basis default: TRADE_DATE
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_1 (
     src_id              STRING,
@@ -23,9 +26,9 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_1 (
     quantity_yesterday      STRING,
     movement                STRING,
     quantity_today          STRING,
-    trade_date              STRING
+    position_basis          STRING
 )
-COMMENT 'User Upload Source 1 - Basic Position Data'
+COMMENT 'User Upload Source 1 - Basic Position Data (position_basis defaulted to TRADE_DATE at ingest)'
 PARTITIONED BY (
     processing_date     STRING
 )
@@ -35,10 +38,11 @@ STORED AS PARQUET
 -- ============================================================================
 -- USER_UPLOAD_2: Portfolio Holdings with Country
 -- Fields: Portfolio_Name, Stock_Name, Security_Description, ISIN_Code,
---         Qty_Held, Shares_Issued, Pct_Holding, Country, Country_ID, trade_date
+--         Qty_Held, Shares_Issued, Pct_Holding, Country, Country_ID
+-- position_basis default: TRADE_DATE
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_2 (
- src_id              STRING,
+    src_id              STRING,
     src_system          STRING,
     sub_system          STRING,
     data_cat            STRING,
@@ -52,9 +56,9 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_2 (
     pct_holding             STRING,
     country                 STRING,
     country_id              STRING,
-    trade_date              STRING
+    position_basis          STRING
 )
-COMMENT 'User Upload Source 2 - Portfolio Holdings with Country'
+COMMENT 'User Upload Source 2 - Portfolio Holdings with Country (position_basis defaulted to TRADE_DATE at ingest)'
 PARTITIONED BY (
     processing_date     STRING
 )
@@ -64,10 +68,11 @@ STORED AS PARQUET
 -- ============================================================================
 -- USER_UPLOAD_3: Account Position Data
 -- Fields: Account_name, Asset_description_short, ISIN, Shares_Par_value,
---         Shares_outstanding_total, Country_of_listing_code, trade_date
+--         Shares_outstanding_total, Country_of_listing_code
+-- position_basis default: TRADE_DATE
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_3 (
- src_id              STRING,
+    src_id              STRING,
     src_system          STRING,
     sub_system          STRING,
     data_cat            STRING,
@@ -78,9 +83,9 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_3 (
     shares_par_value            STRING,
     shares_outstanding_total    STRING,
     country_of_listing_code     STRING,
-    trade_date                  STRING
+    position_basis              STRING
 )
-COMMENT 'User Upload Source 3 - Account Position Data'
+COMMENT 'User Upload Source 3 - Account Position Data (position_basis defaulted to TRADE_DATE at ingest)'
 PARTITIONED BY (
     processing_date     STRING
 )
@@ -91,13 +96,14 @@ STORED AS PARQUET
 -- USER_UPLOAD_4: Comprehensive Position with Valuation
 -- Fields: PORTFOLIO, SECURITY_FULL_NAME, PRODUCT_TYPE, SECURITY_TYPE,
 --         GL_FUND_TYPE, QUOTED_UNQUOTED, SECURITY_CURRENCY, QUANTITY,
---         COST_FC, NET_BOOK_VALUE_FC, LOCAL_CURRENCY_Home_ccy, COST_LC,
---         Pct_HOLDINGS, NO_OF_SHARES_ISSUES_BY_THE_COMPANY,
+--         COST_FC, NET_BOOK_VALUE_FC, NET_BOOK_VALUE_LC, LOCAL_CURRENCY_Home_ccy,
+--         COST_LC, Pct_HOLDINGS, NO_OF_SHARES_ISSUES_BY_THE_COMPANY,
 --         COUNTRY_OF_INCORPORATION, COUNTRY_OF_EXCHANGE, ISIN_CODE,
---         TICKER_CODE, INDUSTRY, Financial_Non_Financial_Co, settled_date
+--         TICKER_CODE, INDUSTRY, Financial_Non_Financial_Co
+-- position_basis default: SETTLE_DATE
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_4 (
- src_id              STRING,
+    src_id              STRING,
     src_system          STRING,
     sub_system          STRING,
     data_cat            STRING,
@@ -112,6 +118,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_4 (
     quantity                            STRING,
     cost_fc                             STRING,
     net_book_value_fc                   STRING,
+    net_book_value_lc                   STRING,
     local_currency_home_ccy             STRING,
     cost_lc                             STRING,
     pct_holdings                        STRING,
@@ -122,9 +129,9 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_4 (
     ticker_code                         STRING,
     industry                            STRING,
     financial_non_financial_co          STRING,
-    settled_date                        STRING
+    position_basis                      STRING
 )
-COMMENT 'User Upload Source 4 - Comprehensive Position with Valuation'
+COMMENT 'User Upload Source 4 - Comprehensive Position with Valuation (position_basis defaulted to SETTLE_DATE at ingest)'
 PARTITIONED BY (
     processing_date     STRING
 )
@@ -145,11 +152,11 @@ STORED AS PARQUET
 --         ISIN_CODE, TICKER_CODE, ISSUER_TYPE, REITS_or_Fund_Y_N, INDUSTRY,
 --         NO_OF_SHARES_ISSUES_BY_THE_COMPANY, Pct_HOLDINGS, CELS_Code,
 --         BWCIF_NUMBER_SG, MAS_6D_CODE_SG, BWCIF_NUMBER_Overseas,
---         MAS_6D_CODE_Overseas, MATURITY_DATE, PORTIA_FUND_TYPE_CIS_INVESTMENT_TYPE,
---         settled_date
+--         MAS_6D_CODE_Overseas, MATURITY_DATE, PORTIA_FUND_TYPE_CIS_INVESTMENT_TYPE
+-- position_basis default: SETTLE_DATE
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_5 (
- src_id              STRING,
+    src_id              STRING,
     src_system          STRING,
     sub_system          STRING,
     data_cat            STRING,
@@ -201,9 +208,9 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_5 (
     mas_6d_code_overseas                STRING,
     maturity_date                       STRING,
     portia_fund_type_cis_investment_type STRING,
-    settled_date                        STRING
+    position_basis                      STRING
 )
-COMMENT 'User Upload Source 5 - Full Position with P&L and MAS Codes'
+COMMENT 'User Upload Source 5 - Full Position with P&L and MAS Codes (position_basis defaulted to SETTLE_DATE at ingest)'
 PARTITIONED BY (
     processing_date     STRING
 )
@@ -212,8 +219,8 @@ STORED AS PARQUET
 -- ============================================================================
 -- Repair partitions after data load
 -- ============================================================================
--- MSCK REPAIR TABLE gmp_cis.user_upload_1;
--- MSCK REPAIR TABLE gmp_cis.user_upload_2;
--- MSCK REPAIR TABLE gmp_cis.user_upload_3;
--- MSCK REPAIR TABLE gmp_cis.user_upload_4;
--- MSCK REPAIR TABLE gmp_cis.user_upload_5;
+-- MSCK REPAIR TABLE gmp_cis.cis_user_sta_adhoc_position_1;
+-- MSCK REPAIR TABLE gmp_cis.cis_user_sta_adhoc_position_2;
+-- MSCK REPAIR TABLE gmp_cis.cis_user_sta_adhoc_position_3;
+-- MSCK REPAIR TABLE gmp_cis.cis_user_sta_adhoc_position_4;
+-- MSCK REPAIR TABLE gmp_cis.cis_user_sta_adhoc_position_5;
