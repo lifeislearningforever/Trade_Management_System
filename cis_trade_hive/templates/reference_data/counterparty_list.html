@@ -373,20 +373,12 @@
 
 <script>
 // CIF Modal Functionality with client-side caching
-// Uses Bootstrap 5 native Modal API — handles backdrop, keyboard, z-index correctly
-// and allows repeated sequential opens without state corruption.
+// Uses Bootstrap 5 getOrCreateInstance — safe for repeated opens.
 let cifCache = new Map();
-let _cifModalInstance = null;
-
-function _getCIFModal() {
-    const el = document.getElementById('cifModal');
-    if (!_cifModalInstance) {
-        _cifModalInstance = new bootstrap.Modal(el, { backdrop: true, keyboard: true });
-    }
-    return _cifModalInstance;
-}
 
 function viewCIFs(counterpartyShortName) {
+    const el = document.getElementById('cifModal');
+
     // Reset content before showing
     document.getElementById('cifList').innerHTML = '';
     document.getElementById('cifLoadingSpinner').style.display = 'block';
@@ -395,7 +387,7 @@ function viewCIFs(counterpartyShortName) {
     document.getElementById('noCIFsMessage').style.display = 'none';
     document.getElementById('cifCounterpartyName').textContent = counterpartyShortName;
 
-    _getCIFModal().show();
+    bootstrap.Modal.getOrCreateInstance(el).show();
 
     // Serve from cache if available — instant display
     if (cifCache.has(counterpartyShortName)) {
@@ -414,7 +406,9 @@ function viewCIFs(counterpartyShortName) {
 }
 
 function closeCIFModal() {
-    _getCIFModal().hide();
+    const el = document.getElementById('cifModal');
+    const instance = bootstrap.Modal.getInstance(el);
+    if (instance) instance.hide();
 }
 
 function fetchCIFsFromServer(counterpartyShortName) {

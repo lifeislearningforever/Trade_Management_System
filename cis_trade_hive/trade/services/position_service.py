@@ -101,6 +101,31 @@ class PositionService:
             if trade_type not in self.POSITION_AFFECTING_TYPES:
                 return True, f"Trade type {trade_type} does not affect position", None
 
+            # --- IDEMPOTENCY GUARD ---
+            # If cis_trade_position already has a row for this trade_id + position_basis,
+            # this event has already been processed (e.g. worker double-processed the event
+            # before the process-level lock took effect, or Kudu stale read race).
+            # Return the existing row so callers get a valid result without re-calculating.
+            if trade_id and not is_chain_recalc:
+                existing_check = impala_manager.execute_query(
+                    f"""
+                    SELECT version_id, position_id, quantity, average_cost_fc, position_basis
+                    FROM {self.DATABASE}.{self.POSITION_TABLE}
+                    WHERE trade_id = {trade_id}
+                      AND position_basis = '{position_basis}'
+                      AND is_latest = true
+                    LIMIT 1
+                    """,
+                    database=self.DATABASE
+                )
+                if existing_check:
+                    logger.warning(
+                        f"IDEMPOTENCY: trade_id={trade_id} basis={position_basis} already processed "
+                        f"(version={existing_check[0].get('version_id')}). Skipping recalculation."
+                    )
+                    return True, f"Position already calculated for trade {trade_id} basis={position_basis} (idempotency guard)", existing_check[0]
+            # -------------------------
+
             # Convert to Decimal for precision
             qty = Decimal(str(quantity))
             prc = Decimal(str(price))

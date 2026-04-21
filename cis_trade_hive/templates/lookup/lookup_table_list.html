@@ -87,7 +87,9 @@
                 <div class="row">
                     {% for table in tables %}
                     <div class="col-md-6 col-lg-4 mb-3">
-                        <div class="card h-100 lookup-table-card">
+                        <div class="card h-100 lookup-table-card" style="position:relative;">
+                            <!-- Stretch link covers the entire card body for easy clicking -->
+                            <a href="{% url 'lookup:table_detail' table.table_name %}" class="stretched-link" aria-label="Manage {{ table.display_name }}"></a>
                             <div class="card-body">
                                 <h5 class="card-title">
                                     <i class="bi bi-table text-primary"></i>
@@ -104,7 +106,7 @@
                                     PK: <code>{{ table.pk_column }}</code>
                                 </p>
                             </div>
-                            <div class="card-footer bg-transparent">
+                            <div class="card-footer bg-transparent" style="position:relative; z-index:2;">
                                 <a href="{% url 'lookup:table_detail' table.table_name %}" class="btn btn-sm btn-primary">
                                     <i class="bi bi-pencil-square"></i> Manage
                                 </a>

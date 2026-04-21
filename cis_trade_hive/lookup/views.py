@@ -93,8 +93,8 @@ class LookupTableDetailView(View):
             return render(request, self.template_name, context)
 
         except Exception as e:
-            logger.error(f"Error loading table {table_name}: {str(e)}")
-            messages.error(request, f"Error loading table: {str(e)}")
+            logger.error(f"Error loading table {table_name}: {str(e)}", exc_info=True)
+            messages.error(request, f"Error loading table '{table_name}': {str(e)}")
             return redirect('lookup:table_list')
 
     def _export_csv(self, table_name, table_info, search):
