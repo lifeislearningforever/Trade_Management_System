@@ -385,32 +385,32 @@
                             <div class="col-md-2">
                                 <label class="form-label">Brokerage Fee</label>
                                 <input type="number" class="form-control" name="calculated_commission" id="calculated_commission"
-                                       step="0.01" value="{{ trade.calculated_commission|default:'0' }}" onchange="updateTotalCharges()">
+                                       step="0.000001" value="{{ trade.calculated_commission|default:'0' }}" onchange="updateTotalCharges()">
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label">Clearing Fee</label>
                                 <input type="number" class="form-control" name="calculated_clearing_fee" id="calculated_clearing_fee"
-                                       step="0.01" value="{{ trade.calculated_clearing_fee|default:'0' }}" onchange="updateTotalCharges()">
+                                       step="0.000001" value="{{ trade.calculated_clearing_fee|default:'0' }}" onchange="updateTotalCharges()">
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label">Trading Fee</label>
                                 <input type="number" class="form-control" name="calculated_trading_fee" id="calculated_trading_fee"
-                                       step="0.01" value="{{ trade.calculated_trading_fee|default:'0' }}" onchange="updateTotalCharges()">
+                                       step="0.000001" value="{{ trade.calculated_trading_fee|default:'0' }}" onchange="updateTotalCharges()">
                             </div>
                             <div class="col-md-2">
-                                <label class="form-label">GST</label>
+                                <label class="form-label">GST (on fees)</label>
                                 <input type="number" class="form-control" name="calculated_gst" id="calculated_gst"
-                                       step="0.01" value="{{ trade.calculated_gst|default:'0' }}" onchange="updateTotalCharges()">
+                                       step="0.000001" value="{{ trade.calculated_gst|default:'0' }}" onchange="updateTotalCharges()">
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label">FFP/SGX SI FEE</label>
                                 <input type="number" class="form-control" name="calculated_other_fees" id="calculated_other_fees"
-                                       step="0.01" value="{{ trade.calculated_other_fees|default:'0' }}" onchange="updateTotalCharges()">
+                                       step="0.000001" value="{{ trade.calculated_other_fees|default:'0' }}" onchange="updateTotalCharges()">
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label">Total Charges</label>
                                 <input type="number" class="form-control fw-bold bg-light" name="total_calculated_charges" id="total_calculated_charges"
-                                       step="0.01" value="{{ trade.total_calculated_charges|default:'0' }}" readonly>
+                                       step="0.000001" value="{{ trade.total_calculated_charges|default:'0' }}" readonly>
                             </div>
                         </div>
 
@@ -1252,7 +1252,7 @@ function calculateBrokerCharges() {
                     <td>${charge.country_of_exchange || '-'}</td>
                     <td>${charge.fee_rule}</td>
                     <td>${feeDisplay}</td>
-                    <td class="text-end fw-bold">${charge.calculated_fee.toFixed(2)}</td>
+                    <td class="text-end fw-bold">${charge.calculated_fee.toFixed(6)}</td>
                 `;
                 if (chargesTbody) chargesTbody.appendChild(row);
 
@@ -1281,12 +1281,12 @@ function calculateBrokerCharges() {
             console.log('  total_charges:', data.total_charges);
 
             // Update hidden fields (matches cis_trade columns)
-            document.getElementById('calculated_commission').value = calculatedCommission.toFixed(2);
-            document.getElementById('calculated_clearing_fee').value = calculatedClearingFee.toFixed(2);
-            document.getElementById('calculated_trading_fee').value = calculatedTradingFee.toFixed(2);
-            document.getElementById('calculated_gst').value = calculatedGst.toFixed(2);
-            document.getElementById('calculated_other_fees').value = calculatedOtherFees.toFixed(2);
-            document.getElementById('total_calculated_charges').value = data.total_charges.toFixed(2);
+            document.getElementById('calculated_commission').value = calculatedCommission.toFixed(6);
+            document.getElementById('calculated_clearing_fee').value = calculatedClearingFee.toFixed(6);
+            document.getElementById('calculated_trading_fee').value = calculatedTradingFee.toFixed(6);
+            document.getElementById('calculated_gst').value = calculatedGst.toFixed(6);
+            document.getElementById('calculated_other_fees').value = calculatedOtherFees.toFixed(6);
+            document.getElementById('total_calculated_charges').value = data.total_charges.toFixed(6);
             document.getElementById('charges_auto_calculated').value = 'true';
 
             console.log('Hidden fields updated successfully');
@@ -1302,13 +1302,13 @@ function calculateBrokerCharges() {
             }
 
             // Update broker charge info
-            brokerChargeInfo.textContent = `${charges.length} charge(s) - Total: ${data.total_charges.toFixed(2)}`;
+            brokerChargeInfo.textContent = `${charges.length} charge(s) - Total: ${data.total_charges.toFixed(6)}`;
             brokerChargeInfo.className = 'text-success small';
 
             // Auto-fill commission field with total calculated charges
             const commissionField = document.getElementById('commission');
             if (commissionField) {
-                commissionField.value = data.total_charges.toFixed(2);
+                commissionField.value = data.total_charges.toFixed(6);
             }
 
             // Recalculate total
@@ -1750,7 +1750,7 @@ function calculateBrokerChargesSync(callback) {
             // Also update commission field
             const commissionField = document.getElementById('commission');
             if (commissionField) {
-                commissionField.value = data.total_charges.toFixed(2);
+                commissionField.value = data.total_charges.toFixed(6);
             }
 
             console.log('Hidden fields updated - Total charges:', data.total_charges);

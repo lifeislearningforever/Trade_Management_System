@@ -841,19 +841,60 @@ class TradeDropdownService:
 
     def calculate_trade_charges(self, broker: str, quantity: float, price: float,
                                 trade_type: str = 'BUY', exchange: str = None) -> Dict[str, Any]:
-        """Calculate charges for a trade based on broker lookup."""
+        """Calculate charges for a trade based on broker lookup.
+
+        GST is applied on the sum of all other fees (brokerage + clearing +
+        trading + flat fees), NOT on the gross trade value.
+
+        Processing order:
+          1. Calculate all non-GST fees against trade_value (or as flat).
+          2. Sum those fees → subtotal_fees.
+          3. Calculate GST as a % of subtotal_fees.
+          4. Total = subtotal_fees + gst.
+        """
         trade_value = float(quantity) * float(price)
         charges = self.get_broker_charges(broker, exchange)
 
-        calculated_charges = []
-        total_charges = 0.0
-
+        # --- Pass 1: calculate all non-GST fees ---
+        non_gst_charges = []
+        gst_charges = []
         for charge in charges:
+            if 'gst' in charge.get('fee_type', '').lower():
+                gst_charges.append(charge)
+            else:
+                non_gst_charges.append(charge)
+
+        calculated_charges = []
+        subtotal_fees = 0.0
+
+        for charge in non_gst_charges:
             fee_rule = charge.get('fee_rule', '')
-            fee_value = charge.get('fee_value', 0)
+            fee_value = float(charge.get('fee_value', 0))
 
             if fee_rule.lower() == 'percent':
                 calculated_fee = trade_value * (fee_value / 100)
+            elif fee_rule.lower() == 'flat':
+                calculated_fee = fee_value
+            else:
+                calculated_fee = 0.0
+
+            subtotal_fees += calculated_fee
+            calculated_charges.append({
+                'fee_type': charge.get('fee_type', ''),
+                'fee_rule': fee_rule,
+                'fee_value': fee_value,
+                'exchange': charge.get('exchange', ''),
+                'country_of_exchange': charge.get('country_of_exchange', ''),
+                'calculated_fee': round(calculated_fee, 6),
+            })
+
+        # --- Pass 2: apply GST on subtotal of other fees ---
+        for charge in gst_charges:
+            fee_rule = charge.get('fee_rule', '')
+            fee_value = float(charge.get('fee_value', 0))
+
+            if fee_rule.lower() == 'percent':
+                calculated_fee = subtotal_fees * (fee_value / 100)
             elif fee_rule.lower() == 'flat':
                 calculated_fee = fee_value
             else:
@@ -864,19 +905,20 @@ class TradeDropdownService:
                 'fee_rule': fee_rule,
                 'fee_value': fee_value,
                 'exchange': charge.get('exchange', ''),
-                'calculated_fee': round(calculated_fee, 2)
+                'country_of_exchange': charge.get('country_of_exchange', ''),
+                'calculated_fee': round(calculated_fee, 6),
             })
-            total_charges += calculated_fee
 
+        total_charges = sum(c['calculated_fee'] for c in calculated_charges)
         grand_total = trade_value + total_charges if trade_type.upper() == 'BUY' else trade_value - total_charges
 
         return {
             'broker': broker,
             'charges': calculated_charges,
-            'total_charges': round(total_charges, 2),
-            'trade_value': round(trade_value, 2),
-            'grand_total': round(grand_total, 2),
-            'trade_type': trade_type.upper()
+            'total_charges': round(total_charges, 6),
+            'trade_value': round(trade_value, 6),
+            'grand_total': round(grand_total, 6),
+            'trade_type': trade_type.upper(),
         }
 
     def get_exchanges(self) -> List[Dict[str, Any]]:
