@@ -25,18 +25,26 @@ class CACashFlowService:
     POSITION_TABLE = 'cis_trade_position'
 
     # CA types that generate cash flows (payment to holder)
-    # Includes both internal names and dropdown values
     CASH_FLOW_CA_TYPES = [
         'DIVIDEND', 'SPECIAL_DIVIDEND', 'INTEREST', 'COUPON', 'ROC',
-        'CAPITAL_DISTRIBUTION',  # From dropdown
+        'CAPITAL_DISTRIBUTION',
+        'INCOME_DISTRIBUTION',  # New: like dividend but accumulates RL_fc/RL_lc
     ]
 
     # CA types that affect position quantity (no cash flow)
-    # Includes both internal names and dropdown values
     POSITION_ADJUSTMENT_CA_TYPES = [
         'BONUS_ISSUE', 'SPLIT', 'STOCK_SPLIT', 'REVERSE_SPLIT',
         'RIGHTS_ENTITLEMENT', 'RIGHTS_ISSUE',
         'WARRANT_ENTITLEMENT', 'CONSOLIDATION',
+    ]
+
+    # CF-only types: overwrite specific position fields, no cash flow record
+    CF_POSITION_OVERWRITE_TYPES = [
+        'CF-COMMITMENT',
+        'CF-UN CALL COMMITMENT',
+        'CF-PIPELINE',
+        'CF-YTD',
+        'CF-PROVISION',
     ]
 
     # CA type to Cash Flow type mapping
@@ -45,16 +53,19 @@ class CACashFlowService:
         'SPECIAL_DIVIDEND': 'SPECIAL_DIVIDEND',
         'INTEREST': 'INTEREST',
         'COUPON': 'COUPON',
-        'ROC': 'ROC',  # Return of Capital
+        'ROC': 'ROC',
+        'CAPITAL_DISTRIBUTION': 'CAPITAL_DISTRIBUTION',
+        'INCOME_DISTRIBUTION': 'INCOME_DISTRIBUTION',
     }
 
-    # CA types where AVP (average cost) should NOT change
-    # Dividend/Special Dividend: AVP unchanged (just cash distribution)
-    NO_AVP_CHANGE_CA_TYPES = ['DIVIDEND', 'SPECIAL_DIVIDEND', 'INTEREST', 'COUPON']
+    # CA types where AVP is unchanged (just cash distribution)
+    NO_AVP_CHANGE_CA_TYPES = [
+        'DIVIDEND', 'SPECIAL_DIVIDEND', 'INTEREST', 'COUPON', 'INCOME_DISTRIBUTION',
+    ]
 
-    # CA types where AVP should be reduced by price (cost basis reduction)
-    # ROC: AVP = AVP_old - price_per_share
-    AVP_REDUCTION_CA_TYPES = ['ROC']
+    # CA types where AVP = AVP_old - price_per_share (per-share cost basis reduction)
+    # CAPITAL_DISTRIBUTION and ROC both reduce the cost basis per share held
+    AVP_REDUCTION_CA_TYPES = ['ROC', 'CAPITAL_DISTRIBUTION']
 
     @staticmethod
     def _escape(value: str) -> str:
@@ -133,7 +144,9 @@ class CACashFlowService:
             ca_type = ca_data.get('ca_type', '')
 
             # Check if CA type requires processing
-            if ca_type not in self.CASH_FLOW_CA_TYPES and ca_type not in self.POSITION_ADJUSTMENT_CA_TYPES:
+            if (ca_type not in self.CASH_FLOW_CA_TYPES
+                    and ca_type not in self.POSITION_ADJUSTMENT_CA_TYPES
+                    and ca_type not in self.CF_POSITION_OVERWRITE_TYPES):
                 logger.info(f"CA type {ca_type} does not require processing, skipping queue")
                 return True, None
 
@@ -214,6 +227,14 @@ class CACashFlowService:
             record_date = queue_entry.get('record_date')
 
             # Route to appropriate processor based on CA type
+            if ca_type in self.CF_POSITION_OVERWRITE_TYPES:
+                # CF-only handlers: overwrite specific position fields, no cash flow
+                return self._process_cf_position_overwrite(
+                    queue_id=queue_id,
+                    queue_entry=queue_entry,
+                    dry_run=dry_run
+                )
+
             if ca_type in self.POSITION_ADJUSTMENT_CA_TYPES:
                 # Position adjustment types (BONUS_ISSUE, SPLIT, RIGHTS, WARRANT)
                 return self._process_position_adjustment_ca(
@@ -673,11 +694,15 @@ class CACashFlowService:
             realized_pnl_fc = Decimal(str(current_position.get('realized_pnl_fc', 0) or 0))
             realized_pnl_lc = Decimal(str(current_position.get('realized_pnl_lc', 0) or 0))
 
-            # Carry forward the 5 new columns — CA events don't change these
+            # Carry forward fields that CA cash flow events don't change
             uncall_fc = float(current_position.get('uncall_fc', 0) or 0)
             uncall_lc = float(current_position.get('uncall_lc', 0) or 0)
             pipeline_fc = float(current_position.get('pipeline_fc', 0) or 0)
             pipeline_lc = float(current_position.get('pipeline_lc', 0) or 0)
+            commit_fc = float(current_position.get('commit_fc', 0) or 0)
+            commit_lc = float(current_position.get('commit_lc', 0) or 0)
+            provision_fc = float(current_position.get('provision_fc', 0) or 0)
+            provision_lc = float(current_position.get('provision_lc', 0) or 0)
             position_type = current_position.get('position_type') or 'NORMAL'
 
             logger.info(f"[UPDATE_POS] Current position: qty={quantity}, total_cost_fc={old_total_cost_fc}, "
@@ -693,36 +718,39 @@ class CACashFlowService:
                 new_total_cost_lc = old_total_cost_lc
                 new_avg_cost_lc = old_avg_cost_lc
             elif ca_type in self.AVP_REDUCTION_CA_TYPES:
-                # ROC (Return of Capital): AVP = AVP_old - price_per_share
-                # Cost basis is reduced by the ROC amount
-                logger.info(f"[UPDATE_POS] CA type {ca_type}: AVP reduced by cash flow amount (cost basis reduction)")
-                new_total_cost_fc = (old_total_cost_fc - cash_flow_amount_fc).quantize(
+                # ROC / CAPITAL_DISTRIBUTION: avp_new = avp_old - price (per-share reduction)
+                # The CA 'price' field holds the per-share distribution amount.
+                # We look it up from the queue_entry via the passed cash_flow_amount_fc / quantity.
+                price_per_share_fc = (cash_flow_amount_fc / quantity).quantize(
                     Decimal('0.00000001'), rounding=ROUND_HALF_UP
-                )
-                if new_total_cost_fc < 0:
-                    new_total_cost_fc = Decimal('0')  # Cost basis can't go negative
+                ) if quantity > 0 else Decimal('0')
+                price_per_share_lc = (cash_flow_amount_lc / quantity).quantize(
+                    Decimal('0.00000001'), rounding=ROUND_HALF_UP
+                ) if quantity > 0 else Decimal('0')
 
-                # Recalculate average cost in FC
-                if quantity > 0:
-                    new_avg_cost_fc = (new_total_cost_fc / quantity).quantize(
+                logger.info(f"[UPDATE_POS] CA type {ca_type}: AVP reduced per-share. "
+                           f"price_per_share_fc={price_per_share_fc}, price_per_share_lc={price_per_share_lc}")
+
+                # avp_new = avp_old - price_per_share (floor at 0)
+                new_avg_cost_fc = max(
+                    Decimal('0'),
+                    (old_avg_cost_fc - price_per_share_fc).quantize(
                         Decimal('0.00000001'), rounding=ROUND_HALF_UP
                     )
-                else:
-                    new_avg_cost_fc = Decimal('0')
-
-                # Calculate values in LC
-                new_total_cost_lc = (old_total_cost_lc - cash_flow_amount_lc).quantize(
-                    Decimal('0.00000001'), rounding=ROUND_HALF_UP
                 )
-                if new_total_cost_lc < 0:
-                    new_total_cost_lc = Decimal('0')
-
-                if quantity > 0:
-                    new_avg_cost_lc = (new_total_cost_lc / quantity).quantize(
+                new_avg_cost_lc = max(
+                    Decimal('0'),
+                    (old_avg_cost_lc - price_per_share_lc).quantize(
                         Decimal('0.00000001'), rounding=ROUND_HALF_UP
                     )
-                else:
-                    new_avg_cost_lc = Decimal('0')
+                )
+                # Recalculate total cost from new AVP
+                new_total_cost_fc = (new_avg_cost_fc * quantity).quantize(
+                    Decimal('0.00000001'), rounding=ROUND_HALF_UP
+                )
+                new_total_cost_lc = (new_avg_cost_lc * quantity).quantize(
+                    Decimal('0.00000001'), rounding=ROUND_HALF_UP
+                )
             else:
                 # Default: keep existing values
                 new_total_cost_fc = old_total_cost_fc
@@ -730,9 +758,9 @@ class CACashFlowService:
                 new_total_cost_lc = old_total_cost_lc
                 new_avg_cost_lc = old_avg_cost_lc
 
-            # Step 4: Calculate dividend accumulation
-            # For DIVIDEND/SPECIAL_DIVIDEND CA types, accumulate the dividend amount
+            # Step 4: Accumulate dividend or income distribution on position
             if ca_type in ['DIVIDEND', 'SPECIAL_DIVIDEND']:
+                # Accumulate on dividend_fc / dividend_lc
                 new_dividend_fc = (old_dividend_fc + cash_flow_amount_fc).quantize(
                     Decimal('0.00000001'), rounding=ROUND_HALF_UP
                 )
@@ -742,10 +770,26 @@ class CACashFlowService:
                 logger.info(f"[UPDATE_POS] Dividend accumulation: "
                            f"FC {old_dividend_fc} + {cash_flow_amount_fc} = {new_dividend_fc}, "
                            f"LC {old_dividend_lc} + {cash_flow_amount_lc} = {new_dividend_lc}")
-            else:
-                # Keep existing dividend values for other CA types
+                new_realized_pnl_fc = realized_pnl_fc
+                new_realized_pnl_lc = realized_pnl_lc
+            elif ca_type == 'INCOME_DISTRIBUTION':
+                # Income Distribution: accumulate on realized_pnl_fc / realized_pnl_lc
                 new_dividend_fc = old_dividend_fc
                 new_dividend_lc = old_dividend_lc
+                new_realized_pnl_fc = (realized_pnl_fc + cash_flow_amount_fc).quantize(
+                    Decimal('0.00000001'), rounding=ROUND_HALF_UP
+                )
+                new_realized_pnl_lc = (realized_pnl_lc + cash_flow_amount_lc).quantize(
+                    Decimal('0.00000001'), rounding=ROUND_HALF_UP
+                )
+                logger.info(f"[UPDATE_POS] Income Distribution accumulation on RL: "
+                           f"FC {realized_pnl_fc} + {cash_flow_amount_fc} = {new_realized_pnl_fc}, "
+                           f"LC {realized_pnl_lc} + {cash_flow_amount_lc} = {new_realized_pnl_lc}")
+            else:
+                new_dividend_fc = old_dividend_fc
+                new_dividend_lc = old_dividend_lc
+                new_realized_pnl_fc = realized_pnl_fc
+                new_realized_pnl_lc = realized_pnl_lc
 
             # Market value in LC
             market_value_lc = (market_value_fc * fx_rate).quantize(
@@ -788,6 +832,8 @@ class CACashFlowService:
                 dividend_fc, dividend_lc,
                 uncall_fc, uncall_lc,
                 pipeline_fc, pipeline_lc,
+                commit_fc, commit_lc,
+                provision_fc, provision_lc,
                 position_type,
                 trade_id, trade_type,
                 security_currency, portfolio_currency, fx_rate,
@@ -811,9 +857,9 @@ class CACashFlowService:
                 {float(market_price)},
                 {float(market_value_fc)},
                 {float(market_value_lc)},
-                {float(realized_pnl_fc)},
+                {float(new_realized_pnl_fc)},
                 {float(new_unrealized_pnl_fc)},
-                {float(realized_pnl_lc)},
+                {float(new_realized_pnl_lc)},
                 {float(new_unrealized_pnl_lc)},
                 {float(new_dividend_fc)},
                 {float(new_dividend_lc)},
@@ -821,6 +867,10 @@ class CACashFlowService:
                 {uncall_lc},
                 {pipeline_fc},
                 {pipeline_lc},
+                {commit_fc},
+                {commit_lc},
+                {provision_fc},
+                {provision_lc},
                 '{self._escape(position_type)}',
                 NULL,
                 'CA_{ca_type}',
@@ -1041,11 +1091,32 @@ class CACashFlowService:
                             dry_run=dry_run
                         )
                     elif ca_type in ['RIGHTS_ENTITLEMENT', 'RIGHTS_ISSUE', 'WARRANT_ENTITLEMENT']:
-                        # Creates new position for the rights/warrant security
-                        # For now, just log - actual implementation would need the new security details
-                        logger.info(f"[POS_ADJ] {ca_type}: Would create new position for rights/warrant. "
-                                   f"Portfolio={portfolio_short_name}, Old Security={security_name}, Qty={quantity}")
-                        success = True  # Placeholder - full implementation needs new security info
+                        # Creates a new position for the rights/warrant security.
+                        # Entitlement qty = old_qty * ratio (price field).
+                        # New security label = original security + suffix (e.g. " RIGHTS" / " WRNTS").
+                        # AVP of new position = 0 (rights/warrants are issued at no cost to holder).
+                        suffix = ' RIGHTS' if ca_type in ['RIGHTS_ENTITLEMENT', 'RIGHTS_ISSUE'] else ' WRNTS'
+                        new_security_name = security_name.rstrip() + suffix
+                        entitlement_qty = (quantity * price).quantize(
+                            Decimal('0.00000001'), rounding=ROUND_HALF_UP
+                        )
+                        logger.info(f"[POS_ADJ] {ca_type}: Creating new position for {new_security_name}, "
+                                   f"qty={entitlement_qty}, AVP=0 (no cost to holder)")
+                        if not dry_run:
+                            success = self._create_rights_warrant_position(
+                                portfolio_short_name=portfolio_short_name,
+                                new_security_name=new_security_name,
+                                entitlement_qty=entitlement_qty,
+                                ca_id=ca_id,
+                                ca_number=ca_number,
+                                ca_type=ca_type,
+                                ex_date=ex_date,
+                                security_currency=security_currency,
+                                portfolio_currency=portfolio_currency,
+                                created_by=created_by
+                            )
+                        else:
+                            success = True
                     else:
                         logger.warning(f"[POS_ADJ] Unknown position adjustment CA type: {ca_type}")
                         success = False
@@ -1287,11 +1358,15 @@ class CACashFlowService:
             # Carry forward dividend values
             dividend_fc = Decimal(str(current_position.get('dividend_fc', 0) or 0))
             dividend_lc = Decimal(str(current_position.get('dividend_lc', 0) or 0))
-            # Carry forward the 5 new columns — CA events don't change these
+            # Carry forward fields that CA position-adjustment events don't change
             uncall_fc = float(current_position.get('uncall_fc', 0) or 0)
             uncall_lc = float(current_position.get('uncall_lc', 0) or 0)
             pipeline_fc = float(current_position.get('pipeline_fc', 0) or 0)
             pipeline_lc = float(current_position.get('pipeline_lc', 0) or 0)
+            commit_fc = float(current_position.get('commit_fc', 0) or 0)
+            commit_lc = float(current_position.get('commit_lc', 0) or 0)
+            provision_fc_val = float(current_position.get('provision_fc', 0) or 0)
+            provision_lc_val = float(current_position.get('provision_lc', 0) or 0)
             position_type = current_position.get('position_type') or 'NORMAL'
 
             # Get FX rate for LC calculations
@@ -1333,6 +1408,8 @@ class CACashFlowService:
                 dividend_fc, dividend_lc,
                 uncall_fc, uncall_lc,
                 pipeline_fc, pipeline_lc,
+                commit_fc, commit_lc,
+                provision_fc, provision_lc,
                 position_type,
                 trade_type,
                 security_currency, portfolio_currency, fx_rate,
@@ -1364,6 +1441,10 @@ class CACashFlowService:
                 {uncall_lc},
                 {pipeline_fc},
                 {pipeline_lc},
+                {commit_fc},
+                {commit_lc},
+                {provision_fc_val},
+                {provision_lc_val},
                 '{self._escape(position_type)}',
                 'CA_{ca_type}',
                 '{self._escape(security_currency or "")}',
@@ -1395,6 +1476,389 @@ class CACashFlowService:
 
         except Exception as e:
             logger.error(f"[POS_ADJ] Error creating position adjustment version: {str(e)}")
+            return False
+
+    def _create_rights_warrant_position(
+        self,
+        portfolio_short_name: str,
+        new_security_name: str,
+        entitlement_qty: Decimal,
+        ca_id: int,
+        ca_number: str,
+        ca_type: str,
+        ex_date: str,
+        security_currency: str,
+        portfolio_currency: str,
+        created_by: str
+    ) -> bool:
+        """
+        Create a brand-new position for a rights/warrant entitlement security.
+
+        AVP = 0 (rights/warrants issued at no cost to the existing holder).
+        position_id is a new ID (not the parent security's position_id).
+        """
+        try:
+            timestamp = datetime.now()
+            timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
+            new_version_id = int(timestamp.timestamp() * 1000)
+            new_position_id = new_version_id + 1  # Unique position_id for the new security
+
+            # FX rate for LC
+            fx_rate = Decimal('1')
+            if security_currency and portfolio_currency and security_currency != portfolio_currency:
+                try:
+                    fx_rate, _ = multicurrency_service.get_fx_rate(
+                        security_currency, portfolio_currency, ex_date
+                    )
+                except Exception:
+                    fx_rate = Decimal('1')
+
+            insert_sql = f"""
+            UPSERT INTO {self.DATABASE}.{self.POSITION_TABLE} (
+                version_id, position_id, position_date, position_basis,
+                portfolio_short_name, security_label,
+                quantity,
+                average_cost_fc, total_cost_fc,
+                average_cost_lc, total_cost_lc,
+                market_price, market_value_fc, market_value_lc,
+                realized_pnl_fc, unrealized_pnl_fc,
+                realized_pnl_lc, unrealized_pnl_lc,
+                dividend_fc, dividend_lc,
+                uncall_fc, uncall_lc,
+                pipeline_fc, pipeline_lc,
+                commit_fc, commit_lc,
+                provision_fc, provision_lc,
+                position_type,
+                trade_type,
+                security_currency, portfolio_currency, fx_rate,
+                status, is_active, is_latest,
+                last_ca_id, last_ca_number, last_ca_type, last_ca_date,
+                created_by, created_at, updated_by, updated_at
+            ) VALUES (
+                {new_version_id},
+                {new_position_id},
+                '{ex_date}',
+                'SETTLE_DATE',
+                '{self._escape(portfolio_short_name)}',
+                '{self._escape(new_security_name)}',
+                {float(entitlement_qty)},
+                0, 0, 0, 0,
+                0, 0, 0,
+                0, 0, 0, 0,
+                0, 0,
+                0, 0, 0, 0,
+                0, 0, 0, 0,
+                'NORMAL',
+                'CA_{ca_type}',
+                '{self._escape(security_currency or "")}',
+                '{self._escape(portfolio_currency or "")}',
+                {float(fx_rate)},
+                'OPEN',
+                true,
+                true,
+                {ca_id},
+                '{self._escape(ca_number)}',
+                '{self._escape(ca_type)}',
+                '{ex_date}',
+                '{self._escape(created_by)}',
+                '{timestamp_str}',
+                '{self._escape(created_by)}',
+                '{timestamp_str}'
+            )
+            """
+            success = impala_manager.execute_write(insert_sql, database=self.DATABASE)
+            if success:
+                logger.info(f"[RIGHTS/WRNTS] Created new position for {new_security_name} "
+                           f"in {portfolio_short_name}: qty={entitlement_qty}, AVP=0")
+            else:
+                logger.error(f"[RIGHTS/WRNTS] Failed to create position for {new_security_name}")
+            return success
+
+        except Exception as e:
+            logger.error(f"[RIGHTS/WRNTS] Error creating rights/warrant position: {str(e)}")
+            return False
+
+    def _process_cf_position_overwrite(
+        self,
+        queue_id: int,
+        queue_entry: Dict[str, Any],
+        dry_run: bool = False
+    ) -> Tuple[bool, str, int, Decimal]:
+        """
+        Process CF-only position overwrite types (no cash flow record created).
+
+        Handlers:
+          CF-COMMITMENT       → overwrite commit_fc / commit_lc
+          CF-UN CALL COMMITMENT → overwrite uncall_fc / uncall_lc
+          CF-PIPELINE         → overwrite pipeline_fc / pipeline_lc
+          CF-YTD              → overwrite realized_pnl_fc / realized_pnl_lc
+          CF-PROVISION        → overwrite provision_fc / provision_lc
+
+        The 'price' field in the queue entry stores the new value (in FC).
+        LC = price × FX rate.
+        """
+        try:
+            ca_type = queue_entry.get('ca_type')
+            security_name = queue_entry.get('security_name')
+            ex_date = queue_entry.get('ex_date')
+            new_value_fc = Decimal(str(queue_entry.get('price') or 0))
+            currency = queue_entry.get('currency')
+            ca_id = int(queue_entry.get('ca_id')) if queue_entry.get('ca_id') else None
+            ca_number = queue_entry.get('ca_number')
+            created_by = queue_entry.get('created_by', 'system')
+
+            logger.info(f"[CF_OVERWRITE] Processing {ca_type}: security={security_name}, "
+                       f"new_value_fc={new_value_fc}, ex_date={ex_date}")
+
+            holdings = self.get_holdings_for_ca(security_name=security_name, as_of_date=ex_date)
+
+            if not holdings:
+                msg = f"No holdings found for security {security_name} as of {ex_date}"
+                logger.info(msg)
+                if not dry_run:
+                    ca_cash_flow_queue_repository.mark_completed(queue_id, 0, Decimal('0'))
+                return True, msg, 0, Decimal('0')
+
+            positions_updated = 0
+            errors = []
+
+            for holding in holdings:
+                portfolio_short_name = holding.get('portfolio_short_name')
+                security_currency = holding.get('security_currency') or currency
+                portfolio_currency = (
+                    holding.get('portfolio_base_currency') or
+                    holding.get('portfolio_currency') or
+                    security_currency
+                )
+
+                # Convert FC value to LC
+                if security_currency != portfolio_currency:
+                    try:
+                        fx_rate, _ = multicurrency_service.get_fx_rate(
+                            security_currency, portfolio_currency, ex_date
+                        )
+                        new_value_lc = (new_value_fc * fx_rate).quantize(
+                            Decimal('0.00000001'), rounding=ROUND_HALF_UP
+                        )
+                    except Exception as e:
+                        logger.warning(f"FX lookup failed {security_currency}->{portfolio_currency}: {e}")
+                        fx_rate = Decimal('1')
+                        new_value_lc = new_value_fc
+                else:
+                    fx_rate = Decimal('1')
+                    new_value_lc = new_value_fc
+
+                if dry_run:
+                    logger.info(f"[DRY RUN] Would overwrite {ca_type} on "
+                               f"{portfolio_short_name}/{security_name}: "
+                               f"FC={new_value_fc}, LC={new_value_lc}")
+                    positions_updated += 1
+                    continue
+
+                try:
+                    success = self._overwrite_position_field(
+                        portfolio_short_name=portfolio_short_name,
+                        security_name=security_name,
+                        ca_type=ca_type,
+                        new_value_fc=new_value_fc,
+                        new_value_lc=new_value_lc,
+                        ca_id=ca_id,
+                        ca_number=ca_number,
+                        ex_date=ex_date,
+                        updated_by=created_by
+                    )
+                    if success:
+                        positions_updated += 1
+                    else:
+                        errors.append(f"{portfolio_short_name}: overwrite failed")
+                except Exception as e:
+                    errors.append(f"{portfolio_short_name}: {str(e)}")
+
+            if not dry_run:
+                if errors:
+                    error_msg = "; ".join(errors[:5])
+                    ca_cash_flow_queue_repository.mark_failed(queue_id, error_msg)
+                    return False, error_msg, positions_updated, Decimal('0')
+                else:
+                    ca_cash_flow_queue_repository.mark_completed(queue_id, positions_updated, Decimal('0'))
+
+            msg = f"Overwrote {ca_type} on {positions_updated} positions"
+            return True, msg, positions_updated, Decimal('0')
+
+        except Exception as e:
+            error_msg = f"Error processing CF position overwrite: {str(e)}"
+            logger.error(error_msg)
+            if not dry_run:
+                ca_cash_flow_queue_repository.mark_failed(queue_id, error_msg)
+            return False, error_msg, 0, Decimal('0')
+
+    def _overwrite_position_field(
+        self,
+        portfolio_short_name: str,
+        security_name: str,
+        ca_type: str,
+        new_value_fc: Decimal,
+        new_value_lc: Decimal,
+        ca_id: int,
+        ca_number: str,
+        ex_date: str,
+        updated_by: str
+    ) -> bool:
+        """
+        Create a new position version with a specific field overwritten.
+
+        Field mapping:
+          CF-COMMITMENT         → commit_fc / commit_lc
+          CF-UN CALL COMMITMENT → uncall_fc / uncall_lc
+          CF-PIPELINE           → pipeline_fc / pipeline_lc
+          CF-YTD                → realized_pnl_fc / realized_pnl_lc
+          CF-PROVISION          → provision_fc / provision_lc
+        """
+        try:
+            current_position = self._get_current_position(portfolio_short_name, security_name)
+            if not current_position:
+                logger.warning(f"[CF_OVERWRITE] No open SETTLE_DATE position for "
+                               f"{portfolio_short_name}/{security_name}")
+                return False
+
+            position_id = current_position.get('position_id')
+            old_version_id = current_position.get('version_id')
+
+            # Carry forward all existing values
+            quantity = Decimal(str(current_position.get('quantity', 0) or 0))
+            avg_cost_fc = Decimal(str(current_position.get('average_cost_fc', 0) or 0))
+            total_cost_fc = Decimal(str(current_position.get('total_cost_fc', 0) or 0))
+            avg_cost_lc = Decimal(str(current_position.get('average_cost_lc', 0) or 0))
+            total_cost_lc = Decimal(str(current_position.get('total_cost_lc', 0) or 0))
+            market_price = Decimal(str(current_position.get('market_price', 0) or 0))
+            market_value_fc = Decimal(str(current_position.get('market_value_fc', 0) or 0))
+            market_value_lc = Decimal(str(current_position.get('market_value_lc', 0) or 0))
+            realized_pnl_fc = Decimal(str(current_position.get('realized_pnl_fc', 0) or 0))
+            unrealized_pnl_fc = Decimal(str(current_position.get('unrealized_pnl_fc', 0) or 0))
+            realized_pnl_lc = Decimal(str(current_position.get('realized_pnl_lc', 0) or 0))
+            unrealized_pnl_lc = Decimal(str(current_position.get('unrealized_pnl_lc', 0) or 0))
+            dividend_fc = Decimal(str(current_position.get('dividend_fc', 0) or 0))
+            dividend_lc = Decimal(str(current_position.get('dividend_lc', 0) or 0))
+            uncall_fc = float(current_position.get('uncall_fc', 0) or 0)
+            uncall_lc = float(current_position.get('uncall_lc', 0) or 0)
+            pipeline_fc = float(current_position.get('pipeline_fc', 0) or 0)
+            pipeline_lc = float(current_position.get('pipeline_lc', 0) or 0)
+            commit_fc = float(current_position.get('commit_fc', 0) or 0)
+            commit_lc = float(current_position.get('commit_lc', 0) or 0)
+            provision_fc_val = float(current_position.get('provision_fc', 0) or 0)
+            provision_lc_val = float(current_position.get('provision_lc', 0) or 0)
+            security_currency = current_position.get('security_currency', '')
+            portfolio_currency = current_position.get('portfolio_currency', '')
+            fx_rate = float(current_position.get('fx_rate', 1) or 1)
+            position_type = current_position.get('position_type') or 'NORMAL'
+
+            # Apply the overwrite based on CA type
+            ca_type_upper = ca_type.upper()
+            if ca_type_upper == 'CF-COMMITMENT':
+                commit_fc = float(new_value_fc)
+                commit_lc = float(new_value_lc)
+            elif ca_type_upper == 'CF-UN CALL COMMITMENT':
+                uncall_fc = float(new_value_fc)
+                uncall_lc = float(new_value_lc)
+            elif ca_type_upper == 'CF-PIPELINE':
+                pipeline_fc = float(new_value_fc)
+                pipeline_lc = float(new_value_lc)
+            elif ca_type_upper == 'CF-YTD':
+                realized_pnl_fc = new_value_fc
+                realized_pnl_lc = new_value_lc
+            elif ca_type_upper == 'CF-PROVISION':
+                provision_fc_val = float(new_value_fc)
+                provision_lc_val = float(new_value_lc)
+            else:
+                logger.warning(f"[CF_OVERWRITE] Unknown CF type: {ca_type}")
+                return False
+
+            # Mark old version as not latest
+            self._mark_old_version_not_latest(old_version_id)
+
+            timestamp = datetime.now()
+            timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
+            new_version_id = int(timestamp.timestamp() * 1000)
+
+            insert_sql = f"""
+            UPSERT INTO {self.DATABASE}.{self.POSITION_TABLE} (
+                version_id, position_id, position_date, position_basis,
+                portfolio_short_name, security_label,
+                quantity,
+                average_cost_fc, total_cost_fc,
+                average_cost_lc, total_cost_lc,
+                market_price, market_value_fc, market_value_lc,
+                realized_pnl_fc, unrealized_pnl_fc,
+                realized_pnl_lc, unrealized_pnl_lc,
+                dividend_fc, dividend_lc,
+                uncall_fc, uncall_lc,
+                pipeline_fc, pipeline_lc,
+                commit_fc, commit_lc,
+                provision_fc, provision_lc,
+                position_type,
+                trade_type,
+                security_currency, portfolio_currency, fx_rate,
+                status, is_active, is_latest,
+                last_ca_id, last_ca_number, last_ca_type, last_ca_date,
+                created_by, created_at, updated_by, updated_at
+            ) VALUES (
+                {new_version_id},
+                {position_id},
+                '{ex_date}',
+                'SETTLE_DATE',
+                '{self._escape(portfolio_short_name)}',
+                '{self._escape(security_name)}',
+                {float(quantity)},
+                {float(avg_cost_fc)},
+                {float(total_cost_fc)},
+                {float(avg_cost_lc)},
+                {float(total_cost_lc)},
+                {float(market_price)},
+                {float(market_value_fc)},
+                {float(market_value_lc)},
+                {float(realized_pnl_fc)},
+                {float(unrealized_pnl_fc)},
+                {float(realized_pnl_lc)},
+                {float(unrealized_pnl_lc)},
+                {float(dividend_fc)},
+                {float(dividend_lc)},
+                {uncall_fc},
+                {uncall_lc},
+                {pipeline_fc},
+                {pipeline_lc},
+                {commit_fc},
+                {commit_lc},
+                {provision_fc_val},
+                {provision_lc_val},
+                '{self._escape(position_type)}',
+                '{self._escape(ca_type)}',
+                '{self._escape(security_currency)}',
+                '{self._escape(portfolio_currency)}',
+                {fx_rate},
+                'OPEN',
+                true,
+                true,
+                {ca_id},
+                '{self._escape(ca_number)}',
+                '{self._escape(ca_type)}',
+                '{ex_date}',
+                '{self._escape(updated_by)}',
+                '{timestamp_str}',
+                '{self._escape(updated_by)}',
+                '{timestamp_str}'
+            )
+            """
+            success = impala_manager.execute_write(insert_sql, database=self.DATABASE)
+            if success:
+                logger.info(f"[CF_OVERWRITE] SUCCESS - {ca_type} applied to "
+                           f"{portfolio_short_name}/{security_name}: "
+                           f"FC={new_value_fc}, LC={new_value_lc}")
+            else:
+                logger.error(f"[CF_OVERWRITE] FAILED - could not write new position version")
+            return success
+
+        except Exception as e:
+            logger.error(f"[CF_OVERWRITE] Error: {str(e)}")
             return False
 
     def process_pending_cas(
