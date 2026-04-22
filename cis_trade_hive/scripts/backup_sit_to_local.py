@@ -168,10 +168,17 @@ def backup_table(spark, kudu_master, database, table, output_dir, dry_run=False)
         print(f"  SUCCESS — {row_count:,} rows in {result['duration_sec']}s")
 
     except Exception as e:
-        result["status"] = "FAILED"
-        result["error"] = str(e)
+        err = str(e)
         result["duration_sec"] = round((datetime.now() - start).total_seconds(), 1)
-        print(f"  FAILED: {e}")
+        # Distinguish "table does not exist in Kudu" from real errors
+        if "does not exist" in err.lower() or "table not found" in err.lower() or "nosuchentityexception" in err.lower():
+            result["status"] = "NOT_FOUND"
+            result["error"] = f"Table not in Kudu: {kudu_table}"
+            print(f"  NOT FOUND — {kudu_table} does not exist in Kudu, skipping")
+        else:
+            result["status"] = "FAILED"
+            result["error"] = err
+            print(f"  FAILED: {err}")
 
     return result
 
@@ -277,25 +284,28 @@ def main():
             dry_run=args.dry_run,
         )
         results.append(result)
-
-        if result["status"] == "FAILED" and not args.continue_on_error:
-            print(f"\nAborting — table {table} failed. Use --continue-on-error to skip.")
-            break
+        # Always continue — never abort mid-loop, report everything at the end
 
     if not args.dry_run:
         write_manifest(output_dir, timestamp, args.kudu_master, results)
 
     total_sec = round((datetime.now() - start_all).total_seconds(), 1)
-    success = [r for r in results if r["status"] == "SUCCESS"]
-    failed  = [r for r in results if r["status"] == "FAILED"]
+    success   = [r for r in results if r["status"] == "SUCCESS"]
+    failed    = [r for r in results if r["status"] == "FAILED"]
+    not_found = [r for r in results if r["status"] == "NOT_FOUND"]
+    empty     = [r for r in results if r["status"] == "EMPTY"]
+    dry_run_r = [r for r in results if r["status"] == "DRY_RUN"]
     total_rows = sum(r["row_count"] for r in success)
 
     print("\n\n" + "=" * 60)
     print("  BACKUP SUMMARY")
     print("=" * 60)
     print(f"  Output dir  : {output_dir}")
+    print(f"  Total       : {len(results)}")
     print(f"  Success     : {len(success)}")
     print(f"  Failed      : {len(failed)}")
+    print(f"  Not found   : {len(not_found)}  (table missing in Kudu — skipped)")
+    print(f"  Empty       : {len(empty)}")
     print(f"  Total rows  : {total_rows:,}")
     print(f"  Total time  : {total_sec}s")
     print(f"\n  {'Table':<45} {'Status':<12} {'Rows':>10}")
@@ -303,8 +313,13 @@ def main():
     for r in results:
         print(f"  {r['table']:<45} {r['status']:<12} {r['row_count']:>10,}")
 
+    if not_found:
+        print(f"\n  NOT FOUND (table missing in Kudu):")
+        for r in not_found:
+            print(f"    - {r['table']}")
+
     if failed:
-        print("\n  FAILED TABLES:")
+        print(f"\n  FAILED (unexpected errors):")
         for r in failed:
             print(f"    - {r['table']}: {r['error']}")
 
