@@ -13,20 +13,26 @@ Flow:
 
 Usage:
     # Backup all tables
-    spark-submit --jars /jars/kudu/kudu-spark3_2.12-1.17.0.jar \\
+    spark-submit \\
+        --master yarn --deploy-mode client \\
+        --jars /app/cloudera/parcels/SPARK3/lib/spark3/hue_for_spark3/hive-warehouse-connector-spark3-assembly-*.jar,/app/cloudera/parcels/CDH/jars/kudu-spark3_2.12-1.17.0.7.1.9.1054-4.jar,/app/cloudera/parcels/CDH/jars/kudu-client-3.17.0.7.1.9.1054-4.jar \\
         backup_sit_to_local.py \\
         --kudu-master <sit-kudu-master>:7051 \\
         --output-dir /tmp/sit_backup
 
     # Skip audit log (faster — rarely needed for rollback)
-    spark-submit --jars /jars/kudu/kudu-spark3_2.12-1.17.0.jar \\
+    spark-submit \\
+        --master yarn --deploy-mode client \\
+        --jars /app/cloudera/parcels/SPARK3/lib/spark3/hue_for_spark3/hive-warehouse-connector-spark3-assembly-*.jar,/app/cloudera/parcels/CDH/jars/kudu-spark3_2.12-1.17.0.7.1.9.1054-4.jar,/app/cloudera/parcels/CDH/jars/kudu-client-3.17.0.7.1.9.1054-4.jar \\
         backup_sit_to_local.py \\
         --kudu-master <sit-kudu-master>:7051 \\
         --output-dir /tmp/sit_backup \\
         --skip-tables cis_audit_log
 
     # Dry run (row counts only, no write)
-    spark-submit --jars /jars/kudu/kudu-spark3_2.12-1.17.0.jar \\
+    spark-submit \\
+        --master yarn --deploy-mode client \\
+        --jars /app/cloudera/parcels/SPARK3/lib/spark3/hue_for_spark3/hive-warehouse-connector-spark3-assembly-*.jar,/app/cloudera/parcels/CDH/jars/kudu-spark3_2.12-1.17.0.7.1.9.1054-4.jar,/app/cloudera/parcels/CDH/jars/kudu-client-3.17.0.7.1.9.1054-4.jar \\
         backup_sit_to_local.py \\
         --kudu-master <sit-kudu-master>:7051 \\
         --dry-run
@@ -236,6 +242,23 @@ def main():
     spark = (
         SparkSession.builder
         .appName(f"CIS_SIT_Backup_{timestamp}")
+        .master("yarn")
+        .config("spark.submit.deployMode", "client")
+        # Cloudera CML — cross-join & timeouts
+        .config("spark.sql.crossJoin.enabled", "true")
+        .config("spark.rpc.askTimeout", "300")
+        .config("spark.network.timeout", "600")
+        # Hive Warehouse Connector (HWC) — required on Cloudera
+        .config("spark.sql.extensions",
+                "com.qubole.spark.hiveacid.HiveAcidAutoConvertExtension")
+        .config("spark.sql.hive.hwc.execution.mode", "spark")
+        .config("spark.datasource.hive.warehouse.read.jdbc.mode", "cluster")
+        .config("spark.hadoop.hive.exec.dynamic.partition.mode", "nonstrict")
+        .config("spark.kryo.registrator",
+                "com.qubole.spark.hiveacid.util.HiveAcidKryoRegistrator")
+        # Kudu master (override per env via --kudu-master arg at runtime)
+        .config("spark.kudu.master", args.kudu_master)
+        # Legacy time parser for STRING date columns
         .config("spark.sql.legacy.timeParserPolicy", "LEGACY")
         .getOrCreate()
     )

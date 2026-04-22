@@ -319,6 +319,21 @@ def main():
     spark = (
         SparkSession.builder
         .appName("CIS_UAT_to_SIT_Migration")
+        .master("yarn")
+        .config("spark.submit.deployMode", "client")
+        # Cloudera CML — cross-join & timeouts
+        .config("spark.sql.crossJoin.enabled", "true")
+        .config("spark.rpc.askTimeout", "300")
+        .config("spark.network.timeout", "600")
+        # Hive Warehouse Connector (HWC) — required on Cloudera
+        .config("spark.sql.extensions",
+                "com.qubole.spark.hiveacid.HiveAcidAutoConvertExtension")
+        .config("spark.sql.hive.hwc.execution.mode", "spark")
+        .config("spark.datasource.hive.warehouse.read.jdbc.mode", "cluster")
+        .config("spark.hadoop.hive.exec.dynamic.partition.mode", "nonstrict")
+        .config("spark.kryo.registrator",
+                "com.qubole.spark.hiveacid.util.HiveAcidKryoRegistrator")
+        # Legacy time parser for STRING date columns
         .config("spark.sql.legacy.timeParserPolicy", "LEGACY")
         .getOrCreate()
     )
