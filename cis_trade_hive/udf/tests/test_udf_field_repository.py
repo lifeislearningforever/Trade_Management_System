@@ -16,9 +16,10 @@ from datetime import datetime
 
 from udf.repositories.udf_field_repository import (
     UDFFieldRepository,
-    UDFFieldRepositoryInterface,
     udf_field_repository
 )
+# UDFFieldRepositoryInterface was removed — use UDFFieldRepository directly
+UDFFieldRepositoryInterface = UDFFieldRepository
 
 
 class UDFFieldRepositoryEscapeStringTestCase(TestCase):

@@ -123,7 +123,7 @@ WARN: Some warning message
 class FXRateHiveRepositoryTestCase(TestCase):
     """Test cases for FXRateHiveRepository"""
 
-    @patch.object(HiveConnection, 'execute_query')
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_all_fx_rates_no_filters(self, mock_execute):
         """Test getting all FX rates without filters"""
         mock_execute.return_value = [
@@ -156,7 +156,7 @@ class FXRateHiveRepositoryTestCase(TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]['currency_pair'], 'USD/EUR')
 
-    @patch.object(HiveConnection, 'execute_query')
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_all_fx_rates_with_currency_pair_filter(self, mock_execute):
         """Test filtering by currency pair"""
         mock_execute.return_value = []
@@ -169,7 +169,7 @@ class FXRateHiveRepositoryTestCase(TestCase):
         query = mock_execute.call_args[0][0]
         self.assertIn("currency_pair = 'USD/EUR'", query)
 
-    @patch.object(HiveConnection, 'execute_query')
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_all_fx_rates_with_date_filters(self, mock_execute):
         """Test filtering by date range"""
         mock_execute.return_value = []
@@ -184,7 +184,7 @@ class FXRateHiveRepositoryTestCase(TestCase):
         self.assertIn("rate_date >= '2025-12-01'", query)
         self.assertIn("rate_date <= '2025-12-31'", query)
 
-    @patch.object(HiveConnection, 'execute_query')
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_all_fx_rates_with_source_filter(self, mock_execute):
         """Test filtering by source"""
         mock_execute.return_value = []
@@ -197,7 +197,7 @@ class FXRateHiveRepositoryTestCase(TestCase):
         query = mock_execute.call_args[0][0]
         self.assertIn("source = 'BLOOMBERG'", query)
 
-    @patch.object(HiveConnection, 'execute_query')
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_all_fx_rates_with_all_filters(self, mock_execute):
         """Test using all filters together"""
         mock_execute.return_value = []
@@ -217,7 +217,7 @@ class FXRateHiveRepositoryTestCase(TestCase):
         self.assertIn("source = 'REUTERS'", query)
         self.assertIn('LIMIT 50', query)
 
-    @patch.object(HiveConnection, 'execute_query')
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_fx_rate_by_currency_pair(self, mock_execute):
         """Test getting rates for specific currency pair"""
         mock_execute.return_value = [
@@ -230,7 +230,7 @@ class FXRateHiveRepositoryTestCase(TestCase):
         self.assertIn("currency_pair = 'USD/EUR'", query)
         self.assertEqual(len(results), 1)
 
-    @patch.object(HiveConnection, 'execute_query')
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_latest_fx_rates(self, mock_execute):
         """Test getting latest rates"""
         mock_execute.return_value = [
@@ -244,7 +244,7 @@ class FXRateHiveRepositoryTestCase(TestCase):
         self.assertIn('ORDER BY rate_date DESC', query)
         self.assertIn('LIMIT 10', query)
 
-    @patch.object(HiveConnection, 'execute_query')
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_unique_currency_pairs(self, mock_execute):
         """Test getting unique currency pairs"""
         mock_execute.return_value = [
@@ -259,7 +259,7 @@ class FXRateHiveRepositoryTestCase(TestCase):
         self.assertIn('SELECT DISTINCT currency_pair', query)
         self.assertEqual(len(results), 3)
 
-    @patch.object(HiveConnection, 'execute_query')
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_fx_rates_by_source(self, mock_execute):
         """Test getting rates by source"""
         mock_execute.return_value = []
@@ -270,7 +270,7 @@ class FXRateHiveRepositoryTestCase(TestCase):
         self.assertIn("source = 'BLOOMBERG'", query)
         self.assertIn('LIMIT 25', query)
 
-    @patch.object(HiveConnection, 'execute_query')
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_fx_rates_for_date(self, mock_execute):
         """Test getting rates for specific date"""
         mock_execute.return_value = []
@@ -280,7 +280,7 @@ class FXRateHiveRepositoryTestCase(TestCase):
         query = mock_execute.call_args[0][0]
         self.assertIn("rate_date = '2025-12-26'", query)
 
-    @patch.object(HiveConnection, 'execute_query')
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_repository_handles_empty_results(self, mock_execute):
         """Test repository handles empty results gracefully"""
         mock_execute.return_value = []
@@ -288,7 +288,7 @@ class FXRateHiveRepositoryTestCase(TestCase):
         results = FXRateHiveRepository.get_all_fx_rates()
         self.assertEqual(len(results), 0)
 
-    @patch.object(HiveConnection, 'execute_query')
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_repository_sql_injection_prevention(self, mock_execute):
         """Test that repository prevents SQL injection"""
         mock_execute.return_value = []
