@@ -133,7 +133,7 @@ ALL_TABLES = [
 # Tables to skip by default (transient/queue data not needed in SIT)
 DEFAULT_SKIP = []
 
-# Kudu table name format: impala::<database>.<table>
+# Kudu table name format on Cloudera CML: <database>.<table> (no impala:: prefix)
 DATABASE = "gmp_cis"
 
 
@@ -143,7 +143,7 @@ DATABASE = "gmp_cis"
 
 def kudu_table_name(table: str, database: str = DATABASE) -> str:
     """Returns the Kudu table name as seen by the Spark connector."""
-    return f"impala::{database}.{table}"
+    return f"{database}.{table}"
 
 
 def read_kudu_table(spark: SparkSession, master: str, table: str) -> DataFrame:

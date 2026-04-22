@@ -149,7 +149,7 @@ def restore_table(
     }
     start = datetime.now()
     parquet_path = os.path.join(backup_dir, table)
-    kudu_table = f"impala::{database}.{table}"
+    kudu_table = f"{database}.{table}"
 
     print(f"\n{'='*60}")
     print(f"  Table  : {table}")

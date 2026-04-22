@@ -130,7 +130,7 @@ def backup_table(spark, kudu_master, database, table, output_dir, dry_run=False)
         "duration_sec": 0,
     }
     start = datetime.now()
-    kudu_table = f"impala::{database}.{table}"
+    kudu_table = f"{database}.{table}"
     out_path = os.path.join(output_dir, table)
 
     print(f"\n{'='*60}")
