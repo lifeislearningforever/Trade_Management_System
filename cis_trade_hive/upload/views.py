@@ -531,9 +531,12 @@ def upload_ingest(request, upload_id: str):
                     _temp_dir = os.path.join(settings.BASE_DIR, 'temp_uploads')
                     _file_name = upload.get('file_name', '') or upload.get('original_file_name', '')
                     _reconstructed = os.path.join(_temp_dir, f"{upload_id}_{_file_name}")
+                    logger.info(f"[ingest] Attempting temp file reconstruction: {_reconstructed} exists={os.path.exists(_reconstructed)}")
                     if os.path.exists(_reconstructed):
                         temp_file_path = _reconstructed
                         logger.info(f"[ingest] Reconstructed temp file path: {_reconstructed}")
+                    else:
+                        logger.warning(f"[ingest] Temp file NOT found at {_reconstructed} — will fall back to sample_data ({len(upload.get('sample_data_json') or [])} rows). Row count in DB will be capped at 20.")
             sample_data = None
             if is_session_upload:
                 sample_data_json = upload.get('sample_data_json', [])
