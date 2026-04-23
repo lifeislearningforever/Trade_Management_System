@@ -8,8 +8,9 @@
 
 -- ============================================================================
 -- USER_UPLOAD_1: Basic Position Data
+-- Separator: | (pipe)
 -- Fields: Portfolio, Client_Num, Exchange_Quoted, ISIN_Code, Counter,
---         Quantity_Yesterday, Movement, Quantity_Today, Reporting_Date
+--         Quantity_Yesterday, Movement, Quantity_Today, Trade_Date
 -- position_basis default: TRADE_DATE
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_1 (
@@ -26,7 +27,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_1 (
     quantity_yesterday      STRING,
     movement                STRING,
     quantity_today          STRING,
-    reporting_date          STRING,
+    trade_date              STRING,
     position_basis          STRING
 )
 COMMENT 'User Upload Source 1 - Basic Position Data (position_basis defaulted to TRADE_DATE at ingest)'
@@ -234,6 +235,6 @@ STORED AS PARQUET
 -- Run these on the live cluster if tables were already created without the column.
 -- Tables 4 and 5 do not need this (4 has no reporting_date; 5 already has it).
 -- ============================================================================
--- ALTER TABLE gmp_cis.cis_user_sta_adhoc_position_1 ADD COLUMNS (reporting_date STRING);
+-- ALTER TABLE gmp_cis.cis_user_sta_adhoc_position_1 ADD COLUMNS (trade_date STRING);
 -- ALTER TABLE gmp_cis.cis_user_sta_adhoc_position_2 ADD COLUMNS (reporting_date STRING);
 -- ALTER TABLE gmp_cis.cis_user_sta_adhoc_position_3 ADD COLUMNS (reporting_date STRING);

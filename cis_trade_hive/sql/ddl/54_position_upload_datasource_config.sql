@@ -22,8 +22,9 @@ USE gmp_cis;
 
 -- ----------------------------------------------------------------------------
 -- Position Upload 1: Basic Position Data
+-- Separator: | (pipe)
 -- CSV columns: Portfolio, Client_Num, Exchange_Quoted, ISIN_Code, Counter,
---              Quantity_Yesterday, Movement, Quantity_Today, Reporting_Date
+--              Quantity_Yesterday, Movement, Quantity_Today, Trade_Date
 -- position_basis defaulted to: TRADE_DATE
 -- ----------------------------------------------------------------------------
 UPSERT INTO gmp_cis.cis_datasource_mng (
@@ -42,10 +43,10 @@ UPSERT INTO gmp_cis.cis_datasource_mng (
     'CIS_POS_1',
     'CIS_External_upload_format_1.csv',
     'cis_user_sta_adhoc_position_1',
-    ',',
+    '|',
     'true',
     '0',
-    'portfolio,client_num,exchange_quoted,isin_code,counter,quantity_yesterday,movement,quantity_today,reporting_date',
+    'portfolio,client_num,exchange_quoted,isin_code,counter,quantity_yesterday,movement,quantity_today,trade_date',
     'USER_UPLOAD',
     'user',
     'sta',
