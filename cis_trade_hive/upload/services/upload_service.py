@@ -1869,10 +1869,10 @@ SELECT * FROM (
             #         Each source table has a different column layout — we map
             #         them here to the common schema.
             # ------------------------------------------------------------------
-            # Helper macro: cast STRING→DECIMAL safely (empty string → NULL)
-            def _d4(col):   return f"CAST(NULLIF(TRIM({col}), '') AS DECIMAL(18,4))"
-            def _d6(col):   return f"CAST(NULLIF(TRIM({col}), '') AS DECIMAL(18,6))"
-            def _d10(col):  return f"CAST(NULLIF(TRIM({col}), '') AS DECIMAL(10,6))"
+            # Step 0 writes raw STRING values to position_upload_standardized (all columns are STRING).
+            # Numeric CASTs are applied in Step 1 when building pos_stage_1_base (internal PARQUET).
+            # exchange_code is the DDL column name; it is aliased to `exchange` in Step 1 for
+            # use as a reserved-word-safe name throughout the internal pipeline.
 
             STANDARDIZE_SELECT = {
                 # ------------------------------------------------------------------
@@ -1882,8 +1882,8 @@ SELECT * FROM (
                 # column mapping per Position_insert.sql:
                 #   counter → security_full_name
                 #   isin_code → isin
-                #   exchange_quoted → `exchange`
-                #   quantity_today → quantity  (STRING→DECIMAL cast required)
+                #   exchange_quoted → exchange_code
+                #   quantity_today → quantity  (stored as STRING in standardized table)
                 # ------------------------------------------------------------------
                 'cis_user_sta_adhoc_position_1': f"""
                     SELECT
@@ -1892,7 +1892,7 @@ SELECT * FROM (
                         NULL                                    AS security_short_name,
                         isin_code                               AS isin,
                         NULL                                    AS ticker,
-                        {_d4('quantity_today')}                 AS quantity,
+                        quantity_today                          AS quantity,
                         NULL                                    AS shares_outstanding,
                         NULL                                    AS shares_issued,
                         NULL                                    AS pct_holding,
@@ -1902,12 +1902,12 @@ SELECT * FROM (
                         NULL                                    AS market_value_fc,
                         NULL                                    AS net_book_value_fc,
                         NULL                                    AS unrealized_pnl_fc,
+                        NULL                                    AS provision_fc,
                         NULL                                    AS cost_lc,
                         NULL                                    AS market_value_lc,
                         NULL                                    AS net_book_value_lc,
                         NULL                                    AS unrealized_pnl_lc,
                         NULL                                    AS provision_lc,
-                        NULL                                    AS provision_fc,
                         NULL                                    AS product_type,
                         NULL                                    AS security_type,
                         NULL                                    AS quoted_unquoted,
@@ -1915,7 +1915,7 @@ SELECT * FROM (
                         NULL                                    AS fin_nonfin_co,
                         NULL                                    AS issuer_type,
                         NULL                                    AS reits_or_fund_y_n,
-                        exchange_quoted                         AS `exchange`,
+                        exchange_quoted                         AS exchange_code,
                         NULL                                    AS country_code,
                         NULL                                    AS country_of_exchange,
                         NULL                                    AS country_of_incorporation,
@@ -1938,14 +1938,14 @@ SELECT * FROM (
                         'sta'                                   AS data_cat,
                         'adhoc'                                 AS data_frq,
                         'cis_user_sta_adhoc_position_1'         AS source_table,
-                        CURRENT_TIMESTAMP()                     AS etl_insert_ts,
+                        CAST(CURRENT_TIMESTAMP() AS STRING)     AS etl_insert_ts,
                         'python_etl'                            AS etl_batch_id
                     FROM {db}.cis_user_sta_adhoc_position_1
                     WHERE processing_date = '{processing_date}'
                       AND src_id = '{src_id}'
                 """,
                 # ------------------------------------------------------------------
-                # position_2: qty_held, shares_issued, pct_holding are STRING
+                # position_2: all numeric as STRING passthrough
                 # ------------------------------------------------------------------
                 'cis_user_sta_adhoc_position_2': f"""
                     SELECT
@@ -1954,22 +1954,22 @@ SELECT * FROM (
                         stock_name                              AS security_short_name,
                         isin_code                               AS isin,
                         NULL                                    AS ticker,
-                        {_d4('qty_held')}                       AS quantity,
-                        {_d4('shares_issued')}                  AS shares_outstanding,
+                        qty_held                                AS quantity,
+                        shares_issued                           AS shares_outstanding,
                         NULL                                    AS shares_issued,
-                        {_d10('pct_holding')}                   AS pct_holding,
+                        pct_holding                             AS pct_holding,
                         NULL                                    AS market_price,
                         NULL                                    AS average_cost,
                         NULL                                    AS cost_fc,
                         NULL                                    AS market_value_fc,
                         NULL                                    AS net_book_value_fc,
                         NULL                                    AS unrealized_pnl_fc,
+                        NULL                                    AS provision_fc,
                         NULL                                    AS cost_lc,
                         NULL                                    AS market_value_lc,
                         NULL                                    AS net_book_value_lc,
                         NULL                                    AS unrealized_pnl_lc,
                         NULL                                    AS provision_lc,
-                        NULL                                    AS provision_fc,
                         NULL                                    AS product_type,
                         NULL                                    AS security_type,
                         NULL                                    AS quoted_unquoted,
@@ -1977,7 +1977,7 @@ SELECT * FROM (
                         NULL                                    AS fin_nonfin_co,
                         NULL                                    AS issuer_type,
                         NULL                                    AS reits_or_fund_y_n,
-                        country_id                              AS `exchange`,
+                        country_id                              AS exchange_code,
                         country_id                              AS country_code,
                         country_id                              AS country_of_exchange,
                         country_id                              AS country_of_incorporation,
@@ -2000,69 +2000,39 @@ SELECT * FROM (
                         'sta'                                   AS data_cat,
                         'adhoc'                                 AS data_frq,
                         'cis_user_sta_adhoc_position_2'         AS source_table,
-                        CURRENT_TIMESTAMP()                     AS etl_insert_ts,
+                        CAST(CURRENT_TIMESTAMP() AS STRING)     AS etl_insert_ts,
                         'python_etl'                            AS etl_batch_id
                     FROM {db}.cis_user_sta_adhoc_position_2
                     WHERE processing_date = '{processing_date}'
                       AND src_id = '{src_id}'
                 """,
                 # ------------------------------------------------------------------
-                # position_3/4/5: all numeric columns come in as STRING from ingest
+                # position_3/4/5: already use standardized column names, STRING passthrough
                 # ------------------------------------------------------------------
                 'cis_user_sta_adhoc_position_3': f"""
                     SELECT
-                        portfolio                               AS portfolio,
-                        security_full_name                      AS security_full_name,
-                        security_short_name                     AS security_short_name,
-                        isin                                    AS isin,
-                        ticker                                  AS ticker,
-                        {_d4('quantity')}                       AS quantity,
-                        {_d4('shares_outstanding')}             AS shares_outstanding,
-                        {_d4('shares_issued')}                  AS shares_issued,
-                        {_d10('pct_holding')}                   AS pct_holding,
-                        {_d6('market_price')}                   AS market_price,
-                        {_d6('average_cost')}                   AS average_cost,
-                        {_d4('cost_fc')}                        AS cost_fc,
-                        {_d4('market_value_fc')}                AS market_value_fc,
-                        {_d4('net_book_value_fc')}              AS net_book_value_fc,
-                        {_d4('unrealized_pnl_fc')}              AS unrealized_pnl_fc,
-                        {_d4('cost_lc')}                        AS cost_lc,
-                        {_d4('market_value_lc')}                AS market_value_lc,
-                        {_d4('net_book_value_lc')}              AS net_book_value_lc,
-                        {_d4('unrealized_pnl_lc')}              AS unrealized_pnl_lc,
-                        {_d4('provision_lc')}                   AS provision_lc,
-                        {_d4('provision_fc')}                   AS provision_fc,
-                        product_type                            AS product_type,
-                        security_type                           AS security_type,
-                        quoted_unquoted                         AS quoted_unquoted,
-                        industry                                AS industry,
-                        fin_nonfin_co                           AS fin_nonfin_co,
-                        issuer_type                             AS issuer_type,
-                        reits_or_fund_y_n                       AS reits_or_fund_y_n,
-                        `exchange`                              AS `exchange`,
-                        country_code                            AS country_code,
-                        country_of_exchange                     AS country_of_exchange,
-                        country_of_incorporation                AS country_of_incorporation,
-                        country_of_risk                         AS country_of_risk,
-                        country_of_operation                    AS country_of_operation,
-                        security_currency                       AS security_currency,
-                        corp_code                               AS corp_code,
-                        branch_code                             AS branch_code,
-                        cost_centre                             AS cost_centre,
-                        cels                                    AS cels,
-                        bwcif_sg                                AS bwcif_sg,
-                        bwcif_ovs                               AS bwcif_ovs,
-                        mas_6d_code_sg                          AS mas_6d_code_sg,
-                        mas_6d_code_ovs                         AS mas_6d_code_ovs,
-                        position_basis                          AS position_basis,
-                        reporting_date                          AS reporting_date,
-                        maturity_date                           AS maturity_date,
+                        portfolio, security_full_name, security_short_name,
+                        isin, ticker,
+                        quantity, shares_outstanding, shares_issued, pct_holding,
+                        market_price, average_cost,
+                        cost_fc, market_value_fc, net_book_value_fc,
+                        unrealized_pnl_fc, provision_fc,
+                        cost_lc, market_value_lc, net_book_value_lc,
+                        unrealized_pnl_lc, provision_lc,
+                        product_type, security_type, quoted_unquoted, industry,
+                        fin_nonfin_co, issuer_type, reits_or_fund_y_n,
+                        exchange_code,
+                        country_code, country_of_exchange, country_of_incorporation,
+                        country_of_risk, country_of_operation, security_currency,
+                        corp_code, branch_code, cost_centre, cels,
+                        bwcif_sg, bwcif_ovs, mas_6d_code_sg, mas_6d_code_ovs,
+                        position_basis, reporting_date, maturity_date,
                         'USER_UPLOAD'                           AS src_system,
                         'user'                                  AS sub_system,
                         'sta'                                   AS data_cat,
                         'adhoc'                                 AS data_frq,
                         'cis_user_sta_adhoc_position_3'         AS source_table,
-                        CURRENT_TIMESTAMP()                     AS etl_insert_ts,
+                        CAST(CURRENT_TIMESTAMP() AS STRING)     AS etl_insert_ts,
                         'python_etl'                            AS etl_batch_id
                     FROM {db}.cis_user_sta_adhoc_position_3
                     WHERE processing_date = '{processing_date}'
@@ -2070,58 +2040,28 @@ SELECT * FROM (
                 """,
                 'cis_user_sta_adhoc_position_4': f"""
                     SELECT
-                        portfolio                               AS portfolio,
-                        security_full_name                      AS security_full_name,
-                        security_short_name                     AS security_short_name,
-                        isin                                    AS isin,
-                        ticker                                  AS ticker,
-                        {_d4('quantity')}                       AS quantity,
-                        {_d4('shares_outstanding')}             AS shares_outstanding,
-                        {_d4('shares_issued')}                  AS shares_issued,
-                        {_d10('pct_holding')}                   AS pct_holding,
-                        {_d6('market_price')}                   AS market_price,
-                        {_d6('average_cost')}                   AS average_cost,
-                        {_d4('cost_fc')}                        AS cost_fc,
-                        {_d4('market_value_fc')}                AS market_value_fc,
-                        {_d4('net_book_value_fc')}              AS net_book_value_fc,
-                        {_d4('unrealized_pnl_fc')}              AS unrealized_pnl_fc,
-                        {_d4('cost_lc')}                        AS cost_lc,
-                        {_d4('market_value_lc')}                AS market_value_lc,
-                        {_d4('net_book_value_lc')}              AS net_book_value_lc,
-                        {_d4('unrealized_pnl_lc')}              AS unrealized_pnl_lc,
-                        {_d4('provision_lc')}                   AS provision_lc,
-                        {_d4('provision_fc')}                   AS provision_fc,
-                        product_type                            AS product_type,
-                        security_type                           AS security_type,
-                        quoted_unquoted                         AS quoted_unquoted,
-                        industry                                AS industry,
-                        fin_nonfin_co                           AS fin_nonfin_co,
-                        issuer_type                             AS issuer_type,
-                        reits_or_fund_y_n                       AS reits_or_fund_y_n,
-                        `exchange`                              AS `exchange`,
-                        country_code                            AS country_code,
-                        country_of_exchange                     AS country_of_exchange,
-                        country_of_incorporation                AS country_of_incorporation,
-                        country_of_risk                         AS country_of_risk,
-                        country_of_operation                    AS country_of_operation,
-                        security_currency                       AS security_currency,
-                        corp_code                               AS corp_code,
-                        branch_code                             AS branch_code,
-                        cost_centre                             AS cost_centre,
-                        cels                                    AS cels,
-                        bwcif_sg                                AS bwcif_sg,
-                        bwcif_ovs                               AS bwcif_ovs,
-                        mas_6d_code_sg                          AS mas_6d_code_sg,
-                        mas_6d_code_ovs                         AS mas_6d_code_ovs,
-                        position_basis                          AS position_basis,
-                        reporting_date                          AS reporting_date,
-                        maturity_date                           AS maturity_date,
+                        portfolio, security_full_name, security_short_name,
+                        isin, ticker,
+                        quantity, shares_outstanding, shares_issued, pct_holding,
+                        market_price, average_cost,
+                        cost_fc, market_value_fc, net_book_value_fc,
+                        unrealized_pnl_fc, provision_fc,
+                        cost_lc, market_value_lc, net_book_value_lc,
+                        unrealized_pnl_lc, provision_lc,
+                        product_type, security_type, quoted_unquoted, industry,
+                        fin_nonfin_co, issuer_type, reits_or_fund_y_n,
+                        exchange_code,
+                        country_code, country_of_exchange, country_of_incorporation,
+                        country_of_risk, country_of_operation, security_currency,
+                        corp_code, branch_code, cost_centre, cels,
+                        bwcif_sg, bwcif_ovs, mas_6d_code_sg, mas_6d_code_ovs,
+                        position_basis, reporting_date, maturity_date,
                         'USER_UPLOAD'                           AS src_system,
                         'user'                                  AS sub_system,
                         'sta'                                   AS data_cat,
                         'adhoc'                                 AS data_frq,
                         'cis_user_sta_adhoc_position_4'         AS source_table,
-                        CURRENT_TIMESTAMP()                     AS etl_insert_ts,
+                        CAST(CURRENT_TIMESTAMP() AS STRING)     AS etl_insert_ts,
                         'python_etl'                            AS etl_batch_id
                     FROM {db}.cis_user_sta_adhoc_position_4
                     WHERE processing_date = '{processing_date}'
@@ -2129,58 +2069,28 @@ SELECT * FROM (
                 """,
                 'cis_user_sta_adhoc_position_5': f"""
                     SELECT
-                        portfolio                               AS portfolio,
-                        security_full_name                      AS security_full_name,
-                        security_short_name                     AS security_short_name,
-                        isin                                    AS isin,
-                        ticker                                  AS ticker,
-                        {_d4('quantity')}                       AS quantity,
-                        {_d4('shares_outstanding')}             AS shares_outstanding,
-                        {_d4('shares_issued')}                  AS shares_issued,
-                        {_d10('pct_holding')}                   AS pct_holding,
-                        {_d6('market_price')}                   AS market_price,
-                        {_d6('average_cost')}                   AS average_cost,
-                        {_d4('cost_fc')}                        AS cost_fc,
-                        {_d4('market_value_fc')}                AS market_value_fc,
-                        {_d4('net_book_value_fc')}              AS net_book_value_fc,
-                        {_d4('unrealized_pnl_fc')}              AS unrealized_pnl_fc,
-                        {_d4('cost_lc')}                        AS cost_lc,
-                        {_d4('market_value_lc')}                AS market_value_lc,
-                        {_d4('net_book_value_lc')}              AS net_book_value_lc,
-                        {_d4('unrealized_pnl_lc')}              AS unrealized_pnl_lc,
-                        {_d4('provision_lc')}                   AS provision_lc,
-                        {_d4('provision_fc')}                   AS provision_fc,
-                        product_type                            AS product_type,
-                        security_type                           AS security_type,
-                        quoted_unquoted                         AS quoted_unquoted,
-                        industry                                AS industry,
-                        fin_nonfin_co                           AS fin_nonfin_co,
-                        issuer_type                             AS issuer_type,
-                        reits_or_fund_y_n                       AS reits_or_fund_y_n,
-                        `exchange`                              AS `exchange`,
-                        country_code                            AS country_code,
-                        country_of_exchange                     AS country_of_exchange,
-                        country_of_incorporation                AS country_of_incorporation,
-                        country_of_risk                         AS country_of_risk,
-                        country_of_operation                    AS country_of_operation,
-                        security_currency                       AS security_currency,
-                        corp_code                               AS corp_code,
-                        branch_code                             AS branch_code,
-                        cost_centre                             AS cost_centre,
-                        cels                                    AS cels,
-                        bwcif_sg                                AS bwcif_sg,
-                        bwcif_ovs                               AS bwcif_ovs,
-                        mas_6d_code_sg                          AS mas_6d_code_sg,
-                        mas_6d_code_ovs                         AS mas_6d_code_ovs,
-                        position_basis                          AS position_basis,
-                        reporting_date                          AS reporting_date,
-                        maturity_date                           AS maturity_date,
+                        portfolio, security_full_name, security_short_name,
+                        isin, ticker,
+                        quantity, shares_outstanding, shares_issued, pct_holding,
+                        market_price, average_cost,
+                        cost_fc, market_value_fc, net_book_value_fc,
+                        unrealized_pnl_fc, provision_fc,
+                        cost_lc, market_value_lc, net_book_value_lc,
+                        unrealized_pnl_lc, provision_lc,
+                        product_type, security_type, quoted_unquoted, industry,
+                        fin_nonfin_co, issuer_type, reits_or_fund_y_n,
+                        exchange_code,
+                        country_code, country_of_exchange, country_of_incorporation,
+                        country_of_risk, country_of_operation, security_currency,
+                        corp_code, branch_code, cost_centre, cels,
+                        bwcif_sg, bwcif_ovs, mas_6d_code_sg, mas_6d_code_ovs,
+                        position_basis, reporting_date, maturity_date,
                         'USER_UPLOAD'                           AS src_system,
                         'user'                                  AS sub_system,
                         'sta'                                   AS data_cat,
                         'adhoc'                                 AS data_frq,
                         'cis_user_sta_adhoc_position_5'         AS source_table,
-                        CURRENT_TIMESTAMP()                     AS etl_insert_ts,
+                        CAST(CURRENT_TIMESTAMP() AS STRING)     AS etl_insert_ts,
                         'python_etl'                            AS etl_batch_id
                     FROM {db}.cis_user_sta_adhoc_position_5
                     WHERE processing_date = '{processing_date}'
@@ -2192,8 +2102,8 @@ SELECT * FROM (
             if not std_select:
                 return False, f"Unknown src_id '{src_id}' — no standardization mapping defined", result
 
-            # Delete this partition from position_upload_standardized first (OVERWRITE semantics)
-            impala_manager.execute_write(
+            # Write this partition into position_upload_standardized (STRING columns, no casts).
+            ok = impala_manager.execute_write(
                 f"""
                 INSERT OVERWRITE {db}.position_upload_standardized
                 PARTITION (src_id='{src_id}', processing_date='{processing_date}')
@@ -2201,6 +2111,8 @@ SELECT * FROM (
                 """,
                 database=db
             )
+            if not ok:
+                return False, f"Step 0 INSERT into position_upload_standardized failed — check Impala logs", result
             impala_manager.execute_write(
                 f"INVALIDATE METADATA {db}.position_upload_standardized",
                 database=db
@@ -2222,13 +2134,14 @@ SELECT * FROM (
                 return False, f"Standardization produced 0 rows — check src_id='{src_id}' processing_date='{processing_date}' in {src_id} table", result
 
             # ------------------------------------------------------------------
-            # Step 1: Base staging table — keep `exchange` as-is (reserved word),
-            #         normalise reporting_date to yyyy-MM-dd string.
+            # Step 1: Base staging table — read from position_upload_standardized
+            #         (all STRING), apply DECIMAL casts, rename exchange_code →
+            #         `exchange` for use as internal name throughout the pipeline.
             # ------------------------------------------------------------------
             impala_manager.execute_write(
                 "DROP TABLE IF EXISTS pos_stage_1_base", database=db
             )
-            impala_manager.execute_write(
+            ok = impala_manager.execute_write(
                 f"""
                 CREATE TABLE pos_stage_1_base
                 STORED AS PARQUET AS
@@ -2239,22 +2152,22 @@ SELECT * FROM (
                     security_short_name,
                     isin,
                     ticker,
-                    quantity,
-                    shares_outstanding,
-                    shares_issued,
-                    pct_holding,
-                    market_price,
-                    average_cost,
-                    cost_fc,
-                    market_value_fc,
-                    net_book_value_fc,
-                    unrealized_pnl_fc,
-                    cost_lc,
-                    market_value_lc,
-                    net_book_value_lc,
-                    unrealized_pnl_lc,
-                    provision_lc,
-                    provision_fc,
+                    CAST(NULLIF(TRIM(quantity),            '') AS DECIMAL(18,4)) AS quantity,
+                    CAST(NULLIF(TRIM(shares_outstanding),  '') AS DECIMAL(18,4)) AS shares_outstanding,
+                    CAST(NULLIF(TRIM(shares_issued),       '') AS DECIMAL(18,4)) AS shares_issued,
+                    CAST(NULLIF(TRIM(pct_holding),         '') AS DECIMAL(10,6)) AS pct_holding,
+                    CAST(NULLIF(TRIM(market_price),        '') AS DECIMAL(18,6)) AS market_price,
+                    CAST(NULLIF(TRIM(average_cost),        '') AS DECIMAL(18,6)) AS average_cost,
+                    CAST(NULLIF(TRIM(cost_fc),             '') AS DECIMAL(18,4)) AS cost_fc,
+                    CAST(NULLIF(TRIM(market_value_fc),     '') AS DECIMAL(18,4)) AS market_value_fc,
+                    CAST(NULLIF(TRIM(net_book_value_fc),   '') AS DECIMAL(18,4)) AS net_book_value_fc,
+                    CAST(NULLIF(TRIM(unrealized_pnl_fc),   '') AS DECIMAL(18,4)) AS unrealized_pnl_fc,
+                    CAST(NULLIF(TRIM(cost_lc),             '') AS DECIMAL(18,4)) AS cost_lc,
+                    CAST(NULLIF(TRIM(market_value_lc),     '') AS DECIMAL(18,4)) AS market_value_lc,
+                    CAST(NULLIF(TRIM(net_book_value_lc),   '') AS DECIMAL(18,4)) AS net_book_value_lc,
+                    CAST(NULLIF(TRIM(unrealized_pnl_lc),   '') AS DECIMAL(18,4)) AS unrealized_pnl_lc,
+                    CAST(NULLIF(TRIM(provision_lc),        '') AS DECIMAL(18,4)) AS provision_lc,
+                    CAST(NULLIF(TRIM(provision_fc),        '') AS DECIMAL(18,4)) AS provision_fc,
                     product_type,
                     security_type,
                     quoted_unquoted,
@@ -2262,7 +2175,7 @@ SELECT * FROM (
                     fin_nonfin_co,
                     issuer_type,
                     reits_or_fund_y_n,
-                    `exchange`,
+                    exchange_code                               AS `exchange`,
                     country_code,
                     country_of_exchange,
                     country_of_incorporation,
@@ -2307,6 +2220,8 @@ SELECT * FROM (
                 """,
                 database=db
             )
+            if not ok:
+                return False, "Step 1 CREATE TABLE pos_stage_1_base failed — check Impala logs (likely CAST error or missing exchange_code column)", result
             logger.info("[position_etl] Step 1 complete")
 
             # ------------------------------------------------------------------
@@ -2720,7 +2635,7 @@ SELECT * FROM (
             # Step 7A: INSERT valid records into cis_position.
             #          position_id = (UNIX_TIMESTAMP() * 1000000) + row_id
             # ------------------------------------------------------------------
-            impala_manager.execute_write(
+            ok = impala_manager.execute_write(
                 f"""
                 INSERT INTO {db}.cis_position (
                     position_id,
@@ -2796,6 +2711,8 @@ SELECT * FROM (
                 """,
                 database=db
             )
+            if not ok:
+                return False, "Step 7A INSERT INTO cis_position failed — check Impala logs for column/type mismatch", result
             logger.info("[position_etl] Step 7A complete (cis_position insert)")
 
             # ------------------------------------------------------------------
