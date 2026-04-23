@@ -9,7 +9,7 @@
 -- ============================================================================
 -- USER_UPLOAD_1: Basic Position Data
 -- Fields: Portfolio, Client_Num, Exchange_Quoted, ISIN_Code, Counter,
---         Quantity_Yesterday, Movement, Quantity_Today
+--         Quantity_Yesterday, Movement, Quantity_Today, Reporting_Date
 -- position_basis default: TRADE_DATE
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_1 (
@@ -26,6 +26,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_1 (
     quantity_yesterday      STRING,
     movement                STRING,
     quantity_today          STRING,
+    reporting_date          STRING,
     position_basis          STRING
 )
 COMMENT 'User Upload Source 1 - Basic Position Data (position_basis defaulted to TRADE_DATE at ingest)'
@@ -38,7 +39,8 @@ STORED AS PARQUET
 -- ============================================================================
 -- USER_UPLOAD_2: Portfolio Holdings with Country
 -- Fields: Portfolio_Name, Stock_Name, Security_Description, ISIN_Code,
---         Qty_Held, Shares_Issued, Pct_Holding, Country, Country_ID
+--         Qty_Held, Shares_Issued, Pct_Holding, Country, Country_ID,
+--         Reporting_Date
 -- position_basis default: TRADE_DATE
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_2 (
@@ -56,6 +58,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_2 (
     pct_holding             STRING,
     country                 STRING,
     country_id              STRING,
+    reporting_date          STRING,
     position_basis          STRING
 )
 COMMENT 'User Upload Source 2 - Portfolio Holdings with Country (position_basis defaulted to TRADE_DATE at ingest)'
@@ -68,7 +71,7 @@ STORED AS PARQUET
 -- ============================================================================
 -- USER_UPLOAD_3: Account Position Data
 -- Fields: Account_name, Asset_description_short, ISIN, Shares_Par_value,
---         Shares_outstanding_total, Country_of_listing_code
+--         Shares_outstanding_total, Country_of_listing_code, Reporting_Date
 -- position_basis default: TRADE_DATE
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_3 (
@@ -83,6 +86,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_3 (
     shares_par_value            STRING,
     shares_outstanding_total    STRING,
     country_of_listing_code     STRING,
+    reporting_date              STRING,
     position_basis              STRING
 )
 COMMENT 'User Upload Source 3 - Account Position Data (position_basis defaulted to TRADE_DATE at ingest)'
@@ -224,3 +228,12 @@ STORED AS PARQUET
 -- MSCK REPAIR TABLE gmp_cis.cis_user_sta_adhoc_position_3;
 -- MSCK REPAIR TABLE gmp_cis.cis_user_sta_adhoc_position_4;
 -- MSCK REPAIR TABLE gmp_cis.cis_user_sta_adhoc_position_5;
+
+-- ============================================================================
+-- ALTER TABLE: Add reporting_date to existing tables 1, 2, 3
+-- Run these on the live cluster if tables were already created without the column.
+-- Tables 4 and 5 do not need this (4 has no reporting_date; 5 already has it).
+-- ============================================================================
+-- ALTER TABLE gmp_cis.cis_user_sta_adhoc_position_1 ADD COLUMNS (reporting_date STRING);
+-- ALTER TABLE gmp_cis.cis_user_sta_adhoc_position_2 ADD COLUMNS (reporting_date STRING);
+-- ALTER TABLE gmp_cis.cis_user_sta_adhoc_position_3 ADD COLUMNS (reporting_date STRING);
