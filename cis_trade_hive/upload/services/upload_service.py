@@ -1411,6 +1411,75 @@ class UploadService:
             logger.warning(f"HDFS cleanup error: {e}")
             return False
 
+    # Columns whose values should be normalised to YYYYMMDD before ingest.
+    # Matched case-insensitively against the target table column name.
+    DATE_COLUMNS = {
+        'trade_date', 'reporting_date', 'maturity_date', 'price_date',
+        'settlement_date', 'settle_date', 'value_date', 'effective_date',
+        'start_date', 'end_date', 'expiry_date',
+    }
+
+    @staticmethod
+    def normalise_date(val: str) -> str:
+        """
+        Convert a date string from any common format to YYYYMMDD.
+
+        Handles (examples):
+            30/01/2026  -> 20260130   (DD/MM/YYYY)
+            01-30-2026  -> 20260130   (MM-DD-YYYY)
+            2026-01-30  -> 20260130   (YYYY-MM-DD  — already ISO)
+            20260130    -> 20260130   (already YYYYMMDD)
+            30-Jan-2026 -> 20260130   (DD-Mon-YYYY)
+            Jan 30 2026 -> 20260130
+            30 January 2026 -> 20260130
+
+        Returns the original value unchanged if it cannot be parsed,
+        so ingest never fails hard on a bad date — the raw value lands
+        in the table and can be flagged by the ETL report.
+        """
+        if not val or not isinstance(val, str):
+            return val or ''
+
+        cleaned = val.strip()
+        if not cleaned:
+            return ''
+
+        # Already YYYYMMDD — return immediately
+        if len(cleaned) == 8 and cleaned.isdigit():
+            return cleaned
+
+        from datetime import datetime
+
+        # Ordered list of format strings to try
+        DATE_FORMATS = [
+            '%d/%m/%Y',    # 30/01/2026
+            '%d-%m-%Y',    # 30-01-2026
+            '%m/%d/%Y',    # 01/30/2026  (US)
+            '%m-%d-%Y',    # 01-30-2026  (US)
+            '%Y-%m-%d',    # 2026-01-30  (ISO)
+            '%Y/%m/%d',    # 2026/01/30
+            '%d-%b-%Y',    # 30-Jan-2026
+            '%d-%B-%Y',    # 30-January-2026
+            '%d %b %Y',    # 30 Jan 2026
+            '%d %B %Y',    # 30 January 2026
+            '%b %d %Y',    # Jan 30 2026
+            '%B %d %Y',    # January 30 2026
+            '%b %d, %Y',   # Jan 30, 2026
+            '%B %d, %Y',   # January 30, 2026
+            '%Y%m%d',      # 20260130 (already caught above, safety fallback)
+        ]
+
+        for fmt in DATE_FORMATS:
+            try:
+                dt = datetime.strptime(cleaned, fmt)
+                return dt.strftime('%Y%m%d')
+            except ValueError:
+                continue
+
+        # Could not parse — return original so ingest doesn't break
+        logger.warning(f"[date_normalise] Could not parse date value: '{cleaned}' — storing as-is")
+        return cleaned
+
     def _ingest_using_insert_values(
         self,
         target_table: str,
@@ -1584,6 +1653,10 @@ class UploadService:
                             val = row.get(matching_col, '') if matching_col else ''
                         else:
                             val = ''
+
+                        # Normalise date columns to YYYYMMDD
+                        if col_lower in self.DATE_COLUMNS and val:
+                            val = self.normalise_date(str(val))
 
                         # Escape single quotes and handle empty/null values
                         if val is None or val == '':
