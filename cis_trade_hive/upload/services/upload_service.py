@@ -1902,7 +1902,7 @@ SELECT * FROM (
                     fin_nonfin_co,
                     issuer_type,
                     reits_or_fund_y_n,
-                    exchange_code,
+                    `exchange` AS exchange_code,
                     country_code,
                     country_of_exchange,
                     country_of_incorporation,
