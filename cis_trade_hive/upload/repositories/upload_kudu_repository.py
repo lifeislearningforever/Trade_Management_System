@@ -27,6 +27,29 @@ _MAX_STORED_ERRORS = 50
 _MAX_ERROR_MSG_LEN = 300
 
 
+def _serialise_sample_data(rows) -> str:
+    """
+    Safely serialise sample_data rows for Kudu storage.
+
+    Caps at 20 rows and truncates each cell value to 200 chars so the
+    resulting JSON stays well within Kudu STRING limits.
+    The sample is only used as a fallback when the temp file is unavailable;
+    the full file is always preferred for actual ingestion.
+    """
+    if not rows:
+        return '[]'
+    if not isinstance(rows, list):
+        return '[]'
+    capped = rows[:20]
+    safe_rows = []
+    for row in capped:
+        if isinstance(row, dict):
+            safe_rows.append({k: str(v)[:200] for k, v in row.items()})
+        else:
+            safe_rows.append(row)
+    return json.dumps(safe_rows)
+
+
 def _serialise_errors(errors) -> str:
     """
     Safely serialise a validation errors list to JSON for Kudu storage.
@@ -295,7 +318,7 @@ class UploadKuduRepository:
                 self.escape_value(upload_data.get('target_database', self.DATABASE)),
                 self.escape_value(f"{self.HDFS_BASE_PATH}/{upload_id}"),
                 self.escape_value(json.dumps(upload_data.get('schema', [])) if upload_data.get('schema') else '[]'),
-                self.escape_value(json.dumps(upload_data.get('sample_data', [])) if upload_data.get('sample_data') else '[]'),
+                self.escape_value(_serialise_sample_data(upload_data.get('sample_data', []))),
                 self.escape_value(_serialise_errors(upload_data.get('validation_errors', []))),
                 self.escape_value(self.STATUS_PENDING),
                 'false',
@@ -376,6 +399,8 @@ class UploadKuduRepository:
                 if field in update_data:
                     if field == 'validation_errors_json':
                         json_val = _serialise_errors(update_data[field])
+                    elif field == 'sample_data_json':
+                        json_val = _serialise_sample_data(update_data[field]) if isinstance(update_data[field], list) else (update_data[field] or '[]')
                     else:
                         json_val = json.dumps(update_data[field]) if isinstance(update_data[field], (dict, list)) else update_data[field]
                     set_clauses.append(f"`{field}` = {self.escape_value(json_val)}")

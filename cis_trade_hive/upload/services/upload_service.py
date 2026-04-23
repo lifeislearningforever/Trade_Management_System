@@ -1080,11 +1080,18 @@ class UploadService:
                 upload_sample = upload.get('sample_data_json', []) if upload else []
                 if upload_sample:
                     if isinstance(upload_sample, str):
-                        import json as json_module
-                        sample_data = json_module.loads(upload_sample)
+                        try:
+                            import json as json_module
+                            sample_data = json_module.loads(upload_sample)
+                        except Exception:
+                            # sample_data_json is truncated/corrupt in DB (old record).
+                            # Cannot ingest without the full file — the temp file is gone.
+                            logger.warning("sample_data_json in DB is truncated/corrupt; cannot ingest without original file")
+                            sample_data = []
                     else:
                         sample_data = upload_sample
-                    logger.info(f"Using INSERT VALUES with upload sample_data ({len(sample_data)} rows)")
+                    if sample_data:
+                        logger.info(f"Using INSERT VALUES with upload sample_data ({len(sample_data)} rows)")
 
             # If we have either a local file or sample_data, use INSERT VALUES
             if local_file or sample_data:
