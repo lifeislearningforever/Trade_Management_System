@@ -740,7 +740,8 @@ class UploadService:
 
         except Exception as e:
             logger.error(f"Ingestion error: {str(e)}")
-            self.repository.update_status(upload_id, UploadKuduRepository.STATUS_FAILED, updated_by, str(e))
+            safe_err = f"{type(e).__name__}: {str(e)[:200]}"
+            self.repository.update_status(upload_id, UploadKuduRepository.STATUS_FAILED, updated_by, safe_err)
             return False, f"Ingestion error: {str(e)}"
 
     def get_statistics(self) -> Dict[str, Any]:
@@ -1121,7 +1122,8 @@ class UploadService:
         except Exception as e:
             logger.error(f"Metadata-driven ingestion error: {str(e)}")
             if not is_session_upload:
-                self.repository.update_status(upload_id, UploadKuduRepository.STATUS_FAILED, updated_by, str(e))
+                safe_err = f"{type(e).__name__}: {str(e)[:200]}"
+                self.repository.update_status(upload_id, UploadKuduRepository.STATUS_FAILED, updated_by, safe_err)
             return False, f"Ingestion error: {str(e)}"
 
     def _ingest_kudu_equity_price(
@@ -1300,7 +1302,7 @@ class UploadService:
             else:
                 self.repository.update_status(
                     upload_id, UploadKuduRepository.STATUS_FAILED, updated_by,
-                    f"0 rows inserted. Errors: {counters['errors'][:5]}"
+                    f"0 rows inserted. Errors: {str(counters['errors'][:3])[:200]}"
                 )
 
         # ---- Trigger position market value refresh ----

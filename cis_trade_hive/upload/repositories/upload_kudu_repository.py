@@ -406,16 +406,39 @@ class UploadKuduRepository:
             return False
 
     def update_status(self, upload_id: str, new_status: str, updated_by: str, error_message: str = None) -> bool:
-        """Update upload status."""
+        """Update upload status.
+
+        Always succeeds in setting the status — if the full error payload
+        causes a SQL error we fall back to a plain status-only update so
+        the record never stays stuck on INGESTING.
+        """
         update_data = {'status': new_status}
         if error_message:
             # Sanitise: keep only printable ASCII, strip control chars, cap length.
-            # This prevents embedded newlines/backslashes/quotes in exception
-            # messages from corrupting the generated SQL.
+            # Impala exceptions embed the full query text; we must never let that
+            # reach the SQL builder.
             safe_msg = ''.join(c if 32 <= ord(c) < 127 else ' ' for c in str(error_message))
-            safe_msg = safe_msg[:500]
+            safe_msg = safe_msg[:300]
             update_data['validation_errors_json'] = [{'error': safe_msg, 'timestamp': datetime.now().isoformat()}]
-        return self.update_upload(upload_id, update_data, updated_by)
+
+        result = self.update_upload(upload_id, update_data, updated_by)
+        if not result and error_message:
+            # Fallback: drop the error payload and just flip the status
+            logger.warning(f"update_status fallback: retrying with status-only for {upload_id}")
+            try:
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                upload_id_escaped = upload_id.replace("'", "''")
+                updated_by_escaped = updated_by.replace("'", "''")
+                fallback_query = (
+                    f"UPDATE {self.DATABASE}.{self.TABLE_NAME} "
+                    f"SET status = '{new_status}', updated_by = '{updated_by_escaped}', updated_at = '{timestamp}' "
+                    f"WHERE upload_id = '{upload_id_escaped}'"
+                )
+                return impala_manager.execute_write(fallback_query, database=self.DATABASE)
+            except Exception as fe:
+                logger.error(f"update_status fallback also failed: {fe}")
+                return False
+        return result
 
     def soft_delete(self, upload_id: str, deleted_by: str) -> bool:
         """Soft delete an upload."""
