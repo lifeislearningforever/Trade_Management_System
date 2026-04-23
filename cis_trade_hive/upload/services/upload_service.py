@@ -1863,6 +1863,344 @@ SELECT * FROM (
             db = 'gmp_cis'
 
             # ------------------------------------------------------------------
+            # Step 0: Standardize — map raw source table columns into
+            #         position_upload_standardized (equivalent of Position_insert.sql).
+            #         This INSERT is partitioned by (src_id, processing_date).
+            #         Each source table has a different column layout — we map
+            #         them here to the common schema.
+            # ------------------------------------------------------------------
+            STANDARDIZE_SELECT = {
+                'cis_user_sta_adhoc_position_1': f"""
+                    SELECT
+                        portfolio                       AS portfolio,
+                        counter                         AS security_full_name,
+                        NULL                            AS security_short_name,
+                        isin_code                       AS isin,
+                        NULL                            AS ticker,
+                        quantity_today                  AS quantity,
+                        NULL                            AS shares_outstanding,
+                        NULL                            AS shares_issued,
+                        NULL                            AS pct_holding,
+                        NULL                            AS market_price,
+                        NULL                            AS average_cost,
+                        NULL                            AS cost_fc,
+                        NULL                            AS market_value_fc,
+                        NULL                            AS net_book_value_fc,
+                        NULL                            AS unrealized_pnl_fc,
+                        NULL                            AS cost_lc,
+                        NULL                            AS market_value_lc,
+                        NULL                            AS net_book_value_lc,
+                        NULL                            AS unrealized_pnl_lc,
+                        NULL                            AS provision_lc,
+                        NULL                            AS provision_fc,
+                        NULL                            AS product_type,
+                        NULL                            AS security_type,
+                        NULL                            AS quoted_unquoted,
+                        NULL                            AS industry,
+                        NULL                            AS fin_nonfin_co,
+                        NULL                            AS issuer_type,
+                        NULL                            AS reits_or_fund_y_n,
+                        exchange_quoted                 AS `exchange`,
+                        NULL                            AS country_code,
+                        NULL                            AS country_of_exchange,
+                        NULL                            AS country_of_incorporation,
+                        NULL                            AS country_of_risk,
+                        NULL                            AS country_of_operation,
+                        NULL                            AS security_currency,
+                        NULL                            AS corp_code,
+                        NULL                            AS branch_code,
+                        NULL                            AS cost_centre,
+                        NULL                            AS cels,
+                        NULL                            AS bwcif_sg,
+                        NULL                            AS bwcif_ovs,
+                        NULL                            AS mas_6d_code_sg,
+                        NULL                            AS mas_6d_code_ovs,
+                        position_basis                  AS position_basis,
+                        reporting_date                  AS reporting_date,
+                        NULL                            AS maturity_date,
+                        'USER_UPLOAD'                   AS src_system,
+                        'user'                          AS sub_system,
+                        'sta'                           AS data_cat,
+                        'adhoc'                         AS data_frq,
+                        'cis_user_sta_adhoc_position_1' AS source_table,
+                        CURRENT_TIMESTAMP()             AS etl_insert_ts,
+                        'python_etl'                    AS etl_batch_id
+                    FROM {db}.cis_user_sta_adhoc_position_1
+                    WHERE processing_date = '{processing_date}'
+                      AND src_id = '{src_id}'
+                """,
+                'cis_user_sta_adhoc_position_2': f"""
+                    SELECT
+                        portfolio_name                  AS portfolio,
+                        security_description            AS security_full_name,
+                        stock_name                      AS security_short_name,
+                        isin_code                       AS isin,
+                        NULL                            AS ticker,
+                        qty_held                        AS quantity,
+                        shares_issued                   AS shares_outstanding,
+                        NULL                            AS shares_issued,
+                        pct_holding                     AS pct_holding,
+                        NULL                            AS market_price,
+                        NULL                            AS average_cost,
+                        NULL                            AS cost_fc,
+                        NULL                            AS market_value_fc,
+                        NULL                            AS net_book_value_fc,
+                        NULL                            AS unrealized_pnl_fc,
+                        NULL                            AS cost_lc,
+                        NULL                            AS market_value_lc,
+                        NULL                            AS net_book_value_lc,
+                        NULL                            AS unrealized_pnl_lc,
+                        NULL                            AS provision_lc,
+                        NULL                            AS provision_fc,
+                        NULL                            AS product_type,
+                        NULL                            AS security_type,
+                        NULL                            AS quoted_unquoted,
+                        NULL                            AS industry,
+                        NULL                            AS fin_nonfin_co,
+                        NULL                            AS issuer_type,
+                        NULL                            AS reits_or_fund_y_n,
+                        country_id                      AS `exchange`,
+                        country_id                      AS country_code,
+                        country_id                      AS country_of_exchange,
+                        country_id                      AS country_of_incorporation,
+                        NULL                            AS country_of_risk,
+                        NULL                            AS country_of_operation,
+                        NULL                            AS security_currency,
+                        NULL                            AS corp_code,
+                        NULL                            AS branch_code,
+                        NULL                            AS cost_centre,
+                        NULL                            AS cels,
+                        NULL                            AS bwcif_sg,
+                        NULL                            AS bwcif_ovs,
+                        NULL                            AS mas_6d_code_sg,
+                        NULL                            AS mas_6d_code_ovs,
+                        position_basis                  AS position_basis,
+                        reporting_date                  AS reporting_date,
+                        NULL                            AS maturity_date,
+                        'USER_UPLOAD'                   AS src_system,
+                        'user'                          AS sub_system,
+                        'sta'                           AS data_cat,
+                        'adhoc'                         AS data_frq,
+                        'cis_user_sta_adhoc_position_2' AS source_table,
+                        CURRENT_TIMESTAMP()             AS etl_insert_ts,
+                        'python_etl'                    AS etl_batch_id
+                    FROM {db}.cis_user_sta_adhoc_position_2
+                    WHERE processing_date = '{processing_date}'
+                      AND src_id = '{src_id}'
+                """,
+                'cis_user_sta_adhoc_position_3': f"""
+                    SELECT
+                        portfolio                       AS portfolio,
+                        security_full_name              AS security_full_name,
+                        security_short_name             AS security_short_name,
+                        isin                            AS isin,
+                        ticker                          AS ticker,
+                        quantity                        AS quantity,
+                        shares_outstanding              AS shares_outstanding,
+                        shares_issued                   AS shares_issued,
+                        pct_holding                     AS pct_holding,
+                        market_price                    AS market_price,
+                        average_cost                    AS average_cost,
+                        cost_fc                         AS cost_fc,
+                        market_value_fc                 AS market_value_fc,
+                        net_book_value_fc               AS net_book_value_fc,
+                        unrealized_pnl_fc               AS unrealized_pnl_fc,
+                        cost_lc                         AS cost_lc,
+                        market_value_lc                 AS market_value_lc,
+                        net_book_value_lc               AS net_book_value_lc,
+                        unrealized_pnl_lc               AS unrealized_pnl_lc,
+                        provision_lc                    AS provision_lc,
+                        provision_fc                    AS provision_fc,
+                        product_type                    AS product_type,
+                        security_type                   AS security_type,
+                        quoted_unquoted                 AS quoted_unquoted,
+                        industry                        AS industry,
+                        fin_nonfin_co                   AS fin_nonfin_co,
+                        issuer_type                     AS issuer_type,
+                        reits_or_fund_y_n               AS reits_or_fund_y_n,
+                        `exchange`                      AS `exchange`,
+                        country_code                    AS country_code,
+                        country_of_exchange             AS country_of_exchange,
+                        country_of_incorporation        AS country_of_incorporation,
+                        country_of_risk                 AS country_of_risk,
+                        country_of_operation            AS country_of_operation,
+                        security_currency               AS security_currency,
+                        corp_code                       AS corp_code,
+                        branch_code                     AS branch_code,
+                        cost_centre                     AS cost_centre,
+                        cels                            AS cels,
+                        bwcif_sg                        AS bwcif_sg,
+                        bwcif_ovs                       AS bwcif_ovs,
+                        mas_6d_code_sg                  AS mas_6d_code_sg,
+                        mas_6d_code_ovs                 AS mas_6d_code_ovs,
+                        position_basis                  AS position_basis,
+                        reporting_date                  AS reporting_date,
+                        maturity_date                   AS maturity_date,
+                        'USER_UPLOAD'                   AS src_system,
+                        'user'                          AS sub_system,
+                        'sta'                           AS data_cat,
+                        'adhoc'                         AS data_frq,
+                        'cis_user_sta_adhoc_position_3' AS source_table,
+                        CURRENT_TIMESTAMP()             AS etl_insert_ts,
+                        'python_etl'                    AS etl_batch_id
+                    FROM {db}.cis_user_sta_adhoc_position_3
+                    WHERE processing_date = '{processing_date}'
+                      AND src_id = '{src_id}'
+                """,
+                'cis_user_sta_adhoc_position_4': f"""
+                    SELECT
+                        portfolio                       AS portfolio,
+                        security_full_name              AS security_full_name,
+                        security_short_name             AS security_short_name,
+                        isin                            AS isin,
+                        ticker                          AS ticker,
+                        quantity                        AS quantity,
+                        shares_outstanding              AS shares_outstanding,
+                        shares_issued                   AS shares_issued,
+                        pct_holding                     AS pct_holding,
+                        market_price                    AS market_price,
+                        average_cost                    AS average_cost,
+                        cost_fc                         AS cost_fc,
+                        market_value_fc                 AS market_value_fc,
+                        net_book_value_fc               AS net_book_value_fc,
+                        unrealized_pnl_fc               AS unrealized_pnl_fc,
+                        cost_lc                         AS cost_lc,
+                        market_value_lc                 AS market_value_lc,
+                        net_book_value_lc               AS net_book_value_lc,
+                        unrealized_pnl_lc               AS unrealized_pnl_lc,
+                        provision_lc                    AS provision_lc,
+                        provision_fc                    AS provision_fc,
+                        product_type                    AS product_type,
+                        security_type                   AS security_type,
+                        quoted_unquoted                 AS quoted_unquoted,
+                        industry                        AS industry,
+                        fin_nonfin_co                   AS fin_nonfin_co,
+                        issuer_type                     AS issuer_type,
+                        reits_or_fund_y_n               AS reits_or_fund_y_n,
+                        `exchange`                      AS `exchange`,
+                        country_code                    AS country_code,
+                        country_of_exchange             AS country_of_exchange,
+                        country_of_incorporation        AS country_of_incorporation,
+                        country_of_risk                 AS country_of_risk,
+                        country_of_operation            AS country_of_operation,
+                        security_currency               AS security_currency,
+                        corp_code                       AS corp_code,
+                        branch_code                     AS branch_code,
+                        cost_centre                     AS cost_centre,
+                        cels                            AS cels,
+                        bwcif_sg                        AS bwcif_sg,
+                        bwcif_ovs                       AS bwcif_ovs,
+                        mas_6d_code_sg                  AS mas_6d_code_sg,
+                        mas_6d_code_ovs                 AS mas_6d_code_ovs,
+                        position_basis                  AS position_basis,
+                        reporting_date                  AS reporting_date,
+                        maturity_date                   AS maturity_date,
+                        'USER_UPLOAD'                   AS src_system,
+                        'user'                          AS sub_system,
+                        'sta'                           AS data_cat,
+                        'adhoc'                         AS data_frq,
+                        'cis_user_sta_adhoc_position_4' AS source_table,
+                        CURRENT_TIMESTAMP()             AS etl_insert_ts,
+                        'python_etl'                    AS etl_batch_id
+                    FROM {db}.cis_user_sta_adhoc_position_4
+                    WHERE processing_date = '{processing_date}'
+                      AND src_id = '{src_id}'
+                """,
+                'cis_user_sta_adhoc_position_5': f"""
+                    SELECT
+                        portfolio                       AS portfolio,
+                        security_full_name              AS security_full_name,
+                        security_short_name             AS security_short_name,
+                        isin                            AS isin,
+                        ticker                          AS ticker,
+                        quantity                        AS quantity,
+                        shares_outstanding              AS shares_outstanding,
+                        shares_issued                   AS shares_issued,
+                        pct_holding                     AS pct_holding,
+                        market_price                    AS market_price,
+                        average_cost                    AS average_cost,
+                        cost_fc                         AS cost_fc,
+                        market_value_fc                 AS market_value_fc,
+                        net_book_value_fc               AS net_book_value_fc,
+                        unrealized_pnl_fc               AS unrealized_pnl_fc,
+                        cost_lc                         AS cost_lc,
+                        market_value_lc                 AS market_value_lc,
+                        net_book_value_lc               AS net_book_value_lc,
+                        unrealized_pnl_lc               AS unrealized_pnl_lc,
+                        provision_lc                    AS provision_lc,
+                        provision_fc                    AS provision_fc,
+                        product_type                    AS product_type,
+                        security_type                   AS security_type,
+                        quoted_unquoted                 AS quoted_unquoted,
+                        industry                        AS industry,
+                        fin_nonfin_co                   AS fin_nonfin_co,
+                        issuer_type                     AS issuer_type,
+                        reits_or_fund_y_n               AS reits_or_fund_y_n,
+                        `exchange`                      AS `exchange`,
+                        country_code                    AS country_code,
+                        country_of_exchange             AS country_of_exchange,
+                        country_of_incorporation        AS country_of_incorporation,
+                        country_of_risk                 AS country_of_risk,
+                        country_of_operation            AS country_of_operation,
+                        security_currency               AS security_currency,
+                        corp_code                       AS corp_code,
+                        branch_code                     AS branch_code,
+                        cost_centre                     AS cost_centre,
+                        cels                            AS cels,
+                        bwcif_sg                        AS bwcif_sg,
+                        bwcif_ovs                       AS bwcif_ovs,
+                        mas_6d_code_sg                  AS mas_6d_code_sg,
+                        mas_6d_code_ovs                 AS mas_6d_code_ovs,
+                        position_basis                  AS position_basis,
+                        reporting_date                  AS reporting_date,
+                        maturity_date                   AS maturity_date,
+                        'USER_UPLOAD'                   AS src_system,
+                        'user'                          AS sub_system,
+                        'sta'                           AS data_cat,
+                        'adhoc'                         AS data_frq,
+                        'cis_user_sta_adhoc_position_5' AS source_table,
+                        CURRENT_TIMESTAMP()             AS etl_insert_ts,
+                        'python_etl'                    AS etl_batch_id
+                    FROM {db}.cis_user_sta_adhoc_position_5
+                    WHERE processing_date = '{processing_date}'
+                      AND src_id = '{src_id}'
+                """,
+            }
+
+            std_select = STANDARDIZE_SELECT.get(src_id)
+            if not std_select:
+                return False, f"Unknown src_id '{src_id}' — no standardization mapping defined", result
+
+            # Delete this partition from position_upload_standardized first (OVERWRITE semantics)
+            impala_manager.execute_write(
+                f"""
+                INSERT OVERWRITE {db}.position_upload_standardized
+                PARTITION (src_id='{src_id}', processing_date='{processing_date}')
+                {std_select}
+                """,
+                database=db
+            )
+            impala_manager.execute_write(
+                f"INVALIDATE METADATA {db}.position_upload_standardized",
+                database=db
+            )
+
+            # Verify rows landed
+            std_count = impala_manager.execute_query(
+                f"""
+                SELECT COUNT(*) AS cnt
+                FROM {db}.position_upload_standardized
+                WHERE src_id = '{src_id}'
+                  AND processing_date = '{processing_date}'
+                """,
+                database=db
+            )
+            std_rows = (std_count[0].get('cnt', 0) if std_count else 0)
+            logger.info(f"[position_etl] Step 0 complete — {std_rows} rows standardized into position_upload_standardized")
+            if std_rows == 0:
+                return False, f"Standardization produced 0 rows — check src_id='{src_id}' processing_date='{processing_date}' in {src_id} table", result
+
+            # ------------------------------------------------------------------
             # Step 1: Base staging table — keep `exchange` as-is (reserved word),
             #         normalise reporting_date to yyyy-MM-dd string.
             # ------------------------------------------------------------------
