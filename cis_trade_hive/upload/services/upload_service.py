@@ -2799,111 +2799,278 @@ SELECT * FROM (
             logger.info("[position_etl] Step 7A complete (cis_position insert)")
 
             # ------------------------------------------------------------------
-            # Step 7B: DROP/CREATE position_upload_report with UNION ALL
-            #          covering valid, invalid, portfolio-fail, security-fail rows.
+            # Step 7B: INSERT OVERWRITE into the existing external partitioned
+            #          table gmp_cis.position_upload_report.
+            #          Columns match the DDL in 25_position_upload_standardized.sql.
+            #          Only the (src_id, processing_date) partition is overwritten;
+            #          all other partitions (other runs) are preserved.
             # ------------------------------------------------------------------
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS position_upload_report", database=db
-            )
-            impala_manager.execute_write(
                 f"""
-                CREATE TABLE position_upload_report
-                STORED AS PARQUET AS
+                INSERT OVERWRITE {db}.position_upload_report
+                PARTITION (src_id='{src_id}', processing_date='{processing_date}')
+
+                -- PASS rows: passed all validations
                 SELECT
-                    b.reporting_date,
-                    b.source_table AS file_name,
-                    b.src_system AS reporting_entity,
                     b.portfolio,
                     COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
-                    'Uploaded' AS status,
-                    CASE
-                        WHEN s.overall_status = 'VALID: New security created'
-                            THEN CONCAT('New security created. ', COALESCE(s.price_status, ''))
-                        WHEN s.price_status LIKE 'WARN%'
-                            THEN s.price_status
-                        ELSE NULL
-                    END AS exception_detail,
-                    s.portfolio_status AS step1_portfolio,
-                    s.security_status  AS step2_security,
-                    s.price_status     AS step3_price,
-                    s.quantity_status  AS step4_quantity,
-                    s.exchange_status  AS step5_exchange,
-                    s.overall_status,
-                    '{src_id}'          AS src_id,
-                    '{processing_date}' AS processing_date
+                    b.security_short_name,
+                    b.isin,
+                    b.ticker,
+                    CAST(b.quantity           AS STRING) AS quantity,
+                    CAST(b.shares_outstanding AS STRING) AS shares_outstanding,
+                    CAST(b.shares_issued      AS STRING) AS shares_issued,
+                    CAST(b.pct_holding        AS STRING) AS pct_holding,
+                    CAST(b.market_price       AS STRING) AS market_price,
+                    CAST(b.average_cost       AS STRING) AS average_cost,
+                    CAST(b.cost_fc            AS STRING) AS cost_fc,
+                    CAST(b.market_value_fc    AS STRING) AS market_value_fc,
+                    CAST(b.net_book_value_fc  AS STRING) AS net_book_value_fc,
+                    CAST(b.unrealized_pnl_fc  AS STRING) AS unrealized_pnl_fc,
+                    CAST(b.provision_fc       AS STRING) AS provision_fc,
+                    CAST(b.cost_lc            AS STRING) AS cost_lc,
+                    CAST(b.market_value_lc    AS STRING) AS market_value_lc,
+                    CAST(b.net_book_value_lc  AS STRING) AS net_book_value_lc,
+                    CAST(b.unrealized_pnl_lc  AS STRING) AS unrealized_pnl_lc,
+                    CAST(b.provision_lc       AS STRING) AS provision_lc,
+                    b.product_type,
+                    b.security_type,
+                    b.quoted_unquoted,
+                    b.industry,
+                    b.fin_nonfin_co,
+                    b.issuer_type,
+                    b.reits_or_fund_y_n,
+                    b.`exchange`              AS exchange_code,
+                    b.country_of_exchange,
+                    b.country_of_incorporation,
+                    b.country_of_risk,
+                    b.country_of_operation,
+                    b.security_currency,
+                    b.corp_code,
+                    b.branch_code,
+                    b.cost_centre,
+                    b.cels,
+                    b.bwcif_sg,
+                    b.bwcif_ovs,
+                    b.mas_6d_code_sg,
+                    b.mas_6d_code_ovs,
+                    b.position_basis,
+                    b.reporting_date,
+                    b.maturity_date,
+                    b.src_system,
+                    b.source_table,
+                    'PASS'  AS row_status,
+                    NULL    AS fail_reason,
+                    s.portfolio_status,
+                    s.security_status,
+                    s.price_status,
+                    s.quantity_status,
+                    s.exchange_status,
+                    CAST(s.final_security_id AS STRING) AS matched_security_id,
+                    s.matched_security_name
                 FROM pos_stage_1_base b
                 JOIN position_upload_staging s ON b.row_id = s.row_id
                 WHERE s.overall_status LIKE 'VALID%'
 
                 UNION ALL
 
+                -- FAIL rows: failed one of the validations (portfolio passed, failed later)
                 SELECT
-                    b.reporting_date,
-                    b.source_table AS file_name,
-                    b.src_system AS reporting_entity,
                     b.portfolio,
                     COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
-                    'Fail' AS status,
-                    s.overall_status AS exception_detail,
-                    s.portfolio_status AS step1_portfolio,
-                    s.security_status  AS step2_security,
-                    s.price_status     AS step3_price,
-                    s.quantity_status  AS step4_quantity,
-                    s.exchange_status  AS step5_exchange,
-                    s.overall_status,
-                    '{src_id}'          AS src_id,
-                    '{processing_date}' AS processing_date
+                    b.security_short_name,
+                    b.isin,
+                    b.ticker,
+                    CAST(b.quantity           AS STRING) AS quantity,
+                    CAST(b.shares_outstanding AS STRING) AS shares_outstanding,
+                    CAST(b.shares_issued      AS STRING) AS shares_issued,
+                    CAST(b.pct_holding        AS STRING) AS pct_holding,
+                    CAST(b.market_price       AS STRING) AS market_price,
+                    CAST(b.average_cost       AS STRING) AS average_cost,
+                    CAST(b.cost_fc            AS STRING) AS cost_fc,
+                    CAST(b.market_value_fc    AS STRING) AS market_value_fc,
+                    CAST(b.net_book_value_fc  AS STRING) AS net_book_value_fc,
+                    CAST(b.unrealized_pnl_fc  AS STRING) AS unrealized_pnl_fc,
+                    CAST(b.provision_fc       AS STRING) AS provision_fc,
+                    CAST(b.cost_lc            AS STRING) AS cost_lc,
+                    CAST(b.market_value_lc    AS STRING) AS market_value_lc,
+                    CAST(b.net_book_value_lc  AS STRING) AS net_book_value_lc,
+                    CAST(b.unrealized_pnl_lc  AS STRING) AS unrealized_pnl_lc,
+                    CAST(b.provision_lc       AS STRING) AS provision_lc,
+                    b.product_type,
+                    b.security_type,
+                    b.quoted_unquoted,
+                    b.industry,
+                    b.fin_nonfin_co,
+                    b.issuer_type,
+                    b.reits_or_fund_y_n,
+                    b.`exchange`              AS exchange_code,
+                    b.country_of_exchange,
+                    b.country_of_incorporation,
+                    b.country_of_risk,
+                    b.country_of_operation,
+                    b.security_currency,
+                    b.corp_code,
+                    b.branch_code,
+                    b.cost_centre,
+                    b.cels,
+                    b.bwcif_sg,
+                    b.bwcif_ovs,
+                    b.mas_6d_code_sg,
+                    b.mas_6d_code_ovs,
+                    b.position_basis,
+                    b.reporting_date,
+                    b.maturity_date,
+                    b.src_system,
+                    b.source_table,
+                    'FAIL'           AS row_status,
+                    s.overall_status AS fail_reason,
+                    s.portfolio_status,
+                    s.security_status,
+                    s.price_status,
+                    s.quantity_status,
+                    s.exchange_status,
+                    CAST(s.final_security_id AS STRING) AS matched_security_id,
+                    s.matched_security_name
                 FROM pos_stage_1_base b
                 JOIN position_upload_staging s ON b.row_id = s.row_id
                 WHERE s.overall_status LIKE 'INVALID%'
 
                 UNION ALL
 
+                -- FAIL rows: portfolio not found (never reached staging)
                 SELECT
-                    b.reporting_date,
-                    b.source_table AS file_name,
-                    b.src_system AS reporting_entity,
                     b.portfolio,
                     COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
-                    'Fail' AS status,
-                    'Step 1 FAIL: Portfolio not found in cis_portfolio' AS exception_detail,
-                    p2.portfolio_status AS step1_portfolio,
-                    NULL AS step2_security,
-                    NULL AS step3_price,
-                    NULL AS step4_quantity,
-                    NULL AS step5_exchange,
-                    'FAIL: Portfolio validation' AS overall_status,
-                    '{src_id}'          AS src_id,
-                    '{processing_date}' AS processing_date
+                    b.security_short_name,
+                    b.isin,
+                    b.ticker,
+                    CAST(b.quantity           AS STRING) AS quantity,
+                    CAST(b.shares_outstanding AS STRING) AS shares_outstanding,
+                    CAST(b.shares_issued      AS STRING) AS shares_issued,
+                    CAST(b.pct_holding        AS STRING) AS pct_holding,
+                    CAST(b.market_price       AS STRING) AS market_price,
+                    CAST(b.average_cost       AS STRING) AS average_cost,
+                    CAST(b.cost_fc            AS STRING) AS cost_fc,
+                    CAST(b.market_value_fc    AS STRING) AS market_value_fc,
+                    CAST(b.net_book_value_fc  AS STRING) AS net_book_value_fc,
+                    CAST(b.unrealized_pnl_fc  AS STRING) AS unrealized_pnl_fc,
+                    CAST(b.provision_fc       AS STRING) AS provision_fc,
+                    CAST(b.cost_lc            AS STRING) AS cost_lc,
+                    CAST(b.market_value_lc    AS STRING) AS market_value_lc,
+                    CAST(b.net_book_value_lc  AS STRING) AS net_book_value_lc,
+                    CAST(b.unrealized_pnl_lc  AS STRING) AS unrealized_pnl_lc,
+                    CAST(b.provision_lc       AS STRING) AS provision_lc,
+                    b.product_type,
+                    b.security_type,
+                    b.quoted_unquoted,
+                    b.industry,
+                    b.fin_nonfin_co,
+                    b.issuer_type,
+                    b.reits_or_fund_y_n,
+                    b.`exchange`              AS exchange_code,
+                    b.country_of_exchange,
+                    b.country_of_incorporation,
+                    b.country_of_risk,
+                    b.country_of_operation,
+                    b.security_currency,
+                    b.corp_code,
+                    b.branch_code,
+                    b.cost_centre,
+                    b.cels,
+                    b.bwcif_sg,
+                    b.bwcif_ovs,
+                    b.mas_6d_code_sg,
+                    b.mas_6d_code_ovs,
+                    b.position_basis,
+                    b.reporting_date,
+                    b.maturity_date,
+                    b.src_system,
+                    b.source_table,
+                    'FAIL'                                              AS row_status,
+                    'Portfolio not found in cis_portfolio'              AS fail_reason,
+                    p2.portfolio_status,
+                    NULL AS security_status,
+                    NULL AS price_status,
+                    NULL AS quantity_status,
+                    NULL AS exchange_status,
+                    NULL AS matched_security_id,
+                    NULL AS matched_security_name
                 FROM pos_stage_1_base b
                 JOIN pos_stage_2_portfolio p2 ON b.row_id = p2.row_id
                 WHERE p2.portfolio_status LIKE 'FAIL%'
 
                 UNION ALL
 
+                -- FAIL rows: security validation failed (duplicate ISIN / no identifier)
                 SELECT
-                    b.reporting_date,
-                    b.source_table AS file_name,
-                    b.src_system AS reporting_entity,
                     b.portfolio,
                     COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
-                    'Fail' AS status,
-                    CONCAT('Step 2 FAIL: ', p4.security_status) AS exception_detail,
-                    'PASS' AS step1_portfolio,
-                    p4.security_status AS step2_security,
-                    NULL AS step3_price,
-                    NULL AS step4_quantity,
-                    NULL AS step5_exchange,
-                    'FAIL: Security validation' AS overall_status,
-                    '{src_id}'          AS src_id,
-                    '{processing_date}' AS processing_date
+                    b.security_short_name,
+                    b.isin,
+                    b.ticker,
+                    CAST(b.quantity           AS STRING) AS quantity,
+                    CAST(b.shares_outstanding AS STRING) AS shares_outstanding,
+                    CAST(b.shares_issued      AS STRING) AS shares_issued,
+                    CAST(b.pct_holding        AS STRING) AS pct_holding,
+                    CAST(b.market_price       AS STRING) AS market_price,
+                    CAST(b.average_cost       AS STRING) AS average_cost,
+                    CAST(b.cost_fc            AS STRING) AS cost_fc,
+                    CAST(b.market_value_fc    AS STRING) AS market_value_fc,
+                    CAST(b.net_book_value_fc  AS STRING) AS net_book_value_fc,
+                    CAST(b.unrealized_pnl_fc  AS STRING) AS unrealized_pnl_fc,
+                    CAST(b.provision_fc       AS STRING) AS provision_fc,
+                    CAST(b.cost_lc            AS STRING) AS cost_lc,
+                    CAST(b.market_value_lc    AS STRING) AS market_value_lc,
+                    CAST(b.net_book_value_lc  AS STRING) AS net_book_value_lc,
+                    CAST(b.unrealized_pnl_lc  AS STRING) AS unrealized_pnl_lc,
+                    CAST(b.provision_lc       AS STRING) AS provision_lc,
+                    b.product_type,
+                    b.security_type,
+                    b.quoted_unquoted,
+                    b.industry,
+                    b.fin_nonfin_co,
+                    b.issuer_type,
+                    b.reits_or_fund_y_n,
+                    b.`exchange`              AS exchange_code,
+                    b.country_of_exchange,
+                    b.country_of_incorporation,
+                    b.country_of_risk,
+                    b.country_of_operation,
+                    b.security_currency,
+                    b.corp_code,
+                    b.branch_code,
+                    b.cost_centre,
+                    b.cels,
+                    b.bwcif_sg,
+                    b.bwcif_ovs,
+                    b.mas_6d_code_sg,
+                    b.mas_6d_code_ovs,
+                    b.position_basis,
+                    b.reporting_date,
+                    b.maturity_date,
+                    b.src_system,
+                    b.source_table,
+                    'FAIL'                AS row_status,
+                    p4.security_status    AS fail_reason,
+                    'PASS'                AS portfolio_status,
+                    p4.security_status    AS security_status,
+                    NULL AS price_status,
+                    NULL AS quantity_status,
+                    NULL AS exchange_status,
+                    NULL AS matched_security_id,
+                    NULL AS matched_security_name
                 FROM pos_stage_1_base b
                 JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
                 WHERE p4.security_status LIKE 'FAIL%'
                 """,
                 database=db
             )
-            logger.info("[position_etl] Step 7B complete (position_upload_report created)")
+            impala_manager.execute_write(
+                f"INVALIDATE METADATA {db}.position_upload_report",
+                database=db
+            )
+            logger.info("[position_etl] Step 7B complete — INSERT OVERWRITE into partitioned position_upload_report")
 
             # ------------------------------------------------------------------
             # Count totals from report
@@ -2912,9 +3079,9 @@ SELECT * FROM (
                 f"""
                 SELECT
                     COUNT(*) AS total,
-                    SUM(CASE WHEN status = 'Uploaded' THEN 1 ELSE 0 END) AS passed,
-                    SUM(CASE WHEN status = 'Fail'     THEN 1 ELSE 0 END) AS failed
-                FROM position_upload_report
+                    SUM(CASE WHEN row_status = 'PASS' THEN 1 ELSE 0 END) AS passed,
+                    SUM(CASE WHEN row_status = 'FAIL' THEN 1 ELSE 0 END) AS failed
+                FROM {db}.position_upload_report
                 WHERE src_id = '{src_id}'
                   AND processing_date = '{processing_date}'
                 """,
@@ -2979,7 +3146,7 @@ SELECT * FROM (
                 FROM gmp_cis.position_upload_report
                 WHERE src_id = '{src_id}'
                   AND processing_date = '{processing_date}'
-                ORDER BY status, portfolio, security_full_name
+                ORDER BY row_status, portfolio, security_full_name
                 """,
                 database='gmp_cis'
             )
