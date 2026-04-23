@@ -409,7 +409,12 @@ class UploadKuduRepository:
         """Update upload status."""
         update_data = {'status': new_status}
         if error_message:
-            update_data['validation_errors_json'] = [{'error': error_message, 'timestamp': datetime.now().isoformat()}]
+            # Sanitise: keep only printable ASCII, strip control chars, cap length.
+            # This prevents embedded newlines/backslashes/quotes in exception
+            # messages from corrupting the generated SQL.
+            safe_msg = ''.join(c if 32 <= ord(c) < 127 else ' ' for c in str(error_message))
+            safe_msg = safe_msg[:500]
+            update_data['validation_errors_json'] = [{'error': safe_msg, 'timestamp': datetime.now().isoformat()}]
         return self.update_upload(upload_id, update_data, updated_by)
 
     def soft_delete(self, upload_id: str, deleted_by: str) -> bool:
