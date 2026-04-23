@@ -32,7 +32,7 @@
                 <i class="bi bi-database-add"></i> Ingest
             </a>
             {% endif %}
-            {% if is_position_upload and upload.status == 'COMPLETED' %}
+            {% if can_run_position %}
             <form method="post" action="{% url 'upload:run_position' upload.upload_id %}" class="d-inline"
                   id="runPositionForm">
                 {% csrf_token %}
@@ -502,7 +502,7 @@
                         </button>
                         {% endif %}
 
-                        {% if is_position_upload and upload.status == 'COMPLETED' %}
+                        {% if can_run_position %}
                         <form method="post" action="{% url 'upload:run_position' upload.upload_id %}"
                               id="runPositionFormSidebar">
                             {% csrf_token %}

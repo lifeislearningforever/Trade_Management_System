@@ -627,9 +627,13 @@ def upload_detail(request, upload_id: str):
 
     try:
         errors_json = upload.get('validation_errors_json', '[]')
-        validation_errors = json.loads(errors_json) if isinstance(errors_json, str) else errors_json
-    except:
-        pass
+        parsed = json.loads(errors_json) if isinstance(errors_json, str) else errors_json
+        # Must be a list — if it's a string (truncated JSON), wrap it
+        validation_errors = parsed if isinstance(parsed, list) else [str(parsed)]
+    except Exception as e:
+        # Truncated/invalid JSON stored in Kudu — show raw text as single error
+        raw = upload.get('validation_errors_json', '')
+        validation_errors = [str(raw)[:500]] if raw else []
 
     # Get table preview and reconciliation data if completed
     table_preview = []
@@ -669,6 +673,9 @@ def upload_detail(request, upload_id: str):
             else:
                 recon_data['match_status'] = 'UNKNOWN'
 
+    is_position_upload = upload_service.is_position_upload(upload)
+    upload_status = upload.get('status', '')
+
     context = {
         'upload': upload,
         'schema': schema,
@@ -676,16 +683,21 @@ def upload_detail(request, upload_id: str):
         'validation_errors': validation_errors,
         'table_preview': table_preview,
         'recon_data': recon_data,
-        'can_edit': upload.get('status') in [
+        'can_edit': upload_status in [
             UploadKuduRepository.STATUS_PENDING,
             UploadKuduRepository.STATUS_VALIDATED,
             UploadKuduRepository.STATUS_VALIDATION_FAILED
         ],
-        'can_ingest': upload.get('status') == UploadKuduRepository.STATUS_VALIDATED,
-        'can_delete': upload.get('status') not in [
+        'can_ingest': upload_status == UploadKuduRepository.STATUS_VALIDATED,
+        'can_delete': upload_status not in [
             UploadKuduRepository.STATUS_INGESTING
         ],
-        'is_position_upload': upload_service.is_position_upload(upload),
+        'is_position_upload': is_position_upload,
+        # Allow Run Position on COMPLETED or FAILED (so ETL can be re-run after fix)
+        'can_run_position': is_position_upload and upload_status in [
+            UploadKuduRepository.STATUS_COMPLETED,
+            UploadKuduRepository.STATUS_FAILED,
+        ],
     }
 
     return render(request, 'upload/upload_detail.html', context)
