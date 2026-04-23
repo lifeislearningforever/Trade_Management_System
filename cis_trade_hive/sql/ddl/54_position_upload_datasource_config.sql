@@ -23,9 +23,12 @@ USE gmp_cis;
 -- ----------------------------------------------------------------------------
 -- Position Upload 1: Basic Position Data
 -- Separator: | (pipe)
--- CSV columns: Portfolio, Client_Num, Exchange_Quoted, ISIN_Code, Counter,
---              Quantity_Yesterday, Movement, Quantity_Today, Trade_Date
--- position_basis defaulted to: TRADE_DATE
+-- CSV has header row: TRUE
+-- CSV columns (9 file columns, position_basis is server-injected — NOT listed):
+--   Portfolio, Client_Num, Exchange_Quoted, ISIN_Code, Counter,
+--   Quantity_Yesterday, Movement, Quantity_Today, Trade_Date
+-- position_basis defaulted to: TRADE_DATE at ingest
+-- NOTE: UPSERT keyed on source_id — updates existing row in DB
 -- ----------------------------------------------------------------------------
 UPSERT INTO gmp_cis.cis_datasource_mng (
     source_id,
@@ -40,7 +43,7 @@ UPSERT INTO gmp_cis.cis_datasource_mng (
     data_cat,
     data_frq
 ) VALUES (
-    'CIS_POS_1',
+    'cis_user_sta_adhoc_position_1',
     'CIS_External_upload_format_1.csv',
     'cis_user_sta_adhoc_position_1',
     '|',
@@ -73,7 +76,7 @@ UPSERT INTO gmp_cis.cis_datasource_mng (
     data_cat,
     data_frq
 ) VALUES (
-    'CIS_POS_2',
+    'cis_user_sta_adhoc_position_2',
     'CIS_External_upload_format_2.csv',
     'cis_user_sta_adhoc_position_2',
     ',',
@@ -105,7 +108,7 @@ UPSERT INTO gmp_cis.cis_datasource_mng (
     data_cat,
     data_frq
 ) VALUES (
-    'CIS_POS_3',
+    'cis_user_sta_adhoc_position_3',
     'CIS_External_upload_format_3.csv',
     'cis_user_sta_adhoc_position_3',
     ',',
@@ -143,7 +146,7 @@ UPSERT INTO gmp_cis.cis_datasource_mng (
     data_cat,
     data_frq
 ) VALUES (
-    'CIS_POS_4',
+    'cis_user_sta_adhoc_position_4',
     'CIS_External_upload_format_4.csv',
     'cis_user_sta_adhoc_position_4',
     ',',
@@ -187,7 +190,7 @@ UPSERT INTO gmp_cis.cis_datasource_mng (
     data_cat,
     data_frq
 ) VALUES (
-    'CIS_POS_5',
+    'cis_user_sta_adhoc_position_5',
     'CIS_External_upload_format_5.csv',
     'cis_user_sta_adhoc_position_5',
     ',',
@@ -201,7 +204,13 @@ UPSERT INTO gmp_cis.cis_datasource_mng (
 );
 
 -- Verify all 5 configs
-SELECT source_id, source_name, target_table, src_system
+SELECT source_id, source_name, target_table, separator, header, intake_columns
 FROM gmp_cis.cis_datasource_mng
-WHERE source_id IN ('CIS_POS_1', 'CIS_POS_2', 'CIS_POS_3', 'CIS_POS_4', 'CIS_POS_5')
+WHERE source_id IN (
+    'cis_user_sta_adhoc_position_1',
+    'cis_user_sta_adhoc_position_2',
+    'cis_user_sta_adhoc_position_3',
+    'cis_user_sta_adhoc_position_4',
+    'cis_user_sta_adhoc_position_5'
+)
 ORDER BY source_id;

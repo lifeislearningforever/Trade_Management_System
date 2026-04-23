@@ -813,7 +813,7 @@ class UploadService:
             # Get file properties from datasource config
             separator = datasource_config.get('separator', ',')
             skip_lines = int(datasource_config.get('no_of_skip_line', 0) or 0)
-            has_header = str(datasource_config.get('header', 'true')).lower() == 'true'
+            has_header = datasource_repository.parse_header_flag(datasource_config)
 
             # Get predefined columns
             intake_columns = datasource_repository.parse_intake_columns(datasource_config)
@@ -1040,7 +1040,7 @@ class UploadService:
 
             # Get file properties
             separator = datasource_config.get('separator', ',')
-            has_header = str(datasource_config.get('header', 'true')).lower() == 'true'
+            has_header = datasource_repository.parse_header_flag(datasource_config)
             skip_lines = int(datasource_config.get('no_of_skip_line', 0) or 0)
 
             # Use Hybrid connection - Hive for external table operations
@@ -1458,7 +1458,7 @@ class UploadService:
             source_id = datasource_config.get('source_id', '')
             col_names = [col['name'] for col in intake_columns]
             separator = datasource_config.get('separator', ',')
-            has_header = str(datasource_config.get('header', 'true')).lower() == 'true'
+            has_header = datasource_repository.parse_header_flag(datasource_config)
 
             # Get target table columns to ensure we match exactly
             target_table_info = datasource_repository.get_table_info(target_table, self.repository.DATABASE)

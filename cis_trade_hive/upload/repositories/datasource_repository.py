@@ -160,6 +160,29 @@ class DatasourceRepository:
         logger.info(f"Using current date as processing date: {current_date}")
         return current_date
 
+    @staticmethod
+    def parse_header_flag(datasource: Dict[str, Any]) -> bool:
+        """
+        Parse the header flag from datasource config robustly.
+
+        Kudu may return the value as:
+          - Python bool:   True / False
+          - String:        'true' / 'false' / 'True' / 'False' / '1' / '0'
+          - Integer:       1 / 0
+          - None / missing
+
+        Defaults to True (assume first row is a header) when value is absent.
+        """
+        val = datasource.get('header')
+        if val is None:
+            return True
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, int):
+            return bool(val)
+        # String — treat 'true' / '1' as True, everything else as False
+        return str(val).strip().lower() in ('true', '1', 'yes')
+
     def parse_intake_columns(self, datasource: Dict[str, Any]) -> List[Dict[str, str]]:
         """
         Parse intake_columns from datasource configuration.
