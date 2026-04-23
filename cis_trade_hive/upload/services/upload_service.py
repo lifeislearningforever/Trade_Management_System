@@ -1720,3 +1720,569 @@ SELECT * FROM (
     def get_all_datasource_configs(self) -> List[Dict[str, Any]]:
         """Get all datasource configurations for dropdown."""
         return datasource_repository.get_all_datasources()
+
+    # =========================================================================
+    # POSITION UPLOAD ETL — Run transform pipeline & report download
+    # =========================================================================
+
+    # Position source tables that trigger the AVP transform pipeline
+    POSITION_TARGET_TABLES = {
+        'cis_user_sta_adhoc_position_1',
+        'cis_user_sta_adhoc_position_2',
+        'cis_user_sta_adhoc_position_3',
+        'cis_user_sta_adhoc_position_4',
+        'cis_user_sta_adhoc_position_5',
+    }
+
+    def is_position_upload(self, upload: Dict[str, Any]) -> bool:
+        """Return True if this upload's target table is one of the 5 position sources."""
+        target = (upload.get('target_table_name') or '').lower().split('.')[-1]
+        return target in self.POSITION_TARGET_TABLES
+
+    def run_position_etl(
+        self,
+        upload_id: str,
+        src_id: str,
+        processing_date: str,
+        updated_by: str
+    ) -> Tuple[bool, str, Dict[str, Any]]:
+        """
+        Execute the position upload transform pipeline for a given partition.
+
+        Runs the Hive/Impala equivalent of position_upload_transform_optimized.sql:
+          Step 1 — build pos_stage_1_base from position_upload_standardized
+          Step 2 — portfolio validation
+          Step 3 — security ISIN match
+          Step 4 — security fallback match
+          Step 5 — price lookup
+          Step 6 — consolidated staging
+          Step 7A — upsert into cis_position
+          Step 7B — write position_upload_report
+
+        Args:
+            upload_id: Upload record ID (for status tracking)
+            src_id:    Source partition value (e.g. 'cis_user_sta_adhoc_position_1')
+            processing_date: YYYYMMDD partition value
+            updated_by: Username triggering the ETL
+
+        Returns:
+            Tuple of (success, message, result_dict)
+        """
+        from core.repositories.impala_connection import impala_manager
+
+        result = {'src_id': src_id, 'processing_date': processing_date}
+
+        try:
+            logger.info(
+                f"[position_etl] Starting ETL for src_id={src_id} "
+                f"processing_date={processing_date} by {updated_by}"
+            )
+
+            db = 'gmp_cis'
+
+            # ------------------------------------------------------------------
+            # Step 1: Base staging table (row_id + all upload columns)
+            # ------------------------------------------------------------------
+            impala_manager.execute_write(
+                "DROP TABLE IF EXISTS pos_stage_1_base", database=db
+            )
+            impala_manager.execute_write(
+                f"""
+                CREATE TABLE pos_stage_1_base
+                STORED AS PARQUET AS
+                SELECT
+                    ROW_NUMBER() OVER (ORDER BY portfolio, security_full_name) AS row_id,
+                    portfolio,
+                    security_full_name,
+                    security_short_name,
+                    isin,
+                    ticker,
+                    quantity,
+                    shares_outstanding,
+                    shares_issued,
+                    pct_holding,
+                    market_price,
+                    average_cost,
+                    cost_fc,
+                    market_value_fc,
+                    net_book_value_fc,
+                    unrealized_pnl_fc,
+                    provision_fc,
+                    cost_lc,
+                    market_value_lc,
+                    net_book_value_lc,
+                    unrealized_pnl_lc,
+                    provision_lc,
+                    product_type,
+                    security_type,
+                    quoted_unquoted,
+                    industry,
+                    fin_nonfin_co,
+                    issuer_type,
+                    reits_or_fund_y_n,
+                    exchange_code,
+                    country_code,
+                    country_of_exchange,
+                    country_of_incorporation,
+                    country_of_risk,
+                    country_of_operation,
+                    security_currency,
+                    corp_code,
+                    branch_code,
+                    cost_centre,
+                    cels,
+                    bwcif_sg,
+                    bwcif_ovs,
+                    mas_6d_code_sg,
+                    mas_6d_code_ovs,
+                    position_basis,
+                    reporting_date,
+                    maturity_date,
+                    src_system,
+                    sub_system,
+                    data_cat,
+                    data_frq,
+                    source_table,
+                    etl_insert_ts,
+                    etl_batch_id,
+                    src_id,
+                    processing_date
+                FROM {db}.position_upload_standardized
+                WHERE src_id = '{src_id}'
+                  AND processing_date = '{processing_date}'
+                """,
+                database=db
+            )
+            logger.info("[position_etl] Step 1 complete")
+
+            # ------------------------------------------------------------------
+            # Step 2: Portfolio validation
+            # ------------------------------------------------------------------
+            impala_manager.execute_write(
+                "DROP TABLE IF EXISTS pos_stage_2_portfolio", database=db
+            )
+            impala_manager.execute_write(
+                f"""
+                CREATE TABLE pos_stage_2_portfolio
+                STORED AS PARQUET AS
+                SELECT
+                    b.row_id,
+                    b.portfolio,
+                    b.isin,
+                    b.security_full_name,
+                    b.security_short_name,
+                    b.ticker,
+                    b.exchange_code,
+                    b.quantity,
+                    b.market_price,
+                    b.position_basis,
+                    b.src_id,
+                    b.processing_date,
+                    CASE
+                        WHEN p.portfolio_short_name IS NOT NULL THEN 'VALID'
+                        ELSE 'FAIL_PORTFOLIO_NOT_FOUND'
+                    END AS portfolio_status,
+                    p.portfolio_short_name AS matched_portfolio
+                FROM pos_stage_1_base b
+                LEFT JOIN {db}.cis_portfolio p
+                    ON UPPER(TRIM(b.portfolio)) = UPPER(TRIM(p.portfolio_short_name))
+                   AND p.status NOT IN ('INACTIVE', 'CLOSED', 'DELETED')
+                """,
+                database=db
+            )
+            logger.info("[position_etl] Step 2 complete")
+
+            # ------------------------------------------------------------------
+            # Step 3: Security ISIN match
+            # ------------------------------------------------------------------
+            impala_manager.execute_write(
+                "DROP TABLE IF EXISTS pos_stage_3_security_isin", database=db
+            )
+            impala_manager.execute_write(
+                f"""
+                CREATE TABLE pos_stage_3_security_isin
+                STORED AS PARQUET AS
+                SELECT
+                    p2.row_id,
+                    p2.portfolio_status,
+                    CASE
+                        WHEN p2.portfolio_status != 'VALID' THEN 'SKIPPED'
+                        WHEN p2.isin IS NOT NULL AND p2.isin != ''
+                             AND s.security_id IS NOT NULL THEN 'MATCHED_ISIN'
+                        ELSE 'NOT_MATCHED_ISIN'
+                    END AS security_status,
+                    s.security_id AS matched_security_id,
+                    s.security_name AS matched_security_name
+                FROM pos_stage_2_portfolio p2
+                LEFT JOIN {db}.cis_security_kudu s
+                    ON UPPER(TRIM(p2.isin)) = UPPER(TRIM(s.isin))
+                   AND s.status NOT IN ('INACTIVE', 'DELETED')
+                """,
+                database=db
+            )
+            logger.info("[position_etl] Step 3 complete")
+
+            # ------------------------------------------------------------------
+            # Step 4: Security fallback name match (for rows not matched by ISIN)
+            # ------------------------------------------------------------------
+            impala_manager.execute_write(
+                "DROP TABLE IF EXISTS pos_stage_4_security_name", database=db
+            )
+            impala_manager.execute_write(
+                f"""
+                CREATE TABLE pos_stage_4_security_name
+                STORED AS PARQUET AS
+                SELECT
+                    s3.row_id,
+                    s3.portfolio_status,
+                    CASE
+                        WHEN s3.security_status = 'MATCHED_ISIN'   THEN 'MATCHED_ISIN'
+                        WHEN s3.security_status = 'SKIPPED'        THEN 'SKIPPED'
+                        WHEN s2.security_id IS NOT NULL             THEN 'MATCHED_NAME'
+                        ELSE 'FAIL_SECURITY_NOT_FOUND'
+                    END AS security_status,
+                    COALESCE(s3.matched_security_id, s2.security_id)     AS matched_security_id,
+                    COALESCE(s3.matched_security_name, s2.security_name) AS matched_security_name
+                FROM pos_stage_3_security_isin s3
+                JOIN pos_stage_2_portfolio p2 ON s3.row_id = p2.row_id
+                LEFT JOIN {db}.cis_security_kudu s2
+                    ON s3.security_status = 'NOT_MATCHED_ISIN'
+                   AND (
+                       UPPER(TRIM(p2.security_full_name)) = UPPER(TRIM(s2.security_name))
+                    OR UPPER(TRIM(p2.security_short_name)) = UPPER(TRIM(s2.short_name))
+                   )
+                   AND s2.status NOT IN ('INACTIVE', 'DELETED')
+                """,
+                database=db
+            )
+            logger.info("[position_etl] Step 4 complete")
+
+            # ------------------------------------------------------------------
+            # Step 5: Price lookup
+            # ------------------------------------------------------------------
+            impala_manager.execute_write(
+                "DROP TABLE IF EXISTS pos_stage_5_price", database=db
+            )
+            impala_manager.execute_write(
+                f"""
+                CREATE TABLE pos_stage_5_price
+                STORED AS PARQUET AS
+                SELECT
+                    s4.row_id,
+                    s4.portfolio_status,
+                    s4.security_status,
+                    s4.matched_security_id,
+                    s4.matched_security_name,
+                    CASE
+                        WHEN s4.security_status NOT IN ('MATCHED_ISIN', 'MATCHED_NAME')
+                            THEN 'SKIPPED'
+                        WHEN p2.market_price IS NOT NULL AND p2.market_price != ''
+                             AND CAST(p2.market_price AS DOUBLE) > 0
+                            THEN 'PRICE_FROM_UPLOAD'
+                        WHEN ep.main_closing_price IS NOT NULL
+                            THEN 'PRICE_FROM_EQUITY'
+                        ELSE 'FAIL_NO_PRICE'
+                    END AS price_status,
+                    COALESCE(
+                        NULLIF(p2.market_price, ''),
+                        CAST(ep.main_closing_price AS STRING)
+                    ) AS final_price,
+                    CASE
+                        WHEN p2.quantity IS NULL OR p2.quantity = ''
+                          OR CAST(p2.quantity AS DOUBLE) <= 0
+                            THEN 'FAIL_INVALID_QUANTITY'
+                        ELSE 'VALID'
+                    END AS quantity_status,
+                    CASE
+                        WHEN p2.exchange_code IS NULL OR p2.exchange_code = ''
+                            THEN 'FAIL_NO_EXCHANGE'
+                        ELSE 'VALID'
+                    END AS exchange_status
+                FROM pos_stage_4_security_name s4
+                JOIN pos_stage_2_portfolio p2 ON s4.row_id = p2.row_id
+                LEFT JOIN {db}.cis_equity_price ep
+                    ON s4.matched_security_id IS NOT NULL
+                   AND ep.security_label = s4.matched_security_name
+                   AND ep.price_date = (
+                       SELECT MAX(price_date)
+                       FROM {db}.cis_equity_price ep2
+                       WHERE ep2.security_label = s4.matched_security_name
+                   )
+                """,
+                database=db
+            )
+            logger.info("[position_etl] Step 5 complete")
+
+            # ------------------------------------------------------------------
+            # Step 6: Consolidated staging — overall_status
+            # ------------------------------------------------------------------
+            impala_manager.execute_write(
+                "DROP TABLE IF EXISTS position_upload_staging", database=db
+            )
+            impala_manager.execute_write(
+                f"""
+                CREATE TABLE position_upload_staging
+                STORED AS PARQUET AS
+                SELECT
+                    s5.row_id,
+                    s5.portfolio_status,
+                    s5.security_status,
+                    s5.price_status,
+                    s5.quantity_status,
+                    s5.exchange_status,
+                    s5.matched_security_id,
+                    s5.matched_security_name,
+                    s5.final_price,
+                    CASE
+                        WHEN s5.portfolio_status != 'VALID'
+                            THEN CONCAT('INVALID: ', s5.portfolio_status)
+                        WHEN s5.security_status NOT IN ('MATCHED_ISIN', 'MATCHED_NAME')
+                            THEN CONCAT('INVALID: ', s5.security_status)
+                        WHEN s5.quantity_status != 'VALID'
+                            THEN CONCAT('INVALID: ', s5.quantity_status)
+                        WHEN s5.exchange_status != 'VALID'
+                            THEN CONCAT('INVALID: ', s5.exchange_status)
+                        ELSE 'VALID'
+                    END AS overall_status
+                FROM pos_stage_5_price s5
+                """,
+                database=db
+            )
+            logger.info("[position_etl] Step 6 complete")
+
+            # ------------------------------------------------------------------
+            # Step 7A: Upsert valid records into cis_position
+            # ------------------------------------------------------------------
+            impala_manager.execute_write(
+                f"""
+                UPSERT INTO {db}.cis_position
+                SELECT
+                    CONCAT(b.portfolio, '_', CAST(s.matched_security_id AS STRING),
+                           '_', b.position_basis, '_', b.processing_date) AS position_id,
+                    1 AS version_id,
+                    b.portfolio,
+                    COALESCE(s.matched_security_name,
+                             b.security_full_name,
+                             b.security_short_name) AS security_label,
+                    b.position_basis,
+                    COALESCE(NULLIF(b.reporting_date, ''), b.processing_date) AS position_date,
+                    'USER_UPLOAD' AS src_system,
+                    b.processing_date,
+                    CAST(b.quantity AS DOUBLE) AS quantity,
+                    CAST(b.average_cost AS DOUBLE) AS average_cost_fc,
+                    CAST(b.cost_fc AS DOUBLE) AS cost_fc,
+                    CAST(b.market_value_fc AS DOUBLE) AS market_value_fc,
+                    CAST(b.net_book_value_fc AS DOUBLE) AS net_book_value_fc,
+                    CAST(b.unrealized_pnl_fc AS DOUBLE) AS unrealized_pnl_fc,
+                    NULL AS average_cost_lc,
+                    CAST(b.cost_lc AS DOUBLE) AS cost_lc,
+                    CAST(b.market_value_lc AS DOUBLE) AS market_value_lc,
+                    CAST(b.net_book_value_lc AS DOUBLE) AS net_book_value_lc,
+                    CAST(b.unrealized_pnl_lc AS DOUBLE) AS unrealized_pnl_lc,
+                    CAST(b.provision_fc AS DOUBLE) AS provision_fc,
+                    CAST(b.provision_lc AS DOUBLE) AS provision_lc,
+                    0.0 AS dividend_fc,
+                    0.0 AS dividend_lc,
+                    0.0 AS realized_pnl_fc,
+                    0.0 AS realized_pnl_lc,
+                    b.isin,
+                    NULL AS uncall_fc,
+                    NULL AS uncall_lc,
+                    NULL AS pipeline_fc,
+                    NULL AS pipeline_lc,
+                    'OPEN' AS position_type,
+                    NOW() AS created_at,
+                    '{updated_by}' AS created_by,
+                    NOW() AS updated_at,
+                    '{updated_by}' AS updated_by
+                FROM pos_stage_1_base b
+                JOIN position_upload_staging s ON b.row_id = s.row_id
+                WHERE s.overall_status = 'VALID'
+                """,
+                database=db
+            )
+            logger.info("[position_etl] Step 7A complete (cis_position upsert)")
+
+            # ------------------------------------------------------------------
+            # Step 7B: Write report to position_upload_report (partitioned)
+            # ------------------------------------------------------------------
+            impala_manager.execute_write(
+                f"""
+                INSERT INTO TABLE {db}.position_upload_report
+                PARTITION (src_id='{src_id}', processing_date='{processing_date}')
+                SELECT
+                    b.portfolio,
+                    COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
+                    b.security_short_name,
+                    b.isin,
+                    b.ticker,
+                    b.quantity,
+                    b.shares_outstanding,
+                    b.shares_issued,
+                    b.pct_holding,
+                    b.market_price,
+                    b.average_cost,
+                    b.cost_fc,
+                    b.market_value_fc,
+                    b.net_book_value_fc,
+                    b.unrealized_pnl_fc,
+                    b.provision_fc,
+                    b.cost_lc,
+                    b.market_value_lc,
+                    b.net_book_value_lc,
+                    b.unrealized_pnl_lc,
+                    b.provision_lc,
+                    b.product_type,
+                    b.security_type,
+                    b.quoted_unquoted,
+                    b.industry,
+                    b.fin_nonfin_co,
+                    b.issuer_type,
+                    b.reits_or_fund_y_n,
+                    b.exchange_code,
+                    b.country_of_exchange,
+                    b.country_of_incorporation,
+                    b.country_of_risk,
+                    b.country_of_operation,
+                    b.security_currency,
+                    b.corp_code,
+                    b.branch_code,
+                    b.cost_centre,
+                    b.cels,
+                    b.bwcif_sg,
+                    b.bwcif_ovs,
+                    b.mas_6d_code_sg,
+                    b.mas_6d_code_ovs,
+                    b.position_basis,
+                    b.reporting_date,
+                    b.maturity_date,
+                    b.src_system,
+                    b.source_table,
+                    CASE
+                        WHEN s.overall_status = 'VALID' THEN 'PASS'
+                        ELSE 'FAIL'
+                    END AS row_status,
+                    CASE
+                        WHEN s.overall_status = 'VALID' THEN NULL
+                        ELSE s.overall_status
+                    END AS fail_reason,
+                    s.portfolio_status,
+                    s.security_status,
+                    s.price_status,
+                    s.quantity_status,
+                    s.exchange_status,
+                    CAST(s.matched_security_id AS STRING) AS matched_security_id,
+                    s.matched_security_name
+                FROM pos_stage_1_base b
+                JOIN position_upload_staging s ON b.row_id = s.row_id
+                """,
+                database=db
+            )
+            impala_manager.execute_write(
+                f"INVALIDATE METADATA {db}.position_upload_report",
+                database=db
+            )
+            logger.info("[position_etl] Step 7B complete (report written)")
+
+            # ------------------------------------------------------------------
+            # Count report rows for result
+            # ------------------------------------------------------------------
+            rows = impala_manager.execute_query(
+                f"""
+                SELECT
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN row_status = 'PASS' THEN 1 ELSE 0 END) AS passed,
+                    SUM(CASE WHEN row_status = 'FAIL' THEN 1 ELSE 0 END) AS failed
+                FROM {db}.position_upload_report
+                WHERE src_id = '{src_id}'
+                  AND processing_date = '{processing_date}'
+                """,
+                database=db
+            )
+            if rows:
+                result.update({
+                    'total': rows[0].get('total', 0),
+                    'passed': rows[0].get('passed', 0),
+                    'failed': rows[0].get('failed', 0),
+                })
+            else:
+                result.update({'total': 0, 'passed': 0, 'failed': 0})
+
+            # Clean up temp staging tables
+            for tbl in [
+                'pos_stage_1_base', 'pos_stage_2_portfolio',
+                'pos_stage_3_security_isin', 'pos_stage_4_security_name',
+                'pos_stage_5_price', 'position_upload_staging',
+            ]:
+                try:
+                    impala_manager.execute_write(
+                        f"DROP TABLE IF EXISTS {tbl}", database=db
+                    )
+                except Exception:
+                    pass
+
+            msg = (
+                f"Position ETL complete for {src_id} / {processing_date}: "
+                f"{result.get('total', 0)} rows — "
+                f"{result.get('passed', 0)} PASS, {result.get('failed', 0)} FAIL"
+            )
+            logger.info(f"[position_etl] {msg}")
+            return True, msg, result
+
+        except Exception as e:
+            logger.error(f"[position_etl] Error: {e}", exc_info=True)
+            return False, f"Position ETL error: {e}", result
+
+    def get_position_report(
+        self,
+        src_id: str,
+        processing_date: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch all rows from position_upload_report for a given partition.
+
+        Args:
+            src_id: Source partition value
+            processing_date: YYYYMMDD partition value
+
+        Returns:
+            List of row dicts
+        """
+        from core.repositories.impala_connection import impala_manager
+
+        try:
+            rows = impala_manager.execute_query(
+                f"""
+                SELECT *
+                FROM gmp_cis.position_upload_report
+                WHERE src_id = '{src_id}'
+                  AND processing_date = '{processing_date}'
+                ORDER BY row_status DESC, portfolio, security_full_name
+                """,
+                database='gmp_cis'
+            )
+            return rows or []
+        except Exception as e:
+            logger.error(f"[position_report] Query error: {e}")
+            return []
+
+    def build_position_report_csv(
+        self,
+        src_id: str,
+        processing_date: str
+    ) -> Tuple[bool, str, str]:
+        """
+        Build CSV content from position_upload_report for a given partition.
+
+        Returns:
+            Tuple of (success, message, csv_string)
+        """
+        rows = self.get_position_report(src_id, processing_date)
+        if not rows:
+            return False, "No report data found for this upload partition", ""
+
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+        return True, f"{len(rows)} rows", output.getvalue()

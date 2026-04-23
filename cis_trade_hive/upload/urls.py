@@ -26,6 +26,10 @@ urlpatterns = [
     path('<str:upload_id>/ingest/', views.upload_ingest, name='ingest'),
     path('<str:upload_id>/delete/', views.upload_delete, name='delete'),
 
+    # Position Upload ETL
+    path('<str:upload_id>/run-position/', views.run_position_etl, name='run_position'),
+    path('<str:upload_id>/download-report/', views.download_position_report, name='download_position_report'),
+
     # API Endpoints
     path('api/validate/', views.api_validate_file, name='api_validate'),
     path('api/<str:upload_id>/status/', views.api_upload_status, name='api_status'),

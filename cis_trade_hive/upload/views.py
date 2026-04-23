@@ -16,7 +16,7 @@ import logging
 from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
-from django.http import JsonResponse, Http404
+from django.http import JsonResponse, Http404, HttpResponse
 from django.views.decorators.http import require_http_methods
 from django.conf import settings
 
@@ -685,6 +685,7 @@ def upload_detail(request, upload_id: str):
         'can_delete': upload.get('status') not in [
             UploadKuduRepository.STATUS_INGESTING
         ],
+        'is_position_upload': upload_service.is_position_upload(upload),
     }
 
     return render(request, 'upload/upload_detail.html', context)
@@ -838,6 +839,126 @@ def api_table_preview(request, upload_id: str):
         'preview': preview,
         'row_count': len(preview),
     })
+
+
+# =============================================================================
+# POSITION UPLOAD — Run ETL & Download Report
+# =============================================================================
+
+@require_http_methods(["POST"])
+def run_position_etl(request, upload_id: str):
+    """
+    POST: Trigger the position upload transform pipeline for a completed upload.
+
+    Reads src_id (target_table_name) and processing_date from the upload record,
+    then runs the 7-step AVP validation + cis_position upsert + report write.
+    """
+    user_info = get_user_info(request)
+    upload = upload_service.get_upload_by_id(upload_id)
+
+    if not upload:
+        messages.error(request, 'Upload not found')
+        return redirect('upload:list')
+
+    if not upload_service.is_position_upload(upload):
+        messages.error(request, 'This upload is not a position file — ETL not applicable')
+        return redirect('upload:detail', upload_id=upload_id)
+
+    # Derive src_id and processing_date
+    src_id = (upload.get('target_table_name') or '').lower().split('.')[-1]
+    processing_date = request.POST.get('processing_date', '').strip()
+
+    if not processing_date:
+        # Try to read from description
+        import re
+        date_match = re.search(r'processing_date[=:\s]+(\d{8})', upload.get('description', ''))
+        if date_match:
+            processing_date = date_match.group(1)
+
+    if not processing_date:
+        # Fall back to today
+        from datetime import datetime
+        processing_date = datetime.now().strftime('%Y%m%d')
+
+    try:
+        success, message, result = upload_service.run_position_etl(
+            upload_id=upload_id,
+            src_id=src_id,
+            processing_date=processing_date,
+            updated_by=user_info['username']
+        )
+
+        if success:
+            audit_log_kudu_repository.log_action(
+                user_id=user_info['user_id'],
+                username=user_info['username'],
+                user_email=user_info['user_email'],
+                action_type='POSITION_ETL',
+                entity_type='FILE_UPLOAD',
+                entity_id=upload_id,
+                entity_name=upload.get('file_name', ''),
+                action_description=message,
+                new_value=json.dumps(result),
+                request_method='POST',
+                request_path=request.path,
+                ip_address=request.META.get('REMOTE_ADDR'),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
+            )
+            messages.success(request, message)
+        else:
+            messages.error(request, message)
+
+    except Exception as e:
+        messages.error(request, f'Position ETL error: {e}')
+
+    return redirect('upload:detail', upload_id=upload_id)
+
+
+@require_http_methods(["GET"])
+def download_position_report(request, upload_id: str):
+    """
+    GET: Stream position_upload_report as a CSV file for download.
+
+    Query params:
+        processing_date (optional): override partition date (YYYYMMDD)
+    """
+    upload = upload_service.get_upload_by_id(upload_id)
+    if not upload:
+        raise Http404("Upload not found")
+
+    if not upload_service.is_position_upload(upload):
+        messages.error(request, 'This upload is not a position file')
+        return redirect('upload:detail', upload_id=upload_id)
+
+    src_id = (upload.get('target_table_name') or '').lower().split('.')[-1]
+    processing_date = request.GET.get('processing_date', '').strip()
+
+    if not processing_date:
+        import re
+        date_match = re.search(r'processing_date[=:\s]+(\d{8})', upload.get('description', ''))
+        if date_match:
+            processing_date = date_match.group(1)
+
+    if not processing_date:
+        from datetime import datetime
+        processing_date = datetime.now().strftime('%Y%m%d')
+
+    success, message, csv_content = upload_service.build_position_report_csv(
+        src_id=src_id,
+        processing_date=processing_date
+    )
+
+    if not success:
+        messages.error(request, message)
+        return redirect('upload:detail', upload_id=upload_id)
+
+    file_name = upload.get('file_name', 'position_report').rsplit('.', 1)[0]
+    response = HttpResponse(csv_content, content_type='text/csv')
+    response['Content-Disposition'] = (
+        f'attachment; filename="position_report_{file_name}_{processing_date}.csv"'
+    )
+    return response
 
 
 @require_http_methods(["GET"])

@@ -81,7 +81,7 @@ SELECT
     source_table,
     src_id,
     processing_date
-FROM position_upload_standardized;
+FROM gmp_cis.position_upload_standardized;
 
 
 -- ============================================================================
@@ -634,121 +634,186 @@ WHERE overall_status LIKE 'VALID%';
 
 
 -- ============================================================================
--- STEP 7B: Create Upload Report (ALL records - Pass and Fail)
+-- STEP 7B: Write Upload Report to Hive external table (ALL records - Pass + Fail)
 -- ============================================================================
--- Report format requested by SA:
---   Reporting Date | FileName | Reporting Entity | Portfolio | Security full name | Status | Exception detail
-DROP TABLE IF EXISTS position_upload_report;
-
-CREATE TABLE position_upload_report
-STORED AS PARQUET AS
--- Valid records (from staging - passed all validations)
+-- Writes into gmp_cis.position_upload_report (partitioned by src_id, processing_date).
+-- One row per uploaded row. Extra columns: row_status, fail_reason, step results.
+-- Django CSV download reads directly from this table.
+--
+-- Report columns: all original upload columns + row_status (PASS/FAIL) + fail_reason
+-- ============================================================================
+INSERT INTO TABLE gmp_cis.position_upload_report
+PARTITION (src_id, processing_date)
+-- VALID records
 SELECT
-    b.reporting_date,
-    b.data_src AS file_name,
-    b.src_system AS reporting_entity,
     b.portfolio,
     COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
-    'Uploaded' AS status,
-    -- Exception detail: show what validation passed and any warnings
+    b.security_short_name,
+    b.isin,
+    b.ticker,
+    CAST(b.quantity AS STRING),
+    CAST(b.shares_outstanding AS STRING),
+    CAST(b.shares_issued AS STRING),
+    CAST(b.pct_holding AS STRING),
+    CAST(b.market_price AS STRING),
+    CAST(b.average_cost AS STRING),
+    CAST(b.cost_fc AS STRING),
+    CAST(b.market_value_fc AS STRING),
+    CAST(b.net_book_value_fc AS STRING),
+    CAST(b.unrealized_pnl_fc AS STRING),
+    CAST(b.provision_fc AS STRING),
+    CAST(b.cost_lc AS STRING),
+    CAST(b.market_value_lc AS STRING),
+    CAST(b.net_book_value_lc AS STRING),
+    CAST(b.unrealized_pnl_lc AS STRING),
+    CAST(b.provision_lc AS STRING),
+    b.security_type,
+    b.product_type,
+    b.quoted_unquoted,
+    b.industry,
+    b.fin_nonfin_co,
+    b.issuer_type,
+    b.reis_or_fund_u_n                  AS reits_or_fund_y_n,
+    b.exchange_code,
+    b.country_of_exchange,
+    b.country_of_incorporation,
+    b.country_of_risk,
+    b.country_of_operation,
+    b.security_currency,
+    b.borp_code                         AS corp_code,
+    b.branch_centre                     AS branch_code,
+    b.oets                              AS cost_centre,
+    b.bwcif_sq                          AS cels,
+    b.bwcif_bd_code_sq                  AS bwcif_sg,
+    b.mas_bd_code_ovs                   AS bwcif_ovs,
+    NULL                                AS mas_6d_code_sg,
+    NULL                                AS mas_6d_code_ovs,
+    b.position_base_ovs                 AS position_basis,
+    b.reporting_date,
+    b.maturity_date,
+    b.src_system,
+    b.source_table,
+    -- Validation result columns
+    'PASS'                              AS row_status,
     CASE
         WHEN s.overall_status = 'VALID: New security created'
             THEN 'New security created. ' || COALESCE(s.price_status, '')
         WHEN s.price_status LIKE 'WARN%'
             THEN s.price_status
         ELSE NULL
-    END AS exception_detail,
-    -- Additional detail columns for traceability
-    s.portfolio_status AS step1_portfolio,
-    s.security_status AS step2_security,
-    s.price_status AS step3_price,
-    s.quantity_status AS step4_quantity,
-    s.exchange_status AS step5_exchange,
-    s.overall_status
+    END                                 AS fail_reason,
+    s.portfolio_status,
+    s.security_status,
+    s.price_status,
+    s.quantity_status,
+    s.exchange_status,
+    CAST(s.final_security_id AS STRING) AS matched_security_id,
+    s.matched_security_name,
+    -- partition columns last
+    b.src_id,
+    b.processing_date
 FROM pos_stage_1_base b
 JOIN position_upload_staging s ON b.row_id = s.row_id
 WHERE s.overall_status LIKE 'VALID%'
 
 UNION ALL
 
--- Invalid records from staging (passed portfolio but failed elsewhere)
+-- INVALID records (passed portfolio but failed other validations)
 SELECT
-    b.reporting_date,
-    b.data_src AS file_name,
-    b.src_system AS reporting_entity,
     b.portfolio,
-    COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
-    'Fail' AS status,
-    -- Exception detail: show the failure reason
-    s.overall_status AS exception_detail,
-    s.portfolio_status AS step1_portfolio,
-    s.security_status AS step2_security,
-    s.price_status AS step3_price,
-    s.quantity_status AS step4_quantity,
-    s.exchange_status AS step5_exchange,
-    s.overall_status
+    COALESCE(b.security_full_name, b.security_short_name, b.isin),
+    b.security_short_name,
+    b.isin,
+    b.ticker,
+    CAST(b.quantity AS STRING),
+    CAST(b.shares_outstanding AS STRING),
+    CAST(b.shares_issued AS STRING),
+    CAST(b.pct_holding AS STRING),
+    CAST(b.market_price AS STRING),
+    CAST(b.average_cost AS STRING),
+    CAST(b.cost_fc AS STRING),
+    CAST(b.market_value_fc AS STRING),
+    CAST(b.net_book_value_fc AS STRING),
+    CAST(b.unrealized_pnl_fc AS STRING),
+    CAST(b.provision_fc AS STRING),
+    CAST(b.cost_lc AS STRING),
+    CAST(b.market_value_lc AS STRING),
+    CAST(b.net_book_value_lc AS STRING),
+    CAST(b.unrealized_pnl_lc AS STRING),
+    CAST(b.provision_lc AS STRING),
+    b.security_type, b.product_type, b.quoted_unquoted,
+    b.industry, b.fin_nonfin_co, b.issuer_type, b.reis_or_fund_u_n,
+    b.exchange_code, b.country_of_exchange, b.country_of_incorporation,
+    b.country_of_risk, b.country_of_operation, b.security_currency,
+    b.borp_code, b.branch_centre, b.oets, b.bwcif_sq,
+    b.bwcif_bd_code_sq, b.mas_bd_code_ovs, NULL, NULL,
+    b.position_base_ovs, b.reporting_date, b.maturity_date,
+    b.src_system, b.source_table,
+    'FAIL'                              AS row_status,
+    s.overall_status                    AS fail_reason,
+    s.portfolio_status,
+    s.security_status,
+    s.price_status,
+    s.quantity_status,
+    s.exchange_status,
+    NULL                                AS matched_security_id,
+    NULL                                AS matched_security_name,
+    b.src_id,
+    b.processing_date
 FROM pos_stage_1_base b
 JOIN position_upload_staging s ON b.row_id = s.row_id
 WHERE s.overall_status LIKE 'INVALID%'
 
 UNION ALL
 
--- Failed portfolio records (never made it to staging)
+-- FAIL: Portfolio not found (never reached staging)
 SELECT
-    b.reporting_date,
-    b.data_src AS file_name,
-    b.src_system AS reporting_entity,
     b.portfolio,
-    COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
-    'Fail' AS status,
-    'Step 1 FAIL: Portfolio not found in cis_portfolio' AS exception_detail,
-    p2.portfolio_status AS step1_portfolio,
-    NULL AS step2_security,
-    NULL AS step3_price,
-    NULL AS step4_quantity,
-    NULL AS step5_exchange,
-    'FAIL: Portfolio validation' AS overall_status
+    COALESCE(b.security_full_name, b.security_short_name, b.isin),
+    b.security_short_name, b.isin, b.ticker,
+    CAST(b.quantity AS STRING), CAST(b.shares_outstanding AS STRING),
+    CAST(b.shares_issued AS STRING), CAST(b.pct_holding AS STRING),
+    CAST(b.market_price AS STRING), CAST(b.average_cost AS STRING),
+    CAST(b.cost_fc AS STRING), CAST(b.market_value_fc AS STRING),
+    CAST(b.net_book_value_fc AS STRING), CAST(b.unrealized_pnl_fc AS STRING),
+    CAST(b.provision_fc AS STRING), CAST(b.cost_lc AS STRING),
+    CAST(b.market_value_lc AS STRING), CAST(b.net_book_value_lc AS STRING),
+    CAST(b.unrealized_pnl_lc AS STRING), CAST(b.provision_lc AS STRING),
+    b.security_type, b.product_type, b.quoted_unquoted,
+    b.industry, b.fin_nonfin_co, b.issuer_type, b.reis_or_fund_u_n,
+    b.exchange_code, b.country_of_exchange, b.country_of_incorporation,
+    b.country_of_risk, b.country_of_operation, b.security_currency,
+    b.borp_code, b.branch_centre, b.oets, b.bwcif_sq,
+    b.bwcif_bd_code_sq, b.mas_bd_code_ovs, NULL, NULL,
+    b.position_base_ovs, b.reporting_date, b.maturity_date,
+    b.src_system, b.source_table,
+    'FAIL'                                              AS row_status,
+    'Step 1: Portfolio not found in cis_portfolio'      AS fail_reason,
+    p2.portfolio_status,
+    NULL, NULL, NULL, NULL, NULL, NULL,
+    b.src_id,
+    b.processing_date
 FROM pos_stage_1_base b
 JOIN pos_stage_2_portfolio p2 ON b.row_id = p2.row_id
-WHERE p2.portfolio_status LIKE 'FAIL%'
+WHERE p2.portfolio_status LIKE 'FAIL%';
 
-UNION ALL
+-- Repair partitions so Impala can see new data
+INVALIDATE METADATA gmp_cis.position_upload_report;
 
--- Records that failed security validation (Multiple ISINs, etc.)
-SELECT
-    b.reporting_date,
-    b.data_src AS file_name,
-    b.src_system AS reporting_entity,
-    b.portfolio,
-    COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
-    'Fail' AS status,
-    'Step 2 FAIL: ' || p4.security_status AS exception_detail,
-    'PASS' AS step1_portfolio,
-    p4.security_status AS step2_security,
-    NULL AS step3_price,
-    NULL AS step4_quantity,
-    NULL AS step5_exchange,
-    'FAIL: Security validation' AS overall_status
-FROM pos_stage_1_base b
-JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
-WHERE p4.security_status LIKE 'FAIL%';
+-- Report summary
+SELECT 'REPORT SUMMARY' AS info;
+SELECT row_status, COUNT(*) AS cnt
+FROM gmp_cis.position_upload_report
+WHERE processing_date = '${processing_date}'
+GROUP BY row_status;
 
--- Show report preview (first 100 rows)
-SELECT 'POSITION UPLOAD REPORT PREVIEW' AS info;
-SELECT * FROM position_upload_report LIMIT 100;
-
--- Report summary by status
-SELECT 'REPORT SUMMARY BY STATUS' AS info;
-SELECT status, COUNT(*) AS record_count
-FROM position_upload_report
-GROUP BY status;
-
--- Failed records by exception detail
-SELECT 'FAILED RECORDS BY REASON' AS info;
-SELECT exception_detail, COUNT(*) AS cnt
-FROM position_upload_report
-WHERE status = 'Fail'
-GROUP BY exception_detail
+SELECT 'FAILED ROWS BY REASON' AS info;
+SELECT fail_reason, COUNT(*) AS cnt
+FROM gmp_cis.position_upload_report
+WHERE processing_date = '${processing_date}'
+  AND row_status = 'FAIL'
+GROUP BY fail_reason
+ORDER BY cnt DESC
 ORDER BY cnt DESC;
 
 

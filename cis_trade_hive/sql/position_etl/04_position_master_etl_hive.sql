@@ -1,6 +1,6 @@
 -- ============================================================================
 -- Position Master ETL - Hive SQL Implementation
--- Transforms 10 source tables into unified position_master
+-- Transforms 10 source tables into unified position_upload_standardized
 -- No temporary views - single INSERT with UNION ALL
 -- ============================================================================
 -- Usage:
@@ -20,7 +20,7 @@ SET parquet.compression=SNAPPY;
 -- ============================================================================
 -- Single INSERT with UNION ALL from all 10 source tables
 -- ============================================================================
-INSERT INTO TABLE gmp_cis.position_master
+INSERT INTO TABLE gmp_cis.position_upload_standardized
 PARTITION (src_id, processing_date)
 SELECT
     portfolio, security_full_name, security_short_name, isin, ticker,
@@ -646,7 +646,7 @@ SELECT
     src_system,
     source_table,
     COUNT(*) AS record_count
-FROM gmp_cis.position_master
+FROM gmp_cis.position_upload_standardized
 WHERE processing_date = '${processing_date}'
   AND etl_batch_id = '${batch_id}'
 GROUP BY src_system, source_table
@@ -656,6 +656,6 @@ SELECT
     COUNT(*) AS total_records,
     '${processing_date}' AS processing_date,
     '${batch_id}' AS batch_id
-FROM gmp_cis.position_master
+FROM gmp_cis.position_upload_standardized
 WHERE processing_date = '${processing_date}'
   AND etl_batch_id = '${batch_id}';
