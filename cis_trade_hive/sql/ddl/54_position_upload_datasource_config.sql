@@ -7,6 +7,7 @@
 --
 -- Key rules:
 --   - source_name must match the uploaded filename EXACTLY (case-sensitive)
+--     Actual filenames: CIS_External_upload_format_1.csv .. _5.csv
 --   - intake_columns lists only file columns (no position_basis — it is
 --     server-injected at ingest time via POSITION_TABLE_BASIS dict)
 --   - reporting_date IS a file column for tables 1, 2, 3 — included here
@@ -39,7 +40,7 @@ UPSERT INTO gmp_cis.cis_datasource_mng (
     data_frq
 ) VALUES (
     'CIS_POS_1',
-    'CIS_Position_Upload_1.csv',
+    'CIS_External_upload_format_1.csv',
     'cis_user_sta_adhoc_position_1',
     ',',
     'true',
@@ -72,7 +73,7 @@ UPSERT INTO gmp_cis.cis_datasource_mng (
     data_frq
 ) VALUES (
     'CIS_POS_2',
-    'CIS_Position_Upload_2.csv',
+    'CIS_External_upload_format_2.csv',
     'cis_user_sta_adhoc_position_2',
     ',',
     'true',
@@ -104,7 +105,7 @@ UPSERT INTO gmp_cis.cis_datasource_mng (
     data_frq
 ) VALUES (
     'CIS_POS_3',
-    'CIS_Position_Upload_3.csv',
+    'CIS_External_upload_format_3.csv',
     'cis_user_sta_adhoc_position_3',
     ',',
     'true',
@@ -142,7 +143,7 @@ UPSERT INTO gmp_cis.cis_datasource_mng (
     data_frq
 ) VALUES (
     'CIS_POS_4',
-    'CIS_Position_Upload_4.csv',
+    'CIS_External_upload_format_4.csv',
     'cis_user_sta_adhoc_position_4',
     ',',
     'true',
@@ -186,7 +187,7 @@ UPSERT INTO gmp_cis.cis_datasource_mng (
     data_frq
 ) VALUES (
     'CIS_POS_5',
-    'CIS_Position_Upload_5.csv',
+    'CIS_External_upload_format_5.csv',
     'cis_user_sta_adhoc_position_5',
     ',',
     'true',
