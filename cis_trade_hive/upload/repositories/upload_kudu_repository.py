@@ -21,6 +21,37 @@ from core.repositories.impala_connection import impala_manager
 
 logger = logging.getLogger('upload')
 
+# Maximum number of validation errors to persist (prevents Kudu STRING truncation)
+_MAX_STORED_ERRORS = 50
+# Maximum length of each individual error message
+_MAX_ERROR_MSG_LEN = 300
+
+
+def _serialise_errors(errors) -> str:
+    """
+    Safely serialise a validation errors list to JSON for Kudu storage.
+
+    Caps at _MAX_STORED_ERRORS entries and truncates each message so the
+    resulting JSON string stays well within Kudu's practical string limits.
+    If more errors exist, appends a summary entry so users know the list
+    was cut short.
+    """
+    if not errors:
+        return '[]'
+    if not isinstance(errors, list):
+        errors = [str(errors)]
+
+    original_count = len(errors)
+    capped = errors[:_MAX_STORED_ERRORS]
+    truncated = [str(e)[:_MAX_ERROR_MSG_LEN] for e in capped]
+
+    if original_count > _MAX_STORED_ERRORS:
+        truncated.append(
+            f"... {original_count - _MAX_STORED_ERRORS} more errors not shown (total: {original_count})"
+        )
+
+    return json.dumps(truncated)
+
 
 class UploadKuduRepository:
     """Repository for file upload operations with Kudu via Impala."""
@@ -250,7 +281,7 @@ class UploadKuduRepository:
                 self.escape_value(f"{self.HDFS_BASE_PATH}/{upload_id}"),
                 self.escape_value(json.dumps(upload_data.get('schema', [])) if upload_data.get('schema') else '[]'),
                 self.escape_value(json.dumps(upload_data.get('sample_data', [])) if upload_data.get('sample_data') else '[]'),
-                self.escape_value(json.dumps(upload_data.get('validation_errors', [])) if upload_data.get('validation_errors') else '[]'),
+                self.escape_value(_serialise_errors(upload_data.get('validation_errors', []))),
                 self.escape_value(self.STATUS_PENDING),
                 'false',
                 self.escape_value(created_by),
@@ -328,7 +359,10 @@ class UploadKuduRepository:
 
             for field in json_fields:
                 if field in update_data:
-                    json_val = json.dumps(update_data[field]) if isinstance(update_data[field], (dict, list)) else update_data[field]
+                    if field == 'validation_errors_json':
+                        json_val = _serialise_errors(update_data[field])
+                    else:
+                        json_val = json.dumps(update_data[field]) if isinstance(update_data[field], (dict, list)) else update_data[field]
                     set_clauses.append(f"`{field}` = {self.escape_value(json_val)}")
 
             # Always update audit fields

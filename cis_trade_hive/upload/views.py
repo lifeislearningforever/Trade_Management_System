@@ -630,10 +630,24 @@ def upload_detail(request, upload_id: str):
         parsed = json.loads(errors_json) if isinstance(errors_json, str) else errors_json
         # Must be a list — if it's a string (truncated JSON), wrap it
         validation_errors = parsed if isinstance(parsed, list) else [str(parsed)]
-    except Exception as e:
-        # Truncated/invalid JSON stored in Kudu — show raw text as single error
-        raw = upload.get('validation_errors_json', '')
-        validation_errors = [str(raw)[:500]] if raw else []
+    except Exception:
+        # Truncated/invalid JSON stored in Kudu (old row before the write-cap fix).
+        # Try to recover complete string entries from the partial JSON array,
+        # then append a warning so the user knows the list may be incomplete.
+        raw = upload.get('validation_errors_json', '') or ''
+        recovered = []
+        try:
+            import re as _re
+            # Pull out all fully-quoted strings from the partial array
+            recovered = _re.findall(r'"((?:[^"\\]|\\.)*)"', raw)
+            recovered = [s.replace('\\"', '"') for s in recovered]
+        except Exception:
+            pass
+        if recovered:
+            recovered.append('[Validation errors list was truncated — only partial results shown]')
+            validation_errors = recovered
+        else:
+            validation_errors = [str(raw)[:500]] if raw else []
 
     # Get table preview and reconciliation data if completed
     table_preview = []
