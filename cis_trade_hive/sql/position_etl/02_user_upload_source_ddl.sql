@@ -9,9 +9,9 @@
 -- ============================================================================
 -- USER_UPLOAD_1: Basic Position Data
 -- Separator: | (pipe)
--- Fields: Portfolio, Client_Num, Exchange_Quoted, ISIN_Code, Counter,
---         Quantity_Yesterday, Movement, Quantity_Today, Trade_Date
--- position_basis default: TRADE_DATE
+-- File headers: REPORTING_DATE, Portfolio, Client_Num, Exchange_Quoted,
+--               ISIN_Code, Counter, Quantity_Yesterday, Movement, Quantity_Today
+-- position_basis default: TRADE_DATE (server-injected, not in file)
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_1 (
     src_id              STRING,
@@ -19,6 +19,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_1 (
     sub_system          STRING,
     data_cat            STRING,
     data_frq            STRING,
+    reporting_date          STRING,
     portfolio               STRING,
     client_num              STRING,
     exchange_quoted         STRING,
@@ -27,7 +28,6 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_1 (
     quantity_yesterday      STRING,
     movement                STRING,
     quantity_today          STRING,
-    trade_date              STRING,
     position_basis          STRING
 )
 COMMENT 'User Upload Source 1 - Basic Position Data (position_basis defaulted to TRADE_DATE at ingest)'

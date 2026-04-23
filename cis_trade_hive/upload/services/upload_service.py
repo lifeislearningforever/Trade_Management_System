@@ -1863,7 +1863,8 @@ SELECT * FROM (
             db = 'gmp_cis'
 
             # ------------------------------------------------------------------
-            # Step 1: Base staging table (row_id + all upload columns)
+            # Step 1: Base staging table — keep `exchange` as-is (reserved word),
+            #         normalise reporting_date to yyyy-MM-dd string.
             # ------------------------------------------------------------------
             impala_manager.execute_write(
                 "DROP TABLE IF EXISTS pos_stage_1_base", database=db
@@ -1889,12 +1890,12 @@ SELECT * FROM (
                     market_value_fc,
                     net_book_value_fc,
                     unrealized_pnl_fc,
-                    provision_fc,
                     cost_lc,
                     market_value_lc,
                     net_book_value_lc,
                     unrealized_pnl_lc,
                     provision_lc,
+                    provision_fc,
                     product_type,
                     security_type,
                     quoted_unquoted,
@@ -1902,7 +1903,7 @@ SELECT * FROM (
                     fin_nonfin_co,
                     issuer_type,
                     reits_or_fund_y_n,
-                    `exchange` AS exchange_code,
+                    `exchange`,
                     country_code,
                     country_of_exchange,
                     country_of_incorporation,
@@ -1918,7 +1919,19 @@ SELECT * FROM (
                     mas_6d_code_sg,
                     mas_6d_code_ovs,
                     position_basis,
-                    reporting_date,
+                    from_timestamp(
+                        CASE
+                            WHEN reporting_date LIKE '%/%/%' THEN
+                                CAST(unix_timestamp(reporting_date, 'dd/MM/yyyy') AS TIMESTAMP)
+                            WHEN length(reporting_date) = 8 THEN
+                                CAST(unix_timestamp(reporting_date, 'yyyyMMdd') AS TIMESTAMP)
+                            WHEN reporting_date LIKE '%-%-% %:%:%' THEN
+                                CAST(reporting_date AS TIMESTAMP)
+                            ELSE
+                                CAST(reporting_date AS TIMESTAMP)
+                        END,
+                        'yyyy-MM-dd'
+                    ) AS reporting_date,
                     maturity_date,
                     src_system,
                     sub_system,
@@ -1938,7 +1951,7 @@ SELECT * FROM (
             logger.info("[position_etl] Step 1 complete")
 
             # ------------------------------------------------------------------
-            # Step 2: Portfolio validation
+            # Step 2: Portfolio validation — join on pf.name (exact match)
             # ------------------------------------------------------------------
             impala_manager.execute_write(
                 "DROP TABLE IF EXISTS pos_stage_2_portfolio", database=db
@@ -1950,97 +1963,149 @@ SELECT * FROM (
                 SELECT
                     b.row_id,
                     b.portfolio,
-                    b.isin,
-                    b.security_full_name,
-                    b.security_short_name,
-                    b.ticker,
-                    b.exchange_code,
-                    b.quantity,
-                    b.market_price,
-                    b.position_basis,
-                    b.src_id,
-                    b.processing_date,
+                    pf.name AS valid_portfolio,
+                    pf.currency AS portfolio_currency,
                     CASE
-                        WHEN p.portfolio_short_name IS NOT NULL THEN 'VALID'
-                        ELSE 'FAIL_PORTFOLIO_NOT_FOUND'
-                    END AS portfolio_status,
-                    p.portfolio_short_name AS matched_portfolio
+                        WHEN pf.name IS NOT NULL THEN 'PASS'
+                        ELSE 'FAIL: Portfolio not found in cis_portfolio'
+                    END AS portfolio_status
                 FROM pos_stage_1_base b
-                LEFT JOIN {db}.cis_portfolio p
-                    ON UPPER(TRIM(b.portfolio)) = UPPER(TRIM(p.portfolio_short_name))
-                   AND p.status NOT IN ('INACTIVE', 'CLOSED', 'DELETED')
+                LEFT JOIN {db}.cis_portfolio pf ON b.portfolio = pf.name
                 """,
                 database=db
             )
             logger.info("[position_etl] Step 2 complete")
 
             # ------------------------------------------------------------------
-            # Step 3: Security ISIN match
+            # Step 3: Security validation — duplicate ISIN detection + ISIN match.
+            #         Only for records that passed portfolio validation (INNER JOIN).
             # ------------------------------------------------------------------
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_3_security_isin", database=db
+                "DROP TABLE IF EXISTS pos_stage_3_duplicate_isins", database=db
             )
             impala_manager.execute_write(
                 f"""
-                CREATE TABLE pos_stage_3_security_isin
+                CREATE TABLE pos_stage_3_duplicate_isins
+                STORED AS PARQUET AS
+                SELECT isin, COUNT(*) AS isin_count
+                FROM {db}.cis_security
+                WHERE is_active = true
+                  AND isin IS NOT NULL
+                  AND TRIM(isin) != ''
+                GROUP BY isin
+                HAVING COUNT(*) > 1
+                """,
+                database=db
+            )
+
+            impala_manager.execute_write(
+                "DROP TABLE IF EXISTS pos_stage_3_security", database=db
+            )
+            impala_manager.execute_write(
+                f"""
+                CREATE TABLE pos_stage_3_security
                 STORED AS PARQUET AS
                 SELECT
-                    p2.row_id,
+                    b.row_id,
+                    b.isin AS upload_isin,
+                    b.security_full_name,
+                    b.security_short_name,
+                    b.`exchange` AS upload_exchange,
                     p2.portfolio_status,
+                    dup.isin_count AS duplicate_isin_count,
+                    CASE WHEN dup.isin IS NULL THEN s.security_id  ELSE NULL END AS matched_security_id,
+                    CASE WHEN dup.isin IS NULL THEN s.security_name ELSE NULL END AS matched_security_name,
+                    CASE WHEN dup.isin IS NULL THEN s.isin          ELSE NULL END AS matched_isin,
+                    CASE WHEN dup.isin IS NULL THEN s.exchange_code ELSE NULL END AS matched_exchange,
+                    CASE WHEN dup.isin IS NULL THEN s.country_of_exchange ELSE NULL END AS matched_country,
+                    CASE WHEN dup.isin IS NULL THEN s.currency_code ELSE NULL END AS matched_currency,
                     CASE
-                        WHEN p2.portfolio_status != 'VALID' THEN 'SKIPPED'
-                        WHEN p2.isin IS NOT NULL AND p2.isin != ''
-                             AND s.security_id IS NOT NULL THEN 'MATCHED_ISIN'
-                        ELSE 'NOT_MATCHED_ISIN'
-                    END AS security_status,
-                    s.security_id AS matched_security_id,
-                    s.security_name AS matched_security_name
-                FROM pos_stage_2_portfolio p2
-                LEFT JOIN {db}.cis_security_kudu s
-                    ON UPPER(TRIM(p2.isin)) = UPPER(TRIM(s.isin))
-                   AND s.status NOT IN ('INACTIVE', 'DELETED')
+                        WHEN dup.isin IS NOT NULL              THEN 'FAIL: Multiple ISINs found in master'
+                        WHEN s.security_id IS NOT NULL         THEN 'ISIN_MATCH'
+                        WHEN b.isin IS NULL OR TRIM(b.isin) = '' THEN 'NO_ISIN'
+                        ELSE 'ISIN_NO_MATCH'
+                    END AS match_type
+                FROM pos_stage_1_base b
+                JOIN pos_stage_2_portfolio p2 ON b.row_id = p2.row_id
+                LEFT JOIN pos_stage_3_duplicate_isins dup ON b.isin = dup.isin
+                LEFT JOIN {db}.cis_security s
+                    ON b.isin = s.isin
+                    AND s.is_active = true
+                    AND b.isin IS NOT NULL
+                    AND TRIM(b.isin) != ''
+                WHERE p2.portfolio_status = 'PASS'
                 """,
                 database=db
             )
             logger.info("[position_etl] Step 3 complete")
 
             # ------------------------------------------------------------------
-            # Step 4: Security fallback name match (for rows not matched by ISIN)
+            # Step 4: Security fallback — full_name (security_description),
+            #         then short_name, then 'NOT_FOUND: Create new security'.
             # ------------------------------------------------------------------
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_4_security_name", database=db
+                "DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=db
             )
             impala_manager.execute_write(
                 f"""
-                CREATE TABLE pos_stage_4_security_name
+                CREATE TABLE pos_stage_4_security_fallback
                 STORED AS PARQUET AS
                 SELECT
                     s3.row_id,
+                    s3.upload_isin,
+                    s3.security_full_name,
+                    s3.security_short_name,
+                    s3.upload_exchange,
                     s3.portfolio_status,
+                    s3.match_type AS isin_match_type,
+                    COALESCE(s3.matched_security_id, s_desc.security_id, s_name.security_id) AS final_security_id,
+                    COALESCE(s3.matched_security_name, s_desc.security_name, s_name.security_name) AS final_security_name,
+                    COALESCE(s3.matched_isin,     s_desc.isin,          s_name.isin)          AS final_isin,
+                    COALESCE(s3.matched_exchange,  s_desc.exchange_code, s_name.exchange_code) AS final_exchange,
+                    COALESCE(s3.matched_country,   s_desc.country_of_exchange, s_name.country_of_exchange) AS final_country,
+                    COALESCE(s3.matched_currency,  s_desc.currency_code, s_name.currency_code) AS final_currency,
                     CASE
-                        WHEN s3.security_status = 'MATCHED_ISIN'   THEN 'MATCHED_ISIN'
-                        WHEN s3.security_status = 'SKIPPED'        THEN 'SKIPPED'
-                        WHEN s2.security_id IS NOT NULL             THEN 'MATCHED_NAME'
-                        ELSE 'FAIL_SECURITY_NOT_FOUND'
-                    END AS security_status,
-                    COALESCE(s3.matched_security_id, s2.security_id)     AS matched_security_id,
-                    COALESCE(s3.matched_security_name, s2.security_name) AS matched_security_name
-                FROM pos_stage_3_security_isin s3
-                JOIN pos_stage_2_portfolio p2 ON s3.row_id = p2.row_id
-                LEFT JOIN {db}.cis_security_kudu s2
-                    ON s3.security_status = 'NOT_MATCHED_ISIN'
-                   AND (
-                       UPPER(TRIM(p2.security_full_name)) = UPPER(TRIM(s2.security_name))
-                    OR UPPER(TRIM(p2.security_short_name)) = UPPER(TRIM(s2.short_name))
-                   )
-                   AND s2.status NOT IN ('INACTIVE', 'DELETED')
+                        WHEN s3.matched_security_id IS NOT NULL THEN 'ISIN_MATCH'
+                        WHEN s_desc.security_id IS NOT NULL     THEN 'FULLNAME_MATCH'
+                        WHEN s_name.security_id IS NOT NULL     THEN 'SHORTNAME_MATCH'
+                        ELSE NULL
+                    END AS match_method,
+                    CASE
+                        WHEN s3.match_type = 'FAIL: Multiple ISINs found in master'
+                            THEN 'FAIL: Multiple ISINs found'
+                        WHEN s3.matched_security_id IS NOT NULL THEN 'ISIN_MATCH'
+                        WHEN s_desc.security_id IS NOT NULL     THEN 'FULLNAME_MATCH'
+                        WHEN s_name.security_id IS NOT NULL     THEN 'SHORTNAME_MATCH'
+                        WHEN (s3.upload_isin IS NULL OR TRIM(s3.upload_isin) = '')
+                             AND (s3.security_full_name IS NULL OR TRIM(s3.security_full_name) = '')
+                             AND (s3.security_short_name IS NULL OR TRIM(s3.security_short_name) = '')
+                            THEN 'FAIL: No identifier (isin, security_full_name, security_short_name all null)'
+                        ELSE 'NOT_FOUND: Create new security'
+                    END AS security_status
+                FROM pos_stage_3_security s3
+                LEFT JOIN {db}.cis_security s_desc
+                    ON s3.security_full_name = s_desc.security_description
+                    AND s_desc.is_active = true
+                    AND s3.matched_security_id IS NULL
+                    AND s3.match_type != 'FAIL: Multiple ISINs found in master'
+                    AND s3.security_full_name IS NOT NULL
+                    AND TRIM(s3.security_full_name) != ''
+                LEFT JOIN {db}.cis_security s_name
+                    ON s3.security_short_name = s_name.security_name
+                    AND s_name.is_active = true
+                    AND s3.matched_security_id IS NULL
+                    AND s_desc.security_id IS NULL
+                    AND s3.match_type != 'FAIL: Multiple ISINs found in master'
+                    AND s3.security_short_name IS NOT NULL
+                    AND TRIM(s3.security_short_name) != ''
                 """,
                 database=db
             )
             logger.info("[position_etl] Step 4 complete")
 
             # ------------------------------------------------------------------
-            # Step 5: Price lookup
+            # Step 5: Price lookup — latest price per ISIN from cis_equity_price.
+            #         Skip records with FAIL security status.
             # ------------------------------------------------------------------
             impala_manager.execute_write(
                 "DROP TABLE IF EXISTS pos_stage_5_price", database=db
@@ -2050,53 +2115,112 @@ SELECT * FROM (
                 CREATE TABLE pos_stage_5_price
                 STORED AS PARQUET AS
                 SELECT
-                    s4.row_id,
-                    s4.portfolio_status,
-                    s4.security_status,
-                    s4.matched_security_id,
-                    s4.matched_security_name,
+                    b.row_id,
+                    b.isin,
+                    b.reporting_date,
+                    b.market_price AS upload_market_price,
+                    ep.main_closing_price,
                     CASE
-                        WHEN s4.security_status NOT IN ('MATCHED_ISIN', 'MATCHED_NAME')
-                            THEN 'SKIPPED'
-                        WHEN p2.market_price IS NOT NULL AND p2.market_price != ''
-                             AND CAST(p2.market_price AS DOUBLE) > 0
-                            THEN 'PRICE_FROM_UPLOAD'
-                        WHEN ep.main_closing_price IS NOT NULL
-                            THEN 'PRICE_FROM_EQUITY'
-                        ELSE 'FAIL_NO_PRICE'
-                    END AS price_status,
-                    COALESCE(
-                        NULLIF(p2.market_price, ''),
-                        CAST(ep.main_closing_price AS STRING)
-                    ) AS final_price,
+                        WHEN ep.main_closing_price IS NOT NULL AND ep.main_closing_price != 0
+                            THEN ep.main_closing_price
+                        WHEN b.market_price IS NOT NULL AND b.market_price != 0
+                            THEN b.market_price
+                        ELSE NULL
+                    END AS final_market_price,
                     CASE
-                        WHEN p2.quantity IS NULL OR p2.quantity = ''
-                          OR CAST(p2.quantity AS DOUBLE) <= 0
-                            THEN 'FAIL_INVALID_QUANTITY'
-                        ELSE 'VALID'
-                    END AS quantity_status,
-                    CASE
-                        WHEN p2.exchange_code IS NULL OR p2.exchange_code = ''
-                            THEN 'FAIL_NO_EXCHANGE'
-                        ELSE 'VALID'
-                    END AS exchange_status
-                FROM pos_stage_4_security_name s4
-                JOIN pos_stage_2_portfolio p2 ON s4.row_id = p2.row_id
-                LEFT JOIN {db}.cis_equity_price ep
-                    ON s4.matched_security_id IS NOT NULL
-                   AND ep.security_label = s4.matched_security_name
-                   AND ep.price_date = (
-                       SELECT MAX(price_date)
-                       FROM {db}.cis_equity_price ep2
-                       WHERE ep2.security_label = s4.matched_security_name
-                   )
+                        WHEN ep.main_closing_price IS NOT NULL AND ep.main_closing_price != 0
+                            THEN 'PASS: Using cis_equity_price'
+                        WHEN b.market_price IS NOT NULL AND b.market_price != 0
+                            THEN 'PASS: Using uploaded'
+                        WHEN ep.main_closing_price = 0 OR b.market_price = 0
+                            THEN 'WARN: Price is zero (omitted)'
+                        ELSE 'WARN: No price'
+                    END AS price_status
+                FROM pos_stage_1_base b
+                JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
+                LEFT JOIN (
+                    SELECT isin, price_date, main_closing_price,
+                           ROW_NUMBER() OVER (PARTITION BY isin, price_date ORDER BY price_timestamp DESC) AS rn
+                    FROM {db}.cis_equity_price
+                    WHERE is_active = true
+                      AND main_closing_price IS NOT NULL
+                      AND main_closing_price != 0
+                ) ep ON b.isin = ep.isin AND b.reporting_date = ep.price_date AND ep.rn = 1
+                WHERE p4.security_status NOT LIKE 'FAIL%'
                 """,
                 database=db
             )
             logger.info("[position_etl] Step 5 complete")
 
             # ------------------------------------------------------------------
-            # Step 6: Consolidated staging — overall_status
+            # Step 5B: Create new securities for NOT_FOUND rows that have exchange.
+            # ------------------------------------------------------------------
+            impala_manager.execute_write(
+                f"""
+                INSERT INTO {db}.cis_security (
+                    security_id,
+                    security_name,
+                    isin,
+                    security_description,
+                    issuer,
+                    ticker,
+                    industry,
+                    security_type,
+                    investment_type,
+                    issuer_type,
+                    quoted_unquoted,
+                    country_of_incorporation,
+                    country_of_exchange,
+                    exchange_code,
+                    currency_code,
+                    shares_outstanding,
+                    fin_nonfin_ind,
+                    status,
+                    is_active,
+                    created_by,
+                    created_at,
+                    updated_by,
+                    updated_at
+                )
+                SELECT
+                    (UNIX_TIMESTAMP() * 1000) + b.row_id AS security_id,
+                    COALESCE(b.security_short_name, b.security_full_name) AS security_name,
+                    b.isin,
+                    b.security_full_name AS security_description,
+                    NULL AS issuer,
+                    b.ticker,
+                    b.industry,
+                    b.security_type,
+                    NULL AS investment_type,
+                    b.issuer_type,
+                    b.quoted_unquoted,
+                    b.country_of_incorporation,
+                    b.country_of_exchange,
+                    b.`exchange`,
+                    b.security_currency AS currency_code,
+                    CAST(b.shares_outstanding AS BIGINT) AS shares_outstanding,
+                    b.fin_nonfin_co AS fin_nonfin_ind,
+                    'ACTIVE' AS status,
+                    TRUE AS is_active,
+                    'POSITION_UPLOAD' AS created_by,
+                    UNIX_TIMESTAMP() * 1000 AS created_at,
+                    'POSITION_UPLOAD' AS updated_by,
+                    UNIX_TIMESTAMP() * 1000 AS updated_at
+                FROM pos_stage_1_base b
+                JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
+                WHERE p4.security_status = 'NOT_FOUND: Create new security'
+                  AND b.`exchange` IS NOT NULL
+                  AND TRIM(b.`exchange`) != ''
+                  AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
+                """,
+                database=db
+            )
+            logger.info("[position_etl] Step 5B complete (new securities created)")
+
+            # ------------------------------------------------------------------
+            # Step 6: Final staging — INNER JOIN on portfolio PASS; compute
+            #         final_quantity, final_market_value_fc, overall_status.
+            #         Also create position_upload_failed for reporting.
             # ------------------------------------------------------------------
             impala_manager.execute_write(
                 "DROP TABLE IF EXISTS position_upload_staging", database=db
@@ -2106,176 +2230,332 @@ SELECT * FROM (
                 CREATE TABLE position_upload_staging
                 STORED AS PARQUET AS
                 SELECT
-                    s5.row_id,
-                    s5.portfolio_status,
-                    s5.security_status,
-                    s5.price_status,
-                    s5.quantity_status,
-                    s5.exchange_status,
-                    s5.matched_security_id,
-                    s5.matched_security_name,
-                    s5.final_price,
+                    b.*,
+                    p2.valid_portfolio,
+                    p2.portfolio_currency,
+                    p2.portfolio_status,
+                    p4.final_security_id,
+                    p4.final_security_name AS matched_security_name,
+                    p4.final_isin,
+                    p4.final_country AS country_resolved,
+                    p4.final_currency AS security_currency_resolved,
+                    p4.security_status,
+                    p5.final_market_price,
+                    p5.price_status,
                     CASE
-                        WHEN s5.portfolio_status != 'VALID'
-                            THEN CONCAT('INVALID: ', s5.portfolio_status)
-                        WHEN s5.security_status NOT IN ('MATCHED_ISIN', 'MATCHED_NAME')
-                            THEN CONCAT('INVALID: ', s5.security_status)
-                        WHEN s5.quantity_status != 'VALID'
-                            THEN CONCAT('INVALID: ', s5.quantity_status)
-                        WHEN s5.exchange_status != 'VALID'
-                            THEN CONCAT('INVALID: ', s5.exchange_status)
+                        WHEN b.quantity IS NOT NULL THEN b.quantity
+                        WHEN b.cost_fc IS NOT NULL  THEN b.cost_fc
+                        ELSE NULL
+                    END AS final_quantity,
+                    CASE
+                        WHEN b.quantity IS NOT NULL THEN 'PASS'
+                        WHEN b.cost_fc IS NOT NULL  THEN 'PASS: Using cost_fc'
+                        ELSE 'FAIL: Both quantity and cost_fc null'
+                    END AS quantity_status,
+                    CASE
+                        WHEN b.shares_issued IS NOT NULL THEN b.shares_issued
+                        WHEN b.pct_holding IS NOT NULL AND b.quantity IS NOT NULL AND b.pct_holding > 0
+                            THEN b.quantity / b.pct_holding
+                        ELSE NULL
+                    END AS final_shares_issued,
+                    CASE
+                        WHEN b.`exchange` IS NULL OR TRIM(b.`exchange`) = ''
+                            THEN 'FAIL: Exchange is null'
+                        ELSE 'PASS'
+                    END AS exchange_status,
+                    CASE
+                        WHEN b.market_value_fc IS NOT NULL AND b.market_value_fc != 0
+                            THEN b.market_value_fc
+                        WHEN b.quantity IS NOT NULL AND p5.final_market_price IS NOT NULL
+                            THEN b.quantity * p5.final_market_price
+                        ELSE NULL
+                    END AS final_market_value_fc,
+                    CASE
+                        WHEN b.net_book_value_fc IS NOT NULL THEN b.net_book_value_fc
+                        WHEN b.cost_fc IS NOT NULL           THEN b.cost_fc - COALESCE(b.provision_fc, 0)
+                        ELSE NULL
+                    END AS final_net_book_value_fc,
+                    CASE
+                        WHEN p4.security_status LIKE 'FAIL: No identifier%'
+                            THEN 'INVALID: No security identifier'
+                        WHEN b.`exchange` IS NULL OR TRIM(b.`exchange`) = ''
+                            THEN 'INVALID: Exchange is null'
+                        WHEN b.quantity IS NULL AND b.cost_fc IS NULL
+                            THEN 'INVALID: No quantity'
+                        WHEN p4.security_status = 'NOT_FOUND: Create new security'
+                            THEN 'VALID: New security created'
+                        WHEN p4.security_status IN ('ISIN_MATCH', 'FULLNAME_MATCH', 'SHORTNAME_MATCH',
+                                                     'DESC_MATCH', 'NAME_MATCH')
+                            THEN 'VALID'
+                        WHEN p4.security_status LIKE 'FAIL%'
+                            THEN CONCAT('INVALID: ', p4.security_status)
                         ELSE 'VALID'
                     END AS overall_status
-                FROM pos_stage_5_price s5
+                FROM pos_stage_1_base b
+                JOIN pos_stage_2_portfolio p2
+                    ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
+                JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
+                LEFT JOIN pos_stage_5_price p5 ON b.row_id = p5.row_id
                 """,
                 database=db
             )
             logger.info("[position_etl] Step 6 complete")
 
-            # ------------------------------------------------------------------
-            # Step 7A: Upsert valid records into cis_position
-            # ------------------------------------------------------------------
+            # Failed records table (for reporting — records that never made it to staging)
+            impala_manager.execute_write(
+                "DROP TABLE IF EXISTS position_upload_failed", database=db
+            )
             impala_manager.execute_write(
                 f"""
-                UPSERT INTO {db}.cis_position
+                CREATE TABLE position_upload_failed
+                STORED AS PARQUET AS
                 SELECT
-                    CONCAT(b.portfolio, '_', CAST(s.matched_security_id AS STRING),
-                           '_', b.position_basis, '_', b.processing_date) AS position_id,
-                    1 AS version_id,
-                    b.portfolio,
-                    COALESCE(s.matched_security_name,
-                             b.security_full_name,
-                             b.security_short_name) AS security_label,
-                    b.position_basis,
-                    COALESCE(NULLIF(b.reporting_date, ''), b.processing_date) AS position_date,
-                    'USER_UPLOAD' AS src_system,
-                    b.processing_date,
-                    CAST(b.quantity AS DOUBLE) AS quantity,
-                    CAST(b.average_cost AS DOUBLE) AS average_cost_fc,
-                    CAST(b.cost_fc AS DOUBLE) AS cost_fc,
-                    CAST(b.market_value_fc AS DOUBLE) AS market_value_fc,
-                    CAST(b.net_book_value_fc AS DOUBLE) AS net_book_value_fc,
-                    CAST(b.unrealized_pnl_fc AS DOUBLE) AS unrealized_pnl_fc,
-                    NULL AS average_cost_lc,
-                    CAST(b.cost_lc AS DOUBLE) AS cost_lc,
-                    CAST(b.market_value_lc AS DOUBLE) AS market_value_lc,
-                    CAST(b.net_book_value_lc AS DOUBLE) AS net_book_value_lc,
-                    CAST(b.unrealized_pnl_lc AS DOUBLE) AS unrealized_pnl_lc,
-                    CAST(b.provision_fc AS DOUBLE) AS provision_fc,
-                    CAST(b.provision_lc AS DOUBLE) AS provision_lc,
-                    0.0 AS dividend_fc,
-                    0.0 AS dividend_lc,
-                    0.0 AS realized_pnl_fc,
-                    0.0 AS realized_pnl_lc,
-                    b.isin,
-                    NULL AS uncall_fc,
-                    NULL AS uncall_lc,
-                    NULL AS pipeline_fc,
-                    NULL AS pipeline_lc,
-                    'OPEN' AS position_type,
-                    NOW() AS created_at,
-                    '{updated_by}' AS created_by,
-                    NOW() AS updated_at,
-                    '{updated_by}' AS updated_by
+                    b.*,
+                    CASE
+                        WHEN p2.portfolio_status LIKE 'FAIL%' THEN p2.portfolio_status
+                        ELSE NULL
+                    END AS portfolio_fail_reason,
+                    CASE
+                        WHEN (b.isin IS NULL OR TRIM(b.isin) = '')
+                             AND (b.security_full_name IS NULL OR TRIM(b.security_full_name) = '')
+                             AND (b.security_short_name IS NULL OR TRIM(b.security_short_name) = '')
+                            THEN 'FAIL: No security identifier'
+                        ELSE NULL
+                    END AS security_fail_reason,
+                    CASE
+                        WHEN b.`exchange` IS NULL OR TRIM(b.`exchange`) = ''
+                            THEN 'FAIL: Exchange is null'
+                        ELSE NULL
+                    END AS exchange_fail_reason,
+                    CASE
+                        WHEN b.quantity IS NULL AND b.cost_fc IS NULL
+                            THEN 'FAIL: No quantity'
+                        ELSE NULL
+                    END AS quantity_fail_reason,
+                    CASE
+                        WHEN p2.portfolio_status LIKE 'FAIL%' THEN 'PORTFOLIO_NOT_FOUND'
+                        WHEN (b.isin IS NULL OR TRIM(b.isin) = '')
+                             AND (b.security_full_name IS NULL OR TRIM(b.security_full_name) = '')
+                             AND (b.security_short_name IS NULL OR TRIM(b.security_short_name) = '')
+                            THEN 'NO_SECURITY_IDENTIFIER'
+                        WHEN b.`exchange` IS NULL OR TRIM(b.`exchange`) = ''
+                            THEN 'EXCHANGE_NULL'
+                        WHEN b.quantity IS NULL AND b.cost_fc IS NULL
+                            THEN 'NO_QUANTITY'
+                        ELSE 'OTHER'
+                    END AS fail_category
                 FROM pos_stage_1_base b
-                JOIN position_upload_staging s ON b.row_id = s.row_id
-                WHERE s.overall_status = 'VALID'
+                LEFT JOIN pos_stage_2_portfolio p2 ON b.row_id = p2.row_id
+                WHERE p2.portfolio_status LIKE 'FAIL%'
+                   OR ((b.isin IS NULL OR TRIM(b.isin) = '')
+                       AND (b.security_full_name IS NULL OR TRIM(b.security_full_name) = '')
+                       AND (b.security_short_name IS NULL OR TRIM(b.security_short_name) = ''))
+                   OR (b.`exchange` IS NULL OR TRIM(b.`exchange`) = '')
+                   OR (b.quantity IS NULL AND b.cost_fc IS NULL)
                 """,
                 database=db
             )
-            logger.info("[position_etl] Step 7A complete (cis_position upsert)")
+            logger.info("[position_etl] Step 6B complete (failed table created)")
 
             # ------------------------------------------------------------------
-            # Step 7B: Write report to position_upload_report (partitioned)
+            # Step 7A: INSERT valid records into cis_position.
+            #          position_id = (UNIX_TIMESTAMP() * 1000000) + row_id
             # ------------------------------------------------------------------
             impala_manager.execute_write(
                 f"""
-                INSERT INTO TABLE {db}.position_upload_report
-                PARTITION (src_id='{src_id}', processing_date='{processing_date}')
+                INSERT INTO {db}.cis_position (
+                    position_id,
+                    version_id,
+                    portfolio,
+                    security_label,
+                    position_basis,
+                    position_date,
+                    src_system,
+                    processing_date,
+                    quantity,
+                    average_cost_fc,
+                    cost_fc,
+                    market_value_fc,
+                    net_book_value_fc,
+                    unrealized_pnl_fc,
+                    cost_lc,
+                    market_value_lc,
+                    net_book_value_lc,
+                    unrealized_pnl_lc,
+                    provision_lc,
+                    provision_fc,
+                    dividend_fc,
+                    dividend_lc,
+                    realized_pnl_fc,
+                    realized_pnl_lc,
+                    isin,
+                    average_cost_lc,
+                    placeholder_3,
+                    placeholder_4,
+                    uncall_fc,
+                    uncall_lc,
+                    pipeline_fc,
+                    pipeline_lc,
+                    position_type
+                )
                 SELECT
+                    (UNIX_TIMESTAMP() * 1000000) + row_id AS position_id,
+                    (UNIX_TIMESTAMP() * 1000000) + 500000000 + row_id AS version_id,
+                    portfolio,
+                    COALESCE(matched_security_name, security_full_name, security_short_name) AS security_label,
+                    position_basis,
+                    reporting_date AS position_date,
+                    src_system,
+                    processing_date,
+                    CAST(final_quantity          AS DECIMAL(18,4)) AS quantity,
+                    CAST(average_cost            AS DECIMAL(18,6)) AS average_cost_fc,
+                    CAST(cost_fc                 AS DECIMAL(18,4)) AS cost_fc,
+                    CAST(final_market_value_fc   AS DECIMAL(18,4)) AS market_value_fc,
+                    CAST(final_net_book_value_fc AS DECIMAL(18,4)) AS net_book_value_fc,
+                    CAST(unrealized_pnl_fc       AS DECIMAL(18,4)) AS unrealized_pnl_fc,
+                    CAST(cost_lc                 AS DECIMAL(18,4)) AS cost_lc,
+                    CAST(market_value_lc         AS DECIMAL(18,4)) AS market_value_lc,
+                    CAST(net_book_value_lc       AS DECIMAL(18,4)) AS net_book_value_lc,
+                    CAST(unrealized_pnl_lc       AS DECIMAL(18,4)) AS unrealized_pnl_lc,
+                    CAST(provision_lc            AS DECIMAL(18,4)) AS provision_lc,
+                    CAST(provision_fc            AS DECIMAL(18,4)) AS provision_fc,
+                    CAST(0                       AS DECIMAL(18,4)) AS dividend_fc,
+                    CAST(0                       AS DECIMAL(18,4)) AS dividend_lc,
+                    CAST(0                       AS DECIMAL(18,4)) AS realized_pnl_fc,
+                    CAST(0                       AS DECIMAL(18,4)) AS realized_pnl_lc,
+                    COALESCE(final_isin, isin)                     AS isin,
+                    CAST(0                       AS DECIMAL(18,4)) AS average_cost_lc,
+                    ''                                             AS placeholder_3,
+                    ''                                             AS placeholder_4,
+                    CAST(0                       AS DECIMAL(18,4)) AS uncall_fc,
+                    CAST(0                       AS DECIMAL(18,4)) AS uncall_lc,
+                    CAST(0                       AS DECIMAL(18,4)) AS pipeline_fc,
+                    CAST(0                       AS DECIMAL(18,4)) AS pipeline_lc,
+                    'EOD' AS position_type
+                FROM position_upload_staging
+                WHERE overall_status LIKE 'VALID%'
+                """,
+                database=db
+            )
+            logger.info("[position_etl] Step 7A complete (cis_position insert)")
+
+            # ------------------------------------------------------------------
+            # Step 7B: DROP/CREATE position_upload_report with UNION ALL
+            #          covering valid, invalid, portfolio-fail, security-fail rows.
+            # ------------------------------------------------------------------
+            impala_manager.execute_write(
+                "DROP TABLE IF EXISTS position_upload_report", database=db
+            )
+            impala_manager.execute_write(
+                f"""
+                CREATE TABLE position_upload_report
+                STORED AS PARQUET AS
+                SELECT
+                    b.reporting_date,
+                    b.source_table AS file_name,
+                    b.src_system AS reporting_entity,
                     b.portfolio,
                     COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
-                    b.security_short_name,
-                    b.isin,
-                    b.ticker,
-                    b.quantity,
-                    b.shares_outstanding,
-                    b.shares_issued,
-                    b.pct_holding,
-                    b.market_price,
-                    b.average_cost,
-                    b.cost_fc,
-                    b.market_value_fc,
-                    b.net_book_value_fc,
-                    b.unrealized_pnl_fc,
-                    b.provision_fc,
-                    b.cost_lc,
-                    b.market_value_lc,
-                    b.net_book_value_lc,
-                    b.unrealized_pnl_lc,
-                    b.provision_lc,
-                    b.product_type,
-                    b.security_type,
-                    b.quoted_unquoted,
-                    b.industry,
-                    b.fin_nonfin_co,
-                    b.issuer_type,
-                    b.reits_or_fund_y_n,
-                    b.exchange_code,
-                    b.country_of_exchange,
-                    b.country_of_incorporation,
-                    b.country_of_risk,
-                    b.country_of_operation,
-                    b.security_currency,
-                    b.corp_code,
-                    b.branch_code,
-                    b.cost_centre,
-                    b.cels,
-                    b.bwcif_sg,
-                    b.bwcif_ovs,
-                    b.mas_6d_code_sg,
-                    b.mas_6d_code_ovs,
-                    b.position_basis,
-                    b.reporting_date,
-                    b.maturity_date,
-                    b.src_system,
-                    b.source_table,
+                    'Uploaded' AS status,
                     CASE
-                        WHEN s.overall_status = 'VALID' THEN 'PASS'
-                        ELSE 'FAIL'
-                    END AS row_status,
-                    CASE
-                        WHEN s.overall_status = 'VALID' THEN NULL
-                        ELSE s.overall_status
-                    END AS fail_reason,
-                    s.portfolio_status,
-                    s.security_status,
-                    s.price_status,
-                    s.quantity_status,
-                    s.exchange_status,
-                    CAST(s.matched_security_id AS STRING) AS matched_security_id,
-                    s.matched_security_name
+                        WHEN s.overall_status = 'VALID: New security created'
+                            THEN CONCAT('New security created. ', COALESCE(s.price_status, ''))
+                        WHEN s.price_status LIKE 'WARN%'
+                            THEN s.price_status
+                        ELSE NULL
+                    END AS exception_detail,
+                    s.portfolio_status AS step1_portfolio,
+                    s.security_status  AS step2_security,
+                    s.price_status     AS step3_price,
+                    s.quantity_status  AS step4_quantity,
+                    s.exchange_status  AS step5_exchange,
+                    s.overall_status,
+                    '{src_id}'          AS src_id,
+                    '{processing_date}' AS processing_date
                 FROM pos_stage_1_base b
                 JOIN position_upload_staging s ON b.row_id = s.row_id
+                WHERE s.overall_status LIKE 'VALID%'
+
+                UNION ALL
+
+                SELECT
+                    b.reporting_date,
+                    b.source_table AS file_name,
+                    b.src_system AS reporting_entity,
+                    b.portfolio,
+                    COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
+                    'Fail' AS status,
+                    s.overall_status AS exception_detail,
+                    s.portfolio_status AS step1_portfolio,
+                    s.security_status  AS step2_security,
+                    s.price_status     AS step3_price,
+                    s.quantity_status  AS step4_quantity,
+                    s.exchange_status  AS step5_exchange,
+                    s.overall_status,
+                    '{src_id}'          AS src_id,
+                    '{processing_date}' AS processing_date
+                FROM pos_stage_1_base b
+                JOIN position_upload_staging s ON b.row_id = s.row_id
+                WHERE s.overall_status LIKE 'INVALID%'
+
+                UNION ALL
+
+                SELECT
+                    b.reporting_date,
+                    b.source_table AS file_name,
+                    b.src_system AS reporting_entity,
+                    b.portfolio,
+                    COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
+                    'Fail' AS status,
+                    'Step 1 FAIL: Portfolio not found in cis_portfolio' AS exception_detail,
+                    p2.portfolio_status AS step1_portfolio,
+                    NULL AS step2_security,
+                    NULL AS step3_price,
+                    NULL AS step4_quantity,
+                    NULL AS step5_exchange,
+                    'FAIL: Portfolio validation' AS overall_status,
+                    '{src_id}'          AS src_id,
+                    '{processing_date}' AS processing_date
+                FROM pos_stage_1_base b
+                JOIN pos_stage_2_portfolio p2 ON b.row_id = p2.row_id
+                WHERE p2.portfolio_status LIKE 'FAIL%'
+
+                UNION ALL
+
+                SELECT
+                    b.reporting_date,
+                    b.source_table AS file_name,
+                    b.src_system AS reporting_entity,
+                    b.portfolio,
+                    COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
+                    'Fail' AS status,
+                    CONCAT('Step 2 FAIL: ', p4.security_status) AS exception_detail,
+                    'PASS' AS step1_portfolio,
+                    p4.security_status AS step2_security,
+                    NULL AS step3_price,
+                    NULL AS step4_quantity,
+                    NULL AS step5_exchange,
+                    'FAIL: Security validation' AS overall_status,
+                    '{src_id}'          AS src_id,
+                    '{processing_date}' AS processing_date
+                FROM pos_stage_1_base b
+                JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
+                WHERE p4.security_status LIKE 'FAIL%'
                 """,
                 database=db
             )
-            impala_manager.execute_write(
-                f"INVALIDATE METADATA {db}.position_upload_report",
-                database=db
-            )
-            logger.info("[position_etl] Step 7B complete (report written)")
+            logger.info("[position_etl] Step 7B complete (position_upload_report created)")
 
             # ------------------------------------------------------------------
-            # Count report rows for result
+            # Count totals from report
             # ------------------------------------------------------------------
             rows = impala_manager.execute_query(
                 f"""
                 SELECT
                     COUNT(*) AS total,
-                    SUM(CASE WHEN row_status = 'PASS' THEN 1 ELSE 0 END) AS passed,
-                    SUM(CASE WHEN row_status = 'FAIL' THEN 1 ELSE 0 END) AS failed
-                FROM {db}.position_upload_report
+                    SUM(CASE WHEN status = 'Uploaded' THEN 1 ELSE 0 END) AS passed,
+                    SUM(CASE WHEN status = 'Fail'     THEN 1 ELSE 0 END) AS failed
+                FROM position_upload_report
                 WHERE src_id = '{src_id}'
                   AND processing_date = '{processing_date}'
                 """,
@@ -2283,18 +2563,19 @@ SELECT * FROM (
             )
             if rows:
                 result.update({
-                    'total': rows[0].get('total', 0),
+                    'total':  rows[0].get('total', 0),
                     'passed': rows[0].get('passed', 0),
                     'failed': rows[0].get('failed', 0),
                 })
             else:
                 result.update({'total': 0, 'passed': 0, 'failed': 0})
 
-            # Clean up temp staging tables
+            # Clean up intermediate staging tables (keep report + failed for UI)
             for tbl in [
                 'pos_stage_1_base', 'pos_stage_2_portfolio',
-                'pos_stage_3_security_isin', 'pos_stage_4_security_name',
-                'pos_stage_5_price', 'position_upload_staging',
+                'pos_stage_3_duplicate_isins', 'pos_stage_3_security',
+                'pos_stage_4_security_fallback', 'pos_stage_5_price',
+                'position_upload_staging',
             ]:
                 try:
                     impala_manager.execute_write(
@@ -2339,7 +2620,7 @@ SELECT * FROM (
                 FROM gmp_cis.position_upload_report
                 WHERE src_id = '{src_id}'
                   AND processing_date = '{processing_date}'
-                ORDER BY row_status DESC, portfolio, security_full_name
+                ORDER BY status, portfolio, security_full_name
                 """,
                 database='gmp_cis'
             )

@@ -519,11 +519,21 @@ def upload_ingest(request, upload_id: str):
             ingestion_mode = request.POST.get('ingestion_mode', 'overwrite').strip()
 
             # Get temp file path: session uploads store it in the upload dict;
-            # DB uploads save it separately in session under temp_path_<id>
+            # DB uploads reconstruct the path from the known naming convention
+            # (never rely on session — sessions are not shared across Gunicorn workers).
             if is_session_upload:
                 temp_file_path = upload.get('temp_file_path')
             else:
+                # Try session first (same-worker case), then reconstruct from convention
                 temp_file_path = request.session.get(f'temp_path_{upload_id}')
+                if not temp_file_path or not os.path.exists(temp_file_path):
+                    # Reconstruct: temp_uploads/<upload_id>_<file_name>
+                    _temp_dir = os.path.join(settings.BASE_DIR, 'temp_uploads')
+                    _file_name = upload.get('file_name', '') or upload.get('original_file_name', '')
+                    _reconstructed = os.path.join(_temp_dir, f"{upload_id}_{_file_name}")
+                    if os.path.exists(_reconstructed):
+                        temp_file_path = _reconstructed
+                        logger.info(f"[ingest] Reconstructed temp file path: {_reconstructed}")
             sample_data = None
             if is_session_upload:
                 sample_data_json = upload.get('sample_data_json', [])

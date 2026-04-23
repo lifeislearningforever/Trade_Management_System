@@ -25,9 +25,10 @@ USE gmp_cis;
 -- Separator: | (pipe)
 -- CSV has header row: TRUE
 -- CSV columns (9 file columns, position_basis is server-injected — NOT listed):
---   Portfolio, Client_Num, Exchange_Quoted, ISIN_Code, Counter,
---   Quantity_Yesterday, Movement, Quantity_Today, Trade_Date
--- position_basis defaulted to: TRADE_DATE at ingest
+--   REPORTING_DATE, Portfolio, Client_Num, Exchange_Quoted, ISIN_Code,
+--   Counter, Quantity_Yesterday, Movement, Quantity_Today
+-- NOTE: File header is REPORTING_DATE; Hive table column is reporting_date.
+--       position_basis is server-injected as TRADE_DATE (not in file).
 -- NOTE: UPSERT keyed on source_id — updates existing row in DB
 -- ----------------------------------------------------------------------------
 UPSERT INTO gmp_cis.cis_datasource_mng (
@@ -49,7 +50,7 @@ UPSERT INTO gmp_cis.cis_datasource_mng (
     '|',
     'true',
     '0',
-    'portfolio,client_num,exchange_quoted,isin_code,counter,quantity_yesterday,movement,quantity_today,trade_date',
+    'reporting_date,portfolio,client_num,exchange_quoted,isin_code,counter,quantity_yesterday,movement,quantity_today',
     'USER_UPLOAD',
     'user',
     'sta',
