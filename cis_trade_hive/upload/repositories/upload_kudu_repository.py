@@ -96,13 +96,28 @@ class UploadKuduRepository:
 
     @staticmethod
     def escape_value(val: Any) -> str:
-        """Escape value for SQL query."""
+        """Escape value for Impala SQL string literals.
+
+        Impala uses C-style escape sequences inside single-quoted strings:
+          \\  ->  literal backslash
+          \'  ->  literal single-quote  (or double the quote: '')
+          \\n, \\t etc. are interpreted — so raw newlines/tabs must be escaped.
+        JSON blobs contain backslashes and double-quotes; escaping backslashes
+        first prevents double-escaping, and replacing newlines/tabs keeps the
+        SQL on one logical line so the parser never sees an unterminated literal.
+        """
         if val is None:
             return 'NULL'
-        if isinstance(val, str):
-            return f"'{val.replace(chr(39), chr(39)+chr(39))}'"
         if isinstance(val, bool):
             return str(val).lower()
+        if isinstance(val, str):
+            # Order matters: escape backslashes first
+            s = val.replace('\\', '\\\\')
+            s = s.replace("'", "''")
+            s = s.replace('\n', '\\n')
+            s = s.replace('\r', '\\r')
+            s = s.replace('\t', '\\t')
+            return f"'{s}'"
         return str(val)
 
     @staticmethod
