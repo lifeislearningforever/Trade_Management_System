@@ -170,7 +170,6 @@ def upload_create(request):
 
                         # Save file to temp directory so full data is available at ingest time
                         # (DB record only stores MAX_PREVIEW_ROWS=100 rows in sample_data_json)
-                        import uuid as _uuid
                         temp_dir = os.path.join(settings.BASE_DIR, 'temp_uploads')
                         os.makedirs(temp_dir, exist_ok=True)
                         temp_file_path = os.path.join(temp_dir, f"{upload_id}_{file_name}")
@@ -178,7 +177,12 @@ def upload_create(request):
                         with open(temp_file_path, 'wb') as _f:
                             for chunk in uploaded_file.chunks():
                                 _f.write(chunk)
-                        # Keep temp path in session so ingest view can find it
+                        # Persist the temp file path in the DB record so ingest can
+                        # find the full file on any Gunicorn worker (not session-dependent)
+                        from .repositories.upload_kudu_repository import upload_kudu_repository as _repo
+                        _repo.update_upload(upload_id, {'file_path': temp_file_path}, user_info['username'])
+                        logger.info(f"[upload] Saved temp file path to DB: {temp_file_path}")
+                        # Also keep in session as a fast-path for same-worker ingest
                         request.session[f'temp_path_{upload_id}'] = temp_file_path
 
                         messages.success(request, f'File "{file_name}" validated using datasource config. Target: {datasource_config.get("target_table", "")}')
@@ -524,19 +528,25 @@ def upload_ingest(request, upload_id: str):
             if is_session_upload:
                 temp_file_path = upload.get('temp_file_path')
             else:
-                # Try session first (same-worker case), then reconstruct from convention
-                temp_file_path = request.session.get(f'temp_path_{upload_id}')
-                if not temp_file_path or not os.path.exists(temp_file_path):
-                    # Reconstruct: temp_uploads/<upload_id>_<file_name>
-                    _temp_dir = os.path.join(settings.BASE_DIR, 'temp_uploads')
-                    _file_name = upload.get('file_name', '') or upload.get('original_file_name', '')
-                    _reconstructed = os.path.join(_temp_dir, f"{upload_id}_{_file_name}")
-                    logger.info(f"[ingest] Attempting temp file reconstruction: {_reconstructed} exists={os.path.exists(_reconstructed)}")
-                    if os.path.exists(_reconstructed):
-                        temp_file_path = _reconstructed
-                        logger.info(f"[ingest] Reconstructed temp file path: {_reconstructed}")
-                    else:
-                        logger.warning(f"[ingest] Temp file NOT found at {_reconstructed} — will fall back to sample_data ({len(upload.get('sample_data_json') or [])} rows). Row count in DB will be capped at 20.")
+                # Priority 1: file_path persisted in the DB record at upload time
+                temp_file_path = upload.get('file_path', '').strip() or None
+                if temp_file_path and os.path.exists(temp_file_path):
+                    logger.info(f"[ingest] Using DB-persisted file_path: {temp_file_path}")
+                else:
+                    # Priority 2: session key (same-worker fast-path)
+                    temp_file_path = request.session.get(f'temp_path_{upload_id}')
+                    if not temp_file_path or not os.path.exists(temp_file_path):
+                        # Priority 3: reconstruct from naming convention
+                        _temp_dir = os.path.join(settings.BASE_DIR, 'temp_uploads')
+                        _file_name = upload.get('file_name', '') or upload.get('original_file_name', '')
+                        _reconstructed = os.path.join(_temp_dir, f"{upload_id}_{_file_name}")
+                        logger.info(f"[ingest] Attempting temp file reconstruction: {_reconstructed} exists={os.path.exists(_reconstructed)}")
+                        if os.path.exists(_reconstructed):
+                            temp_file_path = _reconstructed
+                            logger.info(f"[ingest] Reconstructed temp file path: {_reconstructed}")
+                        else:
+                            temp_file_path = None
+                            logger.warning(f"[ingest] Temp file NOT found — falling back to sample_data (capped at 20 rows). Upload full file again to ingest all records.")
             sample_data = None
             if is_session_upload:
                 sample_data_json = upload.get('sample_data_json', [])
