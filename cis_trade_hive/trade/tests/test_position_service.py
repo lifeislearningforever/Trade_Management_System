@@ -29,10 +29,10 @@ class TestAVPCalculation:
         # Scenario: First purchase of 100 shares at $50 with $10 commission
         # Expected: qty=100, avg_cost=50.10 (including charges), total_cost=5010
 
-        with patch.object(self.service, '_get_position_as_of_date', return_value=None):
-            with patch.object(self.service, '_get_market_price', return_value=50.0):
-                with patch.object(self.service, '_save_position', return_value=True):
-                    with patch.object(self.service, '_sync_to_position_master', return_value=True):
+        with patch('core.repositories.impala_connection.impala_manager.execute_query', return_value=[]):
+            with patch.object(self.service, '_get_position_as_of_date', return_value=None):
+                with patch.object(self.service, '_get_market_price', return_value=50.0):
+                    with patch.object(self.service, '_save_position', return_value=True):
                         success, message, position = self.service.calculate_position(
                             portfolio_id='FUND-001',
                             security_id='AAPL',
@@ -49,8 +49,8 @@ class TestAVPCalculation:
         assert position is not None
         assert position['quantity'] == 100.0
         # avg_cost = (100 * 50 + 10) / 100 = 5010/100 = 50.10
-        assert position['average_cost'] == 50.1
-        assert position['total_cost'] == 5010.0
+        assert position['average_cost_fc'] == 50.1
+        assert position['total_cost_fc'] == 5010.0
         assert position['status'] == 'OPEN'
         assert position['src_system'] == 'CIS'
 
@@ -70,10 +70,10 @@ class TestAVPCalculation:
             'realized_pnl': 0
         }
 
-        with patch.object(self.service, '_get_position_as_of_date', return_value=existing_position):
-            with patch.object(self.service, '_get_market_price', return_value=60.0):
-                with patch.object(self.service, '_save_position', return_value=True):
-                    with patch.object(self.service, '_sync_to_position_master', return_value=True):
+        with patch('core.repositories.impala_connection.impala_manager.execute_query', return_value=[]):
+            with patch.object(self.service, '_get_position_as_of_date', return_value=existing_position):
+                with patch.object(self.service, '_get_market_price', return_value=60.0):
+                    with patch.object(self.service, '_save_position', return_value=True):
                         success, message, position = self.service.calculate_position(
                             portfolio_id='FUND-001',
                             security_id='AAPL',
@@ -90,8 +90,8 @@ class TestAVPCalculation:
         assert position is not None
         assert position['quantity'] == 150.0
         # avg_cost = 8005 / 150 = 53.36666667
-        assert round(position['average_cost'], 8) == round(53.36666667, 8)
-        assert position['total_cost'] == 8005.0
+        assert round(position['average_cost_fc'], 8) == round(53.36666667, 8)
+        assert position['total_cost_fc'] == 8005.0
         assert position['position_id'] == 99999  # Same position
 
     def test_buy_multiple_times_avp_accumulates(self):
@@ -109,10 +109,10 @@ class TestAVPCalculation:
             'realized_pnl': 0
         }
 
-        with patch.object(self.service, '_get_position_as_of_date', return_value=existing_after_buy1):
-            with patch.object(self.service, '_get_market_price', return_value=20.0):
-                with patch.object(self.service, '_save_position', return_value=True):
-                    with patch.object(self.service, '_sync_to_position_master', return_value=True):
+        with patch('core.repositories.impala_connection.impala_manager.execute_query', return_value=[]):
+            with patch.object(self.service, '_get_position_as_of_date', return_value=existing_after_buy1):
+                with patch.object(self.service, '_get_market_price', return_value=20.0):
+                    with patch.object(self.service, '_save_position', return_value=True):
                         success, _, position = self.service.calculate_position(
                             portfolio_id='FUND-001',
                             security_id='TEST',
@@ -127,7 +127,7 @@ class TestAVPCalculation:
 
         assert success is True
         assert position['quantity'] == 200.0
-        assert position['average_cost'] == 15.0  # (1000 + 2000) / 200
+        assert position['average_cost_fc'] == 15.0  # (1000 + 2000) / 200
 
     # =========================================================================
     # SELL Tests
@@ -147,10 +147,10 @@ class TestAVPCalculation:
             'realized_pnl': 0
         }
 
-        with patch.object(self.service, '_get_position_as_of_date', return_value=existing_position):
-            with patch.object(self.service, '_get_market_price', return_value=70.0):
-                with patch.object(self.service, '_save_position', return_value=True):
-                    with patch.object(self.service, '_sync_to_position_master', return_value=True):
+        with patch('core.repositories.impala_connection.impala_manager.execute_query', return_value=[]):
+            with patch.object(self.service, '_get_position_as_of_date', return_value=existing_position):
+                with patch.object(self.service, '_get_market_price', return_value=70.0):
+                    with patch.object(self.service, '_save_position', return_value=True):
                         success, message, position = self.service.calculate_position(
                             portfolio_id='FUND-001',
                             security_id='AAPL',
@@ -166,8 +166,8 @@ class TestAVPCalculation:
         assert success is True
         assert position is not None
         assert position['quantity'] == 70.0
-        assert position['average_cost'] == 50.0  # Unchanged
-        assert position['realized_pnl'] == 600.0  # (70-50) * 30
+        assert position['average_cost_fc'] == 50.0  # Unchanged
+        assert position['realized_pnl_fc'] == 600.0  # (70-50) * 30
         assert position['status'] == 'OPEN'
 
     def test_sell_full_position_closes(self):
@@ -183,9 +183,9 @@ class TestAVPCalculation:
             'realized_pnl': 0
         }
 
-        with patch.object(self.service, '_get_position_as_of_date', return_value=existing_position):
-            with patch.object(self.service, '_save_position', return_value=True):
-                with patch.object(self.service, '_sync_to_position_master', return_value=True):
+        with patch('core.repositories.impala_connection.impala_manager.execute_query', return_value=[]):
+            with patch.object(self.service, '_get_position_as_of_date', return_value=existing_position):
+                with patch.object(self.service, '_save_position', return_value=True):
                     success, message, position = self.service.calculate_position(
                         portfolio_id='FUND-001',
                         security_id='AAPL',
@@ -200,8 +200,8 @@ class TestAVPCalculation:
 
         assert success is True
         assert position['quantity'] == 0
-        assert position['average_cost'] == 0
-        assert position['realized_pnl'] == 1000.0
+        assert position['average_cost_fc'] == 0
+        assert position['realized_pnl_fc'] == 1000.0
         assert position['status'] == 'CLOSED'
         assert position['is_active'] is False
 
@@ -217,10 +217,10 @@ class TestAVPCalculation:
             'realized_pnl': 0
         }
 
-        with patch.object(self.service, '_get_position_as_of_date', return_value=existing_position):
-            with patch.object(self.service, '_get_market_price', return_value=40.0):
-                with patch.object(self.service, '_save_position', return_value=True):
-                    with patch.object(self.service, '_sync_to_position_master', return_value=True):
+        with patch('core.repositories.impala_connection.impala_manager.execute_query', return_value=[]):
+            with patch.object(self.service, '_get_position_as_of_date', return_value=existing_position):
+                with patch.object(self.service, '_get_market_price', return_value=40.0):
+                    with patch.object(self.service, '_save_position', return_value=True):
                         success, _, position = self.service.calculate_position(
                             portfolio_id='FUND-001',
                             security_id='AAPL',
@@ -234,7 +234,7 @@ class TestAVPCalculation:
                         )
 
         assert success is True
-        assert position['realized_pnl'] == -500.0  # Loss
+        assert position['realized_pnl_fc'] == -500.0  # Loss
 
     def test_sell_cumulative_realized_pnl(self):
         """Test multiple SELLs accumulate realized P&L."""
@@ -249,10 +249,10 @@ class TestAVPCalculation:
             'realized_pnl': 200.0  # Already had some realized gains
         }
 
-        with patch.object(self.service, '_get_position_as_of_date', return_value=existing_position):
-            with patch.object(self.service, '_get_market_price', return_value=60.0):
-                with patch.object(self.service, '_save_position', return_value=True):
-                    with patch.object(self.service, '_sync_to_position_master', return_value=True):
+        with patch('core.repositories.impala_connection.impala_manager.execute_query', return_value=[]):
+            with patch.object(self.service, '_get_position_as_of_date', return_value=existing_position):
+                with patch.object(self.service, '_get_market_price', return_value=60.0):
+                    with patch.object(self.service, '_save_position', return_value=True):
                         success, _, position = self.service.calculate_position(
                             portfolio_id='FUND-001',
                             security_id='AAPL',
@@ -266,7 +266,7 @@ class TestAVPCalculation:
                         )
 
         assert success is True
-        assert position['realized_pnl'] == 400.0  # 200 + 200
+        assert position['realized_pnl_fc'] == 400.0  # 200 + 200
 
     # =========================================================================
     # Validation Tests
@@ -380,10 +380,10 @@ class TestAVPCalculation:
         # Scenario: 3 shares at $10.12345678 each = $30.37037034 total
         # avg = 30.37037034 / 3 = 10.12345678
 
-        with patch.object(self.service, '_get_position_as_of_date', return_value=None):
-            with patch.object(self.service, '_get_market_price', return_value=10.12345678):
-                with patch.object(self.service, '_save_position', return_value=True):
-                    with patch.object(self.service, '_sync_to_position_master', return_value=True):
+        with patch('core.repositories.impala_connection.impala_manager.execute_query', return_value=[]):
+            with patch.object(self.service, '_get_position_as_of_date', return_value=None):
+                with patch.object(self.service, '_get_market_price', return_value=10.12345678):
+                    with patch.object(self.service, '_save_position', return_value=True):
                         success, _, position = self.service.calculate_position(
                             portfolio_id='FUND-001',
                             security_id='TEST',
@@ -398,7 +398,7 @@ class TestAVPCalculation:
 
         assert success is True
         # Check 8 decimal precision
-        avg_cost = Decimal(str(position['average_cost']))
+        avg_cost = Decimal(str(position['average_cost_fc']))
         assert abs(avg_cost - Decimal('10.12345678')) < Decimal('0.000000005')
 
     def test_charges_included_in_avp(self):
@@ -407,10 +407,10 @@ class TestAVPCalculation:
         # Total cost = (100 * 10) + 50 = 1050
         # AVP = 1050 / 100 = $10.50
 
-        with patch.object(self.service, '_get_position_as_of_date', return_value=None):
-            with patch.object(self.service, '_get_market_price', return_value=10.50):
-                with patch.object(self.service, '_save_position', return_value=True):
-                    with patch.object(self.service, '_sync_to_position_master', return_value=True):
+        with patch('core.repositories.impala_connection.impala_manager.execute_query', return_value=[]):
+            with patch.object(self.service, '_get_position_as_of_date', return_value=None):
+                with patch.object(self.service, '_get_market_price', return_value=10.50):
+                    with patch.object(self.service, '_save_position', return_value=True):
                         success, _, position = self.service.calculate_position(
                             portfolio_id='FUND-001',
                             security_id='TEST',
@@ -424,8 +424,8 @@ class TestAVPCalculation:
                         )
 
         assert success is True
-        assert position['average_cost'] == 10.5  # Includes charges
-        assert position['total_cost'] == 1050.0
+        assert position['average_cost_fc'] == 10.5  # Includes charges
+        assert position['total_cost_fc'] == 1050.0
 
 
 class TestValidation:

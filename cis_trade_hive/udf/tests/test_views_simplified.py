@@ -21,7 +21,7 @@ class GetUserInfoFromRequestTestCase(TestCase):
 
     def test_get_user_info_with_session(self):
         """Test extracting user info from session"""
-        from udf.views_simplified import get_user_info_from_request
+        from udf.views import get_user_info_from_request
 
         mock_request = Mock()
         mock_session = MagicMock()
@@ -43,7 +43,7 @@ class GetUserInfoFromRequestTestCase(TestCase):
 
     def test_get_user_info_empty_session(self):
         """Test extracting user info from empty session uses defaults"""
-        from udf.views_simplified import get_user_info_from_request
+        from udf.views import get_user_info_from_request
 
         mock_request = Mock()
         mock_session = MagicMock()
@@ -74,7 +74,7 @@ class UDFDashboardViewTestCase(TestCase):
         session['user_email'] = 'test@example.com'
         session.save()
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_dashboard_success(self, mock_service):
         """Test dashboard loads successfully"""
         mock_service.get_dashboard_stats.return_value = [
@@ -88,7 +88,7 @@ class UDFDashboardViewTestCase(TestCase):
         self.assertTemplateUsed(response, 'udf/dashboard.html')
         self.assertIn('stats', response.context)
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_dashboard_with_unmatched_object_types(self, mock_service):
         """Test dashboard handles object types without stats"""
         mock_service.get_dashboard_stats.return_value = []  # No stats
@@ -102,7 +102,7 @@ class UDFDashboardViewTestCase(TestCase):
         self.assertEqual(len(stats), 2)
         self.assertEqual(stats[0]['total_fields'], 0)
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_dashboard_exception(self, mock_service):
         """Test dashboard handles exception"""
         mock_service.get_dashboard_stats.side_effect = Exception("Database error")
@@ -144,7 +144,7 @@ class UDFListViewTestCase(TestCase):
             }
         ]
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_list_success(self, mock_service):
         """Test list view loads successfully"""
         mock_service.get_all_fields.return_value = self.sample_fields
@@ -157,7 +157,7 @@ class UDFListViewTestCase(TestCase):
         self.assertIn('fields', response.context)
         self.assertEqual(len(response.context['fields']), 2)
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_list_with_object_type_filter(self, mock_service):
         """Test list view with object_type filter"""
         mock_service.get_all_fields.return_value = [self.sample_fields[0]]
@@ -168,7 +168,7 @@ class UDFListViewTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         mock_service.get_all_fields.assert_called_with(object_type='TRADE', is_active=True)
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_list_with_field_name_filter(self, mock_service):
         """Test list view with field_name filter"""
         mock_service.get_all_fields.return_value = self.sample_fields
@@ -182,7 +182,7 @@ class UDFListViewTestCase(TestCase):
         self.assertEqual(len(fields), 1)
         self.assertEqual(fields[0]['field_name'], 'Fund Type')
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_list_with_active_status_filter(self, mock_service):
         """Test list view with status=active filter (default)"""
         mock_service.get_all_fields.return_value = self.sample_fields
@@ -194,7 +194,7 @@ class UDFListViewTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         mock_service.get_all_fields.assert_called_with(object_type=None, is_active=True)
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_list_with_inactive_status_filter(self, mock_service):
         """Test list view with status=inactive filter"""
         mock_service.get_all_fields.return_value = []
@@ -205,7 +205,7 @@ class UDFListViewTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         mock_service.get_all_fields.assert_called_with(object_type=None, is_active=False)
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_list_with_all_status_filter(self, mock_service):
         """Test list view with status=all filter"""
         mock_service.get_all_fields.return_value = self.sample_fields
@@ -216,7 +216,7 @@ class UDFListViewTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         mock_service.get_all_fields.assert_called_with(object_type=None, is_active=None)
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_list_exception(self, mock_service):
         """Test list view handles exception"""
         mock_service.get_all_fields.side_effect = Exception("Database error")
@@ -239,7 +239,7 @@ class UDFCreateViewTestCase(TestCase):
         session['user_id'] = 1
         session.save()
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_create_get_form(self, mock_service):
         """Test GET request to create view"""
         mock_service.get_object_types.return_value = ['TRADE', 'PORTFOLIO']
@@ -250,7 +250,7 @@ class UDFCreateViewTestCase(TestCase):
         self.assertTemplateUsed(response, 'udf/form.html')
         self.assertEqual(response.context['form_action'], 'create')
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_create_get_form_prepopulated(self, mock_service):
         """Test GET request with prepopulation parameters"""
         mock_service.get_object_types.return_value = ['TRADE', 'PORTFOLIO']
@@ -262,7 +262,7 @@ class UDFCreateViewTestCase(TestCase):
         self.assertEqual(field_data['object_type'], 'TRADE')
         self.assertEqual(field_data['field_name'], 'Fund Type')
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_create_post_success(self, mock_service):
         """Test successful field creation"""
         mock_service.get_object_types.return_value = ['TRADE']
@@ -277,7 +277,7 @@ class UDFCreateViewTestCase(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertRedirects(response, reverse('udf:list'))
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_create_post_validation_failure(self, mock_service):
         """Test field creation with validation error"""
         mock_service.get_object_types.return_value = ['TRADE']
@@ -292,7 +292,7 @@ class UDFCreateViewTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('error', response.context)
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_create_post_exception(self, mock_service):
         """Test field creation handles exception"""
         mock_service.get_object_types.return_value = ['TRADE']
@@ -328,7 +328,7 @@ class UDFEditViewTestCase(TestCase):
             'is_active': True
         }
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_edit_get_form(self, mock_service):
         """Test GET request to edit view"""
         mock_service.get_field_by_id.return_value = self.existing_field
@@ -342,7 +342,7 @@ class UDFEditViewTestCase(TestCase):
         self.assertEqual(response.context['form_action'], 'edit')
         self.assertEqual(response.context['field_data'], self.existing_field)
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_edit_get_not_found(self, mock_service):
         """Test edit view with non-existent field"""
         mock_service.get_field_by_id.return_value = None
@@ -352,7 +352,7 @@ class UDFEditViewTestCase(TestCase):
 
         self.assertEqual(response.status_code, 404)
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_edit_post_success(self, mock_service):
         """Test successful field edit"""
         mock_service.get_field_by_id.return_value = self.existing_field
@@ -370,7 +370,7 @@ class UDFEditViewTestCase(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertRedirects(response, reverse('udf:list'))
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_edit_post_validation_failure(self, mock_service):
         """Test field edit with validation error"""
         mock_service.get_field_by_id.return_value = self.existing_field
@@ -387,7 +387,7 @@ class UDFEditViewTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('error', response.context)
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_edit_post_exception(self, mock_service):
         """Test field edit handles exception"""
         mock_service.get_field_by_id.return_value = self.existing_field
@@ -417,7 +417,7 @@ class UDFDeleteViewTestCase(TestCase):
         session['user_id'] = 1
         session.save()
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_delete_success(self, mock_service):
         """Test successful field deletion"""
         mock_service.delete_field.return_value = (True, None)
@@ -428,7 +428,7 @@ class UDFDeleteViewTestCase(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertRedirects(response, reverse('udf:list'))
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_delete_failure(self, mock_service):
         """Test field deletion failure"""
         mock_service.delete_field.return_value = (False, 'Field not found')
@@ -439,7 +439,7 @@ class UDFDeleteViewTestCase(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn('Field not found', response.content.decode())
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_delete_exception(self, mock_service):
         """Test delete handles exception"""
         mock_service.delete_field.side_effect = Exception("Database error")
@@ -469,7 +469,7 @@ class UDFRestoreViewTestCase(TestCase):
         session['user_id'] = 1
         session.save()
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_restore_success(self, mock_service):
         """Test successful field restoration"""
         mock_service.restore_field.return_value = (True, None)
@@ -480,7 +480,7 @@ class UDFRestoreViewTestCase(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertRedirects(response, reverse('udf:list'))
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_restore_failure(self, mock_service):
         """Test field restoration failure"""
         mock_service.restore_field.return_value = (False, 'Field not found')
@@ -491,7 +491,7 @@ class UDFRestoreViewTestCase(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn('Field not found', response.content.decode())
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_restore_exception(self, mock_service):
         """Test restore handles exception"""
         mock_service.restore_field.side_effect = Exception("Database error")
@@ -522,7 +522,7 @@ class APIGetObjectTypesTestCase(TestCase):
         session['user_id'] = 1
         session.save()
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_api_get_object_types_success(self, mock_service):
         """Test successful API response for object types"""
         mock_service.get_object_types.return_value = ['TRADE', 'PORTFOLIO', 'SECURITY']
@@ -534,7 +534,7 @@ class APIGetObjectTypesTestCase(TestCase):
         self.assertTrue(data['success'])
         self.assertEqual(len(data['object_types']), 3)
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_api_get_object_types_empty(self, mock_service):
         """Test API response with empty object types"""
         mock_service.get_object_types.return_value = []
@@ -546,7 +546,7 @@ class APIGetObjectTypesTestCase(TestCase):
         self.assertTrue(data['success'])
         self.assertEqual(data['object_types'], [])
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_api_get_object_types_exception(self, mock_service):
         """Test API handles exception"""
         mock_service.get_object_types.side_effect = Exception("Database error")
@@ -576,7 +576,7 @@ class APIGetFieldsByEntityTestCase(TestCase):
         session['user_id'] = 1
         session.save()
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_api_get_fields_success(self, mock_service):
         """Test successful API response for fields by entity"""
         mock_service.get_fields_by_entity.return_value = [
@@ -592,7 +592,7 @@ class APIGetFieldsByEntityTestCase(TestCase):
         self.assertTrue(data['success'])
         self.assertEqual(len(data['fields']), 2)
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_api_get_fields_uppercase_conversion(self, mock_service):
         """Test API converts object_type to uppercase"""
         mock_service.get_fields_by_entity.return_value = []
@@ -603,7 +603,7 @@ class APIGetFieldsByEntityTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         mock_service.get_fields_by_entity.assert_called_with('TRADE')
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_api_get_fields_exception(self, mock_service):
         """Test API handles exception"""
         mock_service.get_fields_by_entity.side_effect = Exception("Database error")
@@ -628,7 +628,7 @@ class LegacyAPIGetFieldsByEntityTestCase(TestCase):
         session['user_id'] = 1
         session.save()
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_legacy_api_get_fields_success(self, mock_service):
         """Test successful legacy API response"""
         mock_service.get_all_fields.return_value = [
@@ -642,7 +642,7 @@ class LegacyAPIGetFieldsByEntityTestCase(TestCase):
         data = response.json()
         self.assertTrue(data['success'])
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_legacy_api_uppercase_conversion(self, mock_service):
         """Test legacy API converts object_type to uppercase"""
         mock_service.get_all_fields.return_value = []
@@ -653,7 +653,7 @@ class LegacyAPIGetFieldsByEntityTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         mock_service.get_all_fields.assert_called_with(object_type='PORTFOLIO', is_active=True)
 
-    @patch('udf.views_simplified.udf_field_service')
+    @patch('udf.views.udf_field_service')
     def test_legacy_api_exception(self, mock_service):
         """Test legacy API handles exception"""
         mock_service.get_all_fields.side_effect = Exception("Database error")
