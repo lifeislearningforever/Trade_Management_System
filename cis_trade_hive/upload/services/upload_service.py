@@ -980,7 +980,7 @@ class UploadService:
         return result
 
     # HDFS base path for uploaded files — must match upload_kudu_repository.HDFS_BASE_PATH
-    HDFS_STAGING_PATH = '/mrw/cis/upload'
+    HDFS_STAGING_PATH = '/mrw/cis/staging'
 
     def ingest_to_target_table(
         self,
@@ -1572,26 +1572,30 @@ class UploadService:
                 impala_manager.execute_write(f"DROP TABLE IF EXISTS {db}.{stg_table}", database=db)
                 return False, f"HDFS staging table {stg_table} read 0 rows from {hdfs_path} — file may be empty or path wrong"
 
-            # Build extra column expressions
+            # Build extra column expressions (only columns NOT already in the file).
+            # src_id and processing_date are partition columns — handled by PARTITION clause.
+            # position_basis: default only if not already a file column.
             extra_cols = [
-                f"'{source_id}'  AS src_id",
                 f"'{src_system}' AS src_system",
                 f"'{sub_system}' AS sub_system",
                 f"'{data_cat}'   AS data_cat",
                 f"'{data_frq}'   AS data_frq",
             ]
-            if position_basis:
+            col_names_lower = [c.lower() for c in col_names]
+            if position_basis and 'position_basis' not in col_names_lower:
                 extra_cols.append(f"'{position_basis}' AS position_basis")
 
             # Step 4: INSERT into target table
-            # Partition column processing_date is appended last in the INSERT column list
+            # Partition columns (processing_date, src_id) are in the PARTITION clause.
+            # Extra metadata columns are SELECTed as literals.
+            extra_cols_sql = ',\n                    '.join(extra_cols)
             insert_mode = 'OVERWRITE' if ingestion_mode == 'overwrite' else 'INTO'
             ok = impala_manager.execute_write(f"""
                 INSERT {insert_mode} {db}.{target_table}
                 PARTITION (processing_date='{processing_date}', src_id='{source_id}')
                 SELECT
                     {stg_col_select},
-                    {chr(10) + '                    ,'.join(extra_cols)}
+                    {extra_cols_sql}
                 FROM {db}.{stg_table}
             """, database=db)
 

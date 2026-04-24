@@ -84,8 +84,7 @@ class UploadKuduRepository:
     EXTERNAL_TABLE_PREFIX = 'ext_'
 
     # HDFS base path for uploaded files (Cloudera CML)
-    # Actual upload location confirmed by MRW team: /mrw/cis/upload
-    HDFS_BASE_PATH = '/mrw/cis/upload'
+    HDFS_BASE_PATH = '/mrw/cis/staging'
 
     # Upload Status Constants
     STATUS_PENDING = 'PENDING'           # File uploaded, not yet validated

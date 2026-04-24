@@ -185,17 +185,6 @@ def upload_create(request):
                         # Also keep in session as a fast-path for same-worker ingest
                         request.session[f'temp_path_{upload_id}'] = temp_file_path
 
-                        # Push file to HDFS so the Impala external table path exists on
-                        # any worker node (Cloudera/MRW multi-node environment)
-                        hdfs_dir = f"{upload_service.HDFS_STAGING_PATH}/{upload_id}"
-                        hdfs_ok = upload_service._upload_file_to_hdfs(temp_file_path, hdfs_dir)
-                        if hdfs_ok:
-                            # Update hdfs_path to point to the directory (Impala LOCATION)
-                            _repo.update_upload(upload_id, {'hdfs_path': hdfs_dir}, user_info['username'])
-                            logger.info(f"[upload] File pushed to HDFS: {hdfs_dir}")
-                        else:
-                            logger.warning(f"[upload] HDFS push failed for {temp_file_path} → {hdfs_dir} (will use local temp file at ingest)")
-
                         messages.success(request, f'File "{file_name}" validated using datasource config. Target: {datasource_config.get("target_table", "")}')
                         return redirect('upload:preview', upload_id=upload_id)
                     else:
