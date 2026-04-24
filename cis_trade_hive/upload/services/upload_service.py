@@ -1473,13 +1473,14 @@ class UploadService:
         Download an HDFS file to a local temp file and return the local path.
         Returns None if hdfs command is unavailable or the download fails.
         """
+        from django.conf import settings as django_settings
         import subprocess
         import tempfile
 
         logger.info(f"[hdfs:download] called with hdfs_path={hdfs_path!r}")
         try:
             suffix = os.path.basename(hdfs_path)
-            tmp_dir = os.path.join(settings.BASE_DIR, 'temp_uploads')
+            tmp_dir = os.path.join(django_settings.BASE_DIR, 'temp_uploads')
             os.makedirs(tmp_dir, exist_ok=True)
             tmp = tempfile.NamedTemporaryFile(
                 delete=False, suffix=f'_{suffix}', dir=tmp_dir
