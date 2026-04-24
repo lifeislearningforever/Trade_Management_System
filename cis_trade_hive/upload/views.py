@@ -640,7 +640,7 @@ def upload_ingest(request, upload_id: str):
                 except Exception as _ce:
                     logger.warning(f"[ingest:view] Could not count raw rows: {_ce}")
                     _raw_count = 0
-                logger.info(f"[ingest:view] Raw table row count = {_raw_count}")
+                logger.warning(f"[ingest:view] Raw table row count = {_raw_count}")
                 if _raw_count > 0:
                     # Data already in raw table — mark COMPLETED and skip file ingest
                     upload_service.repository.update_upload(
@@ -648,15 +648,18 @@ def upload_ingest(request, upload_id: str):
                         {'status': 'COMPLETED', 'row_count': _raw_count},
                         user_info['username']
                     )
-                    success = True
-                    message = (
-                        f"Raw data already ingested: {_raw_count} rows in {_target} "
+                    messages.success(request, (
+                        f"Raw data ingested: {_raw_count} rows in {_target} "
                         f"(processing_date={processing_date}). Click 'Run ETL' to proceed."
-                    )
-                    logger.info(f"[ingest:view] Short-circuit OK: {message}")
-                    # Skip the file-based ingest block entirely
-                    if success:
-                        messages.success(request, message)
+                    ))
+                    return redirect('upload:detail', upload_id=upload_id)
+                else:
+                    # Raw table empty — file is gone (request ended).
+                    # Block the 20-row fallback: tell user to re-upload.
+                    messages.error(request, (
+                        f"No data found in {_target} for processing_date={processing_date}. "
+                        f"The file was not ingested at upload time. Please delete this record and re-upload the file."
+                    ))
                     return redirect('upload:detail', upload_id=upload_id)
 
             # ------------------------------------------------------------------
