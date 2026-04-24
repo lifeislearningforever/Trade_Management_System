@@ -168,33 +168,40 @@ def upload_create(request):
                             'description': f"{description}\n[Datasource: {datasource_config.get('source_id', '')}]"
                         }, user_info['username'])
 
-                        # Save file to temp directory so full data is available at ingest time
-                        # (DB record only stores MAX_PREVIEW_ROWS=100 rows in sample_data_json)
-                        temp_dir = os.path.join(settings.BASE_DIR, 'temp_uploads')
-                        os.makedirs(temp_dir, exist_ok=True)
-                        temp_file_path = os.path.join(temp_dir, f"{upload_id}_{file_name}")
-                        uploaded_file.seek(0)
-                        with open(temp_file_path, 'wb') as _f:
-                            for chunk in uploaded_file.chunks():
-                                _f.write(chunk)
-                        # Persist the temp file path in the DB record so ingest can
-                        # find the full file on any Gunicorn worker (not session-dependent)
+                        # -------------------------------------------------------
+                        # INSERT all rows into raw target table NOW (at upload
+                        # time) while the file is still in memory. This avoids
+                        # all cross-worker/cross-node file path problems.
+                        # The ingest button will only run the ETL steps (Step 0
+                        # standardize onward) — no file needed at ingest time.
+                        # -------------------------------------------------------
                         from .repositories.upload_kudu_repository import upload_kudu_repository as _repo
-                        _repo.update_upload(upload_id, {'file_path': temp_file_path}, user_info['username'])
-                        logger.info(f"[upload] Saved temp file path to DB: {temp_file_path}")
-                        # Also keep in session as a fast-path for same-worker ingest
-                        request.session[f'temp_path_{upload_id}'] = temp_file_path
-
-                        # Push to HDFS so the Impala external table at hdfs_path has data.
-                        # hdfs_path = /mrw/cis/staging/{upload_id} (set at record creation).
-                        # _upload_file_to_hdfs resolves the hdfs binary automatically.
-                        _hdfs_dir = upload_service.HDFS_STAGING_PATH + '/' + upload_id
-                        logger.info(f"[upload] Pushing file to HDFS: {temp_file_path} → {_hdfs_dir}")
-                        _hdfs_ok = upload_service._upload_file_to_hdfs(temp_file_path, _hdfs_dir)
-                        if _hdfs_ok:
-                            logger.info(f"[upload] HDFS push OK: {_hdfs_dir}")
+                        import re as _re, csv as _csv, io as _io
+                        from datetime import datetime as _dt
+                        # Determine processing_date from description or default to today
+                        _pd_match = _re.search(r'processing_date[=:\s]+(\d{8})', description or '')
+                        _processing_date = _pd_match.group(1) if _pd_match else _dt.now().strftime('%Y%m%d')
+                        # Read ALL rows from the in-memory file now (before request ends)
+                        uploaded_file.seek(0)
+                        _raw = uploaded_file.read().decode(validation_result.encoding or 'utf-8', errors='replace')
+                        _sep = validation_result.delimiter or ','
+                        _all_rows = list(_csv.DictReader(_io.StringIO(_raw), delimiter=_sep))
+                        logger.info(f"[upload] Ingesting {len(_all_rows)} rows at upload time: target={datasource_config.get('target_table')} processing_date={_processing_date}")
+                        _ingest_ok, _ingest_msg = upload_service.ingest_to_target_table(
+                            upload_id=upload_id,
+                            datasource_config=datasource_config,
+                            updated_by=user_info['username'],
+                            processing_date=_processing_date,
+                            temp_file_path=None,
+                            sample_data=_all_rows,
+                            ingestion_mode='overwrite',
+                        )
+                        if _ingest_ok:
+                            logger.info(f"[upload] Immediate ingest OK: {_ingest_msg}")
+                            _repo.update_upload(upload_id, {'status': 'VALIDATED', 'description': f"{description}\n[Datasource: {datasource_config.get('source_id', '')}]\nprocessing_date={_processing_date}"}, user_info['username'])
                         else:
-                            logger.warning(f"[upload] HDFS push FAILED for {_hdfs_dir} — ingest will fall back to local file or sample_data")
+                            logger.warning(f"[upload] Immediate ingest FAILED: {_ingest_msg} — user can retry via Ingest button")
+                            _repo.update_upload(upload_id, {'status': 'VALIDATED'}, user_info['username'])
 
                         messages.success(request, f'File "{file_name}" validated using datasource config. Target: {datasource_config.get("target_table", "")}')
                         return redirect('upload:preview', upload_id=upload_id)
