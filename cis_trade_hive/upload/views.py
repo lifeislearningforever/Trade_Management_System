@@ -525,28 +525,39 @@ def upload_ingest(request, upload_id: str):
             # Get temp file path: session uploads store it in the upload dict;
             # DB uploads reconstruct the path from the known naming convention
             # (never rely on session — sessions are not shared across Gunicorn workers).
+            logger.info(f"[ingest:view] ===== INGEST STARTED upload_id={upload_id} is_session={is_session_upload} =====")
+            logger.info(f"[ingest:view] upload keys: {list(upload.keys()) if upload else 'None'}")
+            logger.info(f"[ingest:view] upload.file_path={upload.get('file_path')!r}")
+            logger.info(f"[ingest:view] upload.hdfs_path={upload.get('hdfs_path')!r}")
+            logger.info(f"[ingest:view] upload.file_name={upload.get('file_name')!r}")
+            logger.info(f"[ingest:view] upload.row_count={upload.get('row_count')!r}")
+            logger.info(f"[ingest:view] settings.BASE_DIR={settings.BASE_DIR}")
             if is_session_upload:
                 temp_file_path = upload.get('temp_file_path')
+                logger.info(f"[ingest:view] session upload temp_file_path={temp_file_path!r}")
             else:
                 # Priority 1: file_path persisted in the DB record at upload time
                 temp_file_path = upload.get('file_path', '').strip() or None
+                logger.info(f"[ingest:view] P1 DB file_path={temp_file_path!r} exists={os.path.exists(temp_file_path) if temp_file_path else False}")
                 if temp_file_path and os.path.exists(temp_file_path):
-                    logger.info(f"[ingest] Using DB-persisted file_path: {temp_file_path}")
+                    logger.info(f"[ingest:view] P1 RESOLVED — local file: {temp_file_path}")
                 else:
                     # Priority 2: session key (same-worker fast-path)
                     temp_file_path = request.session.get(f'temp_path_{upload_id}')
+                    logger.info(f"[ingest:view] P2 session key temp_path_{upload_id}={temp_file_path!r} exists={os.path.exists(temp_file_path) if temp_file_path else False}")
                     if not temp_file_path or not os.path.exists(temp_file_path):
                         # Priority 3: reconstruct from naming convention
                         _temp_dir = os.path.join(settings.BASE_DIR, 'temp_uploads')
                         _file_name = upload.get('file_name', '') or upload.get('original_file_name', '')
                         _reconstructed = os.path.join(_temp_dir, f"{upload_id}_{_file_name}")
-                        logger.info(f"[ingest] Attempting temp file reconstruction: {_reconstructed} exists={os.path.exists(_reconstructed)}")
+                        logger.info(f"[ingest:view] P3 reconstructed={_reconstructed!r} exists={os.path.exists(_reconstructed)}")
                         if os.path.exists(_reconstructed):
                             temp_file_path = _reconstructed
-                            logger.info(f"[ingest] Reconstructed temp file path: {_reconstructed}")
+                            logger.info(f"[ingest:view] P3 RESOLVED — reconstructed: {temp_file_path}")
                         else:
                             temp_file_path = None
-                            logger.warning(f"[ingest] Temp file NOT found — falling back to sample_data (capped at 20 rows). Upload full file again to ingest all records.")
+                            logger.warning(f"[ingest:view] P1/P2/P3 all FAILED — temp_file_path=None, will try HDFS in service layer")
+                logger.info(f"[ingest:view] final temp_file_path passed to service={temp_file_path!r}")
             sample_data = None
             if is_session_upload:
                 sample_data_json = upload.get('sample_data_json', [])

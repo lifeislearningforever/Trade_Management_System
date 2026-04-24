@@ -1075,39 +1075,62 @@ class UploadService:
             local_file = None
             _hdfs_tmp = None  # track any temp file we download so we can clean up
 
+            logger.info(f"[ingest:svc] ===== FILE RESOLUTION upload_id={upload_id} =====")
+            logger.info(f"[ingest:svc] temp_file_path arg={temp_file_path!r}")
+            logger.info(f"[ingest:svc] temp_file_path exists={os.path.exists(temp_file_path) if temp_file_path else 'N/A'}")
+            logger.info(f"[ingest:svc] upload is None={upload is None}")
+            if upload:
+                logger.info(f"[ingest:svc] upload.hdfs_path={upload.get('hdfs_path')!r}")
+                logger.info(f"[ingest:svc] upload.file_path={upload.get('file_path')!r}")
+                logger.info(f"[ingest:svc] upload.row_count={upload.get('row_count')!r}")
+            logger.info(f"[ingest:svc] sample_data arg count={len(sample_data) if sample_data else 0}")
+
             if temp_file_path and os.path.exists(temp_file_path):
                 local_file = temp_file_path
-                logger.info(f"[ingest] Priority 1 — local temp file: {local_file}")
+                logger.info(f"[ingest:svc] P1 RESOLVED — local temp file: {local_file}")
             else:
+                logger.info(f"[ingest:svc] P1 FAILED — local file not found, trying HDFS")
                 # Priority 2: read from HDFS (works across Gunicorn workers / nodes)
                 hdfs_path_db = (upload.get('hdfs_path', '') or '').strip() if upload else ''
+                logger.info(f"[ingest:svc] P2 hdfs_path_db={hdfs_path_db!r}")
                 if hdfs_path_db:
-                    logger.info(f"[ingest] Priority 2 — downloading from HDFS: {hdfs_path_db}")
+                    logger.info(f"[ingest:svc] P2 attempting HDFS download: {hdfs_path_db}")
                     _hdfs_tmp = self._download_from_hdfs(hdfs_path_db)
                     if _hdfs_tmp:
                         local_file = _hdfs_tmp
-                        logger.info(f"[ingest] HDFS download succeeded → {local_file}")
+                        logger.info(f"[ingest:svc] P2 RESOLVED — HDFS download → {local_file}")
                     else:
-                        logger.warning(f"[ingest] HDFS download failed for {hdfs_path_db}")
+                        logger.warning(f"[ingest:svc] P2 FAILED — HDFS download returned None for {hdfs_path_db}")
+                else:
+                    logger.warning(f"[ingest:svc] P2 SKIPPED — hdfs_path_db is empty")
 
             if not local_file:
+                logger.warning(f"[ingest:svc] P1+P2 FAILED — no local file available")
                 if sample_data:
-                    logger.info(f"[ingest] Priority 3 — session sample_data ({len(sample_data)} rows)")
+                    logger.info(f"[ingest:svc] P3 RESOLVED — session sample_data ({len(sample_data)} rows)")
                 else:
+                    logger.warning(f"[ingest:svc] P3 FAILED — sample_data arg is empty, trying DB sample_data_json")
                     # Priority 4: sample_data_json from DB (capped at 20 rows — last resort)
                     upload_sample = upload.get('sample_data_json', []) if upload else []
+                    logger.info(f"[ingest:svc] P4 upload.sample_data_json type={type(upload_sample).__name__} len={len(upload_sample) if upload_sample else 0}")
                     if upload_sample:
                         if isinstance(upload_sample, str):
                             try:
                                 import json as json_module
                                 sample_data = json_module.loads(upload_sample)
-                            except Exception:
-                                logger.warning("sample_data_json in DB is truncated/corrupt; cannot ingest without original file")
+                                logger.info(f"[ingest:svc] P4 parsed sample_data_json → {len(sample_data)} rows")
+                            except Exception as _je:
+                                logger.warning(f"[ingest:svc] P4 sample_data_json parse error: {_je}")
                                 sample_data = []
                         else:
                             sample_data = upload_sample
+                            logger.info(f"[ingest:svc] P4 sample_data_json already list → {len(sample_data)} rows")
                     if sample_data:
-                        logger.warning(f"[ingest] Priority 4 (fallback) — DB sample_data ({len(sample_data)} rows, capped at 20). Re-upload to ingest all records.")
+                        logger.warning(f"[ingest:svc] P4 FALLBACK — DB sample_data ({len(sample_data)} rows, CAPPED AT 20). Re-upload to ingest all records.")
+                    else:
+                        logger.error(f"[ingest:svc] ALL PRIORITIES FAILED — no data source available")
+
+            logger.info(f"[ingest:svc] FINAL: local_file={local_file!r} sample_data_rows={len(sample_data) if sample_data else 0}")
 
             # If we have either a local file or sample_data, use INSERT VALUES
             if local_file or sample_data:
@@ -1453,6 +1476,7 @@ class UploadService:
         import subprocess
         import tempfile
 
+        logger.info(f"[hdfs:download] called with hdfs_path={hdfs_path!r}")
         try:
             suffix = os.path.basename(hdfs_path)
             tmp_dir = os.path.join(settings.BASE_DIR, 'temp_uploads')
@@ -1462,24 +1486,31 @@ class UploadService:
             )
             tmp.close()
             get_cmd = ['hdfs', 'dfs', '-get', '-f', hdfs_path, tmp.name]
+            logger.info(f"[hdfs:download] running: {' '.join(get_cmd)}")
             result = subprocess.run(get_cmd, capture_output=True, text=True, timeout=300)
+            logger.info(f"[hdfs:download] returncode={result.returncode}")
+            if result.stdout:
+                logger.info(f"[hdfs:download] stdout={result.stdout[:500]}")
+            if result.stderr:
+                logger.info(f"[hdfs:download] stderr={result.stderr[:500]}")
             if result.returncode == 0:
-                logger.info(f"[hdfs] Downloaded {hdfs_path} → {tmp.name}")
+                file_size = os.path.getsize(tmp.name)
+                logger.info(f"[hdfs:download] SUCCESS → {tmp.name} ({file_size} bytes)")
                 return tmp.name
-            logger.error(f"[hdfs] Download failed: {result.stderr}")
+            logger.error(f"[hdfs:download] FAILED returncode={result.returncode} stderr={result.stderr[:500]}")
             try:
                 os.unlink(tmp.name)
             except OSError:
                 pass
             return None
         except FileNotFoundError:
-            logger.warning("[hdfs] 'hdfs' command not found — skipping HDFS download")
+            logger.warning("[hdfs:download] 'hdfs' command not found — hdfs client not installed on this node")
             return None
         except subprocess.TimeoutExpired:
-            logger.error("[hdfs] Download timed out")
+            logger.error("[hdfs:download] timed out after 300s")
             return None
         except Exception as e:
-            logger.error(f"[hdfs] Download error: {e}")
+            logger.error(f"[hdfs:download] unexpected error: {e}", exc_info=True)
             return None
 
     # Columns whose values should be normalised to YYYYMMDD before ingest.
@@ -1653,8 +1684,12 @@ class UploadService:
 
             # Read data from file or use sample_data
             all_data = sample_data or []
+            logger.info(f"[insert_values] temp_file_path={temp_file_path!r} exists={os.path.exists(temp_file_path) if temp_file_path else 'N/A'}")
+            logger.info(f"[insert_values] sample_data rows={len(sample_data) if sample_data else 0}")
+            logger.info(f"[insert_values] separator={separator!r} has_header={has_header} col_names={col_names}")
             if temp_file_path and os.path.exists(temp_file_path):
-                logger.info(f"Reading full file from {temp_file_path} for ingestion")
+                file_size = os.path.getsize(temp_file_path)
+                logger.info(f"[insert_values] reading full file {temp_file_path} ({file_size} bytes)")
                 try:
                     all_data = []
                     with open(temp_file_path, 'r', encoding='utf-8', errors='replace') as f:
@@ -1662,26 +1697,31 @@ class UploadService:
                         reader = csv.reader(f, delimiter=delim)
                         rows = list(reader)
 
-                        if has_header and len(rows) > 0:
-                            data_rows = rows[1:]
-                        else:
-                            data_rows = rows
+                    logger.info(f"[insert_values] raw row count from file={len(rows)} has_header={has_header}")
+                    if has_header and len(rows) > 0:
+                        logger.info(f"[insert_values] header row={rows[0]}")
+                        data_rows = rows[1:]
+                    else:
+                        data_rows = rows
 
-                        # Convert to list of dicts using intake column names
-                        for row in data_rows:
-                            if len(row) > 0:
-                                row_dict = {}
-                                for idx, col in enumerate(col_names):
-                                    if idx < len(row):
-                                        row_dict[col] = row[idx]
-                                    else:
-                                        row_dict[col] = ''
-                                all_data.append(row_dict)
+                    logger.info(f"[insert_values] data_rows to process={len(data_rows)}")
+                    # Convert to list of dicts using intake column names
+                    for row in data_rows:
+                        if len(row) > 0:
+                            row_dict = {}
+                            for idx, col in enumerate(col_names):
+                                if idx < len(row):
+                                    row_dict[col] = row[idx]
+                                else:
+                                    row_dict[col] = ''
+                            all_data.append(row_dict)
 
-                    logger.info(f"Read {len(all_data)} rows from file")
+                    logger.info(f"[insert_values] parsed {len(all_data)} rows from file")
                 except Exception as e:
-                    logger.error(f"Failed to read file {temp_file_path}: {e}")
+                    logger.error(f"[insert_values] FAILED to read file {temp_file_path}: {e}", exc_info=True)
                     all_data = sample_data or []
+            else:
+                logger.warning(f"[insert_values] temp_file_path not usable — using sample_data ({len(all_data)} rows)")
 
             if not all_data:
                 return False, "No data to insert"
