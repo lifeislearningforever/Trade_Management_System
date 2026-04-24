@@ -132,6 +132,8 @@ def upload_create(request):
             # Check if datasource config exists for this file
             datasource_config = upload_service.get_datasource_config(file_name)
 
+            logger.info(f"[GATE1] file_name={file_name!r} use_datasource_config={use_datasource_config} datasource_config={'FOUND' if datasource_config else 'NONE'}")
+
             if datasource_config and use_datasource_config:
                 # Use metadata-driven validation
                 validation_result = upload_service.validate_with_datasource_config(
@@ -139,6 +141,8 @@ def upload_create(request):
                     file_name=file_name,
                     datasource_config=datasource_config
                 )
+
+                logger.info(f"[GATE2] validation is_valid={validation_result.is_valid} row_count={validation_result.row_count} all_data={len(validation_result.all_data)} errors={validation_result.errors}")
 
                 if validation_result.is_valid:
                     # Create upload record with datasource config
@@ -160,6 +164,8 @@ def upload_create(request):
 
                     from .repositories.upload_kudu_repository import upload_kudu_repository
                     upload_id = upload_kudu_repository.create_upload(upload_data, user_info['username'])
+
+                    logger.info(f"[GATE3] upload_id={upload_id!r}")
 
                     if upload_id:
                         # Store datasource_id for later use
