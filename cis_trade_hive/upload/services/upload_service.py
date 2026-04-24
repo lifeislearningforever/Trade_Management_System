@@ -979,8 +979,8 @@ class UploadService:
 
         return result
 
-    # HDFS temp location for staging files
-    HDFS_STAGING_PATH = '/mrw/cis/staging'
+    # HDFS base path for uploaded files — must match upload_kudu_repository.HDFS_BASE_PATH
+    HDFS_STAGING_PATH = '/mrw/cis/upload'
 
     def ingest_to_target_table(
         self,
@@ -1068,12 +1068,13 @@ class UploadService:
                 return False, "No columns defined in datasource configuration or target table"
 
             # Resolve the best available data source, in priority order:
-            #   1. Local temp file (same-node upload or DB-persisted path)
-            #   2. HDFS path (cross-node / MRW Cloudera environment)
-            #   3. sample_data from session (rare; session-based uploads only)
-            #   4. sample_data_json from DB record (fallback — capped at 20 rows)
+            #   P1. Local temp file (same-node upload or DB-persisted path)
+            #   P2. Impala external table over HDFS path (Cloudera/MRW — no hdfs shell needed)
+            #   P3. sample_data from session (session-based uploads only)
+            #   P4. sample_data_json from DB record (last resort — capped at 20 rows)
             local_file = None
-            _hdfs_tmp = None  # track any temp file we download so we can clean up
+            _hdfs_tmp = None
+            _hdfs_impala_done = False  # True if P2 Impala path handled ingest directly
 
             logger.info(f"[ingest:svc] ===== FILE RESOLUTION upload_id={upload_id} =====")
             logger.info(f"[ingest:svc] temp_file_path arg={temp_file_path!r}")
@@ -1089,44 +1090,59 @@ class UploadService:
                 local_file = temp_file_path
                 logger.info(f"[ingest:svc] P1 RESOLVED — local temp file: {local_file}")
             else:
-                logger.info(f"[ingest:svc] P1 FAILED — local file not found, trying HDFS")
-                # Priority 2: read from HDFS (works across Gunicorn workers / nodes)
+                logger.info(f"[ingest:svc] P1 FAILED — local file not found, trying Impala/HDFS path")
+                # ----------------------------------------------------------------
+                # P2: HDFS file available — create a temporary Hive external table
+                #     pointing at the HDFS staging directory and INSERT directly
+                #     into the target raw table via Impala SELECT.
+                #     No hdfs shell command needed — works on any Cloudera node.
+                # ----------------------------------------------------------------
                 hdfs_path_db = (upload.get('hdfs_path', '') or '').strip() if upload else ''
                 logger.info(f"[ingest:svc] P2 hdfs_path_db={hdfs_path_db!r}")
-                if hdfs_path_db:
-                    logger.info(f"[ingest:svc] P2 attempting HDFS download: {hdfs_path_db}")
-                    _hdfs_tmp = self._download_from_hdfs(hdfs_path_db)
-                    if _hdfs_tmp:
-                        local_file = _hdfs_tmp
-                        logger.info(f"[ingest:svc] P2 RESOLVED — HDFS download → {local_file}")
+                if hdfs_path_db and not is_session_upload:
+                    logger.info(f"[ingest:svc] P2 attempting Impala external table over HDFS: {hdfs_path_db}")
+                    p2_success, p2_msg = self._ingest_via_hdfs_impala(
+                        hdfs_path=hdfs_path_db,
+                        target_table=target_table,
+                        datasource_config=datasource_config,
+                        intake_columns=intake_columns,
+                        processing_date=processing_date,
+                        upload_id=upload_id,
+                        updated_by=updated_by,
+                        ingestion_mode=ingestion_mode,
+                    )
+                    if p2_success:
+                        logger.info(f"[ingest:svc] P2 RESOLVED via Impala/HDFS: {p2_msg}")
+                        if not is_session_upload:
+                            self.repository.update_status(upload_id, UploadKuduRepository.STATUS_COMPLETED, updated_by)
+                        return True, p2_msg
                     else:
-                        logger.warning(f"[ingest:svc] P2 FAILED — HDFS download returned None for {hdfs_path_db}")
+                        logger.warning(f"[ingest:svc] P2 FAILED — Impala/HDFS path: {p2_msg} — falling through to P3/P4")
                 else:
-                    logger.warning(f"[ingest:svc] P2 SKIPPED — hdfs_path_db is empty")
+                    logger.warning(f"[ingest:svc] P2 SKIPPED — hdfs_path_db empty or session upload")
 
             if not local_file:
-                logger.warning(f"[ingest:svc] P1+P2 FAILED — no local file available")
+                logger.warning(f"[ingest:svc] P1+P2 FAILED — no local file, using row data")
                 if sample_data:
                     logger.info(f"[ingest:svc] P3 RESOLVED — session sample_data ({len(sample_data)} rows)")
                 else:
-                    logger.warning(f"[ingest:svc] P3 FAILED — sample_data arg is empty, trying DB sample_data_json")
-                    # Priority 4: sample_data_json from DB (capped at 20 rows — last resort)
+                    logger.warning(f"[ingest:svc] P3 FAILED — sample_data arg empty, trying DB sample_data_json")
                     upload_sample = upload.get('sample_data_json', []) if upload else []
-                    logger.info(f"[ingest:svc] P4 upload.sample_data_json type={type(upload_sample).__name__} len={len(upload_sample) if upload_sample else 0}")
+                    logger.info(f"[ingest:svc] P4 sample_data_json type={type(upload_sample).__name__} len={len(upload_sample) if upload_sample else 0}")
                     if upload_sample:
                         if isinstance(upload_sample, str):
                             try:
                                 import json as json_module
                                 sample_data = json_module.loads(upload_sample)
-                                logger.info(f"[ingest:svc] P4 parsed sample_data_json → {len(sample_data)} rows")
+                                logger.info(f"[ingest:svc] P4 parsed → {len(sample_data)} rows")
                             except Exception as _je:
-                                logger.warning(f"[ingest:svc] P4 sample_data_json parse error: {_je}")
+                                logger.warning(f"[ingest:svc] P4 parse error: {_je}")
                                 sample_data = []
                         else:
                             sample_data = upload_sample
-                            logger.info(f"[ingest:svc] P4 sample_data_json already list → {len(sample_data)} rows")
+                            logger.info(f"[ingest:svc] P4 already list → {len(sample_data)} rows")
                     if sample_data:
-                        logger.warning(f"[ingest:svc] P4 FALLBACK — DB sample_data ({len(sample_data)} rows, CAPPED AT 20). Re-upload to ingest all records.")
+                        logger.warning(f"[ingest:svc] P4 FALLBACK — DB sample_data ({len(sample_data)} rows, CAPPED AT 20)")
                     else:
                         logger.error(f"[ingest:svc] ALL PRIORITIES FAILED — no data source available")
 
@@ -1467,6 +1483,145 @@ class UploadService:
         except Exception as e:
             logger.warning(f"HDFS cleanup error: {e}")
             return False
+
+    def _ingest_via_hdfs_impala(
+        self,
+        hdfs_path: str,
+        target_table: str,
+        datasource_config: Dict[str, Any],
+        intake_columns: List[Dict[str, Any]],
+        processing_date: str,
+        upload_id: str,
+        updated_by: str,
+        ingestion_mode: str = 'overwrite',
+    ) -> Tuple[bool, str]:
+        """
+        Ingest a CSV/pipe-delimited file on HDFS directly into the raw target table
+        using Impala — no hdfs shell command required.
+
+        Strategy:
+          1. CREATE EXTERNAL TABLE stg_... STORED AS TEXTFILE LOCATION '<hdfs_path>'
+          2. INSERT OVERWRITE/INTO <target_table> PARTITION(processing_date, src_id)
+                SELECT col1, col2, ..., '<processing_date>' FROM stg_...
+             skipping the header row via a WHERE clause on a ROW_NUMBER() window.
+          3. DROP TABLE stg_... (external — does not delete HDFS data)
+        """
+        from core.repositories.impala_connection import impala_manager
+        from ..repositories.datasource_repository import datasource_repository
+
+        db = self.repository.DATABASE
+        separator = datasource_config.get('separator', ',')
+        has_header = datasource_repository.parse_header_flag(datasource_config)
+        source_id = datasource_config.get('source_id', target_table)
+        src_system = datasource_config.get('src_system', 'USER_UPLOAD')
+        sub_system = datasource_config.get('sub_system', 'user')
+        data_cat = datasource_config.get('data_cat', 'sta')
+        data_frq = datasource_config.get('data_frq', 'adhoc')
+
+        # Safe staging table name — unique per upload
+        stg_table = f"stg_hdfs_{upload_id.replace('-', '_').lower()}"
+
+        # Impala field terminator: pipe needs escaping
+        field_term = separator if separator not in ('|',) else '\\|'
+
+        col_names = [col['name'] for col in intake_columns]
+        # Build SELECT col list: col1, col2, ... from the staging table
+        # All staging columns are STRING (TEXTFILE external table)
+        stg_col_select = ',\n                    '.join(col_names)
+
+        # Additional columns appended to target
+        POSITION_TABLE_BASIS = {
+            'cis_user_sta_adhoc_position_1': 'TRADE_DATE',
+            'cis_user_sta_adhoc_position_2': 'TRADE_DATE',
+            'cis_user_sta_adhoc_position_3': 'TRADE_DATE',
+            'cis_user_sta_adhoc_position_4': 'SETTLE_DATE',
+            'cis_user_sta_adhoc_position_5': 'SETTLE_DATE',
+        }
+        table_lower = target_table.lower().split('.')[-1]
+        position_basis = POSITION_TABLE_BASIS.get(table_lower, '')
+
+        try:
+            # Step 1: Drop any leftover staging table
+            impala_manager.execute_write(f"DROP TABLE IF EXISTS {db}.{stg_table}", database=db)
+
+            # Step 2: Create external table over the HDFS staging directory
+            create_cols = ',\n    '.join(f"`{c}` STRING" for c in col_names)
+            ok = impala_manager.execute_write(f"""
+                CREATE EXTERNAL TABLE {db}.{stg_table} (
+                    {create_cols}
+                )
+                ROW FORMAT DELIMITED
+                FIELDS TERMINATED BY '{field_term}'
+                STORED AS TEXTFILE
+                LOCATION '{hdfs_path}'
+                TBLPROPERTIES ('skip.header.line.count'='{"1" if has_header else "0"}')
+            """, database=db)
+            if not ok:
+                return False, f"Could not CREATE EXTERNAL TABLE {stg_table} over {hdfs_path}"
+
+            impala_manager.execute_write(f"INVALIDATE METADATA {db}.{stg_table}", database=db)
+
+            # Step 3: Count rows to verify
+            cnt_rows = impala_manager.execute_query(
+                f"SELECT COUNT(*) AS cnt FROM {db}.{stg_table}", database=db
+            )
+            row_count = cnt_rows[0].get('cnt', 0) if cnt_rows else 0
+            logger.info(f"[hdfs:impala] staging table {stg_table} has {row_count} rows")
+
+            if row_count == 0:
+                impala_manager.execute_write(f"DROP TABLE IF EXISTS {db}.{stg_table}", database=db)
+                return False, f"HDFS staging table {stg_table} read 0 rows from {hdfs_path} — file may be empty or path wrong"
+
+            # Build extra column expressions
+            extra_cols = [
+                f"'{source_id}'  AS src_id",
+                f"'{src_system}' AS src_system",
+                f"'{sub_system}' AS sub_system",
+                f"'{data_cat}'   AS data_cat",
+                f"'{data_frq}'   AS data_frq",
+            ]
+            if position_basis:
+                extra_cols.append(f"'{position_basis}' AS position_basis")
+
+            # Step 4: INSERT into target table
+            # Partition column processing_date is appended last in the INSERT column list
+            insert_mode = 'OVERWRITE' if ingestion_mode == 'overwrite' else 'INTO'
+            ok = impala_manager.execute_write(f"""
+                INSERT {insert_mode} {db}.{target_table}
+                PARTITION (processing_date='{processing_date}', src_id='{source_id}')
+                SELECT
+                    {stg_col_select},
+                    {chr(10) + '                    ,'.join(extra_cols)}
+                FROM {db}.{stg_table}
+            """, database=db)
+
+            if not ok:
+                impala_manager.execute_write(f"DROP TABLE IF EXISTS {db}.{stg_table}", database=db)
+                return False, f"INSERT from {stg_table} into {target_table} failed — check Impala logs"
+
+            impala_manager.execute_write(f"INVALIDATE METADATA {db}.{target_table}", database=db)
+
+            # Step 5: Confirm rows landed
+            inserted = impala_manager.execute_query(f"""
+                SELECT COUNT(*) AS cnt FROM {db}.{target_table}
+                WHERE processing_date = '{processing_date}'
+                  AND src_id = '{source_id}'
+            """, database=db)
+            inserted_count = inserted[0].get('cnt', 0) if inserted else 0
+            logger.info(f"[hdfs:impala] inserted {inserted_count} rows into {target_table} partition processing_date={processing_date} src_id={source_id}")
+
+            # Step 6: Drop staging table (external — HDFS data preserved)
+            impala_manager.execute_write(f"DROP TABLE IF EXISTS {db}.{stg_table}", database=db)
+
+            return True, f"Ingested {inserted_count} rows from HDFS into {target_table} (processing_date={processing_date})"
+
+        except Exception as e:
+            logger.error(f"[hdfs:impala] error: {e}", exc_info=True)
+            try:
+                impala_manager.execute_write(f"DROP TABLE IF EXISTS {db}.{stg_table}", database=db)
+            except Exception:
+                pass
+            return False, f"HDFS Impala ingest error: {e}"
 
     def _download_from_hdfs(self, hdfs_path: str) -> Optional[str]:
         """
