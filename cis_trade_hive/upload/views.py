@@ -254,46 +254,44 @@ def upload_create(request):
                         }
 
                         _rows_inserted = 0
-                        _batch_size = 50
                         _ingest_ok = False
                         _ingest_msg = 'No rows to insert'
 
                         if _all_rows and _tbl_cols:
-                            for _bi in range(0, len(_all_rows), _batch_size):
-                                _batch = _all_rows[_bi:_bi + _batch_size]
-                                _selects = []
-                                for _row in _batch:
-                                    _vals = []
-                                    for _col in _tbl_cols:
-                                        _cl = _col.lower()
-                                        if _cl in _fixed:
-                                            _v = _fixed[_cl]
-                                        else:
-                                            _v = _row.get(_col) or _row.get(_cl) or ''
-                                        _v = str(_v).replace("'", "''") if _v else ''
-                                        _vals.append(f"'{_v}' AS `{_col}`")
-                                    _selects.append(f"SELECT {', '.join(_vals)}")
-                                _union = '\nUNION ALL\n'.join(_selects)
-                                # Hive external table: batch 1 = OVERWRITE (clears partition),
-                                # subsequent batches = INTO (append within same partition).
-                                _kw = 'OVERWRITE' if _bi == 0 else 'INTO'
-                                _sql = (f"INSERT {_kw} gmp_cis.{_target_table}\n"
-                                        f"PARTITION (processing_date='{_processing_date}')\n"
-                                        f"SELECT * FROM (\n{_union}\n) t")
-                                logger.warning(f"[upload:direct] batch {_bi//50+1} INSERT {_kw} {len(_batch)} rows")
-                                _ok = _imp.execute_write(_sql, database='gmp_cis')
-                                if _ok:
-                                    _rows_inserted += len(_batch)
-                                    logger.warning(f"[upload:direct] batch {_bi//50+1} OK — total so far: {_rows_inserted}")
-                                else:
-                                    logger.error(f"[upload:direct] batch {_bi//50+1} INSERT FAILED — stopping")
-                                    print(f"[upload:direct] batch {_bi//50+1} FAILED", flush=True)
-                                    break
+                            # Build one single INSERT OVERWRITE with all rows as UNION ALL.
+                            # Batched INSERT INTO on Hive external tables is unreliable —
+                            # each INSERT INTO call creates a separate file and the partition
+                            # may end up with only the last-written file visible.
+                            # A single INSERT OVERWRITE atomically replaces the entire partition.
+                            _selects = []
+                            for _row in _all_rows:
+                                _vals = []
+                                for _col in _tbl_cols:
+                                    _cl = _col.lower()
+                                    if _cl in _fixed:
+                                        _v = _fixed[_cl]
+                                    else:
+                                        _v = _row.get(_col) or _row.get(_cl) or ''
+                                    _v = str(_v).replace("'", "''") if _v else ''
+                                    _vals.append(f"'{_v}' AS `{_col}`")
+                                _selects.append(f"SELECT {', '.join(_vals)}")
 
-                            _ingest_ok = _rows_inserted > 0
-                            _ingest_msg = f"Inserted {_rows_inserted} rows into {_target_table}"
-                            logger.warning(f"[upload:direct] done: {_ingest_msg}")
-                            print(f"[upload:direct] done: {_ingest_msg}", flush=True)
+                            _union = '\nUNION ALL\n'.join(_selects)
+                            _sql = (f"INSERT OVERWRITE gmp_cis.{_target_table}\n"
+                                    f"PARTITION (processing_date='{_processing_date}')\n"
+                                    f"SELECT * FROM (\n{_union}\n) t")
+                            logger.warning(f"[upload:direct] single INSERT OVERWRITE {len(_all_rows)} rows into partition {_processing_date}")
+                            print(f"[upload:direct] single INSERT OVERWRITE {len(_all_rows)} rows", flush=True)
+                            _ok = _imp.execute_write(_sql, database='gmp_cis')
+                            if _ok:
+                                _rows_inserted = len(_all_rows)
+                                _ingest_ok = True
+                                _ingest_msg = f"Inserted {_rows_inserted} rows into {_target_table}"
+                                logger.warning(f"[upload:direct] done: {_ingest_msg}")
+                                print(f"[upload:direct] done: {_ingest_msg}", flush=True)
+                            else:
+                                logger.error(f"[upload:direct] INSERT OVERWRITE FAILED for {_target_table}")
+                                print(f"[upload:direct] INSERT OVERWRITE FAILED", flush=True)
                         else:
                             logger.error(f"[upload:direct] SKIP — all_rows={len(_all_rows)} tbl_cols={len(_tbl_cols)} — nothing to insert")
                             print(f"[upload:direct] SKIP — all_rows={len(_all_rows)} tbl_cols={len(_tbl_cols)}", flush=True)
