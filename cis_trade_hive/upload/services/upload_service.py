@@ -42,6 +42,10 @@ class FileValidationResult:
     columns: List[Dict[str, str]] = field(default_factory=list)
     sample_data: List[Dict[str, Any]] = field(default_factory=list)
     file_size: int = 0
+    # Full parsed data rows (all rows, not capped). Populated by
+    # validate_with_datasource_config so upload_create can ingest
+    # immediately without re-reading the file.
+    all_data: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -961,16 +965,24 @@ class UploadService:
                 if col['name'].lower() not in SERVER_INJECTED_COLS
             ]
             result.sample_data = []
-            for row in data_rows[:self.validation_service.MAX_PREVIEW_ROWS]:
+            result.all_data = []
+            for row_idx, row in enumerate(data_rows):
                 row_dict = {}
                 # Map file columns by position
                 for idx, col_name in enumerate(file_col_names):
                     row_dict[col_name] = row[idx] if idx < len(row) else ''
-                # Inject server-side defaults for preview
+                # Inject server-side defaults (position_basis etc.)
                 for col_name, default_val in injected_defaults.items():
-                    row_dict[col_name] = f'[{default_val}]'  # bracketed to show it's auto-set
-                result.sample_data.append(row_dict)
+                    row_dict[col_name] = default_val
+                result.all_data.append(row_dict)
+                # Sample data (preview only — bracketed defaults, capped at MAX_PREVIEW_ROWS)
+                if row_idx < self.validation_service.MAX_PREVIEW_ROWS:
+                    preview_dict = dict(row_dict)
+                    for col_name, default_val in injected_defaults.items():
+                        preview_dict[col_name] = f'[{default_val}]'
+                    result.sample_data.append(preview_dict)
 
+            logger.info(f"validate_with_datasource_config: {len(result.all_data)} total rows, {len(result.sample_data)} preview rows for {file_name}")
             result.is_valid = True
 
         except Exception as e:

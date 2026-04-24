@@ -176,23 +176,16 @@ def upload_create(request):
                         # standardize onward) — no file needed at ingest time.
                         # -------------------------------------------------------
                         from .repositories.upload_kudu_repository import upload_kudu_repository as _repo
-                        import re as _re, csv as _csv, io as _io
+                        import re as _re
                         from datetime import datetime as _dt
                         # Determine processing_date from description or default to today
                         _pd_match = _re.search(r'processing_date[=:\s]+(\d{8})', description or '')
                         _processing_date = _pd_match.group(1) if _pd_match else _dt.now().strftime('%Y%m%d')
-                        # Read ALL rows from the in-memory file now (before request ends)
-                        uploaded_file.seek(0)
-                        _raw = uploaded_file.read().decode(validation_result.encoding or 'utf-8', errors='replace')
-                        _sep = datasource_config.get('separator') or validation_result.delimiter or ','
-                        _raw_lines = _raw.splitlines()
-                        logger.info(f"[upload] File read: {len(_raw)} bytes, {len(_raw_lines)} lines, sep={_sep!r}, encoding={validation_result.encoding!r}")
-                        _all_rows = list(_csv.DictReader(_io.StringIO(_raw), delimiter=_sep))
-                        logger.info(f"[upload] DictReader produced {len(_all_rows)} rows (sep={_sep!r})")
-                        if not _all_rows:
-                            # DictReader gave 0 rows — sep mismatch? Try splitting manually.
-                            logger.error(f"[upload] DictReader returned 0 rows — sep={_sep!r} may be wrong. First line: {_raw_lines[0][:200] if _raw_lines else 'EMPTY'}")
-                        logger.info(f"[upload] Ingesting {len(_all_rows)} rows at upload time: target={datasource_config.get('target_table')} processing_date={_processing_date}")
+                        # Use all_data already parsed by validate_with_datasource_config —
+                        # no file re-read needed, no seek, no encoding/separator guessing.
+                        _all_rows = validation_result.all_data
+                        logger.info(f"[upload] Ingesting {len(_all_rows)} rows (from validation_result.all_data) "
+                                    f"target={datasource_config.get('target_table')} processing_date={_processing_date}")
                         _ingest_ok, _ingest_msg = upload_service.ingest_to_target_table(
                             upload_id=upload_id,
                             datasource_config=datasource_config,
