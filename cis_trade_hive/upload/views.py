@@ -143,7 +143,10 @@ def upload_create(request):
             logger.warning(f"[GATE0b] file_name={file_name!r} use_datasource_config={use_datasource_config} post_keys={list(request.POST.keys())}")
             print(f"[GATE0b] file_name={file_name!r} use_datasource_config={use_datasource_config}", flush=True)
 
-            # Check if datasource config exists for this file
+            # Check if datasource config exists for this file.
+            # NOTE: use_datasource_config checkbox may not be submitted when the
+            # datasource config div is hidden (d-none). Always use datasource config
+            # if one is found for the filename — don't rely on the checkbox value.
             try:
                 datasource_config = upload_service.get_datasource_config(file_name)
                 logger.warning(f"[GATE1] file_name={file_name!r} use_datasource_config={use_datasource_config} datasource_config={'FOUND' if datasource_config else 'NONE'}")
@@ -153,7 +156,9 @@ def upload_create(request):
                 print(f"[GATE1-ERR] get_datasource_config raised: {_dse}", flush=True)
                 datasource_config = None
 
-            if datasource_config and use_datasource_config:
+            # Use datasource config whenever one exists for this file — checkbox is
+            # unreliable because the div is hidden (d-none) when AJAX finds no config.
+            if datasource_config:
                 # Use metadata-driven validation
                 validation_result = upload_service.validate_with_datasource_config(
                     file_obj=uploaded_file,
