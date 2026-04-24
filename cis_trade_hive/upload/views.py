@@ -125,8 +125,13 @@ def upload_create(request):
         print("[UPLOAD_CREATE] POST received", flush=True)
         logger.warning("[UPLOAD_CREATE] POST received")
         try:
+            # GATE0 — first line of try block
+            logger.warning("[GATE0] entered try block")
+            print("[GATE0] entered try block", flush=True)
+
             # Check if file was uploaded
             if 'file' not in request.FILES:
+                logger.warning("[GATE0a] no file in request.FILES — redirecting")
                 messages.error(request, 'No file was uploaded')
                 return redirect('upload:create')
 
@@ -135,11 +140,18 @@ def upload_create(request):
             description = request.POST.get('description', '').strip()
             use_datasource_config = request.POST.get('use_datasource_config', '') == 'true'
 
-            # Check if datasource config exists for this file
-            datasource_config = upload_service.get_datasource_config(file_name)
+            logger.warning(f"[GATE0b] file_name={file_name!r} use_datasource_config={use_datasource_config} post_keys={list(request.POST.keys())}")
+            print(f"[GATE0b] file_name={file_name!r} use_datasource_config={use_datasource_config}", flush=True)
 
-            logger.warning(f"[GATE1] file_name={file_name!r} use_datasource_config={use_datasource_config} datasource_config={'FOUND' if datasource_config else 'NONE'}")
-            print(f"[GATE1] file_name={file_name!r} use_datasource_config={use_datasource_config} datasource_config={'FOUND' if datasource_config else 'NONE'}", flush=True)
+            # Check if datasource config exists for this file
+            try:
+                datasource_config = upload_service.get_datasource_config(file_name)
+                logger.warning(f"[GATE1] file_name={file_name!r} use_datasource_config={use_datasource_config} datasource_config={'FOUND' if datasource_config else 'NONE'}")
+                print(f"[GATE1] file_name={file_name!r} use_datasource_config={use_datasource_config} datasource_config={'FOUND' if datasource_config else 'NONE'}", flush=True)
+            except Exception as _dse:
+                logger.error(f"[GATE1-ERR] get_datasource_config raised: {_dse}", exc_info=True)
+                print(f"[GATE1-ERR] get_datasource_config raised: {_dse}", flush=True)
+                datasource_config = None
 
             if datasource_config and use_datasource_config:
                 # Use metadata-driven validation
@@ -409,6 +421,8 @@ def upload_create(request):
                         messages.warning(request, warning)
 
         except Exception as e:
+            logger.error(f"[UPLOAD_CREATE] unhandled exception: {e}", exc_info=True)
+            print(f"[UPLOAD_CREATE] unhandled exception: {e}", flush=True)
             messages.error(request, f'Upload error: {str(e)}')
 
     # Get available datasource configs for dropdown
