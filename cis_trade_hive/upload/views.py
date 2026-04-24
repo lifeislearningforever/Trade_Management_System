@@ -540,16 +540,65 @@ def upload_ingest(request, upload_id: str):
             # Get ingestion mode (overwrite or append)
             ingestion_mode = request.POST.get('ingestion_mode', 'overwrite').strip()
 
-            # Get temp file path: session uploads store it in the upload dict;
-            # DB uploads reconstruct the path from the known naming convention
-            # (never rely on session — sessions are not shared across Gunicorn workers).
-            logger.info(f"[ingest:view] ===== INGEST STARTED upload_id={upload_id} is_session={is_session_upload} =====")
-            logger.info(f"[ingest:view] upload keys: {list(upload.keys()) if upload else 'None'}")
+            # ------------------------------------------------------------------
+            # POSITION UPLOAD SHORT-CIRCUIT
+            # Rows were already inserted into the raw target table at upload
+            # time (upload_create). The Ingest button here only needs to confirm
+            # data is present — no file access needed.
+            # If the raw table already has rows for this partition, mark COMPLETED
+            # and skip the file-based ingest path entirely.
+            # ------------------------------------------------------------------
+            if not is_session_upload and upload_service.is_position_upload(upload):
+                import re as _re
+                from core.repositories.impala_connection import impala_manager
+                _target = datasource_config.get('target_table', '')
+                _src_id = _target.lower().split('.')[-1]
+                # Resolve processing_date from POST → description → today
+                if not processing_date:
+                    _desc = upload.get('description', '') or ''
+                    _dm = _re.search(r'processing_date[=:\s]+(\d{8})', _desc)
+                    processing_date = _dm.group(1) if _dm else ''
+                if not processing_date:
+                    from datetime import datetime as _dt2
+                    processing_date = _dt2.now().strftime('%Y%m%d')
+                logger.info(f"[ingest:view] Position upload short-circuit: checking {_target} src_id={_src_id} date={processing_date}")
+                try:
+                    _cnt_rows = impala_manager.execute_query(
+                        f"SELECT COUNT(*) AS cnt FROM gmp_cis.{_target} "
+                        f"WHERE src_id='{_src_id}' AND processing_date='{processing_date}'",
+                        database='gmp_cis'
+                    )
+                    _raw_count = int(_cnt_rows[0].get('cnt', 0)) if _cnt_rows else 0
+                except Exception as _ce:
+                    logger.warning(f"[ingest:view] Could not count raw rows: {_ce}")
+                    _raw_count = 0
+                logger.info(f"[ingest:view] Raw table row count = {_raw_count}")
+                if _raw_count > 0:
+                    # Data already in raw table — mark COMPLETED and skip file ingest
+                    upload_service.repository.update_upload(
+                        upload_id,
+                        {'status': 'COMPLETED', 'row_count': _raw_count},
+                        user_info['username']
+                    )
+                    success = True
+                    message = (
+                        f"Raw data already ingested: {_raw_count} rows in {_target} "
+                        f"(processing_date={processing_date}). Click 'Run ETL' to proceed."
+                    )
+                    logger.info(f"[ingest:view] Short-circuit OK: {message}")
+                    # Skip the file-based ingest block entirely
+                    if success:
+                        messages.success(request, message)
+                    return redirect('upload:detail', upload_id=upload_id)
+
+            # ------------------------------------------------------------------
+            # Standard file-based ingest (non-position uploads, or session uploads)
+            # ------------------------------------------------------------------
+            logger.info(f"[ingest:view] ===== FILE INGEST upload_id={upload_id} is_session={is_session_upload} =====")
             logger.info(f"[ingest:view] upload.file_path={upload.get('file_path')!r}")
             logger.info(f"[ingest:view] upload.hdfs_path={upload.get('hdfs_path')!r}")
             logger.info(f"[ingest:view] upload.file_name={upload.get('file_name')!r}")
             logger.info(f"[ingest:view] upload.row_count={upload.get('row_count')!r}")
-            logger.info(f"[ingest:view] settings.BASE_DIR={settings.BASE_DIR}")
             if is_session_upload:
                 temp_file_path = upload.get('temp_file_path')
                 logger.info(f"[ingest:view] session upload temp_file_path={temp_file_path!r}")
@@ -562,7 +611,7 @@ def upload_ingest(request, upload_id: str):
                 else:
                     # Priority 2: session key (same-worker fast-path)
                     temp_file_path = request.session.get(f'temp_path_{upload_id}')
-                    logger.info(f"[ingest:view] P2 session key temp_path_{upload_id}={temp_file_path!r} exists={os.path.exists(temp_file_path) if temp_file_path else False}")
+                    logger.info(f"[ingest:view] P2 session key={temp_file_path!r} exists={os.path.exists(temp_file_path) if temp_file_path else False}")
                     if not temp_file_path or not os.path.exists(temp_file_path):
                         # Priority 3: reconstruct from naming convention
                         _temp_dir = os.path.join(settings.BASE_DIR, 'temp_uploads')
@@ -574,8 +623,8 @@ def upload_ingest(request, upload_id: str):
                             logger.info(f"[ingest:view] P3 RESOLVED — reconstructed: {temp_file_path}")
                         else:
                             temp_file_path = None
-                            logger.warning(f"[ingest:view] P1/P2/P3 all FAILED — temp_file_path=None, will try HDFS in service layer")
-                logger.info(f"[ingest:view] final temp_file_path passed to service={temp_file_path!r}")
+                            logger.warning(f"[ingest:view] P1/P2/P3 all FAILED — no local file available")
+                logger.info(f"[ingest:view] final temp_file_path={temp_file_path!r}")
             sample_data = None
             if is_session_upload:
                 sample_data_json = upload.get('sample_data_json', [])
