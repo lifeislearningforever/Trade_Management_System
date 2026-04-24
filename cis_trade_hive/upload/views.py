@@ -185,6 +185,17 @@ def upload_create(request):
                         # Also keep in session as a fast-path for same-worker ingest
                         request.session[f'temp_path_{upload_id}'] = temp_file_path
 
+                        # Push to HDFS so the Impala external table at hdfs_path has data.
+                        # hdfs_path = /mrw/cis/staging/{upload_id} (set at record creation).
+                        # _upload_file_to_hdfs resolves the hdfs binary automatically.
+                        _hdfs_dir = upload_service.HDFS_STAGING_PATH + '/' + upload_id
+                        logger.info(f"[upload] Pushing file to HDFS: {temp_file_path} → {_hdfs_dir}")
+                        _hdfs_ok = upload_service._upload_file_to_hdfs(temp_file_path, _hdfs_dir)
+                        if _hdfs_ok:
+                            logger.info(f"[upload] HDFS push OK: {_hdfs_dir}")
+                        else:
+                            logger.warning(f"[upload] HDFS push FAILED for {_hdfs_dir} — ingest will fall back to local file or sample_data")
+
                         messages.success(request, f'File "{file_name}" validated using datasource config. Target: {datasource_config.get("target_table", "")}')
                         return redirect('upload:preview', upload_id=upload_id)
                     else:

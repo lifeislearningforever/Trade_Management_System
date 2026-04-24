@@ -1415,43 +1415,64 @@ class UploadService:
 
     def _upload_file_to_hdfs(self, local_path: str, hdfs_dir: str) -> bool:
         """
-        Upload a local file to HDFS.
+        Upload a local file to HDFS using the hdfs CLI.
+        Tries several common full paths for the hdfs binary on Cloudera CML.
 
         Args:
             local_path: Path to local file
-            hdfs_dir: HDFS directory to upload to
+            hdfs_dir: HDFS directory to upload to (LOCATION for external table)
 
         Returns:
             True if successful, False otherwise
         """
         import subprocess
+        import shutil
 
+        # Resolve hdfs binary — try PATH first, then common Cloudera install locations
+        hdfs_bin = shutil.which('hdfs')
+        if not hdfs_bin:
+            for candidate in [
+                '/usr/bin/hdfs',
+                '/usr/local/bin/hdfs',
+                '/opt/cloudera/parcels/CDH/bin/hdfs',
+                '/opt/hadoop/bin/hdfs',
+            ]:
+                if os.path.isfile(candidate):
+                    hdfs_bin = candidate
+                    break
+
+        if not hdfs_bin:
+            logger.error("[hdfs:put] hdfs binary not found — cannot upload to HDFS")
+            return False
+
+        logger.info(f"[hdfs:put] using hdfs binary: {hdfs_bin}")
         try:
             # Create HDFS directory
-            mkdir_cmd = ['hdfs', 'dfs', '-mkdir', '-p', hdfs_dir]
+            mkdir_cmd = [hdfs_bin, 'dfs', '-mkdir', '-p', hdfs_dir]
+            logger.info(f"[hdfs:put] {' '.join(mkdir_cmd)}")
             result = subprocess.run(mkdir_cmd, capture_output=True, text=True, timeout=60)
+            logger.info(f"[hdfs:put] mkdir rc={result.returncode} stderr={result.stderr[:200]}")
             if result.returncode != 0:
-                logger.error(f"Failed to create HDFS directory: {result.stderr}")
+                logger.error(f"[hdfs:put] Failed to create HDFS directory: {result.stderr}")
                 return False
 
             # Upload file to HDFS
-            put_cmd = ['hdfs', 'dfs', '-put', '-f', local_path, hdfs_dir]
+            put_cmd = [hdfs_bin, 'dfs', '-put', '-f', local_path, hdfs_dir]
+            logger.info(f"[hdfs:put] {' '.join(put_cmd)}")
             result = subprocess.run(put_cmd, capture_output=True, text=True, timeout=300)
+            logger.info(f"[hdfs:put] put rc={result.returncode} stderr={result.stderr[:200]}")
             if result.returncode != 0:
-                logger.error(f"Failed to upload file to HDFS: {result.stderr}")
+                logger.error(f"[hdfs:put] Failed to upload file: {result.stderr}")
                 return False
 
-            logger.info(f"Successfully uploaded {local_path} to {hdfs_dir}")
+            logger.info(f"[hdfs:put] SUCCESS {local_path} → {hdfs_dir}")
             return True
 
         except subprocess.TimeoutExpired:
-            logger.error("HDFS upload timed out")
-            return False
-        except FileNotFoundError:
-            logger.error("hdfs command not found - HDFS client not installed")
+            logger.error("[hdfs:put] timed out")
             return False
         except Exception as e:
-            logger.error(f"HDFS upload error: {str(e)}")
+            logger.error(f"[hdfs:put] error: {e}", exc_info=True)
             return False
 
     def _cleanup_hdfs_staging(self, hdfs_path: str) -> bool:
