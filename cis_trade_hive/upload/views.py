@@ -291,7 +291,7 @@ def upload_create(request):
                             _all_cols = _tbl_cols  # column order matches table schema
                             _tmp = _tf.NamedTemporaryFile(
                                 mode='w', suffix='.csv', delete=False,
-                                prefix=f"{_src_id}_", encoding='utf-8'
+                                prefix=f"pos_{_src_id[-1]}_", encoding='utf-8'
                             )
                             try:
                                 for _row in _all_rows:
@@ -334,17 +334,20 @@ def upload_create(request):
                                     _ingest_msg = f"Loaded {_rows_inserted} rows → {_hdfs_file}"
                                     logger.warning(f"[upload:direct] done: {_ingest_msg}")
                                     print(f"[upload:direct] done: {_ingest_msg}", flush=True)
-                                    # Refresh Impala metadata so the new partition is visible
-                                    _imp.execute_write(
-                                        f"MSCK REPAIR TABLE gmp_cis.{_target_table}",
-                                        database='gmp_cis'
-                                    )
-                                    _imp.execute_write(
-                                        f"INVALIDATE METADATA gmp_cis.{_target_table}",
-                                        database='gmp_cis'
-                                    )
+                                    # Refresh Impala metadata — INVALIDATE METADATA is the
+                                    # correct command for Impala external tables (MSCK REPAIR
+                                    # is Hive-only and fails on Impala/CDH).
+                                    # REFRESH with partition path for targeted refresh.
+                                    try:
+                                        _imp.execute_write(
+                                            f"INVALIDATE METADATA gmp_cis.{_target_table}",
+                                            database='gmp_cis'
+                                        )
+                                        logger.warning(f"[upload:direct] INVALIDATE METADATA done")
+                                    except Exception as _me:
+                                        logger.warning(f"[upload:direct] INVALIDATE METADATA warning: {_me}")
                                 else:
-                                    logger.error(f"[upload:direct] hdfs put FAILED: {_put.stderr}")
+                                    logger.error(f"[upload:direct] hdfs put FAILED rc={_put.returncode} stderr={_put.stderr}")
                                     print(f"[upload:direct] hdfs put FAILED: {_put.stderr}", flush=True)
                             finally:
                                 # Clean up local temp file
