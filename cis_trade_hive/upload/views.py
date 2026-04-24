@@ -184,8 +184,14 @@ def upload_create(request):
                         # Read ALL rows from the in-memory file now (before request ends)
                         uploaded_file.seek(0)
                         _raw = uploaded_file.read().decode(validation_result.encoding or 'utf-8', errors='replace')
-                        _sep = validation_result.delimiter or ','
+                        _sep = datasource_config.get('separator') or validation_result.delimiter or ','
+                        _raw_lines = _raw.splitlines()
+                        logger.info(f"[upload] File read: {len(_raw)} bytes, {len(_raw_lines)} lines, sep={_sep!r}, encoding={validation_result.encoding!r}")
                         _all_rows = list(_csv.DictReader(_io.StringIO(_raw), delimiter=_sep))
+                        logger.info(f"[upload] DictReader produced {len(_all_rows)} rows (sep={_sep!r})")
+                        if not _all_rows:
+                            # DictReader gave 0 rows — sep mismatch? Try splitting manually.
+                            logger.error(f"[upload] DictReader returned 0 rows — sep={_sep!r} may be wrong. First line: {_raw_lines[0][:200] if _raw_lines else 'EMPTY'}")
                         logger.info(f"[upload] Ingesting {len(_all_rows)} rows at upload time: target={datasource_config.get('target_table')} processing_date={_processing_date}")
                         _ingest_ok, _ingest_msg = upload_service.ingest_to_target_table(
                             upload_id=upload_id,
