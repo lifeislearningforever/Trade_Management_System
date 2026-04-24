@@ -176,31 +176,89 @@ def upload_create(request):
                         # standardize onward) — no file needed at ingest time.
                         # -------------------------------------------------------
                         from .repositories.upload_kudu_repository import upload_kudu_repository as _repo
+                        from core.repositories.impala_connection import impala_manager as _imp
                         import re as _re
                         from datetime import datetime as _dt
+
                         # Determine processing_date from description or default to today
                         _pd_match = _re.search(r'processing_date[=:\s]+(\d{8})', description or '')
                         _processing_date = _pd_match.group(1) if _pd_match else _dt.now().strftime('%Y%m%d')
-                        # Use all_data already parsed by validate_with_datasource_config —
-                        # no file re-read needed, no seek, no encoding/separator guessing.
+
+                        # all_data is already fully parsed by validate_with_datasource_config.
+                        # No file re-read. No service layer fallback chain. Direct INSERT.
                         _all_rows = validation_result.all_data
-                        logger.info(f"[upload] Ingesting {len(_all_rows)} rows (from validation_result.all_data) "
-                                    f"target={datasource_config.get('target_table')} processing_date={_processing_date}")
-                        _ingest_ok, _ingest_msg = upload_service.ingest_to_target_table(
-                            upload_id=upload_id,
-                            datasource_config=datasource_config,
-                            updated_by=user_info['username'],
-                            processing_date=_processing_date,
-                            temp_file_path=None,
-                            sample_data=_all_rows,
-                            ingestion_mode='overwrite',
-                        )
-                        if _ingest_ok:
-                            logger.info(f"[upload] Immediate ingest OK: {_ingest_msg}")
-                            _repo.update_upload(upload_id, {'status': 'VALIDATED', 'description': f"{description}\n[Datasource: {datasource_config.get('source_id', '')}]\nprocessing_date={_processing_date}"}, user_info['username'])
+                        _target_table = datasource_config.get('target_table', '')
+                        _src_id = _target_table.lower().split('.')[-1]
+                        logger.info(f"[upload:direct] {len(_all_rows)} rows → {_target_table} "
+                                    f"src_id={_src_id} processing_date={_processing_date}")
+
+                        # Get target table column list from Impala
+                        from upload.repositories.datasource_repository import datasource_repository as _dsr
+                        _tbl_info = _dsr.get_table_info(_target_table, 'gmp_cis')
+                        _tbl_cols = [c['name'] for c in _tbl_info.get('columns', [])
+                                     if c['name'].lower() != 'processing_date']
+
+                        POSITION_BASIS = {
+                            'cis_user_sta_adhoc_position_1': 'TRADE_DATE',
+                            'cis_user_sta_adhoc_position_2': 'TRADE_DATE',
+                            'cis_user_sta_adhoc_position_3': 'TRADE_DATE',
+                            'cis_user_sta_adhoc_position_4': 'SETTLE_DATE',
+                            'cis_user_sta_adhoc_position_5': 'SETTLE_DATE',
+                        }
+                        _fixed = {
+                            'src_id': _src_id,
+                            'src_system': 'USER_UPLOAD',
+                            'sub_system': 'user',
+                            'data_cat': 'sta',
+                            'data_frq': 'adhoc',
+                            'position_basis': POSITION_BASIS.get(_src_id, 'TRADE_DATE'),
+                        }
+
+                        _rows_inserted = 0
+                        _batch_size = 50
+                        _ingest_ok = False
+                        _ingest_msg = 'No rows to insert'
+
+                        if _all_rows and _tbl_cols:
+                            for _bi in range(0, len(_all_rows), _batch_size):
+                                _batch = _all_rows[_bi:_bi + _batch_size]
+                                _selects = []
+                                for _row in _batch:
+                                    _vals = []
+                                    for _col in _tbl_cols:
+                                        _cl = _col.lower()
+                                        if _cl in _fixed:
+                                            _v = _fixed[_cl]
+                                        else:
+                                            _v = _row.get(_col) or _row.get(_cl) or ''
+                                        _v = str(_v).replace("'", "''") if _v else ''
+                                        _vals.append(f"'{_v}' AS {_col}")
+                                    _selects.append(f"SELECT {', '.join(_vals)}")
+                                _union = '\nUNION ALL\n'.join(_selects)
+                                _kw = 'OVERWRITE' if _bi == 0 else 'INTO'
+                                _sql = (f"INSERT {_kw} gmp_cis.{_target_table}\n"
+                                        f"PARTITION (processing_date='{_processing_date}')\n"
+                                        f"SELECT * FROM (\n{_union}\n) t")
+                                _ok = _imp.execute_write(_sql, database='gmp_cis')
+                                if _ok:
+                                    _rows_inserted += len(_batch)
+                                else:
+                                    logger.error(f"[upload:direct] batch {_bi//50+1} INSERT failed")
+                                    break
+
+                            _ingest_ok = _rows_inserted > 0
+                            _ingest_msg = f"Inserted {_rows_inserted} rows into {_target_table}"
+                            logger.info(f"[upload:direct] done: {_ingest_msg}")
                         else:
-                            logger.warning(f"[upload] Immediate ingest FAILED: {_ingest_msg} — user can retry via Ingest button")
-                            _repo.update_upload(upload_id, {'status': 'VALIDATED'}, user_info['username'])
+                            logger.error(f"[upload:direct] all_rows={len(_all_rows)} tbl_cols={len(_tbl_cols)} — nothing to insert")
+
+                        _desc = (f"{description}\n[Datasource: {datasource_config.get('source_id', '')}]\n"
+                                 f"processing_date={_processing_date}")
+                        _repo.update_upload(upload_id, {
+                            'status': 'VALIDATED',
+                            'description': _desc,
+                            'row_count': _rows_inserted,
+                        }, user_info['username'])
 
                         messages.success(request, f'File "{file_name}" validated using datasource config. Target: {datasource_config.get("target_table", "")}')
                         return redirect('upload:preview', upload_id=upload_id)
