@@ -212,9 +212,14 @@ def upload_create(request):
                         import re as _re
                         from datetime import datetime as _dt
 
-                        # Determine processing_date from description or default to today
-                        _pd_match = _re.search(r'processing_date[=:\s]+(\d{8})', description or '')
-                        _processing_date = _pd_match.group(1) if _pd_match else _dt.now().strftime('%Y%m%d')
+                        # Determine processing_date: always read from MRA_PC_DATE.txt first.
+                        # Fall back to description field, then today only as last resort.
+                        from upload.repositories.datasource_repository import datasource_repository as _dsr_pd
+                        _processing_date = _dsr_pd.get_processing_date_from_hdfs()
+                        if not _processing_date:
+                            _pd_match = _re.search(r'processing_date[=:\s]+(\d{8})', description or '')
+                            _processing_date = _pd_match.group(1) if _pd_match else _dt.now().strftime('%Y%m%d')
+                        logger.warning(f"[upload:direct] processing_date={_processing_date}")
 
                         # all_data is already fully parsed by validate_with_datasource_config.
                         # No file re-read. No service layer fallback chain. Direct INSERT.
@@ -258,40 +263,95 @@ def upload_create(request):
                         _ingest_msg = 'No rows to insert'
 
                         if _all_rows and _tbl_cols:
-                            # Build one single INSERT OVERWRITE with all rows as UNION ALL.
-                            # Batched INSERT INTO on Hive external tables is unreliable —
-                            # each INSERT INTO call creates a separate file and the partition
-                            # may end up with only the last-written file visible.
-                            # A single INSERT OVERWRITE atomically replaces the entire partition.
-                            _selects = []
-                            for _row in _all_rows:
-                                _vals = []
-                                for _col in _tbl_cols:
-                                    _cl = _col.lower()
-                                    if _cl in _fixed:
-                                        _v = _fixed[_cl]
-                                    else:
-                                        _v = _row.get(_col) or _row.get(_cl) or ''
-                                    _v = str(_v).replace("'", "''") if _v else ''
-                                    _vals.append(f"'{_v}' AS `{_col}`")
-                                _selects.append(f"SELECT {', '.join(_vals)}")
+                            # Write all rows as a pipe-delimited file then push directly
+                            # into the HDFS partition directory via `hdfs dfs -put`.
+                            # This avoids Impala query-string size limits (UNION ALL with
+                            # 792 rows exceeds Impala's query string limit and causes only
+                            # the first ~50 rows from the previous batch attempt to land).
+                            import subprocess as _sp
+                            import tempfile as _tf
+                            import uuid as _uuid
 
-                            _union = '\nUNION ALL\n'.join(_selects)
-                            _sql = (f"INSERT OVERWRITE gmp_cis.{_target_table}\n"
-                                    f"PARTITION (processing_date='{_processing_date}')\n"
-                                    f"SELECT * FROM (\n{_union}\n) t")
-                            logger.warning(f"[upload:direct] single INSERT OVERWRITE {len(_all_rows)} rows into partition {_processing_date}")
-                            print(f"[upload:direct] single INSERT OVERWRITE {len(_all_rows)} rows", flush=True)
-                            _ok = _imp.execute_write(_sql, database='gmp_cis')
-                            if _ok:
-                                _rows_inserted = len(_all_rows)
-                                _ingest_ok = True
-                                _ingest_msg = f"Inserted {_rows_inserted} rows into {_target_table}"
-                                logger.warning(f"[upload:direct] done: {_ingest_msg}")
-                                print(f"[upload:direct] done: {_ingest_msg}", flush=True)
-                            else:
-                                logger.error(f"[upload:direct] INSERT OVERWRITE FAILED for {_target_table}")
-                                print(f"[upload:direct] INSERT OVERWRITE FAILED", flush=True)
+                            # Determine the separator used by this datasource
+                            _sep = datasource_config.get('separator', '|') or '|'
+
+                            # Build the HDFS partition path for this external table
+                            # Pattern: /mrw/cis/<table_name>/processing_date=<date>/
+                            _hdfs_base = _dsr.get_table_hdfs_location(_target_table, 'gmp_cis')
+                            if not _hdfs_base:
+                                # Fallback naming convention
+                                _hdfs_base = f"/mrw/cis/{_target_table}"
+                            _hdfs_partition = f"{_hdfs_base.rstrip('/')}/processing_date={_processing_date}"
+                            _hdfs_file = f"{_hdfs_partition}/{_src_id}_{_processing_date}.csv"
+
+                            logger.warning(f"[upload:direct] HDFS target: {_hdfs_file}")
+                            print(f"[upload:direct] HDFS target: {_hdfs_file}", flush=True)
+
+                            # Write data to a local temp file
+                            _all_cols = _tbl_cols  # column order matches table schema
+                            _tmp = _tf.NamedTemporaryFile(
+                                mode='w', suffix='.csv', delete=False,
+                                prefix=f"{_src_id}_", encoding='utf-8'
+                            )
+                            try:
+                                for _row in _all_rows:
+                                    _line_vals = []
+                                    for _col in _all_cols:
+                                        _cl = _col.lower()
+                                        if _cl in _fixed:
+                                            _v = str(_fixed[_cl])
+                                        else:
+                                            _v = str(_row.get(_col) or _row.get(_cl) or '')
+                                        # Escape separator within value
+                                        _v = _v.replace(_sep, ' ')
+                                        _line_vals.append(_v)
+                                    _tmp.write(_sep.join(_line_vals) + '\n')
+                                _tmp.flush()
+                                _tmp_path = _tmp.name
+                            finally:
+                                _tmp.close()
+
+                            logger.warning(f"[upload:direct] temp file written: {_tmp_path} ({len(_all_rows)} rows)")
+                            print(f"[upload:direct] temp file: {_tmp_path}", flush=True)
+
+                            try:
+                                # Ensure HDFS partition directory exists
+                                _sp.run(['hdfs', 'dfs', '-mkdir', '-p', _hdfs_partition],
+                                        capture_output=True, timeout=30)
+
+                                # Remove any existing file for this partition+src_id
+                                _sp.run(['hdfs', 'dfs', '-rm', '-f', _hdfs_file],
+                                        capture_output=True, timeout=30)
+
+                                # Put the new file into HDFS
+                                _put = _sp.run(
+                                    ['hdfs', 'dfs', '-put', _tmp_path, _hdfs_file],
+                                    capture_output=True, text=True, timeout=120
+                                )
+                                if _put.returncode == 0:
+                                    _rows_inserted = len(_all_rows)
+                                    _ingest_ok = True
+                                    _ingest_msg = f"Loaded {_rows_inserted} rows → {_hdfs_file}"
+                                    logger.warning(f"[upload:direct] done: {_ingest_msg}")
+                                    print(f"[upload:direct] done: {_ingest_msg}", flush=True)
+                                    # Refresh Impala metadata so the new partition is visible
+                                    _imp.execute_write(
+                                        f"MSCK REPAIR TABLE gmp_cis.{_target_table}",
+                                        database='gmp_cis'
+                                    )
+                                    _imp.execute_write(
+                                        f"INVALIDATE METADATA gmp_cis.{_target_table}",
+                                        database='gmp_cis'
+                                    )
+                                else:
+                                    logger.error(f"[upload:direct] hdfs put FAILED: {_put.stderr}")
+                                    print(f"[upload:direct] hdfs put FAILED: {_put.stderr}", flush=True)
+                            finally:
+                                # Clean up local temp file
+                                try:
+                                    os.remove(_tmp_path)
+                                except Exception:
+                                    pass
                         else:
                             logger.error(f"[upload:direct] SKIP — all_rows={len(_all_rows)} tbl_cols={len(_tbl_cols)} — nothing to insert")
                             print(f"[upload:direct] SKIP — all_rows={len(_all_rows)} tbl_cols={len(_tbl_cols)}", flush=True)
