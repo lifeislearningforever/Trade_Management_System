@@ -118,6 +118,8 @@ def upload_create(request):
     user_info = get_user_info(request)
 
     if request.method == 'POST':
+        print("[UPLOAD_CREATE] POST received", flush=True)
+        logger.warning("[UPLOAD_CREATE] POST received")
         try:
             # Check if file was uploaded
             if 'file' not in request.FILES:
@@ -132,7 +134,8 @@ def upload_create(request):
             # Check if datasource config exists for this file
             datasource_config = upload_service.get_datasource_config(file_name)
 
-            logger.info(f"[GATE1] file_name={file_name!r} use_datasource_config={use_datasource_config} datasource_config={'FOUND' if datasource_config else 'NONE'}")
+            logger.warning(f"[GATE1] file_name={file_name!r} use_datasource_config={use_datasource_config} datasource_config={'FOUND' if datasource_config else 'NONE'}")
+            print(f"[GATE1] file_name={file_name!r} use_datasource_config={use_datasource_config} datasource_config={'FOUND' if datasource_config else 'NONE'}", flush=True)
 
             if datasource_config and use_datasource_config:
                 # Use metadata-driven validation
@@ -142,7 +145,8 @@ def upload_create(request):
                     datasource_config=datasource_config
                 )
 
-                logger.info(f"[GATE2] validation is_valid={validation_result.is_valid} row_count={validation_result.row_count} all_data={len(validation_result.all_data)} errors={validation_result.errors}")
+                logger.warning(f"[GATE2] validation is_valid={validation_result.is_valid} row_count={validation_result.row_count} all_data={len(validation_result.all_data)} errors={validation_result.errors}")
+                print(f"[GATE2] is_valid={validation_result.is_valid} row_count={validation_result.row_count} all_data={len(validation_result.all_data)}", flush=True)
 
                 if validation_result.is_valid:
                     # Create upload record with datasource config
@@ -165,7 +169,8 @@ def upload_create(request):
                     from .repositories.upload_kudu_repository import upload_kudu_repository
                     upload_id = upload_kudu_repository.create_upload(upload_data, user_info['username'])
 
-                    logger.info(f"[GATE3] upload_id={upload_id!r}")
+                    logger.warning(f"[GATE3] upload_id={upload_id!r}")
+                    print(f"[GATE3] upload_id={upload_id!r}", flush=True)
 
                     if upload_id:
                         # Store datasource_id for later use
