@@ -1067,62 +1067,87 @@ class UploadService:
             if not intake_columns:
                 return False, "No columns defined in datasource configuration or target table"
 
-            # Use INSERT VALUES directly - more reliable than HDFS staging
-            # Check for temp file first, then fall back to sample_data
+            # Resolve the best available data source, in priority order:
+            #   1. Local temp file (same-node upload or DB-persisted path)
+            #   2. HDFS path (cross-node / MRW Cloudera environment)
+            #   3. sample_data from session (rare; session-based uploads only)
+            #   4. sample_data_json from DB record (fallback — capped at 20 rows)
             local_file = None
+            _hdfs_tmp = None  # track any temp file we download so we can clean up
+
             if temp_file_path and os.path.exists(temp_file_path):
                 local_file = temp_file_path
-                logger.info(f"Using INSERT VALUES with local file: {local_file}")
-            elif sample_data:
-                logger.info(f"Using INSERT VALUES with sample_data ({len(sample_data)} rows)")
+                logger.info(f"[ingest] Priority 1 — local temp file: {local_file}")
             else:
-                # Try to get sample data from upload record
-                upload_sample = upload.get('sample_data_json', []) if upload else []
-                if upload_sample:
-                    if isinstance(upload_sample, str):
-                        try:
-                            import json as json_module
-                            sample_data = json_module.loads(upload_sample)
-                        except Exception:
-                            # sample_data_json is truncated/corrupt in DB (old record).
-                            # Cannot ingest without the full file — the temp file is gone.
-                            logger.warning("sample_data_json in DB is truncated/corrupt; cannot ingest without original file")
-                            sample_data = []
+                # Priority 2: read from HDFS (works across Gunicorn workers / nodes)
+                hdfs_path_db = (upload.get('hdfs_path', '') or '').strip() if upload else ''
+                if hdfs_path_db:
+                    logger.info(f"[ingest] Priority 2 — downloading from HDFS: {hdfs_path_db}")
+                    _hdfs_tmp = self._download_from_hdfs(hdfs_path_db)
+                    if _hdfs_tmp:
+                        local_file = _hdfs_tmp
+                        logger.info(f"[ingest] HDFS download succeeded → {local_file}")
                     else:
-                        sample_data = upload_sample
+                        logger.warning(f"[ingest] HDFS download failed for {hdfs_path_db}")
+
+            if not local_file:
+                if sample_data:
+                    logger.info(f"[ingest] Priority 3 — session sample_data ({len(sample_data)} rows)")
+                else:
+                    # Priority 4: sample_data_json from DB (capped at 20 rows — last resort)
+                    upload_sample = upload.get('sample_data_json', []) if upload else []
+                    if upload_sample:
+                        if isinstance(upload_sample, str):
+                            try:
+                                import json as json_module
+                                sample_data = json_module.loads(upload_sample)
+                            except Exception:
+                                logger.warning("sample_data_json in DB is truncated/corrupt; cannot ingest without original file")
+                                sample_data = []
+                        else:
+                            sample_data = upload_sample
                     if sample_data:
-                        logger.info(f"Using INSERT VALUES with upload sample_data ({len(sample_data)} rows)")
+                        logger.warning(f"[ingest] Priority 4 (fallback) — DB sample_data ({len(sample_data)} rows, capped at 20). Re-upload to ingest all records.")
 
             # If we have either a local file or sample_data, use INSERT VALUES
             if local_file or sample_data:
-                # ----------------------------------------------------------------
-                # Kudu UPSERT path: cis_equity_price is a Kudu table, not a
-                # Hive external/partitioned table — INSERT OVERWRITE won't work.
-                # Route to dedicated Kudu upsert method instead.
-                # ----------------------------------------------------------------
-                if target_table.lower() in ('cis_equity_price', 'gmp_cis.cis_equity_price'):
-                    return self._ingest_kudu_equity_price(
+                try:
+                    # ----------------------------------------------------------------
+                    # Kudu UPSERT path: cis_equity_price is a Kudu table, not a
+                    # Hive external/partitioned table — INSERT OVERWRITE won't work.
+                    # Route to dedicated Kudu upsert method instead.
+                    # ----------------------------------------------------------------
+                    if target_table.lower() in ('cis_equity_price', 'gmp_cis.cis_equity_price'):
+                        return self._ingest_kudu_equity_price(
+                            datasource_config=datasource_config,
+                            intake_columns=intake_columns,
+                            sample_data=sample_data if sample_data else [],
+                            updated_by=updated_by,
+                            upload_id=upload_id,
+                            is_session_upload=is_session_upload,
+                            temp_file_path=local_file,
+                        )
+
+                    return self._ingest_using_insert_values(
+                        target_table=target_table,
                         datasource_config=datasource_config,
                         intake_columns=intake_columns,
                         sample_data=sample_data if sample_data else [],
+                        processing_date=processing_date,
                         updated_by=updated_by,
                         upload_id=upload_id,
                         is_session_upload=is_session_upload,
                         temp_file_path=local_file,
+                        ingestion_mode=ingestion_mode
                     )
-
-                return self._ingest_using_insert_values(
-                    target_table=target_table,
-                    datasource_config=datasource_config,
-                    intake_columns=intake_columns,
-                    sample_data=sample_data if sample_data else [],
-                    processing_date=processing_date,
-                    updated_by=updated_by,
-                    upload_id=upload_id,
-                    is_session_upload=is_session_upload,
-                    temp_file_path=local_file,
-                    ingestion_mode=ingestion_mode
-                )
+                finally:
+                    # Clean up the HDFS-downloaded temp file (not the user's original temp)
+                    if _hdfs_tmp and os.path.exists(_hdfs_tmp):
+                        try:
+                            os.unlink(_hdfs_tmp)
+                            logger.info(f"[ingest] Cleaned up HDFS temp file: {_hdfs_tmp}")
+                        except OSError:
+                            pass
 
             return False, "No file or sample data available for ingestion. Please re-upload the file."
 
@@ -1419,6 +1444,43 @@ class UploadService:
         except Exception as e:
             logger.warning(f"HDFS cleanup error: {e}")
             return False
+
+    def _download_from_hdfs(self, hdfs_path: str) -> Optional[str]:
+        """
+        Download an HDFS file to a local temp file and return the local path.
+        Returns None if hdfs command is unavailable or the download fails.
+        """
+        import subprocess
+        import tempfile
+
+        try:
+            suffix = os.path.basename(hdfs_path)
+            tmp_dir = os.path.join(settings.BASE_DIR, 'temp_uploads')
+            os.makedirs(tmp_dir, exist_ok=True)
+            tmp = tempfile.NamedTemporaryFile(
+                delete=False, suffix=f'_{suffix}', dir=tmp_dir
+            )
+            tmp.close()
+            get_cmd = ['hdfs', 'dfs', '-get', '-f', hdfs_path, tmp.name]
+            result = subprocess.run(get_cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode == 0:
+                logger.info(f"[hdfs] Downloaded {hdfs_path} → {tmp.name}")
+                return tmp.name
+            logger.error(f"[hdfs] Download failed: {result.stderr}")
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+            return None
+        except FileNotFoundError:
+            logger.warning("[hdfs] 'hdfs' command not found — skipping HDFS download")
+            return None
+        except subprocess.TimeoutExpired:
+            logger.error("[hdfs] Download timed out")
+            return None
+        except Exception as e:
+            logger.error(f"[hdfs] Download error: {e}")
+            return None
 
     # Columns whose values should be normalised to YYYYMMDD before ingest.
     # Matched case-insensitively against the target table column name.
