@@ -975,10 +975,33 @@ def upload_detail(request, upload_id: str):
     is_position_upload = upload_service.is_position_upload(upload)
     upload_status = upload.get('status', '')
 
+    # For position uploads: query the actual Hive partition count so the
+    # detail page shows the real row count regardless of what Kudu stores.
+    hive_row_count = None
+    if is_position_upload:
+        try:
+            import re as _re2
+            from core.repositories.impala_connection import impala_manager as _imp2
+            _tgt = upload.get('target_table_name', '').split('.')[-1]
+            _desc2 = upload.get('description', '') or ''
+            _dm2 = _re2.search(r'processing_date[=:\s]+(\d{8})', _desc2)
+            _pd2 = _dm2.group(1) if _dm2 else None
+            if _tgt and _pd2:
+                _cnt = _imp2.execute_query(
+                    f"SELECT COUNT(*) AS cnt FROM gmp_cis.{_tgt} "
+                    f"WHERE processing_date='{_pd2}'",
+                    database='gmp_cis'
+                )
+                hive_row_count = int(_cnt[0].get('cnt', 0)) if _cnt else None
+                logger.info(f"[detail] hive_row_count={hive_row_count} for {_tgt} pd={_pd2}")
+        except Exception as _hce:
+            logger.warning(f"[detail] Could not count Hive rows: {_hce}")
+
     context = {
         'upload': upload,
         'schema': schema,
         'sample_data': sample_data[:10],
+        'hive_row_count': hive_row_count,
         'validation_errors': validation_errors,
         'table_preview': table_preview,
         'recon_data': recon_data,

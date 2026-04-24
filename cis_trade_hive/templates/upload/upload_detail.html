@@ -143,6 +143,11 @@
                         <div class="col-md-3">
                             <label class="form-label text-muted small">Rows</label>
                             <div class="fw-bold">{{ upload.row_count|default:"-" }}</div>
+                            {% if hive_row_count is not None %}
+                            <div class="small text-{% if hive_row_count == upload.row_count %}success{% else %}warning{% endif %}">
+                                Hive: {{ hive_row_count }} rows
+                            </div>
+                            {% endif %}
                         </div>
                         <div class="col-md-3">
                             <label class="form-label text-muted small">Columns</label>
