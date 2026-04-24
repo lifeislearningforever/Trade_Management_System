@@ -25,6 +25,8 @@ from .services.upload_service import UploadService, FileValidationService
 from .repositories.upload_kudu_repository import UploadKuduRepository
 
 logger = logging.getLogger('upload')
+logger.warning("upload.views MODULE LOADED — version 79a2339+")
+print("upload.views MODULE LOADED — version 79a2339+", flush=True)
 
 # Initialize services
 upload_service = UploadService()
@@ -115,6 +117,8 @@ def upload_create(request):
     1. Standard upload - auto-detect schema
     2. Metadata-driven upload - use cis_datasource_mng config
     """
+    print(f"[UPLOAD_CREATE] method={request.method} path={request.path}", flush=True)
+    logger.warning(f"[UPLOAD_CREATE] method={request.method} path={request.path}")
     user_info = get_user_info(request)
 
     if request.method == 'POST':
