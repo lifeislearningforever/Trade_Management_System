@@ -221,14 +221,16 @@ def upload_create(request):
                         _all_rows = validation_result.all_data
                         _target_table = datasource_config.get('target_table', '')
                         _src_id = _target_table.lower().split('.')[-1]
-                        logger.info(f"[upload:direct] {len(_all_rows)} rows → {_target_table} "
-                                    f"src_id={_src_id} processing_date={_processing_date}")
+                        logger.warning(f"[upload:direct] {len(_all_rows)} rows → {_target_table} "
+                                       f"src_id={_src_id} processing_date={_processing_date}")
+                        print(f"[upload:direct] {len(_all_rows)} rows → {_target_table} src_id={_src_id}", flush=True)
 
-                        # Get target table column list from Impala
+                        # Get target table column list from Impala (ALL columns including processing_date)
                         from upload.repositories.datasource_repository import datasource_repository as _dsr
                         _tbl_info = _dsr.get_table_info(_target_table, 'gmp_cis')
-                        _tbl_cols = [c['name'] for c in _tbl_info.get('columns', [])
-                                     if c['name'].lower() != 'processing_date']
+                        _tbl_cols = [c['name'] for c in _tbl_info.get('columns', [])]
+                        logger.warning(f"[upload:direct] tbl_cols={_tbl_cols}")
+                        print(f"[upload:direct] tbl_cols={_tbl_cols}", flush=True)
 
                         POSITION_BASIS = {
                             'cis_user_sta_adhoc_position_1': 'TRADE_DATE',
@@ -237,6 +239,7 @@ def upload_create(request):
                             'cis_user_sta_adhoc_position_4': 'SETTLE_DATE',
                             'cis_user_sta_adhoc_position_5': 'SETTLE_DATE',
                         }
+                        # All fixed columns including processing_date (Kudu = regular column, not partition)
                         _fixed = {
                             'src_id': _src_id,
                             'src_system': 'USER_UPLOAD',
@@ -244,6 +247,7 @@ def upload_create(request):
                             'data_cat': 'sta',
                             'data_frq': 'adhoc',
                             'position_basis': POSITION_BASIS.get(_src_id, 'TRADE_DATE'),
+                            'processing_date': _processing_date,
                         }
 
                         _rows_inserted = 0
@@ -264,25 +268,29 @@ def upload_create(request):
                                         else:
                                             _v = _row.get(_col) or _row.get(_cl) or ''
                                         _v = str(_v).replace("'", "''") if _v else ''
-                                        _vals.append(f"'{_v}' AS {_col}")
+                                        _vals.append(f"'{_v}' AS `{_col}`")
                                     _selects.append(f"SELECT {', '.join(_vals)}")
                                 _union = '\nUNION ALL\n'.join(_selects)
-                                _kw = 'OVERWRITE' if _bi == 0 else 'INTO'
-                                _sql = (f"INSERT {_kw} gmp_cis.{_target_table}\n"
-                                        f"PARTITION (processing_date='{_processing_date}')\n"
+                                # Kudu tables use UPSERT, not INSERT OVERWRITE/PARTITION
+                                _sql = (f"UPSERT INTO gmp_cis.{_target_table}\n"
                                         f"SELECT * FROM (\n{_union}\n) t")
+                                logger.warning(f"[upload:direct] batch {_bi//50+1} UPSERT {len(_batch)} rows")
                                 _ok = _imp.execute_write(_sql, database='gmp_cis')
                                 if _ok:
                                     _rows_inserted += len(_batch)
+                                    logger.warning(f"[upload:direct] batch {_bi//50+1} OK — total so far: {_rows_inserted}")
                                 else:
-                                    logger.error(f"[upload:direct] batch {_bi//50+1} INSERT failed")
+                                    logger.error(f"[upload:direct] batch {_bi//50+1} UPSERT FAILED — stopping")
+                                    print(f"[upload:direct] batch {_bi//50+1} FAILED", flush=True)
                                     break
 
                             _ingest_ok = _rows_inserted > 0
                             _ingest_msg = f"Inserted {_rows_inserted} rows into {_target_table}"
-                            logger.info(f"[upload:direct] done: {_ingest_msg}")
+                            logger.warning(f"[upload:direct] done: {_ingest_msg}")
+                            print(f"[upload:direct] done: {_ingest_msg}", flush=True)
                         else:
-                            logger.error(f"[upload:direct] all_rows={len(_all_rows)} tbl_cols={len(_tbl_cols)} — nothing to insert")
+                            logger.error(f"[upload:direct] SKIP — all_rows={len(_all_rows)} tbl_cols={len(_tbl_cols)} — nothing to insert")
+                            print(f"[upload:direct] SKIP — all_rows={len(_all_rows)} tbl_cols={len(_tbl_cols)}", flush=True)
 
                         _desc = (f"{description}\n[Datasource: {datasource_config.get('source_id', '')}]\n"
                                  f"processing_date={_processing_date}")
