@@ -334,18 +334,33 @@ def upload_create(request):
                                     _ingest_msg = f"Loaded {_rows_inserted} rows → {_hdfs_file}"
                                     logger.warning(f"[upload:direct] done: {_ingest_msg}")
                                     print(f"[upload:direct] done: {_ingest_msg}", flush=True)
-                                    # Refresh Impala metadata — INVALIDATE METADATA is the
-                                    # correct command for Impala external tables (MSCK REPAIR
-                                    # is Hive-only and fails on Impala/CDH).
-                                    # REFRESH with partition path for targeted refresh.
+                                    # Register partition + refresh files in Impala/CDH:
+                                    # 1. ALTER TABLE ADD PARTITION — registers the new
+                                    #    partition in the Hive Metastore (required when the
+                                    #    partition directory was created by hdfs -put, not
+                                    #    by an INSERT statement).
+                                    # 2. REFRESH PARTITION — tells Impala to re-read the
+                                    #    files in that specific partition from HDFS.
+                                    #    Faster and more targeted than INVALIDATE METADATA.
                                     try:
                                         _imp.execute_write(
-                                            f"INVALIDATE METADATA gmp_cis.{_target_table}",
+                                            f"ALTER TABLE gmp_cis.{_target_table} "
+                                            f"ADD IF NOT EXISTS PARTITION "
+                                            f"(processing_date='{_processing_date}')",
                                             database='gmp_cis'
                                         )
-                                        logger.warning(f"[upload:direct] INVALIDATE METADATA done")
-                                    except Exception as _me:
-                                        logger.warning(f"[upload:direct] INVALIDATE METADATA warning: {_me}")
+                                        logger.warning(f"[upload:direct] ADD PARTITION done")
+                                    except Exception as _ae:
+                                        logger.warning(f"[upload:direct] ADD PARTITION warning: {_ae}")
+                                    try:
+                                        _imp.execute_write(
+                                            f"REFRESH gmp_cis.{_target_table} "
+                                            f"PARTITION (processing_date='{_processing_date}')",
+                                            database='gmp_cis'
+                                        )
+                                        logger.warning(f"[upload:direct] REFRESH PARTITION done")
+                                    except Exception as _re2:
+                                        logger.warning(f"[upload:direct] REFRESH PARTITION warning: {_re2}")
                                 else:
                                     logger.error(f"[upload:direct] hdfs put FAILED rc={_put.returncode} stderr={_put.stderr}")
                                     print(f"[upload:direct] hdfs put FAILED: {_put.stderr}", flush=True)
