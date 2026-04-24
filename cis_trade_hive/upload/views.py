@@ -225,10 +225,13 @@ def upload_create(request):
                                        f"src_id={_src_id} processing_date={_processing_date}")
                         print(f"[upload:direct] {len(_all_rows)} rows → {_target_table} src_id={_src_id}", flush=True)
 
-                        # Get target table column list from Impala (ALL columns including processing_date)
+                        # Get target table column list from Impala.
+                        # Exclude processing_date — it is the Hive partition key,
+                        # not a regular column in the SELECT list.
                         from upload.repositories.datasource_repository import datasource_repository as _dsr
                         _tbl_info = _dsr.get_table_info(_target_table, 'gmp_cis')
-                        _tbl_cols = [c['name'] for c in _tbl_info.get('columns', [])]
+                        _tbl_cols = [c['name'] for c in _tbl_info.get('columns', [])
+                                     if c['name'].lower() != 'processing_date']
                         logger.warning(f"[upload:direct] tbl_cols={_tbl_cols}")
                         print(f"[upload:direct] tbl_cols={_tbl_cols}", flush=True)
 
@@ -239,7 +242,8 @@ def upload_create(request):
                             'cis_user_sta_adhoc_position_4': 'SETTLE_DATE',
                             'cis_user_sta_adhoc_position_5': 'SETTLE_DATE',
                         }
-                        # All fixed columns including processing_date (Kudu = regular column, not partition)
+                        # Fixed server-injected columns (NOT including processing_date —
+                        # that goes in PARTITION clause, not in the SELECT list)
                         _fixed = {
                             'src_id': _src_id,
                             'src_system': 'USER_UPLOAD',
@@ -247,7 +251,6 @@ def upload_create(request):
                             'data_cat': 'sta',
                             'data_frq': 'adhoc',
                             'position_basis': POSITION_BASIS.get(_src_id, 'TRADE_DATE'),
-                            'processing_date': _processing_date,
                         }
 
                         _rows_inserted = 0
@@ -271,16 +274,19 @@ def upload_create(request):
                                         _vals.append(f"'{_v}' AS `{_col}`")
                                     _selects.append(f"SELECT {', '.join(_vals)}")
                                 _union = '\nUNION ALL\n'.join(_selects)
-                                # Kudu tables use UPSERT, not INSERT OVERWRITE/PARTITION
-                                _sql = (f"UPSERT INTO gmp_cis.{_target_table}\n"
+                                # Hive external table: batch 1 = OVERWRITE (clears partition),
+                                # subsequent batches = INTO (append within same partition).
+                                _kw = 'OVERWRITE' if _bi == 0 else 'INTO'
+                                _sql = (f"INSERT {_kw} gmp_cis.{_target_table}\n"
+                                        f"PARTITION (processing_date='{_processing_date}')\n"
                                         f"SELECT * FROM (\n{_union}\n) t")
-                                logger.warning(f"[upload:direct] batch {_bi//50+1} UPSERT {len(_batch)} rows")
+                                logger.warning(f"[upload:direct] batch {_bi//50+1} INSERT {_kw} {len(_batch)} rows")
                                 _ok = _imp.execute_write(_sql, database='gmp_cis')
                                 if _ok:
                                     _rows_inserted += len(_batch)
                                     logger.warning(f"[upload:direct] batch {_bi//50+1} OK — total so far: {_rows_inserted}")
                                 else:
-                                    logger.error(f"[upload:direct] batch {_bi//50+1} UPSERT FAILED — stopping")
+                                    logger.error(f"[upload:direct] batch {_bi//50+1} INSERT FAILED — stopping")
                                     print(f"[upload:direct] batch {_bi//50+1} FAILED", flush=True)
                                     break
 
