@@ -305,7 +305,7 @@ class PartyRepository(ImpalaReferenceRepository):
         if status == self.STATUS_VALIDATED and validated_by:
             validated_by_escaped = validated_by.replace("'", "''")
             set_parts.append(f"validated_by = '{validated_by_escaped}'")
-            set_parts.append(f"validated_at = NOW()")
+            # validated_at column does not exist in cis_party — use updated_at as proxy
             if validation_comments:
                 comments_escaped = validation_comments.replace("'", "''")
                 set_parts.append(f"validation_comments = '{comments_escaped}'")
