@@ -857,6 +857,20 @@ def upload_detail(request, upload_id: str):
     if not upload:
         raise Http404("Upload not found")
 
+    # Normalise session-upload dicts: fill in fields the template expects
+    # that are only present on DB-persisted rows.
+    if is_session_upload:
+        from datetime import datetime as _dt
+        _now = _dt.now().strftime('%Y-%m-%d %H:%M:%S')
+        upload.setdefault('created_at', _now)
+        upload.setdefault('updated_at', _now)
+        upload.setdefault('updated_by', upload.get('created_by', ''))
+        upload.setdefault('hdfs_path', '')
+        upload.setdefault('mime_type', '')
+        upload.setdefault('original_file_name', upload.get('file_name', ''))
+        upload.setdefault('validation_errors_json', '[]')
+        upload.setdefault('target_database', 'gmp_cis')
+
     # Parse JSON fields
     schema = []
     sample_data = []
