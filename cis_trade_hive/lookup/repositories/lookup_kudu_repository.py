@@ -72,12 +72,8 @@ class LookupKuduRepository:
             Table metadata including columns and row count
         """
         try:
-            # Get column info
+            # Get column info (SELECT * probe + DESCRIBE fallback)
             columns = self.get_table_columns(table_name)
-            logger.debug(f"get_table_info: {table_name} has {len(columns)} columns: {[c['name'] for c in columns]}")
-
-            if not columns:
-                logger.warning(f"get_table_info: DESCRIBE returned no columns for {table_name} — DESCRIBE may have failed")
 
             # Get row count
             count_query = f"SELECT COUNT(*) as cnt FROM {self.database}.{table_name}"
@@ -87,8 +83,8 @@ class LookupKuduRepository:
             # Derive display name from table name
             display_name = self._format_table_name(table_name)
 
-            # Identify primary key column
-            pk_column = self._identify_pk_column(columns)
+            # Identify primary key column — also check extended DESCRIBE primary_key field
+            pk_column = self._identify_pk_column_from_describe(table_name) or self._identify_pk_column(columns)
 
             return {
                 'table_name': table_name,
@@ -106,39 +102,61 @@ class LookupKuduRepository:
     def get_table_columns(self, table_name: str) -> List[Dict[str, Any]]:
         """
         Get column metadata for a table.
-
-        Args:
-            table_name: Name of the table
-
-        Returns:
-            List of column metadata
+        Uses SELECT * LIMIT 0 to get column names from cursor.description — this is
+        immune to DESCRIBE format differences across Impala versions and avoids the
+        issue where Impala's extended DESCRIBE drops Kudu PK columns from the output.
+        Falls back to DESCRIBE if the SELECT approach fails.
         """
         try:
-            query = f"DESCRIBE {self.database}.{table_name}"
-            results = impala_manager.execute_query(query)
+            # Primary approach: derive columns from actual query result metadata
+            # cursor.description always matches what SELECT * returns — no filtering needed
+            probe_query = f"SELECT * FROM {self.database}.{table_name} LIMIT 1"
+            results = impala_manager.execute_query(probe_query)
 
-            # Log raw result to diagnose column key names from this Impala version
             if results:
-                logger.warning(f"DESCRIBE {table_name} raw first row keys: {list(results[0].keys())} | values: {list(results[0].values())}")
-            else:
-                logger.warning(f"DESCRIBE {table_name} returned empty results")
+                # Build columns from the actual row keys (cursor.description mapped by execute_query)
+                first_row = results[0]
+                columns = []
+                for col_name in first_row.keys():
+                    # Infer type from value
+                    val = first_row[col_name]
+                    if isinstance(val, bool):
+                        col_type = 'BOOLEAN'
+                    elif isinstance(val, int):
+                        col_type = 'BIGINT'
+                    elif isinstance(val, float):
+                        col_type = 'DECIMAL'
+                    else:
+                        col_type = 'STRING'
+                    columns.append({
+                        'name': col_name,
+                        'type': col_type,
+                        'display_name': self._format_column_name(col_name),
+                        'is_nullable': True
+                    })
+                logger.debug(f"get_table_columns {table_name}: {len(columns)} cols from SELECT *")
+                return columns
+
+            # Fallback: DESCRIBE (works even on empty tables)
+            desc_query = f"DESCRIBE {self.database}.{table_name}"
+            desc_results = impala_manager.execute_query(desc_query)
 
             columns = []
-            if results:
-                for row in results:
-                    # Impala may return 'name'/'type' or 'col_name'/'data_type' depending on version
+            if desc_results:
+                for row in desc_results:
                     col_name = row.get('name') or row.get('col_name') or row.get('NAME') or ''
                     col_type = row.get('type') or row.get('data_type') or row.get('TYPE') or 'STRING'
+                    # Skip blank separator rows and comment rows (#...) from extended DESCRIBE
+                    if not col_name or col_name.startswith('#') or col_name.startswith(' '):
+                        continue
+                    columns.append({
+                        'name': col_name,
+                        'type': col_type.upper(),
+                        'display_name': self._format_column_name(col_name),
+                        'is_nullable': True
+                    })
 
-                    if col_name and not col_name.startswith('#'):
-                        columns.append({
-                            'name': col_name,
-                            'type': col_type.upper(),
-                            'display_name': self._format_column_name(col_name),
-                            'is_nullable': True  # Kudu allows nulls except for PK
-                        })
-
-            logger.warning(f"DESCRIBE {table_name} parsed {len(columns)} columns: {[c['name'] for c in columns]}")
+            logger.debug(f"get_table_columns {table_name}: {len(columns)} cols from DESCRIBE fallback")
             return columns
 
         except Exception as e:
@@ -175,7 +193,9 @@ class LookupKuduRepository:
         try:
             columns = self.get_table_columns(table_name)
             col_names = [c['name'] for c in columns]
-            select_cols = ', '.join(col_names) if col_names else '*'
+            # Always SELECT * so we get all columns including PK even if DESCRIBE
+            # omits it (Impala extended DESCRIBE can drop Kudu PK from regular section)
+            select_cols = '*'
 
             # Build WHERE clause
             where_clauses = []
@@ -443,6 +463,23 @@ class LookupKuduRepository:
 
         # Default to first column
         return columns[0]['name']
+
+    def _identify_pk_column_from_describe(self, table_name: str) -> Optional[str]:
+        """
+        Use Impala extended DESCRIBE to find the column with primary_key = 'true'.
+        Impala's extended DESCRIBE returns a 'primary_key' column — use it directly.
+        """
+        try:
+            query = f"DESCRIBE {self.database}.{table_name}"
+            results = impala_manager.execute_query(query)
+            for row in (results or []):
+                col_name = row.get('name') or row.get('col_name') or ''
+                is_pk = str(row.get('primary_key', '')).lower() == 'true'
+                if col_name and not col_name.startswith('#') and is_pk:
+                    return col_name
+        except Exception:
+            pass
+        return None
 
     def _escape_sql(self, value: str) -> str:
         """Escape SQL string to prevent injection."""
