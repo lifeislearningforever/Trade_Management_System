@@ -31,8 +31,8 @@ def _serialise_sample_data(rows) -> str:
     """
     Safely serialise sample_data rows for Kudu storage.
 
-    Caps at 20 rows and truncates each cell value to 200 chars so the
-    resulting JSON stays well within Kudu STRING limits.
+    Caps at 500 rows and truncates each cell value to 200 chars so the
+    resulting JSON stays within Kudu STRING limits.
     The sample is only used as a fallback when the temp file is unavailable;
     the full file is always preferred for actual ingestion.
     """
@@ -40,7 +40,7 @@ def _serialise_sample_data(rows) -> str:
         return '[]'
     if not isinstance(rows, list):
         return '[]'
-    capped = rows[:20]
+    capped = rows[:500]
     safe_rows = []
     for row in capped:
         if isinstance(row, dict):

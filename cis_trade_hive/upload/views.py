@@ -355,6 +355,8 @@ def upload_create(request):
                                 f.write(chunk)
 
                         # Store in session with datasource config info
+                        # Use all_data (full rows) for ingest; sample_data is preview-only
+                        _all_data = getattr(validation_result, 'all_data', None) or validation_result.sample_data
                         request.session[f'upload_{upload_id}'] = {
                             'upload_id': upload_id,
                             'file_name': file_name,
@@ -367,7 +369,7 @@ def upload_create(request):
                             'encoding': validation_result.encoding,
                             'description': description,
                             'schema_json': validation_result.columns,
-                            'sample_data_json': validation_result.sample_data,
+                            'sample_data_json': _all_data,  # full rows for ingest
                             'status': 'VALIDATED',
                             'created_by': user_info['username'],
                             'target_table_name': datasource_config.get('target_table', ''),
@@ -407,7 +409,8 @@ def upload_create(request):
                         for chunk in uploaded_file.chunks():
                             f.write(chunk)
 
-                    # Store in session
+                    # Store in session — use all_data (full rows) for ingest
+                    _all_data = getattr(validation_result, 'all_data', None) or validation_result.sample_data
                     request.session[f'upload_{upload_id}'] = {
                         'upload_id': upload_id,
                         'file_name': file_name,
@@ -420,7 +423,7 @@ def upload_create(request):
                         'encoding': validation_result.encoding,
                         'description': description,
                         'schema_json': validation_result.columns,
-                        'sample_data_json': validation_result.sample_data,
+                        'sample_data_json': _all_data,  # full rows for ingest
                         'status': 'VALIDATED',
                         'created_by': user_info['username'],
                         'temp_file_path': temp_file_path,  # Path to saved file
