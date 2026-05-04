@@ -310,20 +310,21 @@ class LookupService:
                 continue
 
             col_type = column_types[col_name]
+            col_type_base = col_type.split('(')[0]  # handle DECIMAL(20,8), VARCHAR(255) etc.
 
             if value is None or value == '':
                 processed[col_name] = None
-            elif col_type in ('INT', 'INTEGER', 'BIGINT', 'SMALLINT', 'TINYINT'):
+            elif col_type_base in ('INT', 'INTEGER', 'BIGINT', 'SMALLINT', 'TINYINT'):
                 try:
                     processed[col_name] = int(value)
                 except (ValueError, TypeError):
                     processed[col_name] = None
-            elif col_type in ('FLOAT', 'DOUBLE', 'DECIMAL'):
+            elif col_type_base in ('FLOAT', 'DOUBLE', 'DECIMAL', 'REAL'):
                 try:
                     processed[col_name] = float(value)
                 except (ValueError, TypeError):
                     processed[col_name] = None
-            elif col_type in ('BOOLEAN', 'BOOL'):
+            elif col_type_base in ('BOOLEAN', 'BOOL'):
                 if isinstance(value, bool):
                     processed[col_name] = value
                 elif isinstance(value, str):

@@ -248,7 +248,8 @@ document.addEventListener('DOMContentLoaded', function() {
     function createInputForType(colName, colType, value, isPk, isNew) {
         let input;
 
-        if (colType === 'BOOLEAN' || colType === 'BOOL') {
+        const colTypeBase = colType.split('(')[0];
+        if (colTypeBase === 'BOOLEAN' || colTypeBase === 'BOOL') {
             input = document.createElement('select');
             input.className = 'form-select form-select-sm';
             // Normalize the value to check for truthiness
@@ -257,12 +258,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 <option value="true" ${isTrueValue ? 'selected' : ''}>Yes</option>
                 <option value="false" ${!isTrueValue ? 'selected' : ''}>No</option>
             `;
-        } else if (colType === 'INT' || colType === 'INTEGER' || colType === 'BIGINT' || colType === 'SMALLINT' || colType === 'TINYINT') {
+        } else if (colTypeBase === 'INT' || colTypeBase === 'INTEGER' || colTypeBase === 'BIGINT' || colTypeBase === 'SMALLINT' || colTypeBase === 'TINYINT') {
             input = document.createElement('input');
             input.type = 'number';
             input.className = 'form-control form-control-sm';
             input.value = value || '';
-        } else if (colType === 'FLOAT' || colType === 'DOUBLE' || colType === 'DECIMAL') {
+        } else if (colTypeBase === 'FLOAT' || colTypeBase === 'DOUBLE' || colTypeBase === 'DECIMAL' || colTypeBase === 'REAL') {
             input = document.createElement('input');
             input.type = 'number';
             input.step = 'any';

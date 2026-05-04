@@ -74,6 +74,10 @@ class LookupKuduRepository:
         try:
             # Get column info
             columns = self.get_table_columns(table_name)
+            logger.debug(f"get_table_info: {table_name} has {len(columns)} columns: {[c['name'] for c in columns]}")
+
+            if not columns:
+                logger.warning(f"get_table_info: DESCRIBE returned no columns for {table_name} — DESCRIBE may have failed")
 
             # Get row count
             count_query = f"SELECT COUNT(*) as cnt FROM {self.database}.{table_name}"
@@ -96,7 +100,7 @@ class LookupKuduRepository:
             }
 
         except Exception as e:
-            logger.error(f"Error getting table info for {table_name}: {str(e)}")
+            logger.error(f"Error getting table info for {table_name}: {str(e)}", exc_info=True)
             return None
 
     def get_table_columns(self, table_name: str) -> List[Dict[str, Any]]:
@@ -116,8 +120,9 @@ class LookupKuduRepository:
             columns = []
             if results:
                 for row in results:
-                    col_name = row.get('name', row.get('NAME', ''))
-                    col_type = row.get('type', row.get('TYPE', 'STRING'))
+                    # Impala may return 'name'/'type' or 'col_name'/'data_type' depending on version
+                    col_name = row.get('name') or row.get('col_name') or row.get('NAME') or ''
+                    col_type = row.get('type') or row.get('data_type') or row.get('TYPE') or 'STRING'
 
                     if col_name and not col_name.startswith('#'):
                         columns.append({
@@ -163,6 +168,7 @@ class LookupKuduRepository:
         try:
             columns = self.get_table_columns(table_name)
             col_names = [c['name'] for c in columns]
+            select_cols = ', '.join(col_names) if col_names else '*'
 
             # Build WHERE clause
             where_clauses = []
@@ -171,7 +177,8 @@ class LookupKuduRepository:
             if search:
                 search_conditions = []
                 for col in columns:
-                    if col['type'] in ('STRING', 'VARCHAR', 'CHAR'):
+                    col_type_base = col['type'].split('(')[0]
+                    if col_type_base in ('STRING', 'VARCHAR', 'CHAR'):
                         search_conditions.append(
                             f"LOWER({col['name']}) LIKE LOWER('%{self._escape_sql(search)}%')"
                         )
@@ -212,7 +219,7 @@ class LookupKuduRepository:
 
             # Get paginated rows
             data_query = f"""
-                SELECT {', '.join(col_names)}
+                SELECT {select_cols}
                 FROM {self.database}.{table_name}
                 {where_sql}
                 {order_sql}
