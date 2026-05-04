@@ -304,6 +304,28 @@ class LookupTableAPIView(View):
             return JsonResponse({'error': str(e)}, status=500)
 
 
+def lookup_debug_api(request, table_name):
+    """Temporary debug endpoint — returns raw context data as JSON."""
+    import decimal
+    def safe(v):
+        if isinstance(v, decimal.Decimal):
+            return float(v)
+        return v
+
+    table_info = lookup_service.get_table_metadata(table_name)
+    result = lookup_service.get_table_rows(table_name=table_name, page=1, page_size=5)
+    return JsonResponse({
+        'pk_column': table_info.get('pk_column') if table_info else None,
+        'columns': table_info.get('columns', []) if table_info else [],
+        'row_count': table_info.get('row_count') if table_info else 0,
+        'rows_returned': len(result['rows']),
+        'total_count': result['total_count'],
+        'first_row': {k: safe(v) for k, v in result['rows'][0].items()} if result['rows'] else None,
+        'first_row_keys': list(result['rows'][0].keys()) if result['rows'] else [],
+        'column_names': [c['name'] for c in table_info.get('columns', [])] if table_info else [],
+    })
+
+
 class LookupDropdownAPIView(View):
     """API view to get dropdown options from a lookup table"""
 
