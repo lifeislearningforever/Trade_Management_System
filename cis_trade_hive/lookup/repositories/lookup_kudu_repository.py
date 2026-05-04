@@ -41,7 +41,8 @@ class LookupKuduRepository:
             tables = []
             if results:
                 for row in results:
-                    table_name = row.get('name', row.get('NAME', ''))
+                    # Impala SHOW TABLES returns column 'tab_name' (not 'name')
+                    table_name = row.get('tab_name', row.get('name', row.get('NAME', list(row.values())[0] if row else '')))
                     if table_name:
                         # Exclude tables with '_rep' prefix or suffix (report tables)
                         table_name_lower = table_name.lower()
