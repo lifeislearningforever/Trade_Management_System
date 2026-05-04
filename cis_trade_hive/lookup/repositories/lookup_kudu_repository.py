@@ -117,6 +117,12 @@ class LookupKuduRepository:
             query = f"DESCRIBE {self.database}.{table_name}"
             results = impala_manager.execute_query(query)
 
+            # Log raw result to diagnose column key names from this Impala version
+            if results:
+                logger.warning(f"DESCRIBE {table_name} raw first row keys: {list(results[0].keys())} | values: {list(results[0].values())}")
+            else:
+                logger.warning(f"DESCRIBE {table_name} returned empty results")
+
             columns = []
             if results:
                 for row in results:
@@ -132,10 +138,11 @@ class LookupKuduRepository:
                             'is_nullable': True  # Kudu allows nulls except for PK
                         })
 
+            logger.warning(f"DESCRIBE {table_name} parsed {len(columns)} columns: {[c['name'] for c in columns]}")
             return columns
 
         except Exception as e:
-            logger.error(f"Error getting columns for {table_name}: {str(e)}")
+            logger.error(f"Error getting columns for {table_name}: {str(e)}", exc_info=True)
             return []
 
     # =========================================================================
@@ -225,7 +232,9 @@ class LookupKuduRepository:
                 {order_sql}
                 LIMIT {limit} OFFSET {offset}
             """
+            logger.warning(f"get_all_rows query for {table_name}: SELECT {select_cols} ... total_count={total_count}")
             rows = impala_manager.execute_query(data_query) or []
+            logger.warning(f"get_all_rows {table_name}: got {len(rows)} rows")
 
             return rows, total_count
 
