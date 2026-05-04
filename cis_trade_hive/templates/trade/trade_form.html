@@ -259,9 +259,16 @@
                             <!-- Exchange -->
                             <div class="col-md-6">
                                 <label class="form-label">Exchange</label>
-                                <select class="form-select" name="charge_exchange" id="charge_exchange">
-                                    <option value="">Select Exchange</option>
-                                </select>
+                                <div class="input-group">
+                                    <select class="form-select" name="charge_exchange" id="charge_exchange">
+                                        <option value="">Select Exchange</option>
+                                    </select>
+                                    <span class="input-group-text d-none text-muted" id="exchange_lock_badge"
+                                          title="Exchange is fixed for this broker">
+                                        <i class="bi bi-lock-fill"></i>
+                                    </span>
+                                </div>
+                                <small class="text-muted d-none" id="exchange_lock_hint"></small>
                             </div>
                         </div>
 
@@ -1032,10 +1039,30 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load exchanges dropdown
     loadExchanges();
 
-    // If editing and broker is already set, load charges
+    // If editing and broker is already set, restore exchange lock state then load charges
     const brokerEl = document.getElementById('brokers');
     if (brokerEl && brokerEl.value) {
-        calculateBrokerCharges();
+        fetch(`/trade/api/exchanges-for-broker/?broker=${encodeURIComponent(brokerEl.value)}`)
+            .then(r => r.json())
+            .then(data => {
+                const exchanges = data.results || [];
+                const exchangeEl = document.getElementById('charge_exchange');
+                if (exchangeEl) {
+                    exchangeEl.innerHTML = '<option value="">Select Exchange</option>';
+                    exchanges.forEach(function(ex) {
+                        const opt = document.createElement('option');
+                        opt.value = ex.value;
+                        opt.textContent = ex.label;
+                        exchangeEl.appendChild(opt);
+                    });
+                    // Restore saved exchange value (edit mode)
+                    const savedExchange = "{{ trade.charge_exchange|default:'' }}";
+                    if (savedExchange) exchangeEl.value = savedExchange;
+                    if (exchanges.length === 1) setExchangeLock(true, exchanges[0].label);
+                }
+                calculateBrokerCharges();
+            })
+            .catch(() => calculateBrokerCharges());
     }
 
     // Calculate gross amount and total on page load (for edit mode)
@@ -1086,6 +1113,24 @@ function loadExchanges() {
         });
 }
 
+function setExchangeLock(locked, label) {
+    const exchangeEl   = document.getElementById('charge_exchange');
+    const lockBadge    = document.getElementById('exchange_lock_badge');
+    const lockHint     = document.getElementById('exchange_lock_hint');
+    if (!exchangeEl) return;
+    if (locked) {
+        exchangeEl.disabled = true;
+        exchangeEl.classList.add('bg-light');
+        if (lockBadge) lockBadge.classList.remove('d-none');
+        if (lockHint)  { lockHint.textContent = `Fixed to ${label} for this broker`; lockHint.classList.remove('d-none'); }
+    } else {
+        exchangeEl.disabled = false;
+        exchangeEl.classList.remove('bg-light');
+        if (lockBadge) lockBadge.classList.add('d-none');
+        if (lockHint)  { lockHint.textContent = ''; lockHint.classList.add('d-none'); }
+    }
+}
+
 // Broker dropdown change handler — auto-set exchange from LUT then calculate
 const brokersEl = document.getElementById('brokers');
 if (brokersEl) {
@@ -1093,10 +1138,13 @@ if (brokersEl) {
         const broker = this.value;
         const exchangeEl = document.getElementById('charge_exchange');
         if (!broker || !exchangeEl) {
+            // Broker cleared — unlock and restore full exchange list
+            setExchangeLock(false, '');
+            loadExchanges();
             calculateBrokerCharges();
             return;
         }
-        // Fetch exchanges available for this broker and auto-select if only one
+        // Fetch exchanges available for this broker
         fetch(`/trade/api/exchanges-for-broker/?broker=${encodeURIComponent(broker)}`)
             .then(r => r.json())
             .then(data => {
@@ -1110,9 +1158,13 @@ if (brokersEl) {
                     opt.dataset.country = ex.country;
                     exchangeEl.appendChild(opt);
                 });
-                // Auto-select when broker maps to exactly one exchange
                 if (exchanges.length === 1) {
+                    // Exactly one exchange for this broker — auto-select and lock
                     exchangeEl.value = exchanges[0].value;
+                    setExchangeLock(true, exchanges[0].label);
+                } else {
+                    // Multiple exchanges — user must pick, but field is enabled
+                    setExchangeLock(false, '');
                 }
                 calculateBrokerCharges();
             })
