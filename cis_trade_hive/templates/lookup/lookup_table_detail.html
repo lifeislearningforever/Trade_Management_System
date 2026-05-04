@@ -86,54 +86,7 @@
                         </tr>
                     </thead>
                     <tbody id="tableBody">
-                        {% for row in rows %}
-                        <tr data-pk="{{ row|get_item:pk_column }}" class="data-row">
-                            {% for col in columns %}
-                            <td class="editable-cell" data-column="{{ col.name }}" data-type="{{ col.type }}"
-                                {% if col.type == 'BOOLEAN' or col.type == 'BOOL' %}data-original="{% if row|get_item:col.name %}true{% else %}false{% endif %}"{% else %}data-original="{{ row|get_item:col.name|default:'' }}"{% endif %}
-                                {% if col.name == pk_column %}data-is-pk="true"{% endif %}>
-                                {% with value=row|get_item:col.name %}
-                                    {% if col.type == 'BOOLEAN' or col.type == 'BOOL' %}
-                                        {% if value %}
-                                            <span class="badge badge-success">Yes</span>
-                                        {% else %}
-                                            <span class="badge badge-secondary">No</span>
-                                        {% endif %}
-                                    {% elif col.name == pk_column %}
-                                        <strong class="text-primary">{{ value|default:"-" }}</strong>
-                                    {% else %}
-                                        {{ value|default:"-" }}
-                                    {% endif %}
-                                {% endwith %}
-                            </td>
-                            {% endfor %}
-                            <td class="sticky-action-column">
-                                <div class="btn-group btn-group-sm action-buttons">
-                                    <button type="button" class="btn btn-outline-primary btn-edit-row" title="Edit Row">
-                                        <i class="bi bi-pencil"></i>
-                                    </button>
-                                    <button type="button" class="btn btn-outline-danger btn-delete-row" title="Delete Row">
-                                        <i class="bi bi-trash"></i>
-                                    </button>
-                                </div>
-                                <div class="btn-group btn-group-sm edit-buttons" style="display: none;">
-                                    <button type="button" class="btn btn-success btn-save-row" title="Save">
-                                        <i class="bi bi-check-lg"></i>
-                                    </button>
-                                    <button type="button" class="btn btn-secondary btn-cancel-row" title="Cancel">
-                                        <i class="bi bi-x-lg"></i>
-                                    </button>
-                                </div>
-                            </td>
-                        </tr>
-                        {% empty %}
-                        <tr class="no-data-row">
-                            <td colspan="{{ columns|length|add:1 }}" class="text-center py-4 text-muted">
-                                <i class="bi bi-inbox" style="font-size: 2rem; opacity: 0.3;"></i>
-                                <p class="mt-2 mb-0">No data found. Click the + button below to add a row.</p>
-                            </td>
-                        </tr>
-                        {% endfor %}
+                        <!-- rows rendered by JS from rows_json to avoid template filter issues -->
                     </tbody>
                     <tfoot>
                         <tr id="addRowBtn" class="table-light" style="cursor: pointer;">
@@ -228,9 +181,67 @@ document.addEventListener('DOMContentLoaded', function() {
     const pkColumn = '{{ pk_column }}';
     const columns = {{ columns_json }};
     const csrfToken = '{{ csrf_token }}';
+    const initialRows = {{ rows_json }};
 
     const tableBody = document.getElementById('tableBody');
     const addNewRowBtn = document.getElementById('addNewRowBtn');
+
+    // Render initial rows from JSON (avoids Django template filter issues)
+    function renderInitialRows() {
+        tableBody.innerHTML = '';
+        if (!initialRows || initialRows.length === 0) {
+            tableBody.innerHTML = `<tr class="no-data-row">
+                <td colspan="${columns.length + 1}" class="text-center py-4 text-muted">
+                    <i class="bi bi-inbox" style="font-size:2rem;opacity:0.3;"></i>
+                    <p class="mt-2 mb-0">No data found. Click the + button below to add a row.</p>
+                </td></tr>`;
+            return;
+        }
+        initialRows.forEach(function(row) {
+            const tr = document.createElement('tr');
+            tr.className = 'data-row';
+            tr.dataset.pk = row[pkColumn] != null ? row[pkColumn] : '';
+            columns.forEach(function(col) {
+                const td = document.createElement('td');
+                td.className = 'editable-cell';
+                td.dataset.column = col.name;
+                td.dataset.type = col.type;
+                const val = row[col.name];
+                const colTypeBase = col.type.split('(')[0];
+                if (colTypeBase === 'BOOLEAN' || colTypeBase === 'BOOL') {
+                    td.dataset.original = val ? 'true' : 'false';
+                    td.innerHTML = val
+                        ? '<span class="badge bg-success">Yes</span>'
+                        : '<span class="badge bg-secondary">No</span>';
+                } else {
+                    const displayVal = (val !== null && val !== undefined && val !== '') ? val : '-';
+                    td.dataset.original = (val !== null && val !== undefined) ? String(val) : '';
+                    if (col.name === pkColumn) {
+                        td.dataset.isPk = 'true';
+                        td.innerHTML = `<strong class="text-primary">${displayVal}</strong>`;
+                    } else {
+                        td.textContent = displayVal;
+                    }
+                }
+                tr.appendChild(td);
+            });
+            // Action buttons cell
+            const actionTd = document.createElement('td');
+            actionTd.className = 'sticky-action-column';
+            actionTd.innerHTML = `
+                <div class="btn-group btn-group-sm action-buttons">
+                    <button type="button" class="btn btn-outline-primary btn-edit-row" title="Edit Row"><i class="bi bi-pencil"></i></button>
+                    <button type="button" class="btn btn-outline-danger btn-delete-row" title="Delete Row"><i class="bi bi-trash"></i></button>
+                </div>
+                <div class="btn-group btn-group-sm edit-buttons" style="display:none;">
+                    <button type="button" class="btn btn-success btn-save-row" title="Save"><i class="bi bi-check-lg"></i></button>
+                    <button type="button" class="btn btn-secondary btn-cancel-row" title="Cancel"><i class="bi bi-x-lg"></i></button>
+                </div>`;
+            tr.appendChild(actionTd);
+            tableBody.appendChild(tr);
+        });
+    }
+    renderInitialRows();
 
     // Get column info
     function getColumnInfo() {

@@ -73,10 +73,24 @@ class LookupTableDetailView(View):
             columns = table_info.get('columns', [])
             columns_for_js = [{'name': col['name'], 'type': col['type']} for col in columns]
 
+            # Serialize rows to JSON for JS rendering (avoids get_item filter issues)
+            import decimal
+            def _json_safe(v):
+                if isinstance(v, decimal.Decimal):
+                    return float(v)
+                return v
+            rows_for_js = [
+                {k: _json_safe(v) for k, v in row.items()}
+                for row in result['rows']
+            ]
+
+            logger.warning(f"LookupDetailView: {table_name} columns={len(columns)} rows={len(result['rows'])} pk={table_info.get('pk_column')}")
+
             context = {
                 'table_info': table_info,
                 'table_name': table_name,
                 'rows': result['rows'],
+                'rows_json': mark_safe(json.dumps(rows_for_js, default=str)),
                 'columns': columns,
                 'columns_json': mark_safe(json.dumps(columns_for_js)),
                 'pk_column': table_info.get('pk_column'),
