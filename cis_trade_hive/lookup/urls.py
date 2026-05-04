@@ -23,4 +23,5 @@ urlpatterns = [
     path('api/table/<str:table_name>/', views.LookupTableAPIView.as_view(), name='api_table'),
     path('api/dropdown/<str:table_name>/', views.LookupDropdownAPIView.as_view(), name='api_dropdown'),
     path('api/debug/<str:table_name>/', views.lookup_debug_api, name='api_debug'),
+    path('api/debug-html/<str:table_name>/', views.lookup_debug_view, name='api_debug_html'),
 ]

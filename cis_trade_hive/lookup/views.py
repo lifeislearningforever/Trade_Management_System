@@ -304,6 +304,34 @@ class LookupTableAPIView(View):
             return JsonResponse({'error': str(e)}, status=500)
 
 
+def lookup_debug_view(request, table_name):
+    """Temporary plain-HTML debug view — bypasses base template to isolate rendering."""
+    from django.http import HttpResponse
+    import decimal
+
+    table_info = lookup_service.get_table_metadata(table_name)
+    result = lookup_service.get_table_rows(table_name=table_name, page=1, page_size=10)
+    columns = table_info.get('columns', []) if table_info else []
+    rows = result['rows']
+
+    html = [f'<h2>{table_name}</h2>']
+    html.append(f'<p>pk_column: {table_info.get("pk_column") if table_info else "NONE"}</p>')
+    html.append(f'<p>columns ({len(columns)}): {[c["name"] for c in columns]}</p>')
+    html.append(f'<p>rows returned: {len(rows)} / total: {result["total_count"]}</p>')
+    html.append('<table border="1"><thead><tr>')
+    for col in columns:
+        html.append(f'<th>{col["name"]}<br/><small>{col["type"]}</small></th>')
+    html.append('</tr></thead><tbody>')
+    for row in rows:
+        html.append('<tr>')
+        for col in columns:
+            val = row.get(col['name'], 'KEY_MISSING')
+            html.append(f'<td>{val}</td>')
+        html.append('</tr>')
+    html.append('</tbody></table>')
+    return HttpResponse('\n'.join(html))
+
+
 def lookup_debug_api(request, table_name):
     """Temporary debug endpoint — returns raw context data as JSON."""
     import decimal
