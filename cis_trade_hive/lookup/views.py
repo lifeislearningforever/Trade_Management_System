@@ -310,19 +310,28 @@ def lookup_debug_api(request, table_name):
     def safe(v):
         if isinstance(v, decimal.Decimal):
             return float(v)
+        if isinstance(v, bool):
+            return v
         return v
 
     table_info = lookup_service.get_table_metadata(table_name)
     result = lookup_service.get_table_rows(table_name=table_name, page=1, page_size=5)
+    columns = table_info.get('columns', []) if table_info else []
+    rows = result['rows']
+    safe_rows = [{k: safe(v) for k, v in row.items()} for row in rows]
     return JsonResponse({
         'pk_column': table_info.get('pk_column') if table_info else None,
-        'columns': table_info.get('columns', []) if table_info else [],
-        'row_count': table_info.get('row_count') if table_info else 0,
-        'rows_returned': len(result['rows']),
+        'column_names': [c['name'] for c in columns],
+        'column_types': {c['name']: c['type'] for c in columns},
+        'row_count_db': table_info.get('row_count') if table_info else 0,
+        'rows_returned': len(rows),
         'total_count': result['total_count'],
-        'first_row': {k: safe(v) for k, v in result['rows'][0].items()} if result['rows'] else None,
-        'first_row_keys': list(result['rows'][0].keys()) if result['rows'] else [],
-        'column_names': [c['name'] for c in table_info.get('columns', [])] if table_info else [],
+        'first_row_keys': list(rows[0].keys()) if rows else [],
+        'keys_match_columns': (
+            sorted([c['name'] for c in columns]) == sorted(list(rows[0].keys()))
+            if rows and columns else None
+        ),
+        'rows': safe_rows,
     })
 
 
