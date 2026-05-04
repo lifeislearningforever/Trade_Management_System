@@ -1511,6 +1511,17 @@ def api_get_exchanges(request):
 
 
 @require_http_methods(["GET"])
+def api_get_exchanges_for_broker(request):
+    """
+    API: Get exchanges available for a specific broker in cis_trade_charge_lut.
+    Used to auto-select exchange when broker is chosen on trade form.
+    """
+    broker = request.GET.get('broker', '').strip()
+    exchanges = trade_dropdown_service.get_exchanges_for_broker(broker)
+    return JsonResponse({'results': exchanges})
+
+
+@require_http_methods(["GET"])
 def api_debug_charge_lut(request):
     """
     API: Debug endpoint to show all brokers in charge lookup table.

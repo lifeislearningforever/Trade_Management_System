@@ -944,6 +944,35 @@ class TradeDropdownService:
             logger.debug(f"Error getting exchanges: {str(e)}")
         return []
 
+    def get_exchanges_for_broker(self, broker: str) -> List[Dict[str, Any]]:
+        """Get distinct exchanges available for a specific broker in cis_trade_charge_lut."""
+        if not broker:
+            return []
+        try:
+            escaped_broker = broker.replace("'", "''")
+            base_broker = escaped_broker.replace('*', '%').replace('?', '_')
+            query = f"""
+            SELECT DISTINCT exchange, country_of_exchange
+            FROM {self.DATABASE}.cis_trade_charge_lut
+            WHERE (broker = '{escaped_broker}' OR UPPER(broker) = UPPER('{escaped_broker}')
+                   OR broker LIKE '{base_broker}' OR UPPER(broker) LIKE UPPER('{base_broker}'))
+              AND exchange IS NOT NULL
+            ORDER BY exchange
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            if results:
+                return [
+                    {
+                        'value': r.get('exchange', ''),
+                        'label': f"{r.get('exchange', '')} ({r.get('country_of_exchange', '')})" if r.get('country_of_exchange') else r.get('exchange', ''),
+                        'country': r.get('country_of_exchange', '') or '',
+                    }
+                    for r in results if r.get('exchange')
+                ]
+        except Exception as e:
+            logger.debug(f"Error getting exchanges for broker: {str(e)}")
+        return []
+
     def get_brokers_from_charge_lut(self) -> List[Dict[str, Any]]:
         """Get distinct brokers from charge lookup table."""
         try:

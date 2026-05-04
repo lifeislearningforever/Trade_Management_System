@@ -1086,13 +1086,37 @@ function loadExchanges() {
         });
 }
 
-// Broker dropdown change handler - fetch and calculate charges
+// Broker dropdown change handler — auto-set exchange from LUT then calculate
 const brokersEl = document.getElementById('brokers');
 if (brokersEl) {
     brokersEl.addEventListener('change', function() {
-        console.log('=== BROKER CHANGED ===');
-        console.log('Selected broker:', this.value);
-        calculateBrokerCharges();
+        const broker = this.value;
+        const exchangeEl = document.getElementById('charge_exchange');
+        if (!broker || !exchangeEl) {
+            calculateBrokerCharges();
+            return;
+        }
+        // Fetch exchanges available for this broker and auto-select if only one
+        fetch(`/trade/api/exchanges-for-broker/?broker=${encodeURIComponent(broker)}`)
+            .then(r => r.json())
+            .then(data => {
+                const exchanges = data.results || [];
+                // Rebuild exchange dropdown scoped to this broker
+                exchangeEl.innerHTML = '<option value="">Select Exchange</option>';
+                exchanges.forEach(function(ex) {
+                    const opt = document.createElement('option');
+                    opt.value = ex.value;
+                    opt.textContent = ex.label;
+                    opt.dataset.country = ex.country;
+                    exchangeEl.appendChild(opt);
+                });
+                // Auto-select when broker maps to exactly one exchange
+                if (exchanges.length === 1) {
+                    exchangeEl.value = exchanges[0].value;
+                }
+                calculateBrokerCharges();
+            })
+            .catch(() => calculateBrokerCharges());
     });
 }
 console.log('Broker element found:', !!brokersEl);
