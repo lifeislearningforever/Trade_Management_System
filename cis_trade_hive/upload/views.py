@@ -785,9 +785,10 @@ def upload_ingest(request, upload_id: str):
             if is_session_upload:
                 session_key = f'upload_{upload_id}'
                 if session_key in request.session:
-                    _sess = request.session[session_key]
+                    _sess = dict(request.session[session_key])  # shallow copy to force new object
                     _sess['status'] = UploadKuduRepository.STATUS_COMPLETED if success else UploadKuduRepository.STATUS_FAILED
                     request.session[session_key] = _sess
+                    request.session.modified = True  # ensure Django persists the updated status
             # Clean up DB-upload temp path key regardless
             temp_path_key = f'temp_path_{upload_id}'
             if success and temp_path_key in request.session:
@@ -856,6 +857,8 @@ def upload_detail(request, upload_id: str):
 
     if not upload:
         raise Http404("Upload not found")
+
+    logger.warning(f"[upload_detail] upload_id={upload_id} is_session={is_session_upload} status={upload.get('status')} target={upload.get('target_table_name')}")
 
     # Normalise session-upload dicts: fill in fields the template expects
     # that are only present on DB-persisted rows.
