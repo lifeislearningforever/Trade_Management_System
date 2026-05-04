@@ -1239,11 +1239,11 @@ function calculateBrokerCharges() {
                 // Format fee value display based on fee_rule (Percent or Flat)
                 let feeDisplay = '';
                 if (charge.fee_rule.toLowerCase() === 'percent') {
-                    feeDisplay = charge.fee_value.toFixed(2) + '%';
+                    feeDisplay = charge.fee_value.toFixed(4) + '%';
                 } else if (charge.fee_rule.toLowerCase() === 'flat') {
-                    feeDisplay = charge.fee_value.toFixed(2) + ' (Flat)';
+                    feeDisplay = charge.fee_value.toFixed(4) + ' (Flat)';
                 } else {
-                    feeDisplay = charge.fee_value.toFixed(2);
+                    feeDisplay = charge.fee_value.toFixed(4);
                 }
 
                 row.innerHTML = `

@@ -811,7 +811,7 @@ class TradeDropdownService:
         try:
             escaped_broker = broker.replace("'", "''")
             base_broker = escaped_broker.replace('*', '%').replace('?', '_')
-            exchange_filter = f"AND (exchange = '{exchange}' OR exchange IS NULL)" if exchange else ""
+            exchange_filter = f"AND exchange = '{exchange}'" if exchange else ""
 
             query = f"""
             SELECT fee_type, broker, exchange, country_of_exchange, fee_rule, fee_value
