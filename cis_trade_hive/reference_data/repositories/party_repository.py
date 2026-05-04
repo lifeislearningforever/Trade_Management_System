@@ -279,7 +279,7 @@ class PartyRepository(ImpalaReferenceRepository):
         validation_comments: str = None
     ) -> bool:
         """
-        Update party status and validation fields using UPSERT.
+        Update party status and validation fields using UPDATE (preserves all other columns).
 
         Args:
             short_name: Party short name
@@ -295,34 +295,26 @@ class PartyRepository(ImpalaReferenceRepository):
         updated_by_escaped = updated_by.replace("'", "''")
         status_escaped = status.replace("'", "''")
 
-        # Build columns and values for UPSERT
-        columns = ['party_short_name', 'status', 'updated_by', 'updated_at']
-        values = [
-            f"'{short_name_escaped}'",
-            f"'{status_escaped}'",
-            f"'{updated_by_escaped}'",
-            'NOW()'
+        # Build SET clause for UPDATE (preserves all other columns)
+        set_parts = [
+            f"status = '{status_escaped}'",
+            f"updated_by = '{updated_by_escaped}'",
+            f"updated_at = NOW()",
         ]
 
         if status == self.STATUS_VALIDATED and validated_by:
             validated_by_escaped = validated_by.replace("'", "''")
-            columns.append('validated_by')
-            values.append(f"'{validated_by_escaped}'")
-            columns.append('validated_at')
-            values.append('NOW()')
+            set_parts.append(f"validated_by = '{validated_by_escaped}'")
+            set_parts.append(f"validated_at = NOW()")
             if validation_comments:
                 comments_escaped = validation_comments.replace("'", "''")
-                columns.append('validation_comments')
-                values.append(f"'{comments_escaped}'")
+                set_parts.append(f"validation_comments = '{comments_escaped}'")
 
-        columns_str = ', '.join(columns)
-        values_str = ', '.join(values)
+        set_clause = ', '.join(set_parts)
 
-        # Use UPSERT to update only the specified columns
         query = f"""
-        UPSERT INTO {self.TABLE_NAME} ({columns_str})
-        SELECT {values_str}
-        FROM {self.TABLE_NAME}
+        UPDATE {self.TABLE_NAME}
+        SET {set_clause}
         WHERE party_short_name = '{short_name_escaped}'
         """
 
