@@ -27,7 +27,29 @@ class CorporateActionDropdownService:
     """Service for fetching dropdown options for corporate action forms"""
 
     DATABASE = 'gmp_cis'
-    OBJECT_TYPE = 'CORPORATE_ACTION'  # UDF Object Type
+    OBJECT_TYPE = 'CORPORATE_ACTIONS'  # UDF Object Type (stored with S in Kudu)
+
+    # Maps UDF display labels (field_value) → internal processing codes used by ca_cash_flow_service
+    UDF_LABEL_TO_CODE = {
+        'cash dividend':        'DIVIDEND',
+        'dividend':             'DIVIDEND',
+        'special dividend':     'SPECIAL_DIVIDEND',
+        'capital distribution': 'CAPITAL_DISTRIBUTION',
+        'income distribution':  'INCOME_DISTRIBUTION',
+        'rights':               'RIGHTS_ISSUE',
+        'rights issue':         'RIGHTS_ISSUE',
+        'rights entitlement':   'RIGHTS_ENTITLEMENT',
+        'warrants':             'WARRANT_ENTITLEMENT',
+        'warrant entitlement':  'WARRANT_ENTITLEMENT',
+        'split':                'STOCK_SPLIT',
+        'stock split':          'STOCK_SPLIT',
+        'reverse split':        'REVERSE_SPLIT',
+        'bonus issue':          'BONUS_ISSUE',
+        'consolidation':        'CONSOLIDATION',
+        'interest':             'INTEREST',
+        'coupon':               'COUPON',
+        'roc':                  'ROC',
+    }
 
     def get_all_dropdown_options(self) -> Dict[str, List[Dict[str, Any]]]:
         """
@@ -169,17 +191,28 @@ class CorporateActionDropdownService:
             logger.warning(f"Cache read error for ca_types: {str(e)}")
 
         try:
-            # Try UDF first
+            # Try UDF first (object_type='CORPORATE_ACTIONS', field_name='Corporate Action Type')
             results = udf_field_repository.get_field_values(self.OBJECT_TYPE, 'Corporate Action Type')
 
             if results:
-                options = [
-                    {
-                        'value': r.get('field_value', ''),
-                        'label': r.get('field_value', '').replace('_', ' ').title()
-                    }
-                    for r in results if r.get('field_value')
-                ]
+                options = []
+                for r in results:
+                    raw_label = r.get('field_value', '')
+                    if not raw_label:
+                        continue
+                    # Map UDF display label → internal processing code
+                    internal_code = self.UDF_LABEL_TO_CODE.get(raw_label.lower().strip())
+                    if not internal_code:
+                        # Unknown label: log a warning so it's visible, skip it
+                        logger.warning(
+                            f"CA type '{raw_label}' from UDF has no internal code mapping — "
+                            f"add it to UDF_LABEL_TO_CODE in corporate_action_dropdown_service.py"
+                        )
+                        continue
+                    options.append({
+                        'value': internal_code,
+                        'label': raw_label.title(),
+                    })
 
                 if options:
                     try:

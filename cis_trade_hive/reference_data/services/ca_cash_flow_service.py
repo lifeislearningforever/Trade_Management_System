@@ -34,8 +34,8 @@ class CACashFlowService:
     # CA types that affect position quantity (no cash flow)
     POSITION_ADJUSTMENT_CA_TYPES = [
         'BONUS_ISSUE', 'SPLIT', 'STOCK_SPLIT', 'REVERSE_SPLIT',
-        'RIGHTS_ENTITLEMENT', 'RIGHTS_ISSUE',
-        'WARRANT_ENTITLEMENT', 'CONSOLIDATION',
+        'RIGHTS_ENTITLEMENT', 'RIGHTS_ISSUE', 'RIGHTS',
+        'WARRANT_ENTITLEMENT', 'WARRANTS', 'CONSOLIDATION',
     ]
 
     # CF-only types: overwrite specific position fields, no cash flow record
@@ -147,7 +147,11 @@ class CACashFlowService:
             if (ca_type not in self.CASH_FLOW_CA_TYPES
                     and ca_type not in self.POSITION_ADJUSTMENT_CA_TYPES
                     and ca_type not in self.CF_POSITION_OVERWRITE_TYPES):
-                logger.info(f"CA type {ca_type} does not require processing, skipping queue")
+                logger.warning(
+                    f"CA type '{ca_type}' is not in any processing type list — "
+                    f"no cash flow or position update will occur. "
+                    f"If this is a new type, add it to the appropriate list in CACashFlowService."
+                )
                 return True, None
 
             # Note: portfolio_name removed - CA applies at security level
@@ -1090,12 +1094,12 @@ class CACashFlowService:
                             updated_by=created_by,
                             dry_run=dry_run
                         )
-                    elif ca_type in ['RIGHTS_ENTITLEMENT', 'RIGHTS_ISSUE', 'WARRANT_ENTITLEMENT']:
+                    elif ca_type in ['RIGHTS_ENTITLEMENT', 'RIGHTS_ISSUE', 'RIGHTS', 'WARRANT_ENTITLEMENT', 'WARRANTS']:
                         # Creates a new position for the rights/warrant security.
                         # Entitlement qty = old_qty * ratio (price field).
                         # New security label = original security + suffix (e.g. " RIGHTS" / " WRNTS").
                         # AVP of new position = 0 (rights/warrants are issued at no cost to holder).
-                        suffix = ' RIGHTS' if ca_type in ['RIGHTS_ENTITLEMENT', 'RIGHTS_ISSUE'] else ' WRNTS'
+                        suffix = ' RIGHTS' if ca_type in ['RIGHTS_ENTITLEMENT', 'RIGHTS_ISSUE', 'RIGHTS'] else ' WRNTS'
                         new_security_name = security_name.rstrip() + suffix
                         entitlement_qty = (quantity * price).quantize(
                             Decimal('0.00000001'), rounding=ROUND_HALF_UP
