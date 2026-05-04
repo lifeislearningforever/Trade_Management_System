@@ -781,11 +781,13 @@ def upload_ingest(request, upload_id: str):
                 ingestion_mode=ingestion_mode
             )
 
-            # Clean up session data on success
-            if success and is_session_upload:
+            # Mark session upload as completed (keep it so upload_detail can render)
+            if is_session_upload:
                 session_key = f'upload_{upload_id}'
                 if session_key in request.session:
-                    del request.session[session_key]
+                    _sess = request.session[session_key]
+                    _sess['status'] = UploadKuduRepository.STATUS_COMPLETED if success else UploadKuduRepository.STATUS_FAILED
+                    request.session[session_key] = _sess
             # Clean up DB-upload temp path key regardless
             temp_path_key = f'temp_path_{upload_id}'
             if success and temp_path_key in request.session:
@@ -845,6 +847,12 @@ def upload_ingest(request, upload_id: str):
 def upload_detail(request, upload_id: str):
     """View upload details."""
     upload = upload_service.get_upload_by_id(upload_id)
+
+    is_session_upload = False
+    if not upload:
+        session_key = f'upload_{upload_id}'
+        upload = request.session.get(session_key)
+        is_session_upload = True
 
     if not upload:
         raise Http404("Upload not found")
@@ -1145,6 +1153,9 @@ def run_position_etl(request, upload_id: str):
     """
     user_info = get_user_info(request)
     upload = upload_service.get_upload_by_id(upload_id)
+
+    if not upload:
+        upload = request.session.get(f'upload_{upload_id}')
 
     if not upload:
         messages.error(request, 'Upload not found')
