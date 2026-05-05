@@ -78,7 +78,12 @@ def upload_list(request):
                 continue
         uploads = [val] + list(uploads)
 
-    uploads = sorted(uploads, key=lambda u: u.get('created_at', ''), reverse=True)
+    def _sort_key(u):
+        v = u.get('created_at', '')
+        if hasattr(v, 'isoformat'):
+            return v.isoformat()
+        return str(v) if v else ''
+    uploads = sorted(uploads, key=_sort_key, reverse=True)
 
     # Pagination
     paginator = Paginator(uploads, 25)
