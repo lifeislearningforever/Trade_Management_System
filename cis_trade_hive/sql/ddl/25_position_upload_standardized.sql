@@ -97,8 +97,8 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.position_upload_standardized (
 )
 COMMENT 'Unified position upload staging table — normalised from 5 user upload sources'
 PARTITIONED BY (
-    src_id          STRING COMMENT 'Source table name (cis_user_sta_adhoc_position_1..5)',
-    processing_date STRING COMMENT 'Load date YYYYMMDD'
+    processing_date STRING COMMENT 'Load date YYYYMMDD',
+    src_id          STRING COMMENT 'Source table name (cis_user_sta_adhoc_position_1..5)'
 )
 STORED AS PARQUET
 LOCATION '/data/gmp_cis/position_upload_standardized';
@@ -170,8 +170,8 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.position_upload_report (
 )
 COMMENT 'Position upload validation report — one row per uploaded row, with PASS/FAIL status'
 PARTITIONED BY (
-    src_id          STRING COMMENT 'Source table name, matches position_upload_standardized',
-    processing_date STRING COMMENT 'Load date YYYYMMDD'
+    processing_date STRING COMMENT 'Load date YYYYMMDD',
+    src_id          STRING COMMENT 'Source table name, matches position_upload_standardized'
 )
 STORED AS PARQUET
 LOCATION '/data/gmp_cis/position_upload_report';

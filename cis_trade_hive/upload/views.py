@@ -58,6 +58,28 @@ def upload_list(request):
         search=search_query if search_query else None
     )
 
+    # Merge session-only (TEMP-) uploads so they appear in the list
+    db_ids = {u.get('upload_id') for u in uploads}
+    for key, val in request.session.items():
+        if not key.startswith('upload_TEMP-'):
+            continue
+        if not isinstance(val, dict):
+            continue
+        uid = val.get('upload_id', key[len('upload_'):])
+        if uid in db_ids:
+            continue
+        if status_filter and val.get('status') != status_filter:
+            continue
+        if file_type_filter and val.get('file_type') != file_type_filter:
+            continue
+        if search_query:
+            haystack = (val.get('file_name', '') + ' ' + val.get('description', '')).lower()
+            if search_query.lower() not in haystack:
+                continue
+        uploads = [val] + list(uploads)
+
+    uploads = sorted(uploads, key=lambda u: u.get('created_at', ''), reverse=True)
+
     # Pagination
     paginator = Paginator(uploads, 25)
     page = request.GET.get('page', 1)

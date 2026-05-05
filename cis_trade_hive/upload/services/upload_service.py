@@ -2478,7 +2478,7 @@ SELECT * FROM (
             ok = impala_manager.execute_write(
                 f"""
                 INSERT OVERWRITE {db}.position_upload_standardized
-                PARTITION (src_id='{src_id}', processing_date='{processing_date}')
+                PARTITION (processing_date='{processing_date}', src_id='{src_id}')
                 {std_select}
                 """,
                 database=db
@@ -3108,7 +3108,7 @@ SELECT * FROM (
             impala_manager.execute_write(
                 f"""
                 INSERT OVERWRITE {db}.position_upload_report
-                PARTITION (src_id='{src_id}', processing_date='{processing_date}')
+                PARTITION (processing_date='{processing_date}', src_id='{src_id}')
 
                 -- PASS rows: passed all validations
                 SELECT
