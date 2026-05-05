@@ -174,7 +174,7 @@ class EquityPriceService:
 
         # Generate timestamp if not provided
         if not equity_price_data.get('price_timestamp'):
-            equity_price_data['price_timestamp'] = int(time.time() * 1000)
+            equity_price_data['price_timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
         try:
             success = equity_price_hive_repository.upsert_equity_price(equity_price_data, username=user)

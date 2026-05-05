@@ -312,13 +312,13 @@ class EquityPriceHiveRepository:
                 {f"'{isin}'" if isin else 'NULL'},
                 '{price_date}',
                 {main_closing_price},
-                {price_timestamp},
+                {f"'{price_timestamp}'" if price_timestamp is not None else 'NULL'},
                 '{src_system}',
                 true,
                 '{created_by}',
-                {created_at},
+                '{created_at}',
                 {f"'{updated_by}'" if updated_by else 'NULL'},
-                {updated_at if updated_at else 'NULL'}
+                {f"'{updated_at}'" if updated_at else 'NULL'}
             )
             """
 
@@ -570,10 +570,10 @@ class EquityPriceHiveRepository:
                 '{price_date}',
                 {f"'{isin}'" if isin else 'NULL'},
                 {main_closing_price if main_closing_price is not None else 'NULL'},
-                {price_timestamp if price_timestamp else 'NULL'},
+                {f"'{price_timestamp}'" if price_timestamp else 'NULL'},
                 {f"'{src_system}'" if src_system else 'NULL'},
                 '{escaped_changed_by}',
-                {changed_at},
+                '{changed_at}',
                 '{escaped_change_type}'
             )
             """
