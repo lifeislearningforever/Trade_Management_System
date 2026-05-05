@@ -3004,12 +3004,17 @@ SELECT * FROM (
             logger.info("[position_etl] Step 6B complete (failed table created)")
 
             # ------------------------------------------------------------------
-            # Step 7A: INSERT valid records into cis_position.
-            #          position_id = (UNIX_TIMESTAMP() * 1000000) + row_id
+            # Step 7A: UPSERT valid records into cis_position (Kudu).
+            #
+            # position_id is a deterministic hash of the natural key:
+            #   (portfolio, security_label, position_basis, position_date, src_system)
+            # Using FNV-style: abs(hash(concat(...))) cast to BIGINT.
+            # This guarantees that re-running ETL for the same batch replaces
+            # existing rows rather than inserting duplicates.
             # ------------------------------------------------------------------
             ok = impala_manager.execute_write(
                 f"""
-                INSERT INTO {db}.cis_position (
+                UPSERT INTO {db}.cis_position (
                     position_id,
                     version_id,
                     portfolio,
@@ -3045,8 +3050,14 @@ SELECT * FROM (
                     position_type
                 )
                 SELECT
-                    (UNIX_TIMESTAMP() * 1000000) + row_id AS position_id,
-                    (UNIX_TIMESTAMP() * 1000000) + 500000000 + row_id AS version_id,
+                    ABS(CAST(fnv_hash(CONCAT_WS('|',
+                        COALESCE(portfolio, ''),
+                        COALESCE(COALESCE(matched_security_name, security_full_name, security_short_name), ''),
+                        COALESCE(position_basis, ''),
+                        COALESCE(CAST(reporting_date AS STRING), ''),
+                        COALESCE(src_system, '')
+                    )) AS BIGINT))                          AS position_id,
+                    CAST(UNIX_TIMESTAMP() * 1000 AS BIGINT) AS version_id,
                     portfolio,
                     COALESCE(matched_security_name, security_full_name, security_short_name) AS security_label,
                     position_basis,
@@ -3077,15 +3088,15 @@ SELECT * FROM (
                     CAST(0                       AS DECIMAL(18,4)) AS uncall_lc,
                     CAST(0                       AS DECIMAL(18,4)) AS pipeline_fc,
                     CAST(0                       AS DECIMAL(18,4)) AS pipeline_lc,
-                    'EOD' AS position_type
+                    'EOD'                                          AS position_type
                 FROM position_upload_staging
                 WHERE overall_status LIKE 'VALID%'
                 """,
                 database=db
             )
             if not ok:
-                return False, "Step 7A INSERT INTO cis_position failed — check Impala logs for column/type mismatch", result
-            logger.info("[position_etl] Step 7A complete (cis_position insert)")
+                return False, "Step 7A UPSERT INTO cis_position failed — check Impala logs for column/type mismatch", result
+            logger.info("[position_etl] Step 7A complete (cis_position upsert)")
 
             # ------------------------------------------------------------------
             # Step 7B: INSERT OVERWRITE into the existing external partitioned
