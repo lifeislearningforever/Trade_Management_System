@@ -60,6 +60,7 @@ def upload_list(request):
 
     # Merge session-only (TEMP-) uploads so they appear in the list
     db_ids = {u.get('upload_id') for u in uploads}
+    session_only_count = 0
     for key, val in request.session.items():
         if not key.startswith('upload_TEMP-'):
             continue
@@ -68,6 +69,7 @@ def upload_list(request):
         uid = val.get('upload_id', key[len('upload_'):])
         if uid in db_ids:
             continue
+        session_only_count += 1
         if status_filter and val.get('status') != status_filter:
             continue
         if file_type_filter and val.get('file_type') != file_type_filter:
@@ -96,8 +98,9 @@ def upload_list(request):
     except EmptyPage:
         page_obj = paginator.page(paginator.num_pages if paginator.num_pages > 0 else 1)
 
-    # Get statistics
+    # Get statistics — add session-only uploads to total so the count matches the list
     stats = upload_service.get_statistics()
+    stats['total_uploads'] = stats.get('total_uploads', 0) + session_only_count
 
     context = {
         'page_obj': page_obj,
