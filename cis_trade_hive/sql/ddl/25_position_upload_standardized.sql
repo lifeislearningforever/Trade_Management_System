@@ -26,7 +26,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.position_upload_standardized (
     portfolio                   STRING,
     security_full_name          STRING,
     security_short_name         STRING,
-    isin_code                   STRING,
+    isin                        STRING,
     ticker                      STRING,
 
     -- Quantity & holdings
@@ -112,7 +112,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.position_upload_report (
     portfolio                   STRING,
     security_full_name          STRING,
     security_short_name         STRING,
-    isin_code                   STRING,
+    isin                        STRING,
     ticker                      STRING,
     quantity                    DECIMAL(18,4),
     shares_outstanding          DECIMAL(18,4),
