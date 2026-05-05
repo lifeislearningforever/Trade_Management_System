@@ -2547,7 +2547,7 @@ SELECT * FROM (
                     fin_nonfin_co,
                     issuer_type,
                     reits_or_fund_y_n,
-                    exchange                                    AS `exchange`,
+                    `exchange`                                  AS `exchange`,
                     country_code,
                     country_of_exchange,
                     country_of_incorporation,
