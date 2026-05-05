@@ -1243,6 +1243,8 @@ def download_position_report(request, upload_id: str):
     """
     upload = upload_service.get_upload_by_id(upload_id)
     if not upload:
+        upload = request.session.get(f'upload_{upload_id}')
+    if not upload:
         raise Http404("Upload not found")
 
     if not upload_service.is_position_upload(upload):
