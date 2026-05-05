@@ -1228,6 +1228,16 @@ def run_position_etl(request, upload_id: str):
             updated_by=user_info['username']
         )
 
+        # Persist processing_date + src_id back to session so download-report
+        # can use the exact partition values without guessing.
+        session_key = f'upload_{upload_id}'
+        if session_key in request.session:
+            _sess = dict(request.session[session_key])
+            _sess['etl_processing_date'] = processing_date
+            _sess['etl_src_id'] = src_id
+            request.session[session_key] = _sess
+            request.session.modified = True
+
         if success:
             audit_log_kudu_repository.log_action(
                 user_id=user_info['user_id'],
@@ -1273,8 +1283,14 @@ def download_position_report(request, upload_id: str):
         messages.error(request, 'This upload is not a position file')
         return redirect('upload:detail', upload_id=upload_id)
 
-    src_id = (upload.get('target_table_name') or '').lower().split('.')[-1]
+    src_id = (
+        upload.get('etl_src_id')
+        or (upload.get('target_table_name') or '').lower().split('.')[-1]
+    )
     processing_date = request.GET.get('processing_date', '').strip()
+
+    if not processing_date:
+        processing_date = upload.get('etl_processing_date', '').strip()
 
     if not processing_date:
         import re
