@@ -3110,7 +3110,8 @@ SELECT * FROM (
                 INSERT OVERWRITE {db}.position_upload_report
                 PARTITION (processing_date='{processing_date}', src_id='{src_id}')
 
-                -- PASS rows: passed all validations
+                -- One row per source row — LEFT JOIN all staging tables, pick status by priority:
+                -- portfolio fail > security fail > staging INVALID > staging VALID
                 SELECT
                     b.portfolio,
                     COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
@@ -3140,7 +3141,7 @@ SELECT * FROM (
                     b.fin_nonfin_co,
                     b.issuer_type,
                     b.reits_or_fund_y_n,
-                    b.`exchange`              AS `exchange`,
+                    b.`exchange`                                        AS `exchange`,
                     b.country_of_exchange,
                     b.country_of_incorporation,
                     b.country_of_risk,
@@ -3159,210 +3160,30 @@ SELECT * FROM (
                     b.maturity_date,
                     b.src_system,
                     b.source_table,
-                    'PASS'  AS row_status,
-                    NULL    AS fail_reason,
-                    s.portfolio_status,
-                    s.security_status,
+                    CASE
+                        WHEN p2.portfolio_status LIKE 'FAIL%'  THEN 'FAIL'
+                        WHEN p4.security_status  LIKE 'FAIL%'  THEN 'FAIL'
+                        WHEN s.overall_status    LIKE 'INVALID%' THEN 'FAIL'
+                        WHEN s.overall_status    LIKE 'VALID%'   THEN 'PASS'
+                        ELSE 'FAIL'
+                    END AS row_status,
+                    CASE
+                        WHEN p2.portfolio_status LIKE 'FAIL%'    THEN 'Portfolio not found in cis_portfolio'
+                        WHEN p4.security_status  LIKE 'FAIL%'    THEN p4.security_status
+                        WHEN s.overall_status    LIKE 'INVALID%' THEN s.overall_status
+                        ELSE NULL
+                    END AS fail_reason,
+                    COALESCE(p2.portfolio_status, s.portfolio_status) AS portfolio_status,
+                    COALESCE(p4.security_status,  s.security_status)  AS security_status,
                     s.price_status,
                     s.quantity_status,
                     s.exchange_status,
                     CAST(s.final_security_id AS STRING) AS matched_security_id,
                     s.matched_security_name
                 FROM pos_stage_1_base b
-                JOIN position_upload_staging s ON b.row_id = s.row_id
-                WHERE s.overall_status LIKE 'VALID%'
-
-                UNION ALL
-
-                -- FAIL rows: failed one of the validations (portfolio passed, failed later)
-                SELECT
-                    b.portfolio,
-                    COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
-                    b.security_short_name,
-                    b.isin,
-                    b.ticker,
-                    b.quantity,
-                    b.shares_outstanding,
-                    b.shares_issued,
-                    b.pct_holding,
-                    b.market_price,
-                    b.average_cost,
-                    b.cost_fc,
-                    b.market_value_fc,
-                    b.net_book_value_fc,
-                    b.unrealized_pnl_fc,
-                    b.provision_fc,
-                    b.cost_lc,
-                    b.market_value_lc,
-                    b.net_book_value_lc,
-                    b.unrealized_pnl_lc,
-                    b.provision_lc,
-                    b.product_type,
-                    b.security_type,
-                    b.quoted_unquoted,
-                    b.industry,
-                    b.fin_nonfin_co,
-                    b.issuer_type,
-                    b.reits_or_fund_y_n,
-                    b.`exchange`              AS `exchange`,
-                    b.country_of_exchange,
-                    b.country_of_incorporation,
-                    b.country_of_risk,
-                    b.country_of_operation,
-                    b.security_currency,
-                    b.corp_code,
-                    b.branch_code,
-                    b.cost_centre,
-                    b.cels,
-                    b.bwcif_sg,
-                    b.bwcif_ovs,
-                    b.mas_6d_code_sg,
-                    b.mas_6d_code_ovs,
-                    b.position_basis,
-                    b.reporting_date,
-                    b.maturity_date,
-                    b.src_system,
-                    b.source_table,
-                    'FAIL'           AS row_status,
-                    s.overall_status AS fail_reason,
-                    s.portfolio_status,
-                    s.security_status,
-                    s.price_status,
-                    s.quantity_status,
-                    s.exchange_status,
-                    CAST(s.final_security_id AS STRING) AS matched_security_id,
-                    s.matched_security_name
-                FROM pos_stage_1_base b
-                JOIN position_upload_staging s ON b.row_id = s.row_id
-                WHERE s.overall_status LIKE 'INVALID%'
-
-                UNION ALL
-
-                -- FAIL rows: portfolio not found (never reached staging)
-                SELECT
-                    b.portfolio,
-                    COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
-                    b.security_short_name,
-                    b.isin,
-                    b.ticker,
-                    b.quantity,
-                    b.shares_outstanding,
-                    b.shares_issued,
-                    b.pct_holding,
-                    b.market_price,
-                    b.average_cost,
-                    b.cost_fc,
-                    b.market_value_fc,
-                    b.net_book_value_fc,
-                    b.unrealized_pnl_fc,
-                    b.provision_fc,
-                    b.cost_lc,
-                    b.market_value_lc,
-                    b.net_book_value_lc,
-                    b.unrealized_pnl_lc,
-                    b.provision_lc,
-                    b.product_type,
-                    b.security_type,
-                    b.quoted_unquoted,
-                    b.industry,
-                    b.fin_nonfin_co,
-                    b.issuer_type,
-                    b.reits_or_fund_y_n,
-                    b.`exchange`              AS `exchange`,
-                    b.country_of_exchange,
-                    b.country_of_incorporation,
-                    b.country_of_risk,
-                    b.country_of_operation,
-                    b.security_currency,
-                    b.corp_code,
-                    b.branch_code,
-                    b.cost_centre,
-                    b.cels,
-                    b.bwcif_sg,
-                    b.bwcif_ovs,
-                    b.mas_6d_code_sg,
-                    b.mas_6d_code_ovs,
-                    b.position_basis,
-                    b.reporting_date,
-                    b.maturity_date,
-                    b.src_system,
-                    b.source_table,
-                    'FAIL'                                              AS row_status,
-                    'Portfolio not found in cis_portfolio'              AS fail_reason,
-                    p2.portfolio_status,
-                    NULL AS security_status,
-                    NULL AS price_status,
-                    NULL AS quantity_status,
-                    NULL AS exchange_status,
-                    NULL AS matched_security_id,
-                    NULL AS matched_security_name
-                FROM pos_stage_1_base b
-                JOIN pos_stage_2_portfolio p2 ON b.row_id = p2.row_id
-                WHERE p2.portfolio_status LIKE 'FAIL%'
-
-                UNION ALL
-
-                -- FAIL rows: security validation failed (duplicate ISIN / no identifier)
-                SELECT
-                    b.portfolio,
-                    COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
-                    b.security_short_name,
-                    b.isin,
-                    b.ticker,
-                    b.quantity,
-                    b.shares_outstanding,
-                    b.shares_issued,
-                    b.pct_holding,
-                    b.market_price,
-                    b.average_cost,
-                    b.cost_fc,
-                    b.market_value_fc,
-                    b.net_book_value_fc,
-                    b.unrealized_pnl_fc,
-                    b.provision_fc,
-                    b.cost_lc,
-                    b.market_value_lc,
-                    b.net_book_value_lc,
-                    b.unrealized_pnl_lc,
-                    b.provision_lc,
-                    b.product_type,
-                    b.security_type,
-                    b.quoted_unquoted,
-                    b.industry,
-                    b.fin_nonfin_co,
-                    b.issuer_type,
-                    b.reits_or_fund_y_n,
-                    b.`exchange`              AS `exchange`,
-                    b.country_of_exchange,
-                    b.country_of_incorporation,
-                    b.country_of_risk,
-                    b.country_of_operation,
-                    b.security_currency,
-                    b.corp_code,
-                    b.branch_code,
-                    b.cost_centre,
-                    b.cels,
-                    b.bwcif_sg,
-                    b.bwcif_ovs,
-                    b.mas_6d_code_sg,
-                    b.mas_6d_code_ovs,
-                    b.position_basis,
-                    b.reporting_date,
-                    b.maturity_date,
-                    b.src_system,
-                    b.source_table,
-                    'FAIL'                AS row_status,
-                    p4.security_status    AS fail_reason,
-                    'PASS'                AS portfolio_status,
-                    p4.security_status    AS security_status,
-                    NULL AS price_status,
-                    NULL AS quantity_status,
-                    NULL AS exchange_status,
-                    NULL AS matched_security_id,
-                    NULL AS matched_security_name
-                FROM pos_stage_1_base b
-                JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
-                WHERE p4.security_status LIKE 'FAIL%'
+                LEFT JOIN pos_stage_2_portfolio       p2 ON b.row_id = p2.row_id
+                LEFT JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
+                LEFT JOIN position_upload_staging      s  ON b.row_id = s.row_id
                 """,
                 database=db
             )
