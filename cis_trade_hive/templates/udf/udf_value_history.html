@@ -39,7 +39,7 @@
                             <tbody>
                                 {% for record in history %}
                                 <tr>
-                                    <td>{{ record.created_at|date:"Y-m-d H:i:s" }}</td>
+                                    <td>{{ record.created_at|default:"-" }}</td>
                                     <td>{{ record.udf_value.udf.display_name }}</td>
                                     <td>
                                         <span class="badge badge-secondary">

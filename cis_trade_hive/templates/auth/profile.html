@@ -130,7 +130,7 @@
                                                 <span class="badge badge-secondary">{{ portfolio.status }}</span>
                                             {% endif %}
                                         </td>
-                                        <td>{{ portfolio.created_at|date:"Y-m-d" }}</td>
+                                        <td>{{ portfolio.created_at|default:"-" }}</td>
                                     </tr>
                                     {% endfor %}
                                 </tbody>

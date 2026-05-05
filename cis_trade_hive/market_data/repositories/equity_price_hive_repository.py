@@ -22,6 +22,28 @@ from core.audit.audit_decorator import log_audit
 logger = logging.getLogger(__name__)
 
 
+def _ts_to_display(value) -> str:
+    """
+    Convert a timestamp value to a human-readable 'YYYY-MM-DD HH:MM:SS' string.
+    Handles three formats that may exist in the DB during / after migration:
+      - STRING already in 'YYYY-MM-DD HH:MM:SS' format  → returned as-is
+      - BIGINT / STRING containing Unix milliseconds      → converted via fromtimestamp
+      - datetime object (Impala TIMESTAMP type)          → formatted directly
+    """
+    if value is None:
+        return ''
+    if isinstance(value, datetime):
+        return value.strftime('%Y-%m-%d %H:%M:%S')
+    try:
+        v = int(value)
+        # Unix ms if > year-2100 in seconds (i.e. > 4102444800)
+        if v > 4_102_444_800:
+            return datetime.fromtimestamp(v / 1000).strftime('%Y-%m-%d %H:%M:%S')
+        return datetime.fromtimestamp(v).strftime('%Y-%m-%d %H:%M:%S')
+    except (ValueError, TypeError):
+        return str(value)
+
+
 class EquityPriceHiveRepository:
     """Repository for Equity Price operations with Impala/Kudu.
 
@@ -108,16 +130,13 @@ class EquityPriceHiveRepository:
             # Add formatted timestamp for display
             for row in results:
                 if row.get('price_timestamp'):
-                    timestamp_ms = row['price_timestamp']
-                    row['price_datetime'] = datetime.fromtimestamp(timestamp_ms / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                    row['price_datetime'] = _ts_to_display(row['price_timestamp'])
 
                 if row.get('created_at'):
-                    created_ms = row['created_at']
-                    row['created_at_display'] = datetime.fromtimestamp(created_ms / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                    row['created_at_display'] = _ts_to_display(row['created_at'])
 
                 if row.get('updated_at'):
-                    updated_ms = row['updated_at']
-                    row['updated_at_display'] = datetime.fromtimestamp(updated_ms / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                    row['updated_at_display'] = _ts_to_display(row['updated_at'])
 
             logger.info(f"Retrieved {len(results)} equity prices")
             return results
@@ -183,16 +202,13 @@ class EquityPriceHiveRepository:
 
             # Add formatted timestamps
             if row.get('price_timestamp'):
-                timestamp_ms = row['price_timestamp']
-                row['price_datetime'] = datetime.fromtimestamp(timestamp_ms / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                row['price_datetime'] = _ts_to_display(row['price_timestamp'])
 
             if row.get('created_at'):
-                created_ms = row['created_at']
-                row['created_at_display'] = datetime.fromtimestamp(created_ms / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                row['created_at_display'] = _ts_to_display(row['created_at'])
 
             if row.get('updated_at'):
-                updated_ms = row['updated_at']
-                row['updated_at_display'] = datetime.fromtimestamp(updated_ms / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                row['updated_at_display'] = _ts_to_display(row['updated_at'])
 
             return row
 
@@ -268,12 +284,12 @@ class EquityPriceHiveRepository:
             isin = equity_price_data.get('isin', '').replace("'", "\\'") if equity_price_data.get('isin') else ''
             price_date = equity_price_data.get('price_date', '')
             main_closing_price = equity_price_data.get('main_closing_price', 0)
-            price_timestamp = equity_price_data.get('price_timestamp', int(time.time() * 1000))
+            price_timestamp = equity_price_data.get('price_timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             src_system = equity_price_data.get('src_system', 'CIS').replace("'", "\\'")
             created_by = equity_price_data.get('created_by', username).replace("'", "\\'")
-            created_at = equity_price_data.get('created_at', int(time.time() * 1000))
+            created_at = equity_price_data.get('created_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             updated_by = equity_price_data.get('updated_by', username).replace("'", "\\'") if equity_price_data.get('updated_by') else ''
-            updated_at = equity_price_data.get('updated_at', int(time.time() * 1000)) if equity_price_data.get('updated_by') else None
+            updated_at = equity_price_data.get('updated_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S')) if equity_price_data.get('updated_by') else None
 
             # Build UPSERT query
             upsert_query = f"""
@@ -370,7 +386,7 @@ class EquityPriceHiveRepository:
             merged_data['currency_code'] = currency_code
             merged_data['security_label'] = security_label
             merged_data['updated_by'] = username
-            merged_data['updated_at'] = int(time.time() * 1000)
+            merged_data['updated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             # Use upsert
             success = EquityPriceHiveRepository.upsert_equity_price(merged_data, username)
@@ -505,8 +521,7 @@ class EquityPriceHiveRepository:
             # Add formatted timestamps
             for row in results:
                 if row.get('price_timestamp'):
-                    timestamp_ms = row['price_timestamp']
-                    row['price_datetime'] = datetime.fromtimestamp(timestamp_ms / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                    row['price_datetime'] = _ts_to_display(row['price_timestamp'])
 
             logger.info(f"Retrieved {len(results)} historical prices for {security_label}")
             return results
@@ -530,8 +545,8 @@ class EquityPriceHiveRepository:
             True if history record saved successfully
         """
         try:
-            history_id = int(time.time() * 1000)
-            changed_at = int(time.time() * 1000)
+            history_id = int(time.time() * 1000)  # PK — keep as BIGINT ms
+            changed_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             currency_code = str(existing_record.get('currency_code', '')).replace("'", "\\'")
             security_label = str(existing_record.get('security_label', '')).replace("'", "\\'")
@@ -617,7 +632,7 @@ class EquityPriceHiveRepository:
 
             for row in results:
                 if row.get('changed_at'):
-                    row['changed_at_display'] = datetime.fromtimestamp(row['changed_at'] / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                    row['changed_at_display'] = _ts_to_display(row['changed_at'])
 
             logger.info(f"Retrieved {len(results)} history records for {currency_code}/{security_label}/{price_date}")
             return results
@@ -663,7 +678,7 @@ class EquityPriceHiveRepository:
 
             for row in results:
                 if row.get('changed_at'):
-                    row['changed_at_display'] = datetime.fromtimestamp(row['changed_at'] / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                    row['changed_at_display'] = _ts_to_display(row['changed_at'])
 
             logger.info(f"Retrieved {len(results)} history records for {currency_code}/{security_label}")
             return results
