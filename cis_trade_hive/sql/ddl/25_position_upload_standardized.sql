@@ -33,7 +33,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.position_upload_standardized (
     quantity                    DECIMAL(18,4),
     shares_outstanding          DECIMAL(18,4),
     shares_issued               DECIMAL(18,4),
-    pct_holding                 DECIMAL(18,4),
+    pct_holding                 DECIMAL(10,6),
 
     -- Pricing
     market_price                DECIMAL(18,6),
@@ -117,7 +117,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.position_upload_report (
     quantity                    DECIMAL(18,4),
     shares_outstanding          DECIMAL(18,4),
     shares_issued               DECIMAL(18,4),
-    pct_holding                 DECIMAL(18,4),
+    pct_holding                 DECIMAL(10,6),
     market_price                DECIMAL(18,6),
     average_cost                DECIMAL(18,6),
     cost_fc                     DECIMAL(18,4),
