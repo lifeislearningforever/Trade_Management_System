@@ -481,24 +481,30 @@ class CashFlowRepository:
             set_clauses = [
                 f"status = {CashFlowRepository.escape_value(status)}",
                 f"updated_by = {CashFlowRepository.escape_value(updated_by)}",
-                f"updated_at = CAST('{timestamp_str}' AS TIMESTAMP)",
+                f"updated_at = '{timestamp_str}'",
             ]
 
             # Set appropriate workflow fields based on status
             if status == 'VALIDATED':
                 set_clauses.append(f"validated_by = {CashFlowRepository.escape_value(updated_by)}")
-                set_clauses.append(f"validated_at = CAST('{timestamp_str}' AS TIMESTAMP)")
+                set_clauses.append(f"validated_at = '{timestamp_str}'")
+                if comments:
+                    set_clauses.append(f"validation_comments = {CashFlowRepository.escape_value(comments)}")
+                set_clauses.append("is_active = true")
+            elif status == 'APPROVED':
+                set_clauses.append(f"validated_by = {CashFlowRepository.escape_value(updated_by)}")
+                set_clauses.append(f"validated_at = '{timestamp_str}'")
                 if comments:
                     set_clauses.append(f"validation_comments = {CashFlowRepository.escape_value(comments)}")
                 set_clauses.append("is_active = true")
             elif status == 'SETTLED':
                 set_clauses.append(f"settled_by = {CashFlowRepository.escape_value(updated_by)}")
-                set_clauses.append(f"settled_at = CAST('{timestamp_str}' AS TIMESTAMP)")
+                set_clauses.append(f"settled_at = '{timestamp_str}'")
                 if comments:
                     set_clauses.append(f"settlement_comments = {CashFlowRepository.escape_value(comments)}")
             elif status == 'CANCELLED':
                 set_clauses.append(f"cancelled_by = {CashFlowRepository.escape_value(updated_by)}")
-                set_clauses.append(f"cancelled_at = CAST('{timestamp_str}' AS TIMESTAMP)")
+                set_clauses.append(f"cancelled_at = '{timestamp_str}'")
                 if comments:
                     set_clauses.append(f"cancel_reason = {CashFlowRepository.escape_value(comments)}")
                 set_clauses.append("is_active = false")
@@ -742,6 +748,8 @@ class CashFlowRepository:
             Dictionary of statistics
         """
         try:
+            today_str = datetime.now().strftime('%Y-%m-%d')
+
             # Count by status
             status_query = f"""
             SELECT status, COUNT(*) as count
@@ -755,6 +763,7 @@ class CashFlowRepository:
             total = 0
             approved = 0
             pending = 0
+            modified = 0
 
             if status_results:
                 for row in status_results:
@@ -767,6 +776,21 @@ class CashFlowRepository:
                         approved += count
                     elif status in ['INITIAL', 'MODIFIED']:
                         pending += count
+                    if status == 'MODIFIED':
+                        modified += count
+
+            # Count approved today using validated_at date prefix
+            approved_today_query = f"""
+            SELECT COUNT(*) as count
+            FROM {CashFlowRepository.DATABASE}.{CashFlowRepository.TABLE_NAME}
+            WHERE status = 'APPROVED'
+              AND (is_deleted = false OR is_deleted IS NULL)
+              AND validated_at LIKE '{today_str}%'
+            """
+            approved_today_results = impala_manager.execute_query(
+                approved_today_query, database=CashFlowRepository.DATABASE
+            )
+            approved_today = approved_today_results[0].get('count', 0) if approved_today_results else 0
 
             # Count by cash flow type
             type_query = f"""
@@ -787,7 +811,9 @@ class CashFlowRepository:
             return {
                 'total': total,
                 'approved': approved,
+                'approved_today': approved_today,
                 'pending_approval': pending,
+                'modified': modified,
                 'status_breakdown': status_counts,
                 'by_type': cf_types,
             }
@@ -797,7 +823,9 @@ class CashFlowRepository:
             return {
                 'total': 0,
                 'approved': 0,
+                'approved_today': 0,
                 'pending_approval': 0,
+                'modified': 0,
                 'status_breakdown': {},
                 'by_type': [],
             }

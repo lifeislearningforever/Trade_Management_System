@@ -222,9 +222,17 @@ def cash_flow_pending_approvals(request):
         page_number = request.GET.get('page', 1)
         page_obj = paginator.get_page(page_number)
 
+        stats = cash_flow_service.get_statistics()
+
+        modified_count = sum(
+            1 for cf in cash_flows if cf.get('status') == 'MODIFIED'
+        )
+
         context = {
             'cash_flows': page_obj,
             'pending_count': len(cash_flows),
+            'modified_count': modified_count,
+            'approved_today': stats.get('approved_today', 0),
             'username': username,
         }
 
@@ -235,7 +243,9 @@ def cash_flow_pending_approvals(request):
         messages.error(request, f"Error loading pending approvals: {str(e)}")
         return render(request, 'trade/cash_flow_pending_approvals.html', {
             'cash_flows': [],
-            'pending_count': 0
+            'pending_count': 0,
+            'modified_count': 0,
+            'approved_today': 0,
         })
 
 
