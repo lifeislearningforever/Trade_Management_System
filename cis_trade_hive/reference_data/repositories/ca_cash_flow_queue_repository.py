@@ -60,7 +60,7 @@ class CACashFlowQueueRepository:
         """
         try:
             queue_id = int(datetime.now().timestamp() * 1000)
-            timestamp_ms = queue_id
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             insert_sql = f"""
             UPSERT INTO {CACashFlowQueueRepository.DATABASE}.{CACashFlowQueueRepository.TABLE_NAME} (
@@ -88,7 +88,7 @@ class CACashFlowQueueRepository:
                 CAST(0 AS BIGINT),
                 NULL,
                 NULL,
-                {timestamp_ms},
+                '{timestamp_str}',
                 {CACashFlowQueueRepository.escape_value(queue_data.get('created_by', 'system'))}
             )
             """
@@ -223,7 +223,7 @@ class CACashFlowQueueRepository:
                 set_clauses.append(f"total_amount = {total_amount}")
 
             if status in [CACashFlowQueueRepository.STATUS_COMPLETED, CACashFlowQueueRepository.STATUS_FAILED]:
-                set_clauses.append(f"processed_at = {int(datetime.now().timestamp() * 1000)}")
+                set_clauses.append(f"processed_at = '{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}'")
 
             update_sql = f"""
             UPDATE {CACashFlowQueueRepository.DATABASE}.{CACashFlowQueueRepository.TABLE_NAME}
@@ -300,7 +300,7 @@ class CACashFlowQueueRepository:
             SET status = '{CACashFlowQueueRepository.STATUS_FAILED}',
                 error_message = {CACashFlowQueueRepository.escape_value(error_message)},
                 retry_count = retry_count + 1,
-                processed_at = {int(datetime.now().timestamp() * 1000)}
+                processed_at = '{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}'
             WHERE queue_id = {queue_id}
             """
 
@@ -408,7 +408,7 @@ class CACashFlowQueueRepository:
         """
         try:
             log_id = int(datetime.now().timestamp() * 1000)
-            timestamp_ms = log_id
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             insert_sql = f"""
             UPSERT INTO {CACashFlowQueueRepository.DATABASE}.{CACashFlowQueueRepository.LOG_TABLE_NAME} (
@@ -429,7 +429,7 @@ class CACashFlowQueueRepository:
                 {CACashFlowQueueRepository.escape_value(log_data.get('currency'))},
                 {CACashFlowQueueRepository.escape_value(log_data.get('status', 'SUCCESS'))},
                 {CACashFlowQueueRepository.escape_value(log_data.get('error_message'))},
-                {timestamp_ms}
+                '{timestamp_str}'
             )
             """
 

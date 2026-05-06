@@ -257,9 +257,10 @@ class CashFlowRepository:
             Tuple of (success, cash_flow_id)
         """
         try:
-            # Generate cash_flow_id (timestamp-based)
+            # Generate cash_flow_id (BIGINT ms PK — intentional)
             timestamp_ms = int(datetime.now().timestamp() * 1000)
             cash_flow_id = timestamp_ms
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             # Build column and value lists
             columns = ['cash_flow_id']
@@ -401,7 +402,7 @@ class CashFlowRepository:
             True if successful, False otherwise
         """
         try:
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             # Build SET clause
             set_clauses = []
@@ -630,7 +631,8 @@ class CashFlowRepository:
         """
         try:
             timestamp_ms = int(datetime.now().timestamp() * 1000)
-            history_id = timestamp_ms
+            history_id = timestamp_ms  # PK — keep as BIGINT ms
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             # Convert changes dict to JSON string
             changes_json = json.dumps(changes) if changes else '{}'
@@ -648,7 +650,7 @@ class CashFlowRepository:
                 {CashFlowRepository.escape_value(changes_json)},
                 {CashFlowRepository.escape_value(comments)},
                 {CashFlowRepository.escape_value(performed_by)},
-                {timestamp_ms}
+                '{timestamp_str}'
             )
             """
 

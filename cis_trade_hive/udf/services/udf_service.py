@@ -127,8 +127,7 @@ class UDFService:
 
         # Save to Kudu table
         try:
-            import time
-            # Prepare data for Kudu (timestamps as BIGINT milliseconds)
+            # Prepare data for Kudu
             kudu_data = {
                 'udf_id': udf.id,
                 'field_name': udf.field_name,
@@ -154,7 +153,7 @@ class UDFService:
             elif udf.field_type == 'NUMBER':
                 kudu_data['default_decimal'] = str(udf.default_value) if udf.default_value else None
             elif udf.field_type == 'DATE':
-                kudu_data['default_datetime'] = int(time.time() * 1000) if udf.default_value else None
+                kudu_data['default_datetime'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S') if udf.default_value else None
             elif udf.field_type == 'BOOLEAN':
                 kudu_data['default_bool'] = bool(udf.default_value) if udf.default_value is not None else None
             elif udf.field_type == 'INTEGER':

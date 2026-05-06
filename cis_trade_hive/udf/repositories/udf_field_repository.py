@@ -320,7 +320,7 @@ class UDFFieldRepository:
                     raise ValueError(f"Missing required field: {field}")
 
             # Set timestamps
-            timestamp = int(datetime.now().timestamp() * 1000)
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             # Extract and escape values
             object_type = self._escape_string(field_data.get('object_type', ''))
@@ -341,9 +341,9 @@ class UDFFieldRepository:
                 '{field_value}',
                 {'true' if is_active else 'false'},
                 '{created_by}',
-                {timestamp},
+                '{timestamp}',
                 '{updated_by}',
-                {timestamp}
+                '{timestamp}'
             )
             """
 
@@ -387,7 +387,7 @@ class UDFFieldRepository:
                 return False
 
             # Set timestamps
-            timestamp = int(datetime.now().timestamp() * 1000)
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             # Use existing composite key values
             object_type = self._escape_string(existing['object_type'])
@@ -411,9 +411,9 @@ class UDFFieldRepository:
                 '{field_value}',
                 {'true' if is_active else 'false'},
                 '{created_by}',
-                {created_at},
+                '{created_at}',
                 '{updated_by}',
-                {timestamp}
+                '{timestamp}'
             )
             """
 

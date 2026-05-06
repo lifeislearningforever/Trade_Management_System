@@ -206,9 +206,10 @@ class CorporateActionRepository:
             Tuple of (success, ca_id)
         """
         try:
-            # Generate ca_id (timestamp-based)
+            # Generate ca_id (BIGINT ms PK — intentional)
             timestamp_ms = int(datetime.now().timestamp() * 1000)
             ca_id = timestamp_ms
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             # Build column and value lists
             columns = ['ca_id']
@@ -262,9 +263,9 @@ class CorporateActionRepository:
                 'true',
                 'false',
                 CorporateActionRepository.escape_value(created_by),
-                str(timestamp_ms),
+                f"'{timestamp_str}'",
                 CorporateActionRepository.escape_value(created_by),
-                str(timestamp_ms)
+                f"'{timestamp_str}'"
             ])
 
             # Build UPSERT statement
@@ -300,7 +301,7 @@ class CorporateActionRepository:
             True if successful, False otherwise
         """
         try:
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             # Build SET clause
             set_clauses = []
@@ -320,7 +321,7 @@ class CorporateActionRepository:
 
             # Always update audit fields
             set_clauses.append(f"updated_by = {CorporateActionRepository.escape_value(updated_by)}")
-            set_clauses.append(f"updated_at = {timestamp_ms}")
+            set_clauses.append(f"updated_at = '{timestamp_str}'")
 
             if not set_clauses:
                 logger.warning(f"No fields to update for corporate action {ca_id}")
@@ -417,7 +418,7 @@ class CorporateActionRepository:
             SET is_deleted = true,
                 is_active = false,
                 updated_by = {CorporateActionRepository.escape_value(deleted_by)},
-                updated_at = {timestamp_ms}
+                updated_at = '{timestamp_str}'
             WHERE ca_id = {ca_id}
             """
 
@@ -453,7 +454,7 @@ class CorporateActionRepository:
                 is_active = true,
                 status = 'MODIFIED',
                 updated_by = {CorporateActionRepository.escape_value(restored_by)},
-                updated_at = {timestamp_ms}
+                updated_at = '{timestamp_str}'
             WHERE ca_id = {ca_id}
             """
 
@@ -566,7 +567,8 @@ class CorporateActionRepository:
         """
         try:
             timestamp_ms = int(datetime.now().timestamp() * 1000)
-            history_id = timestamp_ms
+            history_id = timestamp_ms  # PK — keep as BIGINT ms
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             # Convert changes dict to JSON string
             changes_json = json.dumps(changes) if changes else '{}'
@@ -584,7 +586,7 @@ class CorporateActionRepository:
                 {CorporateActionRepository.escape_value(changes_json)},
                 {CorporateActionRepository.escape_value(comments)},
                 {CorporateActionRepository.escape_value(performed_by)},
-                {timestamp_ms}
+                '{timestamp_str}'
             )
             """
 
