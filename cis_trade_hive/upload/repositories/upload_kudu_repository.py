@@ -709,16 +709,32 @@ class UploadKuduRepository:
             recon_data['duplicate_groups'] = 0  # Number of groups with duplicates
             recon_data['duplicate_rows'] = 0    # Total extra duplicate rows
 
-            # Approach 1: Full row duplicates (excluding system columns)
+            # Detect actual table columns once; used in all duplicate/null checks below
+            detected_cols = []
             try:
-                # Get column names from table (excluding system columns)
                 col_query = f"DESCRIBE {db}.{table_name}"
                 col_result = impala_manager.execute_query(col_query, database=db)
                 if col_result:
+                    detected_cols = [r.get('name', r.get('col_name', '')) for r in col_result]
+            except Exception as e:
+                logger.debug(f"Column detection skipped: {str(e)}")
+
+            # Derive key columns dynamically from detected columns
+            # isin column: prefer 'isin_code', fall back to 'isin'
+            isin_col = 'isin_code' if 'isin_code' in detected_cols else ('isin' if 'isin' in detected_cols else None)
+            # portfolio/identifier column: prefer 'portfolio', fall back to 'portfolio_name', then 'account_name'
+            portfolio_col = None
+            for candidate in ('portfolio', 'portfolio_name', 'account_name'):
+                if candidate in detected_cols:
+                    portfolio_col = candidate
+                    break
+
+            # Approach 1: Full row duplicates (excluding system columns)
+            try:
+                if detected_cols:
                     # Exclude system columns from duplicate check
                     system_cols = {'src_id', 'src_system', 'sub_system', 'data_cat', 'data_frq', 'processing_date'}
-                    data_cols = [r.get('name', r.get('col_name', '')) for r in col_result
-                                if r.get('name', r.get('col_name', '')) not in system_cols]
+                    data_cols = [c for c in detected_cols if c not in system_cols]
 
                     if data_cols:
                         cols_str = ', '.join(data_cols)
@@ -745,18 +761,22 @@ class UploadKuduRepository:
             except Exception as e:
                 logger.warning(f"Full row duplicate check failed: {str(e)}")
 
-            # Approach 2: Key-based duplicates (portfolio + isin_code + trade_date)
-            if not duplicate_found:
+            # Approach 2: Key-based duplicates using detected columns + reporting_date
+            if not duplicate_found and portfolio_col and isin_col:
                 try:
+                    key_cols = [portfolio_col, isin_col]
+                    if 'reporting_date' in detected_cols:
+                        key_cols.append('reporting_date')
+                    key_cols_str = ', '.join(key_cols)
                     dup_query = f"""
                     SELECT
                         COUNT(*) as dup_groups,
                         SUM(cnt - 1) as dup_rows
                     FROM (
-                        SELECT portfolio, isin_code, trade_date, COUNT(*) as cnt
+                        SELECT {key_cols_str}, COUNT(*) as cnt
                         FROM {db}.{table_name}
                         {where_clause}
-                        GROUP BY portfolio, isin_code, trade_date
+                        GROUP BY {key_cols_str}
                         HAVING COUNT(*) > 1
                     ) t
                     """
@@ -770,18 +790,18 @@ class UploadKuduRepository:
                 except Exception as e:
                     logger.debug(f"Key-based duplicate check skipped: {str(e)}")
 
-            # Approach 3: Simple portfolio + isin_code duplicates
-            if not duplicate_found:
+            # Approach 3: Simple 2-column duplicates using detected key columns
+            if not duplicate_found and portfolio_col and isin_col:
                 try:
                     dup_query = f"""
                     SELECT
                         COUNT(*) as dup_groups,
                         SUM(cnt - 1) as dup_rows
                     FROM (
-                        SELECT portfolio, isin_code, COUNT(*) as cnt
+                        SELECT {portfolio_col}, {isin_col}, COUNT(*) as cnt
                         FROM {db}.{table_name}
                         {where_clause}
-                        GROUP BY portfolio, isin_code
+                        GROUP BY {portfolio_col}, {isin_col}
                         HAVING COUNT(*) > 1
                     ) t
                     """
@@ -794,17 +814,25 @@ class UploadKuduRepository:
                 except Exception as e:
                     logger.debug(f"Simple duplicate check skipped: {str(e)}")
 
-            # 5. Check for null key fields
+            # 5. Check for null key fields using detected columns
             try:
-                null_query = f"""
-                SELECT COUNT(*) as null_count
-                FROM {db}.{table_name}
-                {where_clause}
-                {'AND' if where_clause else 'WHERE'} (portfolio IS NULL OR portfolio = '' OR isin_code IS NULL OR isin_code = '')
-                """
-                null_result = impala_manager.execute_query(null_query, database=db)
-                if null_result:
-                    recon_data['null_key_count'] = int(null_result[0].get('null_count', 0))
+                null_conditions = []
+                if portfolio_col:
+                    null_conditions.append(f"({portfolio_col} IS NULL OR {portfolio_col} = '')")
+                if isin_col:
+                    null_conditions.append(f"({isin_col} IS NULL OR {isin_col} = '')")
+
+                if null_conditions:
+                    null_filter = ' OR '.join(null_conditions)
+                    null_query = f"""
+                    SELECT COUNT(*) as null_count
+                    FROM {db}.{table_name}
+                    {where_clause}
+                    {'AND' if where_clause else 'WHERE'} ({null_filter})
+                    """
+                    null_result = impala_manager.execute_query(null_query, database=db)
+                    if null_result:
+                        recon_data['null_key_count'] = int(null_result[0].get('null_count', 0))
             except Exception as e:
                 logger.debug(f"Null check skipped: {str(e)}")
 
