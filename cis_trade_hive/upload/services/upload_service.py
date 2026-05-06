@@ -2857,9 +2857,9 @@ SELECT * FROM (
                     'ACTIVE' AS status,
                     TRUE AS is_active,
                     'POSITION_UPLOAD' AS created_by,
-                    UNIX_TIMESTAMP() * 1000 AS created_at,
+                    from_unixtime(UNIX_TIMESTAMP(), 'yyyy-MM-dd HH:mm:ss') AS created_at,
                     'POSITION_UPLOAD' AS updated_by,
-                    UNIX_TIMESTAMP() * 1000 AS updated_at
+                    from_unixtime(UNIX_TIMESTAMP(), 'yyyy-MM-dd HH:mm:ss') AS updated_at
                 FROM pos_stage_1_base b
                 JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
                 WHERE p4.security_status = 'NOT_FOUND: Create new security'

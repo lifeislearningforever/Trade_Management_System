@@ -349,9 +349,9 @@ CREATE TABLE cis_security (
     src_system STRING,
     is_active BOOLEAN,
     created_by STRING,
-    created_at BIGINT,
+    created_at STRING,
     updated_by STRING,
-    updated_at BIGINT,
+    updated_at STRING,
     PRIMARY KEY (security_id)
 )
 PARTITION BY HASH (security_id) PARTITIONS 8
