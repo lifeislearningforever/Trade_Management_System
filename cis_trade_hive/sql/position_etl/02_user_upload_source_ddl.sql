@@ -134,6 +134,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_4 (
     ticker_code                         STRING,
     industry                            STRING,
     financial_non_financial_co          STRING,
+    reporting_date                      STRING,
     position_basis                      STRING
 )
 COMMENT 'User Upload Source 4 - Comprehensive Position with Valuation (position_basis defaulted to SETTLE_DATE at ingest)'
@@ -167,7 +168,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_5 (
     data_cat            STRING,
     data_frq            STRING,
     reporting_date                      STRING,
-    portfolio_name                      STRING,
+    portfolio                           STRING,
     security_full_name                  STRING,
     product_type                        STRING,
     security_type                       STRING,
