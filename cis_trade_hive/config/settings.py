@@ -71,6 +71,10 @@ INSTALLED_APPS = [
     'crispy_bootstrap5',
     'django_extensions',
 
+    # Django Channels (WebSocket / real-time notifications)
+    'channels',
+    # daphne added conditionally below (requires Rust/cbor2 to build)
+
     # Custom Apps
     'core.apps.CoreConfig',
     'portfolio.apps.PortfolioConfig',
@@ -83,6 +87,14 @@ INSTALLED_APPS = [
     'hive_poc.apps.HivePocConfig',  # Hive POC - Managed Tables with ORC
     'upload.apps.UploadConfig',  # File Upload & Hive External Table Ingestion
 ]
+
+# daphne (ASGI server with HTTP/2 + WebSocket) requires cbor2 which needs Rust.
+# Add it only when it's actually installed so local dev without Rust still works.
+try:
+    import daphne  # noqa: F401
+    INSTALLED_APPS.insert(0, 'daphne')
+except ImportError:
+    pass
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -119,6 +131,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'config.wsgi.application'
+ASGI_APPLICATION = 'config.asgi.application'
 
 # Database Configuration
 # Primary database (SQLite for development, MySQL for production)
@@ -265,6 +278,53 @@ CACHES = {
     }
 }
 
+# ============================================================================
+# Django Channels — Channel Layer Configuration
+# ============================================================================
+# LOCAL/DEV:  InMemoryChannelLayer  (no Redis required, not shared across workers)
+# PROD/CML:   RedisChannelLayer     (set REDIS_URL env var, shared across all workers)
+#
+# Production note: With Gunicorn + multiple workers, InMemoryChannelLayer does NOT
+# share state across processes — each worker has its own layer. Use Redis in prod.
+#
+# Redis URL format: redis://:password@hostname:6379/0
+#                   rediss://:password@hostname:6380/0  (TLS)
+# ============================================================================
+
+_REDIS_URL = os.environ.get('REDIS_URL', '')
+
+if _REDIS_URL:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [_REDIS_URL],
+                'capacity': 1500,           # max messages queued per group
+                'expiry': 60,               # message TTL in seconds
+                'group_expiry': 86400,      # group membership TTL (24 h)
+                'symmetric_encryption_keys': [SECRET_KEY],  # encrypt channel messages
+            },
+        },
+    }
+else:
+    # Development / Docker local — no Redis needed
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+            'CONFIG': {
+                'capacity': 500,
+                'expiry': 60,
+            },
+        },
+    }
+
+# WebSocket settings
+WS_HEARTBEAT_INTERVAL   = int(os.environ.get('WS_HEARTBEAT_INTERVAL', '30'))   # seconds
+WS_MAX_RECONNECT_DELAY  = int(os.environ.get('WS_MAX_RECONNECT_DELAY', '30'))  # seconds
+
+# Add logger for channels
+# (added to LOGGING dict after its definition)
+
 # CSRF Configuration
 CSRF_COOKIE_SECURE = not DEBUG
 
@@ -349,6 +409,16 @@ LOGGING = {
             'propagate': False,
         },
         'upload': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'channels': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'daphne': {
             'handlers': ['console', 'file'],
             'level': 'INFO',
             'propagate': False,

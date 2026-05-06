@@ -22,6 +22,11 @@ import uuid
 
 from core.repositories.impala_connection import impala_manager
 from trade.services.position_service import position_service, PositionService
+from core.notifications import notify_user, notify_admins
+from core.notifications.constants import (
+    EVT_AVP_PROCESSING, EVT_AVP_COMPLETED, EVT_AVP_FAILED,
+    EVT_AVP_DEAD_LETTER, EVT_AVP_SLA_BREACH,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -287,8 +292,25 @@ class PositionQueueService:
             if is_db_queue:
                 self._update_status(queue_id, self.STATUS_PROCESSING)
 
+            queued_by = item.get('queued_by', '')
+            _notif_base = {
+                'queue_id':    queue_id,
+                'trade_id':    trade_id,
+                'portfolio':   item.get('portfolio_id', ''),
+                'security':    item.get('security_name') or item.get('security_id', ''),
+                'isin':        item.get('isin', ''),
+                'position_basis': item.get('position_basis', 'TRADE_DATE'),
+            }
+
+            # Notify user: AVP processing started
+            notify_user(queued_by, EVT_AVP_PROCESSING, {
+                **_notif_base,
+                'message': f'AVP calculation started for trade {trade_id}',
+            })
+
             # Check SLA
             queued_at = item.get('queued_at')
+            elapsed = 0
             if queued_at:
                 if isinstance(queued_at, str):
                     queued_at = datetime.strptime(queued_at, '%Y-%m-%d %H:%M:%S')
@@ -297,6 +319,19 @@ class PositionQueueService:
                     logger.warning(
                         f"SLA breach for queue_id={queue_id}: {elapsed:.0f}s > {self.SLA_SECONDS}s"
                     )
+                    notify_user(queued_by, EVT_AVP_SLA_BREACH, {
+                        **_notif_base,
+                        'elapsed_seconds': int(elapsed),
+                        'sla_seconds': self.SLA_SECONDS,
+                        'message': f'AVP SLA breach: trade {trade_id} waiting {int(elapsed)}s (SLA={self.SLA_SECONDS}s)',
+                    })
+                    notify_admins(EVT_AVP_SLA_BREACH, {
+                        **_notif_base,
+                        'queued_by': queued_by,
+                        'elapsed_seconds': int(elapsed),
+                        'sla_seconds': self.SLA_SECONDS,
+                        'message': f'AVP SLA breach: queue_id={queue_id} trade={trade_id} user={queued_by} elapsed={int(elapsed)}s',
+                    })
 
             # Check if this is a backdated trade requiring chain recalculation
             # error_message field may contain:
@@ -344,6 +379,15 @@ class PositionQueueService:
                     f"Successfully processed backdated trade queue_id={queue_id}, "
                     f"recalculated {recalc_result['recalculated']} positions"
                 )
+                notify_user(queued_by, EVT_AVP_COMPLETED, {
+                    **_notif_base,
+                    'recalculated': recalc_result['recalculated'],
+                    'elapsed_seconds': int(elapsed),
+                    'message': (
+                        f'AVP complete (backdated): {recalc_result["recalculated"]} position(s) '
+                        f'recalculated for trade {trade_id}'
+                    ),
+                })
                 return
 
             # For T+0 / TRADE_DATE basis: Calculate position directly
@@ -373,6 +417,11 @@ class PositionQueueService:
                 if is_db_queue:
                     self._update_status(queue_id, self.STATUS_COMPLETED)
                 logger.info(f"Successfully processed queue_id={queue_id}, trade_id={trade_id}")
+                notify_user(queued_by, EVT_AVP_COMPLETED, {
+                    **_notif_base,
+                    'elapsed_seconds': int(elapsed),
+                    'message': f'AVP calculation complete for trade {trade_id}',
+                })
             else:
                 self._handle_failure(item, message, is_db_queue)
 
@@ -564,8 +613,18 @@ class PositionQueueService:
 
     def _handle_failure(self, item: Dict[str, Any], error_message: str, is_db_queue: bool = True):
         """Handle failed processing with retry logic."""
-        queue_id = item.get('queue_id')
+        queue_id  = item.get('queue_id')
+        trade_id  = item.get('trade_id')
+        queued_by = item.get('queued_by', '')
         retry_count = item.get('retry_count', 0)
+
+        _notif_base = {
+            'queue_id':  queue_id,
+            'trade_id':  trade_id,
+            'portfolio': item.get('portfolio_id', ''),
+            'security':  item.get('security_name') or item.get('security_id', ''),
+            'isin':      item.get('isin', ''),
+        }
 
         if retry_count < self.MAX_RETRIES:
             # Retry later
@@ -576,7 +635,6 @@ class PositionQueueService:
                     increment_retry=True
                 )
             else:
-                # Re-queue in memory
                 item['retry_count'] = retry_count + 1
                 self._in_memory_queue.put(item)
 
@@ -584,6 +642,16 @@ class PositionQueueService:
                 f"Queue item {queue_id} failed, will retry. "
                 f"Retry {retry_count + 1}/{self.MAX_RETRIES}"
             )
+            notify_user(queued_by, EVT_AVP_FAILED, {
+                **_notif_base,
+                'error': error_message,
+                'retry': retry_count + 1,
+                'max_retries': self.MAX_RETRIES,
+                'message': (
+                    f'AVP failed for trade {trade_id} — retrying '
+                    f'({retry_count + 1}/{self.MAX_RETRIES})'
+                ),
+            })
         else:
             # Move to dead letter queue
             if is_db_queue:
@@ -594,6 +662,23 @@ class PositionQueueService:
             logger.error(
                 f"Queue item {queue_id} moved to dead letter queue after {self.MAX_RETRIES} retries"
             )
+            notify_user(queued_by, EVT_AVP_DEAD_LETTER, {
+                **_notif_base,
+                'error': error_message,
+                'message': (
+                    f'AVP permanently failed for trade {trade_id} after '
+                    f'{self.MAX_RETRIES} retries — requires manual intervention'
+                ),
+            })
+            notify_admins(EVT_AVP_DEAD_LETTER, {
+                **_notif_base,
+                'queued_by': queued_by,
+                'error': error_message,
+                'message': (
+                    f'Dead letter: queue_id={queue_id} trade={trade_id} '
+                    f'user={queued_by} — {error_message[:200]}'
+                ),
+            })
 
     # =========================================================================
     # QUEUE MANAGEMENT

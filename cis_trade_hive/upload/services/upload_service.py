@@ -2146,14 +2146,29 @@ SELECT * FROM (
             Tuple of (success, message, result_dict)
         """
         from core.repositories.impala_connection import impala_manager
+        from core.notifications import notify_user, notify_admins
+        from core.notifications.constants import (
+            EVT_UPLOAD_STARTED, EVT_UPLOAD_STEP,
+            EVT_UPLOAD_COMPLETED, EVT_UPLOAD_FAILED,
+        )
 
         result = {'src_id': src_id, 'processing_date': processing_date}
+
+        _notif_base = {
+            'upload_id':       upload_id,
+            'src_id':          src_id,
+            'processing_date': processing_date,
+        }
 
         try:
             logger.info(
                 f"[position_etl] Starting ETL for src_id={src_id} "
                 f"processing_date={processing_date} by {updated_by}"
             )
+            notify_user(updated_by, EVT_UPLOAD_STARTED, {
+                **_notif_base,
+                'message': f'Position ETL started for {src_id} ({processing_date})',
+            })
 
             db = 'gmp_cis'
 
@@ -3275,11 +3290,30 @@ SELECT * FROM (
                 f"{result.get('passed', 0)} PASS, {result.get('failed', 0)} FAIL"
             )
             logger.info(f"[position_etl] {msg}")
+            notify_user(updated_by, EVT_UPLOAD_COMPLETED, {
+                **_notif_base,
+                'total':  result.get('total', 0),
+                'passed': result.get('passed', 0),
+                'failed': result.get('failed', 0),
+                'message': msg,
+            })
             return True, msg, result
 
         except Exception as e:
             logger.error(f"[position_etl] Error: {e}", exc_info=True)
-            return False, f"Position ETL error: {e}", result
+            err_msg = f"Position ETL error: {e}"
+            notify_user(updated_by, EVT_UPLOAD_FAILED, {
+                **_notif_base,
+                'error':   str(e)[:500],
+                'message': f'Position ETL failed for {src_id}: {str(e)[:200]}',
+            })
+            notify_admins(EVT_UPLOAD_FAILED, {
+                **_notif_base,
+                'triggered_by': updated_by,
+                'error':        str(e)[:500],
+                'message':      f'Upload ETL failure: src_id={src_id} user={updated_by} — {str(e)[:200]}',
+            })
+            return False, err_msg, result
 
     def get_position_report(
         self,
