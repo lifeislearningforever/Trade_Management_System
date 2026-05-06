@@ -96,15 +96,21 @@ def clean_kudu_ddl(ddl: str) -> str:
     Strip environment-specific and storage-level noise from a Kudu DDL string
     so the result is portable across dev / SIT / UAT / PROD clusters.
 
-    Removes:
+    Removes / fixes:
+      - EXTERNAL keyword on CREATE TABLE (CML returns CREATE EXTERNAL TABLE
+        for Kudu tables; recreating them requires plain CREATE TABLE)
+      - COMMENT '' empty comment lines
       - ENCODING <name> on column definitions
       - COMPRESSION <name> on column definitions
       - DEFAULT <value> on column definitions
       - kudu.cluster_id and other non-portable TBLPROPERTIES keys
       - Replaces kudu.master_addresses value with ${KUDU_MASTERS} placeholder
     """
-    # 1. Clean column-level storage attributes line by line so we don't
-    #    accidentally touch the PARTITION BY or TBLPROPERTIES sections.
+    # Fix CREATE EXTERNAL TABLE → CREATE TABLE for Kudu tables
+    ddl = re.sub(r'\bCREATE\s+EXTERNAL\s+TABLE\b', 'CREATE TABLE', ddl, flags=re.IGNORECASE)
+
+    # Clean column-level storage attributes line by line so we don't
+    # accidentally touch the PARTITION BY or TBLPROPERTIES sections.
     lines = ddl.split('\n')
     cleaned_lines = []
     in_tblprops = False
@@ -112,6 +118,10 @@ def clean_kudu_ddl(ddl: str) -> str:
 
     for line in lines:
         stripped = line.strip().upper()
+
+        # Drop empty COMMENT lines  e.g.  COMMENT ''  or  COMMENT ""
+        if re.match(r"^\s*COMMENT\s+(['\"])\1\s*$", line, re.IGNORECASE):
+            continue
 
         # Detect start of TBLPROPERTIES block
         if stripped.startswith('TBLPROPERTIES'):
