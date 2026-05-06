@@ -157,9 +157,10 @@ class SecurityHiveRepository:
             True if successful, False otherwise
         """
         try:
-            # Generate security_id (timestamp-based)
+            # Generate security_id (BIGINT ms PK — intentional)
             timestamp_ms = int(datetime.now().timestamp() * 1000)
             security_id = timestamp_ms
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             # Build column and value lists
             columns = ['security_id']
@@ -225,9 +226,9 @@ class SecurityHiveRepository:
             values.extend([
                 'true',
                 SecurityHiveRepository.escape_value(created_by),
-                str(timestamp_ms),
+                f"'{timestamp_str}'",
                 SecurityHiveRepository.escape_value(created_by),
-                str(timestamp_ms)
+                f"'{timestamp_str}'"
             ])
 
             # Build UPSERT statement
@@ -262,7 +263,7 @@ class SecurityHiveRepository:
             True if successful, False otherwise
         """
         try:
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             # Build SET clause
             set_clauses = []
@@ -288,7 +289,7 @@ class SecurityHiveRepository:
 
             # Always update audit fields
             set_clauses.append(f"updated_by = {SecurityHiveRepository.escape_value(updated_by)}")
-            set_clauses.append(f"updated_at = {timestamp_ms}")
+            set_clauses.append(f"updated_at = '{timestamp_str}'")
 
             if not set_clauses:
                 logger.warning(f"No fields to update for security {security_id}")
@@ -326,12 +327,12 @@ class SecurityHiveRepository:
             True if successful, False otherwise
         """
         try:
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             set_clauses = [
                 f"status = {SecurityHiveRepository.escape_value(status)}",
                 f"updated_by = {SecurityHiveRepository.escape_value(updated_by)}",
-                f"updated_at = {timestamp_ms}"
+                f"updated_at = '{timestamp_str}'"
             ]
 
             if status == 'VALIDATED':
@@ -522,7 +523,8 @@ class SecurityHiveRepository:
         """
         try:
             timestamp_ms = int(datetime.now().timestamp() * 1000)
-            history_id = timestamp_ms
+            history_id = timestamp_ms  # PK — keep as BIGINT ms
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             # Convert changes dict to JSON string
             changes_json = json.dumps(changes) if changes else '{}'
@@ -540,7 +542,7 @@ class SecurityHiveRepository:
                 {SecurityHiveRepository.escape_value(changes_json)},
                 {SecurityHiveRepository.escape_value(comments)},
                 {SecurityHiveRepository.escape_value(performed_by)},
-                {timestamp_ms}
+                '{timestamp_str}'
             )
             """
 

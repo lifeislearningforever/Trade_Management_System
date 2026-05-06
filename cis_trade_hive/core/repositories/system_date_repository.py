@@ -87,16 +87,17 @@ class SystemDateRepository:
         """
         try:
             timestamp_ms = int(datetime.now().timestamp() * 1000)
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             # Deactivate all existing records
             deactivate_sql = f"""
             UPDATE {SystemDateRepository.DATABASE}.{SystemDateRepository.SYSTEM_DATE_TABLE}
-            SET is_active = false, updated_at = {timestamp_ms}
+            SET is_active = false, updated_at = '{timestamp_str}'
             WHERE is_active = true
             """
             impala_manager.execute_write(deactivate_sql, database=SystemDateRepository.DATABASE)
 
-            # Generate new date_id (timestamp-based)
+            # Generate new date_id (BIGINT ms PK — intentional)
             date_id = timestamp_ms
 
             # Insert new active record
@@ -108,7 +109,7 @@ class SystemDateRepository:
             ) VALUES (
                 {date_id}, '{system_date}', '{report_date}', '{processing_date}',
                 '{source_file}', '{file_date_raw}', true, {str(is_business_day).lower()},
-                '{loaded_by}', {timestamp_ms}, {timestamp_ms}, {timestamp_ms}
+                '{loaded_by}', '{timestamp_str}', '{timestamp_str}', '{timestamp_str}'
             )
             """
 
