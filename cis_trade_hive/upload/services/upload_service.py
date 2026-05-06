@@ -2158,6 +2158,36 @@ SELECT * FROM (
             db = 'gmp_cis'
 
             # ------------------------------------------------------------------
+            # safe_decimal(col, dec_type): generates SQL that handles every
+            # real-world dirty numeric format before CAST to DECIMAL:
+            #   1. CAST source col to STRING (handles numeric source types)
+            #   2. TRIM whitespace
+            #   3. Strip commas (1,234.56 → 1234.56)
+            #   4. Strip currency symbols and percent signs ($, £, %, etc.)
+            #   5. Convert parentheses-negatives: (123.45) → -123.45
+            #   6. Convert lone dash/en-dash meaning zero → '0'
+            #   7. regexp_extract to pull only the leading -?digits.digits part
+            #   8. NULLIF empty string → NULL
+            #   9. Final CAST to target DECIMAL type
+            # Any value that still can't parse becomes NULL (never throws UDF error).
+            # ------------------------------------------------------------------
+            def safe_decimal(col: str, dec_type: str) -> str:
+                return (
+                    f"CAST(NULLIF(regexp_extract("
+                    f"regexp_replace("
+                    f"regexp_replace("
+                    f"regexp_replace("
+                    f"regexp_replace("
+                    f"TRIM(CAST({col} AS STRING)),"
+                    f" ',', ''),"           # strip thousands separator
+                    f" '[\\\\$£€¥%]', '')," # strip currency/percent symbols
+                    f" '^\\\\(([0-9]+\\\\.?[0-9]*)\\\\)$', '-\\\\1')," # (123.45) → -123.45
+                    f" '^[-–—]+$', '0'),"   # lone dash/en-dash → 0
+                    f" '^-?[0-9]+(\\\\.?[0-9]*)?([eE][+-]?[0-9]+)?', 0),"
+                    f" '') AS {dec_type})"
+                )
+
+            # ------------------------------------------------------------------
             # Step 0: Standardize — map raw source table columns into
             #         position_upload_standardized (equivalent of Position_insert.sql).
             #         This INSERT is partitioned by (src_id, processing_date).
@@ -2189,7 +2219,7 @@ SELECT * FROM (
                         NULL                                            AS security_short_name,
                         isin_code                                       AS isin,
                         NULL                                            AS ticker,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(quantity_today AS STRING)), '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS quantity,
+                        {safe_decimal('quantity_today', 'DECIMAL(18,4)')} AS quantity,
                         CAST(NULL AS DECIMAL(18,4))                     AS shares_outstanding,
                         CAST(NULL AS DECIMAL(18,4))                     AS shares_issued,
                         CAST(NULL AS DECIMAL(10,6))                     AS pct_holding,
@@ -2249,10 +2279,10 @@ SELECT * FROM (
                         stock_name                                      AS security_short_name,
                         isin_code                                       AS isin,
                         NULL                                            AS ticker,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(qty_held AS STRING)),      '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS quantity,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(shares_issued AS STRING)), '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS shares_outstanding,
+                        {safe_decimal('qty_held', 'DECIMAL(18,4)')} AS quantity,
+                        {safe_decimal('shares_issued', 'DECIMAL(18,4)')} AS shares_outstanding,
                         CAST(NULL AS DECIMAL(18,4))                     AS shares_issued,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(pct_holding AS STRING)),   '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(10,6)) AS pct_holding,
+                        {safe_decimal('pct_holding', 'DECIMAL(10,6)')} AS pct_holding,
                         CAST(NULL AS DECIMAL(18,6))                     AS market_price,
                         CAST(NULL AS DECIMAL(18,6))                     AS average_cost,
                         CAST(NULL AS DECIMAL(18,4))                     AS cost_fc,
@@ -2309,8 +2339,8 @@ SELECT * FROM (
                         NULL                                            AS security_short_name,
                         isin                                            AS isin,
                         NULL                                            AS ticker,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(shares_par_value AS STRING)),        '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS quantity,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(shares_outstanding_total AS STRING)), '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS shares_outstanding,
+                        {safe_decimal('shares_par_value', 'DECIMAL(18,4)')} AS quantity,
+                        {safe_decimal('shares_outstanding_total', 'DECIMAL(18,4)')} AS shares_outstanding,
                         CAST(NULL AS DECIMAL(18,4))                     AS shares_issued,
                         CAST(NULL AS DECIMAL(10,6))                     AS pct_holding,
                         CAST(NULL AS DECIMAL(18,6))                     AS market_price,
@@ -2373,20 +2403,20 @@ SELECT * FROM (
                         NULL                                                AS security_short_name,
                         isin_code                                           AS isin,
                         ticker_code                                         AS ticker,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(quantity AS STRING)),                          '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS quantity,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(no_of_shares_issues_by_the_company AS STRING)), '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS shares_outstanding,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(no_of_shares_issues_by_the_company AS STRING)), '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS shares_issued,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(pct_holdings AS STRING)),                       '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(10,6)) AS pct_holding,
+                        {safe_decimal('quantity', 'DECIMAL(18,4)')} AS quantity,
+                        {safe_decimal('no_of_shares_issues_by_the_company', 'DECIMAL(18,4)')} AS shares_outstanding,
+                        {safe_decimal('no_of_shares_issues_by_the_company', 'DECIMAL(18,4)')} AS shares_issued,
+                        {safe_decimal('pct_holdings', 'DECIMAL(10,6)')} AS pct_holding,
                         CAST(NULL AS DECIMAL(18,6))                         AS market_price,
                         CAST(NULL AS DECIMAL(18,6))                         AS average_cost,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(cost_fc AS STRING)),          '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS cost_fc,
+                        {safe_decimal('cost_fc', 'DECIMAL(18,4)')} AS cost_fc,
                         CAST(NULL AS DECIMAL(18,4))                         AS market_value_fc,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(net_book_value_fc AS STRING)), '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS net_book_value_fc,
+                        {safe_decimal('net_book_value_fc', 'DECIMAL(18,4)')} AS net_book_value_fc,
                         CAST(NULL AS DECIMAL(18,4))                         AS unrealized_pnl_fc,
                         CAST(NULL AS DECIMAL(18,4))                         AS provision_fc,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(cost_lc AS STRING)),          '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS cost_lc,
+                        {safe_decimal('cost_lc', 'DECIMAL(18,4)')} AS cost_lc,
                         CAST(NULL AS DECIMAL(18,4))                         AS market_value_lc,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(net_book_value_lc AS STRING)), '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS net_book_value_lc,
+                        {safe_decimal('net_book_value_lc', 'DECIMAL(18,4)')} AS net_book_value_lc,
                         CAST(NULL AS DECIMAL(18,4))                         AS unrealized_pnl_lc,
                         CAST(NULL AS DECIMAL(18,4))                         AS provision_lc,
                         product_type                                        AS product_type,
@@ -2433,22 +2463,22 @@ SELECT * FROM (
                         NULL                                            AS security_short_name,
                         isin_code                                       AS isin,
                         ticker_code                                     AS ticker,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(quantity AS STRING)),                             '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS quantity,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(no_of_shares_issues_by_the_company AS STRING)),   '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS shares_outstanding,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(no_of_shares_issues_by_the_company AS STRING)),   '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS shares_issued,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(pct_holdings AS STRING)),                         '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(10,6)) AS pct_holding,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(market_price_unit_fc AS STRING)),                 '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,6)) AS market_price,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(unit_avg_cost_unit_fc AS STRING)),                '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,6)) AS average_cost,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(cost_fc AS STRING)),                              '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS cost_fc,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(market_value_fc AS STRING)),                      '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS market_value_fc,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(net_book_value_fc AS STRING)),                    '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS net_book_value_fc,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(unrealised_gain_loss_fc AS STRING)),              '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS unrealized_pnl_fc,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(provision_fc AS STRING)),                         '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS provision_fc,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(cost_lc AS STRING)),                              '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS cost_lc,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(market_value_lc AS STRING)),                      '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS market_value_lc,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(net_book_value_lc AS STRING)),                    '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS net_book_value_lc,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(unrealised_gain_loss_lc AS STRING)),              '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS unrealized_pnl_lc,
-                        CAST(NULLIF(regexp_extract(TRIM(CAST(provision_lc AS STRING)),                         '^-?[0-9]+(\\.[0-9]+)?', 0), '' ) AS DECIMAL(18,4)) AS provision_lc,
+                        {safe_decimal('quantity', 'DECIMAL(18,4)')} AS quantity,
+                        {safe_decimal('no_of_shares_issues_by_the_company', 'DECIMAL(18,4)')} AS shares_outstanding,
+                        {safe_decimal('no_of_shares_issues_by_the_company', 'DECIMAL(18,4)')} AS shares_issued,
+                        {safe_decimal('pct_holdings', 'DECIMAL(10,6)')} AS pct_holding,
+                        {safe_decimal('market_price_unit_fc', 'DECIMAL(18,6)')} AS market_price,
+                        {safe_decimal('unit_avg_cost_unit_fc', 'DECIMAL(18,6)')} AS average_cost,
+                        {safe_decimal('cost_fc', 'DECIMAL(18,4)')} AS cost_fc,
+                        {safe_decimal('market_value_fc', 'DECIMAL(18,4)')} AS market_value_fc,
+                        {safe_decimal('net_book_value_fc', 'DECIMAL(18,4)')} AS net_book_value_fc,
+                        {safe_decimal('unrealised_gain_loss_fc', 'DECIMAL(18,4)')} AS unrealized_pnl_fc,
+                        {safe_decimal('provision_fc', 'DECIMAL(18,4)')} AS provision_fc,
+                        {safe_decimal('cost_lc', 'DECIMAL(18,4)')} AS cost_lc,
+                        {safe_decimal('market_value_lc', 'DECIMAL(18,4)')} AS market_value_lc,
+                        {safe_decimal('net_book_value_lc', 'DECIMAL(18,4)')} AS net_book_value_lc,
+                        {safe_decimal('unrealised_gain_loss_lc', 'DECIMAL(18,4)')} AS unrealized_pnl_lc,
+                        {safe_decimal('provision_lc', 'DECIMAL(18,4)')} AS provision_lc,
                         product_type, security_type, quoted_unquoted, industry,
                         NULL                                            AS fin_nonfin_co,
                         issuer_type, reits_or_fund_y_n,
