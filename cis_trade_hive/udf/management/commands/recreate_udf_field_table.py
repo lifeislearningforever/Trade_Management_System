@@ -87,8 +87,8 @@ class Command(BaseCommand):
 
     def _insert_sample_data(self):
         """Insert sample entity types and fields."""
-        import time
-        timestamp = int(time.time() * 1000)
+        from datetime import datetime as _dt
+        timestamp = _dt.now().strftime('%Y-%m-%d %H:%M:%S')
 
         sample_data = [
             # Entity Types (field_value is empty)
@@ -122,7 +122,7 @@ class Command(BaseCommand):
         for data in sample_data:
             query = f"""
             UPSERT INTO gmp_cis.cis_udf_field_kudu VALUES
-            ({data[0]}, '{data[1]}', '{data[2]}', '{data[3]}', {data[4]}, '{data[5]}', {data[6]}, '{data[7]}', {data[8]})
+            ({data[0]}, '{data[1]}', '{data[2]}', '{data[3]}', {data[4]}, '{data[5]}', '{data[6]}', '{data[7]}', '{data[8]}')
             """
             try:
                 impala_manager.execute_write(query, database='gmp_cis')

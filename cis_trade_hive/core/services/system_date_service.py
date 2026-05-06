@@ -128,9 +128,18 @@ class SystemDateService:
                 report_date = self._parse_date(report_date_str) if report_date_str else None
                 processing_date = self._parse_date(processing_date_str) if processing_date_str else None
 
-                # Convert loaded_at from epoch ms to datetime
-                loaded_at_ms = gmp_date_info.get('loaded_at')
-                loaded_at = datetime.fromtimestamp(loaded_at_ms / 1000) if loaded_at_ms else None
+                # loaded_at is now STRING 'YYYY-MM-DD HH:MM:SS' after migration
+                loaded_at_raw = gmp_date_info.get('loaded_at')
+                if loaded_at_raw and isinstance(loaded_at_raw, str):
+                    try:
+                        loaded_at = datetime.strptime(loaded_at_raw, '%Y-%m-%d %H:%M:%S')
+                    except ValueError:
+                        loaded_at = None
+                elif loaded_at_raw:
+                    # fallback: still BIGINT ms before migration
+                    loaded_at = datetime.fromtimestamp(int(loaded_at_raw) / 1000)
+                else:
+                    loaded_at = None
 
                 info = SystemDateInfo(
                     system_date=system_date,

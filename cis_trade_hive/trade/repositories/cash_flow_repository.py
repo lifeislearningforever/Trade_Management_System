@@ -322,24 +322,24 @@ class CashFlowRepository:
                 columns.append('src_system')
                 values.append("'CIS'")
 
-            # Add audit fields - use TIMESTAMP format for created_at/updated_at
+            # Add audit fields
             timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             columns.extend(['is_active', 'is_deleted', 'created_by', 'created_at', 'updated_by', 'updated_at'])
             values.extend([
                 'true',
                 'false',
                 CashFlowRepository.escape_value(created_by),
-                f"CAST('{timestamp_str}' AS TIMESTAMP)",
+                f"'{timestamp_str}'",
                 CashFlowRepository.escape_value(created_by),
-                f"CAST('{timestamp_str}' AS TIMESTAMP)"
+                f"'{timestamp_str}'"
             ])
 
             # For CA-generated cash flows (status=VALIDATED, src_system=CA), auto-populate validation fields
             if status == 'VALIDATED' and src_system == 'CA':
                 columns.extend(['validated_by', 'validated_at', 'validation_comments'])
                 values.extend([
-                    "'SYSTEM_CA'",  # Auto-validated by CA system
-                    f"CAST('{timestamp_str}' AS TIMESTAMP)",
+                    "'SYSTEM_CA'",
+                    f"'{timestamp_str}'",
                     "'Auto-validated: Generated from Corporate Action'"
                 ])
 
@@ -428,10 +428,10 @@ class CashFlowRepository:
                     else:
                         set_clauses.append(f"{field} = {CashFlowRepository.escape_value(cf_data[field])}")
 
-            # Always update audit fields - use TIMESTAMP format
+            # Always update audit fields
             timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             set_clauses.append(f"updated_by = {CashFlowRepository.escape_value(updated_by)}")
-            set_clauses.append(f"updated_at = CAST('{timestamp_str}' AS TIMESTAMP)")
+            set_clauses.append(f"updated_at = '{timestamp_str}'")
 
             if not set_clauses:
                 logger.warning(f"No fields to update for cash flow {cash_flow_id}")
@@ -546,7 +546,7 @@ class CashFlowRepository:
             SET is_deleted = true,
                 is_active = false,
                 updated_by = {CashFlowRepository.escape_value(deleted_by)},
-                updated_at = CAST('{timestamp_str}' AS TIMESTAMP)
+                updated_at = '{timestamp_str}'
             WHERE cash_flow_id = {cash_flow_id}
             """
 
@@ -582,7 +582,7 @@ class CashFlowRepository:
                 is_active = true,
                 status = 'MODIFIED',
                 updated_by = {CashFlowRepository.escape_value(restored_by)},
-                updated_at = CAST('{timestamp_str}' AS TIMESTAMP)
+                updated_at = '{timestamp_str}'
             WHERE cash_flow_id = {cash_flow_id}
             """
 

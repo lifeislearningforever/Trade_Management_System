@@ -314,8 +314,8 @@ class Command(BaseCommand):
                     escaped_value = option_value.replace("'", "\\'")
 
                     # Generate timestamp
-                    import time
-                    timestamp = int(time.time() * 1000)
+                    from datetime import datetime as _dt
+                    timestamp = _dt.now().strftime('%Y-%m-%d %H:%M:%S')
 
                     # Note: In actual table:
                     # - udf_id = primary key ID
@@ -334,9 +334,9 @@ class Command(BaseCommand):
                         'SECURITY',
                         false,
                         true,
-                        {timestamp},
+                        '{timestamp}',
                         'SYSTEM',
-                        {timestamp},
+                        '{timestamp}',
                         'SYSTEM'
                     )
                     """

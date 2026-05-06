@@ -143,9 +143,9 @@ class UDFService:
                 'group_name': udf.group_name or '',
                 'is_active': udf.is_active,
                 'created_by': user.username,
-                'created_at': int(udf.created_at.timestamp() * 1000),  # BIGINT milliseconds
+                'created_at': udf.created_at.strftime('%Y-%m-%d %H:%M:%S') if udf.created_at else datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'updated_by': user.username,
-                'updated_at': int(udf.updated_at.timestamp() * 1000)   # BIGINT milliseconds
+                'updated_at': udf.updated_at.strftime('%Y-%m-%d %H:%M:%S') if udf.updated_at else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
 
             # Add default values based on type
