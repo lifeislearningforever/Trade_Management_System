@@ -103,7 +103,7 @@
             return;
         }
 
-        if (msg.type === 'pong' || msg.event_type === 'EVT_PONG') {
+        if (msg.type === 'pong' || msg.event_type === 'pong' || msg.event_type === 'EVT_PONG') {
             pongReceived = true;
             return;
         }
@@ -455,24 +455,25 @@
     }
 
     function eventLabel(evtType) {
+        // Keys must match the lowercase string values in constants.py
         var labels = {
-            EVT_AVP_QUEUED:      'Position queued',
-            EVT_AVP_PROCESSING:  'Processing position',
-            EVT_AVP_COMPLETED:   'Position calculated',
-            EVT_AVP_FAILED:      'Position failed',
-            EVT_AVP_DEAD_LETTER: 'Position error',
-            EVT_AVP_SLA_BREACH:  'SLA breach',
-            EVT_UPLOAD_STARTED:  'Upload started',
-            EVT_UPLOAD_STEP:     'Upload progress',
-            EVT_UPLOAD_COMPLETED:'Upload complete',
-            EVT_UPLOAD_FAILED:   'Upload failed',
-            EVT_TRADE_CREATED:   'Trade created',
-            EVT_TRADE_APPROVED:  'Trade approved',
-            EVT_TRADE_REJECTED:  'Trade rejected',
-            EVT_TRADE_SETTLED:   'Trade settled',
-            EVT_SYSTEM_ERROR:    'System error',
-            EVT_PING:            'Ping',
-            EVT_PONG:            'Pong'
+            'avp_queued':       'Position Queued',
+            'avp_processing':   'Processing Position',
+            'avp_completed':    'Position Calculated',
+            'avp_failed':       'Position Failed',
+            'avp_dead_letter':  'Position Error',
+            'avp_sla_breach':   'AVP SLA Breach',
+            'upload_started':   'Upload Started',
+            'upload_step':      'Upload Progress',
+            'upload_completed': 'Upload Complete',
+            'upload_failed':    'Upload Failed',
+            'trade_created':    'Trade Created',
+            'trade_approved':   'Trade Approved',
+            'trade_rejected':   'Trade Rejected',
+            'trade_settled':    'Trade Settled',
+            'system_error':     'System Error',
+            'ping':             'Ping',
+            'pong':             'Pong'
         };
         return evtType && labels[evtType] ? labels[evtType] : 'Notification';
     }
