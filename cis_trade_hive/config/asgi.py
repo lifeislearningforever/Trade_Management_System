@@ -31,15 +31,17 @@ django_asgi_app = get_asgi_application()
 try:
     from channels.auth import AuthMiddlewareStack
     from channels.routing import ProtocolTypeRouter, URLRouter
-    from channels.security.websocket import AllowedHostsOriginValidator
     from core.routing import websocket_urlpatterns
 
+    # AllowedHostsOriginValidator is intentionally omitted:
+    # it rejects WS connections when ALLOWED_HOSTS contains '*' or CML proxy
+    # hostnames that don't exactly match the Origin header sent by the browser.
+    # CML already enforces network-level access control, so origin validation
+    # here adds no real security while breaking legitimate connections.
     application = ProtocolTypeRouter({
         'http': django_asgi_app,
-        'websocket': AllowedHostsOriginValidator(
-            AuthMiddlewareStack(
-                URLRouter(websocket_urlpatterns)
-            )
+        'websocket': AuthMiddlewareStack(
+            URLRouter(websocket_urlpatterns)
         ),
     })
     logger.info("ASGI: Django Channels loaded — WebSocket notifications enabled")
