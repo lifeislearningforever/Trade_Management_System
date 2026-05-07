@@ -119,15 +119,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // Notification Button (Placeholder)
-    const notificationsBtn = document.getElementById('notifications-btn');
-    if (notificationsBtn) {
-        notificationsBtn.addEventListener('click', function() {
-            // TODO: Implement notifications panel
-            alert('Notifications feature coming soon!');
-        });
-    }
-
     // Initialize Tooltips
     const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
     tooltipTriggerList.map(function (tooltipTriggerEl) {
