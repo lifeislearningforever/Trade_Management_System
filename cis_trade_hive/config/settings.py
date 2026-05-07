@@ -423,12 +423,40 @@ LOGGING = {
             'level': 'INFO',
             'propagate': False,
         },
+        # Suppress per-request access log noise from uvicorn under ASGI
+        'uvicorn.access': {
+            'handlers': ['console'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'uvicorn.error': {
+            'handlers': ['console'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        # StreamingHttpResponse sync-iterator warning fires on every static
+        # file request under ASGI — it is harmless and very noisy.
+        'django.request': {
+            'handlers': ['console', 'file'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
     },
 }
 
 # Create logs directory if it doesn't exist
 LOGS_DIR = BASE_DIR / 'logs'
 LOGS_DIR.mkdir(exist_ok=True)
+
+# Suppress Django's "StreamingHttpResponse must consume synchronous iterator"
+# warning that fires on every static file request when running under ASGI
+# (uvicorn/daphne). WhiteNoise uses sync iterators — this is harmless.
+import warnings
+warnings.filterwarnings(
+    'ignore',
+    message='.*StreamingHttpResponse.*synchronous iterator.*',
+    category=Warning,
+)
 
 # Email Configuration
 EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
