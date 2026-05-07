@@ -825,6 +825,10 @@ def main():
 
     if WORKDIR:
         os.chdir(WORKDIR)
+        # Add project root to sys.path so 'core', 'trade', etc. are importable
+        # by uvicorn/daphne worker processes that inherit this environment.
+        if WORKDIR not in sys.path:
+            sys.path.insert(0, WORKDIR)
 
     # ==================== Environment Detection ====================
     # Get environment-specific configuration (SIT, UAT, PROD, DR)
@@ -968,6 +972,10 @@ def main():
         "accesslog = '-'",
         "errorlog  = '-'",
         "loglevel  = 'info'",
+        "import sys, os",
+        f"_root = {repr(WORKDIR)}",
+        "if _root not in sys.path: sys.path.insert(0, _root)",
+        f"os.environ.setdefault('PYTHONPATH', {repr(WORKDIR)})",
     ]
     with open(gunicorn_conf, "w") as _f:
         _f.write("\n".join(gunicorn_conf_lines) + "\n")

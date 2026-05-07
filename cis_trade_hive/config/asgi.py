@@ -17,6 +17,14 @@ Production deployment (choose one):
 
 import logging
 import os
+import sys
+
+# Ensure the project root (parent of config/) is on sys.path so that
+# 'core', 'trade', etc. are importable when asgi.py is loaded by uvicorn/daphne.
+# os.chdir() in cml_app.py sets the cwd but does NOT add it to sys.path.
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 
 from django.core.asgi import get_asgi_application
 
