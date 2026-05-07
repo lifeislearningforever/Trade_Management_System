@@ -57,24 +57,46 @@ start_django() {
 
     cd "$PROJECT_DIR"
 
-    # Use gunicorn for production
-    if command -v gunicorn &> /dev/null; then
-        nohup gunicorn config.wsgi:application \
+    # Prefer daphne (ASGI — supports WebSockets for real-time notifications)
+    # Fall back to uvicorn, then gunicorn+uvicorn worker, then plain runserver.
+    if command -v daphne &> /dev/null; then
+        nohup daphne \
+            -b "${DJANGO_HOST}" \
+            -p "${DJANGO_PORT}" \
+            --access-log "$DJANGO_LOG" \
+            config.asgi:application \
+            >> "$DJANGO_LOG" 2>&1 &
+        echo $! > "$PID_DIR/cis_django.pid"
+        log_info "Django (daphne ASGI) started (PID: $!)"
+    elif command -v uvicorn &> /dev/null; then
+        nohup uvicorn config.asgi:application \
+            --host "${DJANGO_HOST}" \
+            --port "${DJANGO_PORT}" \
+            --workers 4 \
+            --log-level info \
+            >> "$DJANGO_LOG" 2>&1 &
+        echo $! > "$PID_DIR/cis_django.pid"
+        log_info "Django (uvicorn ASGI) started (PID: $!)"
+    elif command -v gunicorn &> /dev/null && pip show uvicorn 2>/dev/null | grep -q Name; then
+        # gunicorn with uvicorn worker — also ASGI-capable
+        nohup gunicorn config.asgi:application \
             --bind "${DJANGO_HOST}:${DJANGO_PORT}" \
             --workers 4 \
-            --threads 2 \
+            --worker-class uvicorn.workers.UvicornWorker \
             --timeout 120 \
             --access-logfile "$DJANGO_LOG" \
             --error-logfile "$DJANGO_LOG" \
             >> "$DJANGO_LOG" 2>&1 &
         echo $! > "$PID_DIR/cis_django.pid"
-        log_info "Django (gunicorn) started (PID: $!)"
+        log_info "Django (gunicorn+uvicorn ASGI) started (PID: $!)"
     else
-        # Fallback to runserver
+        # Last resort — runserver (dev only, no WebSocket support in multi-process)
+        log_warn "No ASGI server found — WebSocket notifications will not work!"
+        log_warn "Install daphne or uvicorn: pip install daphne  OR  pip install uvicorn"
         nohup python manage.py runserver "${DJANGO_HOST}:${DJANGO_PORT}" \
             >> "$DJANGO_LOG" 2>&1 &
         echo $! > "$PID_DIR/cis_django.pid"
-        log_info "Django (runserver) started (PID: $!)"
+        log_info "Django (runserver fallback) started (PID: $!)"
     fi
 }
 
