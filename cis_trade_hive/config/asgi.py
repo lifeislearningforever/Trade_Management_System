@@ -33,24 +33,21 @@ try:
     from channels.routing import ProtocolTypeRouter, URLRouter
     from core.routing import websocket_urlpatterns
 
-    # AllowedHostsOriginValidator is intentionally omitted:
-    # it rejects WS connections when ALLOWED_HOSTS contains '*' or CML proxy
-    # hostnames that don't exactly match the Origin header sent by the browser.
-    # CML already enforces network-level access control, so origin validation
-    # here adds no real security while breaking legitimate connections.
+    # AllowedHostsOriginValidator intentionally omitted — it rejects WS when
+    # ALLOWED_HOSTS='*' (CML default) because '*' is matched literally, not
+    # as a wildcard, causing every WS upgrade to fail with ValueError.
     application = ProtocolTypeRouter({
         'http': django_asgi_app,
         'websocket': AuthMiddlewareStack(
             URLRouter(websocket_urlpatterns)
         ),
     })
-    logger.info("ASGI: Django Channels loaded — WebSocket notifications enabled")
+    print("ASGI: Django Channels loaded — WebSocket notifications ENABLED")
 
-except ImportError as e:
-    # channels not installed — serve HTTP only, WebSocket bell icon will
-    # show disconnected but the rest of the app works normally.
-    logger.warning(
-        f"ASGI: Django Channels not available ({e}) — "
-        "running HTTP-only. Install channels==4.2.0 to enable WebSocket notifications."
-    )
+except Exception as e:
+    # Any failure (ImportError, routing error, etc.) — fall back to HTTP only.
+    # WebSocket bell icon shows disconnected but all other features work.
+    import traceback
+    print(f"ASGI: Channels setup failed — running HTTP-only. Reason: {e}")
+    print(traceback.format_exc())
     application = django_asgi_app
