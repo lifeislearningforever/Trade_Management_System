@@ -6,39 +6,49 @@ The AuthMiddlewareStack wraps the WebSocket router so that the session
 is populated before the consumer's connect() is called — this is how
 user_login is available in scope['session'].
 
+Falls back to HTTP-only if Django Channels is not installed, so the
+application still starts — WebSocket notifications just won't work until
+channels is installed (pip install channels==4.2.0).
+
 Production deployment (choose one):
   daphne -b 0.0.0.0 -p 8000 config.asgi:application
-  uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers 4
-
-Both HTTP and WebSocket are handled in the same process.
+  gunicorn config.asgi:application --worker-class uvicorn.workers.UvicornWorker
 """
 
+import logging
 import os
 
 from django.core.asgi import get_asgi_application
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 
+logger = logging.getLogger(__name__)
+
 # Initialise Django BEFORE importing channels or consumers so that
 # app registry is ready when consumers import Django models/services.
 django_asgi_app = get_asgi_application()
 
-from channels.auth import AuthMiddlewareStack                           # noqa: E402
-from channels.routing import ProtocolTypeRouter, URLRouter             # noqa: E402
-from channels.security.websocket import AllowedHostsOriginValidator    # noqa: E402
+try:
+    from channels.auth import AuthMiddlewareStack
+    from channels.routing import ProtocolTypeRouter, URLRouter
+    from channels.security.websocket import AllowedHostsOriginValidator
+    from core.routing import websocket_urlpatterns
 
-from core.routing import websocket_urlpatterns                          # noqa: E402
+    application = ProtocolTypeRouter({
+        'http': django_asgi_app,
+        'websocket': AllowedHostsOriginValidator(
+            AuthMiddlewareStack(
+                URLRouter(websocket_urlpatterns)
+            )
+        ),
+    })
+    logger.info("ASGI: Django Channels loaded — WebSocket notifications enabled")
 
-application = ProtocolTypeRouter({
-    # Standard Django HTTP — views, DRF, WhiteNoise static files
-    'http': django_asgi_app,
-
-    # WebSocket wrapped in:
-    #   AllowedHostsOriginValidator — reject WS from non-ALLOWED_HOSTS origins
-    #   AuthMiddlewareStack         — populate scope['session'] from Django session
-    'websocket': AllowedHostsOriginValidator(
-        AuthMiddlewareStack(
-            URLRouter(websocket_urlpatterns)
-        )
-    ),
-})
+except ImportError as e:
+    # channels not installed — serve HTTP only, WebSocket bell icon will
+    # show disconnected but the rest of the app works normally.
+    logger.warning(
+        f"ASGI: Django Channels not available ({e}) — "
+        "running HTTP-only. Install channels==4.2.0 to enable WebSocket notifications."
+    )
+    application = django_asgi_app
