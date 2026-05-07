@@ -881,9 +881,9 @@ def main():
     # Run Django management commands
     run([python_exec, "manage.py", "migrate"])
     try:
-        run([python_exec, "manage.py", "setup_test_users"], check=False)
+        run([python_exec, "manage.py", "verify_rbac"], check=False)
     except Exception:
-        print("setup_test_users command not found; continuing...")
+        print("verify_rbac command not found; continuing...")
 
     try:
         run([python_exec, "manage.py", "create_hive_db"], check=False)
