@@ -65,6 +65,71 @@ _KUDU_KEEP_PROPS = {'kudu.master_addresses', 'kudu.table_name'}
 # kudu.master_addresses value to use in the cleaned output
 _MASTER_PLACEHOLDER = '${KUDU_MASTERS}'
 
+# Impala reserved keywords that must be backtick-quoted when used as column names.
+# Source: Impala SQL reserved words list (subset that commonly appears in column defs).
+_IMPALA_RESERVED = frozenset({
+    'add', 'aggregate', 'all', 'alter', 'analytic', 'and', 'anti', 'api_version',
+    'array', 'as', 'asc', 'avro', 'between', 'bigint', 'binary', 'boolean',
+    'by', 'cached', 'case', 'cast', 'change', 'char', 'class', 'close_fn',
+    'column', 'columns', 'comment', 'compute', 'create', 'cross', 'current',
+    'data', 'database', 'databases', 'date', 'datetime', 'decimal', 'default',
+    'delete', 'delimited', 'desc', 'describe', 'distinct', 'div', 'double',
+    'drop', 'else', 'end', 'exists', 'explain', 'external', 'false', 'fields',
+    'fileformat', 'files', 'finalize_fn', 'first', 'float', 'following', 'for',
+    'format', 'formatted', 'from', 'full', 'function', 'functions', 'grant',
+    'group', 'having', 'hour', 'if', 'ignore', 'ilike', 'in', 'incremental',
+    'init_fn', 'inner', 'inpath', 'insert', 'int', 'integer', 'intermediate',
+    'interval', 'into', 'invalidate', 'is', 'join', 'key', 'keys', 'kudu',
+    'last', 'lateral', 'left', 'like', 'limit', 'lines', 'load', 'location',
+    'map', 'merge_fn', 'metadata', 'minute', 'month', 'not', 'null', 'nulls',
+    'offset', 'on', 'or', 'order', 'outer', 'over', 'overwrite', 'parquet',
+    'parquetfile', 'partition', 'partitioned', 'partitions', 'preceding',
+    'prepare_fn', 'primary', 'purge', 'range', 'rcfile', 'real', 'refresh',
+    'regexp', 'rename', 'replace', 'returns', 'revoke', 'right', 'rlike', 'role',
+    'roles', 'row', 'rows', 'schema', 'schemas', 'second', 'select', 'semi',
+    'sequencefile', 'serialize_fn', 'set', 'show', 'smallint', 'stats', 'status',
+    'stored', 'straight_join', 'string', 'struct', 'symbol', 'table', 'tables',
+    'tblproperties', 'terminated', 'textfile', 'then', 'timestamp', 'tinyint',
+    'to', 'true', 'truncate', 'type', 'unbounded', 'uncached', 'union', 'update',
+    'update_fn', 'upsert', 'use', 'user', 'using', 'values', 'view', 'when',
+    'where', 'with', 'year',
+})
+
+
+def _quote_reserved_columns(ddl: str) -> str:
+    """
+    Backtick-quote any column name that is an Impala reserved keyword.
+    Only touches lines that look like column definitions (leading whitespace,
+    first token is the column name, not PRIMARY KEY / PARTITION / etc.).
+    Already-quoted names (backtick or double-quote) are left alone.
+    """
+    lines = ddl.split('\n')
+    result = []
+    for line in lines:
+        stripped = line.strip()
+        upper = stripped.upper()
+        # Skip structural / non-column lines
+        if (not stripped
+                or upper.startswith('PRIMARY KEY')
+                or upper.startswith('PARTITION')
+                or upper.startswith('STORED AS')
+                or upper.startswith('TBLPROPERTIES')
+                or upper.startswith(')')
+                or upper.startswith('COMMENT')
+                or not re.match(r'^\s+\w', line)):
+            result.append(line)
+            continue
+
+        # Match:  <whitespace> <col_name> <rest>
+        # col_name must start with a letter/underscore (not a number)
+        m = re.match(r'^(\s+)([A-Za-z_]\w*)(\s+.*)$', line)
+        if m:
+            indent, col_name, rest = m.groups()
+            if col_name.lower() in _IMPALA_RESERVED:
+                line = f'{indent}`{col_name}`{rest}'
+        result.append(line)
+    return '\n'.join(result)
+
 
 def _clean_tblproperties(block: str, is_kudu: bool) -> str:
     """
@@ -163,7 +228,9 @@ def clean_kudu_ddl(ddl: str) -> str:
 
         cleaned_lines.append(line)
 
-    return '\n'.join(cleaned_lines)
+    result = '\n'.join(cleaned_lines)
+    result = _quote_reserved_columns(result)
+    return result
 
 
 class Command(BaseCommand):
@@ -291,6 +358,7 @@ class Command(BaseCommand):
                 f.write('-- ============================================================\n\n')
                 for table, ttype, ddl_text in section_blocks:
                     f.write(f'-- [{ttype}] {table}\n')
+                    f.write(f'DROP TABLE IF EXISTS {db}.{table};\n')
                     f.write(ddl_text)
                     f.write('\n;\n\n')
 
