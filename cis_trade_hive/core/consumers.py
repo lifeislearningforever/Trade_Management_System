@@ -35,6 +35,7 @@ from core.notifications.constants import (
     EVT_PONG,
     SEV_ERROR,
     SEV_INFO,
+    EVENT_TITLE,
     user_group,
     role_group,
 )
@@ -148,11 +149,19 @@ class NotificationConsumer(AsyncJsonWebsocketConsumer):
         (dots replaced with underscores).
         """
         try:
+            payload    = event.get('payload', {})
+            event_type = event.get('event_type', 'notification')
             await self.send_json({
-                'type':       event.get('event_type', 'notification'),
+                'event_type': event_type,
                 'severity':   event.get('severity', SEV_INFO),
                 'timestamp':  event.get('timestamp', datetime.now(timezone.utc).isoformat()),
-                'payload':    event.get('payload', {}),
+                # Flatten to top level — JS reads msg.title and msg.message directly.
+                # Priority: payload.title > EVENT_TITLE lookup > event_type raw string
+                'title':   (payload.get('title')
+                            or EVENT_TITLE.get(event_type)
+                            or event_type.replace('_', ' ').title()),
+                'message': payload.get('message') or payload.get('body') or '',
+                'payload': payload,
             })
         except Exception as exc:
             # Connection may have closed between group_send and delivery

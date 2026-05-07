@@ -59,6 +59,25 @@ EVENT_SEVERITY = {
     EVT_SYSTEM_ERROR:    SEV_ERROR,
 }
 
+# Human-readable title per event type (shown in notification panel + toast)
+EVENT_TITLE = {
+    EVT_AVP_QUEUED:       'AVP Queued',
+    EVT_AVP_PROCESSING:   'AVP Processing',
+    EVT_AVP_COMPLETED:    'AVP Completed',
+    EVT_AVP_FAILED:       'AVP Failed',
+    EVT_AVP_DEAD_LETTER:  'AVP Dead Letter',
+    EVT_AVP_SLA_BREACH:   'AVP SLA Breach',
+    EVT_UPLOAD_STARTED:   'Upload Started',
+    EVT_UPLOAD_STEP:      'Upload Progress',
+    EVT_UPLOAD_COMPLETED: 'Upload Completed',
+    EVT_UPLOAD_FAILED:    'Upload Failed',
+    EVT_TRADE_CREATED:    'Trade Created',
+    EVT_TRADE_APPROVED:   'Trade Approved',
+    EVT_TRADE_REJECTED:   'Trade Rejected',
+    EVT_TRADE_SETTLED:    'Trade Settled',
+    EVT_SYSTEM_ERROR:     'System Error',
+}
+
 # Channel group names
 ADMIN_GROUP = 'admin_all'
 
