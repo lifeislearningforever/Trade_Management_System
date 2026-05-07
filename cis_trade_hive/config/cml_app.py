@@ -849,14 +849,14 @@ def main():
     # Run Django management commands
     run([python_exec, "manage.py", "migrate"])
     try:
-        run([python_exec, "manage.py", "setup_roles"], check=False)
+        run([python_exec, "manage.py", "setup_test_users"], check=False)
     except Exception:
-        print("setup_roles command not found; continuing...")
+        print("setup_test_users command not found; continuing...")
 
     try:
-        run([python_exec, "manage.py", "create_hive_tables"], check=False)
+        run([python_exec, "manage.py", "create_hive_db"], check=False)
     except Exception:
-        print("create_hive_tables failed or not available; continuing...")
+        print("create_hive_db failed or not available; continuing...")
 
     if COLLECT_STATIC:
         os.environ.setdefault("DJANGO_COLLECTSTATIC", "1")
@@ -871,14 +871,15 @@ def main():
     # 3. Health Monitor: restarts workers if they die
     start_worker_health_monitor()
 
-    # Gunicorn configuration
+    # Server configuration
+    # Uses gunicorn + uvicorn worker (ASGI) so WebSocket notifications work.
+    # Falls back to daphne if uvicorn is not installed.
     port = os.environ.get("CDSW_APP_PORT") or os.environ.get("PORT", "8080")
     bind = f"127.0.0.1:{os.environ.get('CDSW_APP_PORT', port)}"
     workers = os.environ.get("WORKERS") or str(8)
     timeout = os.environ.get("TIMEOUT", "120")
-    worker_class = os.environ.get("WORKER_CLASS", "gthread")
-    threads = os.environ.get("THREADS", "8")
     keepalive = os.environ.get("KEEPALIVE", "5")
+    asgi_app = f"{DJANGO_SETTINGS.rsplit('.', 1)[0]}.asgi:application"
 
     print("=" * 60)
     print("  Runtime Configuration")
@@ -889,13 +890,13 @@ def main():
     print(f"  Allowed Hosts:       {os.environ.get('DJANGO_ALLOWED_HOSTS')}")
     print(f"  Collect Static:      {COLLECT_STATIC}")
     print("")
-    print("  Gunicorn:")
+    print("  ASGI Server (WebSocket-capable):")
     print(f"    Bind:              {bind}")
     print(f"    Workers:           {workers}")
-    print(f"    Worker Class:      {worker_class}")
-    print(f"    Threads:           {threads}")
+    print(f"    Worker Class:      uvicorn.workers.UvicornWorker (ASGI)")
     print(f"    Timeout:           {timeout}")
     print(f"    Keep-alive:        {keepalive}")
+    print(f"    App:               {asgi_app}")
     print("")
     print("  Kerberos:")
     print(f"    Keytab:            {keytab}")
@@ -922,16 +923,26 @@ def main():
     print(f"    Queue Table:       cis_position_queue")
     print("=" * 60)
 
-    run([
-        "gunicorn",
-        "--bind", bind,
-        "--workers", workers,
-        "--worker-class", worker_class,
-        "--threads", threads,
-        "--keep-alive", keepalive,
-        "--timeout", timeout,
-        f"{DJANGO_SETTINGS.rsplit('.', 1)[0]}.wsgi:application",
-    ])
+    # Try gunicorn + uvicorn worker first (ASGI — WebSockets work)
+    import shutil
+    if shutil.which("gunicorn"):
+        try:
+            import uvicorn  # noqa: F401 — just check it's importable
+            run([
+                "gunicorn",
+                "--bind", bind,
+                "--workers", workers,
+                "--worker-class", "uvicorn.workers.UvicornWorker",
+                "--keep-alive", keepalive,
+                "--timeout", timeout,
+                asgi_app,
+            ])
+        except ImportError:
+            print("uvicorn not found — falling back to daphne for ASGI")
+            run(["daphne", "-b", "127.0.0.1", "-p", port, asgi_app])
+    else:
+        # No gunicorn — use daphne directly
+        run(["daphne", "-b", "127.0.0.1", "-p", port, asgi_app])
 
 
 if __name__ == "__main__":

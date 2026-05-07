@@ -5,7 +5,8 @@ django-extensions==4.1
 # WebSocket / Real-time notifications
 channels==4.2.0              # Django Channels WebSocket support
 channels-redis==4.2.1        # Redis channel layer (production)
-daphne==4.1.2                # ASGI server (replaces Gunicorn for WS traffic)
+daphne==4.1.2                # ASGI server (WebSocket support)
+uvicorn[standard]==0.30.6   # ASGI worker for gunicorn (WebSocket support)
 redis==5.2.1                 # Redis client (required by channels-redis)
 pytest-asyncio==0.24.0       # Async test support for Channels consumers
 
