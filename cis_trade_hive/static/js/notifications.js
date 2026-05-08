@@ -103,8 +103,15 @@
             return;
         }
 
-        if (msg.type === 'pong' || msg.event_type === 'pong' || msg.event_type === 'EVT_PONG') {
+        // heartbeat reply
+        if (msg.type === 'pong' || msg.event_type === 'pong') {
             pongReceived = true;
+            return;
+        }
+
+        // server system messages (welcome / conn info) — update status indicator only
+        if (msg.type === 'system') {
+            setConnStatus('connected');
             return;
         }
 

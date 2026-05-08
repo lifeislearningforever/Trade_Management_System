@@ -15,14 +15,18 @@ Design principles (low Kudu load):
   - Cache invalidation on write for affected user only
 """
 
+import json
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
 from core.repositories.impala_connection import impala_manager
 from core.repositories.acl_repository_v2 import ACLRepositoryV2
+from core.audit.audit_kudu_repository import AuditLogKuduRepository
 
 logger = logging.getLogger(__name__)
+
+_audit = AuditLogKuduRepository
 
 DB = 'gmp_cis'
 
@@ -100,6 +104,16 @@ class RBACAdminRepository:
                 )
             """
             ok = impala_manager.execute_write(sql, database=DB)
+            if ok:
+                _audit.log_action(
+                    user_id=created_by, username=created_by,
+                    action_type='CREATE', entity_type='RBAC_USER',
+                    entity_id=user_id,
+                    entity_name=data.get('login', '').upper(),
+                    action_description=f"Created user {data.get('login','').upper()}",
+                    new_value=json.dumps({k: data.get(k) for k in ('login','email','name','default_entity')}),
+                    action_category='ADMIN',
+                )
             return (ok, user_id) if ok else (False, "DB write failed")
         except Exception as e:
             logger.error(f"create_user error: {e}")
@@ -130,7 +144,18 @@ class RBACAdminRepository:
             """
             ok = impala_manager.execute_write(sql, database=DB)
             if ok:
-                self._acl.clear_cache(data.get("login", user.get("login", "")))
+                login = data.get("login", user.get("login", ""))
+                self._acl.clear_cache(login)
+                _audit.log_action(
+                    user_id=updated_by, username=updated_by,
+                    action_type='UPDATE', entity_type='RBAC_USER',
+                    entity_id=user_id,
+                    entity_name=login.upper(),
+                    action_description=f"Updated user {login.upper()}",
+                    old_value=json.dumps({k: user.get(k) for k in ('login','email','name','is_active')}),
+                    new_value=json.dumps({k: data.get(k, user.get(k)) for k in ('login','email','name','is_active')}),
+                    action_category='ADMIN',
+                )
             return ok
         except Exception as e:
             logger.error(f"update_user error: {e}")
@@ -141,7 +166,17 @@ class RBACAdminRepository:
             user = self.get_user(user_id)
             if not user:
                 return False
-            return self.update_user(user_id, {'is_active': False}, updated_by)
+            ok = self.update_user(user_id, {'is_active': False}, updated_by)
+            if ok:
+                _audit.log_action(
+                    user_id=updated_by, username=updated_by,
+                    action_type='DEACTIVATE', entity_type='RBAC_USER',
+                    entity_id=user_id,
+                    entity_name=user.get('login', '').upper(),
+                    action_description=f"Deactivated user {user.get('login','').upper()}",
+                    action_category='ADMIN',
+                )
+            return ok
         except Exception as e:
             logger.error(f"deactivate_user error: {e}")
             return False
@@ -197,6 +232,16 @@ class RBACAdminRepository:
                 )
             """
             ok = impala_manager.execute_write(sql, database=DB)
+            if ok:
+                _audit.log_action(
+                    user_id=created_by, username=created_by,
+                    action_type='CREATE', entity_type='RBAC_GROUP',
+                    entity_id=group_id,
+                    entity_name=data.get('group_name', ''),
+                    action_description=f"Created group {data.get('group_name','')}",
+                    new_value=json.dumps({k: data.get(k) for k in ('group_name','description','entity')}),
+                    action_category='ADMIN',
+                )
             return (ok, group_id) if ok else (False, "DB write failed")
         except Exception as e:
             logger.error(f"create_group error: {e}")
@@ -224,7 +269,19 @@ class RBACAdminRepository:
                     '{now}', '{self._escape(updated_by)}'
                 )
             """
-            return impala_manager.execute_write(sql, database=DB)
+            ok = impala_manager.execute_write(sql, database=DB)
+            if ok:
+                _audit.log_action(
+                    user_id=updated_by, username=updated_by,
+                    action_type='UPDATE', entity_type='RBAC_GROUP',
+                    entity_id=group_id,
+                    entity_name=data.get('group_name', group.get('group_name', '')),
+                    action_description=f"Updated group {data.get('group_name', group.get('group_name',''))}",
+                    old_value=json.dumps({k: group.get(k) for k in ('group_name','description','is_active')}),
+                    new_value=json.dumps({k: data.get(k, group.get(k)) for k in ('group_name','description','is_active')}),
+                    action_category='ADMIN',
+                )
+            return ok
         except Exception as e:
             logger.error(f"update_group error: {e}")
             return False
@@ -266,6 +323,16 @@ class RBACAdminRepository:
                 )
             """
             ok = impala_manager.execute_write(sql, database=DB)
+            if ok:
+                _audit.log_action(
+                    user_id=created_by, username=created_by,
+                    action_type='CREATE', entity_type='RBAC_PERMISSION',
+                    entity_id=perm_id,
+                    entity_name=data.get('permission_name', ''),
+                    action_description=f"Created permission {data.get('permission_name','')}",
+                    new_value=json.dumps({k: data.get(k) for k in ('permission_name','entity','description')}),
+                    action_category='ADMIN',
+                )
             return (ok, perm_id) if ok else (False, "DB write failed")
         except Exception as e:
             logger.error(f"create_permission error: {e}")
@@ -341,6 +408,15 @@ class RBACAdminRepository:
 
             # Invalidate cache for this user
             self._acl.clear_cache(user_login)
+            _audit.log_action(
+                user_id=updated_by, username=updated_by,
+                action_type='UPDATE', entity_type='RBAC_USER_GROUP',
+                entity_id=user_id,
+                entity_name=user_login,
+                action_description=f"Updated group memberships for user {user_login}: {', '.join(group_names) or '(none)'}",
+                new_value=json.dumps({'user_login': user_login, 'groups': group_names, 'entity': entity}),
+                action_category='ADMIN',
+            )
             return True
 
         except Exception as e:
@@ -418,6 +494,16 @@ class RBACAdminRepository:
 
             # Clear all cached ACL data — group change affects everyone in it
             self._acl.clear_cache()
+            perm_names = [p.get('permission_name', '') for p in permissions]
+            _audit.log_action(
+                user_id=updated_by, username=updated_by,
+                action_type='UPDATE', entity_type='RBAC_GROUP_PERMISSION',
+                entity_id=group_name,
+                entity_name=group_name,
+                action_description=f"Updated permissions for group {group_name}: {', '.join(perm_names) or '(none)'}",
+                new_value=json.dumps({'group_name': group_name, 'permissions': permissions, 'entity': entity}),
+                action_category='ADMIN',
+            )
             return True
 
         except Exception as e:
