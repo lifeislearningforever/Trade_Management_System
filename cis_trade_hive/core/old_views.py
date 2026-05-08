@@ -281,6 +281,11 @@ def audit_log(request):
     # Get unique entity types for filter dropdown
     entity_types = sorted(set([log.get('entity_type') for log in audit_logs_list if log.get('entity_type')]))
 
+    # Build query string without 'page' so pagination links don't double-append it
+    params = request.GET.copy()
+    params.pop('page', None)
+    filter_query_string = params.urlencode()  # e.g. "search=foo&action=CREATE"
+
     # Prepare context for template
     context = {
         'audit_logs': audit_logs,
@@ -293,6 +298,7 @@ def audit_log(request):
         'date_to': date_to,
         'total_count': len(audit_logs_list),
         'using_kudu': True,  # Flag to indicate Kudu integration
+        'filter_query_string': filter_query_string,
     }
 
     return render(request, 'core/audit_log.html', context)
