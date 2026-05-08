@@ -520,13 +520,13 @@ class RBACAdminRepository:
             query = f"""
                 SELECT action_type, entity_type, entity_id, entity_name,
                        action_description, old_value, new_value,
-                       username, ip_address, created_at
+                       username, ip_address, audit_timestamp
                 FROM {DB}.cis_audit_log
                 WHERE entity_type IN (
                     'RBAC_USER','RBAC_GROUP','RBAC_PERMISSION',
                     'RBAC_USER_GROUP','RBAC_GROUP_PERMISSION'
                 )
-                ORDER BY created_at DESC
+                ORDER BY audit_timestamp DESC
                 LIMIT {limit}
             """
             return impala_manager.execute_query(query, database=DB) or []

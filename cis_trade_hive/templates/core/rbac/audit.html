@@ -41,7 +41,7 @@
                 <tbody>
                     {% for e in entries %}
                     <tr>
-                        <td class="text-muted small">{{ e.created_at|default:"-" }}</td>
+                        <td class="text-muted small">{{ e.audit_timestamp|default:"-" }}</td>
                         <td><strong>{{ e.username|default:"-" }}</strong></td>
                         <td>
                             {% if e.action_type == 'CREATE' %}
