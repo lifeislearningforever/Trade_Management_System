@@ -982,17 +982,40 @@ def main():
     print(f"==> Wrote gunicorn config: {gunicorn_conf}")
 
     import shutil
-    if shutil.which("gunicorn"):
+
+    # Prefer venv-relative binaries (same dir as sys.executable) so CML's venv
+    # is found even when its bin/ directory is not on the system PATH.
+    _bin_dir = os.path.dirname(sys.executable)
+
+    def _find_exe(name):
+        """Return full path to name in venv bin dir, falling back to PATH search."""
+        venv_path = os.path.join(_bin_dir, name)
+        if os.path.isfile(venv_path) and os.access(venv_path, os.X_OK):
+            return venv_path
+        return shutil.which(name)  # fallback to PATH
+
+    _gunicorn = _find_exe("gunicorn")
+    _daphne   = _find_exe("daphne")
+    print(f"==> ASGI server detection: python={sys.executable}")
+    print(f"==> ASGI server detection: gunicorn={_gunicorn or 'NOT FOUND'}")
+    print(f"==> ASGI server detection: daphne={_daphne or 'NOT FOUND'}")
+
+    if _gunicorn:
         try:
             import uvicorn  # noqa: F401 — verify importable before passing worker-class
             print(f"==> Starting gunicorn (UvicornWorker/ASGI) → {bind}")
-            run(["gunicorn", "--config", gunicorn_conf, asgi_app])
+            run([_gunicorn, "--config", gunicorn_conf, asgi_app])
         except ImportError:
             print("==> uvicorn not installed — falling back to daphne (ASGI)")
-            run(["daphne", "-b", "127.0.0.1", "-p", port, asgi_app])
-    elif shutil.which("daphne"):
+            if _daphne:
+                run([_daphne, "-b", "127.0.0.1", "-p", port, asgi_app])
+            else:
+                print("==> WARNING: No ASGI server found. WebSocket notifications will NOT work!")
+                print("==>          Install: pip install uvicorn  OR  pip install daphne")
+                run([sys.executable, "manage.py", "runserver", bind])
+    elif _daphne:
         print(f"==> Starting daphne (ASGI) → {bind}")
-        run(["daphne", "-b", "127.0.0.1", "-p", port, asgi_app])
+        run([_daphne, "-b", "127.0.0.1", "-p", port, asgi_app])
     else:
         print("==> WARNING: No ASGI server found. WebSocket notifications will NOT work!")
         print("==>          Install: pip install uvicorn  OR  pip install daphne")
