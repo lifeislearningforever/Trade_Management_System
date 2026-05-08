@@ -20,7 +20,7 @@
                          window.location.host + '/ws/notifications/';
     var MAX_RETRIES    = 5;
     var BASE_DELAY_MS  = 1000;   // doubles each retry, max ~32 s
-    var PING_INTERVAL  = 25000;  // 25 s — server heartbeat interval is 30 s
+    var PING_INTERVAL  = 10000;  // 10 s — keeps connection alive through CML's ~13 s idle timeout
     var TOAST_DURATION = 5000;   // ms before auto-dismiss
     var MAX_LIST_SIZE  = 50;     // max notifications kept in panel
 

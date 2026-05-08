@@ -31,6 +31,8 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Tuple, Any
 
 from core.repositories.impala_connection import impala_manager
+from core.notifications import notify_user
+from core.notifications.constants import EVT_AVP_COMPLETED, EVT_AVP_FAILED, SEV_SUCCESS, SEV_ERROR
 
 logger = logging.getLogger(__name__)
 
@@ -424,16 +426,34 @@ class TradeEventQueueService:
 
             if success:
                 logger.info(f"Settlement processed for trade {trade_id}: {msg}")
+                notify_user(created_by, EVT_AVP_COMPLETED, {
+                    'trade_id': trade_id,
+                    'portfolio_id': event_data.get('portfolio_short_name', ''),
+                    'security_id': event_data.get('security_label', ''),
+                    'message': f'AVP calculation complete for trade {trade_id}',
+                })
             else:
                 logger.warning(f"Settlement note for trade {trade_id}: {msg}")
                 # Non-critical warnings (like "queued for future") are still success
                 if 'queued' in msg.lower() or 'future' in msg.lower():
+                    notify_user(created_by, EVT_AVP_COMPLETED, {
+                        'trade_id': trade_id,
+                        'message': f'Trade {trade_id} position queued for settlement date',
+                    })
                     return True
+                notify_user(created_by, EVT_AVP_FAILED, {
+                    'trade_id': trade_id,
+                    'message': f'AVP calculation failed for trade {trade_id}: {msg}',
+                })
 
             return success
 
         except Exception as e:
             logger.error(f"Error processing settlement event for trade {trade_id}: {e}")
+            notify_user(created_by, EVT_AVP_FAILED, {
+                'trade_id': trade_id,
+                'message': f'AVP error for trade {trade_id}: {str(e)[:200]}',
+            })
             raise
 
     def _process_position_modify_event(self, event: Dict, event_data: Dict, trade: Dict) -> bool:
