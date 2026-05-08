@@ -912,7 +912,20 @@ def main():
     # Falls back to daphne if uvicorn is not installed.
     port = os.environ.get("CDSW_APP_PORT") or os.environ.get("PORT", "8080")
     bind = f"127.0.0.1:{os.environ.get('CDSW_APP_PORT', port)}"
-    workers = os.environ.get("WORKERS") or str(8)
+    # InMemoryChannelLayer is NOT shared across gunicorn worker processes.
+    # When REDIS_URL is set the channel layer is Redis-backed and workers > 1 is safe.
+    # Without Redis, force workers=1 so the Trade Event Worker thread and the
+    # WebSocket consumer are in the same process and share the same channel layer.
+    _redis_url = os.environ.get('REDIS_URL', '')
+    if os.environ.get("WORKERS"):
+        workers = os.environ.get("WORKERS")
+    elif _redis_url:
+        workers = str(8)
+    else:
+        workers = str(1)
+        print("==> WARNING: REDIS_URL not set — forcing workers=1 so InMemoryChannelLayer")
+        print("==>          is shared between Trade Event Worker and WebSocket consumers.")
+        print("==>          Set REDIS_URL to enable multi-worker mode with real-time notifications.")
     timeout = os.environ.get("TIMEOUT", "120")
     keepalive = os.environ.get("KEEPALIVE", "5")
     asgi_app = f"{DJANGO_SETTINGS.rsplit('.', 1)[0]}.asgi:application"
