@@ -489,3 +489,98 @@ def system_date_api(request):
         'source_file': date_info.source_file,
         'loaded_at': date_info.loaded_at.isoformat() if date_info.loaded_at else None,
     })
+
+
+# =========================================================================
+# WEBSOCKET DIAGNOSTICS
+# =========================================================================
+
+def ws_debug(request):
+    """
+    GET /core/ws-debug/
+    JSON dump of the full WebSocket / channel-layer diagnostic state.
+    No login required so it works even when session is broken.
+    """
+    import sys, os
+    data = {}
+
+    # 1. Channel layer
+    try:
+        from channels.layers import get_channel_layer
+        layer = get_channel_layer()
+        data['channel_layer'] = {
+            'configured': layer is not None,
+            'backend': type(layer).__name__ if layer else None,
+            'module': type(layer).__module__ if layer else None,
+        }
+    except Exception as e:
+        data['channel_layer'] = {'error': str(e)}
+
+    # 2. ASGI application type
+    try:
+        from config.asgi import application
+        data['asgi_application'] = type(application).__name__
+    except Exception as e:
+        data['asgi_application'] = f'error: {e}'
+
+    # 3. Session / logged-in user
+    username = request.session.get('user_login', '')
+    data['session'] = {
+        'user_login': username or None,
+        'session_key': request.session.session_key,
+    }
+
+    # 4. Channel group the user would be in
+    if username:
+        from core.notifications.constants import user_group
+        data['expected_group'] = user_group(username)
+
+    # 5. Server process info
+    data['server'] = {
+        'pid': os.getpid(),
+        'python': sys.executable,
+        'workers_env': os.environ.get('WORKERS', 'not set'),
+        'redis_url': 'SET' if os.environ.get('REDIS_URL') else 'NOT SET',
+    }
+
+    return JsonResponse(data, json_dumps_params={'indent': 2})
+
+
+def ws_test_notify(request):
+    """
+    POST /core/ws-test-notify/
+    Fires a real AVP_COMPLETED notification to the logged-in user via the
+    channel layer so you can verify end-to-end without saving a trade.
+
+    Returns JSON: {ok, username, group, channel_layer_backend, error?}
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST only'}, status=405)
+
+    username = request.session.get('user_login', '')
+    if not username:
+        return JsonResponse({'error': 'Not logged in — no user_login in session'}, status=403)
+
+    try:
+        from core.notifications import notify_user
+        from core.notifications.constants import EVT_AVP_COMPLETED, user_group
+        from channels.layers import get_channel_layer
+
+        layer = get_channel_layer()
+        group = user_group(username)
+
+        ok = notify_user(username, EVT_AVP_COMPLETED, {
+            'trade_id': 'TEST-001',
+            'message': f'WebSocket test notification for {username} — if you see this, notifications are working!',
+        })
+
+        return JsonResponse({
+            'ok': ok,
+            'username': username,
+            'group': group,
+            'channel_layer_backend': type(layer).__name__ if layer else None,
+            'pid': __import__('os').getpid(),
+        })
+    except Exception as e:
+        import traceback
+        return JsonResponse({'ok': False, 'error': str(e), 'trace': traceback.format_exc()}, status=500)

@@ -42,4 +42,8 @@ urlpatterns = [
 
     # Audit
     path('rbac/audit/', rbac_admin_views.rbac_audit, name='rbac_audit'),
+
+    # WebSocket diagnostics (dev/debug — no auth so it works with broken sessions)
+    path('ws-debug/', old_views.ws_debug, name='ws_debug'),
+    path('ws-test-notify/', old_views.ws_test_notify, name='ws_test_notify'),
 ]
