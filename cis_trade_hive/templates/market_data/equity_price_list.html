@@ -48,20 +48,25 @@
             </h5>
         </div>
         <div class="card-body">
-            <form method="get" action="{% url 'market_data:equity_price_list' %}" class="row g-3">
+            <form method="get" action="{% url 'market_data:equity_price_list' %}" id="equity-search-form" class="row g-3">
                 <div class="col-md-3">
-                    <label class="form-label">Currency</label>
+                    <label class="form-label" for="currency_code">
+                        Currency <span class="text-danger" title="Required when searching by security">*</span>
+                    </label>
                     <select class="form-select select2-currency" id="currency_code" name="currency_code">
-                        <option value="">All Currencies</option>
+                        <option value="">-- Select Currency --</option>
                         {% for curr in currencies %}
                             <option value="{{ curr.iso_code }}" {% if currency_code == curr.iso_code %}selected{% endif %}>
                                 {{ curr.iso_code }}
                             </option>
                         {% endfor %}
                     </select>
+                    <div id="currency-required-msg" class="invalid-feedback" style="display:none;">
+                        Please select a currency when searching by security.
+                    </div>
                 </div>
                 <div class="col-md-3">
-                    <label class="form-label">Security</label>
+                    <label class="form-label" for="security_label">Security</label>
                     <input type="text" class="form-control" id="security_label" name="security_label" value="{{ security_label }}"
                            placeholder="Type to search..." autocomplete="off" list="security-suggestions">
                     <datalist id="security-suggestions">
@@ -242,6 +247,32 @@ $(document).ready(function() {
     // Initialize Select2 on currency dropdown
     $('.select2-currency').each(function() {
         CISSelect2.initElement($(this));
+    });
+
+    // Validate: currency is required when searching by security or ISIN
+    $('#equity-search-form').on('submit', function(e) {
+        var security = $('#security_label').val().trim();
+        var isin     = $('input[name="isin"]').val().trim();
+        var currency = $('#currency_code').val();
+
+        if ((security || isin) && !currency) {
+            e.preventDefault();
+            var $sel = $('#currency_code');
+            $sel.addClass('is-invalid');
+            $('#currency-required-msg').css('display', 'block');
+            // Scroll to currency field
+            $sel[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return false;
+        }
+        // Clear error if valid
+        $('#currency_code').removeClass('is-invalid');
+        $('#currency-required-msg').css('display', 'none');
+    });
+
+    // Clear error as soon as user picks a currency
+    $('#currency_code').on('change', function() {
+        $(this).removeClass('is-invalid');
+        $('#currency-required-msg').css('display', 'none');
     });
 });
 </script>
