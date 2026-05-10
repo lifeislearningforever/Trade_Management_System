@@ -260,6 +260,8 @@ def start_trade_event_worker():
         django.setup()
 
         from core.repositories.impala_connection import impala_manager
+        from core.notifications import notify_user
+        from core.notifications.constants import EVT_AVP_COMPLETED, EVT_AVP_FAILED
 
         DATABASE = 'gmp_cis'
         EVENT_QUEUE_TABLE = 'cis_trade_event_queue'
@@ -344,8 +346,24 @@ def start_trade_event_worker():
 
             if success:
                 print(f"==> Trade Event Worker: SETTLEMENT processed for trade {trade_id}: {msg}")
+                notify_user(created_by, EVT_AVP_COMPLETED, {
+                    'trade_id': trade_id,
+                    'portfolio_id': event_data.get('portfolio_short_name', ''),
+                    'security_id': event_data.get('security_label', ''),
+                    'message': f'AVP calculation complete for trade {trade_id}',
+                })
             else:
                 print(f"==> Trade Event Worker: SETTLEMENT warning for trade {trade_id}: {msg}")
+                if 'queued' in msg.lower() or 'future' in msg.lower():
+                    notify_user(created_by, EVT_AVP_COMPLETED, {
+                        'trade_id': trade_id,
+                        'message': f'Trade {trade_id} queued for settlement date',
+                    })
+                else:
+                    notify_user(created_by, EVT_AVP_FAILED, {
+                        'trade_id': trade_id,
+                        'message': f'AVP failed for trade {trade_id}: {msg}',
+                    })
 
         def process_position_modify_event(event, event_data):
             """Process a POSITION_MODIFY event - update position when trade is modified.
@@ -459,8 +477,16 @@ def start_trade_event_worker():
 
             if success:
                 print(f"==> Trade Event Worker: POSITION_MODIFY completed for trade {trade_id}: {msg}")
+                notify_user(created_by, EVT_AVP_COMPLETED, {
+                    'trade_id': trade_id,
+                    'message': f'Position updated for modified trade {trade_id}',
+                })
             else:
                 print(f"==> Trade Event Worker: POSITION_MODIFY warning for trade {trade_id}: {msg}")
+                notify_user(created_by, EVT_AVP_FAILED, {
+                    'trade_id': trade_id,
+                    'message': f'Position update failed for trade {trade_id}: {msg}',
+                })
 
         def process_position_cancel_event(event, event_data):
             """Process a POSITION_CANCEL event - reverse position when trade is cancelled.
@@ -511,8 +537,16 @@ def start_trade_event_worker():
 
             if success:
                 print(f"==> Trade Event Worker: POSITION_CANCEL completed for trade {trade_id}: {msg}")
+                notify_user(created_by, EVT_AVP_COMPLETED, {
+                    'trade_id': trade_id,
+                    'message': f'Position reversed for cancelled trade {trade_id}',
+                })
             else:
                 print(f"==> Trade Event Worker: POSITION_CANCEL warning for trade {trade_id}: {msg}")
+                notify_user(created_by, EVT_AVP_FAILED, {
+                    'trade_id': trade_id,
+                    'message': f'Position reversal failed for trade {trade_id}: {msg}',
+                })
 
         def mark_processing(event_id, event):
             """Mark event as PROCESSING before starting work (prevents double-processing)."""
@@ -899,12 +933,11 @@ def main():
         run([python_exec, "manage.py", "collectstatic", "--noinput"], check=True)
 
     # ==================== Background Workers ====================
-    # Start workers BEFORE gunicorn so they're ready to process
-    # 1. Trade Event Worker: processes HISTORY and SETTLEMENT events
-    start_trade_event_worker()
-    # 2. Position Worker: processes AVP calculations
-    start_position_worker()
-    # 3. Health Monitor: restarts workers if they die
+    # Workers are started via gunicorn post_fork hook (see gunicorn_conf below)
+    # so they run INSIDE the worker process and share its InMemoryChannelLayer.
+    # Starting them here in the parent would give them a separate channel layer
+    # instance that WebSocket consumers (in the forked worker) cannot see.
+    # 3. Health Monitor only — watches thread liveness from the parent process
     start_worker_health_monitor()
 
     # Server configuration
@@ -989,6 +1022,22 @@ def main():
         f"_root = {repr(WORKDIR)}",
         "if _root not in sys.path: sys.path.insert(0, _root)",
         f"os.environ.setdefault('PYTHONPATH', {repr(WORKDIR)})",
+        # post_fork runs inside the worker process after gunicorn forks it.
+        # Starting the Trade Event Worker here ensures the worker thread and
+        # the WebSocket consumer share the SAME InMemoryChannelLayer instance
+        # (same process), so notify_user() actually reaches connected clients.
+        "",
+        "def post_fork(server, worker):",
+        "    import sys as _sys",
+        f"    _root2 = {repr(WORKDIR)}",
+        "    if _root2 not in _sys.path: _sys.path.insert(0, _root2)",
+        "    try:",
+        "        import config.cml_app as _cml",
+        "        _cml.start_trade_event_worker()",
+        "        _cml.start_position_worker()",
+        "        print(f'==> post_fork: workers started in gunicorn worker pid={worker.pid}')",
+        "    except Exception as _e:",
+        "        print(f'==> post_fork: worker start failed: {_e}')",
     ]
     with open(gunicorn_conf, "w") as _f:
         _f.write("\n".join(gunicorn_conf_lines) + "\n")
@@ -1016,17 +1065,25 @@ def main():
     if _gunicorn:
         try:
             import uvicorn  # noqa: F401 — verify importable before passing worker-class
+            # gunicorn forks worker processes — start_trade_event_worker() is called
+            # inside the worker via the post_fork hook in gunicorn_conf, NOT here.
             print(f"==> Starting gunicorn (UvicornWorker/ASGI) → {bind}")
             run([_gunicorn, "--config", gunicorn_conf, asgi_app])
         except ImportError:
             print("==> uvicorn not installed — falling back to daphne (ASGI)")
             if _daphne:
+                # daphne is a single-process server — start workers here directly.
+                start_trade_event_worker()
+                start_position_worker()
                 run([_daphne, "-b", "127.0.0.1", "-p", port, asgi_app])
             else:
                 print("==> WARNING: No ASGI server found. WebSocket notifications will NOT work!")
                 print("==>          Install: pip install uvicorn  OR  pip install daphne")
                 run([sys.executable, "manage.py", "runserver", bind])
     elif _daphne:
+        # daphne is a single-process server — start workers here directly.
+        start_trade_event_worker()
+        start_position_worker()
         print(f"==> Starting daphne (ASGI) → {bind}")
         run([_daphne, "-b", "127.0.0.1", "-p", port, asgi_app])
     else:
