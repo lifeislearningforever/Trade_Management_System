@@ -92,7 +92,7 @@ def currency_list(request):
 
         # CSV Export
         if export:
-            response = HttpResponse(content_type='text/csv')
+            response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
             response['Content-Disposition'] = f'attachment; filename="currencies_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv"'
 
             writer = csv.writer(response)
@@ -198,7 +198,7 @@ def country_list(request):
 
         # CSV Export
         if export:
-            response = HttpResponse(content_type='text/csv')
+            response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
             response['Content-Disposition'] = f'attachment; filename="countries_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv"'
 
             writer = csv.writer(response)
@@ -320,7 +320,7 @@ def calendar_list(request):
 
         # CSV Export
         if export:
-            response = HttpResponse(content_type='text/csv')
+            response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
             response['Content-Disposition'] = f'attachment; filename="calendars_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv"'
 
             writer = csv.writer(response)
@@ -450,7 +450,7 @@ def counterparty_list(request):
 
         # CSV Export
         if export:
-            response = HttpResponse(content_type='text/csv')
+            response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
             response['Content-Disposition'] = f'attachment; filename="counterparties_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv"'
 
             writer = csv.writer(response)
@@ -1198,7 +1198,7 @@ def party_list(request):
 
         # CSV Export
         if export:
-            response = HttpResponse(content_type='text/csv')
+            response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
             response['Content-Disposition'] = f'attachment; filename="parties_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv"'
 
             writer = csv.writer(response)
@@ -2058,7 +2058,7 @@ def corporate_action_list(request):
 
         # CSV Export
         if export:
-            response = HttpResponse(content_type='text/csv')
+            response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
             response['Content-Disposition'] = f'attachment; filename="corporate_actions_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv"'
 
             writer = csv.writer(response)
