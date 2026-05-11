@@ -365,14 +365,14 @@ class CorporateActionRepository:
             True if successful, False otherwise
         """
         try:
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             set_clauses = [
                 f"status = {CorporateActionRepository.escape_value(status)}",
                 f"updated_by = {CorporateActionRepository.escape_value(updated_by)}",
-                f"updated_at = {timestamp_ms}",
+                f"updated_at = '{timestamp_str}'",
                 f"reviewed_by = {CorporateActionRepository.escape_value(updated_by)}",
-                f"reviewed_at = {CorporateActionRepository.escape_value(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))}",
+                f"reviewed_at = '{timestamp_str}'",
             ]
 
             if reviewed_comments:
@@ -411,7 +411,7 @@ class CorporateActionRepository:
             True if successful, False otherwise
         """
         try:
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             update_sql = f"""
             UPDATE {CorporateActionRepository.DATABASE}.{CorporateActionRepository.TABLE_NAME}
@@ -446,7 +446,7 @@ class CorporateActionRepository:
             True if successful, False otherwise
         """
         try:
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             update_sql = f"""
             UPDATE {CorporateActionRepository.DATABASE}.{CorporateActionRepository.TABLE_NAME}
