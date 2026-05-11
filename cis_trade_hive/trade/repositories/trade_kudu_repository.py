@@ -143,6 +143,9 @@ class TradeKuduRepository:
         if not trade_data.get('trade_date'):
             errors.append("Trade date is required")
 
+        if not trade_data.get('counterparty'):
+            errors.append("Counterparty is required")
+
         # Validate references exist (including date validation)
         all_valid, validation_results = trade_validation_repository.validate_trade_references(
             portfolio_name=trade_data.get('portfolio_short_name', ''),

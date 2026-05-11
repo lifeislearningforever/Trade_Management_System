@@ -104,6 +104,10 @@ class NotificationConsumer(AsyncJsonWebsocketConsumer):
         logger.info('WS connected: user=%s groups=%s channel=%s',
                     username, groups, self.channel_name)
 
+        # Flush any notifications that arrived while no WS was connected
+        # (e.g. AVP worker fired during page navigation).
+        await self._flush_pending(username)
+
     async def disconnect(self, close_code):
         """Leave all groups cleanly on disconnect."""
         for group in self._joined_groups:
@@ -209,6 +213,33 @@ class NotificationConsumer(AsyncJsonWebsocketConsumer):
             return False
         admin_keys = ('system_admin', 'trade_approve', 'portfolio_approve')
         return any(perms.get(k) for k in admin_keys)
+
+    async def _flush_pending(self, username: str):
+        """Deliver any notifications stored while no WS was connected."""
+        try:
+            from core.notifications.sender import pop_pending
+            from core.notifications.constants import EVENT_TITLE, SEV_INFO
+            pending = pop_pending(username)
+            for msg in pending:
+                payload    = msg.get('payload', {})
+                event_type = msg.get('event_type', 'notification')
+                try:
+                    await self.send_json({
+                        'event_type': event_type,
+                        'severity':   msg.get('severity', SEV_INFO),
+                        'timestamp':  msg.get('timestamp', ''),
+                        'title':  (payload.get('title')
+                                   or EVENT_TITLE.get(event_type)
+                                   or event_type.replace('_', ' ').title()),
+                        'message': payload.get('message') or payload.get('body') or '',
+                        'payload': payload,
+                    })
+                except Exception:
+                    pass
+            if pending:
+                logger.info('Flushed %d pending notifications to %s', len(pending), username)
+        except Exception as exc:
+            logger.debug('Error flushing pending notifications: %s', exc)
 
     async def _send_system(self, severity: str, message: str, extra: dict = None):
         """Send a system-level notification directly to this connection."""

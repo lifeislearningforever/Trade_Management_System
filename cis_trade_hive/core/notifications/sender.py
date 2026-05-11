@@ -15,6 +15,8 @@ Corner cases handled:
 
 import json
 import logging
+import threading
+from collections import deque
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -32,6 +34,29 @@ from core.notifications.constants import (
 logger = logging.getLogger(__name__)
 
 MAX_PAYLOAD_BYTES = 32_768  # 32 KB — guard against oversized messages
+
+# ── Pending notification store ────────────────────────────────────────────────
+# Holds notifications that were sent while no WS consumer was connected.
+# Flushed to the user on next WS connect (in consumers.py).
+# Keyed by username → deque of message dicts (max 20 per user).
+_pending_lock = threading.Lock()
+_pending: Dict[str, deque] = {}
+_PENDING_MAX = 20  # max queued per user
+
+
+def store_pending(username: str, message: Dict[str, Any]) -> None:
+    """Store a notification for a user who has no active WS connection."""
+    with _pending_lock:
+        if username not in _pending:
+            _pending[username] = deque(maxlen=_PENDING_MAX)
+        _pending[username].append(message)
+
+
+def pop_pending(username: str) -> List[Dict[str, Any]]:
+    """Return and clear all pending notifications for a user."""
+    with _pending_lock:
+        msgs = list(_pending.pop(username, []))
+    return msgs
 
 
 def _get_channel_layer():
@@ -92,6 +117,18 @@ def _send_to_group(group: str, message: Dict[str, Any]) -> bool:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+def _group_has_active_channels(group: str) -> bool:
+    """Return True if the channel layer group has at least one channel registered."""
+    try:
+        layer = _get_channel_layer()
+        if layer is None:
+            return False
+        # InMemoryChannelLayer stores groups as {group: {channel: timestamp}}
+        return bool(getattr(layer, 'groups', {}).get(group))
+    except Exception:
+        return True  # assume active on error — don't suppress sending
+
+
 def notify_user(
     username: str,
     event_type: str,
@@ -99,6 +136,8 @@ def notify_user(
 ) -> bool:
     """
     Send a notification to a specific user's WebSocket group.
+    If no WS connection is active, stores notification as pending so it is
+    delivered when the user's next WebSocket connection opens.
 
     Args:
         username:   The CIS username (from queued_by / session user_login).
@@ -114,9 +153,19 @@ def notify_user(
 
     message = _build_message(event_type, payload or {})
     group = user_group(username)
+
+    # Always attempt to send via channel layer (handles connected users).
     ok = _send_to_group(group, message)
+
+    # Also store as pending so it survives page navigation.
+    # The consumer flushes pending on connect, covering the timing gap between
+    # page load and group_send when the worker fires during navigation.
+    store_pending(username, message)
+
     if ok:
-        logger.debug('Notification %s → user %s sent.', event_type, username)
+        logger.debug('Notification %s → user %s sent (+ stored pending).', event_type, username)
+    else:
+        logger.debug('Notification %s → user %s stored pending (no active WS).', event_type, username)
     return ok
 
 

@@ -195,9 +195,9 @@
                         <div class="row g-3 mt-2">
                             <!-- Counterparty -->
                             <div class="col-md-4">
-                                <label class="form-label">Counterparty</label>
+                                <label class="form-label">Counterparty <span class="text-danger">*</span></label>
                                 <div class="input-group">
-                                    <select class="form-select" name="counterparty" id="counterparty">
+                                    <select class="form-select" name="counterparty" id="counterparty" required>
                                         <option value="">Select Counterparty</option>
                                         {% for c in dropdown_options.counterparties %}
                                         <option value="{{ c.value }}"
