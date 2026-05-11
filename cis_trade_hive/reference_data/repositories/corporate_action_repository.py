@@ -586,7 +586,7 @@ class CorporateActionRepository:
                 {CorporateActionRepository.escape_value(changes_json)},
                 {CorporateActionRepository.escape_value(comments)},
                 {CorporateActionRepository.escape_value(performed_by)},
-                '{timestamp_str}'
+                {CorporateActionRepository.escape_value(timestamp_str)}
             )
             """
 
