@@ -10,42 +10,61 @@
 
 {% block content %}
 <div class="dashboard-container">
+
     <!-- Page Header -->
-    <div class="content-header">
-        <h1 class="content-title">
-            <i class="bi bi-speedometer2"></i> Dashboard
-        </h1>
-        <p class="content-subtitle">
-            Welcome back, <strong>{{ user.name }}</strong>! You are logged in as <strong>{{ user.login }}</strong>.
-        </p>
+    <div class="content-header d-flex justify-content-between align-items-start flex-wrap gap-2">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-speedometer2"></i> Dashboard
+            </h1>
+            <p class="content-subtitle mb-0">
+                Welcome back, <strong>{{ user.name }}</strong>
+                <span class="text-muted ms-1">({{ user.login }})</span>
+            </p>
+        </div>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            {% for action in quick_actions %}
+            <a href="{{ action.url }}" class="btn btn-{{ action.color }} btn-sm">
+                <i class="bi bi-{{ action.icon }}"></i> {{ action.label }}
+            </a>
+            {% endfor %}
+        </div>
     </div>
 
-    <!-- User Info Card -->
-    <div class="row g-4 mb-4">
+    <!-- User Identity Card -->
+    <div class="row g-3 mb-4">
         <div class="col-12">
-            <div class="card">
-                <div class="card-body">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body py-3">
                     <div class="row align-items-center">
                         <div class="col-auto">
                             <div class="user-avatar-large">
-                                {% with user_name=user.name|default:"U" %}
-                                    {{ user_name|slice:":1"|upper }}{% if user_name|wordcount > 1 %}{{ user_name|split:" "|last|slice:":1"|upper }}{% endif %}
+                                {% with n=user.name|default:"U" %}
+                                    {{ n|slice:":1"|upper }}{% if n|wordcount > 1 %}{{ n|split:" "|last|slice:":1"|upper }}{% endif %}
                                 {% endwith %}
                             </div>
                         </div>
                         <div class="col">
-                            <h4 class="mb-1">{{ user.name }}</h4>
-                            <p class="text-muted mb-1">
-                                <i class="bi bi-person-badge"></i> {{ user.login }}
-                                &nbsp;|&nbsp;
-                                <i class="bi bi-envelope"></i> {{ user.email }}
+                            <h5 class="mb-1">{{ user.name }}</h5>
+                            <p class="text-muted mb-1 small">
+                                <i class="bi bi-person-badge me-1"></i>{{ user.login }}
+                                {% if user.email %}
+                                <span class="mx-2">|</span>
+                                <i class="bi bi-envelope me-1"></i>{{ user.email }}
+                                {% endif %}
                             </p>
-                            <p class="mb-0">
-                                <span class="badge bg-primary">{{ user.group }}</span>
-                            </p>
+                            <div class="d-flex flex-wrap gap-1">
+                                {% if user.groups %}
+                                    {% for g in user.groups %}
+                                        {% if g %}<span class="badge bg-primary">{{ g }}</span>{% endif %}
+                                    {% endfor %}
+                                {% elif user.group %}
+                                    <span class="badge bg-primary">{{ user.group }}</span>
+                                {% endif %}
+                            </div>
                         </div>
-                        <div class="col-auto">
-                            <a href="{% url 'logout' %}" class="btn btn-outline-danger">
+                        <div class="col-auto d-none d-md-block">
+                            <a href="{% url 'logout' %}" class="btn btn-outline-danger btn-sm">
                                 <i class="bi bi-box-arrow-right"></i> Logout
                             </a>
                         </div>
@@ -55,126 +74,133 @@
         </div>
     </div>
 
-    <!-- Portfolio Analytics Section -->
-    {% if portfolio_stats and portfolio_stats.total_portfolios > 0 %}
-    <div class="row g-4 mb-4">
+    <!-- Pending Actions Alert Bar -->
+    {% if pending_actions %}
+    <div class="row g-2 mb-4">
         <div class="col-12">
-            <h5 class="mb-3">
-                <i class="bi bi-graph-up"></i> Portfolio Analytics
-            </h5>
-        </div>
-
-        <!-- Total Portfolios Card -->
-        <div class="col-xl-3 col-lg-4 col-md-6">
-            <div class="card stats-card h-100">
-                <div class="card-body">
-                    <div class="d-flex align-items-center">
-                        <div class="stats-icon bg-primary">
-                            <i class="bi bi-briefcase-fill"></i>
-                        </div>
-                        <div class="ms-3">
-                            <h6 class="text-muted mb-1">Total Portfolios</h6>
-                            <h3 class="mb-0">{{ portfolio_stats.total_portfolios }}</h3>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Active Portfolios Card -->
-        <div class="col-xl-3 col-lg-4 col-md-6">
-            <div class="card stats-card h-100">
-                <div class="card-body">
-                    <div class="d-flex align-items-center">
-                        <div class="stats-icon bg-success">
-                            <i class="bi bi-check-circle-fill"></i>
-                        </div>
-                        <div class="ms-3">
-                            <h6 class="text-muted mb-1">Active Portfolios</h6>
-                            <h3 class="mb-0">{{ portfolio_stats.active_portfolios }}</h3>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Currency Breakdown Card -->
-        <div class="col-xl-6 col-lg-12">
-            <div class="card stats-card h-100">
-                <div class="card-body">
-                    <h6 class="text-muted mb-3">
-                        <i class="bi bi-currency-exchange"></i> Active Portfolios by Currency
-                    </h6>
-                    {% if portfolio_stats.currency_breakdown %}
-                    <div class="row g-2">
-                        {% for curr in portfolio_stats.currency_breakdown|slice:":6" %}
-                        <div class="col-6 col-md-4">
-                            <div class="currency-stat">
-                                <span class="badge bg-info">{{ curr.currency }}</span>
-                                <span class="ms-2 fw-bold">{{ curr.count }}</span>
-                            </div>
-                        </div>
-                        {% endfor %}
-                    </div>
-                    {% if portfolio_stats.currency_breakdown|length > 6 %}
-                    <div class="mt-2">
-                        <small class="text-muted">
-                            <i class="bi bi-info-circle"></i>
-                            Showing top 6 currencies. <a href="{% url 'portfolio:list' %}">View all</a>
-                        </small>
-                    </div>
-                    {% endif %}
-                    {% else %}
-                    <p class="text-muted mb-0">No active portfolios</p>
-                    {% endif %}
-                </div>
+            <div class="d-flex flex-wrap gap-2">
+                {% for item in pending_actions %}
+                <a href="{{ item.url }}" class="btn btn-outline-{{ item.color }} btn-sm d-flex align-items-center gap-2">
+                    <i class="bi bi-{{ item.icon }}"></i>
+                    {{ item.label }}
+                    <i class="bi bi-arrow-right"></i>
+                </a>
+                {% endfor %}
             </div>
         </div>
     </div>
     {% endif %}
 
-    <!-- Trade Analytics Section -->
-    {% if trade_stats and trade_stats.total_trades > 0 %}
-    <div class="row g-4 mb-4">
+    <!-- ── PORTFOLIO STATS ── -->
+    {% if sections.portfolio and portfolio_stats %}
+    <div class="row g-3 mb-4">
         <div class="col-12">
-            <h5 class="mb-3">
-                <i class="bi bi-arrow-left-right"></i> Trade Analytics
-            </h5>
+            <h6 class="section-heading">
+                <i class="bi bi-briefcase"></i> Portfolio
+                <a href="{% url 'portfolio:list' %}" class="section-link">View all <i class="bi bi-arrow-right"></i></a>
+            </h6>
         </div>
 
-        <!-- Total Trades Card -->
-        <div class="col-xl-3 col-lg-4 col-md-6">
+        <div class="col-6 col-md-3">
             <div class="card stats-card h-100">
                 <div class="card-body">
                     <div class="d-flex align-items-center">
-                        <div class="stats-icon bg-primary">
-                            <i class="bi bi-receipt"></i>
-                        </div>
+                        <div class="stats-icon bg-primary"><i class="bi bi-briefcase-fill"></i></div>
                         <div class="ms-3">
-                            <h6 class="text-muted mb-1">Total Trades</h6>
-                            <h3 class="mb-0">{{ trade_stats.total_trades }}</h3>
+                            <div class="stats-label">Total</div>
+                            <div class="stats-value">{{ portfolio_stats.total_portfolios|default:"0" }}</div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Pending Validation Card -->
-        <div class="col-xl-3 col-lg-4 col-md-6">
+        <div class="col-6 col-md-3">
             <div class="card stats-card h-100">
                 <div class="card-body">
                     <div class="d-flex align-items-center">
-                        <div class="stats-icon bg-warning">
-                            <i class="bi bi-hourglass-split"></i>
-                        </div>
+                        <div class="stats-icon bg-success"><i class="bi bi-check-circle-fill"></i></div>
                         <div class="ms-3">
-                            <h6 class="text-muted mb-1">Pending Validation</h6>
-                            <h3 class="mb-0">{{ trade_stats.pending_validation }}</h3>
+                            <div class="stats-label">Active</div>
+                            <div class="stats-value">{{ portfolio_stats.active_portfolios|default:"0" }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {% if portfolio_stats.currency_breakdown %}
+        <div class="col-12 col-md-6">
+            <div class="card stats-card h-100">
+                <div class="card-body">
+                    <div class="stats-label mb-2"><i class="bi bi-currency-exchange"></i> By Currency</div>
+                    <div class="d-flex flex-wrap gap-2">
+                        {% for curr in portfolio_stats.currency_breakdown|slice:":6" %}
+                        <span class="breakdown-chip"><span class="chip-label">{{ curr.currency }}</span><span class="chip-count">{{ curr.count }}</span></span>
+                        {% endfor %}
+                        {% if portfolio_stats.currency_breakdown|length > 6 %}
+                        <span class="text-muted small align-self-center">+{{ portfolio_stats.currency_breakdown|length|add:"-6" }} more</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- ── TRADE STATS ── -->
+    {% if sections.trade and trade_stats %}
+    <div class="row g-3 mb-4">
+        <div class="col-12">
+            <h6 class="section-heading">
+                <i class="bi bi-arrow-left-right"></i> Trades
+                <a href="{% url 'trade:list' %}" class="section-link">View all <i class="bi bi-arrow-right"></i></a>
+            </h6>
+        </div>
+
+        <div class="col-6 col-md-3">
+            <div class="card stats-card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="stats-icon bg-primary"><i class="bi bi-receipt"></i></div>
+                        <div class="ms-3">
+                            <div class="stats-label">Total</div>
+                            <div class="stats-value">{{ trade_stats.total_trades|default:"0" }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-6 col-md-3">
+            <div class="card stats-card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="stats-icon bg-success"><i class="bi bi-check-circle-fill"></i></div>
+                        <div class="ms-3">
+                            <div class="stats-label">Settled</div>
+                            <div class="stats-value">{{ trade_stats.settled|default:"0" }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {% if sections.trade_approve %}
+        <div class="col-6 col-md-3">
+            <div class="card stats-card h-100 {% if trade_stats.pending_validation > 0 %}border-warning{% endif %}">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="stats-icon bg-warning"><i class="bi bi-hourglass-split"></i></div>
+                        <div class="ms-3">
+                            <div class="stats-label">Pending Validation</div>
+                            <div class="stats-value">{{ trade_stats.pending_validation|default:"0" }}</div>
                         </div>
                     </div>
                     {% if trade_stats.pending_validation > 0 %}
                     <div class="mt-2">
-                        <a href="{% url 'trade:pending_validation' %}" class="btn btn-sm btn-outline-warning">
+                        <a href="{% url 'trade:pending_validation' %}" class="btn btn-sm btn-outline-warning w-100">
                             <i class="bi bi-arrow-right"></i> Review
                         </a>
                     </div>
@@ -183,22 +209,19 @@
             </div>
         </div>
 
-        <!-- Pending Settlement Card -->
-        <div class="col-xl-3 col-lg-4 col-md-6">
-            <div class="card stats-card h-100">
+        <div class="col-6 col-md-3">
+            <div class="card stats-card h-100 {% if trade_stats.pending_settlement > 0 %}border-info{% endif %}">
                 <div class="card-body">
                     <div class="d-flex align-items-center">
-                        <div class="stats-icon bg-info">
-                            <i class="bi bi-clock-history"></i>
-                        </div>
+                        <div class="stats-icon bg-info"><i class="bi bi-clock-history"></i></div>
                         <div class="ms-3">
-                            <h6 class="text-muted mb-1">Pending Settlement</h6>
-                            <h3 class="mb-0">{{ trade_stats.pending_settlement }}</h3>
+                            <div class="stats-label">Pending Settlement</div>
+                            <div class="stats-value">{{ trade_stats.pending_settlement|default:"0" }}</div>
                         </div>
                     </div>
                     {% if trade_stats.pending_settlement > 0 %}
                     <div class="mt-2">
-                        <a href="{% url 'trade:pending_settlement' %}" class="btn btn-sm btn-outline-info">
+                        <a href="{% url 'trade:pending_settlement' %}" class="btn btn-sm btn-outline-info w-100">
                             <i class="bi bi-arrow-right"></i> Settle
                         </a>
                     </div>
@@ -206,40 +229,19 @@
                 </div>
             </div>
         </div>
+        {% endif %}
 
-        <!-- Settled Trades Card -->
-        <div class="col-xl-3 col-lg-4 col-md-6">
-            <div class="card stats-card h-100">
-                <div class="card-body">
-                    <div class="d-flex align-items-center">
-                        <div class="stats-icon bg-success">
-                            <i class="bi bi-check-circle-fill"></i>
-                        </div>
-                        <div class="ms-3">
-                            <h6 class="text-muted mb-1">Settled Trades</h6>
-                            <h3 class="mb-0">{{ trade_stats.settled }}</h3>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Trade Type Breakdown Card -->
         {% if trade_stats.type_breakdown %}
-        <div class="col-xl-6 col-lg-12">
+        <div class="col-12 col-md-6">
             <div class="card stats-card h-100">
                 <div class="card-body">
-                    <h6 class="text-muted mb-3">
-                        <i class="bi bi-pie-chart"></i> Trades by Type
-                    </h6>
-                    <div class="row g-2">
-                        {% for trade_type, count in trade_stats.type_breakdown.items %}
-                        <div class="col-6 col-md-4">
-                            <div class="trade-type-stat">
-                                <span class="badge {% if trade_type == 'BUY' %}bg-success{% elif trade_type == 'SELL' %}bg-danger{% else %}bg-secondary{% endif %}">{{ trade_type }}</span>
-                                <span class="ms-2 fw-bold">{{ count }}</span>
-                            </div>
-                        </div>
+                    <div class="stats-label mb-2"><i class="bi bi-pie-chart"></i> By Type</div>
+                    <div class="d-flex flex-wrap gap-2">
+                        {% for t, cnt in trade_stats.type_breakdown.items %}
+                        <span class="breakdown-chip">
+                            <span class="chip-label {% if t == 'BUY' %}text-success{% elif t == 'SELL' %}text-danger{% endif %}">{{ t }}</span>
+                            <span class="chip-count">{{ cnt }}</span>
+                        </span>
                         {% endfor %}
                     </div>
                 </div>
@@ -247,28 +249,18 @@
         </div>
         {% endif %}
 
-        <!-- Trade Status Breakdown Card -->
         {% if trade_stats.status_breakdown %}
-        <div class="col-xl-6 col-lg-12">
+        <div class="col-12 col-md-6">
             <div class="card stats-card h-100">
                 <div class="card-body">
-                    <h6 class="text-muted mb-3">
-                        <i class="bi bi-bar-chart"></i> Trades by Status
-                    </h6>
-                    <div class="row g-2">
-                        {% for status, count in trade_stats.status_breakdown.items %}
-                        <div class="col-6 col-md-4">
-                            <div class="trade-status-stat">
-                                <span class="badge {% if status == 'SETTLED' %}bg-success{% elif status == 'PENDING_VALIDATION' %}bg-warning{% elif status == 'VALIDATED' %}bg-info{% elif status == 'CANCELLED' %}bg-danger{% else %}bg-secondary{% endif %}">{{ status }}</span>
-                                <span class="ms-2 fw-bold">{{ count }}</span>
-                            </div>
-                        </div>
+                    <div class="stats-label mb-2"><i class="bi bi-bar-chart"></i> By Status</div>
+                    <div class="d-flex flex-wrap gap-2">
+                        {% for s, cnt in trade_stats.status_breakdown.items %}
+                        <span class="breakdown-chip">
+                            <span class="chip-label">{{ s }}</span>
+                            <span class="chip-count">{{ cnt }}</span>
+                        </span>
                         {% endfor %}
-                    </div>
-                    <div class="mt-3">
-                        <a href="{% url 'trade:list' %}" class="btn btn-sm btn-outline-primary">
-                            <i class="bi bi-list"></i> View All Trades
-                        </a>
                     </div>
                 </div>
             </div>
@@ -277,196 +269,131 @@
     </div>
     {% endif %}
 
-    <!-- Market Data Analytics Section -->
-    {% if fx_stats and fx_stats.total_records > 0 %}
-    <div class="row g-4 mb-4">
+    <!-- ── MARKET DATA STATS ── -->
+    {% if sections.market_data and fx_stats %}
+    <div class="row g-3 mb-4">
         <div class="col-12">
-            <h5 class="mb-3">
-                <i class="bi bi-graph-up-arrow"></i> Market Data Analytics (FX Rates)
-            </h5>
+            <h6 class="section-heading">
+                <i class="bi bi-graph-up-arrow"></i> Market Data
+                <a href="{% url 'market_data:fx_rate_list' %}" class="section-link">View FX Rates <i class="bi bi-arrow-right"></i></a>
+            </h6>
         </div>
 
-        <!-- Total FX Records Card -->
-        <div class="col-xl-3 col-lg-4 col-md-6">
+        <div class="col-6 col-md-3">
             <div class="card stats-card h-100">
                 <div class="card-body">
                     <div class="d-flex align-items-center">
-                        <div class="stats-icon bg-info">
-                            <i class="bi bi-database-fill"></i>
-                        </div>
+                        <div class="stats-icon bg-info"><i class="bi bi-database-fill"></i></div>
                         <div class="ms-3">
-                            <h6 class="text-muted mb-1">Total FX Records</h6>
-                            <h3 class="mb-0">{{ fx_stats.total_records }}</h3>
+                            <div class="stats-label">FX Records</div>
+                            <div class="stats-value">{{ fx_stats.total_records|default:"0" }}</div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Unique Currency Pairs Card -->
-        <div class="col-xl-3 col-lg-4 col-md-6">
+        <div class="col-6 col-md-3">
             <div class="card stats-card h-100">
                 <div class="card-body">
                     <div class="d-flex align-items-center">
-                        <div class="stats-icon bg-warning">
-                            <i class="bi bi-currency-exchange"></i>
-                        </div>
+                        <div class="stats-icon bg-warning"><i class="bi bi-currency-exchange"></i></div>
                         <div class="ms-3">
-                            <h6 class="text-muted mb-1">Currency Pairs</h6>
-                            <h3 class="mb-0">{{ fx_stats.unique_pairs }}</h3>
+                            <div class="stats-label">Currency Pairs</div>
+                            <div class="stats-value">{{ fx_stats.unique_pairs|default:"0" }}</div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Latest Processing Date Card -->
-        <div class="col-xl-3 col-lg-4 col-md-6">
+        <div class="col-6 col-md-3">
             <div class="card stats-card h-100">
                 <div class="card-body">
                     <div class="d-flex align-items-center">
-                        <div class="stats-icon bg-success">
-                            <i class="bi bi-clock-history"></i>
-                        </div>
+                        <div class="stats-icon bg-success"><i class="bi bi-calendar-check"></i></div>
                         <div class="ms-3">
-                            <h6 class="text-muted mb-1">Latest ETL Date</h6>
-                            <h3 class="mb-0" style="font-size: 1.3rem;">{{ fx_stats.latest_processing_date }}</h3>
+                            <div class="stats-label">Latest ETL Date</div>
+                            <div class="stats-value" style="font-size:1rem;">{{ fx_stats.latest_processing_date|default:"N/A" }}</div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- ETL Batches Card -->
-        <div class="col-xl-3 col-lg-12 col-md-6">
+        {% if fx_stats.processing_date_breakdown %}
+        <div class="col-6 col-md-3">
             <div class="card stats-card h-100">
                 <div class="card-body">
-                    <h6 class="text-muted mb-3">
-                        <i class="bi bi-file-earmark-arrow-down"></i> ETL Processing Batches
-                    </h6>
-                    {% if fx_stats.processing_date_breakdown %}
-                    <div class="row g-2">
-                        {% for batch in fx_stats.processing_date_breakdown|slice:":2" %}
-                        <div class="col-12">
-                            <div class="etl-batch-stat">
-                                <div>
-                                    <span class="badge bg-primary">
-                                        {% if batch.processing_date|length == 8 %}
-                                            {{ batch.processing_date|slice:":4" }}-{{ batch.processing_date|slice:"4:6" }}-{{ batch.processing_date|slice:"6:8" }}
-                                        {% else %}
-                                            {{ batch.processing_date }}
-                                        {% endif %}
-                                    </span>
-                                </div>
-                                <div class="text-end">
-                                    <small class="text-muted">{{ batch.record_count }} records</small>
-                                </div>
-                            </div>
-                        </div>
-                        {% endfor %}
+                    <div class="stats-label mb-2"><i class="bi bi-file-earmark-arrow-down"></i> Recent Batches</div>
+                    {% for batch in fx_stats.processing_date_breakdown|slice:":2" %}
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span class="badge bg-primary" style="font-size:0.7rem;">
+                            {% if batch.processing_date|length == 8 %}{{ batch.processing_date|slice:":4" }}-{{ batch.processing_date|slice:"4:6" }}-{{ batch.processing_date|slice:"6:8" }}{% else %}{{ batch.processing_date }}{% endif %}
+                        </span>
+                        <small class="text-muted">{{ batch.record_count }}</small>
                     </div>
-                    {% if fx_stats.processing_date_breakdown|length > 2 %}
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- ── SECURITIES STATS ── -->
+    {% if sections.securities and security_stats %}
+    <div class="row g-3 mb-4">
+        <div class="col-12">
+            <h6 class="section-heading">
+                <i class="bi bi-shield-check"></i> Securities
+                <a href="{% url 'security:list' %}" class="section-link">View all <i class="bi bi-arrow-right"></i></a>
+            </h6>
+        </div>
+
+        <div class="col-6 col-md-3">
+            <div class="card stats-card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="stats-icon bg-primary"><i class="bi bi-shield-fill"></i></div>
+                        <div class="ms-3">
+                            <div class="stats-label">Total</div>
+                            <div class="stats-value">{{ security_stats.total_securities|default:"0" }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-6 col-md-3">
+            <div class="card stats-card h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="stats-icon bg-success"><i class="bi bi-check-circle-fill"></i></div>
+                        <div class="ms-3">
+                            <div class="stats-label">Active</div>
+                            <div class="stats-value">{{ security_stats.active_securities|default:"0" }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {% if security_stats.pending_approvals > 0 %}
+        <div class="col-6 col-md-3">
+            <div class="card stats-card h-100 border-warning">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="stats-icon bg-warning"><i class="bi bi-hourglass-split"></i></div>
+                        <div class="ms-3">
+                            <div class="stats-label">Pending Approval</div>
+                            <div class="stats-value">{{ security_stats.pending_approvals }}</div>
+                        </div>
+                    </div>
                     <div class="mt-2">
-                        <small class="text-muted">
-                            <i class="bi bi-info-circle"></i>
-                            Showing latest 2 batches. <a href="/market-data/fx-rates/">View all</a>
-                        </small>
-                    </div>
-                    {% endif %}
-                    {% else %}
-                    <p class="text-muted mb-0">No FX data loaded</p>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-    </div>
-    {% endif %}
-
-    <!-- Equity Price Analytics Section - DISABLED
-    {% if equity_price_stats and equity_price_stats.total_prices > 0 %}
-    <div class="row g-4 mb-4">
-        <div class="col-12">
-            <h5 class="mb-3">
-                <i class="bi bi-graph-up"></i> Equity Price Analytics
-            </h5>
-        </div>
-
-        <div class="col-xl-3 col-lg-4 col-md-6">
-            <div class="card stats-card h-100">
-                <div class="card-body">
-                    <div class="d-flex align-items-center">
-                        <div class="stats-icon bg-primary">
-                            <i class="bi bi-file-earmark-text-fill"></i>
-                        </div>
-                        <div class="ms-3">
-                            <h6 class="text-muted mb-1">Total Price Records</h6>
-                            <h3 class="mb-0">{{ equity_price_stats.total_prices }}</h3>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-xl-3 col-lg-4 col-md-6">
-            <div class="card stats-card h-100">
-                <div class="card-body">
-                    <div class="d-flex align-items-center">
-                        <div class="stats-icon bg-success">
-                            <i class="bi bi-briefcase-fill"></i>
-                        </div>
-                        <div class="ms-3">
-                            <h6 class="text-muted mb-1">Unique Securities</h6>
-                            <h3 class="mb-0">{{ equity_price_stats.unique_securities }}</h3>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-xl-3 col-lg-4 col-md-6">
-            <div class="card stats-card h-100">
-                <div class="card-body">
-                    <div class="d-flex align-items-center">
-                        <div class="stats-icon bg-warning">
-                            <i class="bi bi-currency-exchange"></i>
-                        </div>
-                        <div class="ms-3">
-                            <h6 class="text-muted mb-1">Currencies</h6>
-                            <h3 class="mb-0">{{ equity_price_stats.unique_currencies }}</h3>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-xl-3 col-lg-4 col-md-6">
-            <div class="card stats-card h-100">
-                <div class="card-body">
-                    <div class="d-flex align-items-center">
-                        <div class="stats-icon bg-info">
-                            <i class="bi bi-calendar-check"></i>
-                        </div>
-                        <div class="ms-3">
-                            <h6 class="text-muted mb-1">Latest Price Date</h6>
-                            <h3 class="mb-0" style="font-size: 1.3rem;">{{ equity_price_stats.latest_date }}</h3>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        {% if equity_price_stats.unique_markets > 0 %}
-        <div class="col-xl-3 col-lg-4 col-md-6">
-            <div class="card stats-card h-100">
-                <div class="card-body">
-                    <div class="d-flex align-items-center">
-                        <div class="stats-icon bg-secondary">
-                            <i class="bi bi-building"></i>
-                        </div>
-                        <div class="ms-3">
-                            <h6 class="text-muted mb-1">Markets</h6>
-                            <h3 class="mb-0">{{ equity_price_stats.unique_markets }}</h3>
-                        </div>
+                        <a href="{% url 'security:pending_approvals' %}" class="btn btn-sm btn-outline-warning w-100">
+                            <i class="bi bi-arrow-right"></i> Review
+                        </a>
                     </div>
                 </div>
             </div>
@@ -474,199 +401,223 @@
         {% endif %}
     </div>
     {% endif %}
-    -->
 
-    <!-- Module Cards -->
-    <div class="row g-4">
+    <!-- ── MODULE QUICK ACCESS GRID ── -->
+    {% with has_any=sections.portfolio|add:sections.trade|add:sections.market_data|add:sections.securities|add:sections.corp_actions|add:sections.parties|add:sections.upload|add:sections.udf|add:sections.lookup|add:sections.currencies|add:sections.audit|add:sections.rbac_admin %}
+    <div class="row g-3 mb-4">
         <div class="col-12">
-            <h5 class="mb-3">
-                <i class="bi bi-grid-3x3-gap"></i> Available Modules
-            </h5>
+            <h6 class="section-heading"><i class="bi bi-grid-3x3-gap"></i> Your Modules</h6>
         </div>
 
-        {% for key, module in modules.items %}
-            {% if module.access != 'NONE' %}
-            <div class="col-xl-3 col-lg-4 col-md-6">
-                <div class="card module-card h-100">
-                    <div class="card-body text-center">
-                        <div class="module-icon mb-3">
-                            <i class="bi bi-{{ module.icon }}"></i>
-                        </div>
-                        <h5 class="card-title">{{ module.name }}</h5>
-                        <p class="text-muted mb-3">
-                            <span class="badge {% if module.access == 'WRITE' or module.access == 'WRITE' %}bg-success{% else %}bg-info{% endif %}">
-                                {{ module.access }}
-                            </span>
-                        </p>
-                        <a href="{{ module.url }}" class="btn btn-primary btn-sm">
-                            <i class="bi bi-arrow-right"></i> Open
-                        </a>
-                    </div>
-                </div>
-            </div>
-            {% endif %}
-        {% endfor %}
-    </div>
-
-    <!-- Permissions Section -->
-    <div class="row g-4 mt-4">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="card-title mb-0">
-                        <i class="bi bi-shield-check"></i> Your Permissions
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-sm">
-                            <thead>
-                                <tr>
-                                    <th>Permission</th>
-                                    <th>Access Level</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for perm, access in permissions.items %}
-                                <tr>
-                                    <td>
-                                        <i class="bi bi-key"></i> {{ perm }}
-                                    </td>
-                                    <td>
-                                        <span class="badge {% if access == 'WRITE' or access == 'WRITE' %}bg-success{% else %}bg-info{% endif %}">
-                                            {{ access }}
-                                        </span>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+        {% if sections.portfolio %}
+        <div class="col-6 col-md-4 col-lg-3">
+            <a href="{% url 'portfolio:list' %}" class="module-tile">
+                <div class="module-tile-icon bg-primary"><i class="bi bi-briefcase-fill"></i></div>
+                <div class="module-tile-label">Portfolios</div>
+            </a>
         </div>
+        {% endif %}
+
+        {% if sections.trade %}
+        <div class="col-6 col-md-4 col-lg-3">
+            <a href="{% url 'trade:list' %}" class="module-tile">
+                <div class="module-tile-icon bg-success"><i class="bi bi-arrow-left-right"></i></div>
+                <div class="module-tile-label">Trades</div>
+            </a>
+        </div>
+        {% endif %}
+
+        {% if sections.position %}
+        <div class="col-6 col-md-4 col-lg-3">
+            <a href="{% url 'trade:position_list' %}" class="module-tile">
+                <div class="module-tile-icon bg-teal"><i class="bi bi-pie-chart-fill"></i></div>
+                <div class="module-tile-label">Positions</div>
+            </a>
+        </div>
+        {% endif %}
+
+        {% if sections.cash_flow %}
+        <div class="col-6 col-md-4 col-lg-3">
+            <a href="{% url 'trade:cash_flow_list' %}" class="module-tile">
+                <div class="module-tile-icon bg-cyan"><i class="bi bi-cash-stack"></i></div>
+                <div class="module-tile-label">Cash Flows</div>
+            </a>
+        </div>
+        {% endif %}
+
+        {% if sections.market_data %}
+        <div class="col-6 col-md-4 col-lg-3">
+            <a href="{% url 'market_data:fx_rate_list' %}" class="module-tile">
+                <div class="module-tile-icon bg-info"><i class="bi bi-graph-up-arrow"></i></div>
+                <div class="module-tile-label">Market Data</div>
+            </a>
+        </div>
+        {% endif %}
+
+        {% if sections.securities %}
+        <div class="col-6 col-md-4 col-lg-3">
+            <a href="{% url 'security:list' %}" class="module-tile">
+                <div class="module-tile-icon bg-indigo"><i class="bi bi-shield-check"></i></div>
+                <div class="module-tile-label">Securities</div>
+            </a>
+        </div>
+        {% endif %}
+
+        {% if sections.corp_actions %}
+        <div class="col-6 col-md-4 col-lg-3">
+            <a href="{% url 'reference_data:corporate_action_list' %}" class="module-tile">
+                <div class="module-tile-icon bg-warning"><i class="bi bi-building"></i></div>
+                <div class="module-tile-label">Corporate Actions</div>
+            </a>
+        </div>
+        {% endif %}
+
+        {% if sections.parties %}
+        <div class="col-6 col-md-4 col-lg-3">
+            <a href="{% url 'reference_data:party_list' %}" class="module-tile">
+                <div class="module-tile-icon bg-secondary"><i class="bi bi-people-fill"></i></div>
+                <div class="module-tile-label">Parties</div>
+            </a>
+        </div>
+        {% endif %}
+
+        {% if sections.currencies %}
+        <div class="col-6 col-md-4 col-lg-3">
+            <a href="{% url 'reference_data:currency_list' %}" class="module-tile">
+                <div class="module-tile-icon bg-orange"><i class="bi bi-currency-exchange"></i></div>
+                <div class="module-tile-label">Currencies</div>
+            </a>
+        </div>
+        {% endif %}
+
+        {% if sections.upload %}
+        <div class="col-6 col-md-4 col-lg-3">
+            <a href="{% url 'upload:list' %}" class="module-tile">
+                <div class="module-tile-icon bg-purple"><i class="bi bi-cloud-upload-fill"></i></div>
+                <div class="module-tile-label">File Upload</div>
+            </a>
+        </div>
+        {% endif %}
+
+        {% if sections.udf %}
+        <div class="col-6 col-md-4 col-lg-3">
+            <a href="{% url 'udf:list' %}" class="module-tile">
+                <div class="module-tile-icon bg-pink"><i class="bi bi-sliders"></i></div>
+                <div class="module-tile-label">UDF</div>
+            </a>
+        </div>
+        {% endif %}
+
+        {% if sections.lookup %}
+        <div class="col-6 col-md-4 col-lg-3">
+            <a href="{% url 'lookup:table_list' %}" class="module-tile">
+                <div class="module-tile-icon bg-secondary"><i class="bi bi-table"></i></div>
+                <div class="module-tile-label">Lookup Tables</div>
+            </a>
+        </div>
+        {% endif %}
+
+        {% if sections.audit %}
+        <div class="col-6 col-md-4 col-lg-3">
+            <a href="{% url 'core:audit_log' %}" class="module-tile">
+                <div class="module-tile-icon bg-dark"><i class="bi bi-file-text-fill"></i></div>
+                <div class="module-tile-label">Audit Logs</div>
+            </a>
+        </div>
+        {% endif %}
+
+        {% if sections.rbac_admin %}
+        <div class="col-6 col-md-4 col-lg-3">
+            <a href="{% url 'core:rbac_user_list' %}" class="module-tile">
+                <div class="module-tile-icon bg-danger"><i class="bi bi-shield-lock-fill"></i></div>
+                <div class="module-tile-label">RBAC Admin</div>
+            </a>
+        </div>
+        {% endif %}
+
     </div>
+    {% endwith %}
+
 </div>
 
 <style>
-    .user-avatar-large {
-        width: 80px;
-        height: 80px;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 32px;
-        font-weight: 600;
-        color: white;
-    }
+.section-heading {
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #6c757d;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0;
+}
+.section-link {
+    margin-left: auto;
+    font-size: 0.78rem;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 500;
+}
 
-    .module-card {
-        border: 2px solid #f0f0f0;
-        transition: all 0.3s;
-    }
+/* User avatar */
+.user-avatar-large {
+    width: 56px; height: 56px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 700; color: white; flex-shrink: 0;
+}
 
-    .module-card:hover {
-        border-color: #667eea;
-        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
-        transform: translateY(-5px);
-    }
+/* Stats cards */
+.stats-card {
+    border: 1px solid #e9ecef;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    transition: box-shadow 0.2s, transform 0.2s;
+}
+.stats-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); transform: translateY(-2px); }
+.stats-icon {
+    width: 48px; height: 48px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; color: white; flex-shrink: 0;
+}
+.stats-label { font-size: 0.75rem; color: #6c757d; margin-bottom: 2px; }
+.stats-value { font-size: 1.6rem; font-weight: 700; line-height: 1; color: #212529; }
 
-    .module-icon {
-        width: 80px;
-        height: 80px;
-        margin: 0 auto;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 36px;
-        color: white;
-    }
+/* Breakdown chips */
+.breakdown-chip {
+    display: inline-flex; align-items: center; gap: 0;
+    border: 1px solid #dee2e6; border-radius: 20px; overflow: hidden;
+    font-size: 0.75rem;
+}
+.chip-label { padding: 2px 8px; background: #f8f9fa; font-weight: 600; }
+.chip-count { padding: 2px 8px; background: #e9ecef; color: #495057; }
 
-    /* Portfolio Analytics Styles */
-    .stats-card {
-        border: none;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-        transition: all 0.3s;
-    }
+/* Module tiles */
+.module-tile {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 1rem 0.5rem; border: 1px solid #e9ecef; border-radius: 10px;
+    background: white; text-decoration: none; color: #212529;
+    transition: all 0.2s; gap: 0.5rem; height: 100%;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.module-tile:hover {
+    border-color: #667eea; box-shadow: 0 4px 12px rgba(102,126,234,0.15);
+    transform: translateY(-3px); color: #212529;
+}
+.module-tile-icon {
+    width: 52px; height: 52px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; color: white;
+}
+.module-tile-label { font-size: 0.8rem; font-weight: 600; text-align: center; }
 
-    .stats-card:hover {
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-        transform: translateY(-2px);
-    }
-
-    .stats-icon {
-        width: 60px;
-        height: 60px;
-        border-radius: 12px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 24px;
-        color: white;
-    }
-
-    .currency-stat {
-        padding: 8px 12px;
-        background: #f8f9fa;
-        border-radius: 6px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-    }
-
-    .currency-stat .badge {
-        font-size: 11px;
-        padding: 4px 8px;
-    }
-
-    .etl-batch-stat {
-        padding: 10px 12px;
-        background: #f8f9fa;
-        border-radius: 6px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        border-left: 3px solid #667eea;
-    }
-
-    .etl-batch-stat .badge {
-        font-size: 11px;
-        padding: 4px 8px;
-    }
-
-    /* Trade Analytics Styles */
-    .trade-type-stat {
-        padding: 8px 12px;
-        background: #f8f9fa;
-        border-radius: 6px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        border-left: 3px solid #198754;
-    }
-
-    .trade-type-stat .badge {
-        font-size: 11px;
-        padding: 4px 8px;
-    }
-
-    .trade-status-stat {
-        padding: 8px 12px;
-        background: #f8f9fa;
-        border-radius: 6px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        border-left: 3px solid #0dcaf0;
-    }
-
-    .trade-status-stat .badge {
-        font-size: 10px;
-        padding: 4px 6px;
-    }
+/* Extra colour tokens */
+.bg-indigo  { background-color: #6610f2 !important; }
+.bg-teal    { background-color: #20c997 !important; }
+.bg-cyan    { background-color: #0dcaf0 !important; }
+.bg-orange  { background-color: #fd7e14 !important; }
+.bg-purple  { background-color: #6f42c1 !important; }
+.bg-pink    { background-color: #d63384 !important; }
 </style>
 {% endblock %}
