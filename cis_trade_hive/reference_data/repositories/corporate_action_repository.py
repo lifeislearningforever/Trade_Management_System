@@ -263,9 +263,9 @@ class CorporateActionRepository:
                 'true',
                 'false',
                 CorporateActionRepository.escape_value(created_by),
-                f"'{timestamp_str}'",
+                CorporateActionRepository.escape_value(timestamp_str),
                 CorporateActionRepository.escape_value(created_by),
-                f"'{timestamp_str}'"
+                CorporateActionRepository.escape_value(timestamp_str)
             ])
 
             # Build UPSERT statement
@@ -321,7 +321,7 @@ class CorporateActionRepository:
 
             # Always update audit fields
             set_clauses.append(f"updated_by = {CorporateActionRepository.escape_value(updated_by)}")
-            set_clauses.append(f"updated_at = '{timestamp_str}'")
+            set_clauses.append(f"updated_at = {CorporateActionRepository.escape_value(timestamp_str)}")
 
             if not set_clauses:
                 logger.warning(f"No fields to update for corporate action {ca_id}")
@@ -370,9 +370,9 @@ class CorporateActionRepository:
             set_clauses = [
                 f"status = {CorporateActionRepository.escape_value(status)}",
                 f"updated_by = {CorporateActionRepository.escape_value(updated_by)}",
-                f"updated_at = '{timestamp_str}'",
+                f"updated_at = {CorporateActionRepository.escape_value(timestamp_str)}",
                 f"reviewed_by = {CorporateActionRepository.escape_value(updated_by)}",
-                f"reviewed_at = '{timestamp_str}'",
+                f"reviewed_at = {CorporateActionRepository.escape_value(timestamp_str)}",
             ]
 
             if reviewed_comments:
@@ -418,7 +418,7 @@ class CorporateActionRepository:
             SET is_deleted = true,
                 is_active = false,
                 updated_by = {CorporateActionRepository.escape_value(deleted_by)},
-                updated_at = '{timestamp_str}'
+                updated_at = {CorporateActionRepository.escape_value(timestamp_str)}
             WHERE ca_id = {ca_id}
             """
 
@@ -454,7 +454,7 @@ class CorporateActionRepository:
                 is_active = true,
                 status = 'MODIFIED',
                 updated_by = {CorporateActionRepository.escape_value(restored_by)},
-                updated_at = '{timestamp_str}'
+                updated_at = {CorporateActionRepository.escape_value(timestamp_str)}
             WHERE ca_id = {ca_id}
             """
 
