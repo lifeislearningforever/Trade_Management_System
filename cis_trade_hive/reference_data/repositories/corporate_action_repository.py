@@ -6,6 +6,7 @@ All queries execute via Impala (no Django ORM).
 """
 
 import logging
+import uuid
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import json
@@ -566,9 +567,9 @@ class CorporateActionRepository:
             True if successful, False otherwise
         """
         try:
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
-            history_id = timestamp_ms  # PK — keep as BIGINT ms
-            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            now = datetime.now()
+            history_id = now.strftime('%Y%m%d%H%M%S') + '_' + uuid.uuid4().hex[:8]
+            timestamp_str = now.strftime('%Y-%m-%d %H:%M:%S')
 
             # Convert changes dict to JSON string
             changes_json = json.dumps(changes) if changes else '{}'
@@ -577,7 +578,7 @@ class CorporateActionRepository:
             UPSERT INTO {CorporateActionRepository.DATABASE}.{CorporateActionRepository.HISTORY_TABLE}
             (history_id, ca_id, ca_number, security_name, action, status, changes, comments, performed_by, performed_at)
             VALUES (
-                {history_id},
+                {CorporateActionRepository.escape_value(history_id)},
                 {ca_id},
                 {CorporateActionRepository.escape_value(ca_number)},
                 {CorporateActionRepository.escape_value(security_name)},
