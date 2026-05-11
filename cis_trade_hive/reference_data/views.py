@@ -2449,6 +2449,9 @@ def corporate_action_validate(request, ca_id):
         comments = request.POST.get('comments', '').strip()
         action = request.POST.get('action', 'approve')
 
+        ca_obj = corporate_action_service.get_by_id(int(ca_id))
+        ca_label = ca_obj.get('ca_number') if ca_obj else ca_id
+
         if action == 'approve':
             success, error_msg = corporate_action_service.validate(
                 ca_id=int(ca_id),
@@ -2459,7 +2462,7 @@ def corporate_action_validate(request, ca_id):
             )
 
             if success:
-                messages.success(request, f"Corporate Action {ca_id} validated successfully")
+                messages.success(request, f"Corporate Action {ca_label} validated successfully")
             else:
                 messages.error(request, error_msg)
         else:
@@ -2473,7 +2476,7 @@ def corporate_action_validate(request, ca_id):
             )
 
             if success:
-                messages.success(request, f"Corporate Action {ca_id} rejected")
+                messages.success(request, f"Corporate Action {ca_label} rejected")
             else:
                 messages.error(request, error_msg)
 
