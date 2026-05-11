@@ -1721,7 +1721,9 @@ $(document).ready(function() {
                     // After charges are calculated, submit the form
                     console.log('Charges calculated, submitting form...');
                     var operation = '{% if is_edit %}update{% else %}create{% endif %}';
-                    var entity = 'Trade';
+                    var dealNumEl = document.getElementById('deal_number');
+                    var dealNum = (dealNumEl && dealNumEl.value) ? dealNumEl.value : '{{ trade.deal_number|default:"" }}';
+                    var entity = dealNum ? ('Trade ' + dealNum) : 'Trade';
                     submitWithPopup(operation, entity, document.getElementById('tradeForm'));
                 });
                 return false;
@@ -1730,7 +1732,9 @@ $(document).ready(function() {
 
         // Show the operation popup
         var operation = '{% if is_edit %}update{% else %}create{% endif %}';
-        var entity = 'Trade';
+        var dealNumEl = document.getElementById('deal_number');
+        var dealNum = (dealNumEl && dealNumEl.value) ? dealNumEl.value : '{{ trade.deal_number|default:"" }}';
+        var entity = dealNum ? ('Trade ' + dealNum) : 'Trade';
         submitWithPopup(operation, entity, this);
 
         // Prevent default - let submitWithPopup handle submission

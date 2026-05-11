@@ -88,7 +88,8 @@
                                 <td>
                                     {% if ca.can_validate %}
                                         <form method="post" action="{% url 'reference_data:corporate_action_validate' ca.ca_id %}"
-                                              class="d-inline validate-form" style="display: inline;">
+                                              class="d-inline validate-form" style="display: inline;"
+                                              data-ca-number="{{ ca.ca_number|default:'' }}">
                                             {% csrf_token %}
                                             <input type="hidden" name="action" value="approve">
                                             <input type="hidden" name="comments" value="">
@@ -97,13 +98,13 @@
                                             </button>
                                         </form>
                                         <form method="post" action="{% url 'reference_data:corporate_action_validate' ca.ca_id %}"
-                                              style="display: inline;">
+                                              class="d-inline reject-form" style="display: inline;"
+                                              data-ca-number="{{ ca.ca_number|default:'' }}">
                                             {% csrf_token %}
                                             <input type="hidden" name="action" value="reject">
                                             <input type="hidden" name="comments" value="Rejected">
                                             <button type="submit" class="btn btn-sm btn-outline-danger"
-                                                    title="Reject"
-                                                    onclick="return confirm('Are you sure you want to reject this corporate action?');">
+                                                    title="Reject">
                                                 <i class="bi bi-x-circle"></i> Reject
                                             </button>
                                         </form>
@@ -208,11 +209,22 @@
 </div>
 
 <script>
-// Optional: Add modal-based validation with comments
 document.querySelectorAll('.validate-form').forEach(function(form) {
     form.addEventListener('submit', function(e) {
-        // For now, just submit directly
-        // Could enhance to show modal for comments
+        e.preventDefault();
+        var caNum = form.getAttribute('data-ca-number');
+        var entity = caNum ? ('Corporate Action ' + caNum) : 'Corporate Action';
+        submitWithPopup('validate', entity, form);
+    });
+});
+
+document.querySelectorAll('.reject-form').forEach(function(form) {
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        var caNum = form.getAttribute('data-ca-number');
+        var label = caNum ? ('Corporate Action ' + caNum) : 'Corporate Action';
+        if (!confirm('Are you sure you want to reject ' + label + '?')) return;
+        submitWithPopup('cancel', label, form);
     });
 });
 </script>

@@ -407,7 +407,7 @@ $(document).ready(function() {
     {% endif %}
 });
 
-// Client-side form validation
+// Client-side form validation with operation popup
 (function() {
     'use strict';
     var forms = document.querySelectorAll('.needs-validation');
@@ -416,8 +416,16 @@ $(document).ready(function() {
             if (!form.checkValidity()) {
                 event.preventDefault();
                 event.stopPropagation();
+                form.classList.add('was-validated');
+                return;
             }
             form.classList.add('was-validated');
+            event.preventDefault();
+            var caNumEl = document.getElementById('ca_number');
+            var caNum = (caNumEl && caNumEl.value) ? caNumEl.value : '';
+            var entity = caNum ? ('Corporate Action ' + caNum) : 'Corporate Action';
+            var operation = '{% if is_edit %}update{% else %}create{% endif %}';
+            submitWithPopup(operation, entity, form);
         }, false);
     });
 })();
