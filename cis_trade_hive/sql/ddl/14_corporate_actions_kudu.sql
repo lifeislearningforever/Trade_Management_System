@@ -93,7 +93,7 @@ DROP TABLE IF EXISTS cis_corporate_actions_history;
 
 CREATE TABLE cis_corporate_actions_history (
     -- Primary Key
-    history_id STRING COMMENT 'History record ID - Primary Key (YYYYMMDDHHMMSS_<hex8>)',
+    history_id BIGINT COMMENT 'History record ID - Primary Key (timestamp milliseconds)',
 
     -- Reference to Corporate Action
     ca_id BIGINT COMMENT 'Foreign key to cis_corporate_actions',
@@ -108,7 +108,7 @@ CREATE TABLE cis_corporate_actions_history (
 
     -- Audit Fields
     performed_by STRING COMMENT 'Username who performed the action',
-    performed_at STRING COMMENT 'Timestamp when action was performed (YYYY-MM-DD HH:MM:SS)',
+    performed_at STRING COMMENT 'Timestamp when action was performed (YYYY-MM-DD HH:MM:SS)',  -- migrated from BIGINT
 
     PRIMARY KEY (history_id)
 )
