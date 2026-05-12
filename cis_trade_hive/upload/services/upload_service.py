@@ -987,6 +987,11 @@ class UploadService:
                     result.sample_data.append(preview_dict)
 
             logger.info(f"validate_with_datasource_config: {len(result.all_data)} total rows, {len(result.sample_data)} preview rows for {file_name}")
+
+            if result.row_count == 0:
+                result.errors.append("File contains only a header row with no data. Please add data rows before uploading.")
+                return result
+
             result.is_valid = True
 
         except Exception as e:
