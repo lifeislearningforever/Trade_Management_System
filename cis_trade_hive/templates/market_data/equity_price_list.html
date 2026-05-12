@@ -152,12 +152,12 @@
                                 <td style="font-size: 0.85rem;">{{ price.created_at_display|default:"-" }}</td>
                                 <td style="position: sticky; right: 0; background-color: {% if not price.is_active %}#f8f9fa{% else %}white{% endif %}; z-index: 4;">
                                     <div class="btn-group btn-group-sm" role="group">
-                                        <a href="{% url 'market_data:equity_price_detail' price.currency_code price.price_date price.security_label %}"
+                                        <a href="{% url 'market_data:equity_price_detail' price.currency_code price.price_date %}?security_label={{ price.security_label|urlencode }}"
                                            class="btn btn-sm btn-outline-info" title="View Details">
                                             <i class="bi bi-eye"></i>
                                         </a>
                                         {% if price.src_system|upper == 'CIS' %}
-                                            <a href="{% url 'market_data:equity_price_edit' price.currency_code price.price_date price.security_label %}"
+                                            <a href="{% url 'market_data:equity_price_edit' price.currency_code price.price_date %}?security_label={{ price.security_label|urlencode }}"
                                                class="btn btn-sm btn-outline-warning" title="Edit">
                                                 <i class="bi bi-pencil"></i>
                                             </a>

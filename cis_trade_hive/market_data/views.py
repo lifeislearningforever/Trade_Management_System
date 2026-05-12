@@ -576,13 +576,13 @@ def equity_price_list(request):
     return render(request, 'market_data/equity_price_list.html', context)
 
 
-def equity_price_detail(request, currency_code: str, price_date: str, security_label: str):
+def equity_price_detail(request, currency_code: str, price_date: str):
     """
     Detail view for equity price with version history.
     Shows current price info and edit history (old values before changes).
     """
     from urllib.parse import unquote
-    security_label = unquote(security_label)
+    security_label = unquote(request.GET.get('security_label', ''))
 
     # Get current price by composite key
     try:
@@ -712,15 +712,14 @@ def equity_price_create(request):
         return render(request, 'market_data/equity_price_form.html', context)
 
 
-def equity_price_edit(request, currency_code: str, price_date: str, security_label: str):
+def equity_price_edit(request, currency_code: str, price_date: str):
     """
     Edit existing equity price.
 
     Uses composite key: (currency_code, security_label, price_date)
     """
-    # URL decode the security_label (may contain spaces, special characters)
     from urllib.parse import unquote
-    security_label = unquote(security_label)
+    security_label = unquote(request.GET.get('security_label', '') or request.POST.get('security_label', ''))
 
     # Get existing price by composite key (including price_date)
     try:

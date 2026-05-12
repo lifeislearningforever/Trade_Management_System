@@ -20,6 +20,6 @@ urlpatterns = [
     path('equity-prices/', views.equity_price_list, name='equity_price_list'),
     path('equity-prices/create/', views.equity_price_create, name='equity_price_create'),
 
-    path('equity-prices/<str:currency_code>/<str:price_date>/<path:security_label>/', views.equity_price_detail, name='equity_price_detail'),
-    path('equity-prices/<str:currency_code>/<str:price_date>/<path:security_label>/edit/', views.equity_price_edit, name='equity_price_edit'),
+    path('equity-prices/<str:currency_code>/<str:price_date>/detail/', views.equity_price_detail, name='equity_price_detail'),
+    path('equity-prices/<str:currency_code>/<str:price_date>/edit/', views.equity_price_edit, name='equity_price_edit'),
 ]

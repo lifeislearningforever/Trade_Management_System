@@ -25,7 +25,7 @@
 
     <!-- Action Buttons -->
     <div class="mb-4">
-        <a href="{% url 'market_data:equity_price_edit' currency_code price_date security_label %}" class="btn btn-warning">
+        <a href="{% url 'market_data:equity_price_edit' currency_code price_date %}?security_label={{ security_label|urlencode }}" class="btn btn-warning">
             <i class="bi bi-pencil"></i> Edit Price
         </a>
         <a href="{% url 'market_data:equity_price_list' %}" class="btn btn-secondary">
