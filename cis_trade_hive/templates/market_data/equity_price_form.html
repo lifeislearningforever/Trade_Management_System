@@ -71,7 +71,8 @@
                     <!-- Security Label (Dropdown 2 - Filtered by currency) -->
                     <div class="col-md-4 mb-3">
                         <label for="security_label" class="form-label">Security <span class="text-danger">*</span></label>
-                        <select class="form-select" id="security_label" name="security_label" required>
+                        <select class="form-select" id="security_label" name="security_label" required
+                                {% if is_edit %}disabled{% endif %}>
                             <option value="">-- Select Security --</option>
                             <!-- Options populated by JavaScript based on currency -->
                         </select>
@@ -201,7 +202,16 @@
         }
 
         // Restore pre-selected security if in edit mode
-        if (preSelectedSecurity && securitySelect.querySelector(`option[value="${preSelectedSecurity}"]`)) {
+        if (preSelectedSecurity) {
+            let existingOption = securitySelect.querySelector(`option[value="${CSS.escape(preSelectedSecurity)}"]`);
+            if (!existingOption) {
+                // Security not in master list (e.g. GMP-imported) — add it so it shows correctly
+                existingOption = document.createElement('option');
+                existingOption.value = preSelectedSecurity;
+                existingOption.textContent = preSelectedSecurity;
+                existingOption.dataset.isin = preSelectedIsin || '';
+                securitySelect.appendChild(existingOption);
+            }
             securitySelect.value = preSelectedSecurity;
             updateIsinFromSecurity();
         }
