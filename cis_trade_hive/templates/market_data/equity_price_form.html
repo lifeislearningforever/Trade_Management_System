@@ -45,8 +45,12 @@
             </h5>
         </div>
         <div class="card-body">
-            <form method="POST" id="equityPriceForm">
+            <form method="POST" id="equityPriceForm"
+                  {% if is_edit %}action="?security_label={{ equity_price.security_label|urlencode:'' }}"{% endif %}>
                 {% csrf_token %}
+                {% if is_edit %}
+                <input type="hidden" name="security_label" value="{{ equity_price.security_label }}">
+                {% endif %}
 
                 <div class="row">
                     <!-- Currency (Dropdown 1 - Triggers cascade) -->

@@ -719,7 +719,10 @@ def equity_price_edit(request, currency_code: str, price_date: str):
     Uses composite key: (currency_code, security_label, price_date)
     """
     from urllib.parse import unquote
-    security_label = unquote(request.GET.get('security_label', '') or request.POST.get('security_label', ''))
+    # POST hidden field has raw value; GET param is percent-encoded — unquote handles both
+    security_label = unquote(
+        request.POST.get('security_label', '') or request.GET.get('security_label', '')
+    )
 
     # Get existing price by composite key (including price_date)
     try:
