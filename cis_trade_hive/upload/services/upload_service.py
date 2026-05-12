@@ -274,7 +274,7 @@ class FileValidationService:
 
             # Validate consistency
             if result.row_count == 0:
-                result.warnings.append("File contains only header row, no data")
+                result.errors.append("File contains only a header row with no data. Please add data rows before uploading.")
 
             # Check for duplicate rows in source file
             duplicate_count = self._count_duplicate_rows(data_rows)
@@ -508,6 +508,10 @@ class FileValidationService:
             result.has_header = True
             result.column_count = len(header_row)
             result.row_count = len(data_rows)
+
+            if result.row_count == 0:
+                result.errors.append("File contains only a header row with no data. Please add data rows before uploading.")
+                return
 
             # Infer column types
             str_rows = [[str(cell) if cell is not None else '' for cell in row] for row in data_rows[:100]]
