@@ -576,7 +576,7 @@ def equity_price_list(request):
     return render(request, 'market_data/equity_price_list.html', context)
 
 
-def equity_price_detail(request, currency_code: str, security_label: str, price_date: str):
+def equity_price_detail(request, currency_code: str, price_date: str, security_label: str):
     """
     Detail view for equity price with version history.
     Shows current price info and edit history (old values before changes).
@@ -712,7 +712,7 @@ def equity_price_create(request):
         return render(request, 'market_data/equity_price_form.html', context)
 
 
-def equity_price_edit(request, currency_code: str, security_label: str, price_date: str):
+def equity_price_edit(request, currency_code: str, price_date: str, security_label: str):
     """
     Edit existing equity price.
 
