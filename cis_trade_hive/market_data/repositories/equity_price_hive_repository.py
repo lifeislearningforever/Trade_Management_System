@@ -80,7 +80,7 @@ class EquityPriceHiveRepository:
         """
         try:
             # Build WHERE clause
-            where_clauses = ["is_active = true"]
+            where_clauses = ["(is_active = true OR is_active IS NULL)"]
 
             if currency_code:
                 escaped_currency = currency_code.replace("'", "\\'")
@@ -185,7 +185,7 @@ class EquityPriceHiveRepository:
             FROM {EquityPriceHiveRepository.TABLE_NAME}
             WHERE currency_code = '{escaped_currency}'
               AND security_label = '{escaped_security}'
-              AND is_active = true
+              AND (is_active = true OR is_active IS NULL)
               {date_clause}
             ORDER BY price_date DESC, price_timestamp DESC
             LIMIT 1
@@ -245,7 +245,7 @@ class EquityPriceHiveRepository:
                 created_at
             FROM {EquityPriceHiveRepository.TABLE_NAME}
             WHERE security_label = '{escaped_security}'
-              AND is_active = true
+              AND (is_active = true OR is_active IS NULL)
             ORDER BY price_date DESC, price_timestamp DESC
             LIMIT 1
             """
@@ -510,7 +510,7 @@ class EquityPriceHiveRepository:
                 updated_at
             FROM {EquityPriceHiveRepository.TABLE_NAME}
             WHERE security_label = '{escaped_security}'
-              AND is_active = true
+              AND (is_active = true OR is_active IS NULL)
             ORDER BY price_date DESC
             LIMIT {days}
             """
@@ -704,7 +704,7 @@ class EquityPriceHiveRepository:
                 MAX(price_date) as latest_date,
                 MIN(price_date) as earliest_date
             FROM {EquityPriceHiveRepository.TABLE_NAME}
-            WHERE is_active = true
+            WHERE (is_active = true OR is_active IS NULL)
             """
 
             logger.info("Retrieving equity price statistics")
