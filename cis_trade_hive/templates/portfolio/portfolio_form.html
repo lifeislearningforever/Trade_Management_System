@@ -28,10 +28,16 @@
         <p class="content-subtitle">All fields marked with * are required</p>
     </div>
 
+    <!-- Validation error banner (shown by JS when required fields are empty) -->
+    <div id="validation-banner" class="alert alert-danger d-none mb-3" role="alert">
+        <strong><i class="bi bi-exclamation-triangle-fill"></i> Please fill in all required fields:</strong>
+        <ul id="validation-banner-list" class="mb-0 mt-1"></ul>
+    </div>
+
     <!-- Form Card -->
     <div class="card">
         <div class="card-body">
-            <form method="post" action="">
+            <form method="post" action="" id="portfolio-form">
                 {% csrf_token %}
 
                 <!-- Basic Information -->
@@ -518,28 +524,37 @@ $(document).ready(function() {
         };
     }
 
-    $('form').on('submit', function(e) {
+    $('#portfolio-form').on('submit', function(e) {
         var result = validateForm();
 
         if (!result.isValid) {
             e.preventDefault();
 
-            // Show alert with all missing fields
-            if (result.errorMessages.length > 0) {
-                alert('Please fill in the following mandatory fields:\n\n- ' + result.errorMessages.join('\n- '));
-            }
+            // Show inline banner instead of native alert
+            var $banner = $('#validation-banner');
+            var $list = $('#validation-banner-list');
+            $list.empty();
+            $.each(result.errorMessages, function(_, msg) {
+                $list.append('<li>' + msg + ' is required</li>');
+            });
+            $banner.removeClass('d-none');
 
-            // Scroll to first invalid field
+            // Scroll to banner
+            $('html, body').animate({ scrollTop: $banner.offset().top - 80 }, 300);
+
             if (result.firstInvalidField) {
-                $('html, body').animate({
-                    scrollTop: result.firstInvalidField.offset().top - 100
-                }, 300);
                 result.firstInvalidField.focus();
             }
             return false;
         }
 
-        return true;
+        // Valid — show operation popup then submit
+        e.preventDefault();
+        $('#validation-banner').addClass('d-none');
+        var operation = '{% if portfolio %}update{% else %}create{% endif %}';
+        var nameVal = $('#name').val() || '{% if portfolio %}{{ portfolio.name|default:"" }}{% endif %}';
+        var entity = nameVal ? ('Portfolio ' + nameVal) : 'Portfolio';
+        submitWithPopup(operation, entity, this);
     });
 
     // Clear validation error on field change
@@ -548,6 +563,10 @@ $(document).ready(function() {
         $(this).next('.validation-error').remove();
         $(this).next('.select2-container').removeClass('is-invalid');
         $(this).next('.select2-container').next('.validation-error').remove();
+        // Hide banner once user starts correcting
+        if ($('.is-invalid').length === 0) {
+            $('#validation-banner').addClass('d-none');
+        }
     });
 
     // Portfolio name validation - alphanumeric only (no special characters)

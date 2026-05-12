@@ -445,6 +445,13 @@ def portfolio_create(request):
         except Exception as e:
             messages.error(request, f'Error creating portfolio: {str(e)}')
 
+        # Re-render form with POST data so fields don't go blank on error
+        dropdown_options = portfolio_dropdown_service.get_all_dropdown_options()
+        return render(request, 'portfolio/portfolio_form.html', {
+            'dropdown_options': dropdown_options,
+            'portfolio': request.POST,
+        })
+
     dropdown_options = portfolio_dropdown_service.get_all_dropdown_options()
 
     context = {
