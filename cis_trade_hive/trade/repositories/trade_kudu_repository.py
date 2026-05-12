@@ -172,8 +172,22 @@ class TradeKuduRepository:
         if trade_type in [self.TRADE_TYPE_BUY, self.TRADE_TYPE_SELL]:
             if not trade_data.get('quantity'):
                 errors.append("Quantity is required for Buy/Sell trades")
+            else:
+                try:
+                    qty = float(trade_data.get('quantity'))
+                    if qty <= 0:
+                        errors.append("Quantity must be greater than zero")
+                except (ValueError, TypeError):
+                    errors.append("Quantity must be a valid number")
             if not trade_data.get('price'):
                 errors.append("Price is required for Buy/Sell trades")
+            else:
+                try:
+                    price = float(trade_data.get('price'))
+                    if price <= 0:
+                        errors.append("Price must be greater than zero")
+                except (ValueError, TypeError):
+                    errors.append("Price must be a valid number")
 
         if trade_type == self.TRADE_TYPE_SELL:
             # Check trade details exists with sufficient quantity
