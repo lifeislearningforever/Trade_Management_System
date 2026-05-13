@@ -153,25 +153,43 @@ DATABASES = {
 # ============================================================================
 # Impala Configuration (Environment-aware)
 # ============================================================================
-# Uses environment-specific settings from config/environments.py
-# Can be overridden by environment variables
+# Re-build IMPALA_CONFIG at settings load time using the live CIS_ENV so that
+# cml_app.py setting os.environ["CIS_ENV"] before Django initialises is picked
+# up correctly.  environments.py freezes CIS_ENV at import time (module level),
+# so importing its pre-built IMPALA_CONFIG gives LOCAL defaults even when
+# CIS_ENV=UAT is set by the CML launcher just before Django starts.
+from config.environments import get_impala_config as _get_impala_cfg
+import importlib as _importlib
+import config.environments as _env_module
 
-# Use IMPALA_CONFIG from environments.py (already environment-aware)
-# Re-evaluate USE_SSL from env var to ensure it picks up latest value after load_dotenv()
-IMPALA_CONFIG = ENV_IMPALA_CONFIG.copy()
+# Force environments module to re-evaluate with the current CIS_ENV value
+_live_cis_env = os.environ.get('CIS_ENV', 'LOCAL').upper()
+if _live_cis_env != _env_module.CIS_ENV:
+    # CIS_ENV changed after environments.py was first imported — reload it so
+    # IMPALA_CONFIG, HIVE_CONFIG reflect the correct environment.
+    _importlib.reload(_env_module)
+
+IMPALA_CONFIG = _env_module.IMPALA_CONFIG.copy()
+
+# env var wins over config file for individual overrides
 _use_ssl_env = os.environ.get('IMPALA_USE_SSL', '').lower()
 if _use_ssl_env:
-    # Explicitly set from environment variable (overrides environments.py default)
     IMPALA_CONFIG['USE_SSL'] = _use_ssl_env == 'true'
+_impala_host_env = os.environ.get('IMPALA_HOST', '')
+if _impala_host_env:
+    IMPALA_CONFIG['HOST'] = _impala_host_env
+_impala_port_env = os.environ.get('IMPALA_PORT', '')
+if _impala_port_env:
+    IMPALA_CONFIG['PORT'] = int(_impala_port_env)
+_impala_auth_env = os.environ.get('IMPALA_AUTH', '')
+if _impala_auth_env:
+    IMPALA_CONFIG['AUTH'] = _impala_auth_env
+    IMPALA_CONFIG['AUTH_MECHANISM'] = _impala_auth_env
 
 # ============================================================================
 # Hive Configuration (Environment-aware)
 # ============================================================================
-# Uses environment-specific settings from config/environments.py
-# Can be overridden by environment variables
-
-# Use HIVE_CONFIG from environments.py (already environment-aware)
-HIVE_CONFIG = ENV_HIVE_CONFIG
+HIVE_CONFIG = _env_module.HIVE_CONFIG
 
 # ============================================================================
 # Kerberos Configuration (Environment-aware)
