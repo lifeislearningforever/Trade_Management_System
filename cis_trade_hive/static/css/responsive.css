@@ -211,13 +211,13 @@ small, .text-small, .text-sm {
     padding: var(--spacing-md) var(--spacing-lg) var(--spacing-sm);
 }
 
-.nav-link {
+.sidebar .nav-link {
     font-size: var(--font-size-sm);
     padding: var(--spacing-sm) var(--spacing-lg);
     gap: var(--spacing-sm);
 }
 
-.nav-link i {
+.sidebar .nav-link i {
     font-size: var(--icon-size-md);
     width: var(--icon-size-lg);
 }

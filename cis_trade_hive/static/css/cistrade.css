@@ -260,7 +260,7 @@ body {
     list-style: none;
 }
 
-.nav-link {
+.sidebar .nav-link {
     display: flex;
     align-items: center;
     gap: 0.75rem;
@@ -272,19 +272,19 @@ body {
     font-weight: 500;
 }
 
-.nav-link:hover {
+.sidebar .nav-link:hover {
     background-color: var(--sidebar-hover);
     color: #ffffff;
     padding-left: 1.75rem;
 }
 
-.nav-link.active {
+.sidebar .nav-link.active {
     background-color: rgba(59, 130, 246, 0.15);
     border-left-color: var(--sidebar-active);
     color: #ffffff;
 }
 
-.nav-link i {
+.sidebar .nav-link i {
     font-size: 1.125rem;
     width: 1.5rem;
     text-align: center;
@@ -326,24 +326,24 @@ body {
     border-left: 2px solid transparent;
 }
 
-.nav-submenu .nav-link {
+.sidebar .nav-submenu .nav-link {
     padding: 0.5rem 1.5rem 0.5rem 2.5rem;
     font-size: var(--font-size-sm);
     font-weight: 400;
     border-left: none;
 }
 
-.nav-submenu .nav-link:hover {
+.sidebar .nav-submenu .nav-link:hover {
     padding-left: 2.75rem;
     background-color: var(--sidebar-hover);
 }
 
-.nav-submenu .nav-link.active {
+.sidebar .nav-submenu .nav-link.active {
     background-color: rgba(59, 130, 246, 0.2);
     color: #ffffff;
 }
 
-.nav-submenu .nav-link i {
+.sidebar .nav-submenu .nav-link i {
     font-size: 0.875rem;
     width: 1.25rem;
 }

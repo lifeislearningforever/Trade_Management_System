@@ -253,12 +253,54 @@ def upload_create(request):
 
                         # all_data is already fully parsed by validate_with_datasource_config.
                         # No file re-read. No service layer fallback chain. Direct INSERT.
-                        _all_rows = validation_result.all_data
+                        _all_rows = list(validation_result.all_data)
                         _target_table = datasource_config.get('target_table', '')
                         _src_id = _target_table.lower().split('.')[-1]
                         logger.warning(f"[upload:direct] {len(_all_rows)} rows → {_target_table} "
                                        f"src_id={_src_id} processing_date={_processing_date}")
                         print(f"[upload:direct] {len(_all_rows)} rows → {_target_table} src_id={_src_id}", flush=True)
+
+                        # --- Pre-insert: detect key columns from the data ---
+                        _col_names = list(_all_rows[0].keys()) if _all_rows else []
+                        _isin_col = next((c for c in ('isin_code', 'isin') if c in _col_names), None)
+                        _port_col = next((c for c in ('portfolio', 'portfolio_name', 'account_name') if c in _col_names), None)
+                        _key_cols = [c for c in (_port_col, _isin_col) if c]
+
+                        # --- Fix 2: Block rows with null/empty key fields ---
+                        if _key_cols:
+                            _null_rows = [
+                                i + 1 for i, r in enumerate(_all_rows)
+                                if any(not str(r.get(c) or '').strip() for c in _key_cols)
+                            ]
+                            if _null_rows:
+                                _null_msg = (
+                                    f"Upload blocked: {len(_null_rows)} row(s) have null/empty key fields "
+                                    f"({', '.join(_key_cols)}). Fix the source file and re-upload."
+                                )
+                                logger.error(f"[upload:direct] {_null_msg} rows={_null_rows[:10]}")
+                                _repo.update_upload(upload_id, {
+                                    'status': 'VALIDATION_FAILED',
+                                    'description': _null_msg,
+                                    'row_count': len(_all_rows),
+                                }, user_info['username'])
+                                messages.error(request, _null_msg)
+                                return redirect('upload:preview', upload_id=upload_id)
+
+                        # --- Fix 1: Deduplicate before insert ---
+                        _dedup_key_cols = _key_cols or _col_names
+                        _seen_keys = set()
+                        _unique_rows = []
+                        _dup_count = 0
+                        for _r in _all_rows:
+                            _k = tuple(str(_r.get(c, '')).strip() for c in _dedup_key_cols)
+                            if _k not in _seen_keys:
+                                _seen_keys.add(_k)
+                                _unique_rows.append(_r)
+                            else:
+                                _dup_count += 1
+                        if _dup_count > 0:
+                            logger.warning(f"[upload:direct] removed {_dup_count} duplicate rows, {len(_unique_rows)} unique remain")
+                        _all_rows = _unique_rows
 
                         # Get target table column list from Impala.
                         # Exclude processing_date — it is the Hive partition key,
@@ -357,8 +399,14 @@ def upload_create(request):
                             logger.error(f"[upload:direct] SKIP — all_rows={len(_all_rows)} tbl_cols={len(_tbl_cols)} — nothing to insert")
                             print(f"[upload:direct] SKIP — all_rows={len(_all_rows)} tbl_cols={len(_tbl_cols)}", flush=True)
 
-                        _desc = (f"{description}\n[Datasource: {datasource_config.get('source_id', '')}]\n"
-                                 f"processing_date={_processing_date}")
+                        _desc_parts = [
+                            f"{description}",
+                            f"[Datasource: {datasource_config.get('source_id', '')}]",
+                            f"processing_date={_processing_date}",
+                        ]
+                        if _dup_count > 0:
+                            _desc_parts.append(f"{_dup_count} duplicates removed")
+                        _desc = '\n'.join(_desc_parts)
                         _repo.update_upload(upload_id, {
                             'status': 'VALIDATED',
                             'description': _desc,
