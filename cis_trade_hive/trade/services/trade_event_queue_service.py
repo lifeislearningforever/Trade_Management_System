@@ -424,13 +424,15 @@ class TradeEventQueueService:
                 async_mode=False  # Process synchronously within worker
             )
 
+            deal_number = event.get('deal_number') or str(trade_id)
             if success:
                 logger.info(f"Settlement processed for trade {trade_id}: {msg}")
                 notify_user(created_by, EVT_AVP_COMPLETED, {
                     'trade_id': trade_id,
+                    'deal_number': deal_number,
                     'portfolio_id': event_data.get('portfolio_short_name', ''),
                     'security_id': event_data.get('security_label', ''),
-                    'message': f'AVP calculation complete for trade {trade_id}',
+                    'message': f'AVP calculation complete for trade {deal_number}',
                 })
             else:
                 logger.warning(f"Settlement note for trade {trade_id}: {msg}")
@@ -438,21 +440,25 @@ class TradeEventQueueService:
                 if 'queued' in msg.lower() or 'future' in msg.lower():
                     notify_user(created_by, EVT_AVP_COMPLETED, {
                         'trade_id': trade_id,
-                        'message': f'Trade {trade_id} position queued for settlement date',
+                        'deal_number': deal_number,
+                        'message': f'Trade {deal_number} position queued for settlement date',
                     })
                     return True
                 notify_user(created_by, EVT_AVP_FAILED, {
                     'trade_id': trade_id,
-                    'message': f'AVP calculation failed for trade {trade_id}: {msg}',
+                    'deal_number': deal_number,
+                    'message': f'AVP calculation failed for trade {deal_number}: {msg}',
                 })
 
             return success
 
         except Exception as e:
             logger.error(f"Error processing settlement event for trade {trade_id}: {e}")
+            deal_number = event.get('deal_number') or str(trade_id)
             notify_user(created_by, EVT_AVP_FAILED, {
                 'trade_id': trade_id,
-                'message': f'AVP error for trade {trade_id}: {str(e)[:200]}',
+                'deal_number': deal_number,
+                'message': f'AVP error for trade {deal_number}: {str(e)[:200]}',
             })
             raise
 

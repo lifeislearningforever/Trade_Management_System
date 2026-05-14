@@ -89,7 +89,8 @@ class PositionQueueService:
         use_db_queue: bool = True,
         chain_recalc_metadata: str = None,
         position_basis: str = 'TRADE_DATE',
-        position_date: str = None
+        position_date: str = None,
+        deal_number: str = ''
     ) -> Tuple[bool, str, Optional[int]]:
         """
         Add trade to position calculation queue.
@@ -121,6 +122,7 @@ class PositionQueueService:
             queue_item = {
                 'queue_id': queue_id,
                 'trade_id': trade_id,
+                'deal_number': deal_number,
                 'portfolio_id': portfolio_id,
                 'security_id': security_id,
                 'trade_type': trade_type,
@@ -293,9 +295,11 @@ class PositionQueueService:
                 self._update_status(queue_id, self.STATUS_PROCESSING)
 
             queued_by = item.get('queued_by', '')
+            deal_number = item.get('deal_number') or str(trade_id)
             _notif_base = {
                 'queue_id':    queue_id,
                 'trade_id':    trade_id,
+                'deal_number': deal_number,
                 'portfolio':   item.get('portfolio_id', ''),
                 'security':    item.get('security_name') or item.get('security_id', ''),
                 'isin':        item.get('isin', ''),
@@ -305,7 +309,7 @@ class PositionQueueService:
             # Notify user: AVP processing started
             notify_user(queued_by, EVT_AVP_PROCESSING, {
                 **_notif_base,
-                'message': f'AVP calculation started for trade {trade_id}',
+                'message': f'AVP calculation started for trade {deal_number}',
             })
 
             # Check SLA
@@ -323,14 +327,14 @@ class PositionQueueService:
                         **_notif_base,
                         'elapsed_seconds': int(elapsed),
                         'sla_seconds': self.SLA_SECONDS,
-                        'message': f'AVP SLA breach: trade {trade_id} waiting {int(elapsed)}s (SLA={self.SLA_SECONDS}s)',
+                        'message': f'AVP SLA breach: trade {deal_number} waiting {int(elapsed)}s (SLA={self.SLA_SECONDS}s)',
                     })
                     notify_admins(EVT_AVP_SLA_BREACH, {
                         **_notif_base,
                         'queued_by': queued_by,
                         'elapsed_seconds': int(elapsed),
                         'sla_seconds': self.SLA_SECONDS,
-                        'message': f'AVP SLA breach: queue_id={queue_id} trade={trade_id} user={queued_by} elapsed={int(elapsed)}s',
+                        'message': f'AVP SLA breach: queue_id={queue_id} trade={deal_number} user={queued_by} elapsed={int(elapsed)}s',
                     })
 
             # Check if this is a backdated trade requiring chain recalculation
@@ -385,7 +389,7 @@ class PositionQueueService:
                     'elapsed_seconds': int(elapsed),
                     'message': (
                         f'AVP complete (backdated): {recalc_result["recalculated"]} position(s) '
-                        f'recalculated for trade {trade_id}'
+                        f'recalculated for trade {deal_number}'
                     ),
                 })
                 return
@@ -420,7 +424,7 @@ class PositionQueueService:
                 notify_user(queued_by, EVT_AVP_COMPLETED, {
                     **_notif_base,
                     'elapsed_seconds': int(elapsed),
-                    'message': f'AVP calculation complete for trade {trade_id}',
+                    'message': f'AVP calculation complete for trade {deal_number}',
                 })
             else:
                 self._handle_failure(item, message, is_db_queue)
@@ -615,15 +619,17 @@ class PositionQueueService:
         """Handle failed processing with retry logic."""
         queue_id  = item.get('queue_id')
         trade_id  = item.get('trade_id')
+        deal_number = item.get('deal_number') or str(trade_id)
         queued_by = item.get('queued_by', '')
         retry_count = item.get('retry_count', 0)
 
         _notif_base = {
-            'queue_id':  queue_id,
-            'trade_id':  trade_id,
-            'portfolio': item.get('portfolio_id', ''),
-            'security':  item.get('security_name') or item.get('security_id', ''),
-            'isin':      item.get('isin', ''),
+            'queue_id':   queue_id,
+            'trade_id':   trade_id,
+            'deal_number': deal_number,
+            'portfolio':  item.get('portfolio_id', ''),
+            'security':   item.get('security_name') or item.get('security_id', ''),
+            'isin':       item.get('isin', ''),
         }
 
         if retry_count < self.MAX_RETRIES:
@@ -648,7 +654,7 @@ class PositionQueueService:
                 'retry': retry_count + 1,
                 'max_retries': self.MAX_RETRIES,
                 'message': (
-                    f'AVP failed for trade {trade_id} — retrying '
+                    f'AVP failed for trade {deal_number} — retrying '
                     f'({retry_count + 1}/{self.MAX_RETRIES})'
                 ),
             })
@@ -666,7 +672,7 @@ class PositionQueueService:
                 **_notif_base,
                 'error': error_message,
                 'message': (
-                    f'AVP permanently failed for trade {trade_id} after '
+                    f'AVP permanently failed for trade {deal_number} after '
                     f'{self.MAX_RETRIES} retries — requires manual intervention'
                 ),
             })
@@ -675,7 +681,7 @@ class PositionQueueService:
                 'queued_by': queued_by,
                 'error': error_message,
                 'message': (
-                    f'Dead letter: queue_id={queue_id} trade={trade_id} '
+                    f'Dead letter: queue_id={queue_id} trade={deal_number} '
                     f'user={queued_by} — {error_message[:200]}'
                 ),
             })
