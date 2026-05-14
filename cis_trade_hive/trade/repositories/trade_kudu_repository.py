@@ -845,9 +845,9 @@ class TradeKuduRepository:
                     security_details=security_details
                 )
 
-                return trade_id
+                return trade_id, deal_number
 
-            return None
+            return None, None
 
         except Exception as e:
             logger.error(f"Error in fast trade insert: {str(e)}")

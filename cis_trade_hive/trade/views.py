@@ -637,7 +637,7 @@ def trade_create(request, trade_type=None):
             # Insert trade using FAST method with skip_validation=True
             # Pass entity_details to avoid duplicate DB queries for portfolio/security
             perf_insert_start = time.time()
-            trade_id = trade_kudu_repository.insert_trade_fast(
+            trade_id, deal_number = trade_kudu_repository.insert_trade_fast(
                 trade_data,
                 created_by=user_info['username'],
                 skip_validation=True,  # Already validated above
@@ -669,7 +669,7 @@ def trade_create(request, trade_type=None):
 
             total_time = (time.time() - perf_start) * 1000
             logger.info(f"[PERF] Total trade create took {total_time:.0f}ms")
-            messages.success(request, f'Trade {trade_id} created with INITIAL status. Submit for validation when ready.')
+            messages.success(request, f'Trade {deal_number} created with INITIAL status. Submit for validation when ready.')
             # Redirect to trade list instead of detail to avoid Kudu sync delay issues
             return redirect('trade:list')
 
@@ -912,7 +912,7 @@ def trade_submit(request, trade_id):
             status='SUCCESS'
         )
 
-        messages.success(request, f'Trade {trade_id} submitted for validation.')
+        messages.success(request, f'Trade {trade_data.get("deal_number", trade_id)} submitted for validation.')
     except Exception as e:
         messages.error(request, f'Error submitting trade: {str(e)}')
 
@@ -1016,7 +1016,7 @@ def trade_settle(request, trade_id):
             status='SUCCESS'
         )
 
-        messages.success(request, 'Trade settled and is now ACTIVE!')
+        messages.success(request, f'Trade {trade_data.get("deal_number", trade_id)} settled and is now ACTIVE!')
     except Exception as e:
         messages.error(request, f'Error settling trade: {str(e)}')
 
