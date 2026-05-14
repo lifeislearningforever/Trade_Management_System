@@ -2155,8 +2155,8 @@ class TradeKuduRepository:
                     stats['status_breakdown'][status] = stats['status_breakdown'].get(status, 0) + count
                     stats['type_breakdown'][trade_type] = stats['type_breakdown'].get(trade_type, 0) + count
 
-                    # Count INITIAL, MODIFIED, and PENDING_VALIDATION as pending validation
-                    if status in (self.STATUS_INITIAL, self.STATUS_MODIFIED, self.STATUS_PENDING_VALIDATION):
+                    # Only PENDING_VALIDATION counts toward the checker's queue
+                    if status == self.STATUS_PENDING_VALIDATION:
                         stats['pending_validation'] += count
                     elif status == self.STATUS_VALIDATED:
                         stats['pending_settlement'] += count
@@ -2189,10 +2189,8 @@ class TradeKuduRepository:
         """
         Get trades pending validation.
 
-        Includes trades with status:
-        - INITIAL: Newly created trades awaiting validation
-        - MODIFIED: Edited trades awaiting re-validation
-        - PENDING_VALIDATION: Trades explicitly submitted for validation
+        Only includes PENDING_VALIDATION — trades explicitly submitted by the maker.
+        INITIAL and MODIFIED trades are drafts not yet submitted, so they are excluded.
 
         Per SA feedback (2026-03-04):
         - By default, only show CIS trades (exclude GMP trades)
@@ -2206,8 +2204,8 @@ class TradeKuduRepository:
             List of trades pending validation
         """
         try:
-            # Include INITIAL, MODIFIED, and PENDING_VALIDATION statuses
-            pending_statuses = [self.STATUS_INITIAL, self.STATUS_MODIFIED, self.STATUS_PENDING_VALIDATION]
+            # Only PENDING_VALIDATION — maker must explicitly submit before checker sees it
+            pending_statuses = [self.STATUS_PENDING_VALIDATION]
             status_list = ", ".join([f"'{s}'" for s in pending_statuses])
 
             where_clauses = [
