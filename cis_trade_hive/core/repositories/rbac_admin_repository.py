@@ -374,18 +374,26 @@ class RBACAdminRepository:
         try:
             now = self._now()
 
-            # Step 1: soft-delete all current mappings
-            del_sql = f"""
-                UPDATE {DB}.cis_user_group_mapping_info
-                SET is_deleted = true,
-                    is_active = false,
-                    updated_on = '{now}',
-                    updated_by = '{self._escape(updated_by)}'
-                WHERE user_id = '{self._escape(user_id)}'
-                  AND entity = '{self._escape(entity)}'
-                  AND is_deleted = false
-            """
-            impala_manager.execute_write(del_sql, database=DB)
+            # Step 1: soft-delete all current mappings via UPSERT (Kudu has no UPDATE)
+            existing = self.get_user_group_mappings(user_id)
+            for m in existing:
+                if m.get('entity', '') != entity:
+                    continue
+                del_sql = f"""
+                    UPSERT INTO {DB}.cis_user_group_mapping_info
+                    (user_group_mapping_id, user_id, entity, group_name,
+                     is_active, is_deleted, created_on, created_by, updated_on, updated_by)
+                    VALUES (
+                        '{self._escape(m["user_group_mapping_id"])}',
+                        '{self._escape(user_id)}',
+                        '{self._escape(m.get("entity", entity))}',
+                        '{self._escape(m["group_name"])}',
+                        false, true,
+                        '{m.get("created_on", now)}', '{self._escape(m.get("created_by", updated_by))}',
+                        '{now}', '{self._escape(updated_by)}'
+                    )
+                """
+                impala_manager.execute_write(del_sql, database=DB)
 
             # Step 2: upsert new mappings
             for group_name in group_names:
@@ -457,18 +465,29 @@ class RBACAdminRepository:
         try:
             now = self._now()
 
-            # Soft-delete existing
-            del_sql = f"""
-                UPDATE {DB}.cis_group_permission_map
-                SET is_deleted = true,
-                    is_active = false,
-                    updated_on = '{now}',
-                    updated_by = '{self._escape(updated_by)}'
-                WHERE group_name = '{self._escape(group_name)}'
-                  AND entity = '{self._escape(entity)}'
-                  AND is_deleted = false
-            """
-            impala_manager.execute_write(del_sql, database=DB)
+            # Soft-delete existing via UPSERT (Kudu has no UPDATE)
+            existing_perms = self.get_group_permission_mappings(group_name)
+            for ep in existing_perms:
+                if ep.get('entity', '') != entity:
+                    continue
+                del_perm_sql = f"""
+                    UPSERT INTO {DB}.cis_group_permission_map
+                    (group_permission_id, group_name, permission_name, entity,
+                     mode, description, is_active, is_deleted,
+                     created_on, created_by, updated_on, updated_by)
+                    VALUES (
+                        '{self._escape(ep["group_permission_id"])}',
+                        '{self._escape(group_name)}',
+                        '{self._escape(ep.get("permission_name",""))}',
+                        '{self._escape(ep.get("entity", entity))}',
+                        '{self._escape(ep.get("mode","READ"))}',
+                        '{self._escape(ep.get("description",""))}',
+                        false, true,
+                        '{ep.get("created_on", now)}', '{self._escape(ep.get("created_by", updated_by))}',
+                        '{now}', '{self._escape(updated_by)}'
+                    )
+                """
+                impala_manager.execute_write(del_perm_sql, database=DB)
 
             # Upsert new
             for perm in permissions:
