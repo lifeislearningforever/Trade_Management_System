@@ -159,12 +159,25 @@
     var preSelectedIsin     = "{% if equity_price %}{{ equity_price.isin }}{% elif form_data %}{{ form_data.isin }}{% endif %}";
 
     function filterSecuritiesByCurrency(selectedCurrency) {
+        console.log('[EQ] filterSecuritiesByCurrency called, currency=', JSON.stringify(selectedCurrency));
+        console.log('[EQ] allSecurities total=', allSecurities.length);
+
         var securitySelect = document.getElementById('security_label');
         securitySelect.innerHTML = '<option value="">-- Select Security --</option>';
 
         var list = selectedCurrency
             ? allSecurities.filter(function(s) { return s.currency_code === selectedCurrency; })
             : allSecurities;
+
+        console.log('[EQ] filtered list length=', list.length);
+        if (list.length > 0) {
+            console.log('[EQ] sample currency_codes:', list.slice(0,3).map(function(s){ return s.currency_code; }));
+        } else if (selectedCurrency) {
+            // Log all unique currency_codes in allSecurities to spot mismatch
+            var uniq = {};
+            allSecurities.forEach(function(s){ uniq[s.currency_code] = true; });
+            console.warn('[EQ] No match for "' + selectedCurrency + '". Available codes:', Object.keys(uniq).sort());
+        }
 
         if (selectedCurrency && list.length === 0) {
             var opt = document.createElement('option');
@@ -194,7 +207,6 @@
                 securitySelect.appendChild(existing);
             }
             securitySelect.value = preSelectedSecurity;
-            // Refresh Select2 so it shows the newly selected value
             if (typeof $ !== 'undefined') { $('#security_label').trigger('change.select2'); }
             updateIsinFromSecurity();
         }
@@ -207,14 +219,17 @@
     }
 
     $(document).ready(function() {
+        console.log('[EQ] ready: allSecurities=', allSecurities.length);
+
         // Initialize Select2
         CISSelect2.initByIds(['currency_code', 'security_label']);
 
         // Wire cascade via jQuery so Select2-triggered events are caught
         $('#currency_code').on('change', function() {
-            filterSecuritiesByCurrency($(this).val() || '');
+            var val = $(this).val() || '';
+            console.log('[EQ] currency_code changed to:', JSON.stringify(val));
+            filterSecuritiesByCurrency(val);
             document.getElementById('isin').value = '';
-            // Refresh security Select2 after options rebuild
             $('#security_label').trigger('change.select2');
         });
 
