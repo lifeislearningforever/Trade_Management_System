@@ -185,7 +185,10 @@ class PortfolioDropdownRepository:
     @staticmethod
     def get_entities() -> List[Dict[str, str]]:
         """
-        Get list of entities from Party table for dropdown.
+        Get list of entities from cis_party for the Entity dropdown.
+
+        Filters: is_active = true AND is_issuer = true AND status = 'VALIDATED'
+        Column used: party_short_name (short_name equivalent in this table)
 
         Returns:
             List of dicts with 'code' (party_short_name) and 'name' (party_full_name)
@@ -195,7 +198,9 @@ class PortfolioDropdownRepository:
             SELECT party_short_name, party_full_name
             FROM {PortfolioDropdownRepository.DATABASE}.{PortfolioDropdownRepository.PARTY_TABLE}
             WHERE party_short_name IS NOT NULL AND party_short_name != ''
-              AND (is_active = TRUE OR is_active IS NULL)
+              AND is_active = true
+              AND is_issuer = true
+              AND status = 'VALIDATED'
             ORDER BY party_short_name
             """
             results = impala_manager.execute_query(query, database=PortfolioDropdownRepository.DATABASE)
