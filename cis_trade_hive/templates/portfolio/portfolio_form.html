@@ -201,13 +201,10 @@
                             <option value="">Select Entity</option>
                             {% for ent in dropdown_options.entities %}
                                 <option value="{{ ent.code }}" {% if portfolio.entity == ent.code %}selected{% endif %}>
-                                    {{ ent.code }} - {{ ent.name }}
+                                    {{ ent.code }}
                                 </option>
                             {% endfor %}
                         </select>
-                        <div class="form-text">
-                            <i class="bi bi-info-circle"></i> Select from Party table
-                        </div>
                     </div>
                     <div class="col-md-6 mb-4">
                         <label for="investment_type" class="form-label">Investment Type</label>
