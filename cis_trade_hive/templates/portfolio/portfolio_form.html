@@ -197,7 +197,7 @@
                     </div>
                     <div class="col-md-12 mb-4">
                         <label for="entity" class="form-label">Entity</label>
-                        <select class="form-select" id="entity" name="entity">
+                        <select class="form-select select2-searchable" id="entity" name="entity" data-placeholder="Select Entity" data-allow-clear="true">
                             <option value="">Select Entity</option>
                             {% for ent in dropdown_options.entities %}
                                 <option value="{{ ent.code }}" {% if portfolio.entity == ent.code %}selected{% endif %}>
