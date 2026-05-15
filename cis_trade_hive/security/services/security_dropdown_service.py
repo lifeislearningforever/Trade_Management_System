@@ -259,8 +259,8 @@ class SecurityDropdownService:
         return options
 
     def get_exchange_codes(self, user: str = 'SYSTEM') -> List[Dict[str, str]]:
-        """Get Exchange Code dropdown options"""
-        options = self.repository.get_udf_options_by_field_name('Exchange Code', 'SECURITY')
+        """Get Exchange Code dropdown options from country table (label column, max processing_date)"""
+        options = self.repository.get_countries()
         self._log_dropdown_fetch('exchange_code', len(options), user)
         return options
 

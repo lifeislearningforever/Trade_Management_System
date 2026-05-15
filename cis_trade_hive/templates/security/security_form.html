@@ -159,8 +159,8 @@
                         <select class="form-select" id="exchange_code" name="exchange_code">
                             <option value="">Select Exchange Code</option>
                             {% for ec in dropdown_options.exchange_codes %}
-                                <option value="{{ ec.value }}" {% if security.exchange_code == ec.value %}selected{% endif %}>
-                                    {{ ec.value }}
+                                <option value="{{ ec.code }}" {% if security.exchange_code == ec.code %}selected{% endif %}>
+                                    {{ ec.code }}
                                 </option>
                             {% endfor %}
                         </select>
