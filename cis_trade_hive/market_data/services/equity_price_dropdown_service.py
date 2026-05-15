@@ -75,17 +75,18 @@ class EquityPriceDropdownService:
             List of security dictionaries with security_id, security_name, isin, currency_code
         """
         try:
-            # Build WHERE clause - include NULL/empty status for legacy data
-            where_clauses = [
-                "(is_active = true OR is_active IS NULL)",
-                "(UPPER(status) IN ('ACTIVE', 'APPROVED', 'SETTLED') OR status IS NULL OR status = '' OR UPPER(status) = 'NONE')"
-            ]
+            # Build WHERE clause - no status filter, matches how trade module queries cis_security
+            where_clauses = []
 
             if currency_code:
                 escaped_currency = currency_code.replace("'", "''")
                 where_clauses.append(f"currency_code = '{escaped_currency}'")
 
-            where_clause = " AND ".join(where_clauses)
+            base_conditions = "security_name IS NOT NULL AND currency_code IS NOT NULL AND currency_code != ''"
+            if where_clauses:
+                where_clause = " AND ".join(where_clauses) + " AND " + base_conditions
+            else:
+                where_clause = base_conditions
 
             # Use cis_security table (same as Trade module)
             query = f"""
@@ -96,9 +97,6 @@ class EquityPriceDropdownService:
                 currency_code
             FROM gmp_cis.cis_security
             WHERE {where_clause}
-              AND security_name IS NOT NULL
-              AND currency_code IS NOT NULL
-              AND currency_code != ''
             ORDER BY security_name
             LIMIT 1000
             """
@@ -133,7 +131,7 @@ class EquityPriceDropdownService:
             Security details dictionary or None
         """
         try:
-            where_clauses = ["(is_active = true OR is_active IS NULL)"]
+            where_clauses = []
 
             if security_id:
                 where_clauses.append(f"security_id = {security_id}")
