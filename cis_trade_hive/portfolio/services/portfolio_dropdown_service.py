@@ -167,7 +167,7 @@ class PortfolioDropdownRepository:
                   SELECT MAX(processing_date)
                   FROM {PortfolioDropdownRepository.DATABASE}.{PortfolioDropdownRepository.COUNTRY_TABLE}
               )
-            ORDER BY `full_name`
+            ORDER BY `label`
             """
             results = impala_manager.execute_query(query, database=PortfolioDropdownRepository.DATABASE)
             return [

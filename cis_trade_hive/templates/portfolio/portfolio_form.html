@@ -167,7 +167,7 @@
                             <option value="">Select Country</option>
                             {% for ctry in dropdown_options.countries %}
                                 <option value="{{ ctry.code }}" {% if portfolio.country == ctry.code %}selected{% endif %}>
-                                    {{ ctry.name }}
+                                    {{ ctry.code }}
                                 </option>
                             {% endfor %}
                         </select>
