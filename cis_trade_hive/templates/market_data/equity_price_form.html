@@ -230,26 +230,8 @@
         }
     }
 
-    /**
-     * Event Listener: Currency change
-     */
-    currencySelect.addEventListener('change', function() {
-        // The dropdown value is now directly the iso_code (e.g., "SGD")
-        const currencyCode = this.value;
-
-        // Filter securities by selected currency code
-        filterSecuritiesByCurrency(currencyCode);
-
-        // Clear ISIN when currency changes
-        isinInput.value = '';
-    });
-
-    /**
-     * Event Listener: Security change
-     */
-    securitySelect.addEventListener('change', function() {
-        updateIsinFromSecurity();
-    });
+    // Currency and security change listeners are registered via jQuery
+    // in the Select2 init block below, so Select2-triggered events are caught.
 
     /**
      * Initialize on page load
@@ -296,16 +278,25 @@
 <script src="{% static 'js/select2-init.js' %}"></script>
 
 <script>
-// Initialize Select2 on ALL equity price form dropdowns
+// Initialize Select2 and wire currency→security cascade
 $(document).ready(function() {
-    // List of ALL dropdown IDs in the equity price form
     var allDropdownIds = [
         'currency_code',
         'security_label'
     ];
-
-    // Initialize all dropdowns using the global CISSelect2 utility
     CISSelect2.initByIds(allDropdownIds);
+
+    // Select2 triggers jQuery change, not a native DOM event —
+    // so the cascade listener must be registered via jQuery after Select2 init.
+    $('#currency_code').on('change', function() {
+        var currencyCode = $(this).val() || '';
+        filterSecuritiesByCurrency(currencyCode);
+        document.getElementById('isin').value = '';
+    });
+
+    $('#security_label').on('change', function() {
+        updateIsinFromSecurity();
+    });
 });
 </script>
 {% endblock %}
