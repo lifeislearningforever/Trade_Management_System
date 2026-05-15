@@ -144,10 +144,10 @@
     const allSecurities = [
         {% for sec in securities %}
         {
-            security_id: {{ sec.security_id }},
-            security_name: "{{ sec.security_name|escapejs }}",
-            isin: "{{ sec.isin|escapejs }}",
-            currency_code: "{{ sec.currency_code|escapejs }}"
+            security_id: {{ sec.security_id|default:0 }},
+            security_name: "{{ sec.security_name|default:''|escapejs }}",
+            isin: "{{ sec.isin|default:''|escapejs }}",
+            currency_code: "{{ sec.currency_code|default:''|escapejs }}"
         }{% if not forloop.last %},{% endif %}
         {% endfor %}
     ];

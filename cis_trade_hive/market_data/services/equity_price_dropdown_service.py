@@ -97,6 +97,8 @@ class EquityPriceDropdownService:
             FROM gmp_cis.cis_security
             WHERE {where_clause}
               AND security_name IS NOT NULL
+              AND currency_code IS NOT NULL
+              AND currency_code != ''
             ORDER BY security_name
             LIMIT 1000
             """
