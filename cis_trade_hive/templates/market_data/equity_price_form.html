@@ -135,13 +135,15 @@
     </div>
 </div>
 
-<!-- JavaScript for Cascading Dropdowns -->
-<script>
-(function() {
-    'use strict';
+<!-- jQuery, Select2 loaded first so cascade script can use $ -->
+<script src="{% static 'js/jquery-3.7.1.min.js' %}"></script>
+<script src="{% static 'js/select2.min.js' %}"></script>
+<script src="{% static 'js/select2-init.js' %}"></script>
 
-    // Store all securities data (passed from Django template)
-    const allSecurities = [
+<!-- Cascading Dropdowns + Select2 init -->
+<script>
+    // Securities data from Django (all currencies, filtered client-side)
+    var allSecurities = [
         {% for sec in securities %}
         {
             security_id: {{ sec.security_id|default:0 }},
@@ -152,151 +154,91 @@
         {% endfor %}
     ];
 
-    // Get form elements
-    const currencySelect = document.getElementById('currency_code');
-    const securitySelect = document.getElementById('security_label');
-    const isinInput = document.getElementById('isin');
+    var preSelectedCurrency = "{% if equity_price %}{{ equity_price.currency_code }}{% elif form_data %}{{ form_data.currency_code }}{% endif %}";
+    var preSelectedSecurity = "{% if equity_price %}{{ equity_price.security_label }}{% elif form_data %}{{ form_data.security_label }}{% endif %}";
+    var preSelectedIsin     = "{% if equity_price %}{{ equity_price.isin }}{% elif form_data %}{{ form_data.isin }}{% endif %}";
 
-    // Store pre-selected values (for edit mode)
-    const preSelectedCurrency = "{% if equity_price %}{{ equity_price.currency_code }}{% elif form_data %}{{ form_data.currency_code }}{% endif %}";
-    const preSelectedSecurity = "{% if equity_price %}{{ equity_price.security_label }}{% elif form_data %}{{ form_data.security_label }}{% endif %}";
-    const preSelectedIsin = "{% if equity_price %}{{ equity_price.isin }}{% elif form_data %}{{ form_data.isin }}{% endif %}";
-
-    /**
-     * Filter securities based on selected currency
-     */
     function filterSecuritiesByCurrency(selectedCurrency) {
-        // Clear current options
+        var securitySelect = document.getElementById('security_label');
         securitySelect.innerHTML = '<option value="">-- Select Security --</option>';
 
-        if (!selectedCurrency) {
-            // No currency selected - show all securities
-            allSecurities.forEach(sec => {
-                const option = document.createElement('option');
-                option.value = sec.security_name;
-                option.textContent = sec.security_name;
-                option.dataset.isin = sec.isin;
-                option.dataset.currencyCode = sec.currency_code;
-                securitySelect.appendChild(option);
-            });
-        } else {
-            // Filter securities by selected currency
-            const filteredSecurities = allSecurities.filter(sec => sec.currency_code === selectedCurrency);
+        var list = selectedCurrency
+            ? allSecurities.filter(function(s) { return s.currency_code === selectedCurrency; })
+            : allSecurities;
 
-            if (filteredSecurities.length === 0) {
-                const option = document.createElement('option');
-                option.value = '';
-                option.textContent = '-- No securities found for this currency --';
-                option.disabled = true;
-                securitySelect.appendChild(option);
-            } else {
-                filteredSecurities.forEach(sec => {
-                    const option = document.createElement('option');
-                    option.value = sec.security_name;
-                    option.textContent = sec.security_name;
-                    option.dataset.isin = sec.isin;
-                    option.dataset.currencyCode = sec.currency_code;
-                    securitySelect.appendChild(option);
-                });
-            }
+        if (selectedCurrency && list.length === 0) {
+            var opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = '-- No securities found for this currency --';
+            opt.disabled = true;
+            securitySelect.appendChild(opt);
+        } else {
+            list.forEach(function(sec) {
+                var opt = document.createElement('option');
+                opt.value = sec.security_name;
+                opt.textContent = sec.security_name;
+                opt.dataset.isin = sec.isin;
+                opt.dataset.currencyCode = sec.currency_code;
+                securitySelect.appendChild(opt);
+            });
         }
 
-        // Restore pre-selected security if in edit mode
+        // Restore pre-selected security (edit mode / GMP imports)
         if (preSelectedSecurity) {
-            let existingOption = securitySelect.querySelector(`option[value="${CSS.escape(preSelectedSecurity)}"]`);
-            if (!existingOption) {
-                // Security not in master list (e.g. GMP-imported) — add it so it shows correctly
-                existingOption = document.createElement('option');
-                existingOption.value = preSelectedSecurity;
-                existingOption.textContent = preSelectedSecurity;
-                existingOption.dataset.isin = preSelectedIsin || '';
-                securitySelect.appendChild(existingOption);
+            var existing = securitySelect.querySelector('option[value="' + preSelectedSecurity.replace(/"/g, '\\"') + '"]');
+            if (!existing) {
+                existing = document.createElement('option');
+                existing.value = preSelectedSecurity;
+                existing.textContent = preSelectedSecurity;
+                existing.dataset.isin = preSelectedIsin || '';
+                securitySelect.appendChild(existing);
             }
             securitySelect.value = preSelectedSecurity;
+            // Refresh Select2 so it shows the newly selected value
+            if (typeof $ !== 'undefined') { $('#security_label').trigger('change.select2'); }
             updateIsinFromSecurity();
         }
     }
 
-    /**
-     * Update ISIN field based on selected security
-     */
     function updateIsinFromSecurity() {
-        const selectedOption = securitySelect.options[securitySelect.selectedIndex];
-
-        if (selectedOption && selectedOption.dataset.isin) {
-            isinInput.value = selectedOption.dataset.isin;
-        } else {
-            isinInput.value = '';
-        }
+        var securitySelect = document.getElementById('security_label');
+        var selectedOption = securitySelect.options[securitySelect.selectedIndex];
+        document.getElementById('isin').value = (selectedOption && selectedOption.dataset.isin) ? selectedOption.dataset.isin : '';
     }
 
-    // Currency and security change listeners are registered via jQuery
-    // in the Select2 init block below, so Select2-triggered events are caught.
+    $(document).ready(function() {
+        // Initialize Select2
+        CISSelect2.initByIds(['currency_code', 'security_label']);
 
-    /**
-     * Initialize on page load
-     */
-    document.addEventListener('DOMContentLoaded', function() {
-        // If editing, pre-populate dropdowns
+        // Wire cascade via jQuery so Select2-triggered events are caught
+        $('#currency_code').on('change', function() {
+            filterSecuritiesByCurrency($(this).val() || '');
+            document.getElementById('isin').value = '';
+            // Refresh security Select2 after options rebuild
+            $('#security_label').trigger('change.select2');
+        });
+
+        $('#security_label').on('change', function() {
+            updateIsinFromSecurity();
+        });
+
+        // On page load: pre-populate for edit mode, or show all for create
         if (preSelectedCurrency) {
-            // The dropdown value is now directly the currency code (iso_code)
-            // Filter securities by pre-selected currency
+            $('#currency_code').val(preSelectedCurrency).trigger('change.select2');
             filterSecuritiesByCurrency(preSelectedCurrency);
-
-            // Set pre-selected ISIN
-            if (preSelectedIsin) {
-                isinInput.value = preSelectedIsin;
-            }
+            if (preSelectedIsin) { document.getElementById('isin').value = preSelectedIsin; }
         } else {
-            // New form - show all securities initially
             filterSecuritiesByCurrency('');
         }
+
+        // Form validation
+        document.getElementById('equityPriceForm').addEventListener('submit', function(e) {
+            var closingPrice = document.getElementById('main_closing_price').value;
+            if (parseFloat(closingPrice) <= 0) {
+                e.preventDefault();
+                alert('Closing price must be greater than zero.');
+            }
+        });
     });
-
-    /**
-     * Form validation
-     */
-    document.getElementById('equityPriceForm').addEventListener('submit', function(e) {
-        const closingPrice = document.getElementById('main_closing_price').value;
-
-        if (parseFloat(closingPrice) <= 0) {
-            e.preventDefault();
-            alert('Closing price must be greater than zero.');
-            return false;
-        }
-    });
-})();
-</script>
-
-<!-- jQuery (required for Select2) - Local -->
-<script src="{% static 'js/jquery-3.7.1.min.js' %}"></script>
-
-<!-- Select2 JS - Local -->
-<script src="{% static 'js/select2.min.js' %}"></script>
-
-<!-- CIS Trade Hive Select2 Global Initialization -->
-<script src="{% static 'js/select2-init.js' %}"></script>
-
-<script>
-// Initialize Select2 and wire currency→security cascade
-$(document).ready(function() {
-    var allDropdownIds = [
-        'currency_code',
-        'security_label'
-    ];
-    CISSelect2.initByIds(allDropdownIds);
-
-    // Select2 triggers jQuery change, not a native DOM event —
-    // so the cascade listener must be registered via jQuery after Select2 init.
-    $('#currency_code').on('change', function() {
-        var currencyCode = $(this).val() || '';
-        filterSecuritiesByCurrency(currencyCode);
-        document.getElementById('isin').value = '';
-    });
-
-    $('#security_label').on('change', function() {
-        updateIsinFromSecurity();
-    });
-});
 </script>
 {% endblock %}

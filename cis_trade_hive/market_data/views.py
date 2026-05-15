@@ -683,6 +683,7 @@ def equity_price_create(request):
             error_message = str(e)
 
         # Re-render form with error
+        from datetime import date as _date
         dropdown_options = equity_price_dropdown_service.get_all_dropdown_options(username)
 
         context = {
@@ -690,6 +691,7 @@ def equity_price_create(request):
             'form_data': equity_price_data,
             'currencies': dropdown_options.get('currencies', []),
             'securities': dropdown_options.get('securities', []),
+            'default_date': equity_price_data.get('price_date') or _date.today().strftime('%Y-%m-%d'),
         }
 
         return render(request, 'market_data/equity_price_form.html', context)
