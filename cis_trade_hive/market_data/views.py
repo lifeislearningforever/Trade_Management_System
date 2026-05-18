@@ -701,14 +701,13 @@ def equity_price_create(request):
         username = request.session.get('user_login', 'SYSTEM')
         dropdown_options = equity_price_dropdown_service.get_all_dropdown_options(username)
 
-        # Default date to today
-        from datetime import date
-        today = date.today().strftime('%Y-%m-%d')
+        from core.services.system_date_service import system_date_service
+        default_date = system_date_service.get_system_date_str(format='%Y-%m-%d')
 
         context = {
             'currencies': dropdown_options.get('currencies', []),
             'securities': dropdown_options.get('securities', []),
-            'default_date': today,
+            'default_date': default_date,
         }
 
         return render(request, 'market_data/equity_price_form.html', context)
