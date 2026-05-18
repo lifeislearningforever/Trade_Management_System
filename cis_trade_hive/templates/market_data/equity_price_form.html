@@ -94,7 +94,7 @@
                     <div class="col-md-4 mb-3">
                         <label for="price_date" class="form-label">Price Date <span class="text-danger">*</span></label>
                         <input type="date" class="form-control" id="price_date" name="price_date"
-                               value="{% if equity_price %}{{ equity_price.price_date }}{% elif form_data %}{{ form_data.price_date }}{% else %}{{ system_date_display }}{% endif %}"
+                               value="{% if equity_price %}{{ equity_price.price_date }}{% elif form_data %}{{ form_data.price_date }}{% endif %}"
                                required>
                     </div>
 
@@ -220,6 +220,16 @@
         $('#security_label').on('change', function() {
             updateIsinFromSecurity();
         });
+
+        // Set price date to system date (from cis_system_date table) for new records only
+        var priceDateEl = document.getElementById('price_date');
+        var isEditMode = {{ equity_price|yesno:"true,false" }};
+        if (priceDateEl && !isEditMode && !priceDateEl.value) {
+            var systemDate = '{{ system_date_display|default:"" }}';
+            if (systemDate) {
+                priceDateEl.value = systemDate;
+            }
+        }
 
         // On page load: pre-populate for edit mode or POST error re-render
         if (preSelectedCurrency) {
