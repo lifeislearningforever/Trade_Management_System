@@ -343,4 +343,18 @@ URL_PERMISSION_MAP = {
     # Lookup AJAX APIs
     'lookup:api_table':     ('lookup-tables-list', 'READ'),
     'lookup:api_dropdown':  ('lookup-tables-list', 'READ'),
+
+    # =========================================================================
+    # QUERY BUILDER
+    # =========================================================================
+    'query_builder:builder':        ('query-builder-run', 'READ'),
+    'query_builder:run_query':      ('query-builder-run', 'READ'),
+    'query_builder:export':         ('query-builder-run', 'READ'),
+    'query_builder:saved_reports':  ('query-builder-run', 'READ'),
+    'query_builder:save_template':  ('query-builder-manage', 'WRITE'),
+    'query_builder:delete_template':('query-builder-manage', 'WRITE'),
+    'query_builder:sql_editor':     ('query-builder-admin', 'WRITE'),
+    'query_builder:run_raw_sql':    ('query-builder-admin', 'WRITE'),
+    'query_builder:api_schema':     ('query-builder-run', 'READ'),
+    'query_builder:api_join_options':('query-builder-run', 'READ'),
 }

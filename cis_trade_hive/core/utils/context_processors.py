@@ -145,6 +145,7 @@ def sidebar_permissions(request):
             'sidebar_udf_view': True,
             'sidebar_udf_create': True,
             'sidebar_upload_view': True,
+            'sidebar_query_builder': True,
             'sidebar_rbac_admin': True,
 
             # System permissions
@@ -208,6 +209,7 @@ def sidebar_permissions(request):
         'sidebar_udf_view': has_perm('udf-list', 'READ'),
         'sidebar_udf_create': has_perm('udf-create', 'WRITE'),
         'sidebar_upload_view': has_perm('upload-list', 'READ') or True,  # Allow upload for now
+        'sidebar_query_builder': has_perm('query-builder-run', 'READ'),
         'sidebar_rbac_admin': has_perm('rbac-admin', 'WRITE'),
 
         # System permissions

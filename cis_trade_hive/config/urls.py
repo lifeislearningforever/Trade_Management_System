@@ -64,6 +64,9 @@ urlpatterns = [
 
     # File Upload & Hive External Table Ingestion
     path('upload/', include('upload.urls')),
+
+    # Query Builder
+    path('query-builder/', include('query_builder.urls')),
 ]
 
 # Serve static files in development

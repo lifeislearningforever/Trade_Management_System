@@ -86,6 +86,7 @@ INSTALLED_APPS = [
     'lookup',
     'hive_poc.apps.HivePocConfig',  # Hive POC - Managed Tables with ORC
     'upload.apps.UploadConfig',  # File Upload & Hive External Table Ingestion
+    'query_builder.apps.QueryBuilderConfig',  # Query Builder
 ]
 
 # daphne (ASGI server with HTTP/2 + WebSocket) requires cbor2 which needs Rust.

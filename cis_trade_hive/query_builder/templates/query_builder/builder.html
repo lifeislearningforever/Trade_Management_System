@@ -1,0 +1,561 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Query Builder - CisTrade{% endblock %}
+
+{% block extra_css %}
+<link href="{% static 'css/select2.min.css' %}" rel="stylesheet" />
+<link href="{% static 'css/select2-bootstrap-5-theme.min.css' %}" rel="stylesheet" />
+<style>
+.qb-section { background:#f8f9fa; border:1px solid #dee2e6; border-radius:8px; padding:16px; margin-bottom:16px; }
+.qb-section-title { font-weight:600; font-size:.9rem; color:#495057; margin-bottom:12px; text-transform:uppercase; letter-spacing:.05em; }
+.filter-row, .join-row, .col-row { background:#fff; border:1px solid #e9ecef; border-radius:6px; padding:10px 12px; margin-bottom:8px; }
+.remove-btn { color:#dc3545; cursor:pointer; border:none; background:none; padding:0 6px; }
+.results-table-wrap { overflow-x:auto; max-height:500px; }
+.results-table-wrap table { font-size:.82rem; }
+.sql-preview { font-family:monospace; font-size:.8rem; background:#1e1e1e; color:#d4d4d4; border-radius:6px; padding:12px; white-space:pre-wrap; max-height:200px; overflow-y:auto; }
+.badge-cache { background:#198754; font-size:.7rem; }
+.spinner-overlay { display:none; position:fixed; top:0;left:0;right:0;bottom:0; background:rgba(0,0,0,.35); z-index:9999; align-items:center; justify-content:center; }
+.spinner-overlay.active { display:flex; }
+</style>
+{% endblock %}
+
+{% block breadcrumb %}
+<li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+<li class="breadcrumb-item active">Query Builder</li>
+{% endblock %}
+
+{% block content %}
+<div class="spinner-overlay" id="spinnerOverlay">
+  <div class="text-center text-white">
+    <div class="spinner-border mb-2" style="width:3rem;height:3rem;"></div>
+    <div>Running query...</div>
+  </div>
+</div>
+
+<div class="content-header d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="content-title"><i class="bi bi-search text-primary"></i> Query Builder</h1>
+    <p class="content-subtitle mb-0">Build and run queries across trade, portfolio, security and position data</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="{% url 'query_builder:saved_reports' %}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-bookmark"></i> Saved Reports</a>
+    {% if is_admin %}<a href="{% url 'query_builder:sql_editor' %}" class="btn btn-outline-danger btn-sm"><i class="bi bi-terminal"></i> SQL Editor</a>{% endif %}
+  </div>
+</div>
+
+<div class="row">
+  <!-- LEFT: Builder Panel -->
+  <div class="col-lg-4">
+
+    <!-- 1. Primary Table -->
+    <div class="qb-section">
+      <div class="qb-section-title"><i class="bi bi-table"></i> Primary Table</div>
+      <select id="primaryTable" class="form-select form-select-sm">
+        <option value="">-- Select table --</option>
+        {% for t in tables %}
+        <option value="{{ t.table }}">{{ t.display }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <!-- 2. Joins -->
+    <div class="qb-section">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="qb-section-title mb-0"><i class="bi bi-diagram-3"></i> Joins</div>
+        <button class="btn btn-outline-primary btn-sm" id="addJoinBtn" disabled><i class="bi bi-plus"></i> Add Join</button>
+      </div>
+      <div id="joinsContainer"></div>
+    </div>
+
+    <!-- 3. Columns -->
+    <div class="qb-section">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="qb-section-title mb-0"><i class="bi bi-layout-three-columns"></i> Columns</div>
+        <button class="btn btn-outline-primary btn-sm" id="addColBtn" disabled><i class="bi bi-plus"></i> Add Column</button>
+      </div>
+      <div id="columnsContainer">
+        <small class="text-muted">No columns selected — all columns returned</small>
+      </div>
+    </div>
+
+    <!-- 4. Filters -->
+    <div class="qb-section">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="qb-section-title mb-0"><i class="bi bi-funnel"></i> Filters</div>
+        <button class="btn btn-outline-primary btn-sm" id="addFilterBtn" disabled><i class="bi bi-plus"></i> Add Filter</button>
+      </div>
+      <div id="filtersContainer"></div>
+    </div>
+
+    <!-- 5. Aggregation & Group By -->
+    <div class="qb-section">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="qb-section-title mb-0"><i class="bi bi-bar-chart"></i> Aggregation</div>
+        <div class="form-check form-switch mb-0">
+          <input class="form-check-input" type="checkbox" id="aggToggle">
+        </div>
+      </div>
+      <div id="aggContainer" style="display:none;">
+        <div class="mb-2">
+          <label class="form-label small mb-1">Group By Columns</label>
+          <div id="groupByContainer"></div>
+          <button class="btn btn-outline-secondary btn-sm mt-1" id="addGroupByBtn"><i class="bi bi-plus"></i> Add</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. Sort & Limit -->
+    <div class="qb-section">
+      <div class="qb-section-title"><i class="bi bi-sort-down"></i> Sort & Limit</div>
+      <div id="orderByContainer" class="mb-2"></div>
+      <button class="btn btn-outline-secondary btn-sm mb-3" id="addOrderByBtn" disabled><i class="bi bi-plus"></i> Add Sort</button>
+      <div class="d-flex align-items-center gap-2">
+        <label class="form-label mb-0 small">Row Limit:</label>
+        <select id="rowLimit" class="form-select form-select-sm" style="width:auto;">
+          <option value="100">100</option>
+          <option value="500" selected>500</option>
+          <option value="1000">1,000</option>
+          {% if max_rows >= 5000 %}<option value="5000">5,000</option>{% endif %}
+          {% if max_rows >= 10000 %}<option value="10000">10,000</option>{% endif %}
+          {% if max_rows >= 50000 %}<option value="50000">50,000</option>{% endif %}
+        </select>
+        <small class="text-muted">(max {{ max_rows|floatformat:"0" }})</small>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="d-grid gap-2">
+      <button class="btn btn-primary" id="runQueryBtn" disabled>
+        <i class="bi bi-play-fill"></i> Run Query
+      </button>
+    </div>
+  </div>
+
+  <!-- RIGHT: Results Panel -->
+  <div class="col-lg-8">
+
+    <!-- SQL Preview (admin only) -->
+    {% if is_admin %}
+    <div class="qb-section mb-3" id="sqlPreviewSection" style="display:none;">
+      <div class="qb-section-title"><i class="bi bi-code-slash"></i> Generated SQL</div>
+      <div class="sql-preview" id="sqlPreview"></div>
+    </div>
+    {% endif %}
+
+    <!-- Results -->
+    <div class="card" id="resultsCard" style="display:none;">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-table"></i> Results <span class="badge bg-primary ms-1" id="resultCount">0</span> rows
+          <span class="badge badge-cache ms-1" id="cacheLabel" style="display:none;">cached</span>
+        </span>
+        <div class="d-flex gap-2">
+          <button class="btn btn-outline-success btn-sm" onclick="doExport('csv')"><i class="bi bi-filetype-csv"></i> CSV</button>
+          <button class="btn btn-outline-success btn-sm" onclick="doExport('excel')"><i class="bi bi-file-earmark-excel"></i> Excel</button>
+          <button class="btn btn-outline-success btn-sm" onclick="doExport('json')"><i class="bi bi-filetype-json"></i> JSON</button>
+          <button class="btn btn-outline-secondary btn-sm" id="saveTemplateBtn"><i class="bi bi-bookmark-plus"></i> Save</button>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <div class="results-table-wrap">
+          <table class="table table-sm table-striped table-hover mb-0" id="resultsTable">
+            <thead id="resultsHead"></thead>
+            <tbody id="resultsBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Empty state -->
+    <div id="emptyState" class="text-center py-5 text-muted">
+      <i class="bi bi-search" style="font-size:3rem; opacity:.3;"></i>
+      <p class="mt-3">Select a table and run a query to see results</p>
+    </div>
+
+    <!-- Error -->
+    <div class="alert alert-danger" id="errorAlert" style="display:none;">
+      <i class="bi bi-exclamation-triangle"></i> <span id="errorMsg"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Save Template Modal -->
+<div class="modal fade" id="saveModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Save Report Template</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <div class="mb-3"><label class="form-label">Template Name *</label>
+          <input type="text" class="form-control" id="tplName"></div>
+        <div class="mb-3"><label class="form-label">Description</label>
+          <textarea class="form-control" id="tplDesc" rows="2"></textarea></div>
+        <div class="mb-3"><label class="form-label">Category</label>
+          <select class="form-select" id="tplCategory">
+            <option value="TRADE">Trade</option><option value="PORTFOLIO">Portfolio</option>
+            <option value="POSITION">Position</option><option value="MARKET_DATA">Market Data</option>
+            <option value="SECURITY">Security</option>
+          </select>
+        </div>
+        <div class="form-check"><input class="form-check-input" type="checkbox" id="tplPublic">
+          <label class="form-check-label">Public (visible to all users)</label></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" id="confirmSaveBtn">Save Template</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="{% static 'js/jquery-3.7.1.min.js' %}"></script>
+<script src="{% static 'js/select2.min.js' %}"></script>
+<script>
+const SCHEMAS = {{ schemas|safe }};
+const USER_ROLE = '{{ user_role }}';
+const IS_ADMIN = {{ is_admin|yesno:'true,false' }};
+const CSRF = '{{ csrf_token }}';
+
+let activeConfig = {};  // current query config
+
+// ----------------------------------------------------------------
+// Helpers
+// ----------------------------------------------------------------
+function getActiveTables() {
+    const primary = $('#primaryTable').val();
+    if (!primary) return [];
+    const joins = [];
+    $('#joinsContainer .join-row').each(function() {
+        const t = $(this).find('.join-table-select').val();
+        if (t) joins.push(t);
+    });
+    return [primary, ...joins];
+}
+
+function getColumnOptions(tableList) {
+    let opts = '<option value="">-- column --</option>';
+    tableList.forEach(tbl => {
+        const cols = SCHEMAS[tbl] || [];
+        if (cols.length) {
+            opts += `<optgroup label="${tbl}">`;
+            cols.forEach(c => { opts += `<option value="${tbl}|${c.name}" data-type="${c.type}">${c.name} (${c.type})</option>`; });
+            opts += '</optgroup>';
+        }
+    });
+    return opts;
+}
+
+const OPERATORS = [
+    {v:'eq',l:'='},{v:'neq',l:'!='},{v:'gt',l:'>'},{v:'gte',l:'>='},{v:'lt',l:'<'},{v:'lte',l:'<='},
+    {v:'like',l:'LIKE'},{v:'not_like',l:'NOT LIKE'},{v:'in',l:'IN'},{v:'not_in',l:'NOT IN'},
+    {v:'between',l:'BETWEEN'},{v:'is_null',l:'IS NULL'},{v:'is_not_null',l:'IS NOT NULL'}
+];
+const AGGS = ['','COUNT','SUM','AVG','MIN','MAX','COUNT_DISTINCT'];
+
+function opOptions(selected='eq') {
+    return OPERATORS.map(o => `<option value="${o.v}" ${o.v===selected?'selected':''}>${o.l}</option>`).join('');
+}
+function aggOptions(selected='') {
+    return AGGS.map(a => `<option value="${a}" ${a===selected?'selected':''}>${a||'(none)'}</option>`).join('');
+}
+
+// ----------------------------------------------------------------
+// Primary table change
+// ----------------------------------------------------------------
+$('#primaryTable').on('change', function() {
+    const tbl = $(this).val();
+    $('#joinsContainer').empty();
+    $('#columnsContainer').html('<small class="text-muted">No columns selected — all columns returned</small>');
+    $('#filtersContainer').empty();
+    $('#orderByContainer').empty();
+    ['addJoinBtn','addColBtn','addFilterBtn','addOrderByBtn','runQueryBtn'].forEach(id => {
+        $('#'+id).prop('disabled', !tbl);
+    });
+    if (tbl) loadJoinOptions(tbl);
+});
+
+let joinOptions = [];
+function loadJoinOptions(primary) {
+    $.get('/query-builder/api/join-options/?table=' + primary, function(data) {
+        joinOptions = data.options || [];
+    });
+}
+
+// ----------------------------------------------------------------
+// Joins
+// ----------------------------------------------------------------
+$('#addJoinBtn').on('click', function() {
+    if ($('#joinsContainer .join-row').length >= 3) { alert('Maximum 3 joins allowed.'); return; }
+    const opts = joinOptions.map(j => `<option value="${j.table}">${j.display}</option>`).join('');
+    const html = `<div class="join-row d-flex gap-2 align-items-center">
+        <select class="form-select form-select-sm join-table-select" style="flex:1;">${opts}</select>
+        <select class="form-select form-select-sm join-type-select" style="width:90px;">
+            <option value="INNER">INNER</option><option value="LEFT">LEFT</option>
+        </select>
+        <button class="remove-btn" onclick="$(this).closest('.join-row').remove(); refreshColumns()"><i class="bi bi-x-circle"></i></button>
+    </div>`;
+    $('#joinsContainer').append(html);
+    $('#joinsContainer .join-table-select').last().on('change', refreshColumns);
+    refreshColumns();
+});
+
+function refreshColumns() {
+    const tables = getActiveTables();
+    const colOpts = getColumnOptions(tables);
+    // Refresh existing column selects
+    $('#columnsContainer .col-table-col select:first-child, #filtersContainer .filter-col select:first-child, #orderByContainer .order-row select:first-child').each(function() {
+        const cur = $(this).val();
+        $(this).html(colOpts);
+        if (cur) $(this).val(cur);
+    });
+    $('#groupByContainer select').each(function() {
+        const cur = $(this).val();
+        $(this).html(colOpts);
+        if (cur) $(this).val(cur);
+    });
+}
+
+// ----------------------------------------------------------------
+// Columns
+// ----------------------------------------------------------------
+$('#addColBtn').on('click', function() {
+    const tables = getActiveTables();
+    const colOpts = getColumnOptions(tables);
+    const html = `<div class="col-row col-table-col d-flex gap-1 align-items-center flex-wrap">
+        <select class="form-select form-select-sm" style="flex:2; min-width:140px;">${colOpts}</select>
+        <select class="form-select form-select-sm" style="width:120px;" title="Aggregation">${aggOptions()}</select>
+        <input type="text" class="form-control form-control-sm" style="width:90px;" placeholder="alias">
+        <button class="remove-btn" onclick="$(this).closest('.col-row').remove()"><i class="bi bi-x-circle"></i></button>
+    </div>`;
+    if ($('#columnsContainer small').length) $('#columnsContainer').empty();
+    $('#columnsContainer').append(html);
+});
+
+// ----------------------------------------------------------------
+// Filters
+// ----------------------------------------------------------------
+$('#addFilterBtn').on('click', function() {
+    const tables = getActiveTables();
+    const colOpts = getColumnOptions(tables);
+    const isFirst = $('#filtersContainer .filter-row').length === 0;
+    const html = `<div class="filter-row d-flex gap-1 align-items-center flex-wrap">
+        ${!isFirst ? `<select class="form-select form-select-sm" style="width:65px;"><option value="AND">AND</option><option value="OR">OR</option></select>` : ''}
+        <select class="form-select form-select-sm filter-col" style="flex:2; min-width:140px;">${colOpts}</select>
+        <select class="form-select form-select-sm filter-op" style="width:110px;">${opOptions()}</select>
+        <input type="text" class="form-control form-control-sm filter-val" style="flex:1; min-width:80px;" placeholder="value">
+        <button class="remove-btn" onclick="$(this).closest('.filter-row').remove()"><i class="bi bi-x-circle"></i></button>
+    </div>`;
+    $('#filtersContainer').append(html);
+    // Hide value input for IS NULL / IS NOT NULL
+    $('#filtersContainer .filter-op').last().on('change', function() {
+        const op = $(this).val();
+        $(this).closest('.filter-row').find('.filter-val').toggle(!['is_null','is_not_null'].includes(op));
+    });
+});
+
+// ----------------------------------------------------------------
+// Group By
+// ----------------------------------------------------------------
+$('#aggToggle').on('change', function() {
+    $('#aggContainer').toggle(this.checked);
+});
+$('#addGroupByBtn').on('click', function() {
+    const tables = getActiveTables();
+    const colOpts = getColumnOptions(tables);
+    const html = `<div class="d-flex gap-1 align-items-center mb-1">
+        <select class="form-select form-select-sm" style="flex:1;">${colOpts}</select>
+        <button class="remove-btn" onclick="$(this).closest('div').remove()"><i class="bi bi-x-circle"></i></button>
+    </div>`;
+    $('#groupByContainer').append(html);
+});
+
+// ----------------------------------------------------------------
+// Order By
+// ----------------------------------------------------------------
+$('#addOrderByBtn').on('click', function() {
+    if ($('#orderByContainer .order-row').length >= 3) return;
+    const tables = getActiveTables();
+    const colOpts = getColumnOptions(tables);
+    const html = `<div class="order-row d-flex gap-1 align-items-center mb-1">
+        <select class="form-select form-select-sm" style="flex:2;">${colOpts}</select>
+        <select class="form-select form-select-sm" style="width:80px;">
+            <option value="ASC">ASC</option><option value="DESC">DESC</option>
+        </select>
+        <button class="remove-btn" onclick="$(this).closest('.order-row').remove()"><i class="bi bi-x-circle"></i></button>
+    </div>`;
+    $('#orderByContainer').append(html);
+});
+
+// ----------------------------------------------------------------
+// Build config from UI
+// ----------------------------------------------------------------
+function buildConfig() {
+    const primary = $('#primaryTable').val();
+    const joins = [];
+    $('#joinsContainer .join-row').each(function() {
+        const tbl = $(this).find('.join-table-select').val();
+        const type = $(this).find('.join-type-select').val();
+        if (tbl) joins.push({table: tbl, type: type});
+    });
+
+    const columns = [];
+    $('#columnsContainer .col-row').each(function() {
+        const raw = $(this).find('select:first').val();
+        if (!raw) return;
+        const [tbl, col] = raw.split('|');
+        const agg = $(this).find('select:last').val();
+        const alias = $(this).find('input').val().trim();
+        columns.push({table: tbl, column: col, agg: agg, alias: alias});
+    });
+
+    const filters = [];
+    $('#filtersContainer .filter-row').each(function(i) {
+        const raw = $(this).find('.filter-col').val();
+        if (!raw) return;
+        const [tbl, col] = raw.split('|');
+        const op = $(this).find('.filter-op').val();
+        const val = $(this).find('.filter-val').val();
+        const logic = i === 0 ? 'AND' : ($(this).find('select:first').val() || 'AND');
+        filters.push({table: tbl, column: col, op: op, value: val, logic: logic});
+    });
+
+    const group_by = [];
+    if ($('#aggToggle').is(':checked')) {
+        $('#groupByContainer select').each(function() {
+            const raw = $(this).val();
+            if (raw) { const [tbl, col] = raw.split('|'); group_by.push(`${tbl}.${col}`); }
+        });
+    }
+
+    const order_by = [];
+    $('#orderByContainer .order-row').each(function() {
+        const raw = $(this).find('select:first').val();
+        if (!raw) return;
+        const [tbl, col] = raw.split('|');
+        const dir = $(this).find('select:last').val();
+        order_by.push({table: tbl, column: col, direction: dir});
+    });
+
+    return {
+        primary_table: primary,
+        joins, columns, filters, group_by, order_by,
+        limit: parseInt($('#rowLimit').val()) || 500,
+        user_role: USER_ROLE,
+    };
+}
+
+// ----------------------------------------------------------------
+// Run Query
+// ----------------------------------------------------------------
+$('#runQueryBtn').on('click', function() {
+    const config = buildConfig();
+    activeConfig = config;
+    $('#spinnerOverlay').addClass('active');
+    $('#errorAlert').hide();
+    $('#resultsCard').hide();
+    $('#emptyState').hide();
+
+    $.ajax({
+        url: '/query-builder/run/',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(config),
+        headers: {'X-CSRFToken': CSRF},
+        success: function(data) {
+            $('#spinnerOverlay').removeClass('active');
+            if (data.success) {
+                renderResults(data);
+                if (IS_ADMIN && data.sql) {
+                    $('#sqlPreview').text(data.sql);
+                    $('#sqlPreviewSection').show();
+                }
+            } else {
+                showError(data.error);
+            }
+        },
+        error: function(xhr) {
+            $('#spinnerOverlay').removeClass('active');
+            const msg = xhr.responseJSON ? xhr.responseJSON.error : 'Request failed';
+            showError(msg);
+        }
+    });
+});
+
+function renderResults(data) {
+    $('#resultCount').text(data.count);
+    $('#cacheLabel').toggle(!!data.from_cache);
+    $('#resultsCard').show();
+
+    const head = data.columns.map(c => `<th>${c}</th>`).join('');
+    $('#resultsHead').html(`<tr>${head}</tr>`);
+
+    const rows = data.rows.map(row => {
+        const cells = data.columns.map(c => `<td>${row[c] !== null && row[c] !== undefined ? row[c] : ''}</td>`).join('');
+        return `<tr>${cells}</tr>`;
+    }).join('');
+    $('#resultsBody').html(rows || '<tr><td colspan="99" class="text-center text-muted">No results</td></tr>');
+}
+
+function showError(msg) {
+    $('#errorMsg').text(msg);
+    $('#errorAlert').show();
+    $('#emptyState').hide();
+}
+
+// ----------------------------------------------------------------
+// Export
+// ----------------------------------------------------------------
+function doExport(fmt) {
+    const config = buildConfig();
+    const form = $('<form method="POST" action="/query-builder/export/" style="display:none;">');
+    form.append(`<input name="csrfmiddlewaretoken" value="${CSRF}">`);
+    form.append(`<input name="_data" value='${JSON.stringify({config, format: fmt})}'>`);
+    // Use AJAX post for streaming
+    $.ajax({
+        url: '/query-builder/export/',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({config, format: fmt}),
+        headers: {'X-CSRFToken': CSRF},
+        xhrFields: {responseType: 'blob'},
+        success: function(blob, status, xhr) {
+            const ext = {csv:'csv', excel:'xlsx', json:'json'}[fmt];
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = `query_results.${ext}`; a.click();
+            URL.revokeObjectURL(url);
+        },
+        error: function() { alert('Export failed. Please try again.'); }
+    });
+}
+
+// ----------------------------------------------------------------
+// Save Template
+// ----------------------------------------------------------------
+$('#saveTemplateBtn').on('click', function() {
+    new bootstrap.Modal('#saveModal').show();
+});
+$('#confirmSaveBtn').on('click', function() {
+    const data = {
+        template_name: $('#tplName').val().trim(),
+        description: $('#tplDesc').val().trim(),
+        category: $('#tplCategory').val(),
+        is_public: $('#tplPublic').is(':checked'),
+        query_config: activeConfig,
+        allowed_groups: [],
+    };
+    if (!data.template_name) { alert('Template name is required.'); return; }
+    $.ajax({
+        url: '/query-builder/saved/save/',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(data),
+        headers: {'X-CSRFToken': CSRF},
+        success: function(r) {
+            if (r.success) { bootstrap.Modal.getInstance('#saveModal').hide(); alert('Template saved!'); }
+            else { alert('Error: ' + r.error); }
+        }
+    });
+});
+</script>
+{% endblock %}
