@@ -94,10 +94,10 @@ class SqlBuilderService:
         order_by_cfg   = config.get('order_by', [])
         user_role      = config.get('user_role', 'VIEWER').upper()
 
-        row_limit = min(
-            int(config.get('limit', self.DEFAULT_LIMIT)),
-            self.ROLE_LIMITS.get(user_role, self.DEFAULT_LIMIT)
-        )
+        requested_limit = int(config.get('limit', self.DEFAULT_LIMIT))
+        if requested_limit <= 0:
+            raise ValueError("limit must be a positive integer")
+        row_limit = min(requested_limit, self.ROLE_LIMITS.get(user_role, self.DEFAULT_LIMIT))
 
         select_sql, params = self._build_select(columns_cfg)
         from_sql          = f"{self.DATABASE}.{primary} {self.TABLES[primary]['alias']}"
@@ -142,20 +142,27 @@ class SqlBuilderService:
 
     def _build_select(self, columns: List[Dict]) -> Tuple[str, List]:
         if not columns:
-            parts = [f"{self.TABLES[t]['alias']}.*" for t in self.TABLES]
-            return ', '.join(parts), []
+            # No columns specified — only select from the primary table alias to avoid
+            # cartesian column explosion when joins are present (corner case: * on all
+            # tables in TABLES includes non-joined tables, producing invalid SQL).
+            return '*', []
 
+        seen_aliases: set = set()
         parts = []
         for col in columns:
-            tbl  = self._assert_table(col['table'])
-            name = self._safe_identifier(col['column'])
+            tbl  = self._assert_table(col.get('table', ''))
+            raw_col = col.get('column', '').strip()
+            if not raw_col:
+                raise ValueError("Column name cannot be empty")
+            name = self._safe_identifier(raw_col)
             alias_str = self.TABLES[tbl]['alias']
-            agg  = col.get('agg', '').upper()
-            col_alias = col.get('alias', '')
+            agg  = col.get('agg', '').strip().upper()
+            col_alias = col.get('alias', '').strip()
 
             if agg:
                 if agg not in self.VALID_AGGREGATIONS:
-                    raise ValueError(f"Invalid aggregation: {agg}")
+                    raise ValueError(f"Invalid aggregation: {agg!r}. "
+                                     f"Valid: {sorted(self.VALID_AGGREGATIONS)}")
                 expr = (f"COUNT(DISTINCT {alias_str}.{name})"
                         if agg == 'COUNT_DISTINCT'
                         else f"{agg}({'*' if name == '*' else f'{alias_str}.{name}'})")
@@ -163,7 +170,12 @@ class SqlBuilderService:
                 expr = f"{alias_str}.{name}"
 
             if col_alias:
-                expr += f" AS {self._safe_identifier(col_alias)}"
+                safe_alias = self._safe_identifier(col_alias)
+                if safe_alias in seen_aliases:
+                    raise ValueError(f"Duplicate column alias: {safe_alias!r}")
+                seen_aliases.add(safe_alias)
+                expr += f" AS {safe_alias}"
+
             parts.append(expr)
 
         return ', '.join(parts), []
@@ -195,38 +207,50 @@ class SqlBuilderService:
 
         parts, params = [], []
         for i, f in enumerate(filters):
-            tbl     = self._assert_table(f['table'])
-            col     = self._safe_identifier(f['column'])
-            op_key  = f['op']
+            tbl     = self._assert_table(f.get('table', ''))
+            col     = self._safe_identifier(f.get('column', ''))
+            op_key  = f.get('op', '')
             alias   = self.TABLES[tbl]['alias']
             logic   = f.get('logic', 'AND').upper() if i > 0 else ''
+            if logic not in ('AND', 'OR'):
+                logic = 'AND'
 
             if op_key not in self.FILTER_OPERATORS:
-                raise ValueError(f"Invalid filter operator: {op_key}")
+                raise ValueError(f"Invalid filter operator: {op_key!r}")
 
             op = self.FILTER_OPERATORS[op_key]
 
             if op_key in ('is_null', 'is_not_null'):
                 expr = f"{alias}.{col} {op}"
             elif op_key == 'between':
-                vals = f['value']
+                vals = f.get('value')
+                if isinstance(vals, str):
+                    parts_v = [v.strip() for v in vals.split(',')]
+                    if len(parts_v) == 2:
+                        vals = parts_v
                 if not isinstance(vals, (list, tuple)) or len(vals) != 2:
-                    raise ValueError("BETWEEN requires [low, high] list")
+                    raise ValueError("BETWEEN requires exactly two values: [low, high] or 'low,high'")
                 expr = f"{alias}.{col} BETWEEN %s AND %s"
                 params.extend(vals)
             elif op_key in ('in', 'not_in'):
-                vals = f['value']
+                vals = f.get('value', '')
                 if isinstance(vals, str):
-                    vals = [v.strip() for v in vals.split(',')]
+                    vals = [v.strip() for v in vals.split(',') if v.strip()]
+                if not vals:
+                    raise ValueError(f"{op_key.upper()} requires at least one value")
                 placeholders = ', '.join(['%s'] * len(vals))
                 expr = f"{alias}.{col} {op} ({placeholders})"
                 params.extend(vals)
-            elif op_key == 'like':
+            elif op_key in ('like', 'not_like'):
+                val = f.get('value', '')
                 expr = f"{alias}.{col} {op} %s"
-                params.append(f"%{f['value']}%")
+                params.append(f"%{val}%")
             else:
+                val = f.get('value')
+                if val is None or val == '':
+                    raise ValueError(f"Filter on '{col}' requires a value for operator '{op_key}'")
                 expr = f"{alias}.{col} {op} %s"
-                params.append(f['value'])
+                params.append(val)
 
             parts.append(f"{logic} {expr}".strip())
 
@@ -277,9 +301,18 @@ class SqlBuilderService:
     # ----------------------------------------------------------------
 
     def _validate(self, config: Dict) -> None:
-        if 'primary_table' not in config:
+        if not isinstance(config, dict):
+            raise ValueError("Query config must be a dict")
+        if not config.get('primary_table'):
             raise ValueError("primary_table is required")
         self._assert_table(config['primary_table'])
+        limit = config.get('limit', self.DEFAULT_LIMIT)
+        try:
+            int_limit = int(limit)
+        except (TypeError, ValueError):
+            raise ValueError(f"Invalid limit value: {limit!r}")
+        if int_limit <= 0:
+            raise ValueError(f"Invalid limit value: {limit!r} — must be a positive integer")
 
     def _assert_table(self, table: str) -> str:
         if table not in self.TABLES:
@@ -288,8 +321,12 @@ class SqlBuilderService:
 
     @staticmethod
     def _safe_identifier(name: str) -> str:
-        if not re.match(r'^[a-zA-Z0-9_.*()\s]+$', name):
-            raise ValueError(f"Invalid identifier: {name}")
+        # Allow letters, digits, underscore, dot, *, ( ) and single spaces — nothing else.
+        # Explicit newline/tab rejection before the regex (re.DOTALL would miss \n in \s).
+        if '\n' in name or '\r' in name or '\t' in name or '\x00' in name:
+            raise ValueError(f"Invalid identifier: {name!r}")
+        if not re.match(r'^[a-zA-Z0-9_.*() ]+$', name):
+            raise ValueError(f"Invalid identifier: {name!r}")
         return name
 
 

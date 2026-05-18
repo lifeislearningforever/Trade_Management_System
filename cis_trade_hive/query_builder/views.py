@@ -163,6 +163,20 @@ def export(request):
             response['Content-Disposition'] = 'attachment; filename="query_results.json"'
             return response
 
+        if fmt == 'pdf':
+            title    = body.get('title', 'Query Results')
+            subtitle = body.get('subtitle', '')
+            username = request.session.get('user_login', '')
+            data = export_service.to_pdf_bytes(
+                results, columns,
+                title=title,
+                subtitle=subtitle or f"Table: {config.get('primary_table', '')}  |  Rows: {len(results):,}",
+                generated_by=username,
+            )
+            response = HttpResponse(data, content_type='application/pdf')
+            response['Content-Disposition'] = 'attachment; filename="query_results.pdf"'
+            return response
+
         return JsonResponse({'error': f'Unsupported format: {fmt}'}, status=400)
 
     except Exception as e:
