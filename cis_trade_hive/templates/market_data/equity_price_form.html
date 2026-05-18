@@ -168,9 +168,10 @@
                 securitySelect.appendChild(opt);
             } else {
                 results.forEach(function(sec) {
+                    var name = sec.value || sec.security_name || '';
                     var opt = document.createElement('option');
-                    opt.value = sec.security_name;
-                    opt.textContent = sec.security_name;
+                    opt.value = name;
+                    opt.textContent = name;
                     opt.dataset.isin = sec.isin || '';
                     securitySelect.appendChild(opt);
                 });
