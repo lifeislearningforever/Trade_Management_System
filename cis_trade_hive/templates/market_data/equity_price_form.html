@@ -142,74 +142,59 @@
 
 <!-- Cascading Dropdowns + Select2 init -->
 <script>
-    // Securities data from Django (all currencies, filtered client-side)
-    var allSecurities = [
-        {% for sec in securities %}
-        {
-            security_id: {{ sec.security_id|default:0 }},
-            security_name: "{{ sec.security_name|default:''|escapejs }}",
-            isin: "{{ sec.isin|default:''|escapejs }}",
-            currency_code: "{{ sec.currency_code|default:''|escapejs }}"
-        }{% if not forloop.last %},{% endif %}
-        {% endfor %}
-    ];
-
     var preSelectedCurrency = "{% if equity_price %}{{ equity_price.currency_code }}{% elif form_data %}{{ form_data.currency_code }}{% endif %}";
     var preSelectedSecurity = "{% if equity_price %}{{ equity_price.security_label }}{% elif form_data %}{{ form_data.security_label }}{% endif %}";
     var preSelectedIsin     = "{% if equity_price %}{{ equity_price.isin }}{% elif form_data %}{{ form_data.isin }}{% endif %}";
 
-    function filterSecuritiesByCurrency(selectedCurrency) {
-        console.log('[EQ] filterSecuritiesByCurrency called, currency=', JSON.stringify(selectedCurrency));
-        console.log('[EQ] allSecurities total=', allSecurities.length);
-
+    function loadSecuritiesByCurrency(selectedCurrency, callback) {
         var securitySelect = document.getElementById('security_label');
-        securitySelect.innerHTML = '<option value="">-- Select Security --</option>';
+        securitySelect.innerHTML = '<option value="">-- Loading... --</option>';
 
-        var list = selectedCurrency
-            ? allSecurities.filter(function(s) { return s.currency_code === selectedCurrency; })
-            : allSecurities;
-
-        console.log('[EQ] filtered list length=', list.length);
-        if (list.length > 0) {
-            console.log('[EQ] sample currency_codes:', list.slice(0,3).map(function(s){ return s.currency_code; }));
-        } else if (selectedCurrency) {
-            // Log all unique currency_codes in allSecurities to spot mismatch
-            var uniq = {};
-            allSecurities.forEach(function(s){ uniq[s.currency_code] = true; });
-            console.warn('[EQ] No match for "' + selectedCurrency + '". Available codes:', Object.keys(uniq).sort());
+        if (!selectedCurrency) {
+            securitySelect.innerHTML = '<option value="">-- Select Currency first --</option>';
+            if (callback) callback([]);
+            return;
         }
 
-        if (selectedCurrency && list.length === 0) {
-            var opt = document.createElement('option');
-            opt.value = '';
-            opt.textContent = '-- No securities found for this currency --';
-            opt.disabled = true;
-            securitySelect.appendChild(opt);
-        } else {
-            list.forEach(function(sec) {
+        $.get('/trade/api/securities-by-currency/', { currency: selectedCurrency }, function(data) {
+            var results = data.results || [];
+            securitySelect.innerHTML = '<option value="">-- Select Security --</option>';
+
+            if (results.length === 0) {
                 var opt = document.createElement('option');
-                opt.value = sec.security_name;
-                opt.textContent = sec.security_name;
-                opt.dataset.isin = sec.isin;
-                opt.dataset.currencyCode = sec.currency_code;
+                opt.value = '';
+                opt.textContent = '-- No securities found for this currency --';
+                opt.disabled = true;
                 securitySelect.appendChild(opt);
-            });
-        }
-
-        // Restore pre-selected security (edit mode / GMP imports)
-        if (preSelectedSecurity) {
-            var existing = securitySelect.querySelector('option[value="' + preSelectedSecurity.replace(/"/g, '\\"') + '"]');
-            if (!existing) {
-                existing = document.createElement('option');
-                existing.value = preSelectedSecurity;
-                existing.textContent = preSelectedSecurity;
-                existing.dataset.isin = preSelectedIsin || '';
-                securitySelect.appendChild(existing);
+            } else {
+                results.forEach(function(sec) {
+                    var opt = document.createElement('option');
+                    opt.value = sec.security_name;
+                    opt.textContent = sec.security_name;
+                    opt.dataset.isin = sec.isin || '';
+                    securitySelect.appendChild(opt);
+                });
             }
-            securitySelect.value = preSelectedSecurity;
-            if (typeof $ !== 'undefined') { $('#security_label').trigger('change.select2'); }
-            updateIsinFromSecurity();
-        }
+
+            // Restore pre-selected security (edit mode / POST error re-render)
+            if (preSelectedSecurity) {
+                var existing = securitySelect.querySelector('option[value="' + CSS.escape(preSelectedSecurity) + '"]');
+                if (!existing) {
+                    existing = document.createElement('option');
+                    existing.value = preSelectedSecurity;
+                    existing.textContent = preSelectedSecurity;
+                    existing.dataset.isin = preSelectedIsin || '';
+                    securitySelect.appendChild(existing);
+                }
+                securitySelect.value = preSelectedSecurity;
+                if (preSelectedIsin) { document.getElementById('isin').value = preSelectedIsin; }
+            }
+
+            $('#security_label').trigger('change.select2');
+            if (callback) callback(results);
+        }).fail(function() {
+            securitySelect.innerHTML = '<option value="">-- Error loading securities --</option>';
+        });
     }
 
     function updateIsinFromSecurity() {
@@ -219,18 +204,16 @@
     }
 
     $(document).ready(function() {
-        console.log('[EQ] ready: allSecurities=', allSecurities.length);
-
         // Initialize Select2
         CISSelect2.initByIds(['currency_code', 'security_label']);
 
         // Wire cascade via jQuery so Select2-triggered events are caught
         $('#currency_code').on('change', function() {
             var val = $(this).val() || '';
-            console.log('[EQ] currency_code changed to:', JSON.stringify(val));
-            filterSecuritiesByCurrency(val);
             document.getElementById('isin').value = '';
-            $('#security_label').trigger('change.select2');
+            preSelectedSecurity = '';
+            preSelectedIsin = '';
+            loadSecuritiesByCurrency(val);
         });
 
         $('#security_label').on('change', function() {
@@ -252,13 +235,10 @@
             }
         }
 
-        // On page load: pre-populate for edit mode, or show all for create
+        // On page load: pre-populate for edit mode or POST error re-render
         if (preSelectedCurrency) {
             $('#currency_code').val(preSelectedCurrency).trigger('change.select2');
-            filterSecuritiesByCurrency(preSelectedCurrency);
-            if (preSelectedIsin) { document.getElementById('isin').value = preSelectedIsin; }
-        } else {
-            filterSecuritiesByCurrency('');
+            loadSecuritiesByCurrency(preSelectedCurrency);
         }
 
         // Form validation
