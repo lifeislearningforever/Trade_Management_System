@@ -74,6 +74,11 @@
         <div class="qb-section-title mb-0"><i class="bi bi-layout-three-columns"></i> Columns</div>
         <button class="btn btn-outline-primary btn-sm" id="addColBtn" disabled><i class="bi bi-plus"></i> Add Column</button>
       </div>
+      <div id="colsHint" style="display:none;" class="d-flex gap-1 mb-1 px-1">
+        <small class="text-muted" style="flex:2; min-width:140px;">Column</small>
+        <small class="text-muted" style="width:120px;">Aggregate</small>
+        <small class="text-muted" style="width:110px;">Rename</small>
+      </div>
       <div id="columnsContainer">
         <small class="text-muted">No columns selected — all columns returned</small>
       </div>
@@ -324,11 +329,12 @@ $('#addColBtn').on('click', function() {
     const html = `<div class="col-row col-table-col d-flex gap-1 align-items-center flex-wrap">
         <select class="form-select form-select-sm" style="flex:2; min-width:140px;">${colOpts}</select>
         <select class="form-select form-select-sm" style="width:120px;" title="Aggregation">${aggOptions()}</select>
-        <input type="text" class="form-control form-control-sm" style="width:90px;" placeholder="alias">
-        <button class="remove-btn" onclick="$(this).closest('.col-row').remove()"><i class="bi bi-x-circle"></i></button>
+        <input type="text" class="form-control form-control-sm col-alias-input" style="width:110px;" placeholder="Rename (alias)" title="Optional: rename this column in results">
+        <button class="remove-btn" onclick="$(this).closest('.col-row').remove(); if(!$('#columnsContainer .col-row').length){$('#columnsContainer').html('<small class=\'text-muted\'>No columns selected — all columns returned</small>');$('#colsHint').hide();}"><i class="bi bi-x-circle"></i></button>
     </div>`;
     if ($('#columnsContainer small').length) $('#columnsContainer').empty();
     $('#columnsContainer').append(html);
+    $('#colsHint').show();
 });
 
 // ----------------------------------------------------------------
