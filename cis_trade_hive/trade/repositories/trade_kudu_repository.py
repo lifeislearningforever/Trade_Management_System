@@ -585,55 +585,11 @@ class TradeKuduRepository:
                 # Invalidate statistics cache (new trade changes counts)
                 self.invalidate_statistics_cache()
 
-                # DUAL POSITION LOGIC implemented.
-                # process_trade_settlement(position_basis=None) creates TWO queue entries:
-                #   1. TRADE_DATE basis → position_date=trade_date  (committed exposure)
-                #   2. SETTLE_DATE basis → position_date=settle_date (settled position)
-                # T+1/T+2: TRADE_DATE → cis_position_queue (immediate), SETTLE_DATE → cis_settlement_queue (EOD)
-                # Backdated: chain recalculation handles both bases in worker.
-                #
-                # Process settlement - ALL settlements are queued for async processing
-                # This keeps trade save FAST (non-blocking)
-                # Background worker processes within SLA (< 5 minutes):
-                # - T+0 (today): Queued to cis_position_queue, processed immediately by worker
-                # - T+1/T+2 (future): Queued to cis_settlement_queue, processed by EOD job
-                # - Backdated: Queued to cis_position_queue + chain recalculation flag
-                from trade.services.settlement_service import settlement_service
-                from decimal import Decimal
-
-                settle_date = trade_data.get('settle_date', '')
-                trade_date = trade_data.get('trade_date', '')
-                charges = Decimal(str(trade_data.get('commission', 0) or 0)) + \
-                          Decimal(str(trade_data.get('sec_fee', 0) or 0)) + \
-                          Decimal(str(trade_data.get('other_charges', 0) or 0))
-
-                # position_basis=None → dual mode: creates TRADE_DATE + SETTLE_DATE positions
-                # async_mode=True → non-blocking, queued for background worker
-                settlement_success, settlement_msg, settlement_result = settlement_service.process_trade_settlement(
-                    trade_id=trade_id,
-                    portfolio_id=trade_data.get('portfolio_short_name', ''),
-                    security_id=trade_data.get('security_label', ''),
-                    trade_type=trade_data.get('trade_type', ''),
-                    quantity=Decimal(str(trade_data.get('quantity', 0) or 0)),
-                    price=Decimal(str(trade_data.get('price', 0) or 0)),
-                    charges=charges,
-                    trade_date=trade_date,
-                    settle_date=settle_date,
-                    updated_by=created_by,
-                    security_currency=security_details.get('currency_code') if security_details else None,
-                    portfolio_currency=portfolio_details.get('currency') if portfolio_details else None,
-                    isin=security_details.get('isin') if security_details else None,
-                    security_name=security_details.get('security_name') if security_details else None,
-                    custodian=trade_data.get('custodian', ''),
-                    sub_custodian=trade_data.get('udf_sub_custodian', ''),
-                    async_mode=True,
-                    position_basis=None  # dual: TRADE_DATE + SETTLE_DATE
-                )
-
-                if settlement_success:
-                    logger.info(f"Settlement queued for trade {trade_id}: {settlement_msg}")
-                else:
-                    logger.warning(f"Settlement queue note for trade {trade_id}: {settlement_msg}")
+                # Position calculation is queued at SETTLE action (trade_settle view),
+                # not here at INITIAL creation. Queuing at creation is wrong because the
+                # trade may still be rejected by the checker — we must only calculate
+                # positions for fully approved (SETTLED) trades.
+                logger.info(f"Trade {trade_id} created with INITIAL status — position queued at settle step")
 
                 return trade_id
 
