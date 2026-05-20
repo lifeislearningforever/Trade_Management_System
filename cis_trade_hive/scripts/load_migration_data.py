@@ -208,7 +208,7 @@ PARTY_ALIASES: Dict[str, str] = {
     'updated_by':       'updated_by',
 }
 
-PARTY_BOOL_COLS = {'is_broker', 'is_custodian', 'is_issuer', 'is_bank', 'is_subsidiary', 'is_corporate', 'is_active'}
+PARTY_BOOL_COLS = {'is_broker', 'is_custodian', 'is_issuer', 'is_bank', 'is_subsidiary', 'is_corporate', 'is_active', 'is_deleted'}
 
 
 def load_party(rows: List[Dict], status: str, dry_run: bool, processing_date: str = '') -> Tuple[int, int, List[str]]:
