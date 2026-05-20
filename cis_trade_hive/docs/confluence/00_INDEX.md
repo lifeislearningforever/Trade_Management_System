@@ -30,7 +30,8 @@ CIS Trade Hive (Space Home)
 ├── 07 — Audit Logging                        ← Support / SA / Developer
 ├── 08 — Environments & Configuration         ← Developer / Support
 ├── 09 — Data Migration & Backup/Restore      ← Developer / Support
-└── 10 — Glossary                             ← Everyone
+├── 10 — Glossary                             ← Everyone
+└── 11 — CDP Cluster Access Flow (Ranger)     ← GIPS / Infrastructure / Security
 ```
 
 ---
@@ -57,3 +58,4 @@ CIS Trade Hive (Space Home)
 | `08_environments.md` | Environments & Configuration | Dev / Support |
 | `09_migration.md` | Data Migration & Backup/Restore | Dev / Support |
 | `10_glossary.md` | Glossary | Everyone |
+| `11_cdp_ranger_access_flow.md` | CDP Cluster Access Flow (Ranger) | GIPS / Infra / Security |
