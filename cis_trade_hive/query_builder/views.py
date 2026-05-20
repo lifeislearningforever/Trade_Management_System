@@ -25,10 +25,18 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------
 
 def _user_role(request) -> str:
-    groups = [g.upper() for g in request.session.get('user_groups', [])]
+    raw = request.session.get('user_groups', [])
+    # user_groups is a list of dicts: [{'group_name': 'CIS-SYSOPS', ...}]
+    groups = [
+        (g.get('group_name', '') if isinstance(g, dict) else str(g)).upper()
+        for g in raw
+    ]
     for role in ('RBAC_ADMIN', 'ADMIN', 'RISK_MANAGER', 'TRADER'):
         if role in groups:
             return role
+    # CIS-SYSOPS maps to ADMIN for row-limit purposes
+    if 'CIS-SYSOPS' in groups:
+        return 'ADMIN'
     return 'VIEWER'
 
 
