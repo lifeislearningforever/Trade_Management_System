@@ -398,10 +398,13 @@ class ACLRepositoryV2:
 
                 for perm in group_perms:
                     perm_name = perm.get('permission_name')
-                    mode = perm.get('mode', 'READ')
+                    raw_mode = perm.get('mode', 'READ')
 
                     if not perm_name:
                         continue
+
+                    # Normalise READ_WRITE (stored in DB) → WRITE (used by has_perm checks)
+                    mode = 'WRITE' if raw_mode == 'READ_WRITE' else raw_mode
 
                     # Use highest privilege (WRITE > READ)
                     existing_mode = permission_map.get(perm_name)
