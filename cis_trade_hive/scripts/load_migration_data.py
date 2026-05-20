@@ -9,10 +9,13 @@ Usage:
     python scripts/load_migration_data.py --table security   --file /path/to/security.csv
 
 Options:
-    --dry-run        Parse + validate only, no writes to Kudu
-    --delimiter ","  CSV delimiter (default comma)
-    --batch 100      Rows per UPSERT batch (default 100)
-    --status ACTIVE  Override status field (default ACTIVE)
+    --dry-run                  Parse + validate only, no writes to Kudu
+    --delimiter ","            CSV delimiter (default comma)
+    --batch 100                Rows per UPSERT batch (default 100)
+    --status ACTIVE            Override status field (default ACTIVE)
+    --processing-date 2026-05-20  Set processing_date on every row (default: today).
+                               If the CSV already has a processing_date column that
+                               value takes priority over this argument.
 
 Output:
     Prints a summary of loaded / skipped / failed rows.
@@ -208,7 +211,7 @@ PARTY_ALIASES: Dict[str, str] = {
 PARTY_BOOL_COLS = {'is_broker', 'is_custodian', 'is_issuer', 'is_bank', 'is_subsidiary', 'is_corporate', 'is_active'}
 
 
-def load_party(rows: List[Dict], status: str, dry_run: bool) -> Tuple[int, int, List[str]]:
+def load_party(rows: List[Dict], status: str, dry_run: bool, processing_date: str = '') -> Tuple[int, int, List[str]]:
     ok = fail = 0
     errors: List[str] = []
     ts = _now()
@@ -237,6 +240,7 @@ def load_party(rows: List[Dict], status: str, dry_run: bool) -> Tuple[int, int, 
         mapped.setdefault('updated_by', SRC_SYSTEM)
         mapped['created_at'] = ts
         mapped['updated_at'] = ts
+        mapped.setdefault('processing_date', processing_date)
 
         col_names = []
         col_vals = []
@@ -301,7 +305,7 @@ PARTY_CIF_ALIASES: Dict[str, str] = {
 PARTY_CIF_BOOL_COLS = {'is_active', 'is_deleted'}
 
 
-def load_party_cif(rows: List[Dict], status: str, dry_run: bool) -> Tuple[int, int, List[str]]:
+def load_party_cif(rows: List[Dict], status: str, dry_run: bool, processing_date: str = '') -> Tuple[int, int, List[str]]:
     ok = fail = 0
     errors: List[str] = []
     ts = _now()
@@ -328,6 +332,7 @@ def load_party_cif(rows: List[Dict], status: str, dry_run: bool) -> Tuple[int, i
         mapped.setdefault('updated_by', SRC_SYSTEM)
         mapped['created_at'] = ts
         mapped['updated_at'] = ts
+        mapped.setdefault('processing_date', processing_date)
 
         col_names = []
         col_vals = []
@@ -431,7 +436,7 @@ SECURITY_BIGINT_COLS  = {'shares_outstanding'}
 SECURITY_BOOL_COLS    = {'is_active'}
 
 
-def load_security(rows: List[Dict], status: str, dry_run: bool) -> Tuple[int, int, List[str]]:
+def load_security(rows: List[Dict], status: str, dry_run: bool, processing_date: str = '') -> Tuple[int, int, List[str]]:
     ok = fail = 0
     errors: List[str] = []
 
@@ -461,6 +466,7 @@ def load_security(rows: List[Dict], status: str, dry_run: bool) -> Tuple[int, in
         mapped.setdefault('updated_by', SRC_SYSTEM)
         mapped['created_at'] = str(security_id)   # BIGINT ms, same convention as repo
         mapped['updated_at'] = str(security_id)
+        mapped.setdefault('processing_date', processing_date)
 
         col_names = []
         col_vals = []
@@ -524,34 +530,48 @@ LOADERS = {
 
 
 def main():
+    today_yyyymmdd = datetime.now().strftime('%Y%m%d')
+
     parser = argparse.ArgumentParser(description='CIS migration data loader')
-    parser.add_argument('--table',     required=True, choices=list(LOADERS), help='Target table')
-    parser.add_argument('--file',      required=True, help='Path to CSV file')
-    parser.add_argument('--delimiter', default=',',   help='CSV delimiter (default: ,)')
-    parser.add_argument('--status',    default='ACTIVE', help='status value to set (default: ACTIVE)')
-    parser.add_argument('--dry-run',   action='store_true', help='Parse and validate only, no writes')
+    parser.add_argument('--table',           required=True, choices=list(LOADERS), help='Target table')
+    parser.add_argument('--file',            required=True, help='Path to CSV file')
+    parser.add_argument('--delimiter',       default=',',   help='CSV delimiter (default: ,)')
+    parser.add_argument('--status',          default='ACTIVE', help='status value (default: ACTIVE)')
+    parser.add_argument('--processing-date', default=today_yyyymmdd,
+                        help='processing_date in YYYYMMDD format (default: today). '
+                             'CSV column value takes priority if present.')
+    parser.add_argument('--dry-run',         action='store_true', help='Parse and validate only, no writes')
     args = parser.parse_args()
+
+    # Validate YYYYMMDD format
+    proc_date = args.processing_date
+    try:
+        datetime.strptime(proc_date, '%Y%m%d')
+    except ValueError:
+        logger.error("--processing-date must be YYYYMMDD, got: %s", proc_date)
+        sys.exit(1)
 
     if not os.path.isfile(args.file):
         logger.error("File not found: %s", args.file)
         sys.exit(1)
 
-    logger.info("Loading %s from %s (dry_run=%s)", args.table, args.file, args.dry_run)
+    logger.info("Loading %s from %s (dry_run=%s, processing_date=%s)", args.table, args.file, args.dry_run, proc_date)
     headers, rows = _read_csv(args.file, args.delimiter)
     logger.info("Read %d rows, columns: %s", len(rows), headers)
 
     loader = LOADERS[args.table]
-    ok, fail, errors = loader(rows, args.status, args.dry_run)
+    ok, fail, errors = loader(rows, args.status, args.dry_run, proc_date)
 
     print()
     print("=" * 50)
-    print(f"  Table   : {DATABASE}.cis_{args.table}")
-    print(f"  File    : {args.file}")
-    print(f"  Total   : {len(rows)}")
-    print(f"  Loaded  : {ok}")
-    print(f"  Failed  : {fail}")
+    print(f"  Table            : {DATABASE}.cis_{args.table}")
+    print(f"  File             : {args.file}")
+    print(f"  processing_date  : {proc_date}")
+    print(f"  Total            : {len(rows)}")
+    print(f"  Loaded           : {ok}")
+    print(f"  Failed           : {fail}")
     if args.dry_run:
-        print("  Mode    : DRY RUN — no data written")
+        print("  Mode             : DRY RUN — no data written")
     print("=" * 50)
 
     if errors:
