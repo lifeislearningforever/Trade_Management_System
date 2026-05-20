@@ -52,10 +52,24 @@ SRC_SYSTEM = 'CIS'
 # ---------------------------------------------------------------------------
 
 def _escape(value: Any) -> str:
-    """Return SQL-safe quoted string or NULL."""
+    """Return SQL-safe quoted string or NULL.
+
+    Handles:
+      - single quotes  →  doubled ('')
+      - backslash      →  doubled (\\)
+      - newline / CR   →  space (Kudu STRING columns are single-line)
+      - null byte      →  removed
+    """
     if value is None or str(value).strip() == '':
         return 'NULL'
-    return "'" + str(value).replace("'", "''") + "'"
+    s = str(value)
+    s = s.replace('\\', '\\\\')   # backslash first, before any other replacement
+    s = s.replace("'", "''")       # single quote → doubled
+    s = s.replace('\n', ' ')       # newline → space
+    s = s.replace('\r', ' ')       # carriage return → space
+    s = s.replace('\t', ' ')       # tab → space
+    s = s.replace('\x00', '')      # null byte → removed
+    return "'" + s + "'"
 
 
 def _bool(value: Any) -> str:
