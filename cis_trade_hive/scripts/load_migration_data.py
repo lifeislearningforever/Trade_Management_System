@@ -688,14 +688,12 @@ def load_trade(rows: List[Dict], status: str, dry_run: bool, processing_date: st
             if db_col:
                 mapped[db_col] = raw_val
 
-        # trade_id is required — must come from CSV
-        raw_id = mapped.get('trade_id', '').strip() if mapped.get('trade_id') else ''
+        # trade_id: use CSV value if present, otherwise auto-generate
+        raw_id = str(mapped.get('trade_id', '') or '').strip()
         if not raw_id:
-            msg = f"Row {i}: missing trade_id — skipped"
-            logger.warning(msg)
-            errors.append(msg)
-            fail += 1
-            continue
+            raw_id = str(_timestamp_ms() + i)
+            mapped['trade_id'] = raw_id
+            logger.debug("Row %d: trade_id not in CSV, auto-generated %s", i, raw_id)
 
         # Required business fields
         if not mapped.get('trade_type', '').strip():
