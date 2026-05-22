@@ -732,9 +732,10 @@ def load_trade(rows: List[Dict], status: str, dry_run: bool, processing_date: st
         mapped.setdefault('updated_by', SRC_SYSTEM)
         mapped.setdefault('created_at', ts)
         mapped.setdefault('updated_at', ts)
-        # deal_number: use trade_id as fallback if not in CSV
+        # deal_number: match CIS UI format DEAL-YYYYMMDD-<last4 of trade_id>
         if not mapped.get('deal_number', '').strip():
-            mapped['deal_number'] = f"MIG-{raw_id}"
+            trade_date_str = mapped.get('trade_date', ts[:10]).replace('-', '')[:8]
+            mapped['deal_number'] = f"DEAL-{trade_date_str}-{str(raw_id)[-4:].zfill(4)}"
 
         col_names = []
         col_vals = []
