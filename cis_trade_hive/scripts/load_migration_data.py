@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 """
-Migration Data Loader — cis_party, cis_party_cif, cis_security
+Migration Data Loader — cis_party, cis_party_cif, cis_security, cis_trade
 Loads records from CSV files with src_system = 'CIS'.
 
 Usage:
     python scripts/load_migration_data.py --table party      --file /path/to/party.csv
     python scripts/load_migration_data.py --table party_cif  --file /path/to/party_cif.csv
     python scripts/load_migration_data.py --table security   --file /path/to/security.csv
+    python scripts/load_migration_data.py --table trade      --file /path/to/trade.csv
 
 Options:
     --dry-run                  Parse + validate only, no writes to Kudu
@@ -517,6 +518,257 @@ def load_security(rows: List[Dict], status: str, dry_run: bool, processing_date:
 
 
 # ---------------------------------------------------------------------------
+# cis_trade
+# ---------------------------------------------------------------------------
+
+TRADE_ALIASES: Dict[str, str] = {
+    # Primary key — must be in CSV (source system ID)
+    'trade_id':                 'trade_id',
+    'id':                       'trade_id',
+
+    # Core trade fields
+    'trade_type':               'trade_type',
+    'type':                     'trade_type',
+    'deal_number':              'deal_number',
+    'deal_no':                  'deal_number',
+    'deal_num':                 'deal_number',
+
+    'portfolio_short_name':     'portfolio_short_name',
+    'portfolio':                'portfolio_short_name',
+    'portfolio_name':           'portfolio_short_name',
+    'portfolio_full_name':      'portfolio_full_name',
+
+    'security_label':           'security_label',
+    'security':                 'security_label',
+    'security_name':            'security_label',
+    'security_full_name':       'security_full_name',
+    'security_type':            'security_type',
+
+    'currency_code':            'currency_code',
+    'currency':                 'currency_code',
+    'portfolio_currency':       'portfolio_currency',
+
+    'trade_status':             'trade_status',
+    'trade_date':               'trade_date',
+    'settle_date':              'settle_date',
+    'settlement_date':          'settle_date',
+    'expiry_date':              'expiry_date',
+
+    # Numeric fields
+    'quantity':                 'quantity',
+    'qty':                      'quantity',
+    'face_value':               'face_value',
+    'lot':                      'lot',
+    'price':                    'price',
+    'commission':               'commission',
+    'accrued_interest':         'accrued_interest',
+    'sec_fee':                  'sec_fee',
+    'other_charges':            'other_charges',
+    'total_amount':             'total_amount',
+    'total_amount_fc':          'total_amount_fc',
+    'total_amount_lc':          'total_amount_lc',
+
+    'charge_fee_type':          'charge_fee_type',
+    'charge_exchange':          'charge_exchange',
+    'charge_country':           'charge_country',
+    'charge_fee_rule':          'charge_fee_rule',
+    'charge_fee_value':         'charge_fee_value',
+    'calculated_commission':    'calculated_commission',
+    'calculated_clearing_fee':  'calculated_clearing_fee',
+    'calculated_trading_fee':   'calculated_trading_fee',
+    'calculated_gst':           'calculated_gst',
+    'calculated_other_fees':    'calculated_other_fees',
+    'total_calculated_charges': 'total_calculated_charges',
+    'charges_auto_calculated':  'charges_auto_calculated',
+
+    'open_close_position':      'open_close_position',
+    'open_close':               'open_close_position',
+    'extension':                'extension',
+    'brokers':                  'brokers',
+    'broker_name':              'broker_name',
+    'broker':                   'broker_name',
+    'gl_fund_type':             'gl_fund_type',
+    'gl_cost_centre':           'gl_cost_centre',
+    'gl_account_code':          'gl_account_code',
+    'contract_ref':             'contract_ref',
+    'fd_receipt':               'fd_receipt',
+    'org_pur_date':             'org_pur_date',
+    'open_fx_rate':             'open_fx_rate',
+    'curr_dealing':             'curr_dealing',
+    'open_dealing':             'open_dealing',
+    'input_tax_oth':            'input_tax_oth',
+    'qty_entitled':             'qty_entitled',
+    'selling_rule':             'selling_rule',
+    'cash_balance':             'cash_balance',
+    'custodian':                'custodian',
+    'amor_accr_method':         'amor_accr_method',
+    'lots_held':                'lots_held',
+    'quantity_held':            'quantity_held',
+    'remarks':                  'remarks',
+
+    # UDF fields
+    'udf_fund_type':            'udf_fund_type',
+    'udf_sub_custodian':        'udf_sub_custodian',
+    'udf_disclosure_req':       'udf_disclosure_req',
+    'udf_counter_pledged':      'udf_counter_pledged',
+    'udf_revision_code':        'udf_revision_code',
+    'udf_uobn_uobn_hk':         'udf_uobn_uobn_hk',
+    'udf_income_exp_type':      'udf_income_exp_type',
+    'udf_currency_hedge':       'udf_currency_hedge',
+
+    # CA / split / delivery fields
+    'realized_pnl':             'realized_pnl',
+    'parent_trade_id':          'parent_trade_id',
+    'delivery_type':            'delivery_type',
+    'counterparty':             'counterparty',
+    'reduction_type':           'reduction_type',
+    'reduction_amount':         'reduction_amount',
+    'units_affected':           'units_affected',
+    'income_type':              'income_type',
+    'ex_date':                  'ex_date',
+    'record_date':              'record_date',
+    'pay_date':                 'pay_date',
+    'amount_per_unit':          'amount_per_unit',
+    'gross_amount':             'gross_amount',
+    'withholding_tax':          'withholding_tax',
+    'net_amount':               'net_amount',
+    'split_type':               'split_type',
+    'split_ratio_new':          'split_ratio_new',
+    'split_ratio_old':          'split_ratio_old',
+    'effective_date':           'effective_date',
+
+    # Workflow / audit
+    'status':                   'status',
+    'internal_ref':             'internal_ref',
+    'external_ref':             'external_ref',
+    'submitted_by':             'submitted_by',
+    'submitted_at':             'submitted_at',
+    'validated_by':             'validated_by',
+    'validated_at':             'validated_at',
+    'validation_comments':      'validation_comments',
+    'settled_by':               'settled_by',
+    'settled_at':               'settled_at',
+    'settlement_comments':      'settlement_comments',
+    'cancelled_by':             'cancelled_by',
+    'cancelled_at':             'cancelled_at',
+    'cancel_reason':            'cancel_reason',
+
+    'is_active':                'is_active',
+    'is_deleted':               'is_deleted',
+    'created_by':               'created_by',
+    'updated_by':               'updated_by',
+    'created_at':               'created_at',
+    'updated_at':               'updated_at',
+}
+
+TRADE_DECIMAL_COLS = {
+    'quantity', 'face_value', 'lot', 'price', 'commission', 'accrued_interest',
+    'sec_fee', 'other_charges', 'total_amount', 'total_amount_fc', 'total_amount_lc',
+    'charge_fee_value', 'calculated_commission', 'calculated_clearing_fee',
+    'calculated_trading_fee', 'calculated_gst', 'calculated_other_fees',
+    'total_calculated_charges', 'open_fx_rate', 'curr_dealing', 'open_dealing',
+    'input_tax_oth', 'qty_entitled', 'cash_balance', 'lots_held', 'quantity_held',
+    'realized_pnl', 'reduction_amount', 'units_affected', 'amount_per_unit',
+    'gross_amount', 'withholding_tax', 'net_amount',
+}
+TRADE_BIGINT_COLS = {'trade_id', 'parent_trade_id', 'split_ratio_new', 'split_ratio_old'}
+TRADE_BOOL_COLS   = {'is_active', 'is_deleted', 'charges_auto_calculated',
+                     'udf_disclosure_req', 'udf_counter_pledged', 'udf_currency_hedge'}
+
+
+def load_trade(rows: List[Dict], status: str, dry_run: bool, processing_date: str = '') -> Tuple[int, int, List[str]]:
+    ok = fail = 0
+    errors: List[str] = []
+    ts = _now()
+
+    for i, raw in enumerate(rows, 1):
+        mapped: Dict[str, Any] = {}
+        for raw_col, raw_val in raw.items():
+            db_col = TRADE_ALIASES.get(raw_col)
+            if db_col:
+                mapped[db_col] = raw_val
+
+        # trade_id is required — must come from CSV
+        raw_id = mapped.get('trade_id', '').strip() if mapped.get('trade_id') else ''
+        if not raw_id:
+            msg = f"Row {i}: missing trade_id — skipped"
+            logger.warning(msg)
+            errors.append(msg)
+            fail += 1
+            continue
+
+        # Required business fields
+        if not mapped.get('trade_type', '').strip():
+            msg = f"Row {i} (trade_id={raw_id}): missing trade_type — skipped"
+            logger.warning(msg)
+            errors.append(msg)
+            fail += 1
+            continue
+        if not mapped.get('portfolio_short_name', '').strip():
+            msg = f"Row {i} (trade_id={raw_id}): missing portfolio_short_name — skipped"
+            logger.warning(msg)
+            errors.append(msg)
+            fail += 1
+            continue
+        if not mapped.get('security_label', '').strip():
+            msg = f"Row {i} (trade_id={raw_id}): missing security_label — skipped"
+            logger.warning(msg)
+            errors.append(msg)
+            fail += 1
+            continue
+        if not mapped.get('trade_date', '').strip():
+            msg = f"Row {i} (trade_id={raw_id}): missing trade_date — skipped"
+            logger.warning(msg)
+            errors.append(msg)
+            fail += 1
+            continue
+
+        # Fixed / derived fields
+        mapped['src_system'] = SRC_SYSTEM
+        mapped.setdefault('status', status)
+        mapped.setdefault('is_active', True)
+        mapped.setdefault('is_deleted', False)
+        mapped.setdefault('created_by', SRC_SYSTEM)
+        mapped.setdefault('updated_by', SRC_SYSTEM)
+        mapped.setdefault('created_at', ts)
+        mapped.setdefault('updated_at', ts)
+        # deal_number: use trade_id as fallback if not in CSV
+        if not mapped.get('deal_number', '').strip():
+            mapped['deal_number'] = f"MIG-{raw_id}"
+
+        col_names = []
+        col_vals = []
+        for col, val in mapped.items():
+            col_names.append(col)
+            if col in TRADE_BOOL_COLS:
+                col_vals.append(_bool(val))
+            elif col in TRADE_DECIMAL_COLS:
+                col_vals.append(_decimal(val))
+            elif col in TRADE_BIGINT_COLS:
+                col_vals.append(_bigint(val))
+            else:
+                col_vals.append(_escape(val))
+
+        if dry_run:
+            logger.info("[DRY-RUN] trade row %d: trade_id=%s type=%s portfolio=%s security=%s",
+                        i, raw_id, mapped.get('trade_type'), mapped.get('portfolio_short_name'), mapped.get('security_label'))
+            ok += 1
+            continue
+
+        sql = f"UPSERT INTO {DATABASE}.cis_trade ({', '.join(col_names)}) VALUES ({', '.join(col_vals)})"
+        try:
+            impala_manager.execute_write(sql, database=DATABASE)
+            ok += 1
+        except Exception as exc:
+            msg = f"Row {i} (trade_id={raw_id}): {exc}"
+            logger.error(msg)
+            errors.append(msg)
+            fail += 1
+
+    return ok, fail, errors
+
+
+# ---------------------------------------------------------------------------
 # error report
 # ---------------------------------------------------------------------------
 
@@ -541,6 +793,15 @@ LOADERS = {
     'party':     load_party,
     'party_cif': load_party_cif,
     'security':  load_security,
+    'trade':     load_trade,
+}
+
+# Default status per table (can be overridden with --status)
+DEFAULT_STATUS = {
+    'party':     'ACTIVE',
+    'party_cif': 'ACTIVE',
+    'security':  'ACTIVE',
+    'trade':     'SETTLED',
 }
 
 
@@ -551,7 +812,8 @@ def main():
     parser.add_argument('--table',           required=True, choices=list(LOADERS), help='Target table')
     parser.add_argument('--file',            required=True, help='Path to CSV file')
     parser.add_argument('--delimiter',       default=',',   help='CSV delimiter (default: ,)')
-    parser.add_argument('--status',          default='ACTIVE', help='status value (default: ACTIVE)')
+    parser.add_argument('--status',          default=None,
+                        help='status value to set. Defaults: party/party_cif/security=ACTIVE, trade=SETTLED')
     parser.add_argument('--processing-date', default=today_yyyymmdd,
                         help='processing_date in YYYYMMDD format (default: today). '
                              'CSV column value takes priority if present.')
@@ -570,12 +832,14 @@ def main():
         logger.error("File not found: %s", args.file)
         sys.exit(1)
 
-    logger.info("Loading %s from %s (dry_run=%s, processing_date=%s)", args.table, args.file, args.dry_run, proc_date)
+    effective_status = args.status or DEFAULT_STATUS[args.table]
+    logger.info("Loading %s from %s (dry_run=%s, status=%s, processing_date=%s)",
+                args.table, args.file, args.dry_run, effective_status, proc_date)
     headers, rows = _read_csv(args.file, args.delimiter)
     logger.info("Read %d rows, columns: %s", len(rows), headers)
 
     loader = LOADERS[args.table]
-    ok, fail, errors = loader(rows, args.status, args.dry_run, proc_date)
+    ok, fail, errors = loader(rows, effective_status, args.dry_run, proc_date)
 
     print()
     print("=" * 50)
