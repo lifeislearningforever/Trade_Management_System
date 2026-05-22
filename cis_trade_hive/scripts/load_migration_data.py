@@ -82,11 +82,13 @@ def _bool(value: Any) -> str:
     return 'false'
 
 
-def _decimal(value: Any) -> str:
+def _decimal(value: Any, scale: int = 6) -> str:
+    """Round to `scale` decimal places to match DECIMAL(20,scale) column."""
     if value is None or str(value).strip() == '':
         return 'NULL'
     try:
-        return str(Decimal(str(value).strip()))
+        quantize_str = Decimal(10) ** -scale
+        return str(Decimal(str(value).strip()).quantize(quantize_str))
     except InvalidOperation:
         return 'NULL'
 
