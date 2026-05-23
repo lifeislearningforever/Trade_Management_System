@@ -106,6 +106,26 @@ def _now() -> str:
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
+def _normalise_date(val: Any) -> str:
+    """
+    Convert any recognisable date format to YYYY-MM-DD.
+    Handles: DD/MM/YYYY, DD-MM-YYYY, YYYYMMDD, YYYY-MM-DD, datetime objects.
+    Returns '' if unparseable (caller should treat as missing).
+    """
+    if not val:
+        return ''
+    if hasattr(val, 'strftime'):          # date / datetime object
+        return val.strftime('%Y-%m-%d')
+    s = str(val).strip()
+    for fmt in ('%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d', '%Y%m%d',
+                '%m/%d/%Y', '%d/%m/%y', '%d-%m-%y'):
+        try:
+            return datetime.strptime(s, fmt).strftime('%Y-%m-%d')
+        except ValueError:
+            continue
+    return s  # return as-is if already correct or unrecognised
+
+
 def _timestamp_ms() -> int:
     return int(datetime.now().timestamp() * 1000)
 
@@ -730,9 +750,18 @@ def load_trade(
             fail += 1
             continue
 
+        # Normalise date columns to YYYY-MM-DD (CSV may use DD/MM/YYYY etc.)
+        for _dcol in ('trade_date', 'settle_date', 'expiry_date',
+                      'org_pur_date', 'ex_date', 'record_date', 'pay_date',
+                      'effective_date'):
+            if mapped.get(_dcol):
+                mapped[_dcol] = _normalise_date(mapped[_dcol])
+
         # Fixed / derived fields
         mapped['src_system'] = SRC_SYSTEM
-        mapped.setdefault('status', status)
+        # Always force status — setdefault skips if CSV has a blank status col
+        if not str(mapped.get('status', '') or '').strip():
+            mapped['status'] = status
         mapped.setdefault('is_active', True)
         mapped.setdefault('is_deleted', False)
         mapped.setdefault('created_by', SRC_SYSTEM)
@@ -877,17 +906,15 @@ def load_position(
     ok = fail = 0
     errors: List[str] = []
 
-    # Build WHERE clause
+    # Build WHERE clause — date filters applied in Python after normalising
+    # because legacy migrations may have stored dates as DD/MM/YYYY (string
+    # comparison against YYYY-MM-DD bounds gives wrong results in SQL).
     conditions = ["status = 'SETTLED'", "trade_type IN ('BUY','SELL')",
                   "is_deleted = false"]
     if portfolio_filter:
         conditions.append(f"portfolio_short_name = '{portfolio_filter.replace(chr(39), chr(92)+chr(39))}'")
     if trade_type_filter:
         conditions.append(f"trade_type = '{trade_type_filter.upper()}'")
-    if trade_date_from:
-        conditions.append(f"trade_date >= '{trade_date_from}'")
-    if trade_date_to:
-        conditions.append(f"trade_date <= '{trade_date_to}'")
 
     where = ' AND '.join(conditions)
     sql = (
@@ -896,7 +923,7 @@ def load_position(
         f"quantity, price, commission, sec_fee, other_charges, "
         f"trade_date, settle_date "
         f"FROM {DATABASE}.cis_trade WHERE {where} "
-        f"ORDER BY trade_date, trade_id"
+        f"ORDER BY trade_id"
     )
 
     logger.info("Fetching trades: %s", sql)
@@ -905,13 +932,42 @@ def load_position(
         logger.info("No SETTLED BUY/SELL trades found matching the filter.")
         return 0, 0, []
 
+    # Apply date-range filters in Python after normalising stored date strings
+    from datetime import date as _date
+    _from_dt = datetime.strptime(trade_date_from, '%Y-%m-%d').date() if trade_date_from else None
+    _to_dt   = datetime.strptime(trade_date_to,   '%Y-%m-%d').date() if trade_date_to   else None
+    if _from_dt or _to_dt:
+        filtered = []
+        for r in rows:
+            _td = _normalise_date(r.get('trade_date', ''))
+            try:
+                _td_dt = datetime.strptime(_td, '%Y-%m-%d').date()
+            except ValueError:
+                filtered.append(r)   # can't parse — include and let settlement_service handle
+                continue
+            if _from_dt and _td_dt < _from_dt:
+                continue
+            if _to_dt and _td_dt > _to_dt:
+                continue
+            filtered.append(r)
+        logger.info("Date filter applied: %d → %d rows", len(rows), len(filtered))
+        rows = filtered
+
     logger.info("Found %d trades to process for positions", len(rows))
 
     for i, row in enumerate(rows, 1):
         raw_id = str(row.get('trade_id', ''))
+        # Normalise dates from DB — may be stored as DD/MM/YYYY from old migration
+        row = dict(row)
+        row['trade_date']  = _normalise_date(row.get('trade_date',  ''))
+        row['settle_date'] = _normalise_date(row.get('settle_date', ''))
+        if not row['settle_date']:
+            row['settle_date'] = row['trade_date']
+
         if dry_run:
-            logger.info("[DRY-RUN] position row %d: trade_id=%s %s %s qty=%s",
-                        i, raw_id, row.get('trade_type'), row.get('security_label'), row.get('quantity'))
+            logger.info("[DRY-RUN] position row %d: trade_id=%s %s %s qty=%s trade_date=%s",
+                        i, raw_id, row.get('trade_type'), row.get('security_label'),
+                        row.get('quantity'), row.get('trade_date'))
             ok += 1
             continue
 

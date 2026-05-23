@@ -427,7 +427,7 @@ def upload_create(request):
                             _desc_parts.append(f"{_dup_count} duplicates removed")
                         _desc = '\n'.join(_desc_parts)
                         _repo.update_upload(upload_id, {
-                            'status': 'VALIDATED',
+                            'status': 'COMPLETED' if _ingest_ok else 'VALIDATED',
                             'description': _desc,
                             'row_count': _rows_inserted,
                         }, user_info['username'])
@@ -1365,6 +1365,19 @@ def run_position_etl(request, upload_id: str):
                 updated_by=_username,
             )
             if ok:
+                # Persist completed status + ETL identifiers so download report can find the partition
+                _etl_desc = (
+                    f"Position ETL complete\n"
+                    f"src_id={_src_id}\n"
+                    f"processing_date={_proc_date}\n"
+                    f"total={result.get('total', 0)} pass={result.get('passed', 0)} fail={result.get('failed', 0)}"
+                )
+                upload_service.repository.update_upload(
+                    upload_id,
+                    {'status': UploadKuduRepository.STATUS_COMPLETED,
+                     'description': _etl_desc},
+                    _username
+                )
                 audit_log_kudu_repository.log_action(
                     user_id=_user_id, username=_username,
                     user_email=_user_email, action_type='POSITION_ETL',

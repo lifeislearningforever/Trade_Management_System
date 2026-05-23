@@ -31,21 +31,29 @@ def _serialise_sample_data(rows) -> str:
     """
     Safely serialise sample_data rows for Kudu storage.
 
-    Stores all rows (no cap) so cross-node ingest can use the full file.
-    Truncates each cell value to 200 chars to keep the JSON within Kudu
-    STRING limits while preserving all record-level data.
+    Kudu VARCHAR(65535) hard limit. With large files (800+ rows × many cols)
+    the full dataset easily exceeds 65 KB, so we store at most 50 preview rows
+    (cell values capped at 200 chars). Full data is never needed from the DB —
+    it is re-read from the uploaded file at ingest time.
     """
     if not rows:
         return '[]'
     if not isinstance(rows, list):
         return '[]'
+    # Keep only a small preview — just enough for the detail page table
+    preview_rows = rows[:50]
     safe_rows = []
-    for row in rows:
+    for row in preview_rows:
         if isinstance(row, dict):
             safe_rows.append({k: str(v)[:200] for k, v in row.items()})
         else:
             safe_rows.append(row)
-    return json.dumps(safe_rows)
+    serialised = json.dumps(safe_rows)
+    # Hard safety cap: if even 50 rows exceeds the limit, trim further
+    if len(serialised) > 60000:
+        safe_rows = safe_rows[:10]
+        serialised = json.dumps(safe_rows)
+    return serialised
 
 
 def _serialise_errors(errors) -> str:
