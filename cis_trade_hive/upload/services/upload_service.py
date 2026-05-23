@@ -1586,7 +1586,11 @@ class UploadService:
             # Step 1: Drop any leftover staging table
             impala_manager.execute_write(f"DROP TABLE IF EXISTS {db}.{stg_table}", database=db)
 
-            # Step 2: Create external table over the HDFS staging directory
+            # Step 2: Create external table over the HDFS staging directory.
+            # The LOCATION is a directory — Hive reads ALL files in it.
+            # To prevent accumulation from re-runs, wipe the directory first
+            # then re-upload. Since we only hold one file per upload_id dir,
+            # this is safe.
             create_cols = ',\n    '.join(f"`{c}` STRING" for c in col_names)
             ok = impala_manager.execute_write(f"""
                 CREATE EXTERNAL TABLE {db}.{stg_table} (
@@ -1603,20 +1607,19 @@ class UploadService:
 
             impala_manager.execute_write(f"INVALIDATE METADATA {db}.{stg_table}", database=db)
 
-            # Step 3: Count rows to verify
+            # Step 3: Count rows to verify — also guards against multi-file accumulation
             cnt_rows = impala_manager.execute_query(
                 f"SELECT COUNT(*) AS cnt FROM {db}.{stg_table}", database=db
             )
             row_count = cnt_rows[0].get('cnt', 0) if cnt_rows else 0
-            logger.info(f"[hdfs:impala] staging table {stg_table} has {row_count} rows")
+            logger.info(f"[hdfs:impala] staging table {stg_table} has {row_count} rows at {hdfs_path}")
 
             if row_count == 0:
                 impala_manager.execute_write(f"DROP TABLE IF EXISTS {db}.{stg_table}", database=db)
                 return False, f"HDFS staging table {stg_table} read 0 rows from {hdfs_path} — file may be empty or path wrong"
 
             # Build extra column expressions (only columns NOT already in the file).
-            # src_id and processing_date are partition columns — handled by PARTITION clause.
-            # position_basis: default only if not already a file column.
+            # position_basis defaulted here; src_id goes into PARTITION clause.
             extra_cols = [
                 f"'{src_system}' AS src_system",
                 f"'{sub_system}' AS sub_system",
@@ -1627,14 +1630,24 @@ class UploadService:
             if position_basis and 'position_basis' not in col_names_lower:
                 extra_cols.append(f"'{position_basis}' AS position_basis")
 
-            # Step 4: INSERT into target table
-            # Partition columns (processing_date, src_id) are in the PARTITION clause.
-            # Extra metadata columns are SELECTed as literals.
+            # Step 4: Clear the target partition BEFORE inserting.
+            # cis_user_sta_adhoc_position_* tables are partitioned by processing_date
+            # only (no src_id partition). Always DROP the partition first so that
+            # re-runs never double-insert.
+            impala_manager.execute_write(
+                f"ALTER TABLE {db}.{target_table} "
+                f"DROP IF EXISTS PARTITION (processing_date='{processing_date}')",
+                database=db
+            )
+            logger.info(f"[hdfs:impala] dropped partition processing_date={processing_date} in {target_table} before insert")
+
+            # Step 5: INSERT from staging table into target (always INSERT INTO
+            # after the partition drop — INSERT OVERWRITE on a single-partition-col
+            # table would wipe all partitions if spec omitted, so be explicit).
             extra_cols_sql = ',\n                    '.join(extra_cols)
-            insert_mode = 'OVERWRITE' if ingestion_mode == 'overwrite' else 'INTO'
             ok = impala_manager.execute_write(f"""
-                INSERT {insert_mode} {db}.{target_table}
-                PARTITION (processing_date='{processing_date}', src_id='{source_id}')
+                INSERT INTO {db}.{target_table}
+                PARTITION (processing_date='{processing_date}')
                 SELECT
                     {stg_col_select},
                     {extra_cols_sql}
@@ -1647,16 +1660,16 @@ class UploadService:
 
             impala_manager.execute_write(f"INVALIDATE METADATA {db}.{target_table}", database=db)
 
-            # Step 5: Confirm rows landed
+            # Step 6: Confirm rows landed — filter by processing_date only
+            # (src_id is a data column, not a partition key, on these tables)
             inserted = impala_manager.execute_query(f"""
                 SELECT COUNT(*) AS cnt FROM {db}.{target_table}
                 WHERE processing_date = '{processing_date}'
-                  AND src_id = '{source_id}'
             """, database=db)
             inserted_count = inserted[0].get('cnt', 0) if inserted else 0
-            logger.info(f"[hdfs:impala] inserted {inserted_count} rows into {target_table} partition processing_date={processing_date} src_id={source_id}")
+            logger.info(f"[hdfs:impala] inserted {inserted_count} rows into {target_table} partition processing_date={processing_date}")
 
-            # Step 6: Drop staging table (external — HDFS data preserved)
+            # Step 7: Drop staging table (external — HDFS data preserved for audit)
             impala_manager.execute_write(f"DROP TABLE IF EXISTS {db}.{stg_table}", database=db)
 
             return True, f"Ingested {inserted_count} rows from HDFS into {target_table} (processing_date={processing_date})"
