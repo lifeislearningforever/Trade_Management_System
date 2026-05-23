@@ -1941,75 +1941,62 @@ class UploadService:
             # Get non-partition columns (exclude processing_date)
             non_partition_cols = [col for col in target_table_cols if col.lower() != 'processing_date']
 
-            # Step 1: For overwrite mode, clear the partition first.
-            # Impala INSERT INTO PARTITION does not support an explicit column list —
-            # the column list must be omitted; values must match table column order.
+            # Step 1: For overwrite mode, delete the partition first using Impala
+            # DROP PARTITION, which is the only safe way to clear a Hive partition
+            # without relying on SELECT * column ordering.
             if ingestion_mode != 'append':
-                clear_sql = (
-                    f"INSERT OVERWRITE {self.repository.DATABASE}.{target_table} "
-                    f"PARTITION (processing_date='{processing_date}') "
-                    f"SELECT * FROM {self.repository.DATABASE}.{target_table} "
-                    f"WHERE 1=0"
-                )
-                impala_manager.execute_write(clear_sql, database=self.repository.DATABASE)
-                logger.info(f"Cleared partition processing_date='{processing_date}' for overwrite")
-
-            # Step 2: INSERT INTO … SELECT with aliased literals per batch.
-            # Impala does not allow an explicit column list after PARTITION(…), so
-            # we emit a SELECT with named aliases only on the FIRST branch of the
-            # UNION ALL; subsequent branches use positional literals only.
-            # Aliases on the outer SELECT * FROM (…) t avoid the duplicate-alias error.
-            rows_inserted = 0
-            batch_size = 50
-
-            for i in range(0, len(all_data), batch_size):
-                batch = all_data[i:i + batch_size]
-                select_parts = []
-
-                for row_idx, row in enumerate(batch):
-                    row_values = []
-                    for col in non_partition_cols:
-                        col_lower = col.lower()
-                        if col_lower in additional_cols_map:
-                            val = additional_cols_map[col_lower]
-                        elif col_lower in [c.lower() for c in col_names]:
-                            matching_col = next((c for c in col_names if c.lower() == col_lower), None)
-                            val = row.get(matching_col, '') if matching_col else ''
-                        else:
-                            val = ''
-
-                        if col_lower in self.DATE_COLUMNS and val:
-                            val = self.normalise_date(str(val))
-
-                        if val is None or val == '':
-                            lit = "''"
-                        else:
-                            lit = f"'{str(val).replace(chr(39), chr(39)+chr(39))}'"
-
-                        # Only the first row carries column aliases; the rest are bare literals.
-                        if row_idx == 0:
-                            row_values.append(f"{lit} AS `{col}`")
-                        else:
-                            row_values.append(lit)
-
-                    select_parts.append(f"SELECT {', '.join(row_values)}")
-
-                if select_parts:
-                    union_sql = '\nUNION ALL\n'.join(select_parts)
-                    insert_sql = (
-                        f"INSERT INTO {self.repository.DATABASE}.{target_table} "
-                        f"PARTITION (processing_date='{processing_date}') "
-                        f"SELECT * FROM (\n{union_sql}\n) _batch_{i}"
+                try:
+                    drop_sql = (
+                        f"ALTER TABLE {self.repository.DATABASE}.{target_table} "
+                        f"DROP IF EXISTS PARTITION (processing_date='{processing_date}')"
                     )
-                    batch_num = i // batch_size + 1
-                    logger.info(f"Executing INSERT batch {batch_num} ({len(batch)} rows, offset {i})")
-                    success = impala_manager.execute_write(insert_sql, database=self.repository.DATABASE)
-                    if success:
-                        rows_inserted += len(batch)
-                        logger.info(f"Batch {batch_num} OK — total rows so far: {rows_inserted}")
+                    impala_manager.execute_write(drop_sql, database=self.repository.DATABASE)
+                    logger.info(f"Dropped partition processing_date='{processing_date}' for overwrite")
+                except Exception as _dp:
+                    logger.warning(f"Could not drop partition (may not exist yet): {_dp}")
+
+            # Step 2: One INSERT … SELECT per row.
+            # Using a single-row SELECT with named aliases is the only form that
+            # works across all Impala versions regardless of column count:
+            #   INSERT INTO t PARTITION (p='v') SELECT lit AS col, ...
+            # UNION ALL inside an inline view causes "duplicate alias" errors.
+            # An explicit column list after PARTITION(…) is a ParseException.
+            rows_inserted = 0
+
+            def _build_row_sql(row):
+                col_exprs = []
+                for col in non_partition_cols:
+                    col_lower = col.lower()
+                    if col_lower in additional_cols_map:
+                        val = additional_cols_map[col_lower]
+                    elif col_lower in [c.lower() for c in col_names]:
+                        matching_col = next((c for c in col_names if c.lower() == col_lower), None)
+                        val = row.get(matching_col, '') if matching_col else ''
                     else:
-                        logger.error(f"Failed to insert batch at offset {i}")
-                        return False, f"Failed to insert batch at offset {i}"
+                        val = ''
+                    if col_lower in self.DATE_COLUMNS and val:
+                        val = self.normalise_date(str(val))
+                    if val is None or val == '':
+                        lit = "''"
+                    else:
+                        lit = f"'{str(val).replace(chr(39), chr(39)+chr(39))}'"
+                    col_exprs.append(f"{lit} AS `{col}`")
+                return (
+                    f"INSERT INTO {self.repository.DATABASE}.{target_table} "
+                    f"PARTITION (processing_date='{processing_date}') "
+                    f"SELECT {', '.join(col_exprs)}"
+                )
+
+            for row_num, row in enumerate(all_data):
+                insert_sql = _build_row_sql(row)
+                success = impala_manager.execute_write(insert_sql, database=self.repository.DATABASE)
+                if success:
+                    rows_inserted += 1
+                    if rows_inserted % 50 == 0:
+                        logger.info(f"Inserted {rows_inserted}/{len(all_data)} rows into {target_table}")
+                else:
+                    logger.error(f"Failed to insert row at offset {row_num}")
+                    return False, f"Failed to insert batch at offset {row_num}"
 
             if rows_inserted == 0:
                 return False, "No rows were inserted"
