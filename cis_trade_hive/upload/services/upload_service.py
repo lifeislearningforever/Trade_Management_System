@@ -1583,13 +1583,19 @@ class UploadService:
         position_basis = POSITION_TABLE_BASIS.get(table_lower, '')
 
         try:
-            # Step 1: Drop any leftover staging table
-            impala_manager.execute_write(f"DROP TABLE IF EXISTS {db}.{stg_table}", database=db)
+            # Step 1: Drop any leftover staging table; ignore errors (metastore may be stale)
+            try:
+                impala_manager.execute_write(f"DROP TABLE IF EXISTS {db}.{stg_table}", database=db)
+            except Exception as _drop_err:
+                logger.warning(f"[hdfs:impala] DROP TABLE {stg_table} failed (ignored): {_drop_err}")
 
-            # Step 2: Create external table over the HDFS staging directory
+            # Step 2: Create external table over the HDFS staging directory.
+            # Use IF NOT EXISTS so a stale metastore entry from a prior failed run
+            # does not cause "table already exists". Follow immediately with
+            # ALTER TABLE SET LOCATION to guarantee this run's HDFS path is used.
             create_cols = ',\n    '.join(f"`{c}` STRING" for c in col_names)
             ok = impala_manager.execute_write(f"""
-                CREATE EXTERNAL TABLE {db}.{stg_table} (
+                CREATE EXTERNAL TABLE IF NOT EXISTS {db}.{stg_table} (
                     {create_cols}
                 )
                 ROW FORMAT DELIMITED
@@ -1600,6 +1606,12 @@ class UploadService:
             """, database=db)
             if not ok:
                 return False, f"Could not CREATE EXTERNAL TABLE {stg_table} over {hdfs_path}"
+
+            # Ensure the staging table always points at this upload's HDFS path
+            # (handles the case where IF NOT EXISTS reused an existing table entry)
+            impala_manager.execute_write(
+                f"ALTER TABLE {db}.{stg_table} SET LOCATION '{hdfs_path}'", database=db
+            )
 
             impala_manager.execute_write(f"INVALIDATE METADATA {db}.{stg_table}", database=db)
 
