@@ -348,83 +348,91 @@ class UploadKuduRepository:
             return None
 
     def update_upload(self, upload_id: str, update_data: Dict[str, Any], updated_by: str) -> bool:
-        """Update upload record."""
+        """
+        Update upload record.
+
+        Kudu does not support UPDATE on non-PK columns. We fetch the existing
+        row, merge update_data on top, then UPSERT the complete row back.
+        """
         try:
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            set_clauses = []
+            # Fetch current row to preserve all unchanged columns
+            row = self.get_upload_by_id(upload_id)
+            if not row:
+                logger.warning(f"update_upload: upload_id {upload_id} not found — cannot update")
+                return False
 
-            # String fields (encoding needs backticks as it's a reserved keyword)
-            string_fields = [
-                'file_name', 'file_path', 'file_type', 'mime_type',
-                'delimiter', 'description', 'status',
-                'target_table_name', 'target_database', 'hdfs_path'
+            # Merge update_data into the existing row
+            merged = dict(row)
+            for field, val in update_data.items():
+                merged[field] = val
+            merged['updated_by'] = updated_by
+            merged['updated_at'] = timestamp
+
+            # Serialise JSON fields
+            schema_json = merged.get('schema_json', '[]')
+            if isinstance(schema_json, (list, dict)):
+                schema_json = json.dumps(schema_json)
+
+            sample_json = merged.get('sample_data_json', '[]')
+            if isinstance(sample_json, list):
+                sample_json = _serialise_sample_data(sample_json)
+            elif not isinstance(sample_json, str):
+                sample_json = '[]'
+
+            errors_json = merged.get('validation_errors_json', '[]')
+            if isinstance(errors_json, list):
+                errors_json = _serialise_errors(errors_json)
+            elif not isinstance(errors_json, str):
+                errors_json = '[]'
+
+            columns = [
+                'upload_id', 'file_name', 'original_file_name', 'file_path',
+                'file_size', 'file_type', 'mime_type', 'row_count', 'column_count',
+                'delimiter', 'has_header', '`encoding`', 'description',
+                'target_table_name', 'target_database', 'hdfs_path',
+                'schema_json', 'sample_data_json', 'validation_errors_json',
+                'status', 'is_deleted',
+                'created_by', 'created_at', 'updated_by', 'updated_at'
             ]
 
-            # Reserved keyword fields that need backticks
-            reserved_keyword_fields = ['encoding']
+            values = [
+                self.escape_value(upload_id),
+                self.escape_value(merged.get('file_name', '')),
+                self.escape_value(merged.get('original_file_name', '')),
+                self.escape_value(merged.get('file_path', '')),
+                self.to_bigint(merged.get('file_size', 0)),
+                self.escape_value(merged.get('file_type', '')),
+                self.escape_value(merged.get('mime_type', '')),
+                self.to_int(merged.get('row_count', 0)),
+                self.to_int(merged.get('column_count', 0)),
+                self.escape_value(merged.get('delimiter', ',')),
+                str(bool(merged.get('has_header', True))).lower(),
+                self.escape_value(merged.get('encoding', 'UTF-8')),
+                self.escape_value(merged.get('description', '')),
+                self.escape_value(merged.get('target_table_name', '')),
+                self.escape_value(merged.get('target_database', self.DATABASE)),
+                self.escape_value(merged.get('hdfs_path', '')),
+                self.escape_value(schema_json),
+                self.escape_value(sample_json),
+                self.escape_value(errors_json),
+                self.escape_value(merged.get('status', self.STATUS_PENDING)),
+                str(bool(merged.get('is_deleted', False))).lower(),
+                self.escape_value(merged.get('created_by', '')),
+                f"'{merged.get('created_at', timestamp)}'",
+                self.escape_value(updated_by),
+                f"'{timestamp}'",
+            ]
 
-            # Numeric fields (BIGINT)
-            bigint_fields = ['file_size']
-
-            # Numeric fields (INT)
-            int_fields = ['row_count', 'column_count']
-
-            # Boolean fields
-            boolean_fields = ['has_header', 'is_deleted']
-
-            # JSON fields
-            json_fields = ['schema_json', 'sample_data_json', 'validation_errors_json']
-
-            for field in string_fields:
-                if field in update_data:
-                    set_clauses.append(f"`{field}` = {self.escape_value(update_data[field])}")
-
-            for field in reserved_keyword_fields:
-                if field in update_data:
-                    set_clauses.append(f"`{field}` = {self.escape_value(update_data[field])}")
-
-            for field in bigint_fields:
-                if field in update_data:
-                    set_clauses.append(f"`{field}` = {self.to_bigint(update_data[field])}")
-
-            for field in int_fields:
-                if field in update_data:
-                    set_clauses.append(f"`{field}` = {self.to_int(update_data[field])}")
-
-            for field in boolean_fields:
-                if field in update_data:
-                    set_clauses.append(f"`{field}` = {str(update_data[field]).lower()}")
-
-            for field in json_fields:
-                if field in update_data:
-                    if field == 'validation_errors_json':
-                        json_val = _serialise_errors(update_data[field])
-                    elif field == 'sample_data_json':
-                        json_val = _serialise_sample_data(update_data[field]) if isinstance(update_data[field], list) else (update_data[field] or '[]')
-                    else:
-                        json_val = json.dumps(update_data[field]) if isinstance(update_data[field], (dict, list)) else update_data[field]
-                    set_clauses.append(f"`{field}` = {self.escape_value(json_val)}")
-
-            # Always update audit fields
-            set_clauses.append(f"updated_by = {self.escape_value(updated_by)}")
-            set_clauses.append(f"updated_at = '{timestamp}'")
-
-            if not set_clauses:
-                return True
-
-            upload_id_escaped = upload_id.replace("'", "''")
-            query = f"""
-            UPDATE {self.DATABASE}.{self.TABLE_NAME}
-            SET {', '.join(set_clauses)}
-            WHERE upload_id = '{upload_id_escaped}'
-            """
+            query = (
+                f"UPSERT INTO {self.DATABASE}.{self.TABLE_NAME} "
+                f"({', '.join(columns)}) VALUES ({', '.join(values)})"
+            )
 
             success = impala_manager.execute_write(query, database=self.DATABASE)
-
             if success:
                 logger.info(f"Updated upload: {upload_id}")
-
             return success
 
         except Exception as e:
@@ -449,43 +457,73 @@ class UploadKuduRepository:
 
         result = self.update_upload(upload_id, update_data, updated_by)
         if not result and error_message:
-            # Fallback: drop the error payload and just flip the status
-            logger.warning(f"update_status fallback: retrying with status-only for {upload_id}")
-            try:
-                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                upload_id_escaped = upload_id.replace("'", "''")
-                updated_by_escaped = updated_by.replace("'", "''")
-                fallback_query = (
-                    f"UPDATE {self.DATABASE}.{self.TABLE_NAME} "
-                    f"SET status = '{new_status}', updated_by = '{updated_by_escaped}', updated_at = '{timestamp}' "
-                    f"WHERE upload_id = '{upload_id_escaped}'"
-                )
-                return impala_manager.execute_write(fallback_query, database=self.DATABASE)
-            except Exception as fe:
-                logger.error(f"update_status fallback also failed: {fe}")
-                return False
+            # Fallback: drop the error payload and just flip the status via UPSERT
+            logger.warning(f"update_status fallback: retrying status-only for {upload_id}")
+            return self.update_upload(upload_id, {'status': new_status}, updated_by)
         return result
 
     def soft_delete(self, upload_id: str, deleted_by: str) -> bool:
-        """Soft delete an upload."""
+        """
+        Soft delete an upload.
+
+        Kudu does not support UPDATE on non-PK columns. We fetch the existing
+        row and UPSERT it back with is_deleted=true and status=CANCELLED.
+        """
         try:
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            upload_id_escaped = upload_id.replace("'", "''")
 
-            query = f"""
-            UPDATE {self.DATABASE}.{self.TABLE_NAME}
-            SET is_deleted = true,
-                status = '{self.STATUS_CANCELLED}',
-                updated_by = {self.escape_value(deleted_by)},
-                updated_at = '{timestamp}'
-            WHERE upload_id = '{upload_id_escaped}'
-            """
+            # Fetch current row so we can re-write all columns
+            row = self.get_upload_by_id(upload_id)
+            if not row:
+                logger.warning(f"soft_delete: upload_id {upload_id} not found")
+                return False
+
+            columns = [
+                'upload_id', 'file_name', 'original_file_name', 'file_path',
+                'file_size', 'file_type', 'mime_type', 'row_count', 'column_count',
+                'delimiter', 'has_header', '`encoding`', 'description',
+                'target_table_name', 'target_database', 'hdfs_path',
+                'schema_json', 'sample_data_json', 'validation_errors_json',
+                'status', 'is_deleted',
+                'created_by', 'created_at', 'updated_by', 'updated_at'
+            ]
+
+            values = [
+                self.escape_value(upload_id),
+                self.escape_value(row.get('file_name', '')),
+                self.escape_value(row.get('original_file_name', '')),
+                self.escape_value(row.get('file_path', '')),
+                self.to_bigint(row.get('file_size', 0)),
+                self.escape_value(row.get('file_type', '')),
+                self.escape_value(row.get('mime_type', '')),
+                self.to_int(row.get('row_count', 0)),
+                self.to_int(row.get('column_count', 0)),
+                self.escape_value(row.get('delimiter', ',')),
+                str(bool(row.get('has_header', True))).lower(),
+                self.escape_value(row.get('encoding', 'UTF-8')),
+                self.escape_value(row.get('description', '')),
+                self.escape_value(row.get('target_table_name', '')),
+                self.escape_value(row.get('target_database', self.DATABASE)),
+                self.escape_value(row.get('hdfs_path', '')),
+                self.escape_value(row.get('schema_json', '[]')),
+                self.escape_value(row.get('sample_data_json', '[]')),
+                self.escape_value(row.get('validation_errors_json', '[]')),
+                self.escape_value(self.STATUS_CANCELLED),  # status → CANCELLED
+                'true',                                    # is_deleted → true
+                self.escape_value(row.get('created_by', '')),
+                f"'{row.get('created_at', timestamp)}'",
+                self.escape_value(deleted_by),
+                f"'{timestamp}'",
+            ]
+
+            query = (
+                f"UPSERT INTO {self.DATABASE}.{self.TABLE_NAME} "
+                f"({', '.join(columns)}) VALUES ({', '.join(values)})"
+            )
 
             success = impala_manager.execute_write(query, database=self.DATABASE)
-
             if success:
                 logger.info(f"Soft deleted upload: {upload_id}")
-
             return success
 
         except Exception as e:
