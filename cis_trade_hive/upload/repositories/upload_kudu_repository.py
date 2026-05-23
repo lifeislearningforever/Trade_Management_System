@@ -282,8 +282,12 @@ class UploadKuduRepository:
             upload_id = upload_data.get('upload_id') or self.get_next_id()
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            # Generate target table name
-            target_table = self.generate_table_name(upload_data.get('file_name', 'upload'))
+            # Use caller-supplied target_table_name if present (datasource uploads),
+            # otherwise auto-generate from the filename (standard uploads).
+            target_table = (
+                upload_data.get('target_table_name')
+                or self.generate_table_name(upload_data.get('file_name', 'upload'))
+            )
 
             # Build column and value lists
             # Note: 'encoding' is a reserved keyword in Impala, use backticks
