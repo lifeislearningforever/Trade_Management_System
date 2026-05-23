@@ -335,50 +335,52 @@ def upload_create(request):
                         _ingest_msg = 'No rows to insert'
 
                         if _all_rows and _tbl_cols:
-                            # Use proven batched INSERT OVERWRITE/INTO approach — same
-                            # as the existing ingest service which successfully writes rows.
-                            # Batch size 50: safe for Impala query string limits.
-                            # Batch 1 = INSERT OVERWRITE (clears partition),
-                            # Batch 2+ = INSERT INTO (appends within same partition).
-                            # Values are SQL-escaped: single quotes doubled, no column
-                            # aliases on reserved words (use positional SELECT *).
-                            _batch_size = 50
+                            # One INSERT … SELECT per row — the only Impala-safe form:
+                            #   INSERT INTO t PARTITION (processing_date='v')
+                            #   SELECT 'lit1' AS `col1`, 'lit2' AS `col2`, ...
+                            # This avoids: column-list-after-PARTITION ParseException,
+                            # UNION ALL duplicate-alias errors, and query-string size limits.
+                            # Single quotes in values are doubled for SQL safety.
                             _non_part_cols = _tbl_cols  # already excludes processing_date
 
-                            for _bi in range(0, len(_all_rows), _batch_size):
-                                _batch = _all_rows[_bi:_bi + _batch_size]
-                                _selects = []
-                                for _row in _batch:
-                                    _vals = []
-                                    for _col in _non_part_cols:
-                                        _cl = _col.lower()
-                                        if _cl in _fixed:
-                                            _v = str(_fixed[_cl])
-                                        else:
-                                            _v = str(_row.get(_col) or _row.get(_cl) or '')
-                                        # Escape single quotes for SQL safety
-                                        _v = _v.replace("'", "''")
-                                        _vals.append(f"'{_v}'")
-                                    # No column aliases — use positional values only.
-                                    # Avoids reserved-word alias errors (e.g. 'counter').
-                                    _selects.append(f"SELECT {', '.join(_vals)}")
-
-                                _union = '\nUNION ALL\n'.join(_selects)
-                                _kw = 'OVERWRITE' if _bi == 0 else 'INTO'
-                                _col_list = ', '.join([f'`{c}`' for c in _non_part_cols])
-                                _sql = (
-                                    f"INSERT {_kw} gmp_cis.{_target_table} ({_col_list})\n"
-                                    f"PARTITION (processing_date='{_processing_date}')\n"
-                                    f"SELECT * FROM (\n{_union}\n) t"
+                            # Drop the partition first so re-runs never double-insert.
+                            try:
+                                _imp.execute_write(
+                                    f"ALTER TABLE gmp_cis.{_target_table} "
+                                    f"DROP IF EXISTS PARTITION (processing_date='{_processing_date}')",
+                                    database='gmp_cis'
                                 )
-                                logger.warning(f"[upload:direct] batch {_bi//_batch_size+1} INSERT {_kw} {len(_batch)} rows")
-                                _ok = _imp.execute_write(_sql, database='gmp_cis')
+                                logger.warning(f"[upload:direct] dropped partition processing_date={_processing_date} in {_target_table}")
+                            except Exception as _dp_ex:
+                                logger.warning(f"[upload:direct] could not drop partition (may not exist): {_dp_ex}")
+
+                            def _build_direct_row_sql(_row):
+                                _col_exprs = []
+                                for _col in _non_part_cols:
+                                    _cl = _col.lower()
+                                    if _cl in _fixed:
+                                        _v = str(_fixed[_cl])
+                                    else:
+                                        _v = str(_row.get(_col) or _row.get(_cl) or '')
+                                    _v = _v.replace("'", "''")
+                                    _col_exprs.append(f"'{_v}' AS `{_col}`")
+                                return (
+                                    f"INSERT INTO gmp_cis.{_target_table} "
+                                    f"PARTITION (processing_date='{_processing_date}') "
+                                    f"SELECT {', '.join(_col_exprs)}"
+                                )
+
+                            for _ri, _row in enumerate(_all_rows):
+                                _ok = _imp.execute_write(
+                                    _build_direct_row_sql(_row), database='gmp_cis'
+                                )
                                 if _ok:
-                                    _rows_inserted += len(_batch)
-                                    logger.warning(f"[upload:direct] batch {_bi//_batch_size+1} OK total={_rows_inserted}")
+                                    _rows_inserted += 1
+                                    if _rows_inserted % 100 == 0:
+                                        logger.warning(f"[upload:direct] {_rows_inserted}/{len(_all_rows)} rows inserted")
                                 else:
-                                    logger.error(f"[upload:direct] batch {_bi//_batch_size+1} FAILED — stopping")
-                                    print(f"[upload:direct] batch {_bi//_batch_size+1} FAILED", flush=True)
+                                    logger.error(f"[upload:direct] row {_ri} FAILED — stopping")
+                                    print(f"[upload:direct] row {_ri} FAILED", flush=True)
                                     break
 
                             if _rows_inserted > 0:
