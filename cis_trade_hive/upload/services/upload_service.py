@@ -1941,23 +1941,35 @@ class UploadService:
             # Get non-partition columns (exclude processing_date)
             non_partition_cols = [col for col in target_table_cols if col.lower() != 'processing_date']
 
-            # Step 1: For Hive external Parquet tables, we use INSERT OVERWRITE
-            # which automatically replaces data in the partition
-            # No need to explicitly delete - INSERT OVERWRITE handles it
-            logger.info(f"Will use INSERT OVERWRITE for partition processing_date='{processing_date}'")
+            # Step 1: For overwrite mode, clear the partition first with a single
+            # INSERT OVERWRITE of an empty result set, then append all batches via
+            # INSERT INTO VALUES. This avoids the Impala "duplicated inline view
+            # column alias" error that occurs with UNION ALL inside an inline view.
+            col_list = ', '.join(non_partition_cols)
+            if ingestion_mode != 'append':
+                # Clear partition — INSERT OVERWRITE with zero-row VALUES list is
+                # not valid SQL; use a guaranteed-false WHERE instead.
+                clear_sql = (
+                    f"INSERT OVERWRITE {self.repository.DATABASE}.{target_table} "
+                    f"PARTITION (processing_date='{processing_date}') "
+                    f"SELECT {col_list} FROM {self.repository.DATABASE}.{target_table} "
+                    f"WHERE 1=0"
+                )
+                impala_manager.execute_write(clear_sql, database=self.repository.DATABASE)
+                logger.info(f"Cleared partition processing_date='{processing_date}' for overwrite")
 
-            # Step 2: Insert data using INSERT OVERWRITE SELECT * FROM (UNION ALL)
-            # Each SELECT must have column aliases to avoid "duplicated inline view column alias" error
+            # Step 2: INSERT INTO … VALUES (…), (…) — one statement per batch.
+            # VALUES syntax avoids inline-view alias issues and is much more compact.
             rows_inserted = 0
-            batch_size = 50  # Smaller batches for stability
+            batch_size = 50
 
             for i in range(0, len(all_data), batch_size):
                 batch = all_data[i:i + batch_size]
-                select_statements = []
+                value_rows = []
 
-                for row_idx, row in enumerate(batch):
+                for row in batch:
                     row_values = []
-                    for col_idx, col in enumerate(non_partition_cols):
+                    for col in non_partition_cols:
                         col_lower = col.lower()
                         if col_lower in additional_cols_map:
                             val = additional_cols_map[col_lower]
@@ -1971,50 +1983,26 @@ class UploadService:
                         if col_lower in self.DATE_COLUMNS and val:
                             val = self.normalise_date(str(val))
 
-                        # Escape single quotes and handle empty/null values
                         if val is None or val == '':
-                            row_values.append(f"'' AS {col}")
+                            row_values.append("''")
                         else:
                             escaped_val = str(val).replace("'", "''")
-                            row_values.append(f"'{escaped_val}' AS {col}")
+                            row_values.append(f"'{escaped_val}'")
 
-                    # Build SELECT statement for this row with column aliases
-                    select_statements.append(f"SELECT {', '.join(row_values)}")
+                    value_rows.append(f"({', '.join(row_values)})")
 
-                if select_statements:
-                    # Build INSERT statement with PARTITION
-                    # Mode determines whether to OVERWRITE or APPEND
-                    union_query = '\nUNION ALL\n'.join(select_statements)
-
-                    if ingestion_mode == 'append':
-                        # APPEND mode: Always use INSERT INTO to add rows
-                        insert_sql = f"""INSERT INTO {self.repository.DATABASE}.{target_table}
-PARTITION (processing_date='{processing_date}')
-SELECT * FROM (
-{union_query}
-) t"""
-                        logger.info(f"Executing INSERT INTO (append) batch {i//batch_size + 1} with {len(batch)} rows")
-                    elif i == 0:
-                        # OVERWRITE mode - First batch: INSERT OVERWRITE to replace existing partition data
-                        insert_sql = f"""INSERT OVERWRITE {self.repository.DATABASE}.{target_table}
-PARTITION (processing_date='{processing_date}')
-SELECT * FROM (
-{union_query}
-) t"""
-                        logger.info(f"Executing INSERT OVERWRITE batch 1 with {len(batch)} rows")
-                    else:
-                        # OVERWRITE mode - Subsequent batches: INSERT INTO to append within same ingestion
-                        insert_sql = f"""INSERT INTO {self.repository.DATABASE}.{target_table}
-PARTITION (processing_date='{processing_date}')
-SELECT * FROM (
-{union_query}
-) t"""
-                        logger.info(f"Executing INSERT INTO batch {i//batch_size + 1} with {len(batch)} rows")
-
+                if value_rows:
+                    insert_sql = (
+                        f"INSERT INTO {self.repository.DATABASE}.{target_table} "
+                        f"PARTITION (processing_date='{processing_date}') "
+                        f"({col_list}) VALUES {', '.join(value_rows)}"
+                    )
+                    batch_num = i // batch_size + 1
+                    logger.info(f"Executing INSERT VALUES batch {batch_num} ({len(batch)} rows, offset {i})")
                     success = impala_manager.execute_write(insert_sql, database=self.repository.DATABASE)
                     if success:
                         rows_inserted += len(batch)
-                        logger.info(f"Inserted batch {i//batch_size + 1}, total rows: {rows_inserted}")
+                        logger.info(f"Batch {batch_num} OK — total rows so far: {rows_inserted}")
                     else:
                         logger.error(f"Failed to insert batch at offset {i}")
                         return False, f"Failed to insert batch at offset {i}"
