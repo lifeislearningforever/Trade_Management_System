@@ -1941,33 +1941,32 @@ class UploadService:
             # Get non-partition columns (exclude processing_date)
             non_partition_cols = [col for col in target_table_cols if col.lower() != 'processing_date']
 
-            # Step 1: For overwrite mode, clear the partition first with a single
-            # INSERT OVERWRITE of an empty result set, then append all batches via
-            # INSERT INTO VALUES. This avoids the Impala "duplicated inline view
-            # column alias" error that occurs with UNION ALL inside an inline view.
-            col_list = ', '.join(non_partition_cols)
+            # Step 1: For overwrite mode, clear the partition first.
+            # Impala INSERT INTO PARTITION does not support an explicit column list —
+            # the column list must be omitted; values must match table column order.
             if ingestion_mode != 'append':
-                # Clear partition — INSERT OVERWRITE with zero-row VALUES list is
-                # not valid SQL; use a guaranteed-false WHERE instead.
                 clear_sql = (
                     f"INSERT OVERWRITE {self.repository.DATABASE}.{target_table} "
                     f"PARTITION (processing_date='{processing_date}') "
-                    f"SELECT {col_list} FROM {self.repository.DATABASE}.{target_table} "
+                    f"SELECT * FROM {self.repository.DATABASE}.{target_table} "
                     f"WHERE 1=0"
                 )
                 impala_manager.execute_write(clear_sql, database=self.repository.DATABASE)
                 logger.info(f"Cleared partition processing_date='{processing_date}' for overwrite")
 
-            # Step 2: INSERT INTO … VALUES (…), (…) — one statement per batch.
-            # VALUES syntax avoids inline-view alias issues and is much more compact.
+            # Step 2: INSERT INTO … SELECT with aliased literals per batch.
+            # Impala does not allow an explicit column list after PARTITION(…), so
+            # we emit a SELECT with named aliases only on the FIRST branch of the
+            # UNION ALL; subsequent branches use positional literals only.
+            # Aliases on the outer SELECT * FROM (…) t avoid the duplicate-alias error.
             rows_inserted = 0
             batch_size = 50
 
             for i in range(0, len(all_data), batch_size):
                 batch = all_data[i:i + batch_size]
-                value_rows = []
+                select_parts = []
 
-                for row in batch:
+                for row_idx, row in enumerate(batch):
                     row_values = []
                     for col in non_partition_cols:
                         col_lower = col.lower()
@@ -1979,26 +1978,31 @@ class UploadService:
                         else:
                             val = ''
 
-                        # Normalise date columns to YYYYMMDD
                         if col_lower in self.DATE_COLUMNS and val:
                             val = self.normalise_date(str(val))
 
                         if val is None or val == '':
-                            row_values.append("''")
+                            lit = "''"
                         else:
-                            escaped_val = str(val).replace("'", "''")
-                            row_values.append(f"'{escaped_val}'")
+                            lit = f"'{str(val).replace(chr(39), chr(39)+chr(39))}'"
 
-                    value_rows.append(f"({', '.join(row_values)})")
+                        # Only the first row carries column aliases; the rest are bare literals.
+                        if row_idx == 0:
+                            row_values.append(f"{lit} AS `{col}`")
+                        else:
+                            row_values.append(lit)
 
-                if value_rows:
+                    select_parts.append(f"SELECT {', '.join(row_values)}")
+
+                if select_parts:
+                    union_sql = '\nUNION ALL\n'.join(select_parts)
                     insert_sql = (
                         f"INSERT INTO {self.repository.DATABASE}.{target_table} "
                         f"PARTITION (processing_date='{processing_date}') "
-                        f"({col_list}) VALUES {', '.join(value_rows)}"
+                        f"SELECT * FROM (\n{union_sql}\n) _batch_{i}"
                     )
                     batch_num = i // batch_size + 1
-                    logger.info(f"Executing INSERT VALUES batch {batch_num} ({len(batch)} rows, offset {i})")
+                    logger.info(f"Executing INSERT batch {batch_num} ({len(batch)} rows, offset {i})")
                     success = impala_manager.execute_write(insert_sql, database=self.repository.DATABASE)
                     if success:
                         rows_inserted += len(batch)
