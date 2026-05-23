@@ -1582,6 +1582,7 @@ class UploadService:
             # does not cause "table already exists". Follow immediately with
             # ALTER TABLE SET LOCATION to guarantee this run's HDFS path is used.
             create_cols = ',\n    '.join(f"`{c}` STRING" for c in col_names)
+            skip_header = '1' if has_header else '0'
             ok = impala_manager.execute_write(f"""
                 CREATE EXTERNAL TABLE IF NOT EXISTS {db}.{stg_table} (
                     {create_cols}
@@ -1590,7 +1591,7 @@ class UploadService:
                 FIELDS TERMINATED BY '{field_term}'
                 STORED AS TEXTFILE
                 LOCATION '{hdfs_path}'
-                TBLPROPERTIES ('skip.header.line.count'='{"1" if has_header else "0"}')
+                TBLPROPERTIES ('skip.header.line.count'='{skip_header}')
             """, database=db)
             if not ok:
                 return False, f"Could not CREATE EXTERNAL TABLE {stg_table} over {hdfs_path}"
