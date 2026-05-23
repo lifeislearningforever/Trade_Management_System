@@ -355,9 +355,10 @@ def upload_create(request):
                                 logger.warning(f"[upload:direct] could not drop partition (may not exist): {_dp_ex}")
 
                             def _sql_escape(_v: str) -> str:
-                                """Escape value for a SQL single-quoted string literal."""
+                                """Escape value for Impala single-quoted string literals.
+                                Impala uses C-style \\' not '' for single-quote."""
                                 _v = _v.replace('\\', '\\\\')
-                                _v = _v.replace("'", "''")
+                                _v = _v.replace("'", "\\'")
                                 _v = _v.replace('\n', '\\n')
                                 _v = _v.replace('\r', '\\r')
                                 _v = _v.replace('\0', '')
@@ -378,18 +379,21 @@ def upload_create(request):
                                     f"SELECT {', '.join(_col_exprs)}"
                                 )
 
+                            _rows_failed = 0
                             for _ri, _row in enumerate(_all_rows):
-                                _ok = _imp.execute_write(
-                                    _build_direct_row_sql(_row), database='gmp_cis'
-                                )
+                                _sql = _build_direct_row_sql(_row)
+                                _ok = _imp.execute_write(_sql, database='gmp_cis')
                                 if _ok:
                                     _rows_inserted += 1
                                     if _rows_inserted % 100 == 0:
                                         logger.warning(f"[upload:direct] {_rows_inserted}/{len(_all_rows)} rows inserted")
                                 else:
-                                    logger.error(f"[upload:direct] row {_ri} FAILED — stopping")
+                                    _rows_failed += 1
+                                    logger.error(f"[upload:direct] row {_ri} FAILED (skip). SQL={_sql[:300]}")
                                     print(f"[upload:direct] row {_ri} FAILED", flush=True)
-                                    break
+                                    if _rows_failed > 10:
+                                        logger.error(f"[upload:direct] too many failures ({_rows_failed}) — aborting")
+                                        break
 
                             if _rows_inserted > 0:
                                 _ingest_ok = True

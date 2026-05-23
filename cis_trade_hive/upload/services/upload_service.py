@@ -1984,10 +1984,11 @@ class UploadService:
             rows_inserted = 0
 
             def _sql_str(val) -> str:
-                """Escape a value for use inside a SQL single-quoted string literal."""
+                """Escape a value for Impala single-quoted string literals.
+                Impala uses C-style escaping: \' for single-quote, not ''."""
                 s = str(val)
-                s = s.replace('\\', '\\\\')   # backslash first
-                s = s.replace("'", "''")       # single quote
+                s = s.replace('\\', '\\\\')   # backslash first (must be first)
+                s = s.replace("'", "\\'")      # single-quote → backslash-quote
                 s = s.replace('\n', '\\n')     # newline
                 s = s.replace('\r', '\\r')     # carriage return
                 s = s.replace('\0', '')        # null byte — strip entirely
@@ -2017,6 +2018,7 @@ class UploadService:
                     f"SELECT {', '.join(col_exprs)}"
                 )
 
+            rows_failed = 0
             for row_num, row in enumerate(all_data):
                 insert_sql = _build_row_sql(row)
                 success = impala_manager.execute_write(insert_sql, database=self.repository.DATABASE)
@@ -2025,11 +2027,13 @@ class UploadService:
                     if rows_inserted % 50 == 0:
                         logger.info(f"Inserted {rows_inserted}/{len(all_data)} rows into {target_table}")
                 else:
-                    logger.error(f"Failed to insert row at offset {row_num}")
-                    return False, f"Failed to insert batch at offset {row_num}"
+                    rows_failed += 1
+                    logger.error(f"[insert_values] row {row_num} failed — skipping. SQL was: {insert_sql[:300]}")
+                    if rows_failed > 10:
+                        return False, f"Too many row failures ({rows_failed}) — aborting at row {row_num}"
 
             if rows_inserted == 0:
-                return False, "No rows were inserted"
+                return False, f"No rows were inserted (all {rows_failed} rows failed)"
 
             # Step 3: Refresh metadata
             try:

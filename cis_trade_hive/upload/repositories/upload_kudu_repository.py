@@ -131,12 +131,13 @@ class UploadKuduRepository:
         if isinstance(val, bool):
             return str(val).lower()
         if isinstance(val, str):
-            # Order matters: escape backslashes first
+            # Impala uses C-style escaping: backslash first, then \' for single-quote
             s = val.replace('\\', '\\\\')
-            s = s.replace("'", "''")
+            s = s.replace("'", "\\'")
             s = s.replace('\n', '\\n')
             s = s.replace('\r', '\\r')
             s = s.replace('\t', '\\t')
+            s = s.replace('\0', '')
             return f"'{s}'"
         return str(val)
 
