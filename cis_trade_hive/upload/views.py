@@ -354,6 +354,15 @@ def upload_create(request):
                             except Exception as _dp_ex:
                                 logger.warning(f"[upload:direct] could not drop partition (may not exist): {_dp_ex}")
 
+                            def _sql_escape(_v: str) -> str:
+                                """Escape value for a SQL single-quoted string literal."""
+                                _v = _v.replace('\\', '\\\\')
+                                _v = _v.replace("'", "''")
+                                _v = _v.replace('\n', '\\n')
+                                _v = _v.replace('\r', '\\r')
+                                _v = _v.replace('\0', '')
+                                return _v
+
                             def _build_direct_row_sql(_row):
                                 _col_exprs = []
                                 for _col in _non_part_cols:
@@ -362,8 +371,7 @@ def upload_create(request):
                                         _v = str(_fixed[_cl])
                                     else:
                                         _v = str(_row.get(_col) or _row.get(_cl) or '')
-                                    _v = _v.replace("'", "''")
-                                    _col_exprs.append(f"'{_v}' AS `{_col}`")
+                                    _col_exprs.append(f"'{_sql_escape(_v)}' AS `{_col}`")
                                 return (
                                     f"INSERT INTO gmp_cis.{_target_table} "
                                     f"PARTITION (processing_date='{_processing_date}') "

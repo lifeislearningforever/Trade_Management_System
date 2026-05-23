@@ -1839,8 +1839,13 @@ class UploadService:
         from core.repositories.impala_connection import impala_manager
         from ..repositories.datasource_repository import datasource_repository
         import csv
+        import re as _re
 
         try:
+            # Validate processing_date before it touches any SQL
+            if not processing_date or not _re.match(r'^\d{8}$', str(processing_date)):
+                return False, f"Invalid processing_date '{processing_date}' — must be YYYYMMDD"
+
             source_id = datasource_config.get('source_id', '')
             col_names = [col['name'] for col in intake_columns]
             separator = datasource_config.get('separator', ',')
@@ -1907,7 +1912,7 @@ class UploadService:
                 logger.info(f"[insert_values] reading full file {temp_file_path} ({file_size} bytes)")
                 try:
                     all_data = []
-                    with open(temp_file_path, 'r', encoding='utf-8', errors='replace') as f:
+                    with open(temp_file_path, 'r', encoding='utf-8-sig', errors='replace') as f:
                         delim = separator if separator else ','
                         reader = csv.reader(f, delimiter=delim)
                         rows = list(reader)
@@ -1922,14 +1927,16 @@ class UploadService:
                     logger.info(f"[insert_values] data_rows to process={len(data_rows)}")
                     # Convert to list of dicts using intake column names
                     for row in data_rows:
-                        if len(row) > 0:
-                            row_dict = {}
-                            for idx, col in enumerate(col_names):
-                                if idx < len(row):
-                                    row_dict[col] = row[idx]
-                                else:
-                                    row_dict[col] = ''
-                            all_data.append(row_dict)
+                        # Skip blank/whitespace-only rows (common in files with trailing newlines)
+                        if not any(str(c).strip() for c in row):
+                            continue
+                        row_dict = {}
+                        for idx, col in enumerate(col_names):
+                            if idx < len(row):
+                                row_dict[col] = row[idx]
+                            else:
+                                row_dict[col] = ''
+                        all_data.append(row_dict)
 
                     logger.info(f"[insert_values] parsed {len(all_data)} rows from file")
                 except Exception as e:
@@ -1976,6 +1983,16 @@ class UploadService:
             # An explicit column list after PARTITION(…) is a ParseException.
             rows_inserted = 0
 
+            def _sql_str(val) -> str:
+                """Escape a value for use inside a SQL single-quoted string literal."""
+                s = str(val)
+                s = s.replace('\\', '\\\\')   # backslash first
+                s = s.replace("'", "''")       # single quote
+                s = s.replace('\n', '\\n')     # newline
+                s = s.replace('\r', '\\r')     # carriage return
+                s = s.replace('\0', '')        # null byte — strip entirely
+                return s
+
             def _build_row_sql(row):
                 col_exprs = []
                 for col in non_partition_cols:
@@ -1989,10 +2006,10 @@ class UploadService:
                         val = ''
                     if col_lower in self.DATE_COLUMNS and val:
                         val = self.normalise_date(str(val))
-                    if val is None or val == '':
+                    if val is None or str(val).strip() == '':
                         lit = "''"
                     else:
-                        lit = f"'{str(val).replace(chr(39), chr(39)+chr(39))}'"
+                        lit = f"'{_sql_str(val)}'"
                     col_exprs.append(f"{lit} AS `{col}`")
                 return (
                     f"INSERT INTO {self.repository.DATABASE}.{target_table} "
