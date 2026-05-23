@@ -266,25 +266,25 @@ def upload_create(request):
                         _port_col = next((c for c in ('portfolio', 'portfolio_name', 'account_name') if c in _col_names), None)
                         _key_cols = [c for c in (_port_col, _isin_col) if c]
 
-                        # --- Fix 2: Block rows with null/empty key fields ---
+                        # --- Fix 2: Skip rows with null/empty key fields (warn, don't block) ---
                         if _key_cols:
-                            _null_rows = [
+                            _null_row_nums = [
                                 i + 1 for i, r in enumerate(_all_rows)
                                 if any(not str(r.get(c) or '').strip() for c in _key_cols)
                             ]
-                            if _null_rows:
+                            if _null_row_nums:
                                 _null_msg = (
-                                    f"Upload blocked: {len(_null_rows)} row(s) have null/empty key fields "
-                                    f"({', '.join(_key_cols)}). Fix the source file and re-upload."
+                                    f"Skipped {len(_null_row_nums)} row(s) with null/empty key fields "
+                                    f"({', '.join(_key_cols)}): rows {_null_row_nums[:10]}"
+                                    + (' …' if len(_null_row_nums) > 10 else '')
                                 )
-                                logger.error(f"[upload:direct] {_null_msg} rows={_null_rows[:10]}")
-                                _repo.update_upload(upload_id, {
-                                    'status': 'VALIDATION_FAILED',
-                                    'description': _null_msg,
-                                    'row_count': len(_all_rows),
-                                }, user_info['username'])
-                                messages.error(request, _null_msg)
-                                return redirect('upload:preview', upload_id=upload_id)
+                                logger.warning(f"[upload:direct] {_null_msg}")
+                                messages.warning(request, _null_msg)
+                                _null_set = set(_null_row_nums)
+                                _all_rows = [
+                                    r for i, r in enumerate(_all_rows)
+                                    if (i + 1) not in _null_set
+                                ]
 
                         # --- Fix 1: Deduplicate before insert ---
                         _dedup_key_cols = _key_cols or _col_names
