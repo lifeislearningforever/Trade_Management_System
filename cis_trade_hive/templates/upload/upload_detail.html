@@ -61,6 +61,17 @@
         </div>
     </div>
 
+    {% if is_ingesting %}
+    <div class="alert alert-info d-flex align-items-center mb-3" id="ingestingBanner">
+        <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+        <strong>Processing in background&hellip;</strong>&nbsp;
+        This page will refresh automatically every 5 seconds until complete.
+        <button type="button" class="btn btn-sm btn-outline-secondary ms-auto"
+                onclick="location.reload()">Refresh Now</button>
+    </div>
+    <script>setTimeout(function(){ location.reload(); }, 5000);</script>
+    {% endif %}
+
     <div class="row">
         <!-- Main Info -->
         <div class="col-lg-8">

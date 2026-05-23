@@ -112,6 +112,11 @@ def upload_list(request):
         'file_type_choices': upload_service.get_file_type_choices(),
         'stats': stats,
         'total_count': len(uploads),
+        # True if any visible upload is still processing — triggers auto-refresh
+        'has_ingesting': any(
+            u.get('status') == UploadKuduRepository.STATUS_INGESTING
+            for u in page_obj.object_list
+        ),
     }
 
     return render(request, 'upload/upload_list.html', context)
@@ -869,29 +874,77 @@ def upload_ingest(request, upload_id: str):
                     sample_data = sample_data_json if isinstance(sample_data_json, list) else json.loads(sample_data_json)
                     logger.warning(f"[ingest:view] cross-node fallback — using DB sample_data_json ({len(sample_data)} rows)")
 
-            # Perform metadata-driven ingestion
-            success, message = upload_service.ingest_to_target_table(
-                upload_id=upload_id,
-                datasource_config=datasource_config,
-                updated_by=user_info['username'],
-                processing_date=processing_date if processing_date else None,
-                temp_file_path=temp_file_path,
-                sample_data=sample_data,
-                ingestion_mode=ingestion_mode
-            )
+            # Mark INGESTING immediately so the UI shows progress — the actual
+            # work runs in a background thread so the HTTP response returns at
+            # once and Gunicorn never times out on large files.
+            if not is_session_upload:
+                upload_service.repository.update_upload(
+                    upload_id, {'status': UploadKuduRepository.STATUS_INGESTING},
+                    user_info['username']
+                )
 
-            # Mark session upload as completed (keep it so upload_detail can render)
-            if is_session_upload:
-                session_key = f'upload_{upload_id}'
-                if session_key in request.session:
-                    _sess = dict(request.session[session_key])  # shallow copy to force new object
-                    _sess['status'] = UploadKuduRepository.STATUS_COMPLETED if success else UploadKuduRepository.STATUS_FAILED
-                    request.session[session_key] = _sess
-                    request.session.modified = True  # ensure Django persists the updated status
-            # Clean up DB-upload temp path key regardless
-            temp_path_key = f'temp_path_{upload_id}'
-            if success and temp_path_key in request.session:
-                del request.session[temp_path_key]
+            # Capture everything the thread needs (no request/session access inside thread)
+            _username   = user_info['username']
+            _user_id    = user_info['user_id']
+            _user_email = user_info['user_email']
+            _proc_date  = processing_date if processing_date else None
+            _is_session = is_session_upload
+            _file_name  = file_name
+            _req_path   = request.path
+            _ip         = request.META.get('REMOTE_ADDR')
+            _ua         = request.META.get('HTTP_USER_AGENT', '')
+            _ds_cfg     = datasource_config
+            _tfp        = temp_file_path
+            _sd         = sample_data
+            _mode       = ingestion_mode
+
+            def _do_ingest():
+                try:
+                    ok, msg = upload_service.ingest_to_target_table(
+                        upload_id=upload_id,
+                        datasource_config=_ds_cfg,
+                        updated_by=_username,
+                        processing_date=_proc_date,
+                        temp_file_path=_tfp,
+                        sample_data=_sd,
+                        ingestion_mode=_mode,
+                    )
+                    if ok:
+                        audit_log_kudu_repository.log_action(
+                            user_id=_user_id, username=_username,
+                            user_email=_user_email, action_type='INGEST',
+                            entity_type='FILE_UPLOAD', entity_id=upload_id,
+                            entity_name=_file_name, action_description=msg,
+                            request_method='POST', request_path=_req_path,
+                            ip_address=_ip, user_agent=_ua, status='SUCCESS'
+                        )
+                        logger.info(f"[ingest:bg] DONE upload_id={upload_id}: {msg}")
+                    else:
+                        logger.error(f"[ingest:bg] FAILED upload_id={upload_id}: {msg}")
+                        if not _is_session:
+                            upload_service.repository.update_upload(
+                                upload_id, {'status': UploadKuduRepository.STATUS_FAILED,
+                                            'description': msg[:500]}, _username
+                            )
+                except Exception as _ex:
+                    logger.error(f"[ingest:bg] EXCEPTION upload_id={upload_id}: {_ex}", exc_info=True)
+                    if not _is_session:
+                        upload_service.repository.update_upload(
+                            upload_id,
+                            {'status': UploadKuduRepository.STATUS_FAILED,
+                             'description': str(_ex)[:500]},
+                            _username
+                        )
+
+            import threading as _threading
+            _t = _threading.Thread(target=_do_ingest, daemon=True, name=f"ingest-{upload_id[:8]}")
+            _t.start()
+            messages.info(request, (
+                f'Ingestion started for {_file_name}. '
+                f'Refresh this page in a moment to see the result.'
+            ))
+            return redirect('upload:detail', upload_id=upload_id)
+
         else:
             # Standard ingestion - create new external table
             table_name = request.POST.get('table_name', '').strip()
@@ -911,30 +964,13 @@ def upload_ingest(request, upload_id: str):
                 file_path=hdfs_path,
                 updated_by=user_info['username']
             )
-
-        if success:
-            # Log audit
-            audit_log_kudu_repository.log_action(
-                user_id=user_info['user_id'],
-                username=user_info['username'],
-                user_email=user_info['user_email'],
-                action_type='INGEST',
-                entity_type='FILE_UPLOAD',
-                entity_id=upload_id,
-                entity_name=file_name,
-                action_description=message,
-                request_method='POST',
-                request_path=request.path,
-                ip_address=request.META.get('REMOTE_ADDR'),
-                user_agent=request.META.get('HTTP_USER_AGENT', ''),
-                status='SUCCESS'
-            )
-
-            messages.success(request, message)
-        else:
-            messages.error(request, message)
+            if success:
+                messages.success(request, message)
+            else:
+                messages.error(request, message)
 
     except Exception as e:
+        logger.error(f"[ingest:view] EXCEPTION: {e}", exc_info=True)
         messages.error(request, f'Ingestion error: {str(e)}')
 
     return redirect('upload:detail', upload_id=upload_id)
@@ -1090,16 +1126,22 @@ def upload_detail(request, upload_id: str):
             UploadKuduRepository.STATUS_VALIDATED,
             UploadKuduRepository.STATUS_VALIDATION_FAILED
         ],
-        'can_ingest': upload_status == UploadKuduRepository.STATUS_VALIDATED,
+        # Ingest button only for non-position VALIDATED uploads
+        'can_ingest': (not is_position_upload) and upload_status == UploadKuduRepository.STATUS_VALIDATED,
         'can_delete': upload_status not in [
             UploadKuduRepository.STATUS_INGESTING
         ],
         'is_position_upload': is_position_upload,
-        # Allow Run Position on COMPLETED or FAILED (so ETL can be re-run after fix)
+        # Run Position ETL: show whenever raw data is in the table (COMPLETED, FAILED,
+        # INGESTING — bg thread still running) or VALIDATED (data inserted at upload time).
         'can_run_position': is_position_upload and upload_status in [
+            UploadKuduRepository.STATUS_VALIDATED,
+            UploadKuduRepository.STATUS_INGESTING,
             UploadKuduRepository.STATUS_COMPLETED,
             UploadKuduRepository.STATUS_FAILED,
         ],
+        # Show a "still processing" banner when INGESTING
+        'is_ingesting': upload_status == UploadKuduRepository.STATUS_INGESTING,
     }
 
     return render(request, 'upload/upload_detail.html', context)
@@ -1297,48 +1339,68 @@ def run_position_etl(request, upload_id: str):
         from datetime import datetime
         processing_date = datetime.now().strftime('%Y%m%d')
 
-    try:
-        success, message, result = upload_service.run_position_etl(
-            upload_id=upload_id,
-            src_id=src_id,
-            processing_date=processing_date,
-            updated_by=user_info['username']
-        )
+    # Mark INGESTING so the UI shows "processing" banner while ETL runs
+    upload_service.repository.update_upload(
+        upload_id, {'status': UploadKuduRepository.STATUS_INGESTING},
+        user_info['username']
+    )
 
-        # Persist processing_date + src_id back to session so download-report
-        # can use the exact partition values without guessing.
-        session_key = f'upload_{upload_id}'
-        if session_key in request.session:
-            _sess = dict(request.session[session_key])
-            _sess['etl_processing_date'] = processing_date
-            _sess['etl_src_id'] = src_id
-            request.session[session_key] = _sess
-            request.session.modified = True
+    # Capture request-bound data before handing off to the thread
+    _username   = user_info['username']
+    _user_id    = user_info['user_id']
+    _user_email = user_info['user_email']
+    _file_name  = upload.get('file_name', '')
+    _req_path   = request.path
+    _ip         = request.META.get('REMOTE_ADDR')
+    _ua         = request.META.get('HTTP_USER_AGENT', '')
+    _src_id     = src_id
+    _proc_date  = processing_date
 
-        if success:
-            audit_log_kudu_repository.log_action(
-                user_id=user_info['user_id'],
-                username=user_info['username'],
-                user_email=user_info['user_email'],
-                action_type='POSITION_ETL',
-                entity_type='FILE_UPLOAD',
-                entity_id=upload_id,
-                entity_name=upload.get('file_name', ''),
-                action_description=message,
-                new_value=json.dumps(result),
-                request_method='POST',
-                request_path=request.path,
-                ip_address=request.META.get('REMOTE_ADDR'),
-                user_agent=request.META.get('HTTP_USER_AGENT', ''),
-                status='SUCCESS'
+    def _do_etl():
+        try:
+            ok, msg, result = upload_service.run_position_etl(
+                upload_id=upload_id,
+                src_id=_src_id,
+                processing_date=_proc_date,
+                updated_by=_username,
             )
-            messages.success(request, message)
-        else:
-            messages.error(request, message)
+            if ok:
+                audit_log_kudu_repository.log_action(
+                    user_id=_user_id, username=_username,
+                    user_email=_user_email, action_type='POSITION_ETL',
+                    entity_type='FILE_UPLOAD', entity_id=upload_id,
+                    entity_name=_file_name, action_description=msg,
+                    new_value=json.dumps(result),
+                    request_method='POST', request_path=_req_path,
+                    ip_address=_ip, user_agent=_ua, status='SUCCESS'
+                )
+                logger.info(f"[etl:bg] DONE upload_id={upload_id}: {msg}")
+            else:
+                logger.error(f"[etl:bg] FAILED upload_id={upload_id}: {msg}")
+                upload_service.repository.update_upload(
+                    upload_id,
+                    {'status': UploadKuduRepository.STATUS_FAILED,
+                     'description': msg[:500]},
+                    _username
+                )
+        except Exception as _ex:
+            logger.error(f"[etl:bg] EXCEPTION upload_id={upload_id}: {_ex}", exc_info=True)
+            upload_service.repository.update_upload(
+                upload_id,
+                {'status': UploadKuduRepository.STATUS_FAILED,
+                 'description': str(_ex)[:500]},
+                _username
+            )
 
-    except Exception as e:
-        messages.error(request, f'Position ETL error: {e}')
+    import threading as _threading
+    _t = _threading.Thread(target=_do_etl, daemon=True, name=f"etl-{upload_id[:8]}")
+    _t.start()
 
+    messages.info(request, (
+        f'Position ETL started for {_file_name} '
+        f'(src_id={_src_id}, date={_proc_date}). '
+        f'Refresh this page in a moment to see the result.'
+    ))
     return redirect('upload:detail', upload_id=upload_id)
 
 

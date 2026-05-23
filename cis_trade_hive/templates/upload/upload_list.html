@@ -272,4 +272,11 @@
         {% endif %}
     </div>
 </div>
+
+{% if has_ingesting %}
+<script>
+/* Auto-refresh while any upload is in INGESTING state */
+setTimeout(function(){ location.reload(); }, 6000);
+</script>
+{% endif %}
 {% endblock %}
