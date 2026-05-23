@@ -213,7 +213,7 @@ def upload_create(request):
                         'encoding': validation_result.encoding,
                         'description': description,
                         'schema': validation_result.columns,
-                        'sample_data': validation_result.sample_data,
+                        'sample_data': validation_result.all_data or validation_result.sample_data,
                         'target_table_name': datasource_config.get('target_table', ''),
                     }
 
