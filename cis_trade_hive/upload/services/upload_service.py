@@ -2745,16 +2745,17 @@ class UploadService:
                     s3.upload_exchange,
                     s3.portfolio_status,
                     s3.match_type AS isin_match_type,
-                    COALESCE(s3.matched_security_id, s_desc.security_id, s_name.security_id) AS final_security_id,
-                    COALESCE(s3.matched_security_name, s_desc.security_name, s_name.security_name) AS final_security_name,
-                    COALESCE(s3.matched_isin,     s_desc.isin,          s_name.isin)          AS final_isin,
-                    COALESCE(s3.matched_exchange,  s_desc.exchange_code, s_name.exchange_code) AS final_exchange,
-                    COALESCE(s3.matched_country,   s_desc.country_of_exchange, s_name.country_of_exchange) AS final_country,
-                    COALESCE(s3.matched_currency,  s_desc.currency_code, s_name.currency_code) AS final_currency,
+                    COALESCE(s3.matched_security_id, s_desc.security_id, s_name.security_id, s_ticker.security_id) AS final_security_id,
+                    COALESCE(s3.matched_security_name, s_desc.security_name, s_name.security_name, s_ticker.security_name) AS final_security_name,
+                    COALESCE(s3.matched_isin,     s_desc.isin,          s_name.isin,          s_ticker.isin)          AS final_isin,
+                    COALESCE(s3.matched_exchange,  s_desc.exchange_code, s_name.exchange_code, s_ticker.exchange_code) AS final_exchange,
+                    COALESCE(s3.matched_country,   s_desc.country_of_exchange, s_name.country_of_exchange, s_ticker.country_of_exchange) AS final_country,
+                    COALESCE(s3.matched_currency,  s_desc.currency_code, s_name.currency_code, s_ticker.currency_code) AS final_currency,
                     CASE
                         WHEN s3.matched_security_id IS NOT NULL THEN 'ISIN_MATCH'
                         WHEN s_desc.security_id IS NOT NULL     THEN 'FULLNAME_MATCH'
                         WHEN s_name.security_id IS NOT NULL     THEN 'SHORTNAME_MATCH'
+                        WHEN s_ticker.security_id IS NOT NULL   THEN 'TICKER_MATCH'
                         ELSE NULL
                     END AS match_method,
                     CASE
@@ -2763,6 +2764,7 @@ class UploadService:
                         WHEN s3.matched_security_id IS NOT NULL THEN 'ISIN_MATCH'
                         WHEN s_desc.security_id IS NOT NULL     THEN 'FULLNAME_MATCH'
                         WHEN s_name.security_id IS NOT NULL     THEN 'SHORTNAME_MATCH'
+                        WHEN s_ticker.security_id IS NOT NULL   THEN 'TICKER_MATCH'
                         WHEN (s3.upload_isin IS NULL OR TRIM(s3.upload_isin) = '')
                              AND (s3.security_full_name IS NULL OR TRIM(s3.security_full_name) = '')
                              AND (s3.security_short_name IS NULL OR TRIM(s3.security_short_name) = '')
@@ -2770,6 +2772,7 @@ class UploadService:
                         ELSE 'NOT_FOUND: Create new security'
                     END AS security_status
                 FROM pos_stage_3_security s3
+                JOIN pos_stage_1_base b ON s3.row_id = b.row_id
                 LEFT JOIN {db}.cis_security s_desc
                     ON s3.security_full_name = s_desc.security_description
                     AND s_desc.is_active = true
@@ -2785,6 +2788,15 @@ class UploadService:
                     AND s3.match_type != 'FAIL: Multiple ISINs found in master'
                     AND s3.security_short_name IS NOT NULL
                     AND TRIM(s3.security_short_name) != ''
+                LEFT JOIN {db}.cis_security s_ticker
+                    ON UPPER(TRIM(b.ticker)) = UPPER(TRIM(s_ticker.ticker))
+                    AND s_ticker.is_active = true
+                    AND s3.matched_security_id IS NULL
+                    AND s_desc.security_id IS NULL
+                    AND s_name.security_id IS NULL
+                    AND s3.match_type != 'FAIL: Multiple ISINs found in master'
+                    AND b.ticker IS NOT NULL
+                    AND TRIM(b.ticker) != ''
                 """,
                 database=db
             )
@@ -2972,7 +2984,7 @@ class UploadService:
                         WHEN p4.security_status = 'NOT_FOUND: Create new security'
                             THEN 'VALID: New security created'
                         WHEN p4.security_status IN ('ISIN_MATCH', 'FULLNAME_MATCH', 'SHORTNAME_MATCH',
-                                                     'DESC_MATCH', 'NAME_MATCH')
+                                                     'TICKER_MATCH', 'DESC_MATCH', 'NAME_MATCH')
                             THEN 'VALID'
                         WHEN p4.security_status LIKE 'FAIL%'
                             THEN CONCAT('INVALID: ', p4.security_status)
