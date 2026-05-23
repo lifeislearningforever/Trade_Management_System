@@ -847,6 +847,13 @@ def upload_ingest(request, upload_id: str):
             if is_session_upload:
                 sample_data_json = upload.get('sample_data_json', [])
                 sample_data = sample_data_json if isinstance(sample_data_json, list) else json.loads(sample_data_json)
+            elif not temp_file_path:
+                # DB upload but local file is gone (cross-node). Pass DB sample_data_json
+                # so the service's P4 fallback fires rather than returning "no file".
+                sample_data_json = upload.get('sample_data_json', [])
+                if sample_data_json:
+                    sample_data = sample_data_json if isinstance(sample_data_json, list) else json.loads(sample_data_json)
+                    logger.warning(f"[ingest:view] cross-node fallback — using DB sample_data_json ({len(sample_data)} rows)")
 
             # Perform metadata-driven ingestion
             success, message = upload_service.ingest_to_target_table(
