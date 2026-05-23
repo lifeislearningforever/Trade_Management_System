@@ -678,8 +678,15 @@ TRADE_BOOL_COLS   = {'is_active', 'is_deleted', 'charges_auto_calculated',
                      'udf_disclosure_req', 'udf_counter_pledged', 'udf_currency_hedge'}
 
 
-def load_trade(rows: List[Dict], status: str, dry_run: bool, processing_date: str = '') -> Tuple[int, int, List[str]]:
+def load_trade(
+    rows: List[Dict],
+    status: str,
+    dry_run: bool,
+    processing_date: str = '',
+    with_positions: bool = False,
+) -> Tuple[int, int, List[str]]:
     ok = fail = 0
+    pos_ok = pos_fail = 0
     errors: List[str] = []
     ts = _now()
 
@@ -765,6 +772,158 @@ def load_trade(rows: List[Dict], status: str, dry_run: bool, processing_date: st
             logger.error(msg)
             errors.append(msg)
             fail += 1
+            continue
+
+        # Optionally trigger position calculation — same path as UI settle button
+        if with_positions:
+            p_ok, p_err = _trigger_position(mapped, raw_id)
+            if p_ok:
+                pos_ok += 1
+            else:
+                pos_fail += 1
+                errors.append(p_err)
+
+    if with_positions:
+        logger.info("Position results: queued=%d  failed=%d", pos_ok, pos_fail)
+    return ok, fail, errors
+
+
+# ---------------------------------------------------------------------------
+# Position trigger helper — mirrors the UI settle button logic exactly
+# ---------------------------------------------------------------------------
+
+POSITION_TRADE_TYPES = {'BUY', 'SELL'}
+
+
+def _trigger_position(mapped: Dict[str, Any], raw_id: str) -> Tuple[bool, str]:
+    """
+    Call settlement_service.process_trade_settlement for one trade row.
+    Returns (success, error_message).
+    Only BUY / SELL trade types create positions; others are skipped silently.
+    """
+    trade_type = str(mapped.get('trade_type', '') or '').strip().upper()
+    if trade_type not in POSITION_TRADE_TYPES:
+        logger.debug("trade_id=%s type=%s — not BUY/SELL, position skipped", raw_id, trade_type)
+        return True, ''
+
+    try:
+        from decimal import Decimal
+        from trade.services.settlement_service import settlement_service
+
+        charges = (
+            Decimal(str(mapped.get('commission', 0) or 0)) +
+            Decimal(str(mapped.get('sec_fee', 0) or 0)) +
+            Decimal(str(mapped.get('other_charges', 0) or 0))
+        )
+
+        # settle_date defaults to trade_date when absent (T+0 migration data)
+        settle_date = str(mapped.get('settle_date', '') or '').strip()
+        trade_date  = str(mapped.get('trade_date', '') or '').strip()
+        if not settle_date:
+            settle_date = trade_date
+
+        ok, msg, _ = settlement_service.process_trade_settlement(
+            trade_id=int(raw_id),
+            portfolio_id=mapped.get('portfolio_short_name', ''),
+            security_id=mapped.get('security_label', ''),
+            trade_type=trade_type,
+            quantity=Decimal(str(mapped.get('quantity', 0) or 0)),
+            price=Decimal(str(mapped.get('price', 0) or 0)),
+            charges=charges,
+            trade_date=trade_date,
+            settle_date=settle_date,
+            updated_by=SRC_SYSTEM,
+            security_currency=mapped.get('currency_code'),
+            portfolio_currency=mapped.get('portfolio_currency'),
+            isin=mapped.get('isin'),
+            security_name=mapped.get('security_full_name') or mapped.get('security_label'),
+            async_mode=False,       # synchronous — we want all positions before script exits
+            position_basis=None,    # dual: TRADE_DATE + SETTLE_DATE (same as UI)
+        )
+        if ok:
+            logger.info("Position OK  trade_id=%s %s %s qty=%s",
+                        raw_id, trade_type, mapped.get('security_label'), mapped.get('quantity'))
+        else:
+            logger.warning("Position FAIL trade_id=%s: %s", raw_id, msg)
+        return ok, '' if ok else f"trade_id={raw_id}: {msg}"
+
+    except Exception as exc:
+        msg = f"trade_id={raw_id} position error: {exc}"
+        logger.error(msg, exc_info=True)
+        return False, msg
+
+
+# ---------------------------------------------------------------------------
+# load_position  — backfill positions for trades ALREADY in cis_trade
+# ---------------------------------------------------------------------------
+
+def load_position(
+    portfolio_filter: str = '',
+    trade_type_filter: str = '',
+    trade_date_from: str = '',
+    trade_date_to: str = '',
+    dry_run: bool = False,
+) -> Tuple[int, int, List[str]]:
+    """
+    Read SETTLED BUY/SELL trades from cis_trade and create positions for them.
+    Useful for backfilling positions after trades were migrated without --positions.
+
+    Filters (all optional):
+        portfolio_filter  — only this portfolio_short_name
+        trade_type_filter — 'BUY' or 'SELL' (default: both)
+        trade_date_from   — YYYY-MM-DD lower bound on trade_date
+        trade_date_to     — YYYY-MM-DD upper bound on trade_date
+    """
+    ok = fail = 0
+    errors: List[str] = []
+
+    # Build WHERE clause
+    conditions = ["status = 'SETTLED'", "trade_type IN ('BUY','SELL')",
+                  "is_deleted = false"]
+    if portfolio_filter:
+        conditions.append(f"portfolio_short_name = '{portfolio_filter.replace(chr(39), chr(92)+chr(39))}'")
+    if trade_type_filter:
+        conditions.append(f"trade_type = '{trade_type_filter.upper()}'")
+    if trade_date_from:
+        conditions.append(f"trade_date >= '{trade_date_from}'")
+    if trade_date_to:
+        conditions.append(f"trade_date <= '{trade_date_to}'")
+
+    where = ' AND '.join(conditions)
+    sql = (
+        f"SELECT trade_id, trade_type, portfolio_short_name, security_label, "
+        f"security_full_name, currency_code, portfolio_currency, isin, "
+        f"quantity, price, commission, sec_fee, other_charges, "
+        f"trade_date, settle_date "
+        f"FROM {DATABASE}.cis_trade WHERE {where} "
+        f"ORDER BY trade_date, trade_id"
+    )
+
+    logger.info("Fetching trades: %s", sql)
+    rows = impala_manager.execute_query(sql, database=DATABASE)
+    if not rows:
+        logger.info("No SETTLED BUY/SELL trades found matching the filter.")
+        return 0, 0, []
+
+    logger.info("Found %d trades to process for positions", len(rows))
+
+    for i, row in enumerate(rows, 1):
+        raw_id = str(row.get('trade_id', ''))
+        if dry_run:
+            logger.info("[DRY-RUN] position row %d: trade_id=%s %s %s qty=%s",
+                        i, raw_id, row.get('trade_type'), row.get('security_label'), row.get('quantity'))
+            ok += 1
+            continue
+
+        p_ok, p_err = _trigger_position(row, raw_id)
+        if p_ok:
+            ok += 1
+        else:
+            fail += 1
+            errors.append(p_err)
+
+        if i % 50 == 0:
+            logger.info("Progress: %d / %d  (ok=%d fail=%d)", i, len(rows), ok, fail)
 
     return ok, fail, errors
 
@@ -805,13 +964,41 @@ DEFAULT_STATUS = {
     'trade':     'SETTLED',
 }
 
+ALL_TABLES = list(LOADERS) + ['position']
+
 
 def main():
     today_yyyymmdd = datetime.now().strftime('%Y%m%d')
+    today_iso      = datetime.now().strftime('%Y-%m-%d')
 
-    parser = argparse.ArgumentParser(description='CIS migration data loader')
-    parser.add_argument('--table',           required=True, choices=list(LOADERS), help='Target table')
-    parser.add_argument('--file',            required=True, help='Path to CSV file')
+    parser = argparse.ArgumentParser(
+        description='CIS migration data loader',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Load trades from CSV (no positions)
+  python scripts/load_migration_data.py --table trade --file trades.csv
+
+  # Load trades AND create positions in one pass
+  python scripts/load_migration_data.py --table trade --file trades.csv --positions
+
+  # Backfill positions for trades already in cis_trade (no CSV needed)
+  python scripts/load_migration_data.py --table position
+
+  # Backfill positions for one portfolio only
+  python scripts/load_migration_data.py --table position --portfolio UOB-KH-PTE-LTD
+
+  # Backfill positions for a date range
+  python scripts/load_migration_data.py --table position \\
+      --trade-date-from 2026-01-01 --trade-date-to 2026-05-23
+
+  # Dry-run: see what would be processed without writing
+  python scripts/load_migration_data.py --table position --dry-run
+""")
+    parser.add_argument('--table',           required=True, choices=ALL_TABLES,
+                        help='Target table. Use "position" to backfill positions from existing cis_trade rows.')
+    parser.add_argument('--file',            default='',
+                        help='Path to CSV file (required for party/party_cif/security/trade)')
     parser.add_argument('--delimiter',       default=',',   help='CSV delimiter (default: ,)')
     parser.add_argument('--status',          default=None,
                         help='status value to set. Defaults: party/party_cif/security=ACTIVE, trade=SETTLED')
@@ -819,7 +1006,59 @@ def main():
                         help='processing_date in YYYYMMDD format (default: today). '
                              'CSV column value takes priority if present.')
     parser.add_argument('--dry-run',         action='store_true', help='Parse and validate only, no writes')
+
+    # Trade-specific: generate positions after loading
+    parser.add_argument('--positions',       action='store_true',
+                        help='(--table trade only) Also trigger position calculation for each loaded trade')
+
+    # Position backfill filters
+    parser.add_argument('--portfolio',       default='',
+                        help='(--table position) Filter by portfolio_short_name')
+    parser.add_argument('--trade-type',      default='', choices=['', 'BUY', 'SELL'],
+                        help='(--table position) Filter by trade_type (default: both BUY and SELL)')
+    parser.add_argument('--trade-date-from', default='',
+                        help='(--table position) Lower bound on trade_date (YYYY-MM-DD)')
+    parser.add_argument('--trade-date-to',   default='',
+                        help='(--table position) Upper bound on trade_date (YYYY-MM-DD, default: today)')
+
     args = parser.parse_args()
+
+    # ------------------------------------------------------------------ #
+    # --table position: backfill positions from existing cis_trade rows   #
+    # ------------------------------------------------------------------ #
+    if args.table == 'position':
+        date_to = args.trade_date_to or today_iso
+        logger.info(
+            "Backfilling positions from cis_trade (portfolio=%r type=%r from=%r to=%r dry_run=%s)",
+            args.portfolio, args.trade_type, args.trade_date_from, date_to, args.dry_run
+        )
+        ok, fail, errors = load_position(
+            portfolio_filter=args.portfolio,
+            trade_type_filter=args.trade_type,
+            trade_date_from=args.trade_date_from,
+            trade_date_to=date_to,
+            dry_run=args.dry_run,
+        )
+        print()
+        print("=" * 55)
+        print(f"  Mode             : Position backfill from cis_trade")
+        print(f"  Portfolio filter : {args.portfolio or '(all)'}")
+        print(f"  Trade type       : {args.trade_type or 'BUY + SELL'}")
+        print(f"  Date range       : {args.trade_date_from or '(any)'} → {date_to}")
+        print(f"  Positions queued : {ok}")
+        print(f"  Failed           : {fail}")
+        if args.dry_run:
+            print("  Mode             : DRY RUN — no data written")
+        print("=" * 55)
+        if errors:
+            err_file = _write_error_csv('position', errors)
+            if err_file:
+                print(f"  Errors  → {err_file}")
+        sys.exit(0 if fail == 0 else 1)
+
+    # ------------------------------------------------------------------ #
+    # All other tables: standard CSV load                                  #
+    # ------------------------------------------------------------------ #
 
     # Validate YYYYMMDD format
     proc_date = args.processing_date
@@ -829,30 +1068,42 @@ def main():
         logger.error("--processing-date must be YYYYMMDD, got: %s", proc_date)
         sys.exit(1)
 
+    if not args.file:
+        parser.error(f"--file is required for --table {args.table}")
+
     if not os.path.isfile(args.file):
         logger.error("File not found: %s", args.file)
         sys.exit(1)
 
     effective_status = args.status or DEFAULT_STATUS[args.table]
-    logger.info("Loading %s from %s (dry_run=%s, status=%s, processing_date=%s)",
-                args.table, args.file, args.dry_run, effective_status, proc_date)
+    logger.info("Loading %s from %s (dry_run=%s, status=%s, processing_date=%s, positions=%s)",
+                args.table, args.file, args.dry_run, effective_status, proc_date,
+                args.positions if args.table == 'trade' else 'N/A')
     headers, rows = _read_csv(args.file, args.delimiter)
     logger.info("Read %d rows, columns: %s", len(rows), headers)
 
-    loader = LOADERS[args.table]
-    ok, fail, errors = loader(rows, effective_status, args.dry_run, proc_date)
+    if args.table == 'trade':
+        ok, fail, errors = load_trade(
+            rows, effective_status, args.dry_run, proc_date,
+            with_positions=args.positions,
+        )
+    else:
+        loader = LOADERS[args.table]
+        ok, fail, errors = loader(rows, effective_status, args.dry_run, proc_date)
 
     print()
-    print("=" * 50)
+    print("=" * 55)
     print(f"  Table            : {DATABASE}.cis_{args.table}")
     print(f"  File             : {args.file}")
     print(f"  processing_date  : {proc_date}")
-    print(f"  Total            : {len(rows)}")
+    print(f"  Total rows       : {len(rows)}")
     print(f"  Loaded           : {ok}")
     print(f"  Failed           : {fail}")
+    if args.table == 'trade' and args.positions:
+        print(f"  Positions        : triggered alongside each trade")
     if args.dry_run:
         print("  Mode             : DRY RUN — no data written")
-    print("=" * 50)
+    print("=" * 55)
 
     if errors:
         err_file = _write_error_csv(args.table, errors)
