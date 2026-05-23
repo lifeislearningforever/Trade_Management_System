@@ -1090,11 +1090,12 @@ class UploadService:
 
             # Resolve the best available data source, in priority order:
             #   P1. Local temp file (same-node upload or DB-persisted path)
-            #   P2. HDFS download to local temp (cross-node Cloudera/MRW) → INSERT VALUES
+            #   P2. Impala external table over HDFS path (Cloudera/MRW — no hdfs shell needed)
             #   P3. sample_data from session (session-based uploads only)
             #   P4. sample_data_json from DB record (last resort — capped at 20 rows)
             local_file = None
             _hdfs_tmp = None
+            _hdfs_impala_done = False  # True if P2 Impala path handled ingest directly
 
             logger.info(f"[ingest:svc] ===== FILE RESOLUTION upload_id={upload_id} =====")
             logger.info(f"[ingest:svc] temp_file_path arg={temp_file_path!r}")
@@ -1110,23 +1111,34 @@ class UploadService:
                 local_file = temp_file_path
                 logger.info(f"[ingest:svc] P1 RESOLVED — local temp file: {local_file}")
             else:
-                logger.info(f"[ingest:svc] P1 FAILED — local file not found, trying HDFS download")
+                logger.info(f"[ingest:svc] P1 FAILED — local file not found, trying Impala/HDFS path")
                 # ----------------------------------------------------------------
-                # P2: Download file from HDFS to a local temp file, then use
-                #     INSERT VALUES — same path as P1. This handles Cloudera CML
-                #     multi-node deployments where the upload and ingest requests
-                #     hit different Gunicorn workers. No staging table is created.
+                # P2: HDFS file available — create a temporary Hive external table
+                #     pointing at the HDFS staging directory and INSERT directly
+                #     into the target raw table via Impala SELECT.
+                #     No hdfs shell command needed — works on any Cloudera node.
                 # ----------------------------------------------------------------
                 hdfs_path_db = (upload.get('hdfs_path', '') or '').strip() if upload else ''
                 logger.info(f"[ingest:svc] P2 hdfs_path_db={hdfs_path_db!r}")
                 if hdfs_path_db and not is_session_upload:
-                    logger.info(f"[ingest:svc] P2 downloading from HDFS: {hdfs_path_db}")
-                    _hdfs_tmp = self._download_from_hdfs(hdfs_path_db)
-                    if _hdfs_tmp:
-                        local_file = _hdfs_tmp
-                        logger.info(f"[ingest:svc] P2 RESOLVED — HDFS download → {local_file}")
+                    logger.info(f"[ingest:svc] P2 attempting Impala external table over HDFS: {hdfs_path_db}")
+                    p2_success, p2_msg = self._ingest_via_hdfs_impala(
+                        hdfs_path=hdfs_path_db,
+                        target_table=target_table,
+                        datasource_config=datasource_config,
+                        intake_columns=intake_columns,
+                        processing_date=processing_date,
+                        upload_id=upload_id,
+                        updated_by=updated_by,
+                        ingestion_mode=ingestion_mode,
+                    )
+                    if p2_success:
+                        logger.info(f"[ingest:svc] P2 RESOLVED via Impala/HDFS: {p2_msg}")
+                        if not is_session_upload:
+                            self.repository.update_status(upload_id, UploadKuduRepository.STATUS_COMPLETED, updated_by)
+                        return True, p2_msg
                     else:
-                        logger.warning(f"[ingest:svc] P2 FAILED — HDFS download failed for {hdfs_path_db} — falling through to P3/P4")
+                        logger.warning(f"[ingest:svc] P2 FAILED — Impala/HDFS path: {p2_msg} — falling through to P3/P4")
                 else:
                     logger.warning(f"[ingest:svc] P2 SKIPPED — hdfs_path_db empty or session upload")
 
@@ -1571,36 +1583,23 @@ class UploadService:
         position_basis = POSITION_TABLE_BASIS.get(table_lower, '')
 
         try:
-            # Step 1: Drop any leftover staging table; ignore errors (metastore may be stale)
-            try:
-                impala_manager.execute_write(f"DROP TABLE IF EXISTS {db}.{stg_table}", database=db)
-            except Exception as _drop_err:
-                logger.warning(f"[hdfs:impala] DROP TABLE {stg_table} failed (ignored): {_drop_err}")
+            # Step 1: Drop any leftover staging table
+            impala_manager.execute_write(f"DROP TABLE IF EXISTS {db}.{stg_table}", database=db)
 
-            # Step 2: Create external table over the HDFS staging directory.
-            # Use IF NOT EXISTS so a stale metastore entry from a prior failed run
-            # does not cause "table already exists". Follow immediately with
-            # ALTER TABLE SET LOCATION to guarantee this run's HDFS path is used.
+            # Step 2: Create external table over the HDFS staging directory
             create_cols = ',\n    '.join(f"`{c}` STRING" for c in col_names)
-            skip_header = '1' if has_header else '0'
             ok = impala_manager.execute_write(f"""
-                CREATE EXTERNAL TABLE IF NOT EXISTS {db}.{stg_table} (
+                CREATE EXTERNAL TABLE {db}.{stg_table} (
                     {create_cols}
                 )
                 ROW FORMAT DELIMITED
                 FIELDS TERMINATED BY '{field_term}'
                 STORED AS TEXTFILE
                 LOCATION '{hdfs_path}'
-                TBLPROPERTIES ('skip.header.line.count'='{skip_header}')
+                TBLPROPERTIES ('skip.header.line.count'='{"1" if has_header else "0"}')
             """, database=db)
             if not ok:
                 return False, f"Could not CREATE EXTERNAL TABLE {stg_table} over {hdfs_path}"
-
-            # Ensure the staging table always points at this upload's HDFS path
-            # (handles the case where IF NOT EXISTS reused an existing table entry)
-            impala_manager.execute_write(
-                f"ALTER TABLE {db}.{stg_table} SET LOCATION '{hdfs_path}'", database=db
-            )
 
             impala_manager.execute_write(f"INVALIDATE METADATA {db}.{stg_table}", database=db)
 
