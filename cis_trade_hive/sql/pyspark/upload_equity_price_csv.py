@@ -17,16 +17,17 @@ Security resolution (to find security_label and currency_code):
 
 Expected CSV columns (header row required, order-independent):
   Required:
-    price_date          YYYY-MM-DD
-    price               closing price (numeric)
+    price_date          YYYY-MM-DD  (also accepted: date, trade_date, nav_date)
+    closing_price       closing price — also accepted: closing price, price,
+                        close, close_price, main_closing_price, nav, unit_price
   At least one security identifier:
     isin                ISIN code          (preferred)
     security_name       Security name      (fallback)
   Optional (overrides resolved value from cis_security):
-    currency_code       e.g. SGD, USD
+    currency_code       e.g. SGD, USD  (also: currency, ccy)
 
 Example CSV:
-  isin,security_name,price_date,price,currency_code
+  isin,security_name,price_date,closing_price,currency_code
   US0378331005,Apple Inc.,2026-05-23,189.50,USD
   ,DBS Group Holdings,2026-05-23,37.20,SGD
 
@@ -89,13 +90,21 @@ PRICE_TBL  = f'{DB}.cis_equity_price'
 SEC_TBL    = f'{DB}.cis_security'
 SRC_SYSTEM = 'CIS'
 
-# Accepted column name aliases (lower-stripped)
+# Accepted column name aliases (lower-stripped, spaces/underscores normalised)
 _COL_ALIASES = {
-    'isin':           {'isin', 'isin_code', 'isin code'},
-    'security_name':  {'security_name', 'security name', 'name', 'security', 'sec_name', 'description'},
-    'price_date':     {'price_date', 'date', 'pricedate', 'price date', 'trade_date'},
-    'price':          {'price', 'closing_price', 'main_closing_price', 'close', 'close_price', 'closingprice'},
-    'currency_code':  {'currency_code', 'currency', 'ccy', 'curr'},
+    'isin':           {'isin', 'isin_code', 'isin code', 'isincode'},
+    'security_name':  {'security_name', 'security name', 'name', 'security',
+                       'sec_name', 'secname', 'description', 'security_label',
+                       'security label'},
+    'price_date':     {'price_date', 'price date', 'date', 'pricedate',
+                       'trade_date', 'trade date', 'nav_date', 'nav date',
+                       'valuation_date', 'valuation date'},
+    'price':          {'price', 'closing_price', 'closing price', 'closingprice',
+                       'close_price', 'close price', 'closeprice',
+                       'main_closing_price', 'main closing price',
+                       'close', 'last_price', 'last price', 'nav',
+                       'unit_price', 'unit price'},
+    'currency_code':  {'currency_code', 'currency code', 'currency', 'ccy', 'curr'},
 }
 
 
@@ -136,12 +145,20 @@ def _normalise_date(raw: str) -> Optional[str]:
 
 
 def _map_headers(headers: List[str]) -> Dict[str, int]:
-    """Map canonical column names to CSV column indices."""
+    """Map canonical column names to CSV column indices.
+
+    Normalises each header to lowercase with leading/trailing spaces stripped.
+    Checks both the raw normalised form and an underscore-collapsed form so that
+    'Closing Price', 'closing_price', and 'closing price' all match.
+    """
     mapping = {}
     for idx, h in enumerate(headers):
         h_norm = h.strip().lower()
+        h_ul   = h_norm.replace(' ', '_')   # 'closing price' → 'closing_price'
         for canonical, aliases in _COL_ALIASES.items():
-            if h_norm in aliases and canonical not in mapping:
+            if canonical in mapping:
+                continue
+            if h_norm in aliases or h_ul in aliases:
                 mapping[canonical] = idx
     return mapping
 
@@ -249,7 +266,10 @@ def parse_csv(filepath: str, override_date: Optional[str]) -> List[dict]:
 
         if 'price' not in col_map:
             raise ValueError(
-                f"CSV missing required 'price' column. Found: {headers}"
+                f"CSV missing required price column. Accepted names: "
+                f"closing_price, closing price, price, close, close_price, "
+                f"main_closing_price, nav, unit_price, last_price. "
+                f"Found columns: {[h.strip() for h in headers]}"
             )
         if 'price_date' not in col_map and not override_date:
             raise ValueError(
@@ -428,8 +448,10 @@ def parse_args():
                    help='UPSERT even if (currency_code, security_label, price_date) already exists')
     p.add_argument('--dry-run',     action='store_true',
                    help='Parse and validate without writing to the database')
-    p.add_argument('--batch-size',  type=int, default=100,
-                   help='Number of rows per UPSERT batch (default: 100)')
+    p.add_argument('--batch-size',  type=int, default=500,
+                   help='Rows per UPSERT statement (default: 500). '
+                        'All rows in the file are always processed — this only '
+                        'controls how many are grouped into each SQL statement.')
     return p.parse_args()
 
 
