@@ -219,5 +219,20 @@ class PositionRepository:
             logger.error(f"Error fetching portfolios: {str(e)}")
             return []
 
+    def get_max_position_date(self) -> Optional[str]:
+        """Return the latest position_date in the table as YYYY-MM-DD, or None."""
+        try:
+            results = impala_manager.execute_query(
+                f"SELECT MAX(position_date) AS max_date FROM {DATABASE}.{TABLE}",
+                database=DATABASE,
+            )
+            if results:
+                val = results[0].get('max_date')
+                if val:
+                    return str(val)[:10]
+        except Exception as e:
+            logger.error(f"Error fetching max position_date: {e}")
+        return None
+
 
 position_repository = PositionRepository()

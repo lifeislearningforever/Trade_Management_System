@@ -42,10 +42,15 @@ def position_list(request):
     date_to       = request.GET.get('date_to', '').strip()
     export        = request.GET.get('export', '').strip()
 
-    # Default date range: last 30 days if nothing supplied
+    # Default date range: 30 days ending on the latest position_date in the table.
+    # Falls back to today only if the table is empty or unreachable.
     if not date_from and not date_to:
-        date_to   = datetime.now().strftime('%Y-%m-%d')
-        date_from = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        system_date = position_repository.get_max_position_date()
+        if not system_date:
+            system_date = datetime.now().strftime('%Y-%m-%d')
+        date_to   = system_date
+        dt_to     = datetime.strptime(system_date, '%Y-%m-%d')
+        date_from = (dt_to - timedelta(days=30)).strftime('%Y-%m-%d')
 
     # For repo calls: pass first value only (repo supports single string filter);
     # multi-select filtering is done client-side after fetch when multiple selected.
