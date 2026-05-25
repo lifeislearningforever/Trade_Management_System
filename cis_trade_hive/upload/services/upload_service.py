@@ -3193,7 +3193,7 @@ class UploadService:
             # Step 7B: INSERT OVERWRITE into the existing external partitioned
             #          table gmp_cis.position_upload_report.
             #          Columns match the DDL in 25_position_upload_standardized.sql.
-            #          Only the (src_id, processing_date) partition is overwritten;
+            #          Only the (processing_date, src_id) partition is overwritten;
             #          all other partitions (other runs) are preserved.
             # ------------------------------------------------------------------
             impala_manager.execute_write(
