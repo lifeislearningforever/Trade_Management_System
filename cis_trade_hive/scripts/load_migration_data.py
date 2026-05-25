@@ -473,6 +473,24 @@ SECURITY_DECIMAL_COLS = {'price', 'beta', 'par_value'}
 SECURITY_BIGINT_COLS  = {'shares_outstanding'}
 SECURITY_BOOL_COLS    = {'is_active'}
 
+# Exact columns that exist in the live cis_security Kudu table.
+# Any mapped key NOT in this set is silently dropped before the UPSERT
+# to avoid "Unknown column" analysis errors (e.g. processing_date, src_id).
+SECURITY_VALID_COLS = {
+    'security_id', 'record_type', 'security_name', 'isin', 'security_description',
+    'issuer', 'ticker', 'industry', 'security_type', 'investment_type', 'issuer_type',
+    'quoted_unquoted', 'country_of_incorporation', 'country_of_exchange',
+    'country_of_issue', 'exchange_code', 'currency_code',
+    'price', 'shares_outstanding', 'beta', 'par_value',
+    'pct_hld_entity_1', 'pct_hld_entity_2', 'pct_hld_entity_3', 'pct_hld_entity_aggr',
+    'substantial_10_pct', 'cels', 'pevc_s32_devest', 's32_representative',
+    'basel_iv_fund', 'mas_643_entity_type', 'mas_6d_code', 'fin_nonfin_ind',
+    'business_unit_head', 'person_in_charge', 'core_noncore', 'fund_index_fund',
+    'management_limit_classification', 'relative_index',
+    'status', 'src_system', 'is_active',
+    'created_by', 'created_at', 'updated_by', 'updated_at',
+}
+
 
 def load_security(rows: List[Dict], status: str, dry_run: bool, processing_date: str = '') -> Tuple[int, int, List[str]]:
     ok = fail = 0
@@ -502,11 +520,13 @@ def load_security(rows: List[Dict], status: str, dry_run: bool, processing_date:
         mapped.setdefault('is_active', True)
         mapped.setdefault('created_by', SRC_SYSTEM)
         mapped.setdefault('updated_by', SRC_SYSTEM)
-        # created_at / updated_at are STRING in the live table (repository writes
-        # them as 'YYYY-MM-DD HH:MM:SS' quoted strings — match that convention)
+        # created_at / updated_at are STRING in the live table
         mapped['created_at'] = ts
         mapped['updated_at'] = ts
-        mapped.setdefault('processing_date', processing_date)
+
+        # Drop any keys that don't exist as columns in cis_security
+        # (e.g. processing_date, src_id from CSV or alias mapping)
+        mapped = {k: v for k, v in mapped.items() if k in SECURITY_VALID_COLS}
 
         col_names = []
         col_vals = []
