@@ -1126,6 +1126,7 @@ def upload_detail(request, upload_id: str):
     # For position uploads: query the actual Hive partition count so the
     # detail page shows the real row count regardless of what Kudu stores.
     hive_row_count = None
+    _pd2 = None
     if is_position_upload:
         try:
             import re as _re2
@@ -1153,6 +1154,7 @@ def upload_detail(request, upload_id: str):
         'validation_errors': validation_errors,
         'table_preview': table_preview,
         'recon_data': recon_data,
+        'etl_processing_date': _pd2 or '',
         'can_edit': upload_status in [
             UploadKuduRepository.STATUS_PENDING,
             UploadKuduRepository.STATUS_VALIDATED,

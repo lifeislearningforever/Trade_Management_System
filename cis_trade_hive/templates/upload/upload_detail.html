@@ -710,10 +710,9 @@ $(document).ready(function() {
 // Position ETL confirmation dialog
 function confirmRunPosition() {
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    // Pre-fill with the processing_date stored in the upload description (set at ingest time)
-    const desc = '{{ upload.description|default:"" }}';
-    const descMatch = desc.match(/processing_date[=:\s]+(\d{8})/);
-    const defaultDate = descMatch ? descMatch[1] : today;
+    // etl_processing_date is extracted server-side from the upload description
+    const serverDate = '{{ etl_processing_date }}';
+    const defaultDate = (serverDate && /^\d{8}$/.test(serverDate)) ? serverDate : today;
     const dateInput = prompt(
         'Enter processing date (YYYYMMDD).\nThis must match the date used when the file was ingested:',
         defaultDate
