@@ -277,8 +277,15 @@ def parse_csv(filepath: str, override_date: Optional[str]) -> List[dict]:
             )
         if 'isin' not in col_map and 'security_name' not in col_map:
             raise ValueError(
-                "CSV must have at least one of: isin, security_name."
+                "CSV must have at least one of: isin, security_name / security_label. "
+                f"Found columns: {[h.strip() for h in headers]}"
             )
+
+        # Show which columns were recognised — helps debug mapping issues
+        mapped_display = {c: headers[i].strip() for c, i in col_map.items()}
+        logger.info(f"Column mapping: {mapped_display}")
+        if 'currency_code' not in col_map:
+            logger.info("No currency_code column — will use cis_security.currency_code for each row")
 
         for lineno, row in enumerate(reader, start=2):
             if not any(c.strip() for c in row):
