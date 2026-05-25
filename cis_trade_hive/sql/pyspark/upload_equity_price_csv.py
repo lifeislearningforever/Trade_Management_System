@@ -1,55 +1,49 @@
 """
 Upload Equity Price from CSV — src_system='CIS'
 ================================================
-Standalone backend script that loads daily closing prices from a CSV file
-into gmp_cis.cis_equity_price (Kudu), skipping rows that already exist.
+Loads daily closing prices from a CSV into gmp_cis.cis_equity_price (Kudu).
 
-GMP guard (hard fail):
-  If cis_equity_price already contains ANY row with src_system='GMP' for a
-  price_date present in the CSV, the upload is aborted for that date with an
-  error.  GMP prices are authoritative; CIS manual uploads must not overwrite
-  them.  Use --force-gmp-override to bypass this guard (rare/authorised use).
+Logic:
+  1. GMP guard  — if cis_equity_price already has src_system='GMP' rows for
+                  any price_date in the CSV, abort (GMP is authoritative).
+                  Use --force-gmp-override to bypass.
+  2. Existence  — for each row, check if (security_label, price_date) already
+                  exists in cis_equity_price.  If yes → skip.
+  3. Insert     — insert new rows as src_system='CIS'.
 
-Existence check (idempotent):
-  A row is skipped when (currency_code, security_label, price_date) already
-  exists in cis_equity_price with is_active = true.  This makes the script
-  safe to re-run; only genuinely new prices are written.
-
-Security resolution (to find security_label and currency_code):
-  1. ISIN match   — cis_equity_price.isin = csv.isin  (checked first)
-  2. ISIN match   — cis_security.isin = csv.isin
-  3. Name match   — cis_security.security_name = csv.security_name
-  4. Desc match   — cis_security.security_description = csv.security_name
-  If no match the row is flagged SKIP: Security not found.
+security_label comes directly from the CSV column 'Security label' (or alias).
+No lookup against cis_security is performed.
 
 Expected CSV columns (header row required, order-independent):
   Required:
-    price_date          YYYY-MM-DD  (also accepted: date, trade_date, nav_date)
-    closing_price       closing price — also accepted: closing price, price,
-                        close, close_price, main_closing_price, nav, unit_price
-  At least one security identifier:
-    isin                ISIN code          (preferred)
-    security_name       Security name      (fallback)
-  Optional (overrides resolved value from cis_security):
-    currency_code       e.g. SGD, USD  (also: currency, ccy)
+    security_label      (also: security label, security_name, security name,
+                         name, security, sec_name)
+    price_date          YYYY-MM-DD  (also: price date, date, trade_date,
+                                    nav_date, valuation_date)
+    closing_price       (also: closing price, price, close, close_price,
+                         main_closing_price, nav, unit_price, last_price)
+  Optional:
+    isin                stored as-is if present
+    currency_code       (also: currency, ccy)
 
 Example CSV:
-  isin,security_name,price_date,closing_price,currency_code
-  US0378331005,Apple Inc.,2026-05-23,189.50,USD
-  ,DBS Group Holdings,2026-05-23,37.20,SGD
+  Security label,Price Date,Closing Price,ISIN,Currency
+  ZIMI LTD,2026-05-23,1.25,AU000000ZIM7,AUD
+  DBS GROUP,2026-05-23,37.20,,SGD
 
 CLI usage:
-  python upload_equity_price_csv.py --file prices_20260523.csv
+  python upload_equity_price_csv.py --file prices.csv
   python upload_equity_price_csv.py --file prices.csv --price-date 2026-05-23
   python upload_equity_price_csv.py --file prices.csv --dry-run
   python upload_equity_price_csv.py --file prices.csv --overwrite
+  python upload_equity_price_csv.py --file prices.csv --force-gmp-override
 
 Options:
-  --file                Path to the CSV file (required)
+  --file                Path to CSV file (required)
   --price-date          Override price_date for all rows (YYYY-MM-DD)
-  --overwrite           UPSERT even if record already exists (update price)
-  --dry-run             Show what would be written; no DB writes
-  --batch-size          Rows per UPSERT batch (default: 500)
+  --overwrite           Insert even if (security_label, price_date) already exists
+  --dry-run             Validate without writing to the database
+  --batch-size          Rows per UPSERT statement (default: 500)
   --force-gmp-override  Bypass the GMP guard (authorised use only)
 
 Author: CisTrade Team
@@ -63,7 +57,7 @@ import re
 import sys
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 # ---------------------------------------------------------------------------
 # Bootstrap Django so we can use impala_manager
@@ -93,17 +87,15 @@ logger = logging.getLogger('upload_equity_price_csv')
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-DB         = 'gmp_cis'
-PRICE_TBL  = f'{DB}.cis_equity_price'
-SEC_TBL    = f'{DB}.cis_security'
+DB        = 'gmp_cis'
+PRICE_TBL = f'{DB}.cis_equity_price'
 SRC_SYSTEM = 'CIS'
 
-# Accepted column name aliases (lower-stripped, spaces/underscores normalised)
+# Accepted column name aliases — normalised to lowercase, spaces→underscores
 _COL_ALIASES = {
-    'isin':           {'isin', 'isin_code', 'isin code', 'isincode'},
-    'security_name':  {'security_name', 'security name', 'name', 'security',
-                       'sec_name', 'secname', 'description', 'security_label',
-                       'security label'},
+    'security_label': {'security_label', 'security label', 'security_name',
+                       'security name', 'name', 'security', 'sec_name', 'secname',
+                       'security_short_name', 'security short name'},
     'price_date':     {'price_date', 'price date', 'date', 'pricedate',
                        'trade_date', 'trade date', 'nav_date', 'nav date',
                        'valuation_date', 'valuation date'},
@@ -112,6 +104,7 @@ _COL_ALIASES = {
                        'main_closing_price', 'main closing price',
                        'close', 'last_price', 'last price', 'nav',
                        'unit_price', 'unit price'},
+    'isin':           {'isin', 'isin_code', 'isin code', 'isincode'},
     'currency_code':  {'currency_code', 'currency code', 'currency', 'ccy', 'curr'},
 }
 
@@ -124,11 +117,9 @@ def _esc(val: str) -> str:
 
 
 def _clean_price(raw: str) -> Optional[Decimal]:
-    """Parse a raw price string; return Decimal or None on failure."""
     if not raw or not str(raw).strip():
         return None
     cleaned = re.sub(r'[,$£€¥%\s]', '', str(raw))
-    # Handle parenthetical negatives: (1234.56) → -1234.56
     cleaned = re.sub(r'^\(([0-9.]+)\)$', r'-\1', cleaned)
     try:
         d = Decimal(cleaned)
@@ -140,7 +131,6 @@ def _clean_price(raw: str) -> Optional[Decimal]:
 
 
 def _normalise_date(raw: str) -> Optional[str]:
-    """Return YYYY-MM-DD or None."""
     if not raw:
         return None
     raw = raw.strip()
@@ -153,16 +143,11 @@ def _normalise_date(raw: str) -> Optional[str]:
 
 
 def _map_headers(headers: List[str]) -> Dict[str, int]:
-    """Map canonical column names to CSV column indices.
-
-    Normalises each header to lowercase with leading/trailing spaces stripped.
-    Checks both the raw normalised form and an underscore-collapsed form so that
-    'Closing Price', 'closing_price', and 'closing price' all match.
-    """
+    """Map canonical column names to CSV column indices (case/space insensitive)."""
     mapping = {}
     for idx, h in enumerate(headers):
         h_norm = h.strip().lower()
-        h_ul   = h_norm.replace(' ', '_')   # 'closing price' → 'closing_price'
+        h_ul   = h_norm.replace(' ', '_')
         for canonical, aliases in _COL_ALIASES.items():
             if canonical in mapping:
                 continue
@@ -172,123 +157,11 @@ def _map_headers(headers: List[str]) -> Dict[str, int]:
 
 
 # ---------------------------------------------------------------------------
-# Security resolution — check cis_equity_price first, then cis_security
-# ---------------------------------------------------------------------------
-
-def load_security_map() -> Dict[str, dict]:
-    """
-    Build in-memory lookup dicts for security resolution.
-
-    Resolution order (by ISIN):
-      1. cis_equity_price — ISIN → security_label + currency_code
-      2. cis_security     — ISIN → security_name + currency_code
-                          — security_name / security_description (name fallback)
-
-    cis_equity_price is checked first because it already holds the canonical
-    security_label used as the PK in that table.
-    """
-    # --- 1. Load from cis_equity_price (ISIN keyed) ---
-    logger.info("Loading security labels from cis_equity_price …")
-    ep_rows = impala_manager.execute_query(
-        f"""
-        SELECT DISTINCT isin, security_label, currency_code
-        FROM {PRICE_TBL}
-        WHERE isin IS NOT NULL AND isin != ''
-        """,
-        database=DB
-    )
-    ep_by_isin = {}
-    for r in (ep_rows or []):
-        isin = (r.get('isin') or '').strip().upper()
-        if isin:
-            ep_by_isin[isin] = {
-                'security_name': r.get('security_label', ''),
-                'currency_code': r.get('currency_code', ''),
-                'isin':          isin,
-            }
-    logger.info(f"Loaded {len(ep_by_isin)} securities by ISIN from cis_equity_price")
-
-    # --- 2. Load from cis_security (ISIN + name keyed) ---
-    logger.info("Loading security master from cis_security …")
-    sec_rows = impala_manager.execute_query(
-        f"""
-        SELECT security_name, isin, currency_code, security_description
-        FROM {SEC_TBL}
-        """,
-        database=DB
-    )
-    sec_by_isin = {}
-    by_name = {}
-    by_desc = {}
-    for r in (sec_rows or []):
-        entry = {
-            'security_name': r.get('security_name', ''),
-            'currency_code': r.get('currency_code', ''),
-            'isin':          (r.get('isin') or '').strip().upper(),
-        }
-        isin = (r.get('isin') or '').strip().upper()
-        name = (r.get('security_name') or '').strip().lower()
-        desc = (r.get('security_description') or '').strip().lower()
-        if isin:
-            sec_by_isin[isin] = entry
-        if name:
-            by_name.setdefault(name, entry)
-        if desc:
-            by_desc.setdefault(desc, entry)
-    logger.info(f"Loaded {len(sec_by_isin)} securities by ISIN from cis_security")
-
-    return {
-        'ep_isin':  ep_by_isin,   # cis_equity_price — checked first
-        'sec_isin': sec_by_isin,  # cis_security ISIN fallback
-        'name':     by_name,      # cis_security name fallback
-        'desc':     by_desc,      # cis_security description fallback
-    }
-
-
-def resolve_security(csv_isin: str, csv_name: str, sec_map: dict) -> Optional[dict]:
-    """
-    Return matched security dict or None.
-
-    Order:
-      1. ISIN → cis_equity_price
-      2. ISIN → cis_security
-      3. name → cis_security (security_name)
-      4. name → cis_security (security_description)
-    """
-    if csv_isin:
-        isin_key = csv_isin.strip().upper()
-        hit = sec_map['ep_isin'].get(isin_key)
-        if hit:
-            logger.debug(f"Resolved via cis_equity_price ISIN={isin_key} → {hit['security_name']}")
-            return hit
-        hit = sec_map['sec_isin'].get(isin_key)
-        if hit:
-            logger.debug(f"Resolved via cis_security ISIN={isin_key} → {hit['security_name']}")
-            return hit
-        logger.debug(f"ISIN={isin_key!r} not found in cis_equity_price or cis_security")
-    if csv_name:
-        name_key = csv_name.strip().lower()
-        hit = sec_map['name'].get(name_key)
-        if hit:
-            logger.debug(f"Resolved via cis_security name={name_key!r} → {hit['security_name']}")
-            return hit
-        hit = sec_map['desc'].get(name_key)
-        if hit:
-            logger.debug(f"Resolved via cis_security desc={name_key!r} → {hit['security_name']}")
-            return hit
-        logger.debug(f"name={name_key!r} not found in cis_security name/desc")
-    return None
-
-
-# ---------------------------------------------------------------------------
-# GMP guard — refuse upload if GMP prices already exist for that price_date
+# GMP guard
 # ---------------------------------------------------------------------------
 
 def check_gmp_conflict(price_dates: set) -> List[str]:
-    """
-    Return list of price_dates that already have src_system='GMP' rows in
-    cis_equity_price.  An empty list means no conflict — safe to proceed.
-    """
+    """Return price_dates that already have src_system='GMP' in cis_equity_price."""
     if not price_dates:
         return []
     date_list = ', '.join(f"'{d}'" for d in sorted(price_dates))
@@ -305,16 +178,15 @@ def check_gmp_conflict(price_dates: set) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
-# Existence check — bulk fetch existing (currency_code, security_label, price_date)
+# Existence check — fetch (security_label, price_date) already in cis_equity_price
 # ---------------------------------------------------------------------------
 
 def load_existing_keys(price_dates: Optional[set] = None) -> set:
     """
-    Return set of (currency_code, security_label, price_date) tuples already
-    in cis_equity_price (is_active=true).  If price_dates is given, only fetch
-    those dates' rows (faster for daily runs).
+    Return set of (security_label, price_date) tuples already in cis_equity_price.
+    Scoped to the given price_dates for efficiency.
     """
-    where = "WHERE (is_active = true OR is_active IS NULL)"
+    where = 'WHERE 1=1'
     if price_dates:
         if len(price_dates) == 1:
             where += f" AND price_date = '{next(iter(price_dates))}'"
@@ -322,17 +194,16 @@ def load_existing_keys(price_dates: Optional[set] = None) -> set:
             date_list = ', '.join(f"'{d}'" for d in sorted(price_dates))
             where += f" AND price_date IN ({date_list})"
     rows = impala_manager.execute_query(
-        f"SELECT currency_code, security_label, price_date FROM {PRICE_TBL} {where}",
-        database=DB
+        f"SELECT security_label, price_date FROM {PRICE_TBL} {where}",
+        database=DB,
     )
     keys = set()
     for r in (rows or []):
         keys.add((
-            (r.get('currency_code') or '').strip(),
             (r.get('security_label') or '').strip(),
             (r.get('price_date') or '').strip(),
         ))
-    logger.info(f"Loaded {len(keys)} existing price keys from cis_equity_price")
+    logger.info(f"Loaded {len(keys)} existing (security_label, price_date) keys from cis_equity_price")
     return keys
 
 
@@ -341,54 +212,47 @@ def load_existing_keys(price_dates: Optional[set] = None) -> set:
 # ---------------------------------------------------------------------------
 
 def parse_csv(filepath: str, override_date: Optional[str]) -> List[dict]:
-    """
-    Read CSV and return list of raw row dicts with canonical keys:
-      isin, security_name, price_date, price, currency_code
-    """
     rows = []
     with open(filepath, newline='', encoding='utf-8-sig') as fh:
         reader = csv.reader(fh)
         headers = next(reader)
         col_map = _map_headers(headers)
 
+        if 'security_label' not in col_map:
+            raise ValueError(
+                f"CSV missing required security_label column. "
+                f"Accepted names: security_label, security label, security_name, name, security. "
+                f"Found columns: {[h.strip() for h in headers]}"
+            )
         if 'price' not in col_map:
             raise ValueError(
-                f"CSV missing required price column. Accepted names: "
-                f"closing_price, closing price, price, close, close_price, "
-                f"main_closing_price, nav, unit_price, last_price. "
+                f"CSV missing required price column. "
+                f"Accepted names: closing_price, closing price, price, close, nav, unit_price. "
                 f"Found columns: {[h.strip() for h in headers]}"
             )
         if 'price_date' not in col_map and not override_date:
             raise ValueError(
                 "CSV missing 'price_date' column and --price-date not provided."
             )
-        if 'isin' not in col_map and 'security_name' not in col_map:
-            raise ValueError(
-                "CSV must have at least one of: isin, security_name / security_label. "
-                f"Found columns: {[h.strip() for h in headers]}"
-            )
 
-        # Show which columns were recognised — helps debug mapping issues
         mapped_display = {c: headers[i].strip() for c, i in col_map.items()}
         logger.info(f"Column mapping: {mapped_display}")
-        if 'currency_code' not in col_map:
-            logger.info("No currency_code column — will use cis_security.currency_code for each row")
 
         for lineno, row in enumerate(reader, start=2):
             if not any(c.strip() for c in row):
-                continue  # skip blank lines
+                continue
 
             def get(col):
                 idx = col_map.get(col)
                 return row[idx].strip() if idx is not None and idx < len(row) else ''
 
             rows.append({
-                'lineno':        lineno,
-                'isin':          get('isin'),
-                'security_name': get('security_name'),
-                'price_date':    override_date or get('price_date'),
-                'price':         get('price'),
-                'currency_code': get('currency_code'),
+                'lineno':         lineno,
+                'security_label': get('security_label'),
+                'price_date':     override_date or get('price_date'),
+                'price':          get('price'),
+                'isin':           get('isin'),
+                'currency_code':  get('currency_code'),
             })
 
     logger.info(f"Parsed {len(rows)} data rows from {filepath}")
@@ -401,20 +265,13 @@ def parse_csv(filepath: str, override_date: Optional[str]) -> List[dict]:
 
 def process_rows(
     raw_rows: List[dict],
-    sec_map: dict,
     existing_keys: set,
     overwrite: bool,
     dry_run: bool,
     batch_size: int,
 ) -> dict:
     now_ts  = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    summary = {
-        'total':   len(raw_rows),
-        'upsert':  0,
-        'skip':    0,
-        'invalid': 0,
-        'errors':  [],
-    }
+    summary = {'total': len(raw_rows), 'upsert': 0, 'skip': 0, 'invalid': 0, 'errors': []}
 
     upsert_batch: List[dict] = []
 
@@ -428,65 +285,47 @@ def process_rows(
     for r in raw_rows:
         lineno = r['lineno']
 
-        # --- Validate price ---
+        # Validate security_label
+        security_label = r['security_label'].strip()
+        if not security_label:
+            msg = f"Line {lineno}: empty security_label — skipped"
+            logger.warning(msg)
+            summary['errors'].append(msg)
+            summary['invalid'] += 1
+            continue
+
+        # Validate price
         price = _clean_price(r['price'])
         if price is None:
-            msg = f"Line {lineno}: invalid/zero price '{r['price']}' — skipped"
+            msg = f"Line {lineno}: invalid/zero price '{r['price']}' for '{security_label}' — skipped"
             logger.warning(msg)
             summary['errors'].append(msg)
             summary['invalid'] += 1
             continue
 
-        # --- Validate date ---
+        # Validate date
         price_date = _normalise_date(r['price_date'])
         if not price_date:
-            msg = f"Line {lineno}: invalid date '{r['price_date']}' — skipped"
+            msg = f"Line {lineno}: invalid date '{r['price_date']}' for '{security_label}' — skipped"
             logger.warning(msg)
             summary['errors'].append(msg)
             summary['invalid'] += 1
             continue
 
-        # --- Resolve security ---
-        sec = resolve_security(r['isin'], r['security_name'], sec_map)
-        if sec is None:
-            msg = (
-                f"Line {lineno}: security not found in cis_security "
-                f"(isin='{r['isin']}', name='{r['security_name']}') — skipped"
-            )
-            logger.warning(msg)
-            summary['errors'].append(msg)
-            summary['invalid'] += 1
-            continue
-
-        security_label = sec['security_name']
-        # CSV currency_code overrides resolved value if provided
-        currency_code = r['currency_code'] or sec['currency_code']
-        if not currency_code:
-            msg = (
-                f"Line {lineno}: no currency_code for '{security_label}' "
-                f"and cis_security has none either — skipped"
-            )
-            logger.warning(msg)
-            summary['errors'].append(msg)
-            summary['invalid'] += 1
-            continue
-
-        isin = r['isin'] or sec['isin']
-
-        # --- Existence check ---
-        key = (currency_code.strip(), security_label.strip(), price_date.strip())
+        # Existence check — (security_label, price_date) already in cis_equity_price?
+        key = (security_label, price_date)
         if key in existing_keys and not overwrite:
-            logger.debug(f"Line {lineno}: already exists {key} — skipped")
+            logger.debug(f"Line {lineno}: already exists ({security_label}, {price_date}) — skipped")
             summary['skip'] += 1
             continue
 
         upsert_batch.append({
-            'currency_code':     currency_code,
-            'security_label':    security_label,
-            'price_date':        price_date,
-            'isin':              isin,
-            'main_closing_price': str(price),
-            'now_ts':            now_ts,
+            'security_label': security_label,
+            'price_date':     price_date,
+            'isin':           r['isin'],
+            'currency_code':  r['currency_code'],
+            'price':          str(price),
+            'now_ts':         now_ts,
         })
 
         if len(upsert_batch) >= batch_size:
@@ -497,21 +336,21 @@ def process_rows(
 
 
 def _upsert_batch(batch: List[dict], dry_run: bool):
-    """Build and execute a multi-row UPSERT for the given batch."""
     value_rows = []
     for b in batch:
-        isin_sql = _esc(b['isin']) if b['isin'] else 'NULL'
+        isin_sql     = _esc(b['isin']) if b['isin'] else 'NULL'
+        ccy_sql      = _esc(b['currency_code']) if b['currency_code'] else 'NULL'
         value_rows.append(
-            f"({_esc(b['currency_code'])}, {_esc(b['security_label'])}, "
-            f"{_esc(b['price_date'])}, {isin_sql}, "
-            f"{b['main_closing_price']}, "
+            f"({_esc(b['security_label'])}, {_esc(b['price_date'])}, "
+            f"{isin_sql}, {ccy_sql}, "
+            f"{b['price']}, "
             f"'{b['now_ts']}', '{SRC_SYSTEM}', true, "
             f"'CSV_UPLOAD', '{b['now_ts']}', NULL, NULL)"
         )
 
     sql = (
         f"UPSERT INTO {PRICE_TBL} "
-        f"(currency_code, security_label, price_date, isin, "
+        f"(security_label, price_date, isin, currency_code, "
         f"main_closing_price, price_timestamp, src_system, is_active, "
         f"created_by, created_at, updated_by, updated_at) VALUES "
         + ',\n'.join(value_rows)
@@ -519,6 +358,7 @@ def _upsert_batch(batch: List[dict], dry_run: bool):
 
     if dry_run:
         logger.info(f"[DRY RUN] Would UPSERT {len(batch)} rows")
+        logger.debug(f"[DRY RUN] SQL:\n{sql[:500]}")
         return
 
     ok = impala_manager.execute_write(sql, database=DB)
@@ -536,21 +376,18 @@ def parse_args():
     p = argparse.ArgumentParser(
         description='Upload equity prices from CSV into cis_equity_price (src_system=CIS)'
     )
-    p.add_argument('--file',        required=True,  help='Path to CSV file')
-    p.add_argument('--price-date',  default=None,   help='Override price_date for all rows (YYYY-MM-DD)')
-    p.add_argument('--overwrite',   action='store_true',
-                   help='UPSERT even if (currency_code, security_label, price_date) already exists')
-    p.add_argument('--dry-run',     action='store_true',
-                   help='Parse and validate without writing to the database')
-    p.add_argument('--batch-size',  type=int, default=500,
-                   help='Rows per UPSERT statement (default: 500). '
-                        'All rows in the file are always processed — this only '
-                        'controls how many are grouped into each SQL statement.')
+    p.add_argument('--file',       required=True, help='Path to CSV file')
+    p.add_argument('--price-date', default=None,  help='Override price_date for all rows (YYYY-MM-DD)')
+    p.add_argument('--overwrite',  action='store_true',
+                   help='Insert even if (security_label, price_date) already exists')
+    p.add_argument('--dry-run',    action='store_true',
+                   help='Validate without writing to the database')
+    p.add_argument('--batch-size', type=int, default=500,
+                   help='Rows per UPSERT statement (default: 500)')
     p.add_argument('--force-gmp-override', action='store_true',
-                   help='Bypass the GMP guard and insert as CIS even if GMP prices '
-                        'exist for the same date (authorised use only)')
-    p.add_argument('--debug', action='store_true',
-                   help='Enable DEBUG logging to see per-row security resolution details')
+                   help='Bypass the GMP guard (authorised use only)')
+    p.add_argument('--debug',      action='store_true',
+                   help='Enable DEBUG logging for per-row detail')
     return p.parse_args()
 
 
@@ -595,16 +432,13 @@ def main():
         print("No data rows found in CSV — nothing to do.")
         sys.exit(0)
 
-    # 2. Load security master
-    sec_map = load_security_map()
-
-    # 3. Resolve all price_dates present in the file
+    # 2. Collect all price_dates from the file
     dates_in_file = {
         _normalise_date(r['price_date'])
         for r in raw_rows if r['price_date']
     } - {None}
 
-    # 3a. GMP guard — hard-fail if GMP already uploaded prices for these dates
+    # 3. GMP guard
     if not args.force_gmp_override:
         gmp_conflicts = check_gmp_conflict(dates_in_file)
         if gmp_conflicts:
@@ -614,30 +448,29 @@ def main():
                 f"       CIS manual upload is blocked to protect GMP data.\n"
                 f"       Use --force-gmp-override to bypass (authorised use only)."
             )
-            logger.error(f"GMP conflict detected for dates: {conflict_str} — upload aborted")
+            logger.error(f"GMP conflict for dates: {conflict_str} — upload aborted")
             sys.exit(1)
 
-    # 3b. Load existing CIS keys (scoped to the dates in this file)
+    # 4. Load existing (security_label, price_date) keys
     existing_keys = load_existing_keys(price_dates=dates_in_file if dates_in_file else None)
 
-    # 4. Process
+    # 5. Process rows
     summary = process_rows(
         raw_rows=raw_rows,
-        sec_map=sec_map,
         existing_keys=existing_keys,
         overwrite=args.overwrite,
         dry_run=args.dry_run,
         batch_size=args.batch_size,
     )
 
-    # 5. Report
+    # 6. Report
     print('\n' + '=' * 70)
     print('  RESULTS')
     print('=' * 70)
     print(f"  Total rows  : {summary['total']}")
-    print(f"  Upserted    : {summary['upsert']}{' (dry-run — not written)' if args.dry_run else ''}")
-    print(f"  Skipped     : {summary['skip']}  (already exist in cis_equity_price)")
-    print(f"  Invalid     : {summary['invalid']}  (bad price/date/security)")
+    print(f"  Inserted    : {summary['upsert']}{' (dry-run — not written)' if args.dry_run else ''}")
+    print(f"  Skipped     : {summary['skip']}  (already in cis_equity_price)")
+    print(f"  Invalid     : {summary['invalid']}  (bad price/date/security_label)")
     if summary['errors']:
         print(f"\n  Issues ({len(summary['errors'])}):")
         for e in summary['errors'][:20]:
