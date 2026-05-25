@@ -214,7 +214,6 @@ def load_security_map() -> Dict[str, dict]:
         f"""
         SELECT security_name, isin, currency_code, security_description
         FROM {SEC_TBL}
-        WHERE is_active = true
         """,
         database=DB
     )
@@ -260,18 +259,24 @@ def resolve_security(csv_isin: str, csv_name: str, sec_map: dict) -> Optional[di
         isin_key = csv_isin.strip().upper()
         hit = sec_map['ep_isin'].get(isin_key)
         if hit:
+            logger.debug(f"Resolved via cis_equity_price ISIN={isin_key} → {hit['security_name']}")
             return hit
         hit = sec_map['sec_isin'].get(isin_key)
         if hit:
+            logger.debug(f"Resolved via cis_security ISIN={isin_key} → {hit['security_name']}")
             return hit
+        logger.debug(f"ISIN={isin_key!r} not found in cis_equity_price or cis_security")
     if csv_name:
         name_key = csv_name.strip().lower()
         hit = sec_map['name'].get(name_key)
         if hit:
+            logger.debug(f"Resolved via cis_security name={name_key!r} → {hit['security_name']}")
             return hit
         hit = sec_map['desc'].get(name_key)
         if hit:
+            logger.debug(f"Resolved via cis_security desc={name_key!r} → {hit['security_name']}")
             return hit
+        logger.debug(f"name={name_key!r} not found in cis_security name/desc")
     return None
 
 
@@ -544,11 +549,17 @@ def parse_args():
     p.add_argument('--force-gmp-override', action='store_true',
                    help='Bypass the GMP guard and insert as CIS even if GMP prices '
                         'exist for the same date (authorised use only)')
+    p.add_argument('--debug', action='store_true',
+                   help='Enable DEBUG logging to see per-row security resolution details')
     return p.parse_args()
 
 
 def main():
     args = parse_args()
+
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logger.setLevel(logging.DEBUG)
 
     if not os.path.isfile(args.file):
         print(f"ERROR: file not found: {args.file}")
