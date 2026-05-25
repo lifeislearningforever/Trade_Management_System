@@ -1,16 +1,20 @@
 """
-EOD AMS Position ETL Job
-========================
+EOD AMS/GMP Position ETL Job
+=============================
 Standalone backend script — no Django dependency.
 Runs the same 7-step position pipeline as upload_service.run_position_etl()
-but for the 5 AMS_STREET GMP source tables instead of user-uploaded files.
+but for the AMS_STREET and GMP source tables instead of user-uploaded files.
 
 Source tables (all STRING columns, partitioned by processing_date):
-  1. gmp_cis_sta_dly_ams_multi_dis_cif         (AMS Multi Discretionary Fund)
-  2. gmp_cis_sta_dly_ams_multi_hold            (AMS Multiple Holdings Daily)
-  3. gmp_cis_sta_dly_stat_street_ams_iceq      (AMS ICEQ Daily)
-  4. gmp_cis_sta_mthly_stat_street_ams_iceq_end (AMS ICEQ Month End)
+  AMS_STREET:
+  1. gmp_cis_sta_dly_ams_multi_dis_cif           (AMS Multi Discretionary Fund)
+  2. gmp_cis_sta_dly_ams_multi_hold              (AMS Multiple Holdings Daily)
+  3. gmp_cis_sta_dly_stat_street_ams_iceq        (AMS ICEQ Daily)
+  4. gmp_cis_sta_mthly_stat_street_ams_iceq_end  (AMS ICEQ Month End)
   5. gmp_cis_sta_dly_stat_street_ams_daily_limit (AMS S31 UOI Daily Limit)
+
+  GMP:
+  6. gmp_cis_sta_dly_position                    (GMP Daily Position — m_* column prefix)
 
 Pipeline:
   Step 0  — standardize each source table → position_upload_standardized
@@ -27,6 +31,7 @@ Pipeline:
 Control-M / cron usage:
   python eod_ams_position_etl.py --processing-date 20260227
   python eod_ams_position_etl.py --processing-date 20260227 --source ams_iceq
+  python eod_ams_position_etl.py --processing-date 20260227 --source gmp_position
   python eod_ams_position_etl.py --processing-date 20260227 --dry-run
 
 The script connects to Impala via the same ImpalaConnectionManager used by
@@ -73,8 +78,9 @@ logger = logging.getLogger('eod_ams_position_etl')
 # ---------------------------------------------------------------------------
 DB = 'gmp_cis'
 
-# Each AMS source table: name → (position_basis, src_system label)
-AMS_SOURCES = {
+# All source tables: name → metadata dict.
+# position_basis=None means it is read from the source row (e.g. GMP's `line` column).
+ALL_SOURCES = {
     'gmp_cis_sta_dly_ams_multi_dis_cif': {
         'position_basis': 'TRADE_DATE',
         'src_system':     'AMS_STREET',
@@ -100,7 +106,15 @@ AMS_SOURCES = {
         'src_system':     'AMS_STREET',
         'description':    'AMS S31 UOI Daily Limit',
     },
+    'gmp_cis_sta_dly_position': {
+        'position_basis': None,        # derived from `line` column in source
+        'src_system':     'GMP',
+        'description':    'GMP Daily Position (m_* columns)',
+    },
 }
+
+# Keep backward-compatible alias for callers that still reference AMS_SOURCES
+AMS_SOURCES = ALL_SOURCES
 
 # Short alias → table name (for --source CLI arg)
 SOURCE_ALIASES = {
@@ -109,6 +123,7 @@ SOURCE_ALIASES = {
     'ams_iceq':       'gmp_cis_sta_dly_stat_street_ams_iceq',
     'ams_iceq_end':   'gmp_cis_sta_mthly_stat_street_ams_iceq_end',
     'ams_daily_limit':'gmp_cis_sta_dly_stat_street_ams_daily_limit',
+    'gmp_position':   'gmp_cis_sta_dly_position',
     'all':            None,
 }
 
@@ -136,11 +151,11 @@ def safe_decimal(col: str, dec_type: str) -> str:
 # ---------------------------------------------------------------------------
 # Step 0: standardization SQL per source table
 # Mirrors the STANDARDIZE_SELECT dict in upload_service.run_position_etl()
-# but for AMS_STREET tables.
+# but for AMS_STREET / GMP tables.
 # ---------------------------------------------------------------------------
 def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
-    pos_basis = AMS_SOURCES[table]['position_basis']
-    src_sys   = AMS_SOURCES[table]['src_system']
+    pos_basis = ALL_SOURCES[table]['position_basis']
+    src_sys   = ALL_SOURCES[table]['src_system']
 
     if table == 'gmp_cis_sta_dly_ams_multi_dis_cif':
         return f"""
@@ -384,6 +399,69 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
             WHERE processing_date = '{processing_date}'
         """
 
+    if table == 'gmp_cis_sta_dly_position':
+        # GMP daily position — columns have m_* prefix.
+        # position_basis is read from the `line` column (TRADE_DATE / SETTLE_DATE).
+        # m_security_code maps to isin (GMP uses security code as the ISIN identifier).
+        return f"""
+            SELECT
+                m_cis_pfolio                                            AS portfolio,
+                m_security_full_name                                    AS security_full_name,
+                m_security_display_label                                AS security_short_name,
+                m_security_code                                         AS isin,
+                NULL                                                    AS ticker,
+                {safe_decimal('m_quantity', 'DECIMAL(18,4)')}          AS quantity,
+                {safe_decimal('m_outstanding_shares', 'DECIMAL(18,4)')} AS shares_outstanding,
+                CAST(NULL AS DECIMAL(18,4))                             AS shares_issued,
+                CAST(NULL AS DECIMAL(10,6))                             AS pct_holding,
+                {safe_decimal('m_market_price', 'DECIMAL(18,6)')}      AS market_price,
+                {safe_decimal('m_average_cost', 'DECIMAL(18,6)')}      AS average_cost,
+                {safe_decimal('m_total_cost_fc', 'DECIMAL(18,4)')}     AS cost_fc,
+                {safe_decimal('m_market_value_fc', 'DECIMAL(18,4)')}   AS market_value_fc,
+                CAST(NULL AS DECIMAL(18,4))                             AS net_book_value_fc,
+                {safe_decimal('m_unrealized_pl_fc', 'DECIMAL(18,4)')}  AS unrealized_pnl_fc,
+                CAST(NULL AS DECIMAL(18,4))                             AS provision_fc,
+                CAST(NULL AS DECIMAL(18,4))                             AS cost_lc,
+                CAST(NULL AS DECIMAL(18,4))                             AS market_value_lc,
+                CAST(NULL AS DECIMAL(18,4))                             AS net_book_value_lc,
+                CAST(NULL AS DECIMAL(18,4))                             AS unrealized_pnl_lc,
+                CAST(NULL AS DECIMAL(18,4))                             AS provision_lc,
+                NULL                                                    AS product_type,
+                NULL                                                    AS security_type,
+                m_quoted                                                AS quoted_unquoted,
+                NULL                                                    AS industry,
+                NULL                                                    AS fin_nonfin_co,
+                NULL                                                    AS issuer_type,
+                NULL                                                    AS reits_or_fund_y_n,
+                m_country                                               AS exchange,
+                m_country                                               AS country_code,
+                m_country                                               AS country_of_exchange,
+                m_country                                               AS country_of_incorporation,
+                NULL                                                    AS country_of_risk,
+                NULL                                                    AS country_of_operation,
+                m_currency                                              AS security_currency,
+                NULL                                                    AS corp_code,
+                NULL                                                    AS branch_code,
+                NULL                                                    AS cost_centre,
+                NULL                                                    AS cels,
+                NULL                                                    AS bwcif_sg,
+                NULL                                                    AS bwcif_ovs,
+                NULL                                                    AS mas_6d_code_sg,
+                NULL                                                    AS mas_6d_code_ovs,
+                UPPER(TRIM(line))                                       AS position_basis,
+                processing_date                                         AS reporting_date,
+                NULL                                                    AS maturity_date,
+                '{src_sys}'                                             AS src_system,
+                'gmp'                                                   AS sub_system,
+                'sta'                                                   AS data_cat,
+                'dly'                                                   AS data_frq,
+                '{table}'                                               AS source_table,
+                CURRENT_TIMESTAMP()                                     AS etl_insert_ts,
+                'eod_ams_etl'                                           AS etl_batch_id
+            FROM {DB}.{table}
+            WHERE processing_date = '{processing_date}'
+        """
+
     raise ValueError(f'No standardization SQL defined for table: {table}')
 
 
@@ -395,9 +473,10 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
     result = {'table': table, 'src_id': src_id, 'processing_date': processing_date,
               'total': 0, 'passed': 0, 'failed': 0, 'ok': False}
 
+    pos_basis_label = ALL_SOURCES[table]['position_basis'] or 'from source row'
     print(f"\n{'='*70}")
-    print(f"  {AMS_SOURCES[table]['description']} ({table})")
-    print(f"  processing_date={processing_date}  position_basis={AMS_SOURCES[table]['position_basis']}")
+    print(f"  {ALL_SOURCES[table]['description']} ({table})")
+    print(f"  processing_date={processing_date}  position_basis={pos_basis_label}")
     print(f"{'='*70}")
 
     # ---- Step 0: check source has data for this partition ----
@@ -893,7 +972,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
 # Main
 # ---------------------------------------------------------------------------
 def parse_args():
-    parser = argparse.ArgumentParser(description='EOD AMS Position ETL')
+    parser = argparse.ArgumentParser(description='EOD AMS/GMP Position ETL')
     parser.add_argument(
         '--processing-date', required=True,
         help='Partition date in YYYYMMDD format (e.g. 20260227)'
@@ -901,7 +980,7 @@ def parse_args():
     parser.add_argument(
         '--source', default='all',
         choices=list(SOURCE_ALIASES.keys()),
-        help='Which AMS source to process (default: all)'
+        help='Which source to process (default: all)'
     )
     parser.add_argument(
         '--dry-run', action='store_true',
@@ -920,12 +999,12 @@ def main():
     processing_date = args.processing_date
 
     if args.source == 'all':
-        tables = list(AMS_SOURCES.keys())
+        tables = list(ALL_SOURCES.keys())
     else:
         tables = [SOURCE_ALIASES[args.source]]
 
     print('\n' + '=' * 70)
-    print('  CIS Trade Hive — EOD AMS Position ETL')
+    print('  CIS Trade Hive — EOD AMS/GMP Position ETL')
     print('=' * 70)
     print(f'  processing_date : {processing_date}')
     print(f'  sources         : {", ".join(tables)}')

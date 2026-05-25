@@ -496,14 +496,16 @@ def load_security(rows: List[Dict], status: str, dry_run: bool, processing_date:
         security_id = _timestamp_ms() + i
         ts = _now()
 
-        mapped['security_id'] = str(security_id)
+        mapped['security_id'] = security_id       # bare BIGINT for PK
         mapped['src_system'] = SRC_SYSTEM
         mapped.setdefault('status', status)
         mapped.setdefault('is_active', True)
         mapped.setdefault('created_by', SRC_SYSTEM)
         mapped.setdefault('updated_by', SRC_SYSTEM)
-        mapped['created_at'] = str(security_id)   # BIGINT ms, same convention as repo
-        mapped['updated_at'] = str(security_id)
+        # created_at / updated_at are STRING in the live table (repository writes
+        # them as 'YYYY-MM-DD HH:MM:SS' quoted strings — match that convention)
+        mapped['created_at'] = ts
+        mapped['updated_at'] = ts
         mapped.setdefault('processing_date', processing_date)
 
         col_names = []
@@ -516,10 +518,10 @@ def load_security(rows: List[Dict], status: str, dry_run: bool, processing_date:
                 col_vals.append(_bigint(val))
             elif col in SECURITY_BOOL_COLS:
                 col_vals.append(_bool(val))
-            elif col in ('security_id', 'created_at', 'updated_at'):
-                col_vals.append(str(val))          # bare integer, no quotes
+            elif col == 'security_id':
+                col_vals.append(str(val))          # bare BIGINT, no quotes
             else:
-                col_vals.append(_escape(val))
+                col_vals.append(_escape(val))      # STRING — quoted
 
         if dry_run:
             logger.info("[DRY-RUN] security row %d: %s", i, mapped.get('security_name'))
