@@ -267,11 +267,9 @@ def upload_create(request):
 
                         # --- Pre-insert: detect key columns from the data ---
                         _col_names = list(_all_rows[0].keys()) if _all_rows else []
-                        _isin_col = next((c for c in ('isin_code', 'isin') if c in _col_names), None)
-                        _port_col = next((c for c in ('portfolio', 'portfolio_name', 'account_name') if c in _col_names), None)
-                        _basis_col = next((c for c in ('position_basis',) if c in _col_names), None)
-                        _date_col  = next((c for c in ('reporting_date', 'position_date', 'price_date') if c in _col_names), None)
-                        _key_cols = [c for c in (_port_col, _isin_col, _basis_col, _date_col) if c]
+                        _port_col  = next((c for c in ('portfolio', 'portfolio_name', 'account_name') if c in _col_names), None)
+                        _sec_col   = next((c for c in ('security_label', 'security_name', 'isin_code', 'isin') if c in _col_names), None)
+                        _key_cols  = [c for c in (_port_col, _sec_col) if c]
 
                         # --- Fix 2: Skip rows with null/empty key fields (warn, don't block) ---
                         if _key_cols:
