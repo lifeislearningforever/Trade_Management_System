@@ -30,45 +30,9 @@ def _esc(val: str) -> str:
     return f"'{s}'"
 
 
-_table_ensured = False
-
-
-def _ensure_table() -> None:
-    """Create cis_notification if it doesn't exist yet. Runs once per process."""
-    global _table_ensured
-    if _table_ensured:
-        return
-    try:
-        from core.repositories.impala_connection import impala_manager
-        impala_manager.execute_write(
-            f"""
-            CREATE TABLE IF NOT EXISTS {FULL_TABLE} (
-                notif_id     STRING NOT NULL,
-                username     STRING NOT NULL,
-                event_type   STRING,
-                severity     STRING,
-                title        STRING,
-                message      STRING,
-                payload_json STRING,
-                is_read      BOOLEAN DEFAULT FALSE,
-                created_at   TIMESTAMP,
-                PRIMARY KEY (notif_id)
-            )
-            PARTITION BY HASH(notif_id) PARTITIONS 4
-            STORED AS KUDU
-            TBLPROPERTIES ('kudu.num_tablet_servers' = '1')
-            """,
-            database=DATABASE
-        )
-        _table_ensured = True
-    except Exception as exc:
-        logger.debug('_ensure_table failed (non-fatal): %s', exc)
-
-
 def store(username: str, event_type: str, severity: str,
           title: str, message: str, payload: Dict[str, Any]) -> bool:
     """Write one notification row to Kudu. Fire-and-forget; never raises."""
-    _ensure_table()
     try:
         from core.repositories.impala_connection import impala_manager
         notif_id   = str(uuid.uuid4())
@@ -96,7 +60,6 @@ def poll_unread(username: str, since_minutes: int = 60) -> List[Dict[str, Any]]:
     Return unread notifications for username created in the last since_minutes.
     Marks them read immediately after fetching.
     """
-    _ensure_table()
     try:
         from core.repositories.impala_connection import impala_manager
         cutoff = (datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
