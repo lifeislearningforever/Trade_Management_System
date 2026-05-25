@@ -4,6 +4,12 @@ Upload Equity Price from CSV — src_system='CIS'
 Standalone backend script that loads daily closing prices from a CSV file
 into gmp_cis.cis_equity_price (Kudu), skipping rows that already exist.
 
+GMP guard (hard fail):
+  If cis_equity_price already contains ANY row with src_system='GMP' for a
+  price_date present in the CSV, the upload is aborted for that date with an
+  error.  GMP prices are authoritative; CIS manual uploads must not overwrite
+  them.  Use --force-gmp-override to bypass this guard (rare/authorised use).
+
 Existence check (idempotent):
   A row is skipped when (currency_code, security_label, price_date) already
   exists in cis_equity_price with is_active = true.  This makes the script
@@ -38,11 +44,12 @@ CLI usage:
   python upload_equity_price_csv.py --file prices.csv --overwrite
 
 Options:
-  --file            Path to the CSV file (required)
-  --price-date      Override price_date for all rows (YYYY-MM-DD)
-  --overwrite       UPSERT even if record already exists (update price)
-  --dry-run         Show what would be written; no DB writes
-  --batch-size      Rows per UPSERT batch (default: 100)
+  --file                Path to the CSV file (required)
+  --price-date          Override price_date for all rows (YYYY-MM-DD)
+  --overwrite           UPSERT even if record already exists (update price)
+  --dry-run             Show what would be written; no DB writes
+  --batch-size          Rows per UPSERT batch (default: 500)
+  --force-gmp-override  Bypass the GMP guard (authorised use only)
 
 Author: CisTrade Team
 """
@@ -222,18 +229,46 @@ def resolve_security(csv_isin: str, csv_name: str, sec_map: dict) -> Optional[di
 
 
 # ---------------------------------------------------------------------------
+# GMP guard — refuse upload if GMP prices already exist for that price_date
+# ---------------------------------------------------------------------------
+
+def check_gmp_conflict(price_dates: set) -> List[str]:
+    """
+    Return list of price_dates that already have src_system='GMP' rows in
+    cis_equity_price.  An empty list means no conflict — safe to proceed.
+    """
+    if not price_dates:
+        return []
+    date_list = ', '.join(f"'{d}'" for d in sorted(price_dates))
+    rows = impala_manager.execute_query(
+        f"""
+        SELECT DISTINCT price_date
+        FROM {PRICE_TBL}
+        WHERE src_system = 'GMP'
+          AND price_date IN ({date_list})
+        """,
+        database=DB,
+    )
+    return [(r.get('price_date') or '').strip() for r in (rows or []) if r.get('price_date')]
+
+
+# ---------------------------------------------------------------------------
 # Existence check — bulk fetch existing (currency_code, security_label, price_date)
 # ---------------------------------------------------------------------------
 
-def load_existing_keys(price_date: Optional[str] = None) -> set:
+def load_existing_keys(price_dates: Optional[set] = None) -> set:
     """
     Return set of (currency_code, security_label, price_date) tuples already
-    in cis_equity_price (is_active=true).  If price_date is given, only fetch
-    that date's rows (faster for daily runs).
+    in cis_equity_price (is_active=true).  If price_dates is given, only fetch
+    those dates' rows (faster for daily runs).
     """
     where = "WHERE (is_active = true OR is_active IS NULL)"
-    if price_date:
-        where += f" AND price_date = '{price_date}'"
+    if price_dates:
+        if len(price_dates) == 1:
+            where += f" AND price_date = '{next(iter(price_dates))}'"
+        else:
+            date_list = ', '.join(f"'{d}'" for d in sorted(price_dates))
+            where += f" AND price_date IN ({date_list})"
     rows = impala_manager.execute_query(
         f"SELECT currency_code, security_label, price_date FROM {PRICE_TBL} {where}",
         database=DB
@@ -459,6 +494,9 @@ def parse_args():
                    help='Rows per UPSERT statement (default: 500). '
                         'All rows in the file are always processed — this only '
                         'controls how many are grouped into each SQL statement.')
+    p.add_argument('--force-gmp-override', action='store_true',
+                   help='Bypass the GMP guard and insert as CIS even if GMP prices '
+                        'exist for the same date (authorised use only)')
     return p.parse_args()
 
 
@@ -479,12 +517,13 @@ def main():
     print('\n' + '=' * 70)
     print('  CIS Trade Hive — Equity Price CSV Upload')
     print('=' * 70)
-    print(f'  file        : {args.file}')
-    print(f'  price_date  : {override_date or "(from CSV)"}')
-    print(f'  overwrite   : {args.overwrite}')
-    print(f'  dry_run     : {args.dry_run}')
-    print(f'  batch_size  : {args.batch_size}')
-    print(f'  started     : {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+    print(f'  file              : {args.file}')
+    print(f'  price_date        : {override_date or "(from CSV)"}')
+    print(f'  overwrite         : {args.overwrite}')
+    print(f'  dry_run           : {args.dry_run}')
+    print(f'  batch_size        : {args.batch_size}')
+    print(f'  force_gmp_override: {args.force_gmp_override}')
+    print(f'  started           : {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
     print('=' * 70)
 
     # 1. Parse CSV
@@ -501,12 +540,27 @@ def main():
     # 2. Load security master
     sec_map = load_security_map()
 
-    # 3. Load existing price keys (scoped to date if all rows share one date)
-    dates_in_file = {r['price_date'] for r in raw_rows if r['price_date']}
-    lookup_date = list(dates_in_file)[0] if len(dates_in_file) == 1 else None
-    existing_keys = load_existing_keys(
-        price_date=_normalise_date(lookup_date) if lookup_date else None
-    )
+    # 3. Resolve all price_dates present in the file
+    dates_in_file = {
+        _normalise_date(r['price_date'])
+        for r in raw_rows if r['price_date']
+    } - {None}
+
+    # 3a. GMP guard — hard-fail if GMP already uploaded prices for these dates
+    if not args.force_gmp_override:
+        gmp_conflicts = check_gmp_conflict(dates_in_file)
+        if gmp_conflicts:
+            conflict_str = ', '.join(sorted(gmp_conflicts))
+            print(
+                f"\nERROR: GMP prices already exist in cis_equity_price for: {conflict_str}\n"
+                f"       CIS manual upload is blocked to protect GMP data.\n"
+                f"       Use --force-gmp-override to bypass (authorised use only)."
+            )
+            logger.error(f"GMP conflict detected for dates: {conflict_str} — upload aborted")
+            sys.exit(1)
+
+    # 3b. Load existing CIS keys (scoped to the dates in this file)
+    existing_keys = load_existing_keys(price_dates=dates_in_file if dates_in_file else None)
 
     # 4. Process
     summary = process_rows(
