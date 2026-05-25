@@ -335,89 +335,7 @@ def upload_create(request):
                             'position_basis': POSITION_BASIS.get(_src_id, 'TRADE_DATE'),
                         }
 
-                        _rows_inserted = 0
-                        _ingest_ok = False
-                        _ingest_msg = 'No rows to insert'
-
-                        if _all_rows and _tbl_cols:
-                            # One INSERT … SELECT per row — the only Impala-safe form:
-                            #   INSERT INTO t PARTITION (processing_date='v')
-                            #   SELECT 'lit1' AS `col1`, 'lit2' AS `col2`, ...
-                            # This avoids: column-list-after-PARTITION ParseException,
-                            # UNION ALL duplicate-alias errors, and query-string size limits.
-                            # Single quotes in values are doubled for SQL safety.
-                            _non_part_cols = _tbl_cols  # already excludes processing_date
-
-                            # Drop the partition first so re-runs never double-insert.
-                            try:
-                                _imp.execute_write(
-                                    f"ALTER TABLE gmp_cis.{_target_table} "
-                                    f"DROP IF EXISTS PARTITION (processing_date='{_processing_date}')",
-                                    database='gmp_cis'
-                                )
-                                logger.warning(f"[upload:direct] dropped partition processing_date={_processing_date} in {_target_table}")
-                            except Exception as _dp_ex:
-                                logger.warning(f"[upload:direct] could not drop partition (may not exist): {_dp_ex}")
-
-                            def _sql_escape(_v: str) -> str:
-                                """Escape value for Impala single-quoted string literals.
-                                Impala uses C-style \\' not '' for single-quote."""
-                                _v = _v.replace('\\', '\\\\')
-                                _v = _v.replace("'", "\\'")
-                                _v = _v.replace('\n', '\\n')
-                                _v = _v.replace('\r', '\\r')
-                                _v = _v.replace('\0', '')
-                                return _v
-
-                            def _build_direct_row_sql(_row):
-                                _col_exprs = []
-                                for _col in _non_part_cols:
-                                    _cl = _col.lower()
-                                    if _cl in _fixed:
-                                        _v = str(_fixed[_cl])
-                                    else:
-                                        _v = str(_row.get(_col) or _row.get(_cl) or '')
-                                    _col_exprs.append(f"'{_sql_escape(_v)}' AS `{_col}`")
-                                return (
-                                    f"INSERT INTO gmp_cis.{_target_table} "
-                                    f"PARTITION (processing_date='{_processing_date}') "
-                                    f"SELECT {', '.join(_col_exprs)}"
-                                )
-
-                            _rows_failed = 0
-                            for _ri, _row in enumerate(_all_rows):
-                                _sql = _build_direct_row_sql(_row)
-                                _ok = _imp.execute_write(_sql, database='gmp_cis')
-                                if _ok:
-                                    _rows_inserted += 1
-                                    if _rows_inserted % 100 == 0:
-                                        logger.warning(f"[upload:direct] {_rows_inserted}/{len(_all_rows)} rows inserted")
-                                else:
-                                    _rows_failed += 1
-                                    logger.error(f"[upload:direct] row {_ri} FAILED (skip). SQL={_sql[:300]}")
-                                    print(f"[upload:direct] row {_ri} FAILED", flush=True)
-                                    if _rows_failed > 10:
-                                        logger.error(f"[upload:direct] too many failures ({_rows_failed}) — aborting")
-                                        break
-
-                            if _rows_inserted > 0:
-                                _ingest_ok = True
-                                _ingest_msg = f"Inserted {_rows_inserted} rows into {_target_table}"
-                                logger.warning(f"[upload:direct] done: {_ingest_msg}")
-                                print(f"[upload:direct] done: {_ingest_msg}", flush=True)
-                                # Refresh Impala metadata
-                                try:
-                                    _imp.execute_write(
-                                        f"INVALIDATE METADATA gmp_cis.{_target_table}",
-                                        database='gmp_cis'
-                                    )
-                                    logger.warning("[upload:direct] INVALIDATE METADATA done")
-                                except Exception as _me:
-                                    logger.warning(f"[upload:direct] INVALIDATE METADATA: {_me}")
-                        else:
-                            logger.error(f"[upload:direct] SKIP — all_rows={len(_all_rows)} tbl_cols={len(_tbl_cols)} — nothing to insert")
-                            print(f"[upload:direct] SKIP — all_rows={len(_all_rows)} tbl_cols={len(_tbl_cols)}", flush=True)
-
+                        # Build desc early (before thread so messages are correct)
                         _desc_parts = [
                             f"{description}",
                             f"[Datasource: {datasource_config.get('source_id', '')}]",
@@ -426,14 +344,128 @@ def upload_create(request):
                         if _dup_count > 0:
                             _desc_parts.append(f"{_dup_count} duplicates removed")
                         _desc = '\n'.join(_desc_parts)
+
+                        if not _all_rows or not _tbl_cols:
+                            logger.error(f"[upload:direct] SKIP — all_rows={len(_all_rows)} tbl_cols={len(_tbl_cols)} — nothing to insert")
+                            _repo.update_upload(upload_id, {
+                                'status': 'VALIDATED',
+                                'description': _desc,
+                                'row_count': 0,
+                            }, user_info['username'])
+                            messages.warning(request, 'No rows to insert — check file format.')
+                            return redirect('upload:detail', upload_id=upload_id)
+
+                        # Mark INGESTING immediately — background thread does the work.
+                        # This prevents the Gunicorn 30 s timeout on large files (800+ rows).
                         _repo.update_upload(upload_id, {
-                            'status': 'COMPLETED' if _ingest_ok else 'VALIDATED',
+                            'status': UploadKuduRepository.STATUS_INGESTING,
                             'description': _desc,
-                            'row_count': _rows_inserted,
+                            'row_count': len(_all_rows),
                         }, user_info['username'])
 
-                        messages.success(request, f'File "{file_name}" validated using datasource config. Target: {datasource_config.get("target_table", "")}')
-                        return redirect('upload:preview', upload_id=upload_id)
+                        # Capture everything the thread needs before the request ends
+                        _t_upload_id    = upload_id
+                        _t_rows         = _all_rows
+                        _t_tbl_cols     = _tbl_cols
+                        _t_non_part     = _tbl_cols
+                        _t_fixed        = _fixed
+                        _t_target       = _target_table
+                        _t_pd           = _processing_date
+                        _t_desc         = _desc
+                        _t_username     = user_info['username']
+                        _t_dup_count    = _dup_count
+
+                        def _sql_escape(_v: str) -> str:
+                            _v = _v.replace('\\', '\\\\')
+                            _v = _v.replace("'", "\\'")
+                            _v = _v.replace('\n', '\\n')
+                            _v = _v.replace('\r', '\\r')
+                            _v = _v.replace('\0', '')
+                            return _v
+
+                        def _build_direct_row_sql(_row, _cols, _fix, _tbl, _pd):
+                            _col_exprs = []
+                            for _col in _cols:
+                                _cl = _col.lower()
+                                if _cl in _fix:
+                                    _v = str(_fix[_cl])
+                                else:
+                                    _v = str(_row.get(_col) or _row.get(_cl) or '')
+                                _col_exprs.append(f"'{_sql_escape(_v)}' AS `{_col}`")
+                            return (
+                                f"INSERT INTO gmp_cis.{_tbl} "
+                                f"PARTITION (processing_date='{_pd}') "
+                                f"SELECT {', '.join(_col_exprs)}"
+                            )
+
+                        def _do_direct_insert():
+                            from core.repositories.impala_connection import impala_manager as _imp2
+                            from upload.repositories.upload_kudu_repository import upload_kudu_repository as _repo2
+
+                            # Drop existing partition so re-runs don't double-insert
+                            try:
+                                _imp2.execute_write(
+                                    f"ALTER TABLE gmp_cis.{_t_target} "
+                                    f"DROP IF EXISTS PARTITION (processing_date='{_t_pd}')",
+                                    database='gmp_cis'
+                                )
+                                logger.warning(f"[upload:direct:bg] dropped partition processing_date={_t_pd}")
+                            except Exception as _dp_ex:
+                                logger.warning(f"[upload:direct:bg] drop partition skipped: {_dp_ex}")
+
+                            _ins = 0
+                            _fail = 0
+                            for _ri, _row in enumerate(_t_rows):
+                                _sql = _build_direct_row_sql(_row, _t_non_part, _t_fixed, _t_target, _t_pd)
+                                _ok = _imp2.execute_write(_sql, database='gmp_cis')
+                                if _ok:
+                                    _ins += 1
+                                    if _ins % 100 == 0:
+                                        logger.warning(f"[upload:direct:bg] {_ins}/{len(_t_rows)} inserted")
+                                else:
+                                    _fail += 1
+                                    logger.error(f"[upload:direct:bg] row {_ri} FAILED. SQL={_sql[:200]}")
+                                    if _fail > 10:
+                                        logger.error(f"[upload:direct:bg] too many failures — aborting")
+                                        break
+
+                            if _ins > 0:
+                                try:
+                                    _imp2.execute_write(
+                                        f"INVALIDATE METADATA gmp_cis.{_t_target}",
+                                        database='gmp_cis'
+                                    )
+                                except Exception:
+                                    pass
+                                _final_desc = _t_desc + (f"\n{_ins} rows inserted" if _fail else '')
+                                _repo2.update_upload(_t_upload_id, {
+                                    'status': UploadKuduRepository.STATUS_COMPLETED,
+                                    'description': _final_desc,
+                                    'row_count': _ins,
+                                }, _t_username)
+                                logger.warning(f"[upload:direct:bg] DONE — {_ins} rows into {_t_target}")
+                            else:
+                                _repo2.update_upload(_t_upload_id, {
+                                    'status': UploadKuduRepository.STATUS_FAILED,
+                                    'description': f"{_t_desc}\nAll rows failed to insert",
+                                }, _t_username)
+                                logger.error(f"[upload:direct:bg] FAILED — 0 rows inserted into {_t_target}")
+
+                        import threading as _threading
+                        _t = _threading.Thread(
+                            target=_do_direct_insert,
+                            daemon=True,
+                            name=f"direct-{upload_id[:8]}"
+                        )
+                        _t.start()
+                        logger.warning(f"[upload:direct] background insert started for {upload_id} ({len(_all_rows)} rows)")
+
+                        messages.success(request, (
+                            f'File "{file_name}" uploading in background '
+                            f'({len(_all_rows)} rows → {datasource_config.get("target_table", "")}). '
+                            f'Refresh the page in a moment to see the result.'
+                        ))
+                        return redirect('upload:detail', upload_id=upload_id)
                     else:
                         # Table doesn't exist - use session fallback
                         import uuid
