@@ -16,10 +16,11 @@ Existence check (idempotent):
   safe to re-run; only genuinely new prices are written.
 
 Security resolution (to find security_label and currency_code):
-  1. ISIN match   — cis_security.isin = csv.isin
-  2. Name match   — cis_security.security_name = csv.security_name
-  3. Desc match   — cis_security.security_description = csv.security_name
-  If no match the row is flagged SKIP: Security not found in cis_security.
+  1. ISIN match   — cis_equity_price.isin = csv.isin  (checked first)
+  2. ISIN match   — cis_security.isin = csv.isin
+  3. Name match   — cis_security.security_name = csv.security_name
+  4. Desc match   — cis_security.security_description = csv.security_name
+  If no match the row is flagged SKIP: Security not found.
 
 Expected CSV columns (header row required, order-independent):
   Required:
@@ -171,17 +172,45 @@ def _map_headers(headers: List[str]) -> Dict[str, int]:
 
 
 # ---------------------------------------------------------------------------
-# Security resolution — bulk fetch into an in-memory dict
+# Security resolution — check cis_equity_price first, then cis_security
 # ---------------------------------------------------------------------------
 
 def load_security_map() -> Dict[str, dict]:
     """
-    Fetch all active securities from cis_security.
-    Returns dict keyed by ISIN (upper) and by security_name (lower).
-    Value: {'security_name': ..., 'currency_code': ..., 'isin': ...}
+    Build in-memory lookup dicts for security resolution.
+
+    Resolution order (by ISIN):
+      1. cis_equity_price — ISIN → security_label + currency_code
+      2. cis_security     — ISIN → security_name + currency_code
+                          — security_name / security_description (name fallback)
+
+    cis_equity_price is checked first because it already holds the canonical
+    security_label used as the PK in that table.
     """
+    # --- 1. Load from cis_equity_price (ISIN keyed) ---
+    logger.info("Loading security labels from cis_equity_price …")
+    ep_rows = impala_manager.execute_query(
+        f"""
+        SELECT DISTINCT isin, security_label, currency_code
+        FROM {PRICE_TBL}
+        WHERE isin IS NOT NULL AND isin != ''
+        """,
+        database=DB
+    )
+    ep_by_isin = {}
+    for r in (ep_rows or []):
+        isin = (r.get('isin') or '').strip().upper()
+        if isin:
+            ep_by_isin[isin] = {
+                'security_name': r.get('security_label', ''),
+                'currency_code': r.get('currency_code', ''),
+                'isin':          isin,
+            }
+    logger.info(f"Loaded {len(ep_by_isin)} securities by ISIN from cis_equity_price")
+
+    # --- 2. Load from cis_security (ISIN + name keyed) ---
     logger.info("Loading security master from cis_security …")
-    rows = impala_manager.execute_query(
+    sec_rows = impala_manager.execute_query(
         f"""
         SELECT security_name, isin, currency_code, security_description
         FROM {SEC_TBL}
@@ -189,40 +218,58 @@ def load_security_map() -> Dict[str, dict]:
         """,
         database=DB
     )
-    by_isin = {}
+    sec_by_isin = {}
     by_name = {}
     by_desc = {}
-    for r in (rows or []):
+    for r in (sec_rows or []):
         entry = {
             'security_name': r.get('security_name', ''),
             'currency_code': r.get('currency_code', ''),
-            'isin':          r.get('isin', '') or '',
+            'isin':          (r.get('isin') or '').strip().upper(),
         }
         isin = (r.get('isin') or '').strip().upper()
         name = (r.get('security_name') or '').strip().lower()
         desc = (r.get('security_description') or '').strip().lower()
         if isin:
-            by_isin[isin] = entry
+            sec_by_isin[isin] = entry
         if name:
             by_name.setdefault(name, entry)
         if desc:
             by_desc.setdefault(desc, entry)
-    logger.info(f"Loaded {len(by_isin)} securities by ISIN, {len(by_name)} by name")
-    return {'isin': by_isin, 'name': by_name, 'desc': by_desc}
+    logger.info(f"Loaded {len(sec_by_isin)} securities by ISIN from cis_security")
+
+    return {
+        'ep_isin':  ep_by_isin,   # cis_equity_price — checked first
+        'sec_isin': sec_by_isin,  # cis_security ISIN fallback
+        'name':     by_name,      # cis_security name fallback
+        'desc':     by_desc,      # cis_security description fallback
+    }
 
 
 def resolve_security(csv_isin: str, csv_name: str, sec_map: dict) -> Optional[dict]:
-    """Return matched security dict or None."""
+    """
+    Return matched security dict or None.
+
+    Order:
+      1. ISIN → cis_equity_price
+      2. ISIN → cis_security
+      3. name → cis_security (security_name)
+      4. name → cis_security (security_description)
+    """
     if csv_isin:
-        hit = sec_map['isin'].get(csv_isin.strip().upper())
+        isin_key = csv_isin.strip().upper()
+        hit = sec_map['ep_isin'].get(isin_key)
+        if hit:
+            return hit
+        hit = sec_map['sec_isin'].get(isin_key)
         if hit:
             return hit
     if csv_name:
-        hit = sec_map['name'].get(csv_name.strip().lower())
+        name_key = csv_name.strip().lower()
+        hit = sec_map['name'].get(name_key)
         if hit:
             return hit
-        # Try description match
-        hit = sec_map['desc'].get(csv_name.strip().lower())
+        hit = sec_map['desc'].get(name_key)
         if hit:
             return hit
     return None
