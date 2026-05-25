@@ -25,6 +25,15 @@ logger = logging.getLogger('upload')
 _MAX_STORED_ERRORS = 50
 # Maximum length of each individual error message
 _MAX_ERROR_MSG_LEN = 300
+# Hard byte cap for any JSON column written to Kudu VARCHAR(65535)
+_MAX_JSON_BYTES = 60_000
+
+
+def _cap(s: str) -> str:
+    """Truncate string to _MAX_JSON_BYTES to stay within Kudu VARCHAR limit."""
+    if len(s) > _MAX_JSON_BYTES:
+        return s[:_MAX_JSON_BYTES]
+    return s
 
 
 def _serialise_sample_data(rows) -> str:
@@ -323,11 +332,11 @@ class UploadKuduRepository:
                 self.escape_value(upload_data.get('delimiter', ',')),
                 str(upload_data.get('has_header', True)).lower(),
                 self.escape_value(upload_data.get('encoding', 'UTF-8')),
-                self.escape_value(upload_data.get('description', '')),
+                self.escape_value(str(upload_data.get('description', '') or '')[:2000]),
                 self.escape_value(target_table),
                 self.escape_value(upload_data.get('target_database', self.DATABASE)),
                 self.escape_value(f"{self.HDFS_BASE_PATH}/{upload_id}"),
-                self.escape_value(json.dumps(upload_data.get('schema', [])) if upload_data.get('schema') else '[]'),
+                self.escape_value(_cap(json.dumps(upload_data.get('schema', [])) if upload_data.get('schema') else '[]')),
                 self.escape_value(_serialise_sample_data(upload_data.get('sample_data', []))),
                 self.escape_value(_serialise_errors(upload_data.get('validation_errors', []))),
                 self.escape_value(self.STATUS_PENDING),
@@ -356,83 +365,99 @@ class UploadKuduRepository:
             logger.error(f"Error creating upload: {str(e)}")
             return None
 
+    # Columns that are safe to write on every update (no large JSON blobs).
+    # Kudu UPSERT with a partial column list leaves un-listed columns unchanged.
+    _SMALL_COLS = {
+        'status', 'description', 'row_count', 'target_table_name',
+        'updated_by', 'updated_at',
+    }
+    # Columns that may carry large payloads and should only be written when
+    # the caller explicitly includes them in update_data.
+    _LARGE_COLS = {'schema_json', 'sample_data_json', 'validation_errors_json'}
+
     def update_upload(self, upload_id: str, update_data: Dict[str, Any], updated_by: str) -> bool:
         """
-        Update upload record.
+        Update upload record via a targeted UPSERT.
 
-        Kudu does not support UPDATE on non-PK columns. We fetch the existing
-        row, merge update_data on top, then UPSERT the complete row back.
+        Kudu UPSERT with a partial column list only overwrites the listed
+        columns — un-listed columns are unchanged.  This avoids re-writing
+        large JSON blobs (schema_json, sample_data_json) on every status
+        update, which previously caused Kudu VARCHAR(65535) overflows and
+        silently dropped status updates.
+
+        Only the PK (upload_id) plus the changed columns are included.
+        Large JSON columns are only written when the caller explicitly puts
+        them in update_data.
         """
         try:
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            # Fetch current row to preserve all unchanged columns
-            row = self.get_upload_by_id(upload_id)
-            if not row:
-                logger.warning(f"update_upload: upload_id {upload_id} not found — cannot update")
-                return False
+            columns = ['upload_id']
+            values  = [self.escape_value(upload_id)]
 
-            # Merge update_data into the existing row
-            merged = dict(row)
             for field, val in update_data.items():
-                merged[field] = val
-            merged['updated_by'] = updated_by
-            merged['updated_at'] = timestamp
+                if field in ('upload_id',):
+                    continue  # already added as PK
 
-            # Serialise JSON fields
-            schema_json = merged.get('schema_json', '[]')
-            if isinstance(schema_json, (list, dict)):
-                schema_json = json.dumps(schema_json)
+                if field == 'status':
+                    columns.append('status')
+                    values.append(self.escape_value(str(val or self.STATUS_PENDING)))
 
-            sample_json = merged.get('sample_data_json', '[]')
-            if isinstance(sample_json, list):
-                sample_json = _serialise_sample_data(sample_json)
-            elif not isinstance(sample_json, str):
-                sample_json = '[]'
+                elif field == 'description':
+                    # Cap description to prevent overflow
+                    columns.append('description')
+                    values.append(self.escape_value(str(val or '')[:2000]))
 
-            errors_json = merged.get('validation_errors_json', '[]')
-            if isinstance(errors_json, list):
-                errors_json = _serialise_errors(errors_json)
-            elif not isinstance(errors_json, str):
-                errors_json = '[]'
+                elif field == 'row_count':
+                    columns.append('row_count')
+                    values.append(self.to_int(val))
 
-            columns = [
-                'upload_id', 'file_name', 'original_file_name', 'file_path',
-                'file_size', 'file_type', 'mime_type', 'row_count', 'column_count',
-                'delimiter', 'has_header', '`encoding`', 'description',
-                'target_table_name', 'target_database', 'hdfs_path',
-                'schema_json', 'sample_data_json', 'validation_errors_json',
-                'status', 'is_deleted',
-                'created_by', 'created_at', 'updated_by', 'updated_at'
-            ]
+                elif field == 'target_table_name':
+                    columns.append('target_table_name')
+                    values.append(self.escape_value(str(val or '')))
 
-            values = [
-                self.escape_value(upload_id),
-                self.escape_value(merged.get('file_name', '')),
-                self.escape_value(merged.get('original_file_name', '')),
-                self.escape_value(merged.get('file_path', '')),
-                self.to_bigint(merged.get('file_size', 0)),
-                self.escape_value(merged.get('file_type', '')),
-                self.escape_value(merged.get('mime_type', '')),
-                self.to_int(merged.get('row_count', 0)),
-                self.to_int(merged.get('column_count', 0)),
-                self.escape_value(merged.get('delimiter', ',')),
-                str(bool(merged.get('has_header', True))).lower(),
-                self.escape_value(merged.get('encoding', 'UTF-8')),
-                self.escape_value(merged.get('description', '')),
-                self.escape_value(merged.get('target_table_name', '')),
-                self.escape_value(merged.get('target_database', self.DATABASE)),
-                self.escape_value(merged.get('hdfs_path', '')),
-                self.escape_value(schema_json),
-                self.escape_value(sample_json),
-                self.escape_value(errors_json),
-                self.escape_value(merged.get('status', self.STATUS_PENDING)),
-                str(bool(merged.get('is_deleted', False))).lower(),
-                self.escape_value(merged.get('created_by', '')),
-                f"'{merged.get('created_at', timestamp)}'",
-                self.escape_value(updated_by),
-                f"'{timestamp}'",
-            ]
+                elif field == 'is_deleted':
+                    columns.append('is_deleted')
+                    values.append(str(bool(val)).lower())
+
+                elif field == 'file_size':
+                    columns.append('file_size')
+                    values.append(self.to_bigint(val))
+
+                elif field == 'schema_json':
+                    serialised = val if isinstance(val, str) else json.dumps(val or [])
+                    if len(serialised) > 60000:
+                        serialised = '[]'
+                    columns.append('schema_json')
+                    values.append(self.escape_value(serialised))
+
+                elif field == 'sample_data_json':
+                    if isinstance(val, list):
+                        serialised = _serialise_sample_data(val)
+                    elif isinstance(val, str):
+                        serialised = val if len(val) <= 60000 else '[]'
+                    else:
+                        serialised = '[]'
+                    columns.append('sample_data_json')
+                    values.append(self.escape_value(serialised))
+
+                elif field == 'validation_errors_json':
+                    if isinstance(val, list):
+                        serialised = _serialise_errors(val)
+                    elif isinstance(val, str):
+                        serialised = val[:60000]
+                    else:
+                        serialised = '[]'
+                    columns.append('validation_errors_json')
+                    values.append(self.escape_value(serialised))
+
+                # Ignore unknown fields silently
+
+            # Always stamp updated_by / updated_at
+            columns.append('updated_by')
+            values.append(self.escape_value(updated_by))
+            columns.append('updated_at')
+            values.append(f"'{timestamp}'")
 
             query = (
                 f"UPSERT INTO {self.DATABASE}.{self.TABLE_NAME} "
@@ -441,11 +466,13 @@ class UploadKuduRepository:
 
             success = impala_manager.execute_write(query, database=self.DATABASE)
             if success:
-                logger.info(f"Updated upload: {upload_id}")
+                logger.info(f"Updated upload {upload_id}: {list(update_data.keys())}")
+            else:
+                logger.error(f"update_upload FAILED for {upload_id}: {list(update_data.keys())}")
             return success
 
         except Exception as e:
-            logger.error(f"Error updating upload: {str(e)}")
+            logger.error(f"Error updating upload {upload_id}: {str(e)}")
             return False
 
     def update_status(self, upload_id: str, new_status: str, updated_by: str, error_message: str = None) -> bool:
@@ -472,16 +499,20 @@ class UploadKuduRepository:
         return result
 
     def soft_delete(self, upload_id: str, deleted_by: str) -> bool:
-        """
-        Soft delete an upload.
+        """Soft delete — partial UPSERT: only flip status + is_deleted."""
+        return self.update_upload(
+            upload_id,
+            {'status': self.STATUS_CANCELLED, 'is_deleted': True},
+            deleted_by
+        )
 
-        Kudu does not support UPDATE on non-PK columns. We fetch the existing
-        row and UPSERT it back with is_deleted=true and status=CANCELLED.
+    def _soft_delete_full(self, upload_id: str, deleted_by: str) -> bool:
+        """
+        Legacy full-UPSERT soft delete (kept for reference only — not called).
         """
         try:
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            # Fetch current row so we can re-write all columns
             row = self.get_upload_by_id(upload_id)
             if not row:
                 logger.warning(f"soft_delete: upload_id {upload_id} not found")
