@@ -2463,7 +2463,7 @@ class UploadService:
                         financial_non_financial_co                          AS fin_nonfin_co,
                         NULL                                                AS issuer_type,
                         NULL                                                AS reits_or_fund_y_n,
-                        NULL                                                AS exchange,
+                        country_of_exchange                                 AS exchange,
                         NULL                                                AS country_code,
                         country_of_exchange                                 AS country_of_exchange,
                         country_of_incorporation                            AS country_of_incorporation,
@@ -2519,7 +2519,7 @@ class UploadService:
                         product_type, security_type, quoted_unquoted, industry,
                         NULL                                            AS fin_nonfin_co,
                         issuer_type, reits_or_fund_y_n,
-                        NULL                                            AS exchange,
+                        country_of_exchange                             AS exchange,
                         NULL                                            AS country_code,
                         country_of_exchange, country_of_incorporation,
                         country_of_risk, country_of_operation,
@@ -2640,12 +2640,16 @@ class UploadService:
                     position_basis,
                     from_timestamp(
                         CASE
-                            WHEN reporting_date LIKE '%/%/%' THEN
+                            WHEN reporting_date LIKE '%/%/%' AND length(reporting_date) = 10 THEN
                                 CAST(unix_timestamp(reporting_date, 'dd/MM/yyyy') AS TIMESTAMP)
+                            WHEN reporting_date LIKE '__-__-____' THEN
+                                CAST(unix_timestamp(reporting_date, 'dd-MM-yyyy') AS TIMESTAMP)
+                            WHEN reporting_date LIKE '____-__-__' AND length(reporting_date) = 10 THEN
+                                CAST(unix_timestamp(reporting_date, 'yyyy-MM-dd') AS TIMESTAMP)
                             WHEN length(reporting_date) = 8 THEN
                                 CAST(unix_timestamp(reporting_date, 'yyyyMMdd') AS TIMESTAMP)
                             WHEN reporting_date LIKE '%-%-% %:%:%' THEN
-                                CAST(reporting_date AS TIMESTAMP)
+                                CAST(regexp_replace(reporting_date, ' .*', '') AS TIMESTAMP)
                             ELSE
                                 CAST(reporting_date AS TIMESTAMP)
                         END,

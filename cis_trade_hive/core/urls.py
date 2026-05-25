@@ -5,6 +5,7 @@ Core URL Configuration
 from django.urls import path
 from . import old_views
 from .views import rbac_admin_views
+from .views import notification_views
 
 app_name = 'core'
 
@@ -42,6 +43,9 @@ urlpatterns = [
 
     # Audit
     path('rbac/audit/', rbac_admin_views.rbac_audit, name='rbac_audit'),
+
+    # Notification poll endpoint — cross-worker fallback (no Redis / InMemory layer)
+    path('api/notifications/poll/', notification_views.poll_notifications, name='notifications_poll'),
 
     # WebSocket diagnostics (dev/debug — no auth so it works with broken sessions)
     path('ws-debug/', old_views.ws_debug, name='ws_debug'),

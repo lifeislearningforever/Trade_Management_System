@@ -9,6 +9,9 @@
  *  - Session-expiry redirect (close code 4001)
  *  - Tab visibility API: suppress toasts when tab is active & panel is open
  *  - Graceful degradation when WebSocket is unavailable
+ *  - Kudu poll fallback: polls /core/api/notifications/poll/ every 15 s
+ *    to deliver notifications when Gunicorn uses InMemoryChannelLayer and the
+ *    ETL background thread runs on a different worker than the WS consumer.
  */
 (function () {
     'use strict';
@@ -18,6 +21,8 @@
     /* ------------------------------------------------------------------ */
     var WS_URL         = (window.location.protocol === 'https:' ? 'wss://' : 'ws://') +
                          window.location.host + '/ws/notifications/';
+    var POLL_URL       = '/core/api/notifications/poll/';
+    var POLL_INTERVAL  = 15000;  // 15 s — Kudu poll fallback interval
     var MAX_RETRIES    = 5;
     var BASE_DELAY_MS  = 1000;   // doubles each retry, max ~32 s
     var PING_INTERVAL  = 10000;  // 10 s — keeps connection alive through CML's ~13 s idle timeout
@@ -35,6 +40,7 @@
     var retryCount   = 0;
     var retryTimer   = null;
     var pingTimer    = null;
+    var pollTimer    = null;  // Kudu poll fallback timer
     var pongReceived = true;  // assume alive until first ping cycle
     var panelOpen    = false;
     var notifications = [];   // [{id, type, severity, title, body, ts, read}]
@@ -173,6 +179,45 @@
 
     function stopPing() {
         if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Kudu poll fallback                                                   */
+    /* Delivers notifications that arrived on a different Gunicorn worker  */
+    /* (InMemoryChannelLayer is per-process — not shared across workers).  */
+    /* ------------------------------------------------------------------ */
+    function startPoll() {
+        stopPoll();
+        pollTimer = setInterval(doPoll, POLL_INTERVAL);
+        // Also fire immediately on start to catch notifications that arrived
+        // while the page was loading.
+        doPoll();
+    }
+
+    function stopPoll() {
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    }
+
+    function doPoll() {
+        if (disabled) return;
+        try {
+            fetch(POLL_URL, {credentials: 'same-origin'})
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (data) {
+                    if (!data || !data.notifications) return;
+                    data.notifications.forEach(function (n) {
+                        handleNotification({
+                            event_type: n.event_type,
+                            severity:   n.severity,
+                            title:      n.title,
+                            message:    n.message,
+                            timestamp:  n.timestamp,
+                            payload:    n.payload || {},
+                        });
+                    });
+                })
+                .catch(function () { /* network error — ignore */ });
+        } catch (e) { /* fetch not available — ignore */ }
     }
 
     /* ------------------------------------------------------------------ */
@@ -574,6 +619,7 @@
 
         setConnStatus('disconnected');
         connect();
+        startPoll();  // Kudu fallback — delivers cross-worker notifications
     });
 
     /* ================================================================== */

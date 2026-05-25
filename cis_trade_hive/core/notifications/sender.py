@@ -151,21 +151,36 @@ def notify_user(
         logger.debug('notify_user called with empty/invalid username — skipped.')
         return False
 
-    message = _build_message(event_type, payload or {})
+    p = payload or {}
+    message = _build_message(event_type, p)
     group = user_group(username)
 
-    # Always attempt to send via channel layer (handles connected users).
+    # 1. Send via channel layer (works when WS is connected to the same worker).
     ok = _send_to_group(group, message)
 
-    # Also store as pending so it survives page navigation.
-    # The consumer flushes pending on connect, covering the timing gap between
-    # page load and group_send when the worker fires during navigation.
+    # 2. Store in-process pending queue (flushes on next WS connect — same worker only).
     store_pending(username, message)
 
+    # 3. Persist to Kudu so the JS polling fallback can deliver it cross-worker.
+    #    This is the reliable path when Gunicorn has multiple workers and no Redis.
+    try:
+        from core.notifications.kudu_store import store as _kudu_store
+        from core.notifications.constants import EVENT_TITLE
+        _kudu_store(
+            username=username,
+            event_type=event_type,
+            severity=message.get('severity', 'info'),
+            title=p.get('title') or EVENT_TITLE.get(event_type) or event_type,
+            message=p.get('message') or p.get('body') or '',
+            payload=p,
+        )
+    except Exception as _kex:
+        logger.debug('Kudu notification store failed (non-fatal): %s', _kex)
+
     if ok:
-        logger.debug('Notification %s → user %s sent (+ stored pending).', event_type, username)
+        logger.debug('Notification %s → user %s sent (+ stored pending + kudu).', event_type, username)
     else:
-        logger.debug('Notification %s → user %s stored pending (no active WS).', event_type, username)
+        logger.debug('Notification %s → user %s stored pending + kudu (no active WS).', event_type, username)
     return ok
 
 
