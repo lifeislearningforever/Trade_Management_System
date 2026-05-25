@@ -65,11 +65,11 @@
     <div class="alert alert-info d-flex align-items-center mb-3" id="ingestingBanner">
         <div class="spinner-border spinner-border-sm me-2" role="status"></div>
         <strong>Processing in background&hellip;</strong>&nbsp;
-        This page will refresh automatically every 5 seconds until complete.
+        Page will refresh automatically when complete
+        (<span id="elapsedSeconds">0</span>s elapsed).
         <button type="button" class="btn btn-sm btn-outline-secondary ms-auto"
                 onclick="location.reload()">Refresh Now</button>
     </div>
-    <script>setTimeout(function(){ location.reload(); }, 5000);</script>
     {% endif %}
 
     <div class="row">
@@ -695,15 +695,29 @@ $(document).ready(function() {
         });
     });
 
-    // Auto-refresh for ingesting status
+    // Silent background poll — only reloads once when status changes.
+    // Page stays still while the job runs; no jarring 5 s refresh.
     {% if upload.status == 'INGESTING' or upload.status == 'VALIDATING' %}
-    setInterval(function() {
-        $.get("{% url 'upload:api_status' upload.upload_id %}", function(data) {
-            if (data.status !== '{{ upload.status }}') {
-                location.reload();
-            }
-        });
-    }, 5000);
+    (function() {
+        var _pollCount = 0;
+        var _timer = setInterval(function() {
+            _pollCount++;
+            $.get("{% url 'upload:api_status' upload.upload_id %}", function(data) {
+                // Update elapsed time indicator if banner exists
+                var banner = document.getElementById('ingestingBanner');
+                if (banner) {
+                    var elapsed = document.getElementById('elapsedSeconds');
+                    if (elapsed) elapsed.textContent = (_pollCount * 15) + 's';
+                }
+                if (data.status !== '{{ upload.status }}') {
+                    clearInterval(_timer);
+                    location.reload();
+                }
+            }).fail(function() {
+                // Network blip — keep polling
+            });
+        }, 15000);
+    })();
     {% endif %}
 });
 
