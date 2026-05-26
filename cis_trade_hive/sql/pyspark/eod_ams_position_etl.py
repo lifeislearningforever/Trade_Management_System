@@ -752,7 +752,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             security_id, security_name, isin, security_description, issuer, ticker,
             industry, security_type, investment_type, issuer_type, quoted_unquoted,
             country_of_incorporation, country_of_exchange, exchange_code, currency_code,
-            shares_outstanding, fin_nonfin_ind, status, is_active,
+            shares_outstanding, fin_nonfin_ind, src_system, status, is_active,
             created_by, created_at, updated_by, updated_at
         )
         SELECT
@@ -765,6 +765,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             b.security_currency AS currency_code,
             CAST(b.shares_outstanding AS BIGINT) AS shares_outstanding,
             b.fin_nonfin_co AS fin_nonfin_ind,
+            'CIS' AS src_system,
             'ACTIVE' AS status, TRUE AS is_active,
             'EOD_AMS_ETL' AS created_by,
             from_unixtime(UNIX_TIMESTAMP(), 'yyyy-MM-dd HH:mm:ss') AS created_at,
