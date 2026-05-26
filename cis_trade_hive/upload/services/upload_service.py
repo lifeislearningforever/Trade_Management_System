@@ -3000,7 +3000,7 @@ class UploadService:
                     END AS final_shares_issued,
                     CASE
                         WHEN b.`exchange` IS NULL OR TRIM(b.`exchange`) = ''
-                            THEN 'FAIL: Exchange is null'
+                            THEN 'WARN: Exchange is null'
                         ELSE 'PASS'
                     END AS exchange_status,
                     CASE
@@ -3018,8 +3018,6 @@ class UploadService:
                     CASE
                         WHEN p4.security_status LIKE 'FAIL: No identifier%'
                             THEN 'INVALID: No security identifier'
-                        WHEN b.`exchange` IS NULL OR TRIM(b.`exchange`) = ''
-                            THEN 'INVALID: Exchange is null'
                         WHEN b.quantity IS NULL AND b.cost_fc IS NULL
                             THEN 'INVALID: No quantity'
                         WHEN p4.security_status = 'NOT_FOUND: Create new security'
@@ -3064,7 +3062,7 @@ class UploadService:
                     END AS security_fail_reason,
                     CASE
                         WHEN b.`exchange` IS NULL OR TRIM(b.`exchange`) = ''
-                            THEN 'FAIL: Exchange is null'
+                            THEN 'WARN: Exchange is null'
                         ELSE NULL
                     END AS exchange_fail_reason,
                     CASE
@@ -3090,7 +3088,6 @@ class UploadService:
                    OR ((b.isin IS NULL OR TRIM(b.isin) = '')
                        AND (b.security_full_name IS NULL OR TRIM(b.security_full_name) = '')
                        AND (b.security_short_name IS NULL OR TRIM(b.security_short_name) = ''))
-                   OR (b.`exchange` IS NULL OR TRIM(b.`exchange`) = '')
                    OR (b.quantity IS NULL AND b.cost_fc IS NULL)
                 """,
                 database=db

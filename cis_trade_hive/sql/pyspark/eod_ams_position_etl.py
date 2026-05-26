@@ -805,7 +805,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                      THEN b.quantity / b.pct_holding
                  ELSE NULL END AS final_shares_issued,
             CASE WHEN b.`exchange` IS NULL OR TRIM(b.`exchange`) = ''
-                     THEN 'FAIL: Exchange is null'
+                     THEN 'WARN: Exchange is null'
                  ELSE 'PASS' END AS exchange_status,
             CASE WHEN b.market_value_fc IS NOT NULL AND b.market_value_fc != 0 THEN b.market_value_fc
                  WHEN b.quantity IS NOT NULL AND p5.final_market_price IS NOT NULL
@@ -816,7 +816,6 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                  ELSE NULL END AS final_net_book_value_fc,
             CASE
                 WHEN p4.security_status LIKE 'FAIL: No identifier%'  THEN 'INVALID: No security identifier'
-                WHEN b.`exchange` IS NULL OR TRIM(b.`exchange`) = '' THEN 'INVALID: Exchange is null'
                 WHEN b.quantity IS NULL AND b.cost_fc IS NULL        THEN 'INVALID: No quantity'
                 WHEN p4.security_status = 'NOT_FOUND: Create new security' THEN 'VALID: New security created'
                 WHEN p4.security_status IN ('ISIN_MATCH','FULLNAME_MATCH','SHORTNAME_MATCH',
