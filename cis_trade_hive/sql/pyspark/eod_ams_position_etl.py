@@ -710,7 +710,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                              AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
                             THEN 0 ELSE 1
                         END,
-                        CASE WHEN s.src_system = 'CIS' THEN 0 ELSE 1 END,
+                        CASE WHEN s.src_system = 'GMP' THEN 0 ELSE 1 END,
                         s.security_id
                 ) AS rn_priority
             FROM pos_stage_1_base b
