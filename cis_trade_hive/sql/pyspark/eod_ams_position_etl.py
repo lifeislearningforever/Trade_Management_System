@@ -840,7 +840,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             cost_lc, market_value_lc, net_book_value_lc, unrealized_pnl_lc,
             provision_lc, provision_fc,
             dividend_fc, dividend_lc, realized_pnl_fc, realized_pnl_lc,
-            isin, average_cost_lc, placeholder_3, placeholder_4,
+            isin, average_cost_lc, source_table, placeholder_4,
             uncall_fc, uncall_lc, pipeline_fc, pipeline_lc, position_type
         )
         SELECT
@@ -876,7 +876,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             CAST(0 AS DECIMAL(18,4))                        AS realized_pnl_lc,
             COALESCE(final_isin, isin)                      AS isin,
             CAST(0 AS DECIMAL(18,4))                        AS average_cost_lc,
-            ''                                              AS placeholder_3,
+            ''                                              AS source_table,
             ''                                              AS placeholder_4,
             CAST(0 AS DECIMAL(18,4))                        AS uncall_fc,
             CAST(0 AS DECIMAL(18,4))                        AS uncall_lc,

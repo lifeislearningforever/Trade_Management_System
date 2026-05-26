@@ -110,8 +110,7 @@ CREATE TABLE cis_position_new (
     -- Reference
     isin STRING,
 
-    -- Placeholders for future use
-    placeholder_3 STRING,
+    source_table STRING,
     placeholder_4 STRING,
 
     PRIMARY KEY (position_id)
@@ -151,7 +150,7 @@ SELECT
     realized_pnl_fc,
     realized_pnl_lc,
     isin,
-    placeholder_3,
+    placeholder_3,  -- maps to source_table in new schema
     placeholder_4
 FROM cis_position;
 
@@ -177,11 +176,19 @@ SELECT * FROM cis_position LIMIT 5;
 -- ------------------|--------------------|---------------------------------
 -- average_cost      | average_cost_fc    | Avg cost in Security Currency
 -- placeholder_2     | average_cost_lc    | Avg cost in Portfolio Currency
+-- placeholder_3     | source_table       | Source table name for the position row
 -- cost_fc           | cost_fc            | Total cost in Security Currency (unchanged)
 -- cost_lc           | cost_lc            | Total cost in Portfolio Currency (unchanged)
 -- market_value_fc   | market_value_fc    | Market value in Security Currency (unchanged)
 -- market_value_lc   | market_value_lc    | Market value in Portfolio Currency (unchanged)
 -- ============================================================================
+
+
+-- ============================================================================
+-- ALTER TABLE: rename placeholder_3 → source_table in live cis_position table
+-- Run this once against the live Kudu table via Impala shell.
+-- ============================================================================
+-- ALTER TABLE gmp_cis.cis_position CHANGE COLUMN placeholder_3 source_table STRING;
 
 
 -- ============================================================================

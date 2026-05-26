@@ -980,7 +980,7 @@ class PositionService:
             cost_lc, market_value_lc, net_book_value_lc, unrealized_pnl_lc,
             provision_fc, provision_lc, dividend_fc, dividend_lc,
             realized_pnl_fc, realized_pnl_lc, isin, average_cost_lc,
-            placeholder_3, placeholder_4
+            source_table, placeholder_4
 
         Args:
             position_data: Position data to sync
@@ -1010,7 +1010,7 @@ class PositionService:
                 'realized_pnl_fc', 'realized_pnl_lc',
                 'isin',
                 'average_cost_lc',      # Avg cost in Portfolio Currency (renamed from placeholder_2)
-                'placeholder_3', 'placeholder_4',
+                'source_table', 'placeholder_4',
                 'uncall_fc', 'uncall_lc',
                 'pipeline_fc', 'pipeline_lc',
                 'position_type'
@@ -1052,7 +1052,7 @@ class PositionService:
                 cast_decimal(position_data.get('realized_pnl_lc', 0)),
                 f"'{self._escape(position_data.get('isin', ''))}'",
                 cast_decimal(position_data.get('average_cost_lc', 0)),
-                "''",  # placeholder_3
+                "''",  # source_table
                 "''",  # placeholder_4
                 cast_decimal(position_data.get('uncall_fc', 0)),
                 cast_decimal(position_data.get('uncall_lc', 0)),
