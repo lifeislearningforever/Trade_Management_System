@@ -73,9 +73,9 @@ class EquityPriceService:
             ValidationError: If inputs are invalid
         """
         # Validate and cap limit
-        if limit > 1000:
-            logger.warning(f"Limit {limit} exceeds maximum, capping at 1000")
-            limit = 1000
+        if limit > 50000:
+            logger.warning(f"Limit {limit} exceeds maximum, capping at 50000")
+            limit = 50000
 
         # Validate date formats
         if date_from:

@@ -27,8 +27,8 @@ class PositionRepository:
 
     def get_positions(
         self,
-        portfolio: Optional[str] = None,
-        security: Optional[str] = None,
+        portfolios: Optional[list] = None,
+        securities: Optional[list] = None,
         src_system: Optional[str] = None,
         position_basis: Optional[str] = None,
         position_type: Optional[str] = None,
@@ -45,10 +45,16 @@ class PositionRepository:
         try:
             conditions = []
 
-            if portfolio:
-                conditions.append(f"UPPER(portfolio) LIKE '%{self._escape(portfolio.upper())}%'")
-            if security:
-                conditions.append(f"UPPER(security_label) LIKE '%{self._escape(security.upper())}%'")
+            if portfolios and len(portfolios) == 1:
+                conditions.append(f"UPPER(portfolio) LIKE '%{self._escape(portfolios[0].upper())}%'")
+            elif portfolios and len(portfolios) > 1:
+                vals = "', '".join(self._escape(p) for p in portfolios)
+                conditions.append(f"portfolio IN ('{vals}')")
+            if securities and len(securities) == 1:
+                conditions.append(f"UPPER(security_label) LIKE '%{self._escape(securities[0].upper())}%'")
+            elif securities and len(securities) > 1:
+                vals = "', '".join(self._escape(s) for s in securities)
+                conditions.append(f"security_label IN ('{vals}')")
             if src_system:
                 conditions.append(f"src_system = '{self._escape(src_system)}'")
             if position_basis:
@@ -97,8 +103,8 @@ class PositionRepository:
 
     def get_position_count(
         self,
-        portfolio: Optional[str] = None,
-        security: Optional[str] = None,
+        portfolios: Optional[list] = None,
+        securities: Optional[list] = None,
         src_system: Optional[str] = None,
         position_basis: Optional[str] = None,
         position_type: Optional[str] = None,
@@ -109,10 +115,16 @@ class PositionRepository:
         try:
             conditions = []
 
-            if portfolio:
-                conditions.append(f"UPPER(portfolio) LIKE '%{self._escape(portfolio.upper())}%'")
-            if security:
-                conditions.append(f"UPPER(security_label) LIKE '%{self._escape(security.upper())}%'")
+            if portfolios and len(portfolios) == 1:
+                conditions.append(f"UPPER(portfolio) LIKE '%{self._escape(portfolios[0].upper())}%'")
+            elif portfolios and len(portfolios) > 1:
+                vals = "', '".join(self._escape(p) for p in portfolios)
+                conditions.append(f"portfolio IN ('{vals}')")
+            if securities and len(securities) == 1:
+                conditions.append(f"UPPER(security_label) LIKE '%{self._escape(securities[0].upper())}%'")
+            elif securities and len(securities) > 1:
+                vals = "', '".join(self._escape(s) for s in securities)
+                conditions.append(f"security_label IN ('{vals}')")
             if src_system:
                 conditions.append(f"src_system = '{self._escape(src_system)}'")
             if position_basis:
@@ -136,8 +148,8 @@ class PositionRepository:
 
     def get_summary_stats(
         self,
-        portfolio: Optional[str] = None,
-        security: Optional[str] = None,
+        portfolios: Optional[list] = None,
+        securities: Optional[list] = None,
         src_system: Optional[str] = None,
         position_basis: Optional[str] = None,
         position_type: Optional[str] = None,
@@ -148,10 +160,16 @@ class PositionRepository:
         try:
             conditions = []
 
-            if portfolio:
-                conditions.append(f"UPPER(portfolio) LIKE '%{self._escape(portfolio.upper())}%'")
-            if security:
-                conditions.append(f"UPPER(security_label) LIKE '%{self._escape(security.upper())}%'")
+            if portfolios and len(portfolios) == 1:
+                conditions.append(f"UPPER(portfolio) LIKE '%{self._escape(portfolios[0].upper())}%'")
+            elif portfolios and len(portfolios) > 1:
+                vals = "', '".join(self._escape(p) for p in portfolios)
+                conditions.append(f"portfolio IN ('{vals}')")
+            if securities and len(securities) == 1:
+                conditions.append(f"UPPER(security_label) LIKE '%{self._escape(securities[0].upper())}%'")
+            elif securities and len(securities) > 1:
+                vals = "', '".join(self._escape(s) for s in securities)
+                conditions.append(f"security_label IN ('{vals}')")
             if src_system:
                 conditions.append(f"src_system = '{self._escape(src_system)}'")
             if position_basis:

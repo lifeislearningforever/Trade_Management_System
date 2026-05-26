@@ -52,14 +52,9 @@ def position_list(request):
         dt_to     = datetime.strptime(system_date, '%Y-%m-%d')
         date_from = (dt_to - timedelta(days=30)).strftime('%Y-%m-%d')
 
-    # For repo calls: pass first value only (repo supports single string filter);
-    # multi-select filtering is done client-side after fetch when multiple selected.
-    portfolio_filter = selected_portfolios[0] if len(selected_portfolios) == 1 else None
-    security_filter  = selected_securities[0]  if len(selected_securities)  == 1 else None
-
     filter_kwargs = dict(
-        portfolio=portfolio_filter,
-        security=security_filter,
+        portfolios=selected_portfolios or None,
+        securities=selected_securities or None,
         src_system=src_system or None,
         position_basis=position_basis or None,
         position_type=position_type or None,
@@ -69,37 +64,20 @@ def position_list(request):
 
     # --- CSV Export ---
     if export == 'csv':
-        positions = position_repository.get_positions(**filter_kwargs, limit=10000, offset=0)
-        if len(selected_portfolios) > 1:
-            positions = [p for p in positions if p.get('portfolio') in selected_portfolios]
-        if len(selected_securities) > 1:
-            positions = [p for p in positions if p.get('security_label') in selected_securities]
+        positions = position_repository.get_positions(**filter_kwargs, limit=50000, offset=0)
         return _export_csv(positions)
 
-    # --- Fetch all (for multi-select filtering) then paginate ---
+    # --- Paginated fetch — filtering done at DB level via IN clause ---
     try:
         page = max(1, int(request.GET.get('page', 1)))
     except (ValueError, TypeError):
         page = 1
 
-    if len(selected_portfolios) > 1 or len(selected_securities) > 1:
-        # Fetch broader set then filter in-memory
-        all_positions = position_repository.get_positions(**filter_kwargs, limit=10000, offset=0)
-        if len(selected_portfolios) > 1:
-            all_positions = [p for p in all_positions if p.get('portfolio') in selected_portfolios]
-        if len(selected_securities) > 1:
-            all_positions = [p for p in all_positions if p.get('security_label') in selected_securities]
-        total = len(all_positions)
-        total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-        offset = (page - 1) * PAGE_SIZE
-        positions = all_positions[offset:offset + PAGE_SIZE]
-        stats = position_repository.get_summary_stats(**filter_kwargs)
-    else:
-        offset = (page - 1) * PAGE_SIZE
-        total  = position_repository.get_position_count(**filter_kwargs)
-        total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-        positions = position_repository.get_positions(**filter_kwargs, limit=PAGE_SIZE, offset=offset)
-        stats     = position_repository.get_summary_stats(**filter_kwargs)
+    offset = (page - 1) * PAGE_SIZE
+    total  = position_repository.get_position_count(**filter_kwargs)
+    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    positions = position_repository.get_positions(**filter_kwargs, limit=PAGE_SIZE, offset=offset)
+    stats     = position_repository.get_summary_stats(**filter_kwargs)
 
     # --- Dropdown data ---
     src_systems = position_repository.get_distinct_src_systems()
