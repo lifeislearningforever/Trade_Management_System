@@ -1052,7 +1052,7 @@ class PositionService:
                 cast_decimal(position_data.get('realized_pnl_lc', 0)),
                 f"'{self._escape(position_data.get('isin', ''))}'",
                 cast_decimal(position_data.get('average_cost_lc', 0)),
-                "''",  # source_table
+                f"'{self._escape(position_data.get('source_table', 'cis_trade'))}'",
                 "''",  # placeholder_4
                 cast_decimal(position_data.get('uncall_fc', 0)),
                 cast_decimal(position_data.get('uncall_lc', 0)),

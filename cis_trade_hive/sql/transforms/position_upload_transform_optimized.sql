@@ -622,7 +622,7 @@ SELECT
     CAST(0                       AS DECIMAL(18,4)) AS realized_pnl_lc,
     COALESCE(final_isin, isin)                     AS isin,
     CAST(0                       AS DECIMAL(18,4)) AS average_cost_lc,
-    ''                                             AS source_table,
+    source_table                                   AS source_table,
     ''                                             AS placeholder_4,
     CAST(0                       AS DECIMAL(18,4)) AS uncall_fc,
     CAST(0                       AS DECIMAL(18,4)) AS uncall_lc,
