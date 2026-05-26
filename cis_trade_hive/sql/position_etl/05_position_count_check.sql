@@ -43,3 +43,22 @@ LEFT JOIN (
     GROUP BY processing_date
 ) r ON s.processing_date = r.processing_date
 ORDER BY s.processing_date DESC;
+
+
+-- 4. Count in cis_position by source_table for a given processing_date
+--    Replace '20260526' with the actual processing_date you are investigating.
+SELECT src_system, source_table, COUNT(*) AS row_count
+FROM gmp_cis.cis_position
+WHERE processing_date = '20260526'
+GROUP BY src_system, source_table
+ORDER BY row_count DESC;
+
+
+-- 5. Break down UI position list count by source — matches what the UI shows
+--    (UI queries cis_position filtered by position_date range, not processing_date)
+--    Replace date range with the range visible in the UI filter.
+SELECT src_system, source_table, COUNT(*) AS row_count
+FROM gmp_cis.cis_position
+WHERE position_date BETWEEN '2026-04-26' AND '2026-05-26'
+GROUP BY src_system, source_table
+ORDER BY row_count DESC;
