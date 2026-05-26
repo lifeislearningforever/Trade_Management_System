@@ -2715,44 +2715,51 @@ class UploadService:
                 WITH sec_join AS (
                     SELECT
                         b.row_id,
-                        b.isin                   AS upload_isin,
+                        b.isin                  AS upload_isin,
                         b.security_full_name,
                         b.security_short_name,
-                        b.`exchange`             AS upload_exchange,
+                        b.`exchange`            AS upload_exchange,
                         p2.portfolio_status,
                         s.security_id,
                         s.security_name,
-                        s.isin                   AS s_isin,
+                        s.isin                  AS s_isin,
                         s.exchange_code,
                         s.country_of_exchange,
                         s.currency_code,
-                        s.src_system             AS s_src_system,
-                        -- Compute both window functions unconditionally; select between
-                        -- them in the outer query based on whether exchange is present.
-                        COUNT(s.security_id) OVER (PARTITION BY b.row_id)           AS cnt_all,
+                        s.src_system            AS s_src_system,
+                        -- 1 when this cis_security row also matches the upload exchange
+                        CASE
+                            WHEN b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
+                             AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
+                            THEN 1 ELSE 0
+                        END AS is_exchange_match,
+                        -- How many cis_security rows match isin + exchange for this upload row
+                        SUM(CASE
+                            WHEN b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
+                             AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
+                            THEN 1 ELSE 0
+                        END) OVER (PARTITION BY b.row_id) AS cnt_isin_exchange,
+                        -- How many cis_security rows match isin alone for this upload row
+                        COUNT(s.security_id) OVER (PARTITION BY b.row_id) AS cnt_isin_only,
+                        -- Priority: exact exchange match first, then CIS src, then lowest id
                         ROW_NUMBER() OVER (
                             PARTITION BY b.row_id
                             ORDER BY
+                                CASE
+                                    WHEN b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
+                                     AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
+                                    THEN 0 ELSE 1
+                                END,
                                 CASE WHEN s.src_system = 'CIS' THEN 0 ELSE 1 END,
                                 s.security_id
                         ) AS rn_priority
                     FROM pos_stage_1_base b
                     JOIN pos_stage_2_portfolio p2
-                        ON b.row_id = p2.row_id
-                        AND p2.portfolio_status = 'PASS'
+                        ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
                     LEFT JOIN {db}.cis_security s
                         ON  s.is_active = true
-                        AND b.isin IS NOT NULL
-                        AND TRIM(b.isin) != ''
+                        AND b.isin IS NOT NULL AND TRIM(b.isin) != ''
                         AND b.isin = s.isin
-                        AND (
-                            (    b.`exchange` IS NOT NULL
-                             AND TRIM(b.`exchange`) != ''
-                             AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
-                            )
-                            OR
-                            (b.`exchange` IS NULL OR TRIM(b.`exchange`) = '')
-                        )
                 )
                 SELECT
                     row_id,
@@ -2761,44 +2768,18 @@ class UploadService:
                     security_short_name,
                     upload_exchange,
                     portfolio_status,
-                    -- When exchange present: multiple matches = ambiguous, only pick if cnt_all=1.
-                    -- When no exchange: always pick rn_priority=1 (CIS-first), treat as single match.
-                    CASE
-                        WHEN upload_exchange IS NOT NULL AND TRIM(upload_exchange) != ''
-                            THEN CASE WHEN rn_priority = 1 AND cnt_all = 1 THEN security_id   ELSE NULL END
-                        ELSE CASE WHEN rn_priority = 1 AND cnt_all >= 1    THEN security_id   ELSE NULL END
-                    END AS matched_security_id,
-                    CASE
-                        WHEN upload_exchange IS NOT NULL AND TRIM(upload_exchange) != ''
-                            THEN CASE WHEN rn_priority = 1 AND cnt_all = 1 THEN security_name ELSE NULL END
-                        ELSE CASE WHEN rn_priority = 1 AND cnt_all >= 1    THEN security_name ELSE NULL END
-                    END AS matched_security_name,
-                    CASE
-                        WHEN upload_exchange IS NOT NULL AND TRIM(upload_exchange) != ''
-                            THEN CASE WHEN rn_priority = 1 AND cnt_all = 1 THEN s_isin        ELSE NULL END
-                        ELSE CASE WHEN rn_priority = 1 AND cnt_all >= 1    THEN s_isin        ELSE NULL END
-                    END AS matched_isin,
-                    CASE
-                        WHEN upload_exchange IS NOT NULL AND TRIM(upload_exchange) != ''
-                            THEN CASE WHEN rn_priority = 1 AND cnt_all = 1 THEN exchange_code ELSE NULL END
-                        ELSE CASE WHEN rn_priority = 1 AND cnt_all >= 1    THEN exchange_code ELSE NULL END
-                    END AS matched_exchange,
-                    CASE
-                        WHEN upload_exchange IS NOT NULL AND TRIM(upload_exchange) != ''
-                            THEN CASE WHEN rn_priority = 1 AND cnt_all = 1 THEN country_of_exchange ELSE NULL END
-                        ELSE CASE WHEN rn_priority = 1 AND cnt_all >= 1    THEN country_of_exchange ELSE NULL END
-                    END AS matched_country,
-                    CASE
-                        WHEN upload_exchange IS NOT NULL AND TRIM(upload_exchange) != ''
-                            THEN CASE WHEN rn_priority = 1 AND cnt_all = 1 THEN currency_code ELSE NULL END
-                        ELSE CASE WHEN rn_priority = 1 AND cnt_all >= 1    THEN currency_code ELSE NULL END
-                    END AS matched_currency,
+                    CASE WHEN rn_priority = 1 AND cnt_isin_only >= 1 THEN security_id         ELSE NULL END AS matched_security_id,
+                    CASE WHEN rn_priority = 1 AND cnt_isin_only >= 1 THEN security_name       ELSE NULL END AS matched_security_name,
+                    CASE WHEN rn_priority = 1 AND cnt_isin_only >= 1 THEN s_isin              ELSE NULL END AS matched_isin,
+                    CASE WHEN rn_priority = 1 AND cnt_isin_only >= 1 THEN exchange_code       ELSE NULL END AS matched_exchange,
+                    CASE WHEN rn_priority = 1 AND cnt_isin_only >= 1 THEN country_of_exchange ELSE NULL END AS matched_country,
+                    CASE WHEN rn_priority = 1 AND cnt_isin_only >= 1 THEN currency_code       ELSE NULL END AS matched_currency,
                     CASE
                         WHEN upload_isin IS NULL OR TRIM(upload_isin) = ''
                             THEN 'NO_ISIN'
-                        WHEN upload_exchange IS NOT NULL AND TRIM(upload_exchange) != '' AND cnt_all > 1
+                        WHEN cnt_isin_only > 1 AND cnt_isin_exchange != 1
                             THEN 'FAIL: Multiple securities found'
-                        WHEN cnt_all >= 1
+                        WHEN cnt_isin_only >= 1
                             THEN 'ISIN_MATCH'
                         ELSE 'ISIN_NO_MATCH'
                     END AS match_type
