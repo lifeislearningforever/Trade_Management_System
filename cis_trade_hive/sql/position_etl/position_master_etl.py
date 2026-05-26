@@ -145,9 +145,9 @@ SOURCE_TABLES = {
     # AMS_STREET tables (src_system='AMS_STREET')
     'gmp_cis_sta_dly_ams_multi_dis_cif': {
         'src_system': 'AMS_STREET',
-        'position_basis_field': 'trade_date',  # Uses trade_date
+        'position_basis_field': None,  # TRADE_DATE is hardcoded, no trade_date column
         'mapping': {
-            'portfolio': 'portfolio',
+            'portfolio_code': 'portfolio',
             'security_name': 'security_full_name',
             'isin': 'isin',
             'price': 'market_price',
@@ -157,7 +157,7 @@ SOURCE_TABLES = {
     },
     'gmp_cis_sta_dly_ams_multi_hold': {
         'src_system': 'AMS_STREET',
-        'position_basis_field': 'trade_date',  # Uses trade_date
+        'position_basis_field': None,  # TRADE_DATE is hardcoded, no trade_date column
         'mapping': {
             'portfolio_code': 'portfolio',
             'security_name': 'security_full_name',
@@ -181,7 +181,7 @@ SOURCE_TABLES = {
             'ctry_incorporation': 'country_of_incorporation',
             'total_cost_fc': 'cost_fc',
             'mkt_value_fc': 'market_value_fc',
-            'unrealised_pl_fc': 'unrealized_pnl_fc',
+            'unrealised_p_l_fc': 'unrealized_pnl_fc',
             'total_cost_sgd': 'cost_lc',
             'mkt_value_sgd': 'market_value_lc',
             'unrealised_pl_sgd': 'unrealized_pnl_lc',
@@ -220,7 +220,7 @@ SOURCE_TABLES = {
         'position_basis_field': 'settled_date',  # Uses settled_date
         'mapping': {
             'portfolio_code': 'portfolio',
-            'security_name_long': 'security_full_name',
+            'security_long_name': 'security_full_name',
             'country_name': 'country_of_exchange',
             'security_currency': 'security_currency',
             'asset_class': 'product_type',

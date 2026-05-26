@@ -160,7 +160,7 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
     if table == 'gmp_cis_sta_dly_ams_multi_dis_cif':
         return f"""
             SELECT
-                portfolio                                           AS portfolio,
+                portfolio_code                                      AS portfolio,
                 security_name                                       AS security_full_name,
                 NULL                                                AS security_short_name,
                 isin                                                AS isin,
@@ -264,7 +264,7 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
                 NULL                                                AS mas_6d_code_sg,
                 NULL                                                AS mas_6d_code_ovs,
                 '{pos_basis}'                                       AS position_basis,
-                COALESCE(trade_date, processing_date)               AS reporting_date,
+                processing_date                                     AS reporting_date,
                 NULL                                                AS maturity_date,
                 '{src_sys}'                                         AS src_system,
                 'ams'                                               AS sub_system,
@@ -280,10 +280,13 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
     if table in ('gmp_cis_sta_dly_stat_street_ams_iceq',
                  'gmp_cis_sta_mthly_stat_street_ams_iceq_end'):
         frq = 'dly' if 'dly' in table else 'mthly'
+        sec_name_col = ('security_long_name'
+                        if table == 'gmp_cis_sta_mthly_stat_street_ams_iceq_end'
+                        else 'security_name_long')
         return f"""
             SELECT
                 portfolio_code                                          AS portfolio,
-                security_name_long                                      AS security_full_name,
+                {sec_name_col}                                          AS security_full_name,
                 NULL                                                    AS security_short_name,
                 isin                                                    AS isin,
                 NULL                                                    AS ticker,
@@ -356,7 +359,7 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
                 {safe_decimal('total_cost_fc', 'DECIMAL(18,4)')}       AS cost_fc,
                 {safe_decimal('mkt_value_fc', 'DECIMAL(18,4)')}        AS market_value_fc,
                 CAST(NULL AS DECIMAL(18,4))                             AS net_book_value_fc,
-                {safe_decimal('unrealised_pl_fc', 'DECIMAL(18,4)')}    AS unrealized_pnl_fc,
+                {safe_decimal('unrealised_p_l_fc', 'DECIMAL(18,4)')}   AS unrealized_pnl_fc,
                 CAST(NULL AS DECIMAL(18,4))                             AS provision_fc,
                 {safe_decimal('total_cost_sgd', 'DECIMAL(18,4)')}      AS cost_lc,
                 {safe_decimal('mkt_value_sgd', 'DECIMAL(18,4)')}       AS market_value_lc,

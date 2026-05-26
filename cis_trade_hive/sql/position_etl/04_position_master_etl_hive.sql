@@ -340,10 +340,10 @@ FROM (
     UNION ALL
 
     -- ========================================================================
-    -- 6. gmp_cis_sta_dly_ams_multi_dis_cif (position_basis = trade_date)
+    -- 6. gmp_cis_sta_dly_ams_multi_dis_cif (position_basis = TRADE_DATE)
     -- ========================================================================
     SELECT
-        portfolio                           AS portfolio,
+        portfolio_code                      AS portfolio,
         security_name                       AS security_full_name,
         NULL                                AS security_short_name,
         isin                                AS isin,
@@ -385,7 +385,7 @@ FROM (
         NULL                                AS bwcif_ovs,
         NULL                                AS mas_6d_code_sg,
         NULL                                AS mas_6d_code_ovs,
-        NULL                                AS position_basis,
+        'TRADE_DATE'                        AS position_basis,
         NULL                                AS reporting_date,
         NULL                                AS maturity_date,
         'AMS_STREET'                        AS src_system,
@@ -445,7 +445,7 @@ FROM (
         NULL                                AS bwcif_ovs,
         NULL                                AS mas_6d_code_sg,
         NULL                                AS mas_6d_code_ovs,
-        trade_date                          AS position_basis,
+        'TRADE_DATE'                        AS position_basis,
         NULL                                AS reporting_date,
         NULL                                AS maturity_date,
         'AMS_STREET'                        AS src_system,
@@ -477,7 +477,7 @@ FROM (
         total_cost_fc                       AS cost_fc,
         mkt_value_fc                        AS market_value_fc,
         NULL                                AS net_book_value_fc,
-        unrealised_pl_fc                    AS unrealized_pnl_fc,
+        unrealised_p_l_fc                   AS unrealized_pnl_fc,
         total_cost_sgd                      AS cost_lc,
         mkt_value_sgd                       AS market_value_lc,
         NULL                                AS net_book_value_lc,
@@ -505,7 +505,7 @@ FROM (
         NULL                                AS bwcif_ovs,
         mas_6digit_code                     AS mas_6d_code_sg,
         NULL                                AS mas_6d_code_ovs,
-        trade_date                          AS position_basis,
+        'TRADE_DATE'                        AS position_basis,
         NULL                                AS reporting_date,
         NULL                                AS maturity_date,
         'AMS_STREET'                        AS src_system,
@@ -584,7 +584,7 @@ FROM (
     -- ========================================================================
     SELECT
         portfolio_code                      AS portfolio,
-        security_name_long                  AS security_full_name,
+        security_long_name                  AS security_full_name,
         NULL                                AS security_short_name,
         isin                                AS isin,
         NULL                                AS ticker,
