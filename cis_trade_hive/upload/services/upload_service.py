@@ -2809,6 +2809,25 @@ class UploadService:
             )
             logger.info("[position_etl] Step 3 complete")
 
+            # Diagnostic: dump every row from pos_stage_3_security so we can
+            # see exactly what match_type / matched_security_id each row got.
+            _s3_diag = impala_manager.execute_query(
+                """
+                SELECT row_id, upload_isin, upload_exchange,
+                       matched_security_id, match_type
+                FROM pos_stage_3_security
+                """,
+                database=db
+            ) or []
+            for _r in _s3_diag:
+                logger.info(
+                    "[DIAG Step3] row_id=%s isin=%s exchange=%s "
+                    "matched_id=%s match_type=%s",
+                    _r.get('row_id'), _r.get('upload_isin'),
+                    _r.get('upload_exchange'), _r.get('matched_security_id'),
+                    _r.get('match_type'),
+                )
+
             # ------------------------------------------------------------------
             # Step 4: Security fallback — full_name (security_description),
             #         then short_name, then 'NOT_FOUND: Create new security'.
@@ -2845,6 +2864,24 @@ class UploadService:
                 database=db
             )
             logger.info("[position_etl] Step 4 complete")
+
+            # Diagnostic: dump every row from pos_stage_4_security_fallback.
+            _s4_diag = impala_manager.execute_query(
+                """
+                SELECT row_id, upload_isin, upload_exchange,
+                       final_security_id, security_status
+                FROM pos_stage_4_security_fallback
+                """,
+                database=db
+            ) or []
+            for _r in _s4_diag:
+                logger.info(
+                    "[DIAG Step4] row_id=%s isin=%s exchange=%s "
+                    "final_id=%s security_status=%s",
+                    _r.get('row_id'), _r.get('upload_isin'),
+                    _r.get('upload_exchange'), _r.get('final_security_id'),
+                    _r.get('security_status'),
+                )
 
             # ------------------------------------------------------------------
             # Step 5: Price lookup — latest price per ISIN from cis_equity_price.
@@ -2898,6 +2935,28 @@ class UploadService:
             # ------------------------------------------------------------------
             # Step 5B: Create new securities for NOT_FOUND rows that have exchange.
             # ------------------------------------------------------------------
+
+            # Diagnostic: show which rows will be auto-created BEFORE the INSERT.
+            _s5b_diag = impala_manager.execute_query(
+                f"""
+                SELECT b.row_id, b.isin, b.security_full_name, b.security_short_name,
+                       b.`exchange`, p4.security_status
+                FROM pos_stage_1_base b
+                JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
+                WHERE p4.security_status = 'NOT_FOUND: Create new security'
+                  AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
+                """,
+                database=db
+            ) or []
+            for _r in _s5b_diag:
+                logger.info(
+                    "[DIAG Step5B] WILL CREATE security: row_id=%s isin=%s "
+                    "full_name=%s short_name=%s exchange=%s status=%s",
+                    _r.get('row_id'), _r.get('isin'),
+                    _r.get('security_full_name'), _r.get('security_short_name'),
+                    _r.get('exchange'), _r.get('security_status'),
+                )
+
             impala_manager.execute_write(
                 f"""
                 INSERT INTO {db}.cis_security (
