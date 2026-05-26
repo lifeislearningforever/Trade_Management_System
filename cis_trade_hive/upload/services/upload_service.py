@@ -2712,12 +2712,12 @@ class UploadService:
                 f"""
                 CREATE TABLE pos_stage_3_duplicate_isins
                 STORED AS PARQUET AS
-                SELECT isin, COUNT(*) AS isin_count
+                SELECT isin, country_of_exchange, COUNT(*) AS isin_count
                 FROM {db}.cis_security
                 WHERE is_active = true
                   AND isin IS NOT NULL
                   AND TRIM(isin) != ''
-                GROUP BY isin
+                GROUP BY isin, country_of_exchange
                 HAVING COUNT(*) > 1
                 """,
                 database=db
@@ -2752,12 +2752,15 @@ class UploadService:
                     END AS match_type
                 FROM pos_stage_1_base b
                 JOIN pos_stage_2_portfolio p2 ON b.row_id = p2.row_id
-                LEFT JOIN pos_stage_3_duplicate_isins dup ON b.isin = dup.isin
+                LEFT JOIN pos_stage_3_duplicate_isins dup
+                    ON b.isin = dup.isin
+                    AND UPPER(TRIM(COALESCE(b.`exchange`, ''))) = UPPER(TRIM(COALESCE(dup.country_of_exchange, '')))
                 LEFT JOIN {db}.cis_security s
                     ON b.isin = s.isin
                     AND s.is_active = true
                     AND b.isin IS NOT NULL
                     AND TRIM(b.isin) != ''
+                    AND UPPER(TRIM(COALESCE(b.`exchange`, ''))) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
                 WHERE p2.portfolio_status = 'PASS'
                 """,
                 database=db
