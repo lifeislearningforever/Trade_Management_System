@@ -2586,7 +2586,7 @@ class UploadService:
             #         `exchange` for use as internal name throughout the pipeline.
             # ------------------------------------------------------------------
             impala_manager.execute_write(
-                "SELECT 1 -- DEBUG: DROP TABLE IF EXISTS pos_stage_1_base", database=db
+                "DROP TABLE IF EXISTS pos_stage_1_base", database=db
             )
             ok = impala_manager.execute_write(
                 f"""
@@ -2679,7 +2679,7 @@ class UploadService:
             # Step 2: Portfolio validation — join on pf.name (exact match)
             # ------------------------------------------------------------------
             impala_manager.execute_write(
-                "SELECT 1 -- DEBUG: DROP TABLE IF EXISTS pos_stage_2_portfolio", database=db
+                "DROP TABLE IF EXISTS pos_stage_2_portfolio", database=db
             )
             impala_manager.execute_write(
                 f"""
@@ -2706,7 +2706,7 @@ class UploadService:
             #         Only for records that passed portfolio validation (INNER JOIN).
             # ------------------------------------------------------------------
             impala_manager.execute_write(
-                "SELECT 1 -- DEBUG: DROP TABLE IF EXISTS pos_stage_3_security", database=db
+                "DROP TABLE IF EXISTS pos_stage_3_security", database=db
             )
             impala_manager.execute_write(
                 f"""
@@ -2790,58 +2790,13 @@ class UploadService:
             )
             logger.info("[position_etl] Step 3 complete")
 
-            # Diagnostic: dump Step 3 results and raw ISIN bytes to stdout.
-            _s3_diag = impala_manager.execute_query(
-                f"""
-                SELECT b.row_id,
-                       b.isin                    AS b_isin,
-                       LENGTH(b.isin)            AS b_isin_len,
-                       HEX(b.isin)               AS b_isin_hex,
-                       s3.matched_security_id,
-                       s3.match_type,
-                       s3.upload_exchange
-                FROM pos_stage_3_security s3
-                JOIN pos_stage_1_base b ON s3.row_id = b.row_id
-                """,
-                database=db
-            ) or []
-            for _r in _s3_diag:
-                print(f"[DIAG-S3] row={_r.get('row_id')} "
-                      f"isin='{_r.get('b_isin')}' len={_r.get('b_isin_len')} "
-                      f"hex={_r.get('b_isin_hex')} "
-                      f"exchange='{_r.get('upload_exchange')}' "
-                      f"matched_id={_r.get('matched_security_id')} "
-                      f"match_type={_r.get('match_type')}", flush=True)
-
-            # Also show what cis_security has for that ISIN.
-            _isins = list({str(_r.get('b_isin','')) for _r in _s3_diag if _r.get('b_isin')})
-            if _isins:
-                _isin_list = ', '.join(f"'{i}'" for i in _isins[:5])
-                _sec_diag = impala_manager.execute_query(
-                    f"""
-                    SELECT security_id, security_name, isin,
-                           LENGTH(isin) AS isin_len, HEX(isin) AS isin_hex,
-                           is_active, src_system, country_of_exchange
-                    FROM {db}.cis_security
-                    WHERE isin IN ({_isin_list})
-                    """,
-                    database=db
-                ) or []
-                for _r in _sec_diag:
-                    print(f"[DIAG-SEC] id={_r.get('security_id')} "
-                          f"name='{_r.get('security_name')}' "
-                          f"isin='{_r.get('isin')}' len={_r.get('isin_len')} "
-                          f"hex={_r.get('isin_hex')} "
-                          f"is_active={_r.get('is_active')} "
-                          f"src={_r.get('src_system')} "
-                          f"exchange={_r.get('country_of_exchange')}", flush=True)
 
             # ------------------------------------------------------------------
             # Step 4: Security fallback — full_name (security_description),
             #         then short_name, then 'NOT_FOUND: Create new security'.
             # ------------------------------------------------------------------
             impala_manager.execute_write(
-                "SELECT 1 -- DEBUG: DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=db
+                "DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=db
             )
             impala_manager.execute_write(
                 f"""
@@ -2873,28 +2828,13 @@ class UploadService:
             )
             logger.info("[position_etl] Step 4 complete")
 
-            # Diagnostic: dump Step 4 results to stdout.
-            _s4_diag = impala_manager.execute_query(
-                """
-                SELECT row_id, upload_isin, upload_exchange,
-                       final_security_id, security_status
-                FROM pos_stage_4_security_fallback
-                """,
-                database=db
-            ) or []
-            for _r in _s4_diag:
-                print(f"[DIAG-S4] row={_r.get('row_id')} "
-                      f"isin='{_r.get('upload_isin')}' "
-                      f"exchange='{_r.get('upload_exchange')}' "
-                      f"final_id={_r.get('final_security_id')} "
-                      f"status={_r.get('security_status')}", flush=True)
 
             # ------------------------------------------------------------------
             # Step 5: Price lookup — latest price per ISIN from cis_equity_price.
             #         Skip records with FAIL security status.
             # ------------------------------------------------------------------
             impala_manager.execute_write(
-                "SELECT 1 -- DEBUG: DROP TABLE IF EXISTS pos_stage_5_price", database=db
+                "DROP TABLE IF EXISTS pos_stage_5_price", database=db
             )
             impala_manager.execute_write(
                 f"""
@@ -2942,25 +2882,6 @@ class UploadService:
             # Step 5B: Create new securities for NOT_FOUND rows that have exchange.
             # ------------------------------------------------------------------
 
-            # Diagnostic: show which rows will be auto-created BEFORE the INSERT.
-            _s5b_diag = impala_manager.execute_query(
-                f"""
-                SELECT b.row_id, b.isin, b.security_full_name, b.security_short_name,
-                       b.`exchange`, p4.security_status
-                FROM pos_stage_1_base b
-                JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
-                WHERE p4.security_status = 'NOT_FOUND: Create new security'
-                  AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
-                """,
-                database=db
-            ) or []
-            for _r in _s5b_diag:
-                print(f"[DIAG-S5B] WILL CREATE: row={_r.get('row_id')} "
-                      f"isin='{_r.get('isin')}' "
-                      f"full_name='{_r.get('security_full_name')}' "
-                      f"short_name='{_r.get('security_short_name')}' "
-                      f"exchange='{_r.get('exchange')}' "
-                      f"status={_r.get('security_status')}", flush=True)
 
             impala_manager.execute_write(
                 f"""
@@ -3030,7 +2951,7 @@ class UploadService:
             #         Also create position_upload_failed for reporting.
             # ------------------------------------------------------------------
             impala_manager.execute_write(
-                "SELECT 1 -- DEBUG: DROP TABLE IF EXISTS position_upload_staging", database=db
+                "DROP TABLE IF EXISTS position_upload_staging", database=db
             )
             impala_manager.execute_write(
                 f"""
@@ -3107,7 +3028,7 @@ class UploadService:
 
             # Failed records table (for reporting — records that never made it to staging)
             impala_manager.execute_write(
-                "SELECT 1 -- DEBUG: DROP TABLE IF EXISTS position_upload_failed", database=db
+                "DROP TABLE IF EXISTS position_upload_failed", database=db
             )
             impala_manager.execute_write(
                 f"""
@@ -3374,9 +3295,19 @@ class UploadService:
             else:
                 result.update({'total': 0, 'passed': 0, 'failed': 0})
 
-            # DEBUG: cleanup disabled — tables kept for inspection after run.
-            # Re-enable by restoring the DROP TABLE loop below when done debugging.
-            pass
+            # Clean up intermediate staging tables (keep report + failed for UI)
+            for tbl in [
+                'pos_stage_1_base', 'pos_stage_2_portfolio',
+                'pos_stage_3_security',
+                'pos_stage_4_security_fallback', 'pos_stage_5_price',
+                'position_upload_staging',
+            ]:
+                try:
+                    impala_manager.execute_write(
+                        f"DROP TABLE IF EXISTS {tbl}", database=db
+                    )
+                except Exception:
+                    pass
 
             msg = (
                 f"Position ETL complete for {src_id} / {processing_date}: "
