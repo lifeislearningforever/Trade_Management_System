@@ -265,47 +265,8 @@ def upload_create(request):
                                        f"src_id={_src_id} processing_date={_processing_date}")
                         print(f"[upload:direct] {len(_all_rows)} rows → {_target_table} src_id={_src_id}", flush=True)
 
-                        # --- Pre-insert: detect key columns from the data ---
-                        _col_names = list(_all_rows[0].keys()) if _all_rows else []
-                        _port_col  = next((c for c in ('portfolio', 'portfolio_name', 'account_name') if c in _col_names), None)
-                        _sec_col   = next((c for c in ('security_label', 'security_name', 'isin_code', 'isin') if c in _col_names), None)
-                        _key_cols  = [c for c in (_port_col, _sec_col) if c]
-
-                        # --- Fix 2: Skip rows with null/empty key fields (warn, don't block) ---
-                        if _key_cols:
-                            _null_row_nums = [
-                                i + 1 for i, r in enumerate(_all_rows)
-                                if any(not str(r.get(c) or '').strip() for c in _key_cols)
-                            ]
-                            if _null_row_nums:
-                                _null_msg = (
-                                    f"Skipped {len(_null_row_nums)} row(s) with null/empty key fields "
-                                    f"({', '.join(_key_cols)}): rows {_null_row_nums[:10]}"
-                                    + (' …' if len(_null_row_nums) > 10 else '')
-                                )
-                                logger.warning(f"[upload:direct] {_null_msg}")
-                                messages.warning(request, _null_msg)
-                                _null_set = set(_null_row_nums)
-                                _all_rows = [
-                                    r for i, r in enumerate(_all_rows)
-                                    if (i + 1) not in _null_set
-                                ]
-
-                        # --- Fix 1: Deduplicate before insert ---
-                        _dedup_key_cols = _key_cols or _col_names
-                        _seen_keys = set()
-                        _unique_rows = []
-                        _dup_count = 0
-                        for _r in _all_rows:
-                            _k = tuple(str(_r.get(c, '')).strip() for c in _dedup_key_cols)
-                            if _k not in _seen_keys:
-                                _seen_keys.add(_k)
-                                _unique_rows.append(_r)
-                            else:
-                                _dup_count += 1
-                        if _dup_count > 0:
-                            logger.warning(f"[upload:direct] removed {_dup_count} duplicate rows, {len(_unique_rows)} unique remain")
-                        _all_rows = _unique_rows
+                        # All rows are passed through as-is — no null-skip, no dedup.
+                        # The target table UPSERT on its composite PK handles duplicates.
 
                         # Get target table column list from Impala.
                         # Exclude processing_date — it is the Hive partition key,
