@@ -277,16 +277,11 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
             WHERE processing_date = '{processing_date}'
         """
 
-    if table in ('gmp_cis_sta_dly_stat_street_ams_iceq',
-                 'gmp_cis_sta_mthly_stat_street_ams_iceq_end'):
-        frq = 'dly' if 'dly' in table else 'mthly'
-        sec_name_col = ('security_long_name'
-                        if table == 'gmp_cis_sta_mthly_stat_street_ams_iceq_end'
-                        else 'security_name_long')
+    if table == 'gmp_cis_sta_dly_stat_street_ams_iceq':
         return f"""
             SELECT
                 portfolio_code                                          AS portfolio,
-                {sec_name_col}                                          AS security_full_name,
+                security_name_long                                      AS security_full_name,
                 NULL                                                    AS security_short_name,
                 isin                                                    AS isin,
                 NULL                                                    AS ticker,
@@ -334,7 +329,67 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
                 '{src_sys}'                                             AS src_system,
                 'ams'                                                   AS sub_system,
                 'sta'                                                   AS data_cat,
-                '{frq}'                                                 AS data_frq,
+                'dly'                                                   AS data_frq,
+                '{table}'                                               AS source_table,
+                CURRENT_TIMESTAMP()                                     AS etl_insert_ts,
+                'eod_ams_etl'                                           AS etl_batch_id
+            FROM {DB}.{table}
+            WHERE processing_date = '{processing_date}'
+        """
+
+    if table == 'gmp_cis_sta_mthly_stat_street_ams_iceq_end':
+        return f"""
+            SELECT
+                portfolio_code                                          AS portfolio,
+                security_long_name                                      AS security_full_name,
+                NULL                                                    AS security_short_name,
+                isin                                                    AS isin,
+                NULL                                                    AS ticker,
+                {safe_decimal('quantity', 'DECIMAL(18,4)')}            AS quantity,
+                CAST(NULL AS DECIMAL(18,4))                             AS shares_outstanding,
+                CAST(NULL AS DECIMAL(18,4))                             AS shares_issued,
+                {safe_decimal('pct_ratio_reserved', 'DECIMAL(10,6)')}  AS pct_holding,
+                {safe_decimal('market_unit_price_local', 'DECIMAL(18,6)')} AS market_price,
+                {safe_decimal('cost_unit_price_local', 'DECIMAL(18,6)')}   AS average_cost,
+                {safe_decimal('cost_value_local', 'DECIMAL(18,4)')}    AS cost_fc,
+                {safe_decimal('market_value_local', 'DECIMAL(18,4)')}  AS market_value_fc,
+                CAST(NULL AS DECIMAL(18,4))                             AS net_book_value_fc,
+                {safe_decimal('unrealized_pl_local', 'DECIMAL(18,4)')} AS unrealized_pnl_fc,
+                CAST(NULL AS DECIMAL(18,4))                             AS provision_fc,
+                {safe_decimal('cost_value_base', 'DECIMAL(18,4)')}     AS cost_lc,
+                {safe_decimal('market_value_base', 'DECIMAL(18,4)')}   AS market_value_lc,
+                CAST(NULL AS DECIMAL(18,4))                             AS net_book_value_lc,
+                {safe_decimal('unrealized_pl_base', 'DECIMAL(18,4)')}  AS unrealized_pnl_lc,
+                CAST(NULL AS DECIMAL(18,4))                             AS provision_lc,
+                asset_class                                             AS product_type,
+                NULL                                                    AS security_type,
+                listing_status                                          AS quoted_unquoted,
+                NULL                                                    AS industry,
+                NULL                                                    AS fin_nonfin_co,
+                NULL                                                    AS issuer_type,
+                NULL                                                    AS reits_or_fund_y_n,
+                country_name                                            AS exchange,
+                NULL                                                    AS country_code,
+                country_name                                            AS country_of_exchange,
+                NULL                                                    AS country_of_incorporation,
+                NULL                                                    AS country_of_risk,
+                NULL                                                    AS country_of_operation,
+                security_currency                                       AS security_currency,
+                NULL                                                    AS corp_code,
+                NULL                                                    AS branch_code,
+                NULL                                                    AS cost_centre,
+                NULL                                                    AS cels,
+                NULL                                                    AS bwcif_sg,
+                NULL                                                    AS bwcif_ovs,
+                NULL                                                    AS mas_6d_code_sg,
+                NULL                                                    AS mas_6d_code_ovs,
+                '{pos_basis}'                                           AS position_basis,
+                COALESCE(settled_date, valuation_date, processing_date) AS reporting_date,
+                NULL                                                    AS maturity_date,
+                '{src_sys}'                                             AS src_system,
+                'ams'                                                   AS sub_system,
+                'sta'                                                   AS data_cat,
+                'mthly'                                                 AS data_frq,
                 '{table}'                                               AS source_table,
                 CURRENT_TIMESTAMP()                                     AS etl_insert_ts,
                 'eod_ams_etl'                                           AS etl_batch_id
