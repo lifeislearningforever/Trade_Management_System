@@ -265,8 +265,9 @@ def upload_create(request):
                                        f"src_id={_src_id} processing_date={_processing_date}")
                         print(f"[upload:direct] {len(_all_rows)} rows → {_target_table} src_id={_src_id}", flush=True)
 
-                        # All rows are passed through as-is — no null-skip, no dedup.
+                        # All rows passed through as-is — no null-skip, no dedup.
                         # The target table UPSERT on its composite PK handles duplicates.
+                        _dup_count = 0
 
                         # Get target table column list from Impala.
                         # Exclude processing_date — it is the Hive partition key,
