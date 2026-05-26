@@ -2814,24 +2814,40 @@ class UploadService:
                     END AS security_status
                 FROM pos_stage_3_security s3
                 JOIN pos_stage_1_base b ON s3.row_id = b.row_id
-                LEFT JOIN {db}.cis_security s_desc
+                -- Deduplicated fallback joins: ROW_NUMBER() ensures at most one
+                -- security per match key so a non-unique cis_security table cannot
+                -- fan out source rows into multiple cis_position rows.
+                LEFT JOIN (
+                    SELECT security_id, security_name, isin, exchange_code, country_of_exchange, currency_code,
+                           security_description,
+                           ROW_NUMBER() OVER (PARTITION BY security_description ORDER BY security_id) AS rn
+                    FROM {db}.cis_security WHERE is_active = true
+                ) s_desc
                     ON s3.security_full_name = s_desc.security_description
-                    AND s_desc.is_active = true
+                    AND s_desc.rn = 1
                     AND s3.matched_security_id IS NULL
                     AND s3.match_type != 'FAIL: Multiple ISINs found in master'
                     AND s3.security_full_name IS NOT NULL
                     AND TRIM(s3.security_full_name) != ''
-                LEFT JOIN {db}.cis_security s_name
+                LEFT JOIN (
+                    SELECT security_id, security_name, isin, exchange_code, country_of_exchange, currency_code,
+                           ROW_NUMBER() OVER (PARTITION BY security_name ORDER BY security_id) AS rn
+                    FROM {db}.cis_security WHERE is_active = true
+                ) s_name
                     ON s3.security_short_name = s_name.security_name
-                    AND s_name.is_active = true
+                    AND s_name.rn = 1
                     AND s3.matched_security_id IS NULL
                     AND s_desc.security_id IS NULL
                     AND s3.match_type != 'FAIL: Multiple ISINs found in master'
                     AND s3.security_short_name IS NOT NULL
                     AND TRIM(s3.security_short_name) != ''
-                LEFT JOIN {db}.cis_security s_ticker
+                LEFT JOIN (
+                    SELECT security_id, security_name, isin, exchange_code, country_of_exchange, currency_code, ticker,
+                           ROW_NUMBER() OVER (PARTITION BY UPPER(TRIM(ticker)) ORDER BY security_id) AS rn
+                    FROM {db}.cis_security WHERE is_active = true
+                ) s_ticker
                     ON UPPER(TRIM(b.ticker)) = UPPER(TRIM(s_ticker.ticker))
-                    AND s_ticker.is_active = true
+                    AND s_ticker.rn = 1
                     AND s3.matched_security_id IS NULL
                     AND s_desc.security_id IS NULL
                     AND s_name.security_id IS NULL
