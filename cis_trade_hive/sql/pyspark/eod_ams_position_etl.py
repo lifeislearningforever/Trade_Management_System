@@ -686,24 +686,16 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                 s.exchange_code,
                 s.country_of_exchange,
                 s.currency_code,
-                -- When upload has exchange: multiple rows = genuinely ambiguous → FAIL.
-                -- When upload has no exchange: multiple rows are the same security from
-                -- different src_systems; pick one by priority (CIS first, then lowest id).
-                CASE
-                    WHEN b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                        THEN COUNT(s.security_id) OVER (PARTITION BY b.row_id)
-                    ELSE 1
-                END AS match_count,
-                CASE
-                    WHEN b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                        THEN ROW_NUMBER() OVER (PARTITION BY b.row_id ORDER BY s.security_id)
-                    ELSE ROW_NUMBER() OVER (
-                             PARTITION BY b.row_id
-                             ORDER BY
-                                 CASE WHEN s.src_system = 'CIS' THEN 0 ELSE 1 END,
-                                 s.security_id
-                         )
-                END AS rn
+                s.src_system             AS s_src_system,
+                -- Compute both window functions unconditionally; select between
+                -- them in the outer query based on whether exchange is present.
+                COUNT(s.security_id) OVER (PARTITION BY b.row_id)           AS cnt_all,
+                ROW_NUMBER() OVER (
+                    PARTITION BY b.row_id
+                    ORDER BY
+                        CASE WHEN s.src_system = 'CIS' THEN 0 ELSE 1 END,
+                        s.security_id
+                ) AS rn_priority
             FROM pos_stage_1_base b
             JOIN pos_stage_2_portfolio p2
                 ON b.row_id = p2.row_id
@@ -729,20 +721,49 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             security_short_name,
             upload_exchange,
             portfolio_status,
-            CASE WHEN rn = 1 AND match_count >= 1 THEN security_id         ELSE NULL END AS matched_security_id,
-            CASE WHEN rn = 1 AND match_count >= 1 THEN security_name       ELSE NULL END AS matched_security_name,
-            CASE WHEN rn = 1 AND match_count >= 1 THEN s_isin              ELSE NULL END AS matched_isin,
-            CASE WHEN rn = 1 AND match_count >= 1 THEN exchange_code       ELSE NULL END AS matched_exchange,
-            CASE WHEN rn = 1 AND match_count >= 1 THEN country_of_exchange ELSE NULL END AS matched_country,
-            CASE WHEN rn = 1 AND match_count >= 1 THEN currency_code       ELSE NULL END AS matched_currency,
+            -- When exchange present: multiple matches = ambiguous, only pick if cnt_all=1.
+            -- When no exchange: always pick rn_priority=1 (CIS-first), treat as single match.
             CASE
-                WHEN upload_isin IS NULL OR TRIM(upload_isin) = '' THEN 'NO_ISIN'
-                WHEN match_count > 1                               THEN 'FAIL: Multiple securities found'
-                WHEN match_count = 1                               THEN 'ISIN_MATCH'
-                ELSE                                                    'ISIN_NO_MATCH'
+                WHEN upload_exchange IS NOT NULL AND TRIM(upload_exchange) != ''
+                    THEN CASE WHEN rn_priority = 1 AND cnt_all = 1 THEN security_id   ELSE NULL END
+                ELSE CASE WHEN rn_priority = 1 AND cnt_all >= 1    THEN security_id   ELSE NULL END
+            END AS matched_security_id,
+            CASE
+                WHEN upload_exchange IS NOT NULL AND TRIM(upload_exchange) != ''
+                    THEN CASE WHEN rn_priority = 1 AND cnt_all = 1 THEN security_name ELSE NULL END
+                ELSE CASE WHEN rn_priority = 1 AND cnt_all >= 1    THEN security_name ELSE NULL END
+            END AS matched_security_name,
+            CASE
+                WHEN upload_exchange IS NOT NULL AND TRIM(upload_exchange) != ''
+                    THEN CASE WHEN rn_priority = 1 AND cnt_all = 1 THEN s_isin        ELSE NULL END
+                ELSE CASE WHEN rn_priority = 1 AND cnt_all >= 1    THEN s_isin        ELSE NULL END
+            END AS matched_isin,
+            CASE
+                WHEN upload_exchange IS NOT NULL AND TRIM(upload_exchange) != ''
+                    THEN CASE WHEN rn_priority = 1 AND cnt_all = 1 THEN exchange_code ELSE NULL END
+                ELSE CASE WHEN rn_priority = 1 AND cnt_all >= 1    THEN exchange_code ELSE NULL END
+            END AS matched_exchange,
+            CASE
+                WHEN upload_exchange IS NOT NULL AND TRIM(upload_exchange) != ''
+                    THEN CASE WHEN rn_priority = 1 AND cnt_all = 1 THEN country_of_exchange ELSE NULL END
+                ELSE CASE WHEN rn_priority = 1 AND cnt_all >= 1    THEN country_of_exchange ELSE NULL END
+            END AS matched_country,
+            CASE
+                WHEN upload_exchange IS NOT NULL AND TRIM(upload_exchange) != ''
+                    THEN CASE WHEN rn_priority = 1 AND cnt_all = 1 THEN currency_code ELSE NULL END
+                ELSE CASE WHEN rn_priority = 1 AND cnt_all >= 1    THEN currency_code ELSE NULL END
+            END AS matched_currency,
+            CASE
+                WHEN upload_isin IS NULL OR TRIM(upload_isin) = ''
+                    THEN 'NO_ISIN'
+                WHEN upload_exchange IS NOT NULL AND TRIM(upload_exchange) != '' AND cnt_all > 1
+                    THEN 'FAIL: Multiple securities found'
+                WHEN cnt_all >= 1
+                    THEN 'ISIN_MATCH'
+                ELSE 'ISIN_NO_MATCH'
             END AS match_type
         FROM sec_join
-        WHERE rn = 1
+        WHERE rn_priority = 1
         """,
         database=DB
     )
