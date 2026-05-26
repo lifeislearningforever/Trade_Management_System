@@ -2586,7 +2586,7 @@ class UploadService:
             #         `exchange` for use as internal name throughout the pipeline.
             # ------------------------------------------------------------------
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_1_base", database=db
+                "SELECT 1 -- DEBUG: DROP TABLE IF EXISTS pos_stage_1_base", database=db
             )
             ok = impala_manager.execute_write(
                 f"""
@@ -2679,7 +2679,7 @@ class UploadService:
             # Step 2: Portfolio validation — join on pf.name (exact match)
             # ------------------------------------------------------------------
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_2_portfolio", database=db
+                "SELECT 1 -- DEBUG: DROP TABLE IF EXISTS pos_stage_2_portfolio", database=db
             )
             impala_manager.execute_write(
                 f"""
@@ -2706,7 +2706,7 @@ class UploadService:
             #         Only for records that passed portfolio validation (INNER JOIN).
             # ------------------------------------------------------------------
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_3_security", database=db
+                "SELECT 1 -- DEBUG: DROP TABLE IF EXISTS pos_stage_3_security", database=db
             )
             impala_manager.execute_write(
                 f"""
@@ -2860,7 +2860,7 @@ class UploadService:
             #         then short_name, then 'NOT_FOUND: Create new security'.
             # ------------------------------------------------------------------
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=db
+                "SELECT 1 -- DEBUG: DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=db
             )
             impala_manager.execute_write(
                 f"""
@@ -2913,7 +2913,7 @@ class UploadService:
             #         Skip records with FAIL security status.
             # ------------------------------------------------------------------
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_5_price", database=db
+                "SELECT 1 -- DEBUG: DROP TABLE IF EXISTS pos_stage_5_price", database=db
             )
             impala_manager.execute_write(
                 f"""
@@ -3049,7 +3049,7 @@ class UploadService:
             #         Also create position_upload_failed for reporting.
             # ------------------------------------------------------------------
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS position_upload_staging", database=db
+                "SELECT 1 -- DEBUG: DROP TABLE IF EXISTS position_upload_staging", database=db
             )
             impala_manager.execute_write(
                 f"""
@@ -3126,7 +3126,7 @@ class UploadService:
 
             # Failed records table (for reporting — records that never made it to staging)
             impala_manager.execute_write(
-                "DROP TABLE IF EXISTS position_upload_failed", database=db
+                "SELECT 1 -- DEBUG: DROP TABLE IF EXISTS position_upload_failed", database=db
             )
             impala_manager.execute_write(
                 f"""
@@ -3393,19 +3393,9 @@ class UploadService:
             else:
                 result.update({'total': 0, 'passed': 0, 'failed': 0})
 
-            # Clean up intermediate staging tables (keep report + failed for UI)
-            for tbl in [
-                'pos_stage_1_base', 'pos_stage_2_portfolio',
-                'pos_stage_3_security',
-                'pos_stage_4_security_fallback', 'pos_stage_5_price',
-                'position_upload_staging',
-            ]:
-                try:
-                    impala_manager.execute_write(
-                        f"DROP TABLE IF EXISTS {tbl}", database=db
-                    )
-                except Exception:
-                    pass
+            # DEBUG: cleanup disabled — tables kept for inspection after run.
+            # Re-enable by restoring the DROP TABLE loop below when done debugging.
+            pass
 
             msg = (
                 f"Position ETL complete for {src_id} / {processing_date}: "
