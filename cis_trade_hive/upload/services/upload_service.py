@@ -2702,27 +2702,9 @@ class UploadService:
             logger.info("[position_etl] Step 2 complete")
 
             # ------------------------------------------------------------------
-            # Step 3: Security validation — duplicate ISIN detection + ISIN match.
+            # Step 3: Security ISIN match — conditional on exchange presence.
             #         Only for records that passed portfolio validation (INNER JOIN).
             # ------------------------------------------------------------------
-            impala_manager.execute_write(
-                "DROP TABLE IF EXISTS pos_stage_3_duplicate_isins", database=db
-            )
-            impala_manager.execute_write(
-                f"""
-                CREATE TABLE pos_stage_3_duplicate_isins
-                STORED AS PARQUET AS
-                SELECT isin, country_of_exchange, COUNT(*) AS isin_count
-                FROM {db}.cis_security
-                WHERE is_active = true
-                  AND isin IS NOT NULL
-                  AND TRIM(isin) != ''
-                GROUP BY isin, country_of_exchange
-                HAVING COUNT(*) > 1
-                """,
-                database=db
-            )
-
             impala_manager.execute_write(
                 "DROP TABLE IF EXISTS pos_stage_3_security", database=db
             )
@@ -2730,38 +2712,61 @@ class UploadService:
                 f"""
                 CREATE TABLE pos_stage_3_security
                 STORED AS PARQUET AS
+                WITH sec_join AS (
+                    SELECT
+                        b.row_id,
+                        b.isin                   AS upload_isin,
+                        b.security_full_name,
+                        b.security_short_name,
+                        b.`exchange`             AS upload_exchange,
+                        p2.portfolio_status,
+                        s.security_id,
+                        s.security_name,
+                        s.isin                   AS s_isin,
+                        s.exchange_code,
+                        s.country_of_exchange,
+                        s.currency_code,
+                        COUNT(s.security_id) OVER (PARTITION BY b.row_id) AS match_count,
+                        ROW_NUMBER() OVER (PARTITION BY b.row_id ORDER BY s.security_id) AS rn
+                    FROM pos_stage_1_base b
+                    JOIN pos_stage_2_portfolio p2
+                        ON b.row_id = p2.row_id
+                        AND p2.portfolio_status = 'PASS'
+                    LEFT JOIN {db}.cis_security s
+                        ON  s.is_active = true
+                        AND b.isin IS NOT NULL
+                        AND TRIM(b.isin) != ''
+                        AND b.isin = s.isin
+                        AND (
+                            (    b.`exchange` IS NOT NULL
+                             AND TRIM(b.`exchange`) != ''
+                             AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
+                            )
+                            OR
+                            (b.`exchange` IS NULL OR TRIM(b.`exchange`) = '')
+                        )
+                )
                 SELECT
-                    b.row_id,
-                    b.isin AS upload_isin,
-                    b.security_full_name,
-                    b.security_short_name,
-                    b.`exchange` AS upload_exchange,
-                    p2.portfolio_status,
-                    dup.isin_count AS duplicate_isin_count,
-                    CASE WHEN dup.isin IS NULL THEN s.security_id  ELSE NULL END AS matched_security_id,
-                    CASE WHEN dup.isin IS NULL THEN s.security_name ELSE NULL END AS matched_security_name,
-                    CASE WHEN dup.isin IS NULL THEN s.isin          ELSE NULL END AS matched_isin,
-                    CASE WHEN dup.isin IS NULL THEN s.exchange_code ELSE NULL END AS matched_exchange,
-                    CASE WHEN dup.isin IS NULL THEN s.country_of_exchange ELSE NULL END AS matched_country,
-                    CASE WHEN dup.isin IS NULL THEN s.currency_code ELSE NULL END AS matched_currency,
+                    row_id,
+                    upload_isin,
+                    security_full_name,
+                    security_short_name,
+                    upload_exchange,
+                    portfolio_status,
+                    CASE WHEN rn = 1 AND match_count = 1 THEN security_id         ELSE NULL END AS matched_security_id,
+                    CASE WHEN rn = 1 AND match_count = 1 THEN security_name       ELSE NULL END AS matched_security_name,
+                    CASE WHEN rn = 1 AND match_count = 1 THEN s_isin              ELSE NULL END AS matched_isin,
+                    CASE WHEN rn = 1 AND match_count = 1 THEN exchange_code       ELSE NULL END AS matched_exchange,
+                    CASE WHEN rn = 1 AND match_count = 1 THEN country_of_exchange ELSE NULL END AS matched_country,
+                    CASE WHEN rn = 1 AND match_count = 1 THEN currency_code       ELSE NULL END AS matched_currency,
                     CASE
-                        WHEN dup.isin IS NOT NULL              THEN 'FAIL: Multiple ISINs found in master'
-                        WHEN s.security_id IS NOT NULL         THEN 'ISIN_MATCH'
-                        WHEN b.isin IS NULL OR TRIM(b.isin) = '' THEN 'NO_ISIN'
-                        ELSE 'ISIN_NO_MATCH'
+                        WHEN upload_isin IS NULL OR TRIM(upload_isin) = '' THEN 'NO_ISIN'
+                        WHEN match_count > 1                               THEN 'FAIL: Multiple securities found'
+                        WHEN match_count = 1                               THEN 'ISIN_MATCH'
+                        ELSE                                                    'ISIN_NO_MATCH'
                     END AS match_type
-                FROM pos_stage_1_base b
-                JOIN pos_stage_2_portfolio p2 ON b.row_id = p2.row_id
-                LEFT JOIN pos_stage_3_duplicate_isins dup
-                    ON b.isin = dup.isin
-                    AND UPPER(TRIM(COALESCE(b.`exchange`, ''))) = UPPER(TRIM(COALESCE(dup.country_of_exchange, '')))
-                LEFT JOIN {db}.cis_security s
-                    ON b.isin = s.isin
-                    AND s.is_active = true
-                    AND b.isin IS NOT NULL
-                    AND TRIM(b.isin) != ''
-                    AND UPPER(TRIM(COALESCE(b.`exchange`, ''))) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
-                WHERE p2.portfolio_status = 'PASS'
+                FROM sec_join
+                WHERE rn = 1
                 """,
                 database=db
             )
@@ -2785,75 +2790,20 @@ class UploadService:
                     s3.security_short_name,
                     s3.upload_exchange,
                     s3.portfolio_status,
-                    s3.match_type AS isin_match_type,
-                    COALESCE(s3.matched_security_id, s_desc.security_id, s_name.security_id, s_ticker.security_id) AS final_security_id,
-                    COALESCE(s3.matched_security_name, s_desc.security_name, s_name.security_name, s_ticker.security_name) AS final_security_name,
-                    COALESCE(s3.matched_isin,     s_desc.isin,          s_name.isin,          s_ticker.isin)          AS final_isin,
-                    COALESCE(s3.matched_exchange,  s_desc.exchange_code, s_name.exchange_code, s_ticker.exchange_code) AS final_exchange,
-                    COALESCE(s3.matched_country,   s_desc.country_of_exchange, s_name.country_of_exchange, s_ticker.country_of_exchange) AS final_country,
-                    COALESCE(s3.matched_currency,  s_desc.currency_code, s_name.currency_code, s_ticker.currency_code) AS final_currency,
+                    s3.match_type          AS isin_match_type,
+                    s3.matched_security_id AS final_security_id,
+                    s3.matched_security_name AS final_security_name,
+                    s3.matched_isin        AS final_isin,
+                    s3.matched_exchange    AS final_exchange,
+                    s3.matched_country     AS final_country,
+                    s3.matched_currency    AS final_currency,
+                    'ISIN_ONLY'            AS match_method,
                     CASE
-                        WHEN s3.matched_security_id IS NOT NULL THEN 'ISIN_MATCH'
-                        WHEN s_desc.security_id IS NOT NULL     THEN 'FULLNAME_MATCH'
-                        WHEN s_name.security_id IS NOT NULL     THEN 'SHORTNAME_MATCH'
-                        WHEN s_ticker.security_id IS NOT NULL   THEN 'TICKER_MATCH'
-                        ELSE NULL
-                    END AS match_method,
-                    CASE
-                        WHEN s3.match_type = 'FAIL: Multiple ISINs found in master'
-                            THEN 'FAIL: Multiple ISINs found'
-                        WHEN s3.matched_security_id IS NOT NULL THEN 'ISIN_MATCH'
-                        WHEN s_desc.security_id IS NOT NULL     THEN 'FULLNAME_MATCH'
-                        WHEN s_name.security_id IS NOT NULL     THEN 'SHORTNAME_MATCH'
-                        WHEN s_ticker.security_id IS NOT NULL   THEN 'TICKER_MATCH'
-                        WHEN (s3.upload_isin IS NULL OR TRIM(s3.upload_isin) = '')
-                             AND (s3.security_full_name IS NULL OR TRIM(s3.security_full_name) = '')
-                             AND (s3.security_short_name IS NULL OR TRIM(s3.security_short_name) = '')
-                            THEN 'FAIL: No identifier (isin, security_full_name, security_short_name all null)'
-                        ELSE 'NOT_FOUND: Create new security'
+                        WHEN s3.match_type = 'FAIL: Multiple securities found' THEN 'FAIL: Multiple securities found'
+                        WHEN s3.match_type = 'ISIN_MATCH'                      THEN 'ISIN_MATCH'
+                        ELSE                                                        'NOT_FOUND: Create new security'
                     END AS security_status
                 FROM pos_stage_3_security s3
-                JOIN pos_stage_1_base b ON s3.row_id = b.row_id
-                -- Deduplicated fallback joins: ROW_NUMBER() ensures at most one
-                -- security per match key so a non-unique cis_security table cannot
-                -- fan out source rows into multiple cis_position rows.
-                LEFT JOIN (
-                    SELECT security_id, security_name, isin, exchange_code, country_of_exchange, currency_code,
-                           security_description,
-                           ROW_NUMBER() OVER (PARTITION BY security_description ORDER BY security_id) AS rn
-                    FROM {db}.cis_security WHERE is_active = true
-                ) s_desc
-                    ON s3.security_full_name = s_desc.security_description
-                    AND s_desc.rn = 1
-                    AND s3.matched_security_id IS NULL
-                    AND s3.match_type != 'FAIL: Multiple ISINs found in master'
-                    AND s3.security_full_name IS NOT NULL
-                    AND TRIM(s3.security_full_name) != ''
-                LEFT JOIN (
-                    SELECT security_id, security_name, isin, exchange_code, country_of_exchange, currency_code,
-                           ROW_NUMBER() OVER (PARTITION BY security_name ORDER BY security_id) AS rn
-                    FROM {db}.cis_security WHERE is_active = true
-                ) s_name
-                    ON s3.security_short_name = s_name.security_name
-                    AND s_name.rn = 1
-                    AND s3.matched_security_id IS NULL
-                    AND s_desc.security_id IS NULL
-                    AND s3.match_type != 'FAIL: Multiple ISINs found in master'
-                    AND s3.security_short_name IS NOT NULL
-                    AND TRIM(s3.security_short_name) != ''
-                LEFT JOIN (
-                    SELECT security_id, security_name, isin, exchange_code, country_of_exchange, currency_code, ticker,
-                           ROW_NUMBER() OVER (PARTITION BY UPPER(TRIM(ticker)) ORDER BY security_id) AS rn
-                    FROM {db}.cis_security WHERE is_active = true
-                ) s_ticker
-                    ON UPPER(TRIM(b.ticker)) = UPPER(TRIM(s_ticker.ticker))
-                    AND s_ticker.rn = 1
-                    AND s3.matched_security_id IS NULL
-                    AND s_desc.security_id IS NULL
-                    AND s_name.security_id IS NULL
-                    AND s3.match_type != 'FAIL: Multiple ISINs found in master'
-                    AND b.ticker IS NOT NULL
-                    AND TRIM(b.ticker) != ''
                 """,
                 database=db
             )
@@ -2941,7 +2891,7 @@ class UploadService:
                 )
                 SELECT
                     (UNIX_TIMESTAMP() * 1000) + b.row_id AS security_id,
-                    COALESCE(b.security_short_name, b.security_full_name) AS security_name,
+                    COALESCE(b.security_short_name, b.security_full_name, b.isin) AS security_name,
                     b.isin,
                     b.security_full_name AS security_description,
                     NULL AS issuer,
@@ -2967,8 +2917,6 @@ class UploadService:
                 FROM pos_stage_1_base b
                 JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
                 WHERE p4.security_status = 'NOT_FOUND: Create new security'
-                  AND b.`exchange` IS NOT NULL
-                  AND TRIM(b.`exchange`) != ''
                   AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
                 """,
                 database=db
@@ -3040,8 +2988,7 @@ class UploadService:
                             THEN 'INVALID: No quantity'
                         WHEN p4.security_status = 'NOT_FOUND: Create new security'
                             THEN 'VALID: New security created'
-                        WHEN p4.security_status IN ('ISIN_MATCH', 'FULLNAME_MATCH', 'SHORTNAME_MATCH',
-                                                     'TICKER_MATCH', 'DESC_MATCH', 'NAME_MATCH')
+                        WHEN p4.security_status = 'ISIN_MATCH'
                             THEN 'VALID'
                         WHEN p4.security_status LIKE 'FAIL%'
                             THEN CONCAT('INVALID: ', p4.security_status)
@@ -3329,7 +3276,7 @@ class UploadService:
             # Clean up intermediate staging tables (keep report + failed for UI)
             for tbl in [
                 'pos_stage_1_base', 'pos_stage_2_portfolio',
-                'pos_stage_3_duplicate_isins', 'pos_stage_3_security',
+                'pos_stage_3_security',
                 'pos_stage_4_security_fallback', 'pos_stage_5_price',
                 'position_upload_staging',
             ]:
