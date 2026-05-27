@@ -937,7 +937,9 @@ def load_position(
     # because legacy migrations may have stored dates as DD/MM/YYYY (string
     # comparison against YYYY-MM-DD bounds gives wrong results in SQL).
     conditions = ["status = 'SETTLED'", "trade_type IN ('BUY','SELL')",
-                  "is_deleted = false"]
+                  "is_deleted = false",
+                  "trade_date = '2026-02-27'",
+                  "settle_date = '2026-02-27'"]
     if portfolio_filter:
         conditions.append(f"portfolio_short_name = '{portfolio_filter.replace(chr(39), chr(92)+chr(39))}'")
     if trade_type_filter:
