@@ -888,8 +888,13 @@ def _trigger_position(mapped: Dict[str, Any], raw_id: str) -> Tuple[bool, str]:
             portfolio_currency=mapped.get('portfolio_currency'),
             isin=mapped.get('isin'),
             security_name=mapped.get('security_full_name') or mapped.get('security_label'),
-            async_mode=False,       # synchronous — we want all positions before script exits
-            position_basis=None,    # dual: TRADE_DATE + SETTLE_DATE (same as UI)
+            async_mode=False,
+            # Migration: TRADE_DATE basis only. Using dual (None) triggers a
+            # full _recalculate_position_chain per trade for backdated SETTLE_DATE
+            # which overwrites earlier positions — leaving only the last trade.
+            # Load all trades in chronological order on TRADE_DATE basis first;
+            # SETTLE_DATE positions can be derived separately if needed.
+            position_basis='TRADE_DATE',
         )
         if ok:
             logger.info("Position OK  trade_id=%s %s %s qty=%s",
@@ -945,7 +950,7 @@ def load_position(
         f"quantity, price, commission, sec_fee, other_charges, "
         f"trade_date, settle_date "
         f"FROM {DATABASE}.cis_trade WHERE {where} "
-        f"ORDER BY trade_id"
+        f"ORDER BY trade_date, trade_id"
     )
 
     logger.info("Fetching trades: %s", sql)
