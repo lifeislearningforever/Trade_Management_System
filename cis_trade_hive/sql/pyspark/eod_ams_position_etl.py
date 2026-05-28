@@ -833,7 +833,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                 AND sn.is_active = true
                 AND (
                     UPPER(TRIM(sn.ticker)) = UPPER(TRIM(b.ticker))
-                    OR UPPER(TRIM(sn.ticker)) LIKE UPPER(TRIM(b.ticker)) || ' %'
+                    OR UPPER(TRIM(sn.ticker)) LIKE CONCAT(UPPER(TRIM(b.ticker)), ' %')
                 )
         ),
         -- Tier 3: desc_prefix match (AMS — truncated at "COMMON STOCK")
