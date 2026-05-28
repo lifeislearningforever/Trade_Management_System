@@ -106,8 +106,8 @@ CREATE TABLE cis_trade (
     total_amount DECIMAL(20,6),      -- Calculated: Final amount (legacy, same as total_amount_fc)
 
     -- Multi-Currency Total Amount (FC = Foreign/Security Currency, LC = Local/Portfolio Currency)
-    total_amount_fc DECIMAL(20,6),   -- Total amount in Foreign Currency (Security Currency)
-    total_amount_lc DECIMAL(20,6),   -- Total amount in Local Currency (Portfolio Currency)
+    total_amount_fc DECIMAL(30,8),   -- Total amount in Foreign Currency (Security Currency)
+    total_amount_lc DECIMAL(30,8),   -- Total amount in Local Currency (Portfolio Currency)
 
     -- ========================================
     -- AUTO-CALCULATED CHARGES (from Charge LUT)
