@@ -1142,7 +1142,21 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
     print("[Step 7A] cis_position UPSERT complete")
 
     # ---- Step 7B: INSERT OVERWRITE position_upload_report ----
+    # Verify pos_stage_1_base still has rows (sanity check before writing report)
+    _base_cnt_res = impala_manager.execute_query(
+        "SELECT COUNT(*) AS cnt FROM pos_stage_1_base", database=DB
+    )
+    _base_cnt = int(_base_cnt_res[0].get('cnt', 0)) if _base_cnt_res else 0
+    print(f"[Step 7B] pos_stage_1_base has {_base_cnt} rows")
+
+    # Ensure the Hive partition exists before INSERT OVERWRITE
     impala_manager.execute_write(
+        f"ALTER TABLE {DB}.position_upload_report "
+        f"ADD IF NOT EXISTS PARTITION (processing_date='{processing_date}', src_id='{src_id}')",
+        database=DB
+    )
+
+    ok_7b = impala_manager.execute_write(
         f"""
         INSERT OVERWRITE {DB}.position_upload_report
         PARTITION (processing_date='{processing_date}', src_id='{src_id}')
@@ -1189,8 +1203,13 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
         """,
         database=DB
     )
+    if not ok_7b:
+        print("[Step 7B] FAILED — INSERT into position_upload_report failed")
     impala_manager.execute_write(
         f"INVALIDATE METADATA {DB}.position_upload_report", database=DB
+    )
+    impala_manager.execute_write(
+        f"REFRESH {DB}.position_upload_report", database=DB
     )
     print("[Step 7B] position_upload_report written")
 
