@@ -81,17 +81,17 @@ SELECT
     q.security_name,
     q.ex_date,
     q.payment_date,
-    CAST(q.price AS DECIMAL(20,8))                              AS price,
+    CAST(q.price AS DECIMAL(30,8))                              AS price,
     pos.portfolio_short_name,
     pos.quantity,
     pos.security_currency,
     pos.portfolio_currency,
-    CAST(pos.quantity AS DECIMAL(20,8))
-        * CAST(q.price AS DECIMAL(20,8))                        AS amount_fc,
+    CAST(pos.quantity AS DECIMAL(30,8))
+        * CAST(q.price AS DECIMAL(30,8))                        AS amount_fc,
     COALESCE(fx.rate, 1.0)                                      AS fx_rate,
-    CAST(pos.quantity AS DECIMAL(20,8))
-        * CAST(q.price AS DECIMAL(20,8))
-        * COALESCE(CAST(fx.rate AS DECIMAL(20,8)), 1.0)         AS amount_lc
+    CAST(pos.quantity AS DECIMAL(30,8))
+        * CAST(q.price AS DECIMAL(30,8))
+        * COALESCE(CAST(fx.rate AS DECIMAL(30,8)), 1.0)         AS amount_lc
 FROM cis_ca_cash_flow_queue q
 -- Latest open position per portfolio+security as of ex_date (trade-date basis)
 INNER JOIN (
@@ -222,26 +222,26 @@ SELECT
 
     -- Foreign currency = security currency
     pos.security_currency                                       AS foreign_ccy,
-    CAST(pos.quantity AS DECIMAL(20,8))
-        * CAST(q.price AS DECIMAL(20,8))                        AS foreign_ccy_amt,
+    CAST(pos.quantity AS DECIMAL(30,8))
+        * CAST(q.price AS DECIMAL(30,8))                        AS foreign_ccy_amt,
 
     -- Local currency = portfolio currency
     pos.portfolio_currency                                      AS local_ccy,
-    CAST(pos.quantity AS DECIMAL(20,8))
-        * CAST(q.price AS DECIMAL(20,8))
-        * COALESCE(CAST(fx.rate AS DECIMAL(20,8)), 1.0)         AS local_ccy_amt,
-    CAST(pos.quantity AS DECIMAL(20,8))
-        * CAST(q.price AS DECIMAL(20,8))
-        * COALESCE(CAST(fx.rate AS DECIMAL(20,8)), 1.0)         AS flow_amount_local,
+    CAST(pos.quantity AS DECIMAL(30,8))
+        * CAST(q.price AS DECIMAL(30,8))
+        * COALESCE(CAST(fx.rate AS DECIMAL(30,8)), 1.0)         AS local_ccy_amt,
+    CAST(pos.quantity AS DECIMAL(30,8))
+        * CAST(q.price AS DECIMAL(30,8))
+        * COALESCE(CAST(fx.rate AS DECIMAL(30,8)), 1.0)         AS flow_amount_local,
 
     -- Dividend price per share = amount_fc / quantity
-    CASE WHEN CAST(pos.quantity AS DECIMAL(20,8)) > 0
-         THEN CAST(q.price AS DECIMAL(20,8))
+    CASE WHEN CAST(pos.quantity AS DECIMAL(30,8)) > 0
+         THEN CAST(q.price AS DECIMAL(30,8))
          ELSE 0
     END                                                         AS dividend_price,
 
-    CAST(pos.quantity AS DECIMAL(20,8))                         AS quantity,
-    COALESCE(CAST(fx.rate AS DECIMAL(20,8)), 1.0)               AS fx_rate,
+    CAST(pos.quantity AS DECIMAL(30,8))                         AS quantity,
+    COALESCE(CAST(fx.rate AS DECIMAL(30,8)), 1.0)               AS fx_rate,
 
     -- Dates
     q.ex_date                                                   AS value_date,

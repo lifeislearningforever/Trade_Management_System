@@ -272,7 +272,7 @@ def step1_sync_gmp_ca(spark: SparkSession, kudu_master: str, processing_date: st
             F.col("ex_date_str").alias("ex_date"),
             F.col("record_date_str").alias("record_date"),
             F.col("payment_date_str").alias("payment_date"),
-            F.col("price").cast(DecimalType(20, 8)).alias("price"),
+            F.col("price").cast(DecimalType(30, 8)).alias("price"),
             F.lit(None).cast(StringType()).alias("currency"),       # GMP has no currency col
             F.lit("GMP").alias("src_system"),
             F.lit("VALIDATED").alias("status"),                     # pre-validated upstream
@@ -315,7 +315,7 @@ def step1_sync_gmp_ca(spark: SparkSession, kudu_master: str, processing_date: st
             F.lit(0).cast(LongType()).alias("retry_count"),
             F.lit(None).cast(StringType()).alias("error_message"),
             F.lit(0).cast(LongType()).alias("cash_flows_created"),
-            F.lit(None).cast(DecimalType(20, 8)).alias("total_amount"),
+            F.lit(None).cast(DecimalType(30, 8)).alias("total_amount"),
             F.lit(None).cast(LongType()).alias("processed_at"),
             F.lit(ts).cast(LongType()).alias("created_at"),
             F.lit(run_by).alias("created_by"),
@@ -410,8 +410,8 @@ def step2_generate_cash_flows(spark: SparkSession, kudu_master: str,
     # -- Compute amount_fc = quantity × price --
     holdings = holdings.withColumn(
         "amount_fc",
-        (F.col("quantity").cast(DecimalType(20, 8)) * F.col("price").cast(DecimalType(20, 8)))
-        .cast(DecimalType(20, 8))
+        (F.col("quantity").cast(DecimalType(30, 8)) * F.col("price").cast(DecimalType(30, 8)))
+        .cast(DecimalType(30, 8))
     )
 
     # -- FX rate lookup for amount_lc --
@@ -421,7 +421,7 @@ def step2_generate_cash_flows(spark: SparkSession, kudu_master: str,
         .select(
             F.col("from_currency"),
             F.col("to_currency"),
-            F.col("rate").cast(DecimalType(20, 8)).alias("fx_rate"),
+            F.col("rate").cast(DecimalType(30, 8)).alias("fx_rate"),
             F.col("rate_date"),
         )
     )
@@ -447,11 +447,11 @@ def step2_generate_cash_flows(spark: SparkSession, kudu_master: str,
         )
         .withColumn(
             "fx_rate_used",
-            F.coalesce(F.col("fx_rate"), F.lit(1.0).cast(DecimalType(20, 8)))
+            F.coalesce(F.col("fx_rate"), F.lit(1.0).cast(DecimalType(30, 8)))
         )
         .withColumn(
             "amount_lc",
-            (F.col("amount_fc") * F.col("fx_rate_used")).cast(DecimalType(20, 8))
+            (F.col("amount_fc") * F.col("fx_rate_used")).cast(DecimalType(30, 8))
         )
     )
 
@@ -483,8 +483,8 @@ def step2_generate_cash_flows(spark: SparkSession, kudu_master: str,
             "dividend_price",
             F.when(
                 F.col("quantity") > 0,
-                (F.col("amount_fc") / F.col("quantity").cast(DecimalType(20, 8))).cast(DecimalType(20, 8))
-            ).otherwise(F.lit(0).cast(DecimalType(20, 8)))
+                (F.col("amount_fc") / F.col("quantity").cast(DecimalType(30, 8))).cast(DecimalType(30, 8))
+            ).otherwise(F.lit(0).cast(DecimalType(30, 8)))
         )
         .select(
             F.col("cash_flow_id"),
@@ -502,7 +502,7 @@ def step2_generate_cash_flows(spark: SparkSession, kudu_master: str,
             F.col("amount_lc").alias("local_ccy_amt"),
             F.col("amount_lc").alias("flow_amount_local"),
             F.col("dividend_price"),
-            F.col("quantity").cast(DecimalType(20, 8)),
+            F.col("quantity").cast(DecimalType(30, 8)),
             F.col("fx_rate_used").alias("fx_rate"),
             # Dates
             F.col("ex_date").alias("value_date"),
@@ -585,7 +585,7 @@ def _mark_queue_completed(queue_df: DataFrame, spark: SparkSession,
         .withColumn("status",              F.lit("COMPLETED"))
         .withColumn("error_message",       F.lit(None).cast(StringType()))
         .withColumn("cash_flows_created",  F.lit(cash_flows_created).cast(LongType()))
-        .withColumn("total_amount",        F.lit(None).cast(DecimalType(20, 8)))
+        .withColumn("total_amount",        F.lit(None).cast(DecimalType(30, 8)))
         .withColumn("processed_at",        F.lit(ts).cast(LongType()))
     )
     kudu_upsert(completed, kudu_master, CA_QUEUE_TABLE)

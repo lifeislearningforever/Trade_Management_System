@@ -86,8 +86,8 @@ CREATE TABLE gmp_cis.cis_eod_settlement_log (
     portfolio_id STRING,
     security_id STRING,
     trade_type STRING,
-    quantity DECIMAL(20,8),
-    price DECIMAL(20,8),
+    quantity DECIMAL(30,8),
+    price DECIMAL(30,8),
     settle_date STRING,
 
     -- Processing Result
@@ -97,9 +97,9 @@ CREATE TABLE gmp_cis.cis_eod_settlement_log (
     -- Position Result (if successful)
     position_id BIGINT,
     version_id BIGINT,
-    average_cost DECIMAL(20,8),
-    total_cost DECIMAL(20,8),
-    realized_pnl DECIMAL(20,8),
+    average_cost DECIMAL(30,8),
+    total_cost DECIMAL(30,8),
+    realized_pnl DECIMAL(30,8),
 
     -- Timing
     processed_at STRING,
