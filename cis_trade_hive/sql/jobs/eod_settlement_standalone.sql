@@ -491,23 +491,23 @@ SELECT
 
 
 
-  -- Final downcasts to DECIMAL(20,8)
+  -- Final downcasts to DECIMAL(30,8)
 
-  CAST(calc.qty_after AS DECIMAL(20,8)) AS quantity,
+  CAST(calc.qty_after AS DECIMAL(30,8)) AS quantity,
 
-  CAST(calc.ac_after  AS DECIMAL(20,8)) AS average_cost,
+  CAST(calc.ac_after  AS DECIMAL(30,8)) AS average_cost,
 
-  CAST(calc.tc_after  AS DECIMAL(20,8)) AS total_cost,
+  CAST(calc.tc_after  AS DECIMAL(30,8)) AS total_cost,
 
-  CAST(calc.rp_after  AS DECIMAL(20,8)) AS realized_pnl,
+  CAST(calc.rp_after  AS DECIMAL(30,8)) AS realized_pnl,
 
 
 
-  CAST(calc.p_trd AS DECIMAL(20,8))     AS current_price,
+  CAST(calc.p_trd AS DECIMAL(30,8))     AS current_price,
 
-  CAST(NULL AS DECIMAL(20,8))           AS market_value,      -- calculated later
+  CAST(NULL AS DECIMAL(30,8))           AS market_value,      -- calculated later
 
-  CAST(NULL AS DECIMAL(20,8))           AS unrealized_pnl,    -- calculated later
+  CAST(NULL AS DECIMAL(30,8))           AS unrealized_pnl,    -- calculated later
 
 
 
@@ -527,13 +527,13 @@ SELECT
 
 
 
-  CAST(NULL AS DECIMAL(20,8))           AS fx_rate,
+  CAST(NULL AS DECIMAL(30,8))           AS fx_rate,
 
-  CAST(NULL AS DECIMAL(20,8))           AS average_cost_base,
+  CAST(NULL AS DECIMAL(30,8))           AS average_cost_base,
 
-  CAST(NULL AS DECIMAL(20,8))           AS total_cost_base,
+  CAST(NULL AS DECIMAL(30,8))           AS total_cost_base,
 
-  CAST(NULL AS DECIMAL(20,8))           AS realized_pnl_base,
+  CAST(NULL AS DECIMAL(30,8))           AS realized_pnl_base,
 
 
 

@@ -175,42 +175,42 @@ SELECT
     sq.security_id,
     -- quantity
     CAST(CASE
-        WHEN sq.trade_type = 'BUY' THEN COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) + sq.quantity
-        WHEN sq.trade_type = 'SELL' THEN COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) - sq.quantity
-        ELSE COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8)))
-    END AS DECIMAL(20,8)),
+        WHEN sq.trade_type = 'BUY' THEN COALESCE(cp.quantity, CAST(0 AS DECIMAL(30,8))) + sq.quantity
+        WHEN sq.trade_type = 'SELL' THEN COALESCE(cp.quantity, CAST(0 AS DECIMAL(30,8))) - sq.quantity
+        ELSE COALESCE(cp.quantity, CAST(0 AS DECIMAL(30,8)))
+    END AS DECIMAL(30,8)),
     -- average_cost (AVP formula)
     CAST(CASE
         WHEN sq.trade_type = 'BUY' THEN
             CASE
-                WHEN (COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) + sq.quantity) > CAST(0 AS DECIMAL(20,8)) THEN
-                    (COALESCE(cp.total_cost, CAST(0 AS DECIMAL(20,8))) + (sq.quantity * sq.price) + COALESCE(sq.charges, CAST(0 AS DECIMAL(20,8)))) /
-                    (COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) + sq.quantity)
-                ELSE CAST(0 AS DECIMAL(20,8))
+                WHEN (COALESCE(cp.quantity, CAST(0 AS DECIMAL(30,8))) + sq.quantity) > CAST(0 AS DECIMAL(30,8)) THEN
+                    (COALESCE(cp.total_cost, CAST(0 AS DECIMAL(30,8))) + (sq.quantity * sq.price) + COALESCE(sq.charges, CAST(0 AS DECIMAL(30,8)))) /
+                    (COALESCE(cp.quantity, CAST(0 AS DECIMAL(30,8))) + sq.quantity)
+                ELSE CAST(0 AS DECIMAL(30,8))
             END
-        ELSE COALESCE(cp.average_cost, CAST(0 AS DECIMAL(20,8)))
-    END AS DECIMAL(20,8)),
+        ELSE COALESCE(cp.average_cost, CAST(0 AS DECIMAL(30,8)))
+    END AS DECIMAL(30,8)),
     -- total_cost
     CAST(CASE
         WHEN sq.trade_type = 'BUY' THEN
-            COALESCE(cp.total_cost, CAST(0 AS DECIMAL(20,8))) + (sq.quantity * sq.price) + COALESCE(sq.charges, CAST(0 AS DECIMAL(20,8)))
+            COALESCE(cp.total_cost, CAST(0 AS DECIMAL(30,8))) + (sq.quantity * sq.price) + COALESCE(sq.charges, CAST(0 AS DECIMAL(30,8)))
         WHEN sq.trade_type = 'SELL' THEN
             CASE
-                WHEN COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) > CAST(0 AS DECIMAL(20,8)) THEN
-                    COALESCE(cp.total_cost, CAST(0 AS DECIMAL(20,8))) * (COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) - sq.quantity) / cp.quantity
-                ELSE CAST(0 AS DECIMAL(20,8))
+                WHEN COALESCE(cp.quantity, CAST(0 AS DECIMAL(30,8))) > CAST(0 AS DECIMAL(30,8)) THEN
+                    COALESCE(cp.total_cost, CAST(0 AS DECIMAL(30,8))) * (COALESCE(cp.quantity, CAST(0 AS DECIMAL(30,8))) - sq.quantity) / cp.quantity
+                ELSE CAST(0 AS DECIMAL(30,8))
             END
-        ELSE COALESCE(cp.total_cost, CAST(0 AS DECIMAL(20,8)))
-    END AS DECIMAL(20,8)),
+        ELSE COALESCE(cp.total_cost, CAST(0 AS DECIMAL(30,8)))
+    END AS DECIMAL(30,8)),
     -- realized_pnl
     CAST(CASE
         WHEN sq.trade_type = 'SELL' THEN
-            COALESCE(cp.realized_pnl, CAST(0 AS DECIMAL(20,8))) + (sq.quantity * (sq.price - COALESCE(cp.average_cost, CAST(0 AS DECIMAL(20,8)))))
-        ELSE COALESCE(cp.realized_pnl, CAST(0 AS DECIMAL(20,8)))
-    END AS DECIMAL(20,8)),
-    CAST(sq.price AS DECIMAL(20,8)),  -- current_price
-    CAST(NULL AS DECIMAL(20,8)),      -- market_value
-    CAST(NULL AS DECIMAL(20,8)),      -- unrealized_pnl
+            COALESCE(cp.realized_pnl, CAST(0 AS DECIMAL(30,8))) + (sq.quantity * (sq.price - COALESCE(cp.average_cost, CAST(0 AS DECIMAL(30,8)))))
+        ELSE COALESCE(cp.realized_pnl, CAST(0 AS DECIMAL(30,8)))
+    END AS DECIMAL(30,8)),
+    CAST(sq.price AS DECIMAL(30,8)),  -- current_price
+    CAST(NULL AS DECIMAL(30,8)),      -- market_value
+    CAST(NULL AS DECIMAL(30,8)),      -- unrealized_pnl
     sq.trade_id,
     sq.trade_type,
     CAST(CASE WHEN sq.trade_type = 'BUY' THEN COALESCE(cp.lots_held, 0) + 1 ELSE COALESCE(cp.lots_held, 0) END AS INT),
@@ -218,13 +218,13 @@ SELECT
     sq.sub_custodian,
     sq.security_currency,
     sq.portfolio_currency,
-    CAST(NULL AS DECIMAL(20,8)),      -- fx_rate
-    CAST(NULL AS DECIMAL(20,8)),      -- average_cost_base
-    CAST(NULL AS DECIMAL(20,8)),      -- total_cost_base
-    CAST(NULL AS DECIMAL(20,8)),      -- realized_pnl_base
+    CAST(NULL AS DECIMAL(30,8)),      -- fx_rate
+    CAST(NULL AS DECIMAL(30,8)),      -- average_cost_base
+    CAST(NULL AS DECIMAL(30,8)),      -- total_cost_base
+    CAST(NULL AS DECIMAL(30,8)),      -- realized_pnl_base
     CASE
         WHEN sq.trade_type = 'BUY' THEN 'OPEN'
-        WHEN sq.trade_type = 'SELL' AND (COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) - sq.quantity) <= CAST(0 AS DECIMAL(20,8)) THEN 'CLOSED'
+        WHEN sq.trade_type = 'SELL' AND (COALESCE(cp.quantity, CAST(0 AS DECIMAL(30,8))) - sq.quantity) <= CAST(0 AS DECIMAL(30,8)) THEN 'CLOSED'
         ELSE 'OPEN'
     END,
     CAST(true AS BOOLEAN),            -- is_active
@@ -240,7 +240,7 @@ LEFT JOIN gmp_cis.tmp_current_positions_eod cp
 WHERE sq.settle_date <= '__SETTLE_DATE__'
   AND sq.status = 'PROCESSING'
   -- Exclude error cases
-  AND NOT (sq.trade_type = 'SELL' AND (cp.position_id IS NULL OR COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) < sq.quantity));
+  AND NOT (sq.trade_type = 'SELL' AND (cp.position_id IS NULL OR COALESCE(cp.quantity, CAST(0 AS DECIMAL(30,8))) < sq.quantity));
 
 
 -- ============================================================================
@@ -263,13 +263,13 @@ SELECT
     sq.settle_date,
     CASE
         WHEN sq.trade_type = 'SELL' AND cp.position_id IS NULL THEN 'FAILED'
-        WHEN sq.trade_type = 'SELL' AND COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) < sq.quantity THEN 'FAILED'
+        WHEN sq.trade_type = 'SELL' AND COALESCE(cp.quantity, CAST(0 AS DECIMAL(30,8))) < sq.quantity THEN 'FAILED'
         ELSE 'SUCCESS'
     END,
     CASE
         WHEN sq.trade_type = 'SELL' AND cp.position_id IS NULL THEN
             CONCAT('No position found for ', sq.security_id, ' in portfolio ', sq.portfolio_id)
-        WHEN sq.trade_type = 'SELL' AND COALESCE(cp.quantity, CAST(0 AS DECIMAL(20,8))) < sq.quantity THEN
+        WHEN sq.trade_type = 'SELL' AND COALESCE(cp.quantity, CAST(0 AS DECIMAL(30,8))) < sq.quantity THEN
             CONCAT('Insufficient quantity. Available: ', CAST(COALESCE(cp.quantity, 0) AS STRING), ', Requested: ', CAST(sq.quantity AS STRING))
         ELSE NULL
     END,
