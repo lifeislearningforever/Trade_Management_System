@@ -935,8 +935,8 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             b.market_price AS upload_market_price,
             ep.main_closing_price,
             CAST(CASE
-                WHEN ep.main_closing_price IS NOT NULL AND ep.main_closing_price != 0 THEN ep.main_closing_price
-                WHEN b.market_price IS NOT NULL AND b.market_price != 0              THEN b.market_price
+                WHEN ep.main_closing_price IS NOT NULL AND ep.main_closing_price != 0 THEN CAST(ep.main_closing_price AS DECIMAL(30,8))
+                WHEN b.market_price IS NOT NULL AND b.market_price != 0              THEN CAST(b.market_price AS DECIMAL(30,8))
                 ELSE NULL
             END AS DECIMAL(30,8)) AS final_market_price,
             CASE
@@ -1026,17 +1026,18 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                  ELSE 'FAIL: Both quantity and cost_fc null' END AS quantity_status,
             CAST(CASE WHEN b.shares_issued IS NOT NULL THEN b.shares_issued
                       WHEN b.pct_holding IS NOT NULL AND b.quantity IS NOT NULL AND b.pct_holding > 0
-                          THEN b.quantity / b.pct_holding
+                          THEN CAST(b.quantity AS DECIMAL(30,8)) / CAST(b.pct_holding AS DECIMAL(30,8))
                       ELSE NULL END AS DECIMAL(30,8)) AS final_shares_issued,
             CASE WHEN b.`exchange` IS NULL OR TRIM(b.`exchange`) = ''
                      THEN 'WARN: Exchange is null'
                  ELSE 'PASS' END AS exchange_status,
             CAST(CASE WHEN b.market_value_fc IS NOT NULL AND b.market_value_fc != 0 THEN b.market_value_fc
                       WHEN b.quantity IS NOT NULL AND p5.final_market_price IS NOT NULL
-                          THEN b.quantity * p5.final_market_price
+                          THEN CAST(b.quantity AS DECIMAL(30,8)) * CAST(p5.final_market_price AS DECIMAL(30,8))
                       ELSE NULL END AS DECIMAL(30,8)) AS final_market_value_fc,
             CAST(CASE WHEN b.net_book_value_fc IS NOT NULL THEN b.net_book_value_fc
-                      WHEN b.cost_fc IS NOT NULL           THEN b.cost_fc - COALESCE(b.provision_fc, 0)
+                      WHEN b.cost_fc IS NOT NULL
+                          THEN CAST(b.cost_fc AS DECIMAL(30,8)) - CAST(COALESCE(b.provision_fc, CAST(0 AS DECIMAL(30,8))) AS DECIMAL(30,8))
                       ELSE NULL END AS DECIMAL(30,8)) AS final_net_book_value_fc,
             CASE
                 WHEN p4.security_status LIKE 'FAIL: No identifier%'  THEN 'INVALID: No security identifier'
