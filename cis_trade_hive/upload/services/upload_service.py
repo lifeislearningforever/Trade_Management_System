@@ -2792,8 +2792,14 @@ class UploadService:
 
 
             # ------------------------------------------------------------------
-            # Step 4: Security fallback — full_name (security_description),
-            #         then short_name, then 'NOT_FOUND: Create new security'.
+            # Step 4: Security fallback matching for rows where ISIN did not match.
+            #   Tier 1 — full_name: cis_security.security_name = security_full_name
+            #   Tier 2 — short_name: cis_security.security_name = security_short_name
+            #   Tier 3 — ticker: exact OR cis_security.ticker starts with upload ticker
+            #             (handles Bloomberg suffix: upload "ABC US", cis has "ABC US Equity")
+            #   Tier 4 — desc_prefix: strip "COMMON STOCK..." suffix from full_name, match remainder
+            #   Tier 5 — CIS-migrated: match any cis_security with src_system='CIS' by name/short_name
+            #   → All tiers guard against re-creating if a CIS-migrated security already matches.
             # ------------------------------------------------------------------
             impala_manager.execute_write(
                 "DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=db
@@ -2802,27 +2808,149 @@ class UploadService:
                 f"""
                 CREATE TABLE pos_stage_4_security_fallback
                 STORED AS PARQUET AS
+                WITH
+                base_with_prefix AS (
+                    SELECT
+                        s3.*,
+                        TRIM(
+                            CASE
+                                WHEN UPPER(s3.security_full_name) LIKE '%COMMON STOCK%'
+                                  OR UPPER(s3.security_full_name) LIKE '%COMMON STICK%'
+                                THEN regexp_replace(
+                                        s3.security_full_name,
+                                        '(?i)\\\\s*COMMON\\\\s+(STOCK|STICK).*$',
+                                        ''
+                                     )
+                                ELSE s3.security_full_name
+                            END
+                        ) AS desc_prefix
+                    FROM pos_stage_3_security s3
+                ),
+                -- Tier 1: full_name match (any src_system incl. CIS-migrated)
+                tier1 AS (
+                    SELECT b.row_id, sn.security_id, sn.security_name, sn.isin,
+                           sn.exchange_code, sn.country_of_exchange, sn.currency_code,
+                           ROW_NUMBER() OVER (PARTITION BY b.row_id ORDER BY sn.security_id) AS rn
+                    FROM base_with_prefix b
+                    JOIN {db}.cis_security sn
+                        ON  b.match_type IN ('ISIN_NO_MATCH', 'NO_ISIN')
+                        AND b.security_full_name IS NOT NULL AND TRIM(b.security_full_name) != ''
+                        AND sn.is_active = true
+                        AND UPPER(TRIM(sn.security_name)) = UPPER(TRIM(b.security_full_name))
+                ),
+                -- Tier 2: short_name match (any src_system incl. CIS-migrated)
+                tier2 AS (
+                    SELECT b.row_id, sn.security_id, sn.security_name, sn.isin,
+                           sn.exchange_code, sn.country_of_exchange, sn.currency_code,
+                           ROW_NUMBER() OVER (PARTITION BY b.row_id ORDER BY sn.security_id) AS rn
+                    FROM base_with_prefix b
+                    JOIN {db}.cis_security sn
+                        ON  b.match_type IN ('ISIN_NO_MATCH', 'NO_ISIN')
+                        AND b.security_short_name IS NOT NULL AND TRIM(b.security_short_name) != ''
+                        AND sn.is_active = true
+                        AND UPPER(TRIM(sn.security_name)) = UPPER(TRIM(b.security_short_name))
+                ),
+                -- Tier 3: ticker match — exact OR cis_security.ticker starts with upload ticker
+                -- (e.g. upload "ABC US" matches cis_security "ABC US Equity")
+                tier3 AS (
+                    SELECT b.row_id, sn.security_id, sn.security_name, sn.isin,
+                           sn.exchange_code, sn.country_of_exchange, sn.currency_code,
+                           ROW_NUMBER() OVER (PARTITION BY b.row_id ORDER BY sn.security_id) AS rn
+                    FROM base_with_prefix b
+                    JOIN {db}.cis_security sn
+                        ON  b.match_type IN ('ISIN_NO_MATCH', 'NO_ISIN')
+                        AND b.ticker IS NOT NULL AND TRIM(b.ticker) != ''
+                        AND sn.is_active = true
+                        AND (
+                            UPPER(TRIM(sn.ticker)) = UPPER(TRIM(b.ticker))
+                            OR UPPER(TRIM(sn.ticker)) LIKE CONCAT(UPPER(TRIM(b.ticker)), ' %')
+                        )
+                ),
+                -- Tier 4: desc_prefix match (full_name stripped of COMMON STOCK suffix)
+                tier4 AS (
+                    SELECT b.row_id, sn.security_id, sn.security_name, sn.isin,
+                           sn.exchange_code, sn.country_of_exchange, sn.currency_code,
+                           ROW_NUMBER() OVER (PARTITION BY b.row_id ORDER BY sn.security_id) AS rn
+                    FROM base_with_prefix b
+                    JOIN {db}.cis_security sn
+                        ON  b.match_type IN ('ISIN_NO_MATCH', 'NO_ISIN')
+                        AND b.desc_prefix IS NOT NULL AND TRIM(b.desc_prefix) != ''
+                        AND sn.is_active = true
+                        AND UPPER(TRIM(sn.security_name)) = UPPER(TRIM(b.desc_prefix))
+                )
                 SELECT
-                    s3.row_id,
-                    s3.upload_isin,
-                    s3.security_full_name,
-                    s3.security_short_name,
-                    s3.upload_exchange,
-                    s3.portfolio_status,
-                    s3.match_type          AS isin_match_type,
-                    s3.matched_security_id AS final_security_id,
-                    s3.matched_security_name AS final_security_name,
-                    s3.matched_isin        AS final_isin,
-                    s3.matched_exchange    AS final_exchange,
-                    s3.matched_country     AS final_country,
-                    s3.matched_currency    AS final_currency,
-                    'ISIN_ONLY'            AS match_method,
+                    b.row_id,
+                    b.upload_isin,
+                    b.security_full_name,
+                    b.security_short_name,
+                    b.desc_prefix,
+                    b.upload_exchange,
+                    b.portfolio_status,
+                    b.match_type AS isin_match_type,
+                    COALESCE(
+                        b.matched_security_id,
+                        CASE WHEN t1.rn = 1 THEN t1.security_id ELSE NULL END,
+                        CASE WHEN t2.rn = 1 THEN t2.security_id ELSE NULL END,
+                        CASE WHEN t3.rn = 1 THEN t3.security_id ELSE NULL END,
+                        CASE WHEN t4.rn = 1 THEN t4.security_id ELSE NULL END
+                    ) AS final_security_id,
+                    COALESCE(
+                        b.matched_security_name,
+                        CASE WHEN t1.rn = 1 THEN t1.security_name ELSE NULL END,
+                        CASE WHEN t2.rn = 1 THEN t2.security_name ELSE NULL END,
+                        CASE WHEN t3.rn = 1 THEN t3.security_name ELSE NULL END,
+                        CASE WHEN t4.rn = 1 THEN t4.security_name ELSE NULL END
+                    ) AS final_security_name,
+                    COALESCE(
+                        b.matched_isin,
+                        CASE WHEN t1.rn = 1 THEN t1.isin ELSE NULL END,
+                        CASE WHEN t2.rn = 1 THEN t2.isin ELSE NULL END,
+                        CASE WHEN t3.rn = 1 THEN t3.isin ELSE NULL END,
+                        CASE WHEN t4.rn = 1 THEN t4.isin ELSE NULL END
+                    ) AS final_isin,
+                    COALESCE(
+                        b.matched_exchange,
+                        CASE WHEN t1.rn = 1 THEN t1.exchange_code ELSE NULL END,
+                        CASE WHEN t2.rn = 1 THEN t2.exchange_code ELSE NULL END,
+                        CASE WHEN t3.rn = 1 THEN t3.exchange_code ELSE NULL END,
+                        CASE WHEN t4.rn = 1 THEN t4.exchange_code ELSE NULL END
+                    ) AS final_exchange,
+                    COALESCE(
+                        b.matched_country,
+                        CASE WHEN t1.rn = 1 THEN t1.country_of_exchange ELSE NULL END,
+                        CASE WHEN t2.rn = 1 THEN t2.country_of_exchange ELSE NULL END,
+                        CASE WHEN t3.rn = 1 THEN t3.country_of_exchange ELSE NULL END,
+                        CASE WHEN t4.rn = 1 THEN t4.country_of_exchange ELSE NULL END
+                    ) AS final_country,
+                    COALESCE(
+                        b.matched_currency,
+                        CASE WHEN t1.rn = 1 THEN t1.currency_code ELSE NULL END,
+                        CASE WHEN t2.rn = 1 THEN t2.currency_code ELSE NULL END,
+                        CASE WHEN t3.rn = 1 THEN t3.currency_code ELSE NULL END,
+                        CASE WHEN t4.rn = 1 THEN t4.currency_code ELSE NULL END
+                    ) AS final_currency,
                     CASE
-                        WHEN s3.match_type = 'FAIL: Multiple securities found' THEN 'FAIL: Multiple securities found'
-                        WHEN s3.match_type = 'ISIN_MATCH'                      THEN 'ISIN_MATCH'
-                        ELSE                                                        'NOT_FOUND: Create new security'
+                        WHEN b.match_type = 'ISIN_MATCH'                       THEN 'ISIN_ONLY'
+                        WHEN t1.rn = 1 AND t1.security_id IS NOT NULL          THEN 'FULL_NAME'
+                        WHEN t2.rn = 1 AND t2.security_id IS NOT NULL          THEN 'SHORT_NAME'
+                        WHEN t3.rn = 1 AND t3.security_id IS NOT NULL          THEN 'TICKER'
+                        WHEN t4.rn = 1 AND t4.security_id IS NOT NULL          THEN 'DESC_PREFIX'
+                        ELSE                                                         'NONE'
+                    END AS match_method,
+                    CASE
+                        WHEN b.match_type = 'FAIL: Multiple securities found'  THEN 'FAIL: Multiple securities found'
+                        WHEN b.match_type = 'ISIN_MATCH'                       THEN 'ISIN_MATCH'
+                        WHEN t1.rn = 1 AND t1.security_id IS NOT NULL          THEN 'FULL_NAME_MATCH'
+                        WHEN t2.rn = 1 AND t2.security_id IS NOT NULL          THEN 'SHORT_NAME_MATCH'
+                        WHEN t3.rn = 1 AND t3.security_id IS NOT NULL          THEN 'TICKER_MATCH'
+                        WHEN t4.rn = 1 AND t4.security_id IS NOT NULL          THEN 'DESC_PREFIX_MATCH'
+                        ELSE                                                         'NOT_FOUND: Create new security'
                     END AS security_status
-                FROM pos_stage_3_security s3
+                FROM base_with_prefix b
+                LEFT JOIN tier1 t1 ON b.row_id = t1.row_id AND t1.rn = 1
+                LEFT JOIN tier2 t2 ON b.row_id = t2.row_id AND t2.rn = 1
+                LEFT JOIN tier3 t3 ON b.row_id = t3.row_id AND t3.rn = 1
+                LEFT JOIN tier4 t4 ON b.row_id = t4.row_id AND t4.rn = 1
                 """,
                 database=db
             )
@@ -2911,24 +3039,80 @@ class UploadService:
                     updated_by,
                     updated_at
                 )
+                WITH candidates AS (
+                    SELECT
+                        -- Use desc_prefix (COMMON STOCK stripped) as the canonical name.
+                        -- If desc_prefix is null, fall to short_name, then stripped full_name, then isin.
+                        COALESCE(
+                            p4.desc_prefix,
+                            b.security_short_name,
+                            TRIM(regexp_replace(
+                                b.security_full_name,
+                                '(?i)\\\\s*COMMON\\\\s+(STOCK|STICK).*$',
+                                ''
+                            )),
+                            b.isin
+                        ) AS security_name,
+                        b.isin,
+                        b.security_full_name AS security_description,
+                        b.ticker,
+                        b.industry,
+                        b.security_type,
+                        b.issuer_type,
+                        b.quoted_unquoted,
+                        b.country_of_incorporation,
+                        b.country_of_exchange,
+                        b.`exchange`,
+                        b.security_currency AS currency_code,
+                        b.shares_outstanding,
+                        b.fin_nonfin_co,
+                        b.row_id,
+                        -- One row per unique security_name in this batch
+                        ROW_NUMBER() OVER (
+                            PARTITION BY UPPER(TRIM(COALESCE(
+                                p4.desc_prefix,
+                                b.security_short_name,
+                                TRIM(regexp_replace(b.security_full_name, '(?i)\\\\s*COMMON\\\\s+(STOCK|STICK).*$', '')),
+                                b.isin
+                            )))
+                            ORDER BY b.row_id
+                        ) AS rn
+                    FROM pos_stage_1_base b
+                    JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
+                    -- Only create when portfolio matched — no orphan securities
+                    JOIN pos_stage_2_portfolio p2
+                        ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
+                    -- Dedup guard: skip if cis_security already has this name (any src_system)
+                    LEFT JOIN {db}.cis_security existing
+                        ON existing.is_active = true
+                        AND UPPER(TRIM(existing.security_name)) = UPPER(TRIM(COALESCE(
+                            p4.desc_prefix,
+                            b.security_short_name,
+                            TRIM(regexp_replace(b.security_full_name, '(?i)\\\\s*COMMON\\\\s+(STOCK|STICK).*$', '')),
+                            b.isin
+                        )))
+                    WHERE p4.security_status = 'NOT_FOUND: Create new security'
+                      AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
+                      AND existing.security_id IS NULL
+                )
                 SELECT
-                    (UNIX_TIMESTAMP() * 1000) + b.row_id AS security_id,
-                    COALESCE(b.security_short_name, b.security_full_name, b.isin) AS security_name,
-                    b.isin,
-                    b.security_full_name AS security_description,
+                    (UNIX_TIMESTAMP() * 1000) + row_id AS security_id,
+                    security_name,
+                    isin,
+                    security_description,
                     NULL AS issuer,
-                    b.ticker,
-                    b.industry,
-                    b.security_type,
+                    ticker,
+                    industry,
+                    security_type,
                     NULL AS investment_type,
-                    b.issuer_type,
-                    b.quoted_unquoted,
-                    b.country_of_incorporation,
-                    b.country_of_exchange,
-                    b.`exchange`,
-                    b.security_currency AS currency_code,
-                    CAST(b.shares_outstanding AS BIGINT) AS shares_outstanding,
-                    b.fin_nonfin_co AS fin_nonfin_ind,
+                    issuer_type,
+                    quoted_unquoted,
+                    country_of_incorporation,
+                    country_of_exchange,
+                    `exchange`,
+                    currency_code,
+                    CAST(shares_outstanding AS BIGINT) AS shares_outstanding,
+                    fin_nonfin_co AS fin_nonfin_ind,
                     'CIS' AS src_system,
                     'ACTIVE' AS status,
                     TRUE AS is_active,
@@ -2936,10 +3120,8 @@ class UploadService:
                     from_unixtime(UNIX_TIMESTAMP(), 'yyyy-MM-dd HH:mm:ss') AS created_at,
                     'POSITION_UPLOAD' AS updated_by,
                     from_unixtime(UNIX_TIMESTAMP(), 'yyyy-MM-dd HH:mm:ss') AS updated_at
-                FROM pos_stage_1_base b
-                JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
-                WHERE p4.security_status = 'NOT_FOUND: Create new security'
-                  AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
+                FROM candidates
+                WHERE rn = 1
                 """,
                 database=db
             )

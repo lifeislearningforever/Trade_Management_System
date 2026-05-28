@@ -782,9 +782,10 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                 TRIM(
                     CASE
                         WHEN UPPER(s3.security_full_name) LIKE '%COMMON STOCK%'
+                          OR UPPER(s3.security_full_name) LIKE '%COMMON STICK%'
                         THEN regexp_replace(
                                 s3.security_full_name,
-                                '(?i)\\s*COMMON\\s+STOCK.*$',
+                                '(?i)\\s*COMMON\\s+(STOCK|STICK).*$',
                                 ''
                              )
                         ELSE s3.security_full_name
@@ -971,7 +972,18 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
         )
         WITH candidates AS (
             SELECT
-                COALESCE(p4.desc_prefix, b.security_short_name, b.security_full_name, b.isin) AS security_name,
+                -- Use desc_prefix (COMMON STOCK/STICK already stripped in Step 4).
+                -- Fallback strips the suffix inline if desc_prefix is null/empty.
+                COALESCE(
+                    p4.desc_prefix,
+                    b.security_short_name,
+                    TRIM(regexp_replace(
+                        b.security_full_name,
+                        '(?i)\\s*COMMON\\s+(STOCK|STICK).*$',
+                        ''
+                    )),
+                    b.isin
+                ) AS security_name,
                 b.isin, b.security_full_name AS security_description,
                 b.ticker, b.industry, b.security_type, b.issuer_type, b.quoted_unquoted,
                 b.country_of_incorporation, b.country_of_exchange, b.`exchange`,
@@ -980,7 +992,12 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                 b.row_id,
                 -- One row per unique security_name across all source tables in this batch
                 ROW_NUMBER() OVER (
-                    PARTITION BY UPPER(TRIM(COALESCE(p4.desc_prefix, b.security_short_name, b.security_full_name, b.isin)))
+                    PARTITION BY UPPER(TRIM(COALESCE(
+                        p4.desc_prefix,
+                        b.security_short_name,
+                        TRIM(regexp_replace(b.security_full_name, '(?i)\\s*COMMON\\s+(STOCK|STICK).*$', '')),
+                        b.isin
+                    )))
                     ORDER BY b.row_id
                 ) AS rn
             FROM pos_stage_1_base b
@@ -991,9 +1008,12 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             -- Dedup guard: skip if a security with the same name already exists in cis_security
             LEFT JOIN {DB}.cis_security existing
                 ON existing.is_active = true
-                AND UPPER(TRIM(existing.security_name)) = UPPER(TRIM(
-                    COALESCE(p4.desc_prefix, b.security_short_name, b.security_full_name, b.isin)
-                ))
+                AND UPPER(TRIM(existing.security_name)) = UPPER(TRIM(COALESCE(
+                    p4.desc_prefix,
+                    b.security_short_name,
+                    TRIM(regexp_replace(b.security_full_name, '(?i)\\s*COMMON\\s+(STOCK|STICK).*$', '')),
+                    b.isin
+                )))
             WHERE p4.security_status = 'NOT_FOUND: Create new security'
               AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
               AND existing.security_id IS NULL
