@@ -23,12 +23,12 @@ USE gmp_cis;
 -- ALTER cis_position (Kudu table - gold/master position table)
 -- ============================================================================
 -- Note: Kudu ALTER TABLE ADD COLUMNS syntax
--- Uses DECIMAL(18,4) to match existing cis_position column precision
+-- Uses DECIMAL(30,8) for wide monetary columns (handles large LC values)
 
-ALTER TABLE cis_position ADD COLUMNS (uncall_fc DECIMAL(18,4));
-ALTER TABLE cis_position ADD COLUMNS (uncall_lc DECIMAL(18,4));
-ALTER TABLE cis_position ADD COLUMNS (pipeline_fc DECIMAL(18,4));
-ALTER TABLE cis_position ADD COLUMNS (pipeline_lc DECIMAL(18,4));
+ALTER TABLE cis_position ADD COLUMNS (uncall_fc DECIMAL(30,8));
+ALTER TABLE cis_position ADD COLUMNS (uncall_lc DECIMAL(30,8));
+ALTER TABLE cis_position ADD COLUMNS (pipeline_fc DECIMAL(30,8));
+ALTER TABLE cis_position ADD COLUMNS (pipeline_lc DECIMAL(30,8));
 ALTER TABLE cis_position ADD COLUMNS (position_type STRING);
 
 -- ============================================================================
@@ -36,10 +36,10 @@ ALTER TABLE cis_position ADD COLUMNS (position_type STRING);
 -- ============================================================================
 -- Note: Kudu ALTER TABLE ADD COLUMNS syntax
 
-ALTER TABLE cis_trade_position ADD COLUMNS (uncall_fc DECIMAL(20,8));
-ALTER TABLE cis_trade_position ADD COLUMNS (uncall_lc DECIMAL(20,8));
-ALTER TABLE cis_trade_position ADD COLUMNS (pipeline_fc DECIMAL(20,8));
-ALTER TABLE cis_trade_position ADD COLUMNS (pipeline_lc DECIMAL(20,8));
+ALTER TABLE cis_trade_position ADD COLUMNS (uncall_fc DECIMAL(30,8));
+ALTER TABLE cis_trade_position ADD COLUMNS (uncall_lc DECIMAL(30,8));
+ALTER TABLE cis_trade_position ADD COLUMNS (pipeline_fc DECIMAL(30,8));
+ALTER TABLE cis_trade_position ADD COLUMNS (pipeline_lc DECIMAL(30,8));
 ALTER TABLE cis_trade_position ADD COLUMNS (position_type STRING);
 
 -- ============================================================================

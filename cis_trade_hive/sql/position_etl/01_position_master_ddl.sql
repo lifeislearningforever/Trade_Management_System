@@ -21,33 +21,33 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.position_master (
     -- ========================================================================
     -- Quantity & Holdings
     -- ========================================================================
-    quantity                    DECIMAL(18,4)   COMMENT 'Current quantity/units held',
-    shares_outstanding          DECIMAL(18,4)   COMMENT 'Total shares outstanding',
-    shares_issued               DECIMAL(18,4)   COMMENT 'Total shares issued',
+    quantity                    DECIMAL(30,8)   COMMENT 'Current quantity/units held',
+    shares_outstanding          DECIMAL(30,8)   COMMENT 'Total shares outstanding',
+    shares_issued               DECIMAL(30,8)   COMMENT 'Total shares issued',
     pct_holding                 DECIMAL(10,6)   COMMENT 'Percentage holding',
 
     -- ========================================================================
     -- Pricing Information
     -- ========================================================================
-    market_price                DECIMAL(18,6)   COMMENT 'Current market price',
-    average_cost                DECIMAL(18,6)   COMMENT 'Average cost per unit',
+    market_price                DECIMAL(30,8)   COMMENT 'Current market price',
+    average_cost                DECIMAL(30,8)   COMMENT 'Average cost per unit',
 
     -- ========================================================================
     -- Cost Values (Foreign Currency)
     -- ========================================================================
-    cost_fc                     DECIMAL(18,4)   COMMENT 'Cost in foreign currency',
-    market_value_fc             DECIMAL(18,4)   COMMENT 'Market value in foreign currency',
-    net_book_value_fc           DECIMAL(18,4)   COMMENT 'Net book value in foreign currency',
-    unrealized_pnl_fc           DECIMAL(18,4)   COMMENT 'Unrealized P&L in foreign currency',
+    cost_fc                     DECIMAL(30,8)   COMMENT 'Cost in foreign currency',
+    market_value_fc             DECIMAL(30,8)   COMMENT 'Market value in foreign currency',
+    net_book_value_fc           DECIMAL(30,8)   COMMENT 'Net book value in foreign currency',
+    unrealized_pnl_fc           DECIMAL(30,8)   COMMENT 'Unrealized P&L in foreign currency',
 
     -- ========================================================================
     -- Cost Values (Local Currency)
     -- ========================================================================
-    cost_lc                     DECIMAL(18,4)   COMMENT 'Cost in local currency',
-    market_value_lc             DECIMAL(18,4)   COMMENT 'Market value in local currency',
-    net_book_value_lc           DECIMAL(18,4)   COMMENT 'Net book value in local currency',
-    unrealized_pnl_lc           DECIMAL(18,4)   COMMENT 'Unrealized P&L in local currency',
-    provision_lc                DECIMAL(18,4)   COMMENT 'Provision in local currency',
+    cost_lc                     DECIMAL(30,8)   COMMENT 'Cost in local currency',
+    market_value_lc             DECIMAL(30,8)   COMMENT 'Market value in local currency',
+    net_book_value_lc           DECIMAL(30,8)   COMMENT 'Net book value in local currency',
+    unrealized_pnl_lc           DECIMAL(30,8)   COMMENT 'Unrealized P&L in local currency',
+    provision_lc                DECIMAL(30,8)   COMMENT 'Provision in local currency',
 
     -- ========================================================================
     -- Security Classification

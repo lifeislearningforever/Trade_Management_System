@@ -84,34 +84,34 @@ CREATE EXTERNAL TABLE gmp_cis.cis_position_master (
     -- ========================================
     -- HOLDINGS
     -- ========================================
-    quantity DECIMAL(20,6),                   -- Number of units held
-    face_value DECIMAL(20,6),                 -- Nominal value per unit
+    quantity DECIMAL(30,8),                   -- Number of units held
+    face_value DECIMAL(30,8),                 -- Nominal value per unit
     lots_held INT,                            -- Number of lots
 
     -- ========================================
     -- COST VALUES
     -- ========================================
-    average_cost DECIMAL(20,6),               -- Weighted average cost per unit
-    total_cost DECIMAL(20,6),                 -- Legacy: total cost basis
-    cost_value_local DECIMAL(20,6),           -- Cost in security currency
-    cost_value_base DECIMAL(20,6),            -- Cost in portfolio currency
+    average_cost DECIMAL(30,8),               -- Weighted average cost per unit
+    total_cost DECIMAL(30,8),                 -- Legacy: total cost basis
+    cost_value_local DECIMAL(30,8),           -- Cost in security currency
+    cost_value_base DECIMAL(30,8),            -- Cost in portfolio currency
 
     -- ========================================
     -- MARKET VALUES
     -- ========================================
-    market_unit_price DECIMAL(20,6),          -- Current market price per unit
-    current_price DECIMAL(20,6),              -- Alias for market_unit_price
-    market_value DECIMAL(20,6),               -- Legacy: qty * current_price
-    market_value_local DECIMAL(20,6),         -- Market value in security currency
-    market_value_base DECIMAL(20,6),          -- Market value in portfolio currency
+    market_unit_price DECIMAL(30,8),          -- Current market price per unit
+    current_price DECIMAL(30,8),              -- Alias for market_unit_price
+    market_value DECIMAL(30,8),               -- Legacy: qty * current_price
+    market_value_local DECIMAL(30,8),         -- Market value in security currency
+    market_value_base DECIMAL(30,8),          -- Market value in portfolio currency
 
     -- ========================================
     -- PROFIT & LOSS
     -- ========================================
-    unrealized_pnl DECIMAL(20,6),             -- Legacy: market_value - total_cost
-    unrealized_pnl_local DECIMAL(20,6),       -- Unrealized P&L in security currency
-    unrealized_pnl_base DECIMAL(20,6),        -- Unrealized P&L in portfolio currency
-    realized_pnl DECIMAL(20,6),               -- Cumulative realized P&L
+    unrealized_pnl DECIMAL(30,8),             -- Legacy: market_value - total_cost
+    unrealized_pnl_local DECIMAL(30,8),       -- Unrealized P&L in security currency
+    unrealized_pnl_base DECIMAL(30,8),        -- Unrealized P&L in portfolio currency
+    realized_pnl DECIMAL(30,8),               -- Cumulative realized P&L
 
     -- ========================================
     -- ALLOCATION / RATIO
@@ -144,14 +144,14 @@ CREATE EXTERNAL TABLE gmp_cis.cis_position_master (
     -- ========================================
     -- UNCALLED CAPITAL (PE/VC)
     -- ========================================
-    uncall_fc DECIMAL(20,6),                  -- Uncalled amount in Foreign Currency
-    uncall_lc DECIMAL(20,6),                  -- Uncalled amount in Local Currency
+    uncall_fc DECIMAL(30,8),                  -- Uncalled amount in Foreign Currency
+    uncall_lc DECIMAL(30,8),                  -- Uncalled amount in Local Currency
 
     -- ========================================
     -- PIPELINE (Pending trades/commitments)
     -- ========================================
-    pipeline_fc DECIMAL(20,6),                -- Pipeline amount in Foreign Currency
-    pipeline_lc DECIMAL(20,6),                -- Pipeline amount in Local Currency
+    pipeline_fc DECIMAL(30,8),                -- Pipeline amount in Foreign Currency
+    pipeline_lc DECIMAL(30,8),                -- Pipeline amount in Local Currency
 
     -- ========================================
     -- POSITION CLASSIFICATION
@@ -200,8 +200,8 @@ CREATE EXTERNAL TABLE gmp_cis.cis_position_master_history (
     security_label STRING,
     valuation_date STRING,
     src_system STRING,
-    quantity DECIMAL(20,6),
-    market_value_base DECIMAL(20,6),
+    quantity DECIMAL(30,8),
+    market_value_base DECIMAL(30,8),
 
     -- Changes (JSON)
     changes STRING,                           -- JSON diff of changed fields
@@ -252,9 +252,9 @@ CREATE EXTERNAL TABLE gmp_cis.cis_position_unmatched (
     exchange_code STRING,
 
     -- Position Data (preserved for later merge)
-    quantity DECIMAL(20,6),
-    market_value DECIMAL(20,6),
-    cost_value DECIMAL(20,6),
+    quantity DECIMAL(30,8),
+    market_value DECIMAL(30,8),
+    cost_value DECIMAL(30,8),
 
     -- Status
     resolution_status STRING,                 -- PENDING, AUTO_CREATED, MANUALLY_RESOLVED, SKIPPED

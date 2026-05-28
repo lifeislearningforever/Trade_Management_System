@@ -24,10 +24,10 @@ USE gmp_cis;
 -- Run these statements one at a time
 
 -- Rename average_cost to average_cost_fc
-ALTER TABLE cis_position CHANGE COLUMN average_cost average_cost_fc DECIMAL(18,6);
+ALTER TABLE cis_position CHANGE COLUMN average_cost average_cost_fc DECIMAL(30,8);
 
 -- Rename placeholder_2 to average_cost_lc
-ALTER TABLE cis_position CHANGE COLUMN placeholder_2 average_cost_lc DECIMAL(18,4);
+ALTER TABLE cis_position CHANGE COLUMN placeholder_2 average_cost_lc DECIMAL(30,8);
 
 -- ============================================================================
 -- VERIFICATION
@@ -75,37 +75,37 @@ CREATE TABLE cis_position_new (
     processing_date STRING,
 
     -- Holdings
-    quantity DECIMAL(18,4),
+    quantity DECIMAL(30,8),
 
     -- Cost - FC (Foreign/Security Currency)
-    average_cost_fc DECIMAL(18,6),       -- Renamed from average_cost
-    cost_fc DECIMAL(18,4),
+    average_cost_fc DECIMAL(30,8),       -- Renamed from average_cost
+    cost_fc DECIMAL(30,8),
 
     -- Market Value - FC
-    market_value_fc DECIMAL(18,4),
-    net_book_value_fc DECIMAL(18,4),
-    unrealized_pnl_fc DECIMAL(18,4),
+    market_value_fc DECIMAL(30,8),
+    net_book_value_fc DECIMAL(30,8),
+    unrealized_pnl_fc DECIMAL(30,8),
 
     -- Cost - LC (Local/Portfolio Currency)
-    average_cost_lc DECIMAL(18,4),       -- Renamed from placeholder_2
-    cost_lc DECIMAL(18,4),
+    average_cost_lc DECIMAL(30,8),       -- Renamed from placeholder_2
+    cost_lc DECIMAL(30,8),
 
     -- Market Value - LC
-    market_value_lc DECIMAL(18,4),
-    net_book_value_lc DECIMAL(18,4),
-    unrealized_pnl_lc DECIMAL(18,4),
+    market_value_lc DECIMAL(30,8),
+    net_book_value_lc DECIMAL(30,8),
+    unrealized_pnl_lc DECIMAL(30,8),
 
     -- Provision
-    provision_fc DECIMAL(18,4),
-    provision_lc DECIMAL(18,4),
+    provision_fc DECIMAL(30,8),
+    provision_lc DECIMAL(30,8),
 
     -- Dividend
-    dividend_fc DECIMAL(18,4),
-    dividend_lc DECIMAL(18,4),
+    dividend_fc DECIMAL(30,8),
+    dividend_lc DECIMAL(30,8),
 
     -- Realized P&L
-    realized_pnl_fc DECIMAL(18,4),
-    realized_pnl_lc DECIMAL(18,4),
+    realized_pnl_fc DECIMAL(30,8),
+    realized_pnl_lc DECIMAL(30,8),
 
     -- Reference
     isin STRING,

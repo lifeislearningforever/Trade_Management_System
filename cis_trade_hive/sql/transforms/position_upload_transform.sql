@@ -437,7 +437,7 @@ SELECT
 
     -- Average cost in Local Currency (Portfolio Currency)
     -- Calculate from average_cost * FX rate if portfolio_currency != security_currency
-    CAST(0 AS DECIMAL(18,4)) AS average_cost_lc,  -- To be calculated via FX rate
+    CAST(0 AS DECIMAL(30,8)) AS average_cost_lc,  -- To be calculated via FX rate
     source_table AS source_table,
     '' AS placeholder_4
 

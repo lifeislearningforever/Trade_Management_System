@@ -1018,14 +1018,14 @@ class PositionService:
                 'position_type'
             ]
 
-            # cis_position uses DECIMAL(18,N) columns — must match exactly.
-            def cast_decimal(val, precision=4):
+            # cis_position uses DECIMAL(30,8) columns.
+            def cast_decimal(val, precision=8):
                 if val is None:
-                    return f'CAST(0 AS DECIMAL(18,{precision}))'
+                    return f'CAST(0 AS DECIMAL(30,{precision}))'
                 try:
-                    return f"CAST({float(val)} AS DECIMAL(18,{precision}))"
+                    return f"CAST({float(val)} AS DECIMAL(30,{precision}))"
                 except (ValueError, TypeError):
-                    return f'CAST(0 AS DECIMAL(18,{precision}))'
+                    return f'CAST(0 AS DECIMAL(30,{precision}))'
 
             values = [
                 str(position_data.get('position_id', 0)),
@@ -1037,7 +1037,7 @@ class PositionService:
                 "'CIS'",  # src_system - always CIS for CIS-generated positions
                 f"'{position_data.get('processing_date', '')}'",
                 cast_decimal(position_data.get('quantity', 0)),
-                cast_decimal(position_data.get('average_cost_fc', 0), 6),  # DECIMAL(18,6)
+                cast_decimal(position_data.get('average_cost_fc', 0)),
                 cast_decimal(position_data.get('cost_fc', 0)),
                 cast_decimal(position_data.get('market_value_fc', 0)),
                 cast_decimal(position_data.get('net_book_value_fc', 0)),
