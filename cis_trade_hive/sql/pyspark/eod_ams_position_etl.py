@@ -969,36 +969,53 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             shares_outstanding, fin_nonfin_ind, src_system, status, is_active,
             created_by, created_at, updated_by, updated_at
         )
+        WITH candidates AS (
+            SELECT
+                COALESCE(p4.desc_prefix, b.security_short_name, b.security_full_name, b.isin) AS security_name,
+                b.isin, b.security_full_name AS security_description,
+                b.ticker, b.industry, b.security_type, b.issuer_type, b.quoted_unquoted,
+                b.country_of_incorporation, b.country_of_exchange, b.`exchange`,
+                b.security_currency AS currency_code,
+                b.shares_outstanding, b.fin_nonfin_co,
+                b.row_id,
+                -- One row per unique security_name across all source tables in this batch
+                ROW_NUMBER() OVER (
+                    PARTITION BY UPPER(TRIM(COALESCE(p4.desc_prefix, b.security_short_name, b.security_full_name, b.isin)))
+                    ORDER BY b.row_id
+                ) AS rn
+            FROM pos_stage_1_base b
+            JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
+            -- Only create security when portfolio also matched — prevents orphan securities
+            JOIN pos_stage_2_portfolio p2
+                ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
+            -- Dedup guard: skip if a security with the same name already exists in cis_security
+            LEFT JOIN {DB}.cis_security existing
+                ON existing.is_active = true
+                AND UPPER(TRIM(existing.security_name)) = UPPER(TRIM(
+                    COALESCE(p4.desc_prefix, b.security_short_name, b.security_full_name, b.isin)
+                ))
+            WHERE p4.security_status = 'NOT_FOUND: Create new security'
+              AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
+              AND existing.security_id IS NULL
+        )
         SELECT
-            (UNIX_TIMESTAMP() * 1000) + b.row_id AS security_id,
-            -- For AMS rows: use desc_prefix (truncated at "COMMON STOCK") as security_name.
-            -- For GMP rows: prefer short_name. Fallback to full_name or isin.
-            COALESCE(p4.desc_prefix, b.security_short_name, b.security_full_name, b.isin) AS security_name,
-            b.isin, b.security_full_name AS security_description,
-            NULL AS issuer, b.ticker, b.industry, b.security_type,
-            NULL AS investment_type, b.issuer_type, b.quoted_unquoted,
-            b.country_of_incorporation, b.country_of_exchange, b.`exchange`,
-            b.security_currency AS currency_code,
-            CAST(b.shares_outstanding AS BIGINT) AS shares_outstanding,
-            b.fin_nonfin_co AS fin_nonfin_ind,
+            (UNIX_TIMESTAMP() * 1000) + row_id AS security_id,
+            security_name,
+            isin, security_description,
+            NULL AS issuer, ticker, industry, security_type,
+            NULL AS investment_type, issuer_type, quoted_unquoted,
+            country_of_incorporation, country_of_exchange, `exchange`,
+            currency_code,
+            CAST(shares_outstanding AS BIGINT) AS shares_outstanding,
+            fin_nonfin_co AS fin_nonfin_ind,
             'CIS' AS src_system,
             'ACTIVE' AS status, TRUE AS is_active,
             'EOD_AMS_ETL' AS created_by,
             from_unixtime(UNIX_TIMESTAMP(), 'yyyy-MM-dd HH:mm:ss') AS created_at,
             'EOD_AMS_ETL' AS updated_by,
             from_unixtime(UNIX_TIMESTAMP(), 'yyyy-MM-dd HH:mm:ss') AS updated_at
-        FROM pos_stage_1_base b
-        JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
-        -- Dedup guard: skip if a security with the same name already exists in cis_security.
-        -- Prevents duplicate creation on EOD re-runs or when ticker/desc match was missed.
-        LEFT JOIN {DB}.cis_security existing
-            ON existing.is_active = true
-            AND UPPER(TRIM(existing.security_name)) = UPPER(TRIM(
-                COALESCE(p4.desc_prefix, b.security_short_name, b.security_full_name, b.isin)
-            ))
-        WHERE p4.security_status = 'NOT_FOUND: Create new security'
-          AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
-          AND existing.security_id IS NULL
+        FROM candidates
+        WHERE rn = 1
         """,
         database=DB
     )
