@@ -57,34 +57,34 @@ CREATE TABLE cis_trade_position (
     security_label STRING NOT NULL,
 
     -- Position State (8 decimal precision for AVP)
-    -- DECIMAL(28,8): 20 integer digits — handles large LC values (FC * FX rate)
+    -- DECIMAL(30,8): 20 integer digits — handles large LC values (FC * FX rate)
     -- e.g. total_cost_lc = 190B HKD positions * 7.85 = ~1.5T (13 integer digits)
-    quantity DECIMAL(28,8),              -- Current holding quantity
+    quantity DECIMAL(30,8),              -- Current holding quantity
 
     -- Cost in Foreign Currency (FC = Security Currency)
-    average_cost_fc DECIMAL(28,8),       -- Weighted average cost (AVP) in FC
-    total_cost_fc DECIMAL(28,8),         -- Total cost basis in FC
+    average_cost_fc DECIMAL(30,8),       -- Weighted average cost (AVP) in FC
+    total_cost_fc DECIMAL(30,8),         -- Total cost basis in FC
 
     -- Cost in Local Currency (LC = Portfolio Currency)
-    average_cost_lc DECIMAL(28,8),       -- Weighted average cost (AVP) in LC
-    total_cost_lc DECIMAL(28,8),         -- Total cost basis in LC
+    average_cost_lc DECIMAL(30,8),       -- Weighted average cost (AVP) in LC
+    total_cost_lc DECIMAL(30,8),         -- Total cost basis in LC
 
     -- P&L in Foreign Currency (Security Currency)
-    realized_pnl_fc DECIMAL(28,8),       -- Cumulative realized P&L in FC
-    unrealized_pnl_fc DECIMAL(28,8),     -- Unrealized P&L in FC (market_value - total_cost)
+    realized_pnl_fc DECIMAL(30,8),       -- Cumulative realized P&L in FC
+    unrealized_pnl_fc DECIMAL(30,8),     -- Unrealized P&L in FC (market_value - total_cost)
 
     -- P&L in Local Currency (Portfolio Currency)
-    realized_pnl_lc DECIMAL(28,8),       -- Cumulative realized P&L in LC
-    unrealized_pnl_lc DECIMAL(28,8),     -- Unrealized P&L in LC
+    realized_pnl_lc DECIMAL(30,8),       -- Cumulative realized P&L in LC
+    unrealized_pnl_lc DECIMAL(30,8),     -- Unrealized P&L in LC
 
     -- Market Value
-    market_price DECIMAL(28,8),          -- Latest market price in FC
-    market_value_fc DECIMAL(28,8),       -- qty * market_price (in FC)
-    market_value_lc DECIMAL(28,8),       -- Market value in LC
+    market_price DECIMAL(30,8),          -- Latest market price in FC
+    market_value_fc DECIMAL(30,8),       -- qty * market_price (in FC)
+    market_value_lc DECIMAL(30,8),       -- Market value in LC
 
     -- Dividend Tracking (accumulated from Corporate Actions)
-    dividend_fc DECIMAL(28,8),           -- Accumulated dividends in FC
-    dividend_lc DECIMAL(28,8),           -- Accumulated dividends in LC
+    dividend_fc DECIMAL(30,8),           -- Accumulated dividends in FC
+    dividend_lc DECIMAL(30,8),           -- Accumulated dividends in LC
 
     -- Trade that caused this version
     trade_id BIGINT,
@@ -98,7 +98,7 @@ CREATE TABLE cis_trade_position (
     -- Multi-currency support
     security_currency STRING,            -- Security's trading currency (FC)
     portfolio_currency STRING,           -- Portfolio's base currency (LC)
-    fx_rate DECIMAL(28,8),               -- FX rate used (FC to LC)
+    fx_rate DECIMAL(30,8),               -- FX rate used (FC to LC)
 
     -- Status
     status STRING,                       -- OPEN, CLOSED
@@ -112,16 +112,16 @@ CREATE TABLE cis_trade_position (
     last_ca_date STRING,                 -- Date of last CA (ex_date)
     last_cash_flow_id BIGINT,            -- Last cash flow ID generated from CA
     last_cash_flow_number STRING,        -- Last cash flow number
-    last_cash_flow_amount_fc DECIMAL(28,8), -- Amount of last cash flow in FC (foreign_ccy_amt)
-    last_cash_flow_amount_lc DECIMAL(28,8), -- Amount of last cash flow in LC (local_ccy_amt)
+    last_cash_flow_amount_fc DECIMAL(30,8), -- Amount of last cash flow in FC (foreign_ccy_amt)
+    last_cash_flow_amount_lc DECIMAL(30,8), -- Amount of last cash flow in LC (local_ccy_amt)
 
     -- Uncalled Capital (for PE/VC investments)
-    uncall_fc DECIMAL(28,8),             -- Uncalled amount in Foreign Currency
-    uncall_lc DECIMAL(28,8),             -- Uncalled amount in Local Currency
+    uncall_fc DECIMAL(30,8),             -- Uncalled amount in Foreign Currency
+    uncall_lc DECIMAL(30,8),             -- Uncalled amount in Local Currency
 
     -- Pipeline (pending trades/commitments)
-    pipeline_fc DECIMAL(28,8),           -- Pipeline amount in Foreign Currency
-    pipeline_lc DECIMAL(28,8),           -- Pipeline amount in Local Currency
+    pipeline_fc DECIMAL(30,8),           -- Pipeline amount in Foreign Currency
+    pipeline_lc DECIMAL(30,8),           -- Pipeline amount in Local Currency
 
     -- Position Classification
     position_type STRING,                -- LONG, SHORT, COMMITTED, PIPELINE, HEDGE, SYNTHETIC

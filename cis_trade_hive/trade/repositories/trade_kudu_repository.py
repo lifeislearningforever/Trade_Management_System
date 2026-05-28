@@ -1877,11 +1877,11 @@ class TradeKuduRepository:
                 'created_by', 'created_at', 'updated_by', 'updated_at'
             ]
 
-            # DECIMAL(38,8) in CAST avoids "Decimal expression overflow" for large LC values
+            # DECIMAL(30,8) in CAST avoids "Decimal expression overflow" for large LC values
             def cast_decimal(val):
                 if val is None:
                     return 'NULL'
-                return f"CAST({val} AS DECIMAL(38,8))"
+                return f"CAST({val} AS DECIMAL(30,8))"
 
             # Build values list
             values = [

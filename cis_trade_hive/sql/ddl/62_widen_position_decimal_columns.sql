@@ -9,7 +9,7 @@
 --
 -- Fix:
 --   Kudu does not support ALTER COLUMN for type changes.
---   Recreate cis_trade_position with DECIMAL(28,8) monetary columns.
+--   Recreate cis_trade_position with DECIMAL(30,8) monetary columns.
 --   WARNING: This drops all existing position data — run only on empty table
 --   or after backing up data to a temp table.
 --
@@ -39,21 +39,21 @@ CREATE TABLE cis_trade_position (
     settle_date                 STRING,
     portfolio_short_name        STRING NOT NULL,
     security_label              STRING NOT NULL,
-    -- DECIMAL(28,8): 20 integer digits — handles large LC values (FC * FX rate)
-    quantity                    DECIMAL(28,8),
-    average_cost_fc             DECIMAL(28,8),
-    total_cost_fc               DECIMAL(28,8),
-    average_cost_lc             DECIMAL(28,8),
-    total_cost_lc               DECIMAL(28,8),
-    realized_pnl_fc             DECIMAL(28,8),
-    unrealized_pnl_fc           DECIMAL(28,8),
-    realized_pnl_lc             DECIMAL(28,8),
-    unrealized_pnl_lc           DECIMAL(28,8),
-    market_price                DECIMAL(28,8),
-    market_value_fc             DECIMAL(28,8),
-    market_value_lc             DECIMAL(28,8),
-    dividend_fc                 DECIMAL(28,8),
-    dividend_lc                 DECIMAL(28,8),
+    -- DECIMAL(30,8): 20 integer digits — handles large LC values (FC * FX rate)
+    quantity                    DECIMAL(30,8),
+    average_cost_fc             DECIMAL(30,8),
+    total_cost_fc               DECIMAL(30,8),
+    average_cost_lc             DECIMAL(30,8),
+    total_cost_lc               DECIMAL(30,8),
+    realized_pnl_fc             DECIMAL(30,8),
+    unrealized_pnl_fc           DECIMAL(30,8),
+    realized_pnl_lc             DECIMAL(30,8),
+    unrealized_pnl_lc           DECIMAL(30,8),
+    market_price                DECIMAL(30,8),
+    market_value_fc             DECIMAL(30,8),
+    market_value_lc             DECIMAL(30,8),
+    dividend_fc                 DECIMAL(30,8),
+    dividend_lc                 DECIMAL(30,8),
     trade_id                    BIGINT,
     trade_type                  STRING,
     lots_held                   INT,
@@ -61,7 +61,7 @@ CREATE TABLE cis_trade_position (
     sub_custodian               STRING,
     security_currency           STRING,
     portfolio_currency          STRING,
-    fx_rate                     DECIMAL(28,8),
+    fx_rate                     DECIMAL(30,8),
     status                      STRING,
     is_active                   BOOLEAN,
     is_latest                   BOOLEAN DEFAULT TRUE,
@@ -71,12 +71,12 @@ CREATE TABLE cis_trade_position (
     last_ca_date                STRING,
     last_cash_flow_id           BIGINT,
     last_cash_flow_number       STRING,
-    last_cash_flow_amount_fc    DECIMAL(28,8),
-    last_cash_flow_amount_lc    DECIMAL(28,8),
-    uncall_fc                   DECIMAL(28,8),
-    uncall_lc                   DECIMAL(28,8),
-    pipeline_fc                 DECIMAL(28,8),
-    pipeline_lc                 DECIMAL(28,8),
+    last_cash_flow_amount_fc    DECIMAL(30,8),
+    last_cash_flow_amount_lc    DECIMAL(30,8),
+    uncall_fc                   DECIMAL(30,8),
+    uncall_lc                   DECIMAL(30,8),
+    pipeline_fc                 DECIMAL(30,8),
+    pipeline_lc                 DECIMAL(30,8),
     position_type               STRING,
     created_by                  STRING,
     created_at                  STRING,

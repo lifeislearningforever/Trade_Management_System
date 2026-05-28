@@ -236,7 +236,7 @@ FROM gmp_cis.tmp_positions_to_update;
 -- The tmp_current_positions_eod now contains one row per queue_id with
 -- the correct base position for that specific trade date.
 --
--- This version uses CTE-based approach with explicit DECIMAL(38,8) casting
+-- This version uses CTE-based approach with explicit DECIMAL(30,8) casting
 -- throughout to avoid precision errors in Impala/Kudu.
 
 INSERT INTO gmp_cis.cis_trade_position
@@ -293,9 +293,9 @@ WITH base AS (
 
            cp.position_id IS NULL
 
-        OR CAST(COALESCE(cp.quantity, 0) AS DECIMAL(38,8))
+        OR CAST(COALESCE(cp.quantity, 0) AS DECIMAL(30,8))
 
-           < CAST(sq.quantity AS DECIMAL(38,8))
+           < CAST(sq.quantity AS DECIMAL(30,8))
 
       )
 
@@ -305,25 +305,25 @@ WITH base AS (
 
 typed AS (
 
-  -- Normalize all numeric inputs to DECIMAL(38,8)
+  -- Normalize all numeric inputs to DECIMAL(30,8)
 
   SELECT
 
       base.*,
 
-      CAST(COALESCE(base.cp_quantity_raw,     0) AS DECIMAL(38,8)) AS q_prev,
+      CAST(COALESCE(base.cp_quantity_raw,     0) AS DECIMAL(30,8)) AS q_prev,
 
-     CAST(COALESCE(base.cp_average_cost_raw, 0) AS DECIMAL(38,8)) AS ac_prev,
+     CAST(COALESCE(base.cp_average_cost_raw, 0) AS DECIMAL(30,8)) AS ac_prev,
 
-      CAST(COALESCE(base.cp_total_cost_raw,   0) AS DECIMAL(38,8)) AS tc_prev,
+      CAST(COALESCE(base.cp_total_cost_raw,   0) AS DECIMAL(30,8)) AS tc_prev,
 
-      CAST(COALESCE(base.cp_realized_pnl_raw, 0) AS DECIMAL(38,8)) AS rp_prev,
+      CAST(COALESCE(base.cp_realized_pnl_raw, 0) AS DECIMAL(30,8)) AS rp_prev,
 
-      CAST(base.quantity AS DECIMAL(38,8))                             AS q_trd,
+      CAST(base.quantity AS DECIMAL(30,8))                             AS q_trd,
 
-      CAST(base.price    AS DECIMAL(38,8))                             AS p_trd,
+      CAST(base.price    AS DECIMAL(30,8))                             AS p_trd,
 
-      CAST(COALESCE(base.charges, 0) AS DECIMAL(38,8))                 AS chg_trd
+      CAST(COALESCE(base.charges, 0) AS DECIMAL(30,8))                 AS chg_trd
 
   FROM base
 
@@ -337,7 +337,7 @@ calc1 AS (
 
       typed.*,
 
-      CAST(typed.q_trd * typed.p_trd AS DECIMAL(38,8)) AS buy_notional
+      CAST(typed.q_trd * typed.p_trd AS DECIMAL(30,8)) AS buy_notional
 
   FROM typed
 
@@ -345,7 +345,7 @@ calc1 AS (
 
 calc AS (
 
-  -- All CASE branches explicitly return DECIMAL(38,8)
+  -- All CASE branches explicitly return DECIMAL(30,8)
 
   SELECT
 
@@ -359,13 +359,13 @@ calc AS (
 
         WHEN c1.trade_type = 'BUY'
 
-          THEN CAST(c1.q_prev + c1.q_trd AS DECIMAL(38,8))
+          THEN CAST(c1.q_prev + c1.q_trd AS DECIMAL(30,8))
 
         WHEN c1.trade_type = 'SELL'
 
-          THEN CAST(c1.q_prev - c1.q_trd AS DECIMAL(38,8))
+          THEN CAST(c1.q_prev - c1.q_trd AS DECIMAL(30,8))
 
-        ELSE CAST(c1.q_prev AS DECIMAL(38,8))
+        ELSE CAST(c1.q_prev AS DECIMAL(30,8))
 
       END AS qty_after,
 
@@ -379,23 +379,23 @@ calc AS (
 
           CASE
 
-            WHEN CAST(c1.q_prev + c1.q_trd AS DECIMAL(38,8)) > CAST(0 AS DECIMAL(38,8)) THEN
+            WHEN CAST(c1.q_prev + c1.q_trd AS DECIMAL(30,8)) > CAST(0 AS DECIMAL(30,8)) THEN
 
               CAST(
 
-                (c1.tc_prev + CAST(c1.buy_notional + c1.chg_trd AS DECIMAL(38,8)))
+                (c1.tc_prev + CAST(c1.buy_notional + c1.chg_trd AS DECIMAL(30,8)))
 
-                / CAST(c1.q_prev + c1.q_trd AS DECIMAL(38,8))
+                / CAST(c1.q_prev + c1.q_trd AS DECIMAL(30,8))
 
-                AS DECIMAL(38,8)
+                AS DECIMAL(30,8)
 
               )
 
-            ELSE CAST(0 AS DECIMAL(38,8))
+            ELSE CAST(0 AS DECIMAL(30,8))
 
           END
 
-        ELSE CAST(c1.ac_prev AS DECIMAL(38,8))
+        ELSE CAST(c1.ac_prev AS DECIMAL(30,8))
 
       END AS ac_after,
 
@@ -407,29 +407,29 @@ calc AS (
 
         WHEN c1.trade_type = 'BUY' THEN
 
-          CAST(c1.tc_prev + CAST(c1.buy_notional + c1.chg_trd AS DECIMAL(38,8)) AS DECIMAL(38,8))
+          CAST(c1.tc_prev + CAST(c1.buy_notional + c1.chg_trd AS DECIMAL(30,8)) AS DECIMAL(30,8))
 
         WHEN c1.trade_type = 'SELL' THEN
 
           CASE
 
-            WHEN c1.q_prev > CAST(0 AS DECIMAL(38,8)) THEN
+            WHEN c1.q_prev > CAST(0 AS DECIMAL(30,8)) THEN
 
               CAST(
 
-                CAST(c1.tc_prev * CAST(c1.q_prev - c1.q_trd AS DECIMAL(38,8)) AS DECIMAL(38,8))
+                CAST(c1.tc_prev * CAST(c1.q_prev - c1.q_trd AS DECIMAL(30,8)) AS DECIMAL(30,8))
 
                 / c1.q_prev
 
-                AS DECIMAL(38,8)
+                AS DECIMAL(30,8)
 
               )
 
-            ELSE CAST(0 AS DECIMAL(38,8))
+            ELSE CAST(0 AS DECIMAL(30,8))
 
           END
 
-        ELSE CAST(c1.tc_prev AS DECIMAL(38,8))
+        ELSE CAST(c1.tc_prev AS DECIMAL(30,8))
 
       END AS tc_after,
 
@@ -441,9 +441,9 @@ calc AS (
 
         WHEN c1.trade_type = 'SELL' THEN
 
-          CAST(c1.rp_prev + CAST(c1.q_trd * (c1.p_trd - c1.ac_prev) AS DECIMAL(38,8)) AS DECIMAL(38,8))
+          CAST(c1.rp_prev + CAST(c1.q_trd * (c1.p_trd - c1.ac_prev) AS DECIMAL(30,8)) AS DECIMAL(30,8))
 
-        ELSE CAST(c1.rp_prev AS DECIMAL(38,8))
+        ELSE CAST(c1.rp_prev AS DECIMAL(30,8))
 
       END AS rp_after,
 
@@ -543,7 +543,7 @@ SELECT
 
     WHEN calc.trade_type = 'BUY' THEN 'OPEN'
 
-    WHEN calc.trade_type = 'SELL' AND calc.qty_after <= CAST(0 AS DECIMAL(38,8)) THEN 'CLOSED'
+    WHEN calc.trade_type = 'SELL' AND calc.qty_after <= CAST(0 AS DECIMAL(30,8)) THEN 'CLOSED'
 
     ELSE 'OPEN'
 
@@ -588,13 +588,13 @@ SELECT
     sq.settle_date,
     CASE
         WHEN sq.trade_type = 'SELL' AND cp.position_id IS NULL THEN 'FAILED'
-        WHEN sq.trade_type = 'SELL' AND COALESCE(CAST(cp.quantity AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8))) < CAST(sq.quantity AS DECIMAL(38,8)) THEN 'FAILED'
+        WHEN sq.trade_type = 'SELL' AND COALESCE(CAST(cp.quantity AS DECIMAL(30,8)), CAST(0 AS DECIMAL(30,8))) < CAST(sq.quantity AS DECIMAL(30,8)) THEN 'FAILED'
         ELSE 'SUCCESS'
     END,
     CASE
         WHEN sq.trade_type = 'SELL' AND cp.position_id IS NULL THEN
             CONCAT('No position found for ', sq.security_id, ' in portfolio ', sq.portfolio_id)
-        WHEN sq.trade_type = 'SELL' AND COALESCE(CAST(cp.quantity AS DECIMAL(38,8)), CAST(0 AS DECIMAL(38,8))) < CAST(sq.quantity AS DECIMAL(38,8)) THEN
+        WHEN sq.trade_type = 'SELL' AND COALESCE(CAST(cp.quantity AS DECIMAL(30,8)), CAST(0 AS DECIMAL(30,8))) < CAST(sq.quantity AS DECIMAL(30,8)) THEN
             CONCAT('Insufficient quantity. Available: ', CAST(COALESCE(cp.quantity, 0) AS STRING), ', Requested: ', CAST(sq.quantity AS STRING))
         ELSE NULL
     END,
