@@ -1018,15 +1018,14 @@ class PositionService:
                 'position_type'
             ]
 
-            # Helper for decimal formatting — use DECIMAL(30,N) in CAST to avoid
-            # Impala "Decimal expression overflow" for large LC values.
+            # cis_position uses DECIMAL(18,N) columns — must match exactly.
             def cast_decimal(val, precision=4):
                 if val is None:
-                    return f'CAST(0 AS DECIMAL(30,{precision}))'
+                    return f'CAST(0 AS DECIMAL(18,{precision}))'
                 try:
-                    return f"CAST({float(val)} AS DECIMAL(30,{precision}))"
+                    return f"CAST({float(val)} AS DECIMAL(18,{precision}))"
                 except (ValueError, TypeError):
-                    return f'CAST(0 AS DECIMAL(30,{precision}))'
+                    return f'CAST(0 AS DECIMAL(18,{precision}))'
 
             values = [
                 str(position_data.get('position_id', 0)),
