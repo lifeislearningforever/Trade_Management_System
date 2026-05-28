@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS gmp_cis.cis_ca_cash_flow_queue (
     payment_date STRING COMMENT 'Payment date (YYYY-MM-DD)',
 
     -- Amount Information
-    price DECIMAL(20,8) COMMENT 'Dividend/interest rate per share',
+    price DECIMAL(30,8) COMMENT 'Dividend/interest rate per share',
     currency STRING COMMENT 'Currency code',
 
     -- Processing Status
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS gmp_cis.cis_ca_cash_flow_queue (
 
     -- Processing Metadata
     cash_flows_created BIGINT DEFAULT 0 COMMENT 'Number of cash flows created',
-    total_amount DECIMAL(20,8) COMMENT 'Total amount of cash flows created',
+    total_amount DECIMAL(30,8) COMMENT 'Total amount of cash flows created',
     processed_at BIGINT COMMENT 'Timestamp when processing completed',
 
     -- Audit Fields
@@ -78,8 +78,8 @@ CREATE TABLE IF NOT EXISTS gmp_cis.cis_ca_cash_flow_log (
     -- Details
     portfolio_short_name STRING NOT NULL COMMENT 'Portfolio for this cash flow',
     security_label STRING NOT NULL COMMENT 'Security name',
-    quantity DECIMAL(20,8) COMMENT 'Quantity held at ex-date',
-    amount DECIMAL(20,8) COMMENT 'Calculated cash flow amount',
+    quantity DECIMAL(30,8) COMMENT 'Quantity held at ex-date',
+    amount DECIMAL(30,8) COMMENT 'Calculated cash flow amount',
     currency STRING COMMENT 'Currency code',
 
     -- Status

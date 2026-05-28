@@ -42,9 +42,9 @@ CREATE TABLE gmp_cis.cis_position_queue (
     trade_type STRING COMMENT 'BUY or SELL',
 
     -- Trade Values
-    quantity DECIMAL(20,8) COMMENT 'Trade quantity',
-    price DECIMAL(20,8) COMMENT 'Trade price per unit',
-    charges DECIMAL(20,8) COMMENT 'Total charges (commission + fees)',
+    quantity DECIMAL(30,8) COMMENT 'Trade quantity',
+    price DECIMAL(30,8) COMMENT 'Trade price per unit',
+    charges DECIMAL(30,8) COMMENT 'Total charges (commission + fees)',
     settle_date STRING COMMENT 'Settlement date (YYYY-MM-DD)',
 
     -- Multi-currency

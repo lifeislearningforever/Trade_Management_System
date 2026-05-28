@@ -11,8 +11,8 @@
 -- Note: This may require Kudu 1.10+ and Impala 3.2+
 
 ALTER TABLE gmp_cis.cis_trade ADD COLUMNS (
-    total_amount_fc DECIMAL(20,8) COMMENT 'Total amount in Foreign Currency (Security CCY)',
-    total_amount_lc DECIMAL(20,8) COMMENT 'Total amount in Local Currency (Portfolio CCY)'
+    total_amount_fc DECIMAL(30,8) COMMENT 'Total amount in Foreign Currency (Security CCY)',
+    total_amount_lc DECIMAL(30,8) COMMENT 'Total amount in Local Currency (Portfolio CCY)'
 );
 
 -- ============================================================================

@@ -238,9 +238,9 @@ CREATE TABLE cis_position_queue (
     trade_type STRING,
 
     -- Trade Values (8 decimal precision)
-    quantity DECIMAL(20,8),
-    price DECIMAL(20,8),
-    charges DECIMAL(20,8),
+    quantity DECIMAL(30,8),
+    price DECIMAL(30,8),
+    charges DECIMAL(30,8),
     settle_date STRING,
 
     -- Multi-currency
@@ -296,9 +296,9 @@ CREATE TABLE cis_settlement_queue (
     trade_type STRING,
 
     -- Trade Values (8 decimal precision)
-    quantity DECIMAL(20,8),
-    price DECIMAL(20,8),
-    charges DECIMAL(20,8),
+    quantity DECIMAL(30,8),
+    price DECIMAL(30,8),
+    charges DECIMAL(30,8),
     settle_date STRING,
 
     -- Multi-currency

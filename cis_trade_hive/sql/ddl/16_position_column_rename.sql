@@ -28,26 +28,26 @@ USE gmp_cis;
 -- ============================================================================
 
 -- Cost columns (FC = Foreign Currency = Security Currency)
-ALTER TABLE cis_trade_position ADD COLUMNS (average_cost_fc DECIMAL(20,8));
-ALTER TABLE cis_trade_position ADD COLUMNS (total_cost_fc DECIMAL(20,8));
+ALTER TABLE cis_trade_position ADD COLUMNS (average_cost_fc DECIMAL(30,8));
+ALTER TABLE cis_trade_position ADD COLUMNS (total_cost_fc DECIMAL(30,8));
 
 -- Cost columns (LC = Local Currency = Portfolio Currency)
-ALTER TABLE cis_trade_position ADD COLUMNS (average_cost_lc DECIMAL(20,8));
-ALTER TABLE cis_trade_position ADD COLUMNS (total_cost_lc DECIMAL(20,8));
+ALTER TABLE cis_trade_position ADD COLUMNS (average_cost_lc DECIMAL(30,8));
+ALTER TABLE cis_trade_position ADD COLUMNS (total_cost_lc DECIMAL(30,8));
 
 -- Market price (renamed from current_price)
-ALTER TABLE cis_trade_position ADD COLUMNS (market_price DECIMAL(20,8));
+ALTER TABLE cis_trade_position ADD COLUMNS (market_price DECIMAL(30,8));
 
 -- Market value in FC (renamed from market_value)
-ALTER TABLE cis_trade_position ADD COLUMNS (market_value_fc DECIMAL(20,8));
+ALTER TABLE cis_trade_position ADD COLUMNS (market_value_fc DECIMAL(30,8));
 
 -- Cash flow amounts in both currencies
-ALTER TABLE cis_trade_position ADD COLUMNS (last_cash_flow_amount_fc DECIMAL(20,8));
-ALTER TABLE cis_trade_position ADD COLUMNS (last_cash_flow_amount_lc DECIMAL(20,8));
+ALTER TABLE cis_trade_position ADD COLUMNS (last_cash_flow_amount_fc DECIMAL(30,8));
+ALTER TABLE cis_trade_position ADD COLUMNS (last_cash_flow_amount_lc DECIMAL(30,8));
 
 -- Dividend tracking columns (accumulated dividends from CA)
-ALTER TABLE cis_trade_position ADD COLUMNS (dividend_fc DECIMAL(20,8));
-ALTER TABLE cis_trade_position ADD COLUMNS (dividend_lc DECIMAL(20,8));
+ALTER TABLE cis_trade_position ADD COLUMNS (dividend_fc DECIMAL(30,8));
+ALTER TABLE cis_trade_position ADD COLUMNS (dividend_lc DECIMAL(30,8));
 
 -- ============================================================================
 -- Step 2: Copy data from old columns to new columns

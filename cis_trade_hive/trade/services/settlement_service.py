@@ -401,9 +401,9 @@ class SettlementService:
             effective_position_date = position_date or settle_date
 
             # Cast decimal values to avoid precision errors
-            qty_cast = f"CAST({float(quantity)} AS DECIMAL(20,8))"
-            price_cast = f"CAST({float(price)} AS DECIMAL(20,8))"
-            charges_cast = f"CAST({float(charges)} AS DECIMAL(20,8))"
+            qty_cast = f"CAST({float(quantity)} AS DECIMAL(30,8))"
+            price_cast = f"CAST({float(price)} AS DECIMAL(30,8))"
+            charges_cast = f"CAST({float(charges)} AS DECIMAL(30,8))"
 
             # Insert into settlement queue (position_basis + position_date stored for worker)
             query = f"""

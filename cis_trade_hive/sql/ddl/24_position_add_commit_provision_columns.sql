@@ -18,10 +18,10 @@ USE gmp_cis;
 -- ALTER cis_trade_position (Kudu table - AVP position tracking)
 -- ============================================================================
 
-ALTER TABLE cis_trade_position ADD COLUMNS (commit_fc DECIMAL(20,8));
-ALTER TABLE cis_trade_position ADD COLUMNS (commit_lc DECIMAL(20,8));
-ALTER TABLE cis_trade_position ADD COLUMNS (provision_fc DECIMAL(20,8));
-ALTER TABLE cis_trade_position ADD COLUMNS (provision_lc DECIMAL(20,8));
+ALTER TABLE cis_trade_position ADD COLUMNS (commit_fc DECIMAL(30,8));
+ALTER TABLE cis_trade_position ADD COLUMNS (commit_lc DECIMAL(30,8));
+ALTER TABLE cis_trade_position ADD COLUMNS (provision_fc DECIMAL(30,8));
+ALTER TABLE cis_trade_position ADD COLUMNS (provision_lc DECIMAL(30,8));
 
 -- ============================================================================
 -- VERIFICATION
