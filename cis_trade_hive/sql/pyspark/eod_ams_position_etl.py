@@ -812,6 +812,9 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                 AND UPPER(TRIM(sn.security_name)) = UPPER(TRIM(b.security_short_name))
         ),
         -- Tier 2: ticker match (AMS)
+        -- AMS ticker is a short code (e.g. "AAREIT SP"); GMP stores the full Bloomberg
+        -- ticker (e.g. "AAREIT SP Equity"). Match if cis_security.ticker equals the
+        -- upload ticker exactly OR starts with it followed by a space.
         tier2 AS (
             SELECT
                 b.row_id,
@@ -828,7 +831,10 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                 AND b.ticker IS NOT NULL
                 AND TRIM(b.ticker) != ''
                 AND sn.is_active = true
-                AND UPPER(TRIM(sn.ticker)) = UPPER(TRIM(b.ticker))
+                AND (
+                    UPPER(TRIM(sn.ticker)) = UPPER(TRIM(b.ticker))
+                    OR UPPER(TRIM(sn.ticker)) LIKE UPPER(TRIM(b.ticker)) || ' %'
+                )
         ),
         -- Tier 3: desc_prefix match (AMS — truncated at "COMMON STOCK")
         tier3 AS (
@@ -983,8 +989,16 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             from_unixtime(UNIX_TIMESTAMP(), 'yyyy-MM-dd HH:mm:ss') AS updated_at
         FROM pos_stage_1_base b
         JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
+        -- Dedup guard: skip if a security with the same name already exists in cis_security.
+        -- Prevents duplicate creation on EOD re-runs or when ticker/desc match was missed.
+        LEFT JOIN {DB}.cis_security existing
+            ON existing.is_active = true
+            AND UPPER(TRIM(existing.security_name)) = UPPER(TRIM(
+                COALESCE(p4.desc_prefix, b.security_short_name, b.security_full_name, b.isin)
+            ))
         WHERE p4.security_status = 'NOT_FOUND: Create new security'
           AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
+          AND existing.security_id IS NULL
         """,
         database=DB
     )
