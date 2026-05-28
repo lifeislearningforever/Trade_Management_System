@@ -928,11 +928,11 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             b.row_id, b.isin, b.reporting_date,
             b.market_price AS upload_market_price,
             ep.main_closing_price,
-            CASE
+            CAST(CASE
                 WHEN ep.main_closing_price IS NOT NULL AND ep.main_closing_price != 0 THEN ep.main_closing_price
                 WHEN b.market_price IS NOT NULL AND b.market_price != 0              THEN b.market_price
                 ELSE NULL
-            END AS final_market_price,
+            END AS DECIMAL(30,8)) AS final_market_price,
             CASE
                 WHEN ep.main_closing_price IS NOT NULL AND ep.main_closing_price != 0 THEN 'PASS: Using cis_equity_price'
                 WHEN b.market_price IS NOT NULL AND b.market_price != 0              THEN 'PASS: Using uploaded'
@@ -1004,26 +1004,26 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             p4.final_currency AS security_currency_resolved,
             p4.security_status,
             p5.final_market_price, p5.price_status,
-            CASE WHEN b.quantity IS NOT NULL THEN b.quantity
-                 WHEN b.cost_fc IS NOT NULL  THEN b.cost_fc
-                 ELSE NULL END AS final_quantity,
+            CAST(CASE WHEN b.quantity IS NOT NULL THEN b.quantity
+                      WHEN b.cost_fc IS NOT NULL  THEN b.cost_fc
+                      ELSE NULL END AS DECIMAL(30,8)) AS final_quantity,
             CASE WHEN b.quantity IS NOT NULL THEN 'PASS'
                  WHEN b.cost_fc IS NOT NULL  THEN 'PASS: Using cost_fc'
                  ELSE 'FAIL: Both quantity and cost_fc null' END AS quantity_status,
-            CASE WHEN b.shares_issued IS NOT NULL THEN b.shares_issued
-                 WHEN b.pct_holding IS NOT NULL AND b.quantity IS NOT NULL AND b.pct_holding > 0
-                     THEN b.quantity / b.pct_holding
-                 ELSE NULL END AS final_shares_issued,
+            CAST(CASE WHEN b.shares_issued IS NOT NULL THEN b.shares_issued
+                      WHEN b.pct_holding IS NOT NULL AND b.quantity IS NOT NULL AND b.pct_holding > 0
+                          THEN b.quantity / b.pct_holding
+                      ELSE NULL END AS DECIMAL(30,8)) AS final_shares_issued,
             CASE WHEN b.`exchange` IS NULL OR TRIM(b.`exchange`) = ''
                      THEN 'WARN: Exchange is null'
                  ELSE 'PASS' END AS exchange_status,
-            CASE WHEN b.market_value_fc IS NOT NULL AND b.market_value_fc != 0 THEN b.market_value_fc
-                 WHEN b.quantity IS NOT NULL AND p5.final_market_price IS NOT NULL
-                     THEN b.quantity * p5.final_market_price
-                 ELSE NULL END AS final_market_value_fc,
-            CASE WHEN b.net_book_value_fc IS NOT NULL THEN b.net_book_value_fc
-                 WHEN b.cost_fc IS NOT NULL           THEN b.cost_fc - COALESCE(b.provision_fc, 0)
-                 ELSE NULL END AS final_net_book_value_fc,
+            CAST(CASE WHEN b.market_value_fc IS NOT NULL AND b.market_value_fc != 0 THEN b.market_value_fc
+                      WHEN b.quantity IS NOT NULL AND p5.final_market_price IS NOT NULL
+                          THEN b.quantity * p5.final_market_price
+                      ELSE NULL END AS DECIMAL(30,8)) AS final_market_value_fc,
+            CAST(CASE WHEN b.net_book_value_fc IS NOT NULL THEN b.net_book_value_fc
+                      WHEN b.cost_fc IS NOT NULL           THEN b.cost_fc - COALESCE(b.provision_fc, 0)
+                      ELSE NULL END AS DECIMAL(30,8)) AS final_net_book_value_fc,
             CASE
                 WHEN p4.security_status LIKE 'FAIL: No identifier%'  THEN 'INVALID: No security identifier'
                 WHEN b.quantity IS NULL AND b.cost_fc IS NULL        THEN 'INVALID: No quantity'
