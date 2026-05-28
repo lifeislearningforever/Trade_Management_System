@@ -836,7 +836,7 @@ class PositionService:
             # Helper to cast decimal values — use DECIMAL(30,8) in the CAST expression
             # to avoid Impala "Decimal expression overflow" for large LC values
             # (e.g. total_cost_lc = large_cost_fc * HKD_fx_rate > 12 integer digits).
-            # Impala will coerce to the column's DECIMAL(20,8) on UPSERT.
+            # Column is DECIMAL(30,8) — 22 integer digits, matches cis_trade_position DDL.
             def cast_decimal(val):
                 if val is None:
                     return 'NULL'
@@ -1018,15 +1018,15 @@ class PositionService:
                 'position_type'
             ]
 
-            # Helper for decimal formatting — use DECIMAL(38,N) in CAST to avoid
+            # Helper for decimal formatting — use DECIMAL(30,N) in CAST to avoid
             # Impala "Decimal expression overflow" for large LC values.
             def cast_decimal(val, precision=4):
                 if val is None:
-                    return f'CAST(0 AS DECIMAL(38,{precision}))'
+                    return f'CAST(0 AS DECIMAL(30,{precision}))'
                 try:
-                    return f"CAST({float(val)} AS DECIMAL(38,{precision}))"
+                    return f"CAST({float(val)} AS DECIMAL(30,{precision}))"
                 except (ValueError, TypeError):
-                    return f'CAST(0 AS DECIMAL(38,{precision}))'
+                    return f'CAST(0 AS DECIMAL(30,{precision}))'
 
             values = [
                 str(position_data.get('position_id', 0)),
