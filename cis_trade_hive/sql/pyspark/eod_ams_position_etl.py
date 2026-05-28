@@ -750,36 +750,84 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
     )
     print("[Step 3] Security ISIN match complete")
 
-    # ---- Step 4: security fallback ----
+    # ---- Step 4: security short_name fallback (GMP-specific) ----
+    # GMP rows always have security_short_name (m_security_display_label, e.g. "775 HK").
+    # When ISIN match fails (ISIN_NO_MATCH or NO_ISIN), try matching on
+    # cis_security.security_name = security_short_name.
+    # GMP src_system is ranked first; within that, lowest security_id wins.
     impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=DB)
     impala_manager.execute_write(
         f"""
         CREATE TABLE pos_stage_4_security_fallback STORED AS PARQUET AS
+        WITH sn_join AS (
+            SELECT
+                s3.row_id,
+                s3.upload_isin,
+                s3.security_full_name,
+                s3.security_short_name,
+                s3.upload_exchange,
+                s3.portfolio_status,
+                s3.match_type          AS isin_match_type,
+                s3.matched_security_id AS isin_security_id,
+                s3.matched_security_name AS isin_security_name,
+                s3.matched_isin        AS isin_matched_isin,
+                s3.matched_exchange    AS isin_matched_exchange,
+                s3.matched_country     AS isin_matched_country,
+                s3.matched_currency    AS isin_matched_currency,
+                -- short_name fallback: only attempt when ISIN did not match
+                sn.security_id         AS sn_security_id,
+                sn.security_name       AS sn_security_name,
+                sn.isin                AS sn_isin,
+                sn.exchange_code       AS sn_exchange_code,
+                sn.country_of_exchange AS sn_country,
+                sn.currency_code       AS sn_currency,
+                -- rank: GMP first, then lowest security_id
+                ROW_NUMBER() OVER (
+                    PARTITION BY s3.row_id
+                    ORDER BY
+                        CASE WHEN sn.src_system = 'GMP' THEN 0 ELSE 1 END,
+                        sn.security_id
+                ) AS sn_rn
+            FROM pos_stage_3_security s3
+            LEFT JOIN {DB}.cis_security sn
+                ON  s3.match_type IN ('ISIN_NO_MATCH', 'NO_ISIN')
+                AND s3.security_short_name IS NOT NULL
+                AND TRIM(s3.security_short_name) != ''
+                AND sn.is_active = true
+                AND UPPER(TRIM(sn.security_name)) = UPPER(TRIM(s3.security_short_name))
+        )
         SELECT
-            s3.row_id,
-            s3.upload_isin,
-            s3.security_full_name,
-            s3.security_short_name,
-            s3.upload_exchange,
-            s3.portfolio_status,
-            s3.match_type          AS isin_match_type,
-            s3.matched_security_id AS final_security_id,
-            s3.matched_security_name AS final_security_name,
-            s3.matched_isin        AS final_isin,
-            s3.matched_exchange    AS final_exchange,
-            s3.matched_country     AS final_country,
-            s3.matched_currency    AS final_currency,
-            'ISIN_ONLY'            AS match_method,
+            row_id,
+            upload_isin,
+            security_full_name,
+            security_short_name,
+            upload_exchange,
+            portfolio_status,
+            isin_match_type,
+            -- prefer ISIN match; fall back to short_name match when available
+            COALESCE(isin_security_id,   CASE WHEN sn_rn = 1 THEN sn_security_id   ELSE NULL END) AS final_security_id,
+            COALESCE(isin_security_name, CASE WHEN sn_rn = 1 THEN sn_security_name ELSE NULL END) AS final_security_name,
+            COALESCE(isin_matched_isin,  CASE WHEN sn_rn = 1 THEN sn_isin          ELSE NULL END) AS final_isin,
+            COALESCE(isin_matched_exchange, CASE WHEN sn_rn = 1 THEN sn_exchange_code ELSE NULL END) AS final_exchange,
+            COALESCE(isin_matched_country,  CASE WHEN sn_rn = 1 THEN sn_country      ELSE NULL END) AS final_country,
+            COALESCE(isin_matched_currency, CASE WHEN sn_rn = 1 THEN sn_currency     ELSE NULL END) AS final_currency,
             CASE
-                WHEN s3.match_type = 'FAIL: Multiple securities found' THEN 'FAIL: Multiple securities found'
-                WHEN s3.match_type = 'ISIN_MATCH'                      THEN 'ISIN_MATCH'
-                ELSE                                                        'NOT_FOUND: Create new security'
+                WHEN isin_match_type = 'ISIN_MATCH'                      THEN 'ISIN_ONLY'
+                WHEN sn_rn = 1 AND sn_security_id IS NOT NULL            THEN 'SHORT_NAME'
+                ELSE                                                           'NONE'
+            END AS match_method,
+            CASE
+                WHEN isin_match_type = 'FAIL: Multiple securities found'  THEN 'FAIL: Multiple securities found'
+                WHEN isin_match_type = 'ISIN_MATCH'                       THEN 'ISIN_MATCH'
+                WHEN sn_rn = 1 AND sn_security_id IS NOT NULL             THEN 'SHORT_NAME_MATCH'
+                ELSE                                                            'NOT_FOUND: Create new security'
             END AS security_status
-        FROM pos_stage_3_security s3
+        FROM sn_join
+        WHERE sn_rn = 1 OR isin_match_type NOT IN ('ISIN_NO_MATCH', 'NO_ISIN')
         """,
         database=DB
     )
-    print("[Step 4] Security fallback match complete")
+    print("[Step 4] Security short_name fallback complete")
 
     # ---- Step 5: price lookup ----
     impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_5_price", database=DB)
