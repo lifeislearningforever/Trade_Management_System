@@ -921,8 +921,12 @@ def load_position(
     dry_run: bool = False,
 ) -> Tuple[int, int, List[str]]:
     """
-    Read SETTLED BUY/SELL trades from cis_trade and create positions for them.
+    Read SETTLED or VALIDATED BUY/SELL trades from cis_trade and create positions.
     Useful for backfilling positions after trades were migrated without --positions.
+
+    GMP-migrated trades arrive as VALIDATED (GMP has no separate SETTLE step).
+    CIS-native trades that completed settlement arrive as SETTLED.
+    Both represent confirmed positions and are included here.
 
     Filters (all optional):
         portfolio_filter  — only this portfolio_short_name
@@ -936,7 +940,8 @@ def load_position(
     # Build WHERE clause — date filters applied in Python after normalising
     # because legacy migrations may have stored dates as DD/MM/YYYY (string
     # comparison against YYYY-MM-DD bounds gives wrong results in SQL).
-    conditions = ["status = 'SETTLED'", "trade_type IN ('BUY','SELL')",
+    # Include VALIDATED: GMP trades land as VALIDATED (no separate settle step).
+    conditions = ["status IN ('SETTLED', 'VALIDATED')", "trade_type IN ('BUY','SELL')",
                   "is_deleted = false",
                   "trade_date = '2026-02-27'",
                   "settle_date = '2026-02-27'"]
@@ -958,7 +963,7 @@ def load_position(
     logger.info("Fetching trades: %s", sql)
     rows = impala_manager.execute_query(sql, database=DATABASE)
     if not rows:
-        logger.info("No SETTLED BUY/SELL trades found matching the filter.")
+        logger.info("No SETTLED/VALIDATED BUY/SELL trades found matching the filter.")
         return 0, 0, []
 
     # Apply date-range filters in Python after normalising stored date strings

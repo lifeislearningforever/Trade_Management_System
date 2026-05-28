@@ -833,8 +833,10 @@ class PositionService:
                 'created_by', 'created_at', 'updated_by', 'updated_at'
             ]
 
-            # Helper to cast decimal values to DECIMAL(20,8) to avoid precision errors.
-            # Guards against None, empty string, and non-numeric values returned by PyHive.
+            # Helper to cast decimal values — use DECIMAL(38,8) in the CAST expression
+            # to avoid Impala "Decimal expression overflow" for large LC values
+            # (e.g. total_cost_lc = large_cost_fc * HKD_fx_rate > 12 integer digits).
+            # Impala will coerce to the column's DECIMAL(20,8) on UPSERT.
             def cast_decimal(val):
                 if val is None:
                     return 'NULL'
@@ -842,7 +844,7 @@ class PositionService:
                     numeric = float(val)
                 except (ValueError, TypeError):
                     return 'NULL'
-                return f"CAST({numeric} AS DECIMAL(20,8))"
+                return f"CAST({numeric} AS DECIMAL(38,8))"
 
             # Get values from position_data (already set with _fc and _lc suffixes)
             # Fall back to calculated local values for LC values if not in position_data
@@ -1016,14 +1018,15 @@ class PositionService:
                 'position_type'
             ]
 
-            # Helper for decimal formatting — cis_position uses DECIMAL(18,4)
+            # Helper for decimal formatting — use DECIMAL(38,N) in CAST to avoid
+            # Impala "Decimal expression overflow" for large LC values.
             def cast_decimal(val, precision=4):
                 if val is None:
-                    return 'CAST(0 AS DECIMAL(18,4))'
+                    return f'CAST(0 AS DECIMAL(38,{precision}))'
                 try:
-                    return f"CAST({float(val)} AS DECIMAL(18,{precision}))"
+                    return f"CAST({float(val)} AS DECIMAL(38,{precision}))"
                 except (ValueError, TypeError):
-                    return 'CAST(0 AS DECIMAL(18,4))'
+                    return f'CAST(0 AS DECIMAL(38,{precision}))'
 
             values = [
                 str(position_data.get('position_id', 0)),
@@ -1154,20 +1157,20 @@ class PositionService:
                     {row['version_id']}, {row['position_id']}, '{row['position_date']}',
                     '{position_basis}',
                     '{self._escape(row['portfolio_short_name'])}', '{self._escape(row['security_label'])}',
-                    CAST({float(row.get('quantity') or 0)} AS DECIMAL(20,8)),
-                    CAST({float(row.get('average_cost_fc') or 0)} AS DECIMAL(20,8)),
-                    CAST({float(row.get('total_cost_fc') or 0)} AS DECIMAL(20,8)),
-                    CAST({float(row.get('average_cost_lc') or 0)} AS DECIMAL(20,8)),
-                    CAST({float(row.get('total_cost_lc') or 0)} AS DECIMAL(20,8)),
-                    CAST({float(row.get('realized_pnl_fc') or 0)} AS DECIMAL(20,8)),
-                    CAST({float(row.get('unrealized_pnl_fc') or 0)} AS DECIMAL(20,8)),
-                    CAST({float(row.get('realized_pnl_lc') or 0)} AS DECIMAL(20,8)),
-                    CAST({float(row.get('unrealized_pnl_lc') or 0)} AS DECIMAL(20,8)),
-                    CAST({float(row.get('market_price') or 0)} AS DECIMAL(20,8)),
-                    CAST({float(row.get('market_value_fc') or 0)} AS DECIMAL(20,8)),
-                    CAST({float(row.get('market_value_lc') or 0)} AS DECIMAL(20,8)),
-                    CAST({float(row.get('dividend_fc') or 0)} AS DECIMAL(20,8)),
-                    CAST({float(row.get('dividend_lc') or 0)} AS DECIMAL(20,8)),
+                    CAST({float(row.get('quantity') or 0)} AS DECIMAL(38,8)),
+                    CAST({float(row.get('average_cost_fc') or 0)} AS DECIMAL(38,8)),
+                    CAST({float(row.get('total_cost_fc') or 0)} AS DECIMAL(38,8)),
+                    CAST({float(row.get('average_cost_lc') or 0)} AS DECIMAL(38,8)),
+                    CAST({float(row.get('total_cost_lc') or 0)} AS DECIMAL(38,8)),
+                    CAST({float(row.get('realized_pnl_fc') or 0)} AS DECIMAL(38,8)),
+                    CAST({float(row.get('unrealized_pnl_fc') or 0)} AS DECIMAL(38,8)),
+                    CAST({float(row.get('realized_pnl_lc') or 0)} AS DECIMAL(38,8)),
+                    CAST({float(row.get('unrealized_pnl_lc') or 0)} AS DECIMAL(38,8)),
+                    CAST({float(row.get('market_price') or 0)} AS DECIMAL(38,8)),
+                    CAST({float(row.get('market_value_fc') or 0)} AS DECIMAL(38,8)),
+                    CAST({float(row.get('market_value_lc') or 0)} AS DECIMAL(38,8)),
+                    CAST({float(row.get('dividend_fc') or 0)} AS DECIMAL(38,8)),
+                    CAST({float(row.get('dividend_lc') or 0)} AS DECIMAL(38,8)),
                     {row.get('trade_id') or 'NULL'},
                     '{row.get('trade_type', '')}',
                     {row.get('lots_held') or 'NULL'},
@@ -1175,7 +1178,7 @@ class PositionService:
                     {f"'{self._escape(row.get('sub_custodian', ''))}'" if row.get('sub_custodian') else 'NULL'},
                     {f"'{self._escape(row.get('security_currency', ''))}'" if row.get('security_currency') else 'NULL'},
                     {f"'{self._escape(row.get('portfolio_currency', ''))}'" if row.get('portfolio_currency') else 'NULL'},
-                    {f"CAST({float(row.get('fx_rate'))} AS DECIMAL(20,8))" if row.get('fx_rate') not in (None, '', 0) else 'NULL'},
+                    {f"CAST({float(row.get('fx_rate'))} AS DECIMAL(38,8))" if row.get('fx_rate') not in (None, '', 0) else 'NULL'},
                     '{row.get('status', 'OPEN')}',
                     {str(row.get('is_active', True)).lower()},
                     false,
