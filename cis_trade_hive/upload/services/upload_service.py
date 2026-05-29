@@ -2740,8 +2740,11 @@ class UploadService:
             )
             if not ok:
                 return False, f"Step 0 INSERT into position_upload_standardized failed — check Impala logs", result
+            # REFRESH PARTITION is much faster than INVALIDATE METADATA — it only syncs
+            # the single partition just written, not the entire table's metastore entry.
+            # INVALIDATE METADATA on a large partitioned table can take minutes.
             impala_manager.execute_write(
-                f"INVALIDATE METADATA {db}.position_upload_standardized",
+                f"REFRESH {db}.position_upload_standardized PARTITION (processing_date='{processing_date}', src_id='{src_id}')",
                 database=db
             )
 
@@ -3814,7 +3817,7 @@ class UploadService:
                 database=db
             )
             impala_manager.execute_write(
-                f"INVALIDATE METADATA {db}.position_upload_report",
+                f"REFRESH {db}.position_upload_report PARTITION (processing_date='{processing_date}', src_id='{src_id}')",
                 database=db
             )
             logger.info("[position_etl] Step 7B complete — INSERT OVERWRITE into partitioned position_upload_report")
