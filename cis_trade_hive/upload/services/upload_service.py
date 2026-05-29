@@ -3172,6 +3172,109 @@ class UploadService:
             )
             logger.info("[position_etl] Step 4 complete")
 
+            # ------------------------------------------------------------------
+            # Step 4B: Abbreviated-name fuzzy match (Python-side).
+            #   For rows still NOT_FOUND after all SQL tiers, apply
+            #   abbreviate_security_name() to the upload full_name and try to
+            #   match it against cis_security.security_name.
+            #   Example: upload 'UOB VENTURE MANAGEMENT PRIVATE LIMITED'
+            #            abbreviates to 'UOB VENTURE MGMT PRIVATE LTD'
+            #            which matches GMP-stored 'UOB VENTURE MGMT PTE LTD'
+            #            after both sides are abbreviated.
+            #   We match abbreviated upload name against abbreviated cis name
+            #   (both run through abbreviate_security_name) so minor word order
+            #   differences and synonym variants collapse to the same form.
+            # ------------------------------------------------------------------
+            _not_found_rows = impala_manager.execute_query(
+                f"""
+                SELECT p4.row_id, p4.security_full_name
+                FROM pos_stage_4_security_fallback p4
+                WHERE p4.security_status = 'NOT_FOUND: Create new security'
+                """,
+                database=db
+            ) or []
+
+            if _not_found_rows:
+                # Fetch all active cis_security names once
+                _cis_names = impala_manager.execute_query(
+                    f"SELECT security_id, security_name FROM {db}.cis_security WHERE is_active = true",
+                    database=db
+                ) or []
+                # Build abbrev → security_id lookup (abbrev of cis name → id)
+                _cis_abbrev_map = {}
+                for _cs in _cis_names:
+                    _csn = _cs.get('security_name') or ''
+                    _csa = abbreviate_security_name(_csn)
+                    if _csa and _csa not in _cis_abbrev_map:
+                        _cis_abbrev_map[_csa] = int(_cs.get('security_id'))
+
+                # Match each NOT_FOUND upload row
+                _abbrev_matches = []  # list of (row_id, security_id)
+                for _nf in _not_found_rows:
+                    _upload_abbrev = abbreviate_security_name(_nf.get('security_full_name') or '')
+                    if _upload_abbrev and _upload_abbrev in _cis_abbrev_map:
+                        _abbrev_matches.append((_nf['row_id'], _cis_abbrev_map[_upload_abbrev]))
+
+                if _abbrev_matches:
+                    # Update pos_stage_4_security_fallback for matched rows
+                    # Impala Parquet tables are immutable — recreate with updates applied
+                    _when_rows = ' '.join(
+                        f"WHEN row_id = {rid} THEN {sid}"
+                        for rid, sid in _abbrev_matches
+                    )
+                    _match_ids = ', '.join(str(r[0]) for r in _abbrev_matches)
+                    impala_manager.execute_write(
+                        "DROP TABLE IF EXISTS pos_stage_4b_abbrev_match", database=db
+                    )
+                    impala_manager.execute_write(
+                        f"""
+                        CREATE TABLE pos_stage_4b_abbrev_match
+                        STORED AS PARQUET AS
+                        SELECT
+                            p4.*,
+                            CASE
+                                WHEN p4.row_id IN ({_match_ids})
+                                THEN CASE {_when_rows} ELSE p4.final_security_id END
+                                ELSE p4.final_security_id
+                            END AS abbrev_security_id,
+                            CASE
+                                WHEN p4.row_id IN ({_match_ids})
+                                THEN 'ABBREV_NAME_MATCH'
+                                ELSE p4.security_status
+                            END AS abbrev_security_status
+                        FROM pos_stage_4_security_fallback p4
+                        """,
+                        database=db
+                    )
+                    # Swap in the updated table
+                    impala_manager.execute_write(
+                        "DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=db
+                    )
+                    impala_manager.execute_write(
+                        f"""
+                        CREATE TABLE pos_stage_4_security_fallback
+                        STORED AS PARQUET AS
+                        SELECT
+                            row_id, upload_isin, security_full_name, security_short_name,
+                            desc_prefix, upload_exchange, portfolio_status, isin_match_type,
+                            COALESCE(abbrev_security_id, final_security_id) AS final_security_id,
+                            final_security_name, final_isin, final_exchange, final_country,
+                            final_currency,
+                            CASE WHEN abbrev_security_status = 'ABBREV_NAME_MATCH'
+                                 THEN 'ABBREV_NAME_MATCH' ELSE match_method END AS match_method,
+                            abbrev_security_status AS security_status
+                        FROM pos_stage_4b_abbrev_match
+                        """,
+                        database=db
+                    )
+                    impala_manager.execute_write(
+                        "DROP TABLE IF EXISTS pos_stage_4b_abbrev_match", database=db
+                    )
+                    logger.info(f"[position_etl] Step 4B complete ({len(_abbrev_matches)} abbrev matches applied)")
+                else:
+                    logger.info("[position_etl] Step 4B: no abbreviated name matches found")
+            else:
+                logger.info("[position_etl] Step 4B: no NOT_FOUND rows to fuzzy-match")
 
             # ------------------------------------------------------------------
             # Step 5: Price lookup — latest price per ISIN from cis_equity_price.
@@ -3180,7 +3283,7 @@ class UploadService:
             impala_manager.execute_write(
                 "DROP TABLE IF EXISTS pos_stage_5_price", database=db
             )
-            impala_manager.execute_write(
+            ok_5 = impala_manager.execute_write(
                 f"""
                 CREATE TABLE pos_stage_5_price
                 STORED AS PARQUET AS
@@ -3220,6 +3323,9 @@ class UploadService:
                 """,
                 database=db
             )
+            if not ok_5:
+                logger.error("[position_etl] Step 5 FAILED — pos_stage_5_price not created; aborting ETL")
+                return False, "Step 5 CREATE TABLE pos_stage_5_price failed", result
             logger.info("[position_etl] Step 5 complete")
 
             # ------------------------------------------------------------------
@@ -3299,40 +3405,49 @@ class UploadService:
                 database=db
             ) or []
 
-            for _row in _candidates:
-                _row['security_name'] = abbreviate_security_name(
-                    _row.get('raw_security_name') or ''
-                )
-
-            # 5B-iii: INSERT each abbreviated row into cis_security
             import time as _time
-            _now = _time.strftime('%Y-%m-%d %H:%M:%S')
-            for _row in _candidates:
-                _sec_name = (_row.get('security_name') or '').replace("'", "''")
-                _sec_desc = (_row.get('security_description') or '').replace("'", "''")
-                _isin     = _row.get('isin')
-                _ticker   = _row.get('ticker')
-                _industry = (_row.get('industry') or '').replace("'", "''")
-                _sec_type = (_row.get('security_type') or '').replace("'", "''")
-                _iss_type = (_row.get('issuer_type') or '').replace("'", "''")
-                _quoted   = (_row.get('quoted_unquoted') or '').replace("'", "''")
-                _co_inc   = _row.get('country_of_incorporation')
-                _co_exc   = _row.get('country_of_exchange')
-                _exchange = (_row.get('exchange') or '').replace("'", "''")
-                _currency = (_row.get('currency_code') or '').replace("'", "''")
-                _shares   = _row.get('shares_outstanding')
-                _fin      = (_row.get('fin_nonfin_co') or '').replace("'", "''")
-                _row_id   = int(_row.get('row_id') or 0)
 
-                def _sql_str(v):
-                    return f"'{v}'" if v not in (None, '') else 'NULL'
+            def _sql_str(v):
+                if v in (None, ''):
+                    return 'NULL'
+                return "'" + str(v).replace("'", "''") + "'"
 
-                def _sql_bigint(v):
-                    try:
-                        return str(int(float(v)))
-                    except (TypeError, ValueError):
-                        return 'NULL'
+            def _sql_bigint(v):
+                try:
+                    return str(int(float(v)))
+                except (TypeError, ValueError):
+                    return 'NULL'
 
+            if _candidates:
+                _now = _time.strftime('%Y-%m-%d %H:%M:%S')
+                _base_ts = int(_time.time()) * 1000
+                _value_rows = []
+                for _row in _candidates:
+                    _sec_name = abbreviate_security_name(_row.get('raw_security_name') or '')
+                    _row_id   = int(_row.get('row_id') or 0)
+                    _value_rows.append(
+                        f"({_base_ts + _row_id},"
+                        f"{_sql_str(_sec_name)},"
+                        f"{_sql_str(_row.get('isin'))},"
+                        f"{_sql_str(_row.get('security_description'))},"
+                        f"NULL,"
+                        f"{_sql_str(_row.get('ticker'))},"
+                        f"{_sql_str(_row.get('industry'))},"
+                        f"{_sql_str(_row.get('security_type'))},"
+                        f"NULL,"
+                        f"{_sql_str(_row.get('issuer_type'))},"
+                        f"{_sql_str(_row.get('quoted_unquoted'))},"
+                        f"{_sql_str(_row.get('country_of_incorporation'))},"
+                        f"{_sql_str(_row.get('country_of_exchange'))},"
+                        f"{_sql_str(_row.get('exchange'))},"
+                        f"{_sql_str(_row.get('currency_code'))},"
+                        f"{_sql_bigint(_row.get('shares_outstanding'))},"
+                        f"{_sql_str(_row.get('fin_nonfin_co'))},"
+                        f"'CIS','ACTIVE',TRUE,"
+                        f"'POSITION_UPLOAD','{_now}',"
+                        f"'POSITION_UPLOAD','{_now}')"
+                    )
+                # Single batch INSERT — one round trip regardless of row count
                 impala_manager.execute_write(
                     f"""
                     INSERT INTO {db}.cis_security (
@@ -3342,28 +3457,7 @@ class UploadService:
                         country_of_exchange, exchange_code, currency_code,
                         shares_outstanding, fin_nonfin_ind, src_system, status,
                         is_active, created_by, created_at, updated_by, updated_at
-                    ) VALUES (
-                        {(int(_time.time()) * 1000) + _row_id},
-                        {_sql_str(_sec_name)},
-                        {_sql_str(_isin)},
-                        {_sql_str(_sec_desc)},
-                        NULL,
-                        {_sql_str(_ticker)},
-                        {_sql_str(_industry)},
-                        {_sql_str(_sec_type)},
-                        NULL,
-                        {_sql_str(_iss_type)},
-                        {_sql_str(_quoted)},
-                        {_sql_str(_co_inc)},
-                        {_sql_str(_co_exc)},
-                        {_sql_str(_exchange)},
-                        {_sql_str(_currency)},
-                        {_sql_bigint(_shares)},
-                        {_sql_str(_fin)},
-                        'CIS', 'ACTIVE', TRUE,
-                        'POSITION_UPLOAD', '{_now}',
-                        'POSITION_UPLOAD', '{_now}'
-                    )
+                    ) VALUES {', '.join(_value_rows)}
                     """,
                     database=db
                 )
@@ -3725,7 +3819,8 @@ class UploadService:
             for tbl in [
                 'pos_stage_1_base', 'pos_stage_2_portfolio',
                 'pos_stage_3_security',
-                'pos_stage_4_security_fallback', 'pos_stage_5_price',
+                'pos_stage_4_security_fallback', 'pos_stage_4b_abbrev_match',
+                'pos_stage_5_price', 'pos_stage_5b_candidates',
                 'position_upload_staging',
             ]:
                 try:
