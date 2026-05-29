@@ -2252,6 +2252,14 @@ class UploadService:
                     f" 'NA'), 'N/A'), 'NIL'), 'NONE'), '-'), 'N.A.'), 'NAP')"
                 )
 
+            def clean_ticker(col: str) -> str:
+                """Return NULL when col is a known placeholder; otherwise return TRIM(UPPER(col))."""
+                return (
+                    f"NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF("
+                    f"UPPER(TRIM(CAST({col} AS STRING))),"
+                    f" 'NA'), 'N/A'), 'NIL'), 'NONE'), '-'), 'N.A.'), 'NAP')"
+                )
+
             # ------------------------------------------------------------------
             # Step 0: Standardize — map raw source table columns into
             #         position_upload_standardized (equivalent of Position_insert.sql).
@@ -2467,7 +2475,7 @@ class UploadService:
                         security_full_name                                  AS security_full_name,
                         NULL                                                AS security_short_name,
                         {clean_isin('isin_code')}                           AS isin,
-                        ticker_code                                         AS ticker,
+                        {clean_ticker('ticker_code')}                       AS ticker,
                         {safe_decimal('quantity', 'DECIMAL(18,4)')} AS quantity,
                         {safe_decimal('no_of_shares_issues_by_the_company', 'DECIMAL(18,4)')} AS shares_outstanding,
                         {safe_decimal('no_of_shares_issues_by_the_company', 'DECIMAL(18,4)')} AS shares_issued,
@@ -2531,7 +2539,7 @@ class UploadService:
                         p5.security_full_name                              AS security_full_name,
                         NULL                                               AS security_short_name,
                         {clean_isin('p5.isin_code')}                       AS isin,
-                        p5.ticker_code                                     AS ticker,
+                        {clean_ticker('p5.ticker_code')}                   AS ticker,
                         {safe_decimal('p5.quantity', 'DECIMAL(18,4)')} AS quantity,
                         {safe_decimal('p5.no_of_shares_issues_by_the_company', 'DECIMAL(18,4)')} AS shares_outstanding,
                         {safe_decimal('p5.no_of_shares_issues_by_the_company', 'DECIMAL(18,4)')} AS shares_issued,
@@ -3098,7 +3106,9 @@ class UploadService:
                             UPPER(TRIM(CAST(b.isin AS STRING))),
                             'NA'), 'N/A'), 'NIL'), 'NONE'), '-'), 'N.A.'), 'NAP') AS isin,
                         b.security_full_name AS security_description,
-                        b.ticker,
+                        NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(
+                            UPPER(TRIM(CAST(b.ticker AS STRING))),
+                            'NA'), 'N/A'), 'NIL'), 'NONE'), '-'), 'N.A.'), 'NAP') AS ticker,
                         b.industry,
                         b.security_type,
                         b.issuer_type,
