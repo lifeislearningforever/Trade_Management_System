@@ -2260,6 +2260,87 @@ class UploadService:
                     f" 'NA'), 'N/A'), 'NIL'), 'NONE'), '-'), 'N.A.'), 'NAP')"
                 )
 
+            def abbreviate_security_name(name: str, max_len: int = 35) -> str:
+                """Abbreviate a company name to max_len chars using a word-level dict,
+                initialism fallback, then hard word-boundary truncation."""
+                import re as _re
+                _ABBREV = {
+                    "CORPORATION":      "CORP",
+                    "INCORPORATED":     "INC",
+                    "BERHAD":           "BHD",
+                    "SENDIRIAN":        "SDN",
+                    "LIMITED":          "LTD",
+                    "COMPANY":          "CO",
+                    "HOLDINGS":         "HLDGS",
+                    "INTERNATIONAL":    "INTL",
+                    "INVESTMENTS":      "INVT",
+                    "INVESTMENT":       "INVT",
+                    "MANAGEMENT":       "MGMT",
+                    "INDUSTRIES":       "INDS",
+                    "INDUSTRY":         "IND",
+                    "TECHNOLOGIES":     "TECH",
+                    "TECHNOLOGY":       "TECH",
+                    "INFRASTRUCTURE":   "INFRA",
+                    "DEVELOPMENT":      "DEV",
+                    "ENTERPRISE":       "ENTPR",
+                    "ENTERPRISES":      "ENTPR",
+                    "RESOURCES":        "RES",
+                    "PROPERTIES":       "PROP",
+                    "CAPITAL":          "CAP",
+                    "FINANCIAL":        "FIN",
+                    "SERVICES":         "SVCS",
+                    "SERVICE":          "SVC",
+                    "GLOBAL":           "GLB",
+                    "NATIONAL":         "NATL",
+                    "REGIONAL":         "RGNL",
+                    "INDUSTRIAL":       "INDL",
+                    "MANUFACTURING":    "MFG",
+                    "ENGINEERING":      "ENGG",
+                    "CONSTRUCTION":     "CONST",
+                    "DISTRIBUTION":     "DIST",
+                    "ASSOCIATION":      "ASSOC",
+                    "FOUNDATION":       "FNDN",
+                    "EXCHANGE":         "EXCH",
+                    "COMMUNICATIONS":   "COMM",
+                    "COMMUNICATION":    "COMM",
+                    "INSURANCE":        "INS",
+                    "ASSURANCE":        "ASSUR",
+                    "HEALTHCARE":       "HLTHCR",
+                    "PHARMACEUTICALS":  "PHARMA",
+                    "PHARMACEUTICAL":   "PHARMA",
+                    "PLANTATIONS":      "PLANT",
+                    "PLANTATION":       "PLANT",
+                    "PETROLEUM":        "PETRO",
+                    "BANK":             "BK",
+                    "FUND":             "FD",
+                    "GROUP":            "GRP",
+                }
+                if not name:
+                    return name
+                result = name.upper().strip()
+                # Pass 1: whole-word dict substitution, longest words first
+                for word, abbr in sorted(_ABBREV.items(), key=lambda x: -len(x[0])):
+                    result = _re.sub(r'\b' + word + r'\b', abbr, result)
+                result = ' '.join(result.split())
+                if len(result) <= max_len:
+                    return result
+                # Pass 2: shorten remaining words > 6 chars, longest first
+                _abbrev_values = set(_ABBREV.values())
+                words = result.split()
+                for i, w in sorted(enumerate(words), key=lambda x: -len(x[1])):
+                    if len(result) <= max_len:
+                        break
+                    if len(w) > 6 and w not in _abbrev_values and '.' not in w:
+                        words[i] = w[:4] + '.'
+                        result = ' '.join(words)
+                result = ' '.join(result.split())
+                if len(result) <= max_len:
+                    return result
+                # Pass 3: hard truncate at last word boundary
+                truncated = result[:max_len]
+                last_space = truncated.rfind(' ')
+                return truncated[:last_space] if last_space > 0 else truncated
+
             # ------------------------------------------------------------------
             # Step 0: Standardize — map raw source table columns into
             #         position_upload_standardized (equivalent of Position_insert.sql).
@@ -3080,129 +3161,152 @@ class UploadService:
             logger.info("[position_etl] Step 5 complete")
 
             # ------------------------------------------------------------------
-            # Step 5B: Create new securities for NOT_FOUND rows that have exchange.
+            # Step 5B: Create new securities for NOT_FOUND rows.
+            #   5B-i  : build candidates temp table with raw security_name
+            #   5B-ii : fetch candidates into Python, apply abbreviate_security_name()
+            #   5B-iii: INSERT into cis_security with abbreviated names
             # ------------------------------------------------------------------
-
-
+            impala_manager.execute_write(
+                "DROP TABLE IF EXISTS pos_stage_5b_candidates", database=db
+            )
             impala_manager.execute_write(
                 f"""
-                INSERT INTO {db}.cis_security (
-                    security_id,
-                    security_name,
-                    isin,
-                    security_description,
-                    issuer,
-                    ticker,
-                    industry,
-                    security_type,
-                    investment_type,
-                    issuer_type,
-                    quoted_unquoted,
-                    country_of_incorporation,
-                    country_of_exchange,
-                    exchange_code,
-                    currency_code,
-                    shares_outstanding,
-                    fin_nonfin_ind,
-                    src_system,
-                    status,
-                    is_active,
-                    created_by,
-                    created_at,
-                    updated_by,
-                    updated_at
-                )
-                WITH candidates AS (
-                    SELECT
-                        -- Use desc_prefix (COMMON STOCK stripped) as the canonical name.
-                        -- If desc_prefix is null, fall to short_name, then stripped full_name, then isin.
-                        COALESCE(
-                            p4.desc_prefix,
-                            b.security_short_name,
-                            TRIM(regexp_replace(
-                                b.security_full_name,
-                                '(?i)\\\\s*COMMON\\\\s+(STOCK|STICK).*$',
-                                ''
-                            )),
-                            b.isin
-                        ) AS security_name,
-                        NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(
-                            UPPER(TRIM(CAST(b.isin AS STRING))),
-                            'NA'), 'N/A'), 'NIL'), 'NONE'), '-'), 'N.A.'), 'NAP') AS isin,
-                        b.security_full_name AS security_description,
-                        NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(
-                            UPPER(TRIM(CAST(b.ticker AS STRING))),
-                            'NA'), 'N/A'), 'NIL'), 'NONE'), '-'), 'N.A.'), 'NAP') AS ticker,
-                        b.industry,
-                        b.security_type,
-                        b.issuer_type,
-                        b.quoted_unquoted,
-                        b.country_of_incorporation,
-                        b.country_of_exchange,
-                        b.`exchange`,
-                        b.security_currency AS currency_code,
-                        b.shares_outstanding,
-                        b.fin_nonfin_co,
-                        b.row_id,
-                        -- One row per unique security_name in this batch
-                        ROW_NUMBER() OVER (
-                            PARTITION BY UPPER(TRIM(COALESCE(
-                                p4.desc_prefix,
-                                b.security_short_name,
-                                TRIM(regexp_replace(b.security_full_name, '(?i)\\\\s*COMMON\\\\s+(STOCK|STICK).*$', '')),
-                                b.isin
-                            )))
-                            ORDER BY b.row_id
-                        ) AS rn
-                    FROM pos_stage_1_base b
-                    JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
-                    -- Only create when portfolio matched — no orphan securities
-                    JOIN pos_stage_2_portfolio p2
-                        ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
-                    -- Dedup guard: skip if cis_security already has this name (any src_system)
-                    LEFT JOIN {db}.cis_security existing
-                        ON existing.is_active = true
-                        AND UPPER(TRIM(existing.security_name)) = UPPER(TRIM(COALESCE(
+                CREATE TABLE pos_stage_5b_candidates
+                STORED AS PARQUET AS
+                SELECT
+                    -- Raw name (pre-abbreviation) — Python will abbreviate this.
+                    COALESCE(
+                        p4.desc_prefix,
+                        b.security_short_name,
+                        TRIM(regexp_replace(
+                            b.security_full_name,
+                            '(?i)\\\\s*COMMON\\\\s+(STOCK|STICK).*$',
+                            ''
+                        )),
+                        b.isin
+                    ) AS raw_security_name,
+                    NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(
+                        UPPER(TRIM(CAST(b.isin AS STRING))),
+                        'NA'), 'N/A'), 'NIL'), 'NONE'), '-'), 'N.A.'), 'NAP') AS isin,
+                    b.security_full_name AS security_description,
+                    NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(
+                        UPPER(TRIM(CAST(b.ticker AS STRING))),
+                        'NA'), 'N/A'), 'NIL'), 'NONE'), '-'), 'N.A.'), 'NAP') AS ticker,
+                    b.industry,
+                    b.security_type,
+                    b.issuer_type,
+                    b.quoted_unquoted,
+                    b.country_of_incorporation,
+                    b.country_of_exchange,
+                    b.`exchange`,
+                    b.security_currency AS currency_code,
+                    b.shares_outstanding,
+                    b.fin_nonfin_co,
+                    b.row_id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY UPPER(TRIM(COALESCE(
                             p4.desc_prefix,
                             b.security_short_name,
                             TRIM(regexp_replace(b.security_full_name, '(?i)\\\\s*COMMON\\\\s+(STOCK|STICK).*$', '')),
                             b.isin
                         )))
-                    WHERE p4.security_status = 'NOT_FOUND: Create new security'
-                      AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
-                      AND existing.security_id IS NULL
-                )
-                SELECT
-                    (UNIX_TIMESTAMP() * 1000) + row_id AS security_id,
-                    security_name,
-                    isin,
-                    security_description,
-                    NULL AS issuer,
-                    ticker,
-                    industry,
-                    security_type,
-                    NULL AS investment_type,
-                    issuer_type,
-                    quoted_unquoted,
-                    country_of_incorporation,
-                    country_of_exchange,
-                    `exchange`,
-                    currency_code,
-                    CAST(shares_outstanding AS BIGINT) AS shares_outstanding,
-                    fin_nonfin_co AS fin_nonfin_ind,
-                    'CIS' AS src_system,
-                    'ACTIVE' AS status,
-                    TRUE AS is_active,
-                    'POSITION_UPLOAD' AS created_by,
-                    from_unixtime(UNIX_TIMESTAMP(), 'yyyy-MM-dd HH:mm:ss') AS created_at,
-                    'POSITION_UPLOAD' AS updated_by,
-                    from_unixtime(UNIX_TIMESTAMP(), 'yyyy-MM-dd HH:mm:ss') AS updated_at
-                FROM candidates
-                WHERE rn = 1
+                        ORDER BY b.row_id
+                    ) AS rn
+                FROM pos_stage_1_base b
+                JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
+                JOIN pos_stage_2_portfolio p2
+                    ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
+                LEFT JOIN {db}.cis_security existing
+                    ON existing.is_active = true
+                    AND UPPER(TRIM(existing.security_name)) = UPPER(TRIM(COALESCE(
+                        p4.desc_prefix,
+                        b.security_short_name,
+                        TRIM(regexp_replace(b.security_full_name, '(?i)\\\\s*COMMON\\\\s+(STOCK|STICK).*$', '')),
+                        b.isin
+                    )))
+                WHERE p4.security_status = 'NOT_FOUND: Create new security'
+                  AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
+                  AND existing.security_id IS NULL
                 """,
                 database=db
             )
-            logger.info("[position_etl] Step 5B complete (new securities created)")
+
+            # 5B-ii: fetch distinct candidates (rn=1), abbreviate security_name in Python
+            _candidates = impala_manager.execute_query(
+                "SELECT * FROM pos_stage_5b_candidates WHERE rn = 1",
+                database=db
+            ) or []
+
+            for _row in _candidates:
+                _row['security_name'] = abbreviate_security_name(
+                    _row.get('raw_security_name') or ''
+                )
+
+            # 5B-iii: INSERT each abbreviated row into cis_security
+            import time as _time
+            _now = _time.strftime('%Y-%m-%d %H:%M:%S')
+            for _row in _candidates:
+                _sec_name = (_row.get('security_name') or '').replace("'", "''")
+                _sec_desc = (_row.get('security_description') or '').replace("'", "''")
+                _isin     = _row.get('isin')
+                _ticker   = _row.get('ticker')
+                _industry = (_row.get('industry') or '').replace("'", "''")
+                _sec_type = (_row.get('security_type') or '').replace("'", "''")
+                _iss_type = (_row.get('issuer_type') or '').replace("'", "''")
+                _quoted   = (_row.get('quoted_unquoted') or '').replace("'", "''")
+                _co_inc   = _row.get('country_of_incorporation')
+                _co_exc   = _row.get('country_of_exchange')
+                _exchange = (_row.get('exchange') or '').replace("'", "''")
+                _currency = (_row.get('currency_code') or '').replace("'", "''")
+                _shares   = _row.get('shares_outstanding')
+                _fin      = (_row.get('fin_nonfin_co') or '').replace("'", "''")
+                _row_id   = int(_row.get('row_id') or 0)
+
+                def _sql_str(v):
+                    return f"'{v}'" if v not in (None, '') else 'NULL'
+
+                def _sql_bigint(v):
+                    try:
+                        return str(int(float(v)))
+                    except (TypeError, ValueError):
+                        return 'NULL'
+
+                impala_manager.execute_write(
+                    f"""
+                    INSERT INTO {db}.cis_security (
+                        security_id, security_name, isin, security_description,
+                        issuer, ticker, industry, security_type, investment_type,
+                        issuer_type, quoted_unquoted, country_of_incorporation,
+                        country_of_exchange, exchange_code, currency_code,
+                        shares_outstanding, fin_nonfin_ind, src_system, status,
+                        is_active, created_by, created_at, updated_by, updated_at
+                    ) VALUES (
+                        {(int(_time.time()) * 1000) + _row_id},
+                        {_sql_str(_sec_name)},
+                        {_sql_str(_isin)},
+                        {_sql_str(_sec_desc)},
+                        NULL,
+                        {_sql_str(_ticker)},
+                        {_sql_str(_industry)},
+                        {_sql_str(_sec_type)},
+                        NULL,
+                        {_sql_str(_iss_type)},
+                        {_sql_str(_quoted)},
+                        {_sql_str(_co_inc)},
+                        {_sql_str(_co_exc)},
+                        {_sql_str(_exchange)},
+                        {_sql_str(_currency)},
+                        {_sql_bigint(_shares)},
+                        {_sql_str(_fin)},
+                        'CIS', 'ACTIVE', TRUE,
+                        'POSITION_UPLOAD', '{_now}',
+                        'POSITION_UPLOAD', '{_now}'
+                    )
+                    """,
+                    database=db
+                )
+
+            logger.info(f"[position_etl] Step 5B complete ({len(_candidates)} new securities created)")
 
             # ------------------------------------------------------------------
             # Step 6: Final staging — INNER JOIN on portfolio PASS; compute
