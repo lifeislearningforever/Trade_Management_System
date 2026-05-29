@@ -3297,15 +3297,23 @@ class UploadService:
                         CREATE TABLE pos_stage_4_security_fallback
                         STORED AS PARQUET AS
                         SELECT
-                            row_id, upload_isin, security_full_name, security_short_name,
-                            desc_prefix, upload_exchange, portfolio_status, isin_match_type,
-                            COALESCE(abbrev_security_id, final_security_id) AS final_security_id,
-                            final_security_name, final_isin, final_exchange, final_country,
-                            final_currency,
-                            CASE WHEN abbrev_security_status = 'ABBREV_NAME_MATCH'
-                                 THEN 'ABBREV_NAME_MATCH' ELSE match_method END AS match_method,
-                            abbrev_security_status AS security_status
-                        FROM pos_stage_4b_abbrev_match
+                            m.row_id, m.upload_isin, m.security_full_name, m.security_short_name,
+                            m.desc_prefix, m.upload_exchange, m.portfolio_status, m.isin_match_type,
+                            COALESCE(m.abbrev_security_id, m.final_security_id) AS final_security_id,
+                            -- Pull the real security_name from cis_security for abbrev-matched rows
+                            -- so position security_label uses the GMP/existing name, not the upload name
+                            COALESCE(sn.security_name, m.final_security_name) AS final_security_name,
+                            COALESCE(sn.isin,             m.final_isin)      AS final_isin,
+                            COALESCE(sn.exchange_code,    m.final_exchange)  AS final_exchange,
+                            COALESCE(sn.country_of_exchange, m.final_country) AS final_country,
+                            COALESCE(sn.currency_code,    m.final_currency)  AS final_currency,
+                            CASE WHEN m.abbrev_security_status = 'ABBREV_NAME_MATCH'
+                                 THEN 'ABBREV_NAME_MATCH' ELSE m.match_method END AS match_method,
+                            m.abbrev_security_status AS security_status
+                        FROM pos_stage_4b_abbrev_match m
+                        LEFT JOIN {db}.cis_security sn
+                            ON m.abbrev_security_status = 'ABBREV_NAME_MATCH'
+                            AND sn.security_id = m.abbrev_security_id
                         """,
                         database=db
                     )
