@@ -148,6 +148,40 @@ def safe_decimal(col: str, dec_type: str) -> str:
     )
 
 
+def normalize_ticker_suffix(col: str) -> str:
+    """Generate SQL that rewrites ISO country suffixes to Bloomberg exchange suffixes.
+
+    Examples:
+      'DBS SG'  → 'DBS SP'   (Singapore ISO SG → Bloomberg SP)
+      'MAY MY'  → 'MAY MK'   (Malaysia  ISO MY → Bloomberg MK)
+      'DBS SP'  → 'DBS SP'   (already Bloomberg, unchanged)
+      'NA'      → NULL        (placeholder stripped)
+    """
+    _ISO_TO_BB = {
+        'SG': 'SP', 'MY': 'MK', 'ID': 'IJ', 'TH': 'TB', 'PH': 'PM',
+        'IN': 'IS', 'CN': 'CH', 'TW': 'TT', 'KR': 'KS', 'JP': 'JT',
+        'AU': 'AT', 'GB': 'LN', 'DE': 'GY', 'FR': 'FP', 'NL': 'NA',
+        'CH': 'SW', 'SE': 'SS', 'DK': 'DC', 'FI': 'FH', 'IT': 'IM',
+        'ES': 'SM', 'CA': 'CN', 'BR': 'BZ', 'MX': 'MM', 'AE': 'UH',
+        'SA': 'AB', 'ZA': 'SJ',
+    }
+    _when_clauses = '\n    '.join(
+        f"WHEN REGEXP_EXTRACT(UPPER(TRIM(CAST({col} AS STRING))), "
+        f"'^(.+)\\\\s+{iso}$', 1) != '' "
+        f"THEN CONCAT(REGEXP_EXTRACT(UPPER(TRIM(CAST({col} AS STRING))), "
+        f"'^(.+)\\\\s+{iso}$', 1), ' {bb}')"
+        for iso, bb in _ISO_TO_BB.items()
+        if iso != bb
+    )
+    return (
+        f"NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF("
+        f"CASE\n    {_when_clauses}\n"
+        f"    ELSE UPPER(TRIM(CAST({col} AS STRING)))\n"
+        f"END,"
+        f" 'NA'), 'N/A'), 'NIL'), 'NONE'), '-'), 'N.A.'), 'NAP')"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Step 0: standardization SQL per source table
 # Mirrors the STANDARDIZE_SELECT dict in upload_service.run_position_etl()
@@ -404,7 +438,7 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
                 security_desc                                           AS security_full_name,
                 NULL                                                    AS security_short_name,
                 NULL                                                    AS isin,
-                ticker                                                  AS ticker,
+                {normalize_ticker_suffix('ticker')}                     AS ticker,
                 {safe_decimal('quantity_units', 'DECIMAL(30,8)')}      AS quantity,
                 CAST(NULL AS DECIMAL(30,8))                             AS shares_outstanding,
                 CAST(NULL AS DECIMAL(30,8))                             AS shares_issued,

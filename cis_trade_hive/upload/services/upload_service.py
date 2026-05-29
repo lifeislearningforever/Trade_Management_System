@@ -2253,10 +2253,72 @@ class UploadService:
                 )
 
             def clean_ticker(col: str) -> str:
-                """Return NULL when col is a known placeholder; otherwise return TRIM(UPPER(col))."""
+                """Normalize Bloomberg ticker suffix (ISO→Bloomberg) then null-out placeholders.
+
+                Examples:
+                  'DBS SG'  → 'DBS SP'   (Singapore: ISO SG → Bloomberg SP)
+                  'MAY MY'  → 'MAY MK'   (Malaysia:  ISO MY → Bloomberg MK)
+                  'NA'      → NULL
+                  'DBS SP'  → 'DBS SP'   (already correct, unchanged)
+                """
+                # ISO-to-Bloomberg exchange suffix map.
+                # Key = ISO alpha-2 or other non-Bloomberg code that may appear in upload files.
+                # Value = correct Bloomberg exchange suffix.
+                _ISO_TO_BB = {
+                    # Asia Pacific
+                    'SG': 'SP',   # Singapore
+                    'MY': 'MK',   # Malaysia
+                    'ID': 'IJ',   # Indonesia
+                    'TH': 'TB',   # Thailand
+                    'PH': 'PM',   # Philippines
+                    'VN': 'VN',   # Vietnam (same)
+                    'IN': 'IS',   # India NSE  (IB = BSE, IS = NSE — default NSE)
+                    'CN': 'CH',   # China Shanghai
+                    'HK': 'HK',   # Hong Kong (same)
+                    'TW': 'TT',   # Taiwan
+                    'KR': 'KS',   # Korea
+                    'JP': 'JT',   # Japan Tokyo
+                    'AU': 'AT',   # Australia
+                    'NZ': 'NZ',   # New Zealand (same)
+                    # Europe
+                    'GB': 'LN',   # UK London
+                    'DE': 'GY',   # Germany Xetra
+                    'FR': 'FP',   # France Euronext
+                    'NL': 'NA',   # Netherlands
+                    'CH': 'SW',   # Switzerland
+                    'SE': 'SS',   # Sweden
+                    'NO': 'NO',   # Norway (same)
+                    'DK': 'DC',   # Denmark
+                    'FI': 'FH',   # Finland
+                    'IT': 'IM',   # Italy
+                    'ES': 'SM',   # Spain
+                    # Americas
+                    'US': 'US',   # USA (same)
+                    'CA': 'CN',   # Canada
+                    'BR': 'BZ',   # Brazil
+                    'MX': 'MM',   # Mexico
+                    # Middle East / Africa
+                    'AE': 'UH',   # UAE
+                    'SA': 'AB',   # Saudi Arabia
+                    'ZA': 'SJ',   # South Africa
+                }
+                # Build a SQL CASE that rewrites the suffix when it matches an ISO code.
+                # Pattern: ticker = 'ROOT XX' where XX is the last word (2-3 chars).
+                # We extract the root (everything before last space) and the suffix (last word),
+                # then reassemble with the Bloomberg suffix if the ISO code is known.
+                _when_clauses = '\n                    '.join(
+                    f"WHEN REGEXP_EXTRACT(UPPER(TRIM(CAST({col} AS STRING))), "
+                    f"'^(.+)\\\\s+{iso}$', 1) != '' "
+                    f"THEN CONCAT(REGEXP_EXTRACT(UPPER(TRIM(CAST({col} AS STRING))), "
+                    f"'^(.+)\\\\s+{iso}$', 1), ' {bb}')"
+                    for iso, bb in _ISO_TO_BB.items()
+                    if iso != bb   # only emit WHEN for codes that actually change
+                )
                 return (
                     f"NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF("
-                    f"UPPER(TRIM(CAST({col} AS STRING))),"
+                    f"CASE\n                    {_when_clauses}\n"
+                    f"                    ELSE UPPER(TRIM(CAST({col} AS STRING)))\n"
+                    f"                END,"
                     f" 'NA'), 'N/A'), 'NIL'), 'NONE'), '-'), 'N.A.'), 'NAP')"
                 )
 
