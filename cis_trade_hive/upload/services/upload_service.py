@@ -2789,6 +2789,7 @@ class UploadService:
                     LEFT JOIN {db}.cis_security s
                         ON  s.is_active = true
                         AND b.isin IS NOT NULL AND TRIM(b.isin) != ''
+                        AND UPPER(TRIM(b.isin)) NOT IN ('NA', 'N/A', 'NIL', 'NONE', '-', 'N.A.', 'NAP')
                         AND b.isin = s.isin
                 )
                 SELECT
@@ -2807,6 +2808,7 @@ class UploadService:
                     CASE WHEN rn_priority = 1 AND cnt_isin_only >= 1 THEN currency_code       ELSE NULL END AS matched_currency,
                     CASE
                         WHEN upload_isin IS NULL OR TRIM(upload_isin) = ''
+                          OR UPPER(TRIM(upload_isin)) IN ('NA', 'N/A', 'NIL', 'NONE', '-', 'N.A.', 'NAP')
                             THEN 'NO_ISIN'
                         WHEN cnt_isin_only > 1 AND cnt_isin_exchange != 1
                             THEN 'FAIL: Multiple securities found'
