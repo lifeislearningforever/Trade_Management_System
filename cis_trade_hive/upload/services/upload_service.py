@@ -2168,6 +2168,8 @@ class UploadService:
         }
 
         try:
+            import time as _etl_time
+            _etl_t0 = _etl_time.time()
             logger.info(
                 f"[position_etl] Starting ETL for src_id={src_id} "
                 f"processing_date={processing_date} by {updated_by}"
@@ -2178,6 +2180,11 @@ class UploadService:
             })
 
             db = 'gmp_cis'
+
+            def _step_time(label: str, t_start: float) -> float:
+                elapsed = _etl_time.time() - t_start
+                logger.info(f"[position_etl] {label} — {elapsed:.1f}s")
+                return _etl_time.time()
 
             # ------------------------------------------------------------------
             # safe_decimal(col, dec_type): generates SQL that handles every
@@ -2750,6 +2757,7 @@ class UploadService:
             )
             std_rows = (std_count[0].get('cnt', 0) if std_count else 0)
             logger.info(f"[position_etl] Step 0 complete — {std_rows} rows standardized into position_upload_standardized")
+            _t = _step_time("Step 0", _etl_t0)
             if std_rows == 0:
                 return False, f"Standardization produced 0 rows — check src_id='{src_id}' processing_date='{processing_date}' in {src_id} table", result
 
@@ -2847,6 +2855,7 @@ class UploadService:
             if not ok:
                 return False, "Step 1 CREATE TABLE pos_stage_1_base failed — check Impala logs (likely column mismatch in position_upload_standardized)", result
             logger.info("[position_etl] Step 1 complete")
+            _t = _step_time("Step 1", _t)
 
             # ------------------------------------------------------------------
             # Step 2: Portfolio validation — join on pf.name (exact match)
@@ -2873,6 +2882,7 @@ class UploadService:
                 database=db
             )
             logger.info("[position_etl] Step 2 complete")
+            _t = _step_time("Step 2", _t)
 
             # ------------------------------------------------------------------
             # Step 3: Security ISIN match — conditional on exchange presence.
@@ -2966,7 +2976,7 @@ class UploadService:
                 database=db
             )
             logger.info("[position_etl] Step 3 complete")
-
+            _t = _step_time("Step 3", _t)
 
             # ------------------------------------------------------------------
             # Step 4: Security fallback matching for rows where ISIN did not match.
@@ -3156,6 +3166,7 @@ class UploadService:
                 database=db
             )
             logger.info("[position_etl] Step 4 complete")
+            _t = _step_time("Step 4", _t)
 
             # ------------------------------------------------------------------
             # Step 4B: Abbreviated-name fuzzy match (Python-side).
@@ -3184,17 +3195,28 @@ class UploadService:
                 _now_ts = _time_cache.time()
                 if (not UploadService._cis_abbrev_cache or
                         _now_ts - UploadService._cis_abbrev_cache_ts > UploadService._CIS_ABBREV_CACHE_TTL):
-                    # Cache miss or expired — rebuild from cis_security
+                    # Cache miss or expired — rebuild from cis_security.
+                    # Index by BOTH security_name and security_description so GMP securities
+                    # (which store the real company name in security_description, not security_name)
+                    # are found by abbreviated company name match.
                     _cis_names = impala_manager.execute_query(
-                        f"SELECT security_id, security_name FROM {db}.cis_security WHERE is_active = true",
+                        f"SELECT security_id, security_name, security_description FROM {db}.cis_security WHERE is_active = true",
                         database=db
                     ) or []
                     _cis_abbrev_map = {}
                     for _cs in _cis_names:
+                        _sid = int(_cs.get('security_id'))
+                        # Index by abbreviated security_name
                         _csn = _cs.get('security_name') or ''
                         _csa = abbreviate_security_name(_csn)
                         if _csa and _csa not in _cis_abbrev_map:
-                            _cis_abbrev_map[_csa] = int(_cs.get('security_id'))
+                            _cis_abbrev_map[_csa] = _sid
+                        # Also index by abbreviated security_description (GMP stores full
+                        # company name here; security_name is a code like UQ-UOB-182 SG)
+                        _csd = _cs.get('security_description') or ''
+                        _csda = abbreviate_security_name(_csd)
+                        if _csda and _csda not in _cis_abbrev_map:
+                            _cis_abbrev_map[_csda] = _sid
                     UploadService._cis_abbrev_cache = _cis_abbrev_map
                     UploadService._cis_abbrev_cache_ts = _now_ts
                     logger.info(f"[position_etl] Step 4B: rebuilt abbrev cache ({len(_cis_abbrev_map)} entries)")
@@ -3202,7 +3224,8 @@ class UploadService:
                     _cis_abbrev_map = UploadService._cis_abbrev_cache
                     logger.info(f"[position_etl] Step 4B: using cached abbrev map ({len(_cis_abbrev_map)} entries)")
 
-                # Match each NOT_FOUND upload row
+                # Match each NOT_FOUND upload row — try abbreviated full_name against
+                # both abbreviated security_name and security_description in the cache
                 _abbrev_matches = []  # list of (row_id, security_id)
                 for _nf in _not_found_rows:
                     _upload_abbrev = abbreviate_security_name(_nf.get('security_full_name') or '')
@@ -3269,6 +3292,7 @@ class UploadService:
                     logger.info("[position_etl] Step 4B: no abbreviated name matches found")
             else:
                 logger.info("[position_etl] Step 4B: no NOT_FOUND rows to fuzzy-match")
+            _t = _step_time("Step 4B", _t)
 
             # ------------------------------------------------------------------
             # Step 5: Price lookup — latest price per ISIN from cis_equity_price.
@@ -3321,6 +3345,7 @@ class UploadService:
                 logger.error("[position_etl] Step 5 FAILED — pos_stage_5_price not created; aborting ETL")
                 return False, "Step 5 CREATE TABLE pos_stage_5_price failed", result
             logger.info("[position_etl] Step 5 complete")
+            _t = _step_time("Step 5", _t)
 
             # ------------------------------------------------------------------
             # Step 5B: Create new securities for NOT_FOUND rows.
@@ -3462,6 +3487,7 @@ class UploadService:
                 UploadService._cis_abbrev_cache_ts = 0.0
 
             logger.info(f"[position_etl] Step 5B complete ({len(_candidates)} new securities created)")
+            _t = _step_time("Step 5B", _t)
 
             # ------------------------------------------------------------------
             # Step 6: Final staging — INNER JOIN on portfolio PASS; compute
@@ -3544,6 +3570,7 @@ class UploadService:
                 database=db
             )
             logger.info("[position_etl] Step 6 complete")
+            _t = _step_time("Step 6", _t)
 
             # Failed records table (for reporting — records that never made it to staging)
             impala_manager.execute_write(
@@ -3599,6 +3626,7 @@ class UploadService:
                 database=db
             )
             logger.info("[position_etl] Step 6B complete (failed table created)")
+            _t = _step_time("Step 6B", _t)
 
             # ------------------------------------------------------------------
             # Step 7A: UPSERT valid records into cis_position (Kudu).
@@ -3694,6 +3722,7 @@ class UploadService:
             if not ok:
                 return False, "Step 7A UPSERT INTO cis_position failed — check Impala logs for column/type mismatch", result
             logger.info("[position_etl] Step 7A complete (cis_position upsert)")
+            _t = _step_time("Step 7A", _t)
 
             # ------------------------------------------------------------------
             # Step 7B: INSERT OVERWRITE into the existing external partitioned
@@ -3789,6 +3818,7 @@ class UploadService:
                 database=db
             )
             logger.info("[position_etl] Step 7B complete — INSERT OVERWRITE into partitioned position_upload_report")
+            _t = _step_time("Step 7B", _t)
 
             # ------------------------------------------------------------------
             # Count totals from report
@@ -3829,10 +3859,12 @@ class UploadService:
                 except Exception:
                     pass
 
+            _total_elapsed = _etl_time.time() - _etl_t0
             msg = (
                 f"Position ETL complete for {src_id} / {processing_date}: "
                 f"{result.get('total', 0)} rows — "
-                f"{result.get('passed', 0)} PASS, {result.get('failed', 0)} FAIL"
+                f"{result.get('passed', 0)} PASS, {result.get('failed', 0)} FAIL "
+                f"(total {_total_elapsed:.1f}s)"
             )
             logger.info(f"[position_etl] {msg}")
             notify_user(updated_by, EVT_UPLOAD_COMPLETED, {
