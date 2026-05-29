@@ -2316,13 +2316,22 @@ class UploadService:
 
             def abbreviate_security_name(name: str, max_len: int = 35) -> str:
                 """Abbreviate a company name to max_len chars using a word-level dict,
-                initialism fallback, then hard word-boundary truncation."""
+                initialism fallback, then hard word-boundary truncation.
+
+                Pre-processing strips punctuation (.,) so that variants like
+                'CO.,LTD', 'CO. LTD.', 'CO LTD' all normalise to 'CO LTD'
+                before dict substitution. Old GMP abbreviations (MGT) are also
+                expanded back to their full form so the dict can re-abbreviate
+                them consistently.
+                """
                 import re as _re
                 _ABBREV = {
                     "CORPORATION":      "CORP",
                     "INCORPORATED":     "INC",
                     "BERHAD":           "BHD",
                     "SENDIRIAN":        "SDN",
+                    # PRIVATE → PTE so 'PRIVATE LIMITED' and 'PTE LTD' both become 'PTE LTD'
+                    "PRIVATE":          "PTE",
                     "LIMITED":          "LTD",
                     "COMPANY":          "CO",
                     "HOLDINGS":         "HLDGS",
@@ -2369,9 +2378,22 @@ class UploadService:
                     "FUND":             "FD",
                     "GROUP":            "GRP",
                 }
+                # Old GMP abbreviations that differ from our standard form —
+                # expand them first so the dict can re-abbreviate consistently.
+                _EXPAND = {
+                    "MGT": "MANAGEMENT",   # GMP stored 'MGT', we use 'MGMT'
+                }
                 if not name:
                     return name
                 result = name.upper().strip()
+                # Pre-pass: strip trailing/embedded punctuation from words
+                # so 'CO.,LTD' → 'CO LTD', 'LTD.' → 'LTD', 'CO. LTD.' → 'CO LTD'
+                result = _re.sub(r'[.,]+', ' ', result)
+                result = ' '.join(result.split())
+                # Expand old abbreviations back to full words before dict pass
+                for old_abbr, full in _EXPAND.items():
+                    result = _re.sub(r'\b' + old_abbr + r'\b', full, result)
+                result = ' '.join(result.split())
                 # Pass 1: whole-word dict substitution, longest words first
                 for word, abbr in sorted(_ABBREV.items(), key=lambda x: -len(x[0])):
                     result = _re.sub(r'\b' + word + r'\b', abbr, result)
