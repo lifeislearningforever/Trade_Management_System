@@ -2208,34 +2208,25 @@ class UploadService:
             #   9. Final CAST to target DECIMAL type
             # Any value that still can't parse becomes NULL (never throws UDF error).
             # ------------------------------------------------------------------
-            def normalize_country(col: str, alias: str, db: str = db) -> str:
+            def country_joins(db: str = db) -> str:
                 """
-                Normalize a free-text country column to the label (code) from
-                gmp_cis_sta_dly_country by matching the upload value against
-                full_name (case-insensitive, trimmed).
-
-                  e.g. 'SINGAPORE' / 'Singapore' / ' singapore '
-                       → 'SG'   (the label / country code)
-
-                Returns NULL when no match is found — never falls back to the
-                raw value so downstream consumers always get a valid code or NULL.
-
-                Usage in SELECT:
-                    {normalize_country('country_of_risk', 'country_of_risk')}
-                    {normalize_country('country_of_exchange', 'country_of_exchange')}
-
-                The generated SQL is a scalar subquery so it is 1-to-1 with
-                the source column; each country field gets its own independent
-                lookup that does not affect any other column.
+                Generate four LEFT JOIN clauses — one per country field in
+                position_5 — against gmp_cis_sta_dly_country.
+                Impala does not support correlated scalar subqueries in SELECT,
+                so we use one aliased join per source column instead.
+                Each join is independent: a miss on one field does not null
+                out the others.
                 """
-                return (
-                    f"(\n"
-                    f"    SELECT c.label\n"
-                    f"    FROM {db}.gmp_cis_sta_dly_country c\n"
-                    f"    WHERE UPPER(TRIM(c.full_name)) = UPPER(TRIM(CAST({col} AS STRING)))\n"
-                    f"    LIMIT 1\n"
-                    f") AS {alias}"
-                )
+                return f"""
+                    LEFT JOIN {db}.gmp_cis_sta_dly_country cn_exc
+                        ON UPPER(TRIM(cn_exc.full_name)) = UPPER(TRIM(CAST(p5.country_of_exchange AS STRING)))
+                    LEFT JOIN {db}.gmp_cis_sta_dly_country cn_inc
+                        ON UPPER(TRIM(cn_inc.full_name)) = UPPER(TRIM(CAST(p5.country_of_incorporation AS STRING)))
+                    LEFT JOIN {db}.gmp_cis_sta_dly_country cn_rsk
+                        ON UPPER(TRIM(cn_rsk.full_name)) = UPPER(TRIM(CAST(p5.country_of_risk AS STRING)))
+                    LEFT JOIN {db}.gmp_cis_sta_dly_country cn_opr
+                        ON UPPER(TRIM(cn_opr.full_name)) = UPPER(TRIM(CAST(p5.country_of_operation AS STRING)))
+                """
 
             def safe_decimal(col: str, dec_type: str) -> str:
                 return (
@@ -2521,58 +2512,65 @@ class UploadService:
                     WHERE processing_date = '{processing_date}'
                       AND src_id = '{src_id}'
                 """,
-                # position_5: full schema with all numeric and MAS codes
+                # position_5: full schema with all numeric and MAS codes.
+                # Country fields normalized via LEFT JOINs against
+                # gmp_cis_sta_dly_country (full_name → label/code).
+                # Impala does not support correlated scalar subqueries so each
+                # country column gets its own aliased join (cn_exc, cn_inc, etc.).
                 'cis_user_sta_adhoc_position_5': f"""
                     SELECT
-                        portfolio                                       AS portfolio,
-                        security_full_name                              AS security_full_name,
-                        NULL                                            AS security_short_name,
-                        isin_code                                       AS isin,
-                        ticker_code                                     AS ticker,
-                        {safe_decimal('quantity', 'DECIMAL(18,4)')} AS quantity,
-                        {safe_decimal('no_of_shares_issues_by_the_company', 'DECIMAL(18,4)')} AS shares_outstanding,
-                        {safe_decimal('no_of_shares_issues_by_the_company', 'DECIMAL(18,4)')} AS shares_issued,
-                        {safe_decimal('pct_holdings', 'DECIMAL(10,6)')} AS pct_holding,
-                        {safe_decimal('market_price_unit_fc', 'DECIMAL(18,6)')} AS market_price,
-                        {safe_decimal('unit_avg_cost_unit_fc', 'DECIMAL(18,6)')} AS average_cost,
-                        {safe_decimal('cost_fc', 'DECIMAL(18,4)')} AS cost_fc,
-                        {safe_decimal('market_value_fc', 'DECIMAL(18,4)')} AS market_value_fc,
-                        {safe_decimal('net_book_value_fc', 'DECIMAL(18,4)')} AS net_book_value_fc,
-                        {safe_decimal('unrealised_gain_loss_fc', 'DECIMAL(18,4)')} AS unrealized_pnl_fc,
-                        {safe_decimal('provision_fc', 'DECIMAL(18,4)')} AS provision_fc,
-                        {safe_decimal('cost_lc', 'DECIMAL(18,4)')} AS cost_lc,
-                        {safe_decimal('market_value_lc', 'DECIMAL(18,4)')} AS market_value_lc,
-                        {safe_decimal('net_book_value_lc', 'DECIMAL(18,4)')} AS net_book_value_lc,
-                        {safe_decimal('unrealised_gain_loss_lc', 'DECIMAL(18,4)')} AS unrealized_pnl_lc,
-                        {safe_decimal('provision_lc', 'DECIMAL(18,4)')} AS provision_lc,
-                        product_type, security_type, quoted_unquoted, industry,
-                        NULL                                            AS fin_nonfin_co,
-                        issuer_type, reits_or_fund_y_n,
-                        {normalize_country('country_of_exchange', 'exchange')},
-                        NULL                                            AS country_code,
-                        {normalize_country('country_of_exchange',     'country_of_exchange')},
-                        {normalize_country('country_of_incorporation', 'country_of_incorporation')},
-                        {normalize_country('country_of_risk',         'country_of_risk')},
-                        {normalize_country('country_of_operation',    'country_of_operation')},
-                        security_currency_fc                            AS security_currency,
-                        corp_code, branch_code, cost_centre,
-                        cels_code                                       AS cels,
-                        bwcif_number_sg                                 AS bwcif_sg,
-                        bwcif_number_overseas                           AS bwcif_ovs,
-                        mas_6d_code_sg,
-                        mas_6d_code_overseas                            AS mas_6d_code_ovs,
-                        'SETTLE_DATE'                                   AS position_basis,
-                        reporting_date, maturity_date,
-                        'USER_UPLOAD'                                   AS src_system,
-                        'user'                                          AS sub_system,
-                        'sta'                                           AS data_cat,
-                        'adhoc'                                         AS data_frq,
-                        'cis_user_sta_adhoc_position_5'                 AS source_table,
-                        CURRENT_TIMESTAMP()                             AS etl_insert_ts,
-                        'python_etl'                                    AS etl_batch_id
-                    FROM {db}.cis_user_sta_adhoc_position_5
-                    WHERE processing_date = '{processing_date}'
-                      AND src_id = '{src_id}'
+                        p5.portfolio                                       AS portfolio,
+                        p5.security_full_name                              AS security_full_name,
+                        NULL                                               AS security_short_name,
+                        p5.isin_code                                       AS isin,
+                        p5.ticker_code                                     AS ticker,
+                        {safe_decimal('p5.quantity', 'DECIMAL(18,4)')} AS quantity,
+                        {safe_decimal('p5.no_of_shares_issues_by_the_company', 'DECIMAL(18,4)')} AS shares_outstanding,
+                        {safe_decimal('p5.no_of_shares_issues_by_the_company', 'DECIMAL(18,4)')} AS shares_issued,
+                        {safe_decimal('p5.pct_holdings', 'DECIMAL(10,6)')} AS pct_holding,
+                        {safe_decimal('p5.market_price_unit_fc', 'DECIMAL(18,6)')} AS market_price,
+                        {safe_decimal('p5.unit_avg_cost_unit_fc', 'DECIMAL(18,6)')} AS average_cost,
+                        {safe_decimal('p5.cost_fc', 'DECIMAL(18,4)')} AS cost_fc,
+                        {safe_decimal('p5.market_value_fc', 'DECIMAL(18,4)')} AS market_value_fc,
+                        {safe_decimal('p5.net_book_value_fc', 'DECIMAL(18,4)')} AS net_book_value_fc,
+                        {safe_decimal('p5.unrealised_gain_loss_fc', 'DECIMAL(18,4)')} AS unrealized_pnl_fc,
+                        {safe_decimal('p5.provision_fc', 'DECIMAL(18,4)')} AS provision_fc,
+                        {safe_decimal('p5.cost_lc', 'DECIMAL(18,4)')} AS cost_lc,
+                        {safe_decimal('p5.market_value_lc', 'DECIMAL(18,4)')} AS market_value_lc,
+                        {safe_decimal('p5.net_book_value_lc', 'DECIMAL(18,4)')} AS net_book_value_lc,
+                        {safe_decimal('p5.unrealised_gain_loss_lc', 'DECIMAL(18,4)')} AS unrealized_pnl_lc,
+                        {safe_decimal('p5.provision_lc', 'DECIMAL(18,4)')} AS provision_lc,
+                        p5.product_type, p5.security_type, p5.quoted_unquoted, p5.industry,
+                        NULL                                               AS fin_nonfin_co,
+                        p5.issuer_type, p5.reits_or_fund_y_n,
+                        -- Country normalization: full_name → label (e.g. 'Singapore' → 'SG')
+                        -- NULL when full_name not found in gmp_cis_sta_dly_country
+                        cn_exc.label                                       AS exchange,
+                        NULL                                               AS country_code,
+                        cn_exc.label                                       AS country_of_exchange,
+                        cn_inc.label                                       AS country_of_incorporation,
+                        cn_rsk.label                                       AS country_of_risk,
+                        cn_opr.label                                       AS country_of_operation,
+                        p5.security_currency_fc                            AS security_currency,
+                        p5.corp_code, p5.branch_code, p5.cost_centre,
+                        p5.cels_code                                       AS cels,
+                        p5.bwcif_number_sg                                 AS bwcif_sg,
+                        p5.bwcif_number_overseas                           AS bwcif_ovs,
+                        p5.mas_6d_code_sg,
+                        p5.mas_6d_code_overseas                            AS mas_6d_code_ovs,
+                        'SETTLE_DATE'                                      AS position_basis,
+                        p5.reporting_date, p5.maturity_date,
+                        'USER_UPLOAD'                                      AS src_system,
+                        'user'                                             AS sub_system,
+                        'sta'                                              AS data_cat,
+                        'adhoc'                                            AS data_frq,
+                        'cis_user_sta_adhoc_position_5'                    AS source_table,
+                        CURRENT_TIMESTAMP()                                AS etl_insert_ts,
+                        'python_etl'                                       AS etl_batch_id
+                    FROM {db}.cis_user_sta_adhoc_position_5 p5
+                    {country_joins()}
+                    WHERE p5.processing_date = '{processing_date}'
+                      AND p5.src_id = '{src_id}'
                 """,
             }
 
