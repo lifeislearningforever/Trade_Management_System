@@ -2208,6 +2208,35 @@ class UploadService:
             #   9. Final CAST to target DECIMAL type
             # Any value that still can't parse becomes NULL (never throws UDF error).
             # ------------------------------------------------------------------
+            def normalize_country(col: str, alias: str, db: str = db) -> str:
+                """
+                Normalize a free-text country column to the label (code) from
+                gmp_cis_sta_dly_country by matching the upload value against
+                full_name (case-insensitive, trimmed).
+
+                  e.g. 'SINGAPORE' / 'Singapore' / ' singapore '
+                       → 'SG'   (the label / country code)
+
+                Returns NULL when no match is found — never falls back to the
+                raw value so downstream consumers always get a valid code or NULL.
+
+                Usage in SELECT:
+                    {normalize_country('country_of_risk', 'country_of_risk')}
+                    {normalize_country('country_of_exchange', 'country_of_exchange')}
+
+                The generated SQL is a scalar subquery so it is 1-to-1 with
+                the source column; each country field gets its own independent
+                lookup that does not affect any other column.
+                """
+                return (
+                    f"(\n"
+                    f"    SELECT c.label\n"
+                    f"    FROM {db}.gmp_cis_sta_dly_country c\n"
+                    f"    WHERE UPPER(TRIM(c.full_name)) = UPPER(TRIM(CAST({col} AS STRING)))\n"
+                    f"    LIMIT 1\n"
+                    f") AS {alias}"
+                )
+
             def safe_decimal(col: str, dec_type: str) -> str:
                 return (
                     f"CAST(NULLIF(regexp_extract("
@@ -2519,10 +2548,12 @@ class UploadService:
                         product_type, security_type, quoted_unquoted, industry,
                         NULL                                            AS fin_nonfin_co,
                         issuer_type, reits_or_fund_y_n,
-                        country_of_exchange                             AS exchange,
+                        {normalize_country('country_of_exchange', 'exchange')},
                         NULL                                            AS country_code,
-                        country_of_exchange, country_of_incorporation,
-                        country_of_risk, country_of_operation,
+                        {normalize_country('country_of_exchange',     'country_of_exchange')},
+                        {normalize_country('country_of_incorporation', 'country_of_incorporation')},
+                        {normalize_country('country_of_risk',         'country_of_risk')},
+                        {normalize_country('country_of_operation',    'country_of_operation')},
                         security_currency_fc                            AS security_currency,
                         corp_code, branch_code, cost_centre,
                         cels_code                                       AS cels,
