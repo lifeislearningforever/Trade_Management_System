@@ -2244,6 +2244,14 @@ class UploadService:
                     f" '') AS {dec_type})"
                 )
 
+            def clean_isin(col: str) -> str:
+                """Return NULL when col is a known placeholder; otherwise return TRIM(UPPER(col))."""
+                return (
+                    f"NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF("
+                    f"UPPER(TRIM(CAST({col} AS STRING))),"
+                    f" 'NA'), 'N/A'), 'NIL'), 'NONE'), '-'), 'N.A.'), 'NAP')"
+                )
+
             # ------------------------------------------------------------------
             # Step 0: Standardize — map raw source table columns into
             #         position_upload_standardized (equivalent of Position_insert.sql).
@@ -2274,7 +2282,7 @@ class UploadService:
                         portfolio                                       AS portfolio,
                         counter                                         AS security_full_name,
                         NULL                                            AS security_short_name,
-                        isin_code                                       AS isin,
+                        {clean_isin('isin_code')}                       AS isin,
                         NULL                                            AS ticker,
                         {safe_decimal('quantity_today', 'DECIMAL(18,4)')} AS quantity,
                         CAST(NULL AS DECIMAL(18,4))                     AS shares_outstanding,
@@ -2334,7 +2342,7 @@ class UploadService:
                         portfolio_name                                  AS portfolio,
                         security_description                            AS security_full_name,
                         stock_name                                      AS security_short_name,
-                        isin_code                                       AS isin,
+                        {clean_isin('isin_code')}                       AS isin,
                         NULL                                            AS ticker,
                         {safe_decimal('qty_held', 'DECIMAL(18,4)')} AS quantity,
                         {safe_decimal('shares_issued', 'DECIMAL(18,4)')} AS shares_outstanding,
@@ -2394,7 +2402,7 @@ class UploadService:
                         account_name                                    AS portfolio,
                         asset_description_short                         AS security_full_name,
                         NULL                                            AS security_short_name,
-                        isin                                            AS isin,
+                        {clean_isin('isin')}                            AS isin,
                         NULL                                            AS ticker,
                         {safe_decimal('shares_par_value', 'DECIMAL(18,4)')} AS quantity,
                         {safe_decimal('shares_outstanding_total', 'DECIMAL(18,4)')} AS shares_outstanding,
@@ -2458,7 +2466,7 @@ class UploadService:
                         portfolio                                           AS portfolio,
                         security_full_name                                  AS security_full_name,
                         NULL                                                AS security_short_name,
-                        isin_code                                           AS isin,
+                        {clean_isin('isin_code')}                           AS isin,
                         ticker_code                                         AS ticker,
                         {safe_decimal('quantity', 'DECIMAL(18,4)')} AS quantity,
                         {safe_decimal('no_of_shares_issues_by_the_company', 'DECIMAL(18,4)')} AS shares_outstanding,
@@ -2522,7 +2530,7 @@ class UploadService:
                         p5.portfolio                                       AS portfolio,
                         p5.security_full_name                              AS security_full_name,
                         NULL                                               AS security_short_name,
-                        p5.isin_code                                       AS isin,
+                        {clean_isin('p5.isin_code')}                       AS isin,
                         p5.ticker_code                                     AS ticker,
                         {safe_decimal('p5.quantity', 'DECIMAL(18,4)')} AS quantity,
                         {safe_decimal('p5.no_of_shares_issues_by_the_company', 'DECIMAL(18,4)')} AS shares_outstanding,
@@ -3086,7 +3094,9 @@ class UploadService:
                             )),
                             b.isin
                         ) AS security_name,
-                        b.isin,
+                        NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(NULLIF(
+                            UPPER(TRIM(CAST(b.isin AS STRING))),
+                            'NA'), 'N/A'), 'NIL'), 'NONE'), '-'), 'N.A.'), 'NAP') AS isin,
                         b.security_full_name AS security_description,
                         b.ticker,
                         b.industry,
