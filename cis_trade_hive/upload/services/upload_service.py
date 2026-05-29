@@ -597,6 +597,12 @@ class FileValidationService:
 class UploadService:
     """Service class for upload operations."""
 
+    # Class-level cache for abbreviated cis_security name → security_id lookup.
+    # Shared across all instances/ETL runs; rebuilt when TTL expires.
+    _cis_abbrev_cache: dict = {}
+    _cis_abbrev_cache_ts: float = 0.0
+    _CIS_ABBREV_CACHE_TTL: int = 300  # seconds (5 minutes)
+
     def __init__(self):
         self.repository = upload_kudu_repository
         self.validation_service = FileValidationService()
@@ -3195,18 +3201,27 @@ class UploadService:
             ) or []
 
             if _not_found_rows:
-                # Fetch all active cis_security names once
-                _cis_names = impala_manager.execute_query(
-                    f"SELECT security_id, security_name FROM {db}.cis_security WHERE is_active = true",
-                    database=db
-                ) or []
-                # Build abbrev → security_id lookup (abbrev of cis name → id)
-                _cis_abbrev_map = {}
-                for _cs in _cis_names:
-                    _csn = _cs.get('security_name') or ''
-                    _csa = abbreviate_security_name(_csn)
-                    if _csa and _csa not in _cis_abbrev_map:
-                        _cis_abbrev_map[_csa] = int(_cs.get('security_id'))
+                import time as _time_cache
+                _now_ts = _time_cache.time()
+                if (not UploadService._cis_abbrev_cache or
+                        _now_ts - UploadService._cis_abbrev_cache_ts > UploadService._CIS_ABBREV_CACHE_TTL):
+                    # Cache miss or expired — rebuild from cis_security
+                    _cis_names = impala_manager.execute_query(
+                        f"SELECT security_id, security_name FROM {db}.cis_security WHERE is_active = true",
+                        database=db
+                    ) or []
+                    _cis_abbrev_map = {}
+                    for _cs in _cis_names:
+                        _csn = _cs.get('security_name') or ''
+                        _csa = abbreviate_security_name(_csn)
+                        if _csa and _csa not in _cis_abbrev_map:
+                            _cis_abbrev_map[_csa] = int(_cs.get('security_id'))
+                    UploadService._cis_abbrev_cache = _cis_abbrev_map
+                    UploadService._cis_abbrev_cache_ts = _now_ts
+                    logger.info(f"[position_etl] Step 4B: rebuilt abbrev cache ({len(_cis_abbrev_map)} entries)")
+                else:
+                    _cis_abbrev_map = UploadService._cis_abbrev_cache
+                    logger.info(f"[position_etl] Step 4B: using cached abbrev map ({len(_cis_abbrev_map)} entries)")
 
                 # Match each NOT_FOUND upload row
                 _abbrev_matches = []  # list of (row_id, security_id)
@@ -3461,6 +3476,11 @@ class UploadService:
                     """,
                     database=db
                 )
+
+            if _candidates:
+                # Invalidate abbrev cache so newly created securities are visible
+                # on the next ETL run without waiting for TTL expiry
+                UploadService._cis_abbrev_cache_ts = 0.0
 
             logger.info(f"[position_etl] Step 5B complete ({len(_candidates)} new securities created)")
 
