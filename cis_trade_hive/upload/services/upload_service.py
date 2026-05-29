@@ -1103,21 +1103,12 @@ class UploadService:
             _hdfs_tmp = None
             _hdfs_impala_done = False  # True if P2 Impala path handled ingest directly
 
-            logger.info(f"[ingest:svc] ===== FILE RESOLUTION upload_id={upload_id} =====")
-            logger.info(f"[ingest:svc] temp_file_path arg={temp_file_path!r}")
-            logger.info(f"[ingest:svc] temp_file_path exists={os.path.exists(temp_file_path) if temp_file_path else 'N/A'}")
-            logger.info(f"[ingest:svc] upload is None={upload is None}")
-            if upload:
-                logger.info(f"[ingest:svc] upload.hdfs_path={upload.get('hdfs_path')!r}")
-                logger.info(f"[ingest:svc] upload.file_path={upload.get('file_path')!r}")
-                logger.info(f"[ingest:svc] upload.row_count={upload.get('row_count')!r}")
-            logger.info(f"[ingest:svc] sample_data arg count={len(sample_data) if sample_data else 0}")
+            logger.debug(f"[ingest:svc] FILE RESOLUTION upload_id={upload_id} temp_file_path={temp_file_path!r}")
 
             if temp_file_path and os.path.exists(temp_file_path):
                 local_file = temp_file_path
-                logger.info(f"[ingest:svc] P1 RESOLVED — local temp file: {local_file}")
+                logger.debug(f"[ingest:svc] P1 — local temp file: {local_file}")
             else:
-                logger.info(f"[ingest:svc] P1 FAILED — local file not found, trying Impala/HDFS path")
                 # ----------------------------------------------------------------
                 # P2: HDFS file available — create a temporary Hive external table
                 #     pointing at the HDFS staging directory and INSERT directly
@@ -1125,9 +1116,8 @@ class UploadService:
                 #     No hdfs shell command needed — works on any Cloudera node.
                 # ----------------------------------------------------------------
                 hdfs_path_db = (upload.get('hdfs_path', '') or '').strip() if upload else ''
-                logger.info(f"[ingest:svc] P2 hdfs_path_db={hdfs_path_db!r}")
                 if hdfs_path_db and not is_session_upload:
-                    logger.info(f"[ingest:svc] P2 attempting Impala external table over HDFS: {hdfs_path_db}")
+                    logger.debug(f"[ingest:svc] P2 — Impala external table over HDFS: {hdfs_path_db}")
                     p2_success, p2_msg = self._ingest_via_hdfs_impala(
                         hdfs_path=hdfs_path_db,
                         target_table=target_table,
@@ -1139,41 +1129,30 @@ class UploadService:
                         ingestion_mode=ingestion_mode,
                     )
                     if p2_success:
-                        logger.info(f"[ingest:svc] P2 RESOLVED via Impala/HDFS: {p2_msg}")
+                        logger.debug(f"[ingest:svc] P2 OK: {p2_msg}")
                         if not is_session_upload:
                             self.repository.update_status(upload_id, UploadKuduRepository.STATUS_COMPLETED, updated_by)
                         return True, p2_msg
                     else:
-                        logger.warning(f"[ingest:svc] P2 FAILED — Impala/HDFS path: {p2_msg} — falling through to P3/P4")
-                else:
-                    logger.warning(f"[ingest:svc] P2 SKIPPED — hdfs_path_db empty or session upload")
+                        logger.warning(f"[ingest:svc] P2 FAILED — {p2_msg}")
 
             if not local_file:
-                logger.warning(f"[ingest:svc] P1+P2 FAILED — no local file, using row data")
                 if sample_data:
-                    logger.info(f"[ingest:svc] P3 RESOLVED — session sample_data ({len(sample_data)} rows)")
+                    logger.debug(f"[ingest:svc] P3 — session sample_data ({len(sample_data)} rows)")
                 else:
-                    logger.warning(f"[ingest:svc] P3 FAILED — sample_data arg empty, trying DB sample_data_json")
                     upload_sample = upload.get('sample_data_json', []) if upload else []
-                    logger.info(f"[ingest:svc] P4 sample_data_json type={type(upload_sample).__name__} len={len(upload_sample) if upload_sample else 0}")
                     if upload_sample:
                         if isinstance(upload_sample, str):
                             try:
                                 import json as json_module
                                 sample_data = json_module.loads(upload_sample)
-                                logger.info(f"[ingest:svc] P4 parsed → {len(sample_data)} rows")
                             except Exception as _je:
                                 logger.warning(f"[ingest:svc] P4 parse error: {_je}")
                                 sample_data = []
                         else:
                             sample_data = upload_sample
-                            logger.info(f"[ingest:svc] P4 already list → {len(sample_data)} rows")
-                    if sample_data:
-                        logger.warning(f"[ingest:svc] P4 FALLBACK — DB sample_data ({len(sample_data)} rows, CAPPED AT 20)")
-                    else:
-                        logger.error(f"[ingest:svc] ALL PRIORITIES FAILED — no data source available")
-
-            logger.info(f"[ingest:svc] FINAL: local_file={local_file!r} sample_data_rows={len(sample_data) if sample_data else 0}")
+                    if not sample_data:
+                        logger.error(f"[ingest:svc] ALL PRIORITIES FAILED — no data source available for upload_id={upload_id}")
 
             # If we have either a local file or sample_data, use INSERT VALUES
             if local_file or sample_data:
