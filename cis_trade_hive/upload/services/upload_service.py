@@ -2926,6 +2926,21 @@ class UploadService:
                         AND b.desc_prefix IS NOT NULL AND TRIM(b.desc_prefix) != ''
                         AND sn.is_active = true
                         AND UPPER(TRIM(sn.security_name)) = UPPER(TRIM(b.desc_prefix))
+                ),
+                -- Tier 5: security_description match — upload full_name matched against
+                -- cis_security.security_description (e.g. GMP-migrated securities store
+                -- the long name in description, not security_name)
+                tier5 AS (
+                    SELECT b.row_id, sn.security_id, sn.security_name, sn.isin,
+                           sn.exchange_code, sn.country_of_exchange, sn.currency_code,
+                           ROW_NUMBER() OVER (PARTITION BY b.row_id ORDER BY sn.security_id) AS rn
+                    FROM base_with_prefix b
+                    JOIN {db}.cis_security sn
+                        ON  b.match_type IN ('ISIN_NO_MATCH', 'NO_ISIN')
+                        AND b.security_full_name IS NOT NULL AND TRIM(b.security_full_name) != ''
+                        AND sn.is_active = true
+                        AND sn.security_description IS NOT NULL
+                        AND UPPER(TRIM(sn.security_description)) = UPPER(TRIM(b.security_full_name))
                 )
                 SELECT
                     b.row_id,
@@ -2941,42 +2956,48 @@ class UploadService:
                         CASE WHEN t1.rn = 1 THEN t1.security_id ELSE NULL END,
                         CASE WHEN t2.rn = 1 THEN t2.security_id ELSE NULL END,
                         CASE WHEN t3.rn = 1 THEN t3.security_id ELSE NULL END,
-                        CASE WHEN t4.rn = 1 THEN t4.security_id ELSE NULL END
+                        CASE WHEN t4.rn = 1 THEN t4.security_id ELSE NULL END,
+                        CASE WHEN t5.rn = 1 THEN t5.security_id ELSE NULL END
                     ) AS final_security_id,
                     COALESCE(
                         b.matched_security_name,
                         CASE WHEN t1.rn = 1 THEN t1.security_name ELSE NULL END,
                         CASE WHEN t2.rn = 1 THEN t2.security_name ELSE NULL END,
                         CASE WHEN t3.rn = 1 THEN t3.security_name ELSE NULL END,
-                        CASE WHEN t4.rn = 1 THEN t4.security_name ELSE NULL END
+                        CASE WHEN t4.rn = 1 THEN t4.security_name ELSE NULL END,
+                        CASE WHEN t5.rn = 1 THEN t5.security_name ELSE NULL END
                     ) AS final_security_name,
                     COALESCE(
                         b.matched_isin,
                         CASE WHEN t1.rn = 1 THEN t1.isin ELSE NULL END,
                         CASE WHEN t2.rn = 1 THEN t2.isin ELSE NULL END,
                         CASE WHEN t3.rn = 1 THEN t3.isin ELSE NULL END,
-                        CASE WHEN t4.rn = 1 THEN t4.isin ELSE NULL END
+                        CASE WHEN t4.rn = 1 THEN t4.isin ELSE NULL END,
+                        CASE WHEN t5.rn = 1 THEN t5.isin ELSE NULL END
                     ) AS final_isin,
                     COALESCE(
                         b.matched_exchange,
                         CASE WHEN t1.rn = 1 THEN t1.exchange_code ELSE NULL END,
                         CASE WHEN t2.rn = 1 THEN t2.exchange_code ELSE NULL END,
                         CASE WHEN t3.rn = 1 THEN t3.exchange_code ELSE NULL END,
-                        CASE WHEN t4.rn = 1 THEN t4.exchange_code ELSE NULL END
+                        CASE WHEN t4.rn = 1 THEN t4.exchange_code ELSE NULL END,
+                        CASE WHEN t5.rn = 1 THEN t5.exchange_code ELSE NULL END
                     ) AS final_exchange,
                     COALESCE(
                         b.matched_country,
                         CASE WHEN t1.rn = 1 THEN t1.country_of_exchange ELSE NULL END,
                         CASE WHEN t2.rn = 1 THEN t2.country_of_exchange ELSE NULL END,
                         CASE WHEN t3.rn = 1 THEN t3.country_of_exchange ELSE NULL END,
-                        CASE WHEN t4.rn = 1 THEN t4.country_of_exchange ELSE NULL END
+                        CASE WHEN t4.rn = 1 THEN t4.country_of_exchange ELSE NULL END,
+                        CASE WHEN t5.rn = 1 THEN t5.country_of_exchange ELSE NULL END
                     ) AS final_country,
                     COALESCE(
                         b.matched_currency,
                         CASE WHEN t1.rn = 1 THEN t1.currency_code ELSE NULL END,
                         CASE WHEN t2.rn = 1 THEN t2.currency_code ELSE NULL END,
                         CASE WHEN t3.rn = 1 THEN t3.currency_code ELSE NULL END,
-                        CASE WHEN t4.rn = 1 THEN t4.currency_code ELSE NULL END
+                        CASE WHEN t4.rn = 1 THEN t4.currency_code ELSE NULL END,
+                        CASE WHEN t5.rn = 1 THEN t5.currency_code ELSE NULL END
                     ) AS final_currency,
                     CASE
                         WHEN b.match_type = 'ISIN_MATCH'                       THEN 'ISIN_ONLY'
@@ -2984,6 +3005,7 @@ class UploadService:
                         WHEN t2.rn = 1 AND t2.security_id IS NOT NULL          THEN 'SHORT_NAME'
                         WHEN t3.rn = 1 AND t3.security_id IS NOT NULL          THEN 'TICKER'
                         WHEN t4.rn = 1 AND t4.security_id IS NOT NULL          THEN 'DESC_PREFIX'
+                        WHEN t5.rn = 1 AND t5.security_id IS NOT NULL          THEN 'SEC_DESCRIPTION'
                         ELSE                                                         'NONE'
                     END AS match_method,
                     CASE
@@ -2993,6 +3015,7 @@ class UploadService:
                         WHEN t2.rn = 1 AND t2.security_id IS NOT NULL          THEN 'SHORT_NAME_MATCH'
                         WHEN t3.rn = 1 AND t3.security_id IS NOT NULL          THEN 'TICKER_MATCH'
                         WHEN t4.rn = 1 AND t4.security_id IS NOT NULL          THEN 'DESC_PREFIX_MATCH'
+                        WHEN t5.rn = 1 AND t5.security_id IS NOT NULL          THEN 'SEC_DESCRIPTION_MATCH'
                         ELSE                                                         'NOT_FOUND: Create new security'
                     END AS security_status
                 FROM base_with_prefix b
@@ -3000,6 +3023,7 @@ class UploadService:
                 LEFT JOIN tier2 t2 ON b.row_id = t2.row_id AND t2.rn = 1
                 LEFT JOIN tier3 t3 ON b.row_id = t3.row_id AND t3.rn = 1
                 LEFT JOIN tier4 t4 ON b.row_id = t4.row_id AND t4.rn = 1
+                LEFT JOIN tier5 t5 ON b.row_id = t5.row_id AND t5.rn = 1
                 """,
                 database=db
             )
