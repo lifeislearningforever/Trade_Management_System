@@ -110,7 +110,13 @@ def discover_tables(spark: SparkSession, database: str) -> List[Dict]:
 
 
 def _detect_type(spark: SparkSession, database: str, table: str) -> Tuple[str, str]:
-    """Detect table type via DESCRIBE FORMATTED."""
+    """Detect table type via DESCRIBE FORMATTED.
+
+    Returns (type, kudu_table_name_or_location).
+    For Kudu tables the second element is the internal Kudu table name
+    (e.g. 'impala::gmp_cis.cis_trade') extracted from table properties,
+    which is what the Kudu Spark connector requires.
+    """
     try:
         desc_df = spark.sql(f"DESCRIBE FORMATTED {database}.{table}")
         rows = {
@@ -121,8 +127,19 @@ def _detect_type(spark: SparkSession, database: str, table: str) -> Tuple[str, s
         table_type_raw  = rows.get("Table Type", "").upper()
         location        = rows.get("Location", "")
 
+        # Both open-source KuduStorageHandler and Cloudera variant contain 'kudu'
         if "kudu" in storage_handler:
-            return TYPE_KUDU, location
+            # Extract the internal Kudu table name from table properties.
+            # DESCRIBE FORMATTED lists it as 'kudu.table_name' in the
+            # Storage Desc Params / Table Parameters section.
+            # Fall back to 'impala::<db>.<table>' if not found — Impala's
+            # default naming convention for Kudu tables created via Impala.
+            kudu_table = (
+                rows.get("kudu.table_name")
+                or rows.get("kudu.table")
+                or f"impala::{database}.{table}"
+            )
+            return TYPE_KUDU, kudu_table
         elif "external" in table_type_raw:
             return TYPE_EXTERNAL, location
         else:
@@ -201,11 +218,17 @@ class FullBackup:
 
         try:
             if ttype == TYPE_KUDU:
+                # table_info["location"] holds the internal Kudu table name
+                # (e.g. 'impala::gmp_cis.cis_trade') extracted by _detect_type.
+                # The Kudu Spark connector requires this name, NOT the Hive
+                # database-qualified name 'gmp_cis.cis_trade'.
+                kudu_table_name = table_info.get("location") or f"impala::{full}"
+                print(f"  Kudu table name: {kudu_table_name}")
                 df = (
                     self.spark.read
                     .format("org.apache.kudu.spark.kudu")
                     .option("kudu.master", self.config['kudu_master'])
-                    .option("kudu.table", full)
+                    .option("kudu.table", kudu_table_name)
                     .option("kudu.scanRequestTimeoutMs",
                             str(self.config['scan_timeout_ms']))
                     .load()
