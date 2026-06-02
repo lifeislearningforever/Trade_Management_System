@@ -89,7 +89,7 @@ class CurrencyListViewTestCase(TestCase):
         response = self.client.get(self.url, {'export': 'csv'})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response['Content-Type'], 'text/csv')
+        self.assertIn('text/csv', response['Content-Type'])
         self.assertIn('attachment', response['Content-Disposition'])
         self.assertIn('currencies', response['Content-Disposition'])
 
@@ -180,7 +180,7 @@ class CountryListViewTestCase(TestCase):
         response = self.client.get(self.url, {'export': 'csv'})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response['Content-Type'], 'text/csv')
+        self.assertIn('text/csv', response['Content-Type'])
 
         content = response.content.decode('utf-8')
         self.assertIn('US', content)
@@ -252,7 +252,7 @@ class CalendarListViewTestCase(TestCase):
         response = self.client.get(self.url, {'export': 'csv'})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response['Content-Type'], 'text/csv')
+        self.assertIn('text/csv', response['Content-Type'])
 
         content = response.content.decode('utf-8')
         self.assertIn('NYC', content)
@@ -380,7 +380,7 @@ class CounterpartyListViewTestCase(TestCase):
         response = self.client.get(self.url, {'export': 'csv'})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response['Content-Type'], 'text/csv')
+        self.assertIn('text/csv', response['Content-Type'])
 
         content = response.content.decode('utf-8')
         self.assertIn('ABC', content)

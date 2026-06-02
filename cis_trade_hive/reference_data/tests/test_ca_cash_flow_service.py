@@ -762,7 +762,7 @@ class CACashFlowServiceTestCase(TestCase):
         from reference_data.services.ca_cash_flow_service import CACashFlowService
 
         # Cash flow CA types include various dividend and interest types
-        expected_types = ['DIVIDEND', 'SPECIAL_DIVIDEND', 'INTEREST', 'COUPON', 'ROC', 'CAPITAL_DISTRIBUTION']
+        expected_types = ['DIVIDEND', 'SPECIAL_DIVIDEND', 'INTEREST', 'COUPON', 'ROC', 'CAPITAL_DISTRIBUTION', 'INCOME_DISTRIBUTION']
         self.assertEqual(CACashFlowService.CASH_FLOW_CA_TYPES, expected_types)
 
     def test_ca_to_cf_type_map(self):

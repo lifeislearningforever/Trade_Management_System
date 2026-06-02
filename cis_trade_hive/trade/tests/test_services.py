@@ -609,9 +609,12 @@ class TradeDropdownServiceTestCase(TestCase):
     # _GET_UDF_OPTIONS TESTS
     # =========================================================================
 
+    @patch('trade.services.trade_dropdown_service.cache')
     @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    def test_get_udf_options_success(self, mock_udf_repo):
-        """Test _get_udf_options success"""
+    def test_get_udf_options_success(self, mock_udf_repo, mock_cache):
+        """Test _get_udf_options success (cache miss forces DB query)"""
+        mock_cache.get.return_value = None  # Force cache miss
+        mock_udf_repo.get_all.return_value = []  # No batch data
         mock_udf_repo.get_field_values.return_value = [
             {'field_value': 'VALUE_ONE'},
             {'field_value': 'VALUE_TWO'}
@@ -621,7 +624,6 @@ class TradeDropdownServiceTestCase(TestCase):
 
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0]['value'], 'VALUE_ONE')
-        # Label should be title-cased
         mock_udf_repo.get_field_values.assert_called_with('TRADE', 'Test Field')
 
     @patch('trade.services.trade_dropdown_service.udf_field_repository')

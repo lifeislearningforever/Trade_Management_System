@@ -550,5 +550,16 @@ class FXRateHiveRepository:
             return None
 
 
+    @staticmethod
+    def get_unique_currency_pairs() -> List[str]:
+        """Alias for get_currency_pairs()."""
+        return FXRateHiveRepository.get_currency_pairs()
+
+    @staticmethod
+    def get_latest_fx_rates(limit: int = 100) -> List[Dict[str, Any]]:
+        """Alias for get_latest_rates()."""
+        return FXRateHiveRepository.get_latest_rates(limit=limit)
+
+
 # Singleton instance
 fx_rate_hive_repository = FXRateHiveRepository()

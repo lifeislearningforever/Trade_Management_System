@@ -302,23 +302,107 @@ def trade_list(request):
 
         writer = csv.writer(response)
         writer.writerow([
-            'Deal Number', 'Type', 'Portfolio', 'Security',
-            'Trade Date', 'Settle Date', 'Quantity', 'Price',
-            'Total Amount', 'Status'
+            # Identity
+            'Deal Number', 'Trade Type', 'Status', 'Trade Status',
+            # Portfolio & Security
+            'Portfolio', 'Portfolio Full Name', 'Security', 'Security Full Name', 'Security Type',
+            # Dates
+            'Trade Date', 'Settle Date', 'Org. Purchase Date',
+            # Quantities & Prices
+            'Quantity', 'Face Value', 'Lot', 'Price',
+            # Currency
+            'Currency (FC)', 'Portfolio Currency (LC)', 'Open FX Rate',
+            # Amounts
+            'Total Amount', 'Total Amount (FC)', 'Total Amount (LC)',
+            # Charges (manual)
+            'Commission', 'Accrued Interest', 'SEC Fee', 'Other Charges',
+            # Charges (auto-calculated)
+            'Calc. Commission', 'Calc. Clearing Fee', 'Calc. Trading Fee',
+            'Calc. GST', 'Calc. Other Fees', 'Total Calculated Charges',
+            # Counterparty & Broker
+            'Counterparty', 'Broker', 'Broker Name', 'Custodian',
+            # Position & Settlement
+            'Open/Close', 'Extension', 'Selling Rule', 'Cash Balance',
+            'Curr. Dealing', 'Open Dealing', 'Qty Entitled', 'Input Tax (Oth)',
+            # GL / Reference
+            'GL Fund Type', 'GL Cost Centre', 'GL Account Code',
+            'Contract Ref', 'FD Receipt', 'Amor/Accr Method',
+            # Charge Rule
+            'Charge Fee Type', 'Charge Exchange', 'Charge Country', 'Charge Fee Rule',
+            # UDF Fields
+            'UDF Fund Type', 'UDF Section 31/26', 'UDF Sub Custodian',
+            'UDF Revision Code', 'UDF UOBN/UOBN HK', 'UDF Income/Exp Type',
+            'UDF Disclosure Req', 'UDF Counter Pledged', 'UDF Currency Hedge',
+            # Remarks
+            'Remarks',
         ])
 
         for trade in trades_data:
             writer.writerow([
                 trade.get('deal_number', ''),
                 trade.get('trade_type', ''),
+                trade.get('status', ''),
+                trade.get('trade_status', ''),
                 trade.get('portfolio_short_name', ''),
+                trade.get('portfolio_full_name', ''),
                 trade.get('security_label', ''),
+                trade.get('security_full_name', ''),
+                trade.get('security_type', ''),
                 trade.get('trade_date', ''),
                 trade.get('settle_date', ''),
+                trade.get('org_pur_date', ''),
                 trade.get('quantity', ''),
+                trade.get('face_value', ''),
+                trade.get('lot', ''),
                 trade.get('price', ''),
+                trade.get('currency_code', ''),
+                trade.get('portfolio_currency', ''),
+                trade.get('open_fx_rate', ''),
                 trade.get('total_amount', ''),
-                trade.get('status', '')
+                trade.get('total_amount_fc', ''),
+                trade.get('total_amount_lc', ''),
+                trade.get('commission', ''),
+                trade.get('accrued_interest', ''),
+                trade.get('sec_fee', ''),
+                trade.get('other_charges', ''),
+                trade.get('calculated_commission', ''),
+                trade.get('calculated_clearing_fee', ''),
+                trade.get('calculated_trading_fee', ''),
+                trade.get('calculated_gst', ''),
+                trade.get('calculated_other_fees', ''),
+                trade.get('total_calculated_charges', ''),
+                trade.get('counterparty', ''),
+                trade.get('brokers', ''),
+                trade.get('broker_name', ''),
+                trade.get('custodian', ''),
+                trade.get('open_close_position', ''),
+                trade.get('extension', ''),
+                trade.get('selling_rule', ''),
+                trade.get('cash_balance', ''),
+                trade.get('curr_dealing', ''),
+                trade.get('open_dealing', ''),
+                trade.get('qty_entitled', ''),
+                trade.get('input_tax_oth', ''),
+                trade.get('gl_fund_type', ''),
+                trade.get('gl_cost_centre', ''),
+                trade.get('gl_account_code', ''),
+                trade.get('contract_ref', ''),
+                trade.get('fd_receipt', ''),
+                trade.get('amor_accr_method', ''),
+                trade.get('charge_fee_type', ''),
+                trade.get('charge_exchange', ''),
+                trade.get('charge_country', ''),
+                trade.get('charge_fee_rule', ''),
+                trade.get('udf_fund_type', ''),
+                trade.get('udf_section_31_26', ''),
+                trade.get('udf_sub_custodian', ''),
+                trade.get('udf_revision_code', ''),
+                trade.get('udf_uobn_uobn_hk', ''),
+                trade.get('udf_income_exp_type', ''),
+                trade.get('udf_disclosure_req', ''),
+                trade.get('udf_counter_pledged', ''),
+                trade.get('udf_currency_hedge', ''),
+                trade.get('remarks', ''),
             ])
 
         user_info = get_user_info(request)

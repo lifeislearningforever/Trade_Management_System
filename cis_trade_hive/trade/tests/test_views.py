@@ -388,14 +388,16 @@ class TradeCreateViewTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'trade/trade_form.html')
 
+    @patch('trade.views.cache')
     @patch('trade.views.trade_dropdown_service')
     @patch('trade.views.trade_kudu_repository')
     @patch('trade.views.audit_log_kudu_repository')
-    def test_trade_create_post_success(self, mock_audit, mock_repo, mock_dropdown):
+    def test_trade_create_post_success(self, mock_audit, mock_repo, mock_dropdown, mock_cache):
         """Test successful trade creation using fast insert"""
+        mock_cache.get.return_value = None  # No dedup hit
         mock_dropdown.get_all_dropdown_options.return_value = {}
-        mock_repo.validate_trade_data.return_value = (True, [], {})  # Now returns 3 values
-        mock_repo.insert_trade_fast.return_value = 1001  # Using fast insert method
+        mock_repo.validate_trade_data.return_value = (True, [], {})
+        mock_repo.insert_trade_fast.return_value = (1001, 'DEAL-20240115-1001')
 
         response = self.client.post(reverse('trade:create'), {
             'trade_type': 'BUY',
@@ -407,7 +409,7 @@ class TradeCreateViewTestCase(TestCase):
         })
 
         self.assertEqual(response.status_code, 302)  # Redirect
-        mock_repo.insert_trade_fast.assert_called_once()  # Updated to fast insert
+        mock_repo.insert_trade_fast.assert_called_once()
 
     @patch('trade.views.trade_dropdown_service')
     @patch('trade.views.trade_kudu_repository')
@@ -475,18 +477,20 @@ class TradeEditViewTestCase(TestCase):
 
         self.assertEqual(response.status_code, 302)  # Redirect
 
+    @patch('trade.views.trade_dropdown_service')
     @patch('trade.views.trade_kudu_repository')
-    def test_trade_edit_invalid_status(self, mock_repo):
-        """Test cannot edit settled trade"""
+    def test_trade_edit_invalid_status(self, mock_repo, mock_dropdown):
+        """Test CIS settled trade can be edited (all statuses allowed)"""
         mock_repo.get_trade_by_id.return_value = {
             'trade_id': 1,
             'status': 'SETTLED',
             'src_system': 'CIS'
         }
+        mock_dropdown.get_all_dropdown_options.return_value = {}
 
         response = self.client.get(reverse('trade:edit', kwargs={'trade_id': 1}))
 
-        self.assertEqual(response.status_code, 302)  # Redirect
+        self.assertEqual(response.status_code, 200)  # Edit allowed in any status
 
 
 class TradeWorkflowViewsTestCase(TestCase):
@@ -1041,12 +1045,14 @@ class TradeCreateExceptionTestCase(TestCase):
         """Set up test client"""
         self.client = Client()
 
+    @patch('trade.views.cache')
     @patch('trade.views.trade_dropdown_service')
     @patch('trade.views.trade_kudu_repository')
-    def test_trade_create_insert_returns_none(self, mock_repo, mock_dropdown):
+    def test_trade_create_insert_returns_none(self, mock_repo, mock_dropdown, mock_cache):
         """Test trade create when insert_trade_fast returns None"""
+        mock_cache.get.return_value = None  # No dedup hit
         mock_dropdown.get_all_dropdown_options.return_value = {}
-        mock_repo.validate_trade_data.return_value = (True, [], {})  # Now returns 3 values
+        mock_repo.validate_trade_data.return_value = (True, [], {})
         mock_repo.insert_trade_fast.return_value = None  # Simulate failure (using fast insert)
 
         response = self.client.post(
@@ -1064,12 +1070,14 @@ class TradeCreateExceptionTestCase(TestCase):
 
         self.assertEqual(response.status_code, 200)  # Re-render form
 
+    @patch('trade.views.cache')
     @patch('trade.views.trade_dropdown_service')
     @patch('trade.views.trade_kudu_repository')
-    def test_trade_create_value_error(self, mock_repo, mock_dropdown):
+    def test_trade_create_value_error(self, mock_repo, mock_dropdown, mock_cache):
         """Test trade create with ValueError exception using fast insert"""
+        mock_cache.get.return_value = None  # No dedup hit
         mock_dropdown.get_all_dropdown_options.return_value = {}
-        mock_repo.validate_trade_data.return_value = (True, [], {})  # Now returns 3 values
+        mock_repo.validate_trade_data.return_value = (True, [], {})
         mock_repo.insert_trade_fast.side_effect = ValueError("Invalid data")
 
         response = self.client.post(

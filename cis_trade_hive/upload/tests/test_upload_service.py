@@ -409,7 +409,7 @@ class EscapeValueTestCase(TestCase):
 
     def test_string_with_single_quote(self):
         result = self.repo.escape_value("it's")
-        self.assertIn("''", result)
+        self.assertIn("\\'", result)
 
     def test_string_with_backslash(self):
         result = self.repo.escape_value("a\\b")

@@ -67,7 +67,7 @@ def test_create_operation():
 
     print(f"Creating equity price: {test_data['security_label']}")
 
-    success = EquityPriceHiveRepository.insert_equity_price(
+    success = EquityPriceHiveRepository.upsert_equity_price(
         equity_price_data=test_data,
         username='TEST_USER'
     )

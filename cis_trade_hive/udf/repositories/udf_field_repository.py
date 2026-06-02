@@ -489,6 +489,45 @@ class UDFFieldRepository:
             return False
 
     # ========================================================================
+    # HELPER METHODS
+    # ========================================================================
+
+    def add_field_definition(self, object_type: str, field_name: str, created_by: str) -> bool:
+        """Create a field definition (field_value='') as a placeholder."""
+        return bool(self.create({
+            'object_type': object_type,
+            'field_name': field_name,
+            'field_value': '',
+            'is_active': True,
+            'created_by': created_by,
+        }))
+
+    def add_field_value(self, object_type: str, field_name: str, field_value: str, created_by: str) -> bool:
+        """Create a field value entry. Raises ValueError if field_value is empty."""
+        if not field_value:
+            raise ValueError("field_value cannot be empty or None")
+        return bool(self.create({
+            'object_type': object_type,
+            'field_name': field_name,
+            'field_value': field_value,
+            'is_active': True,
+            'created_by': created_by,
+        }))
+
+    def get_next_id(self) -> int:
+        """Return a timestamp-based unique ID (milliseconds)."""
+        import time
+        return int(time.time() * 1000)
+
+    def update_by_id(self, udf_id: str, field_data: Dict[str, Any]) -> bool:
+        """Alias for update() — update by composite-key-derived ID."""
+        return self.update(udf_id, field_data)
+
+    def get_stats_by_entity(self) -> List[Dict[str, Any]]:
+        """Alias for get_dashboard_stats()."""
+        return self.get_dashboard_stats()
+
+    # ========================================================================
     # DASHBOARD STATISTICS
     # ========================================================================
 

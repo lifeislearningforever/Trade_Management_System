@@ -612,7 +612,7 @@ class TestNotificationConsumerNotificationSend:
         await consumer.notification_send(event)
         consumer.send_json.assert_called_once()
         msg = consumer.send_json.call_args[0][0]
-        assert msg['type'] == EVT_AVP_COMPLETED
+        assert msg['event_type'] == EVT_AVP_COMPLETED
         assert msg['severity'] == SEV_SUCCESS
         assert 'payload' in msg
 
@@ -623,7 +623,7 @@ class TestNotificationConsumerNotificationSend:
         consumer.send_json.reset_mock()
         await consumer.notification_send({})  # empty event
         msg = consumer.send_json.call_args[0][0]
-        assert msg['type'] == 'notification'
+        assert msg['event_type'] == 'notification'
         assert msg['severity'] == SEV_INFO
         assert 'timestamp' in msg
 

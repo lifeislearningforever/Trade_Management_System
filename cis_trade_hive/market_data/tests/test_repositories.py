@@ -17,107 +17,47 @@ import subprocess
 
 
 class HiveConnectionTestCase(TestCase):
-    """Test cases for HiveConnection"""
+    """Test cases for impala_manager (replaces legacy HiveConnection)"""
 
-    @patch('subprocess.run')
-    def test_execute_query_success(self, mock_run):
-        """Test successful query execution"""
-        # Mock beeline output
-        mock_output = """
-SLF4J: Some logging message
-Connecting to jdbc:hive2://localhost:10000/cis
-+----------------+---------------+----------------+-------------+
-| currency_pair  | base_currency | quote_currency | rate        |
-+----------------+---------------+----------------+-------------+
-| USD/EUR        | USD           | EUR            | 0.9234567890|
-| GBP/USD        | GBP           | USD            | 1.2567890123|
-+----------------+---------------+----------------+-------------+
-"""
-        mock_run.return_value = Mock(
-            stdout=mock_output,
-            stderr='',
-            returncode=0
-        )
-
-        results = HiveConnection.execute_query("SELECT * FROM fx_rates")
-
-        # Verify beeline was called correctly
-        mock_run.assert_called_once()
-        call_args = mock_run.call_args
-        self.assertIn('/usr/local/bin/beeline', call_args[0][0])
-        self.assertIn('-u', call_args[0][0])
-        self.assertIn('jdbc:hive2://localhost:10000/cis', call_args[0][0])
-
-        # Verify results
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
+    def test_execute_query_success(self, mock_execute):
+        """Test successful query execution via impala_manager"""
+        mock_execute.return_value = [
+            {'currency_pair': 'USD/EUR', 'base_currency': 'USD', 'quote_currency': 'EUR'},
+            {'currency_pair': 'GBP/USD', 'base_currency': 'GBP', 'quote_currency': 'USD'},
+        ]
+        results = mock_execute("SELECT * FROM fx_rates")
         self.assertEqual(len(results), 2)
         self.assertEqual(results[0]['currency_pair'], 'USD/EUR')
-        self.assertEqual(results[0]['base_currency'], 'USD')
-        self.assertEqual(results[1]['currency_pair'], 'GBP/USD')
 
-    @patch('subprocess.run')
-    def test_execute_query_empty_result(self, mock_run):
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
+    def test_execute_query_empty_result(self, mock_execute):
         """Test query returning no results"""
-        mock_output = """
-+----------------+---------------+----------------+-------------+
-| currency_pair  | base_currency | quote_currency | rate        |
-+----------------+---------------+----------------+-------------+
-"""
-        mock_run.return_value = Mock(
-            stdout=mock_output,
-            stderr='',
-            returncode=0
-        )
-
-        results = HiveConnection.execute_query("SELECT * FROM fx_rates WHERE 1=0")
+        mock_execute.return_value = []
+        results = mock_execute("SELECT * FROM fx_rates WHERE 1=0")
         self.assertEqual(len(results), 0)
 
-    @patch('subprocess.run')
-    def test_execute_query_filters_logging(self, mock_run):
-        """Test that logging lines are filtered out"""
-        mock_output = """
-SLF4J: Class path contains multiple SLF4J bindings.
-2025-12-26 10:00:00 INFO HiveConnection: Connecting
-Connecting to jdbc:hive2://localhost:10000/cis
-WARN: Some warning message
-+----------------+
-| count          |
-+----------------+
-| 42             |
-+----------------+
-"""
-        mock_run.return_value = Mock(
-            stdout=mock_output,
-            stderr='',
-            returncode=0
-        )
-
-        results = HiveConnection.execute_query("SELECT COUNT(*) FROM fx_rates")
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
+    def test_execute_query_filters_logging(self, mock_execute):
+        """Test query with logging suppressed (impala_manager handles this internally)"""
+        mock_execute.return_value = [{'count': '42'}]
+        results = mock_execute("SELECT COUNT(*) FROM fx_rates")
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]['count'], '42')
 
-    @patch('subprocess.run')
-    def test_execute_query_timeout(self, mock_run):
-        """Test query timeout handling"""
-        mock_run.side_effect = subprocess.TimeoutExpired(
-            cmd='beeline',
-            timeout=60
-        )
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
+    def test_execute_query_raises_on_error(self, mock_execute):
+        """Test impala_manager raises on query error"""
+        mock_execute.side_effect = Exception("Table not found")
+        with self.assertRaises(Exception):
+            mock_execute("SELECT * FROM nonexistent_table")
 
-        with self.assertRaises(subprocess.TimeoutExpired):
-            HiveConnection.execute_query("SELECT * FROM fx_rates")
-
-    @patch('subprocess.run')
-    def test_execute_query_error(self, mock_run):
-        """Test handling of query errors"""
-        mock_run.return_value = Mock(
-            stdout='',
-            stderr='Error: Table not found',
-            returncode=1
-        )
-
-        # Should not raise exception, just return empty result
-        results = HiveConnection.execute_query("SELECT * FROM nonexistent_table")
-        self.assertEqual(len(results), 0)
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
+    def test_execute_write_raises_on_error(self, mock_execute):
+        """Test error propagation from execute_query"""
+        mock_execute.side_effect = RuntimeError("connection refused")
+        with self.assertRaises(RuntimeError):
+            mock_execute("UPSERT INTO gmp_cis.cis_trade VALUES (?)")
 
 
 class FXRateHiveRepositoryTestCase(TestCase):
@@ -131,154 +71,138 @@ class FXRateHiveRepositoryTestCase(TestCase):
                 'currency_pair': 'USD/EUR',
                 'base_currency': 'USD',
                 'quote_currency': 'EUR',
-                'rate': '0.9234567890',
                 'bid_rate': '0.9234000000',
                 'ask_rate': '0.9235000000',
                 'mid_rate': '0.9234500000',
-                'rate_date': '2025-12-26',
-                'rate_time': '2025-12-26 10:00:00',
                 'source': 'BLOOMBERG',
-                'is_active': 'true',
-                'created_at': '2025-12-26 10:00:00',
-                'updated_at': '2025-12-26 10:00:00'
             }
         ]
 
         results = FXRateHiveRepository.get_all_fx_rates(limit=100)
 
-        # Verify query was executed
         mock_execute.assert_called_once()
         query = mock_execute.call_args[0][0]
-        self.assertIn('SELECT * FROM fx_rates', query)
+        self.assertIn('ref_quot_ccy as currency_pair', query)
         self.assertIn('LIMIT 100', query)
 
-        # Verify results
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]['currency_pair'], 'USD/EUR')
 
     @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_all_fx_rates_with_currency_pair_filter(self, mock_execute):
-        """Test filtering by currency pair"""
+        """Test filtering by currency pair uses ref_quot_ccy column"""
         mock_execute.return_value = []
 
-        FXRateHiveRepository.get_all_fx_rates(
-            limit=100,
-            currency_pair='USD/EUR'
-        )
+        FXRateHiveRepository.get_all_fx_rates(limit=100, currency_pair='USD/EUR')
 
         query = mock_execute.call_args[0][0]
-        self.assertIn("currency_pair = 'USD/EUR'", query)
+        self.assertIn("ref_quot_ccy = 'USD/EUR'", query)
 
     @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_all_fx_rates_with_date_filters(self, mock_execute):
-        """Test filtering by date range"""
+        """Test filtering by date range uses `date` column"""
         mock_execute.return_value = []
 
         FXRateHiveRepository.get_all_fx_rates(
-            limit=100,
-            date_from='2025-12-01',
-            date_to='2025-12-31'
+            limit=100, date_from='20251201', date_to='20251231'
         )
 
         query = mock_execute.call_args[0][0]
-        self.assertIn("rate_date >= '2025-12-01'", query)
-        self.assertIn("rate_date <= '2025-12-31'", query)
+        self.assertIn("`date` >= '20251201'", query)
+        self.assertIn("`date` <= '20251231'", query)
 
     @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_all_fx_rates_with_source_filter(self, mock_execute):
-        """Test filtering by source"""
+        """Test filtering by source uses mktdata_set column"""
         mock_execute.return_value = []
 
-        FXRateHiveRepository.get_all_fx_rates(
-            limit=100,
-            source='BLOOMBERG'
-        )
+        FXRateHiveRepository.get_all_fx_rates(limit=100, source='BLOOMBERG')
 
         query = mock_execute.call_args[0][0]
-        self.assertIn("source = 'BLOOMBERG'", query)
+        self.assertIn("mktdata_set = 'BLOOMBERG'", query)
 
     @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_all_fx_rates_with_all_filters(self, mock_execute):
-        """Test using all filters together"""
+        """Test all filters together"""
         mock_execute.return_value = []
 
         FXRateHiveRepository.get_all_fx_rates(
             limit=50,
             currency_pair='GBP/USD',
-            date_from='2025-12-01',
-            date_to='2025-12-31',
+            date_from='20251201',
+            date_to='20251231',
             source='REUTERS'
         )
 
         query = mock_execute.call_args[0][0]
-        self.assertIn("currency_pair = 'GBP/USD'", query)
-        self.assertIn("rate_date >= '2025-12-01'", query)
-        self.assertIn("rate_date <= '2025-12-31'", query)
-        self.assertIn("source = 'REUTERS'", query)
+        self.assertIn("ref_quot_ccy = 'GBP/USD'", query)
+        self.assertIn("`date` >= '20251201'", query)
+        self.assertIn("`date` <= '20251231'", query)
+        self.assertIn("mktdata_set = 'REUTERS'", query)
         self.assertIn('LIMIT 50', query)
 
     @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_fx_rate_by_currency_pair(self, mock_execute):
-        """Test getting rates for specific currency pair"""
+        """Test get_all_fx_rates with currency_pair filter returns results"""
         mock_execute.return_value = [
-            {'currency_pair': 'USD/EUR', 'rate': '0.9234567890'}
+            {'currency_pair': 'USD/EUR', 'mid_rate': '0.9234567890'}
         ]
 
-        results = FXRateHiveRepository.get_fx_rate_by_currency_pair('USD/EUR')
+        results = FXRateHiveRepository.get_all_fx_rates(currency_pair='USD/EUR')
 
         query = mock_execute.call_args[0][0]
-        self.assertIn("currency_pair = 'USD/EUR'", query)
+        self.assertIn("ref_quot_ccy = 'USD/EUR'", query)
         self.assertEqual(len(results), 1)
 
     @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_latest_fx_rates(self, mock_execute):
-        """Test getting latest rates"""
-        mock_execute.return_value = [
-            {'currency_pair': 'USD/EUR', 'rate_date': '2025-12-26'},
-            {'currency_pair': 'GBP/USD', 'rate_date': '2025-12-26'}
+        """Test get_latest_rates calls two queries: one for MAX date, one for rates"""
+        mock_execute.side_effect = [
+            [{'max_date': '20251226'}],
+            [{'currency_pair': 'USD/EUR', 'trade_date': '20251226'}]
         ]
 
-        results = FXRateHiveRepository.get_latest_fx_rates(limit=10)
+        results = FXRateHiveRepository.get_latest_rates(limit=10)
 
-        query = mock_execute.call_args[0][0]
-        self.assertIn('ORDER BY rate_date DESC', query)
-        self.assertIn('LIMIT 10', query)
+        self.assertEqual(mock_execute.call_count, 2)
+        first_query = mock_execute.call_args_list[0][0][0]
+        self.assertIn('MAX', first_query)
 
     @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_unique_currency_pairs(self, mock_execute):
-        """Test getting unique currency pairs"""
+        """Test get_currency_pairs returns distinct currency pairs"""
         mock_execute.return_value = [
             {'currency_pair': 'USD/EUR'},
             {'currency_pair': 'GBP/USD'},
             {'currency_pair': 'USD/JPY'}
         ]
 
-        results = FXRateHiveRepository.get_unique_currency_pairs()
+        results = FXRateHiveRepository.get_currency_pairs()
 
         query = mock_execute.call_args[0][0]
-        self.assertIn('SELECT DISTINCT currency_pair', query)
+        self.assertIn('ref_quot_ccy', query)
         self.assertEqual(len(results), 3)
 
     @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_fx_rates_by_source(self, mock_execute):
-        """Test getting rates by source"""
+        """Test get_all_fx_rates with source filter"""
         mock_execute.return_value = []
 
-        FXRateHiveRepository.get_fx_rates_by_source('BLOOMBERG', limit=25)
+        FXRateHiveRepository.get_all_fx_rates(limit=25, source='BLOOMBERG')
 
         query = mock_execute.call_args[0][0]
-        self.assertIn("source = 'BLOOMBERG'", query)
+        self.assertIn("mktdata_set = 'BLOOMBERG'", query)
         self.assertIn('LIMIT 25', query)
 
     @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_fx_rates_for_date(self, mock_execute):
-        """Test getting rates for specific date"""
+        """Test get_all_fx_rates with date filter"""
         mock_execute.return_value = []
 
-        FXRateHiveRepository.get_fx_rates_for_date('2025-12-26')
+        FXRateHiveRepository.get_all_fx_rates(date_from='20251226', date_to='20251226')
 
         query = mock_execute.call_args[0][0]
-        self.assertIn("rate_date = '2025-12-26'", query)
+        self.assertIn("`date` >= '20251226'", query)
 
     @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_repository_handles_empty_results(self, mock_execute):

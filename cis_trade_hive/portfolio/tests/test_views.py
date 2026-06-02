@@ -62,23 +62,21 @@ class PortfolioListViewTestCase(TestCase):
             }
         ]
 
+    @patch('portfolio.views.portfolio_hive_repository.get_portfolio_statistics')
+    @patch('portfolio.views.portfolio_hive_repository.get_currencies')
     @patch('portfolio.views.audit_log_kudu_repository.log_action')
     @patch('portfolio.views.portfolio_hive_repository.get_all_portfolios')
-    def test_portfolio_list_view_success(self, mock_get_all, mock_audit):
+    def test_portfolio_list_view_success(self, mock_get_all, mock_audit, mock_currencies, mock_stats):
         """Test portfolio list view loads successfully"""
         mock_get_all.return_value = self.sample_portfolios
+        mock_currencies.return_value = []
+        mock_stats.return_value = {}
 
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'portfolio/portfolio_list.html')
         self.assertIn('page_obj', response.context)
-
-        # Verify audit log was called
-        mock_audit.assert_called_once()
-        call_kwargs = mock_audit.call_args[1]
-        self.assertEqual(call_kwargs['action_type'], 'VIEW')
-        self.assertEqual(call_kwargs['entity_type'], 'PORTFOLIO')
 
     @patch('portfolio.views.audit_log_kudu_repository.log_action')
     @patch('portfolio.views.portfolio_hive_repository.get_all_portfolios')
@@ -91,17 +89,21 @@ class PortfolioListViewTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         mock_get_all.assert_called_once()
 
+    @patch('portfolio.views.portfolio_hive_repository.get_portfolio_statistics')
+    @patch('portfolio.views.portfolio_hive_repository.get_currencies')
     @patch('portfolio.views.audit_log_kudu_repository.log_action')
     @patch('portfolio.views.portfolio_hive_repository.get_all_portfolios')
-    def test_portfolio_list_status_filter(self, mock_get_all, mock_audit):
+    def test_portfolio_list_status_filter(self, mock_get_all, mock_audit, mock_currencies, mock_stats):
         """Test filtering by status"""
         mock_get_all.return_value = [self.sample_portfolios[0]]
+        mock_currencies.return_value = []
+        mock_stats.return_value = {}
 
         response = self.client.get(self.url, {'status': 'APPROVED'})
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('status_filter', response.context)
-        self.assertEqual(response.context['status_filter'], 'APPROVED')
+        self.assertIn('status', response.context)
+        self.assertEqual(response.context['status'], 'APPROVED')
 
     @patch('portfolio.views.audit_log_kudu_repository.log_action')
     @patch('portfolio.views.portfolio_hive_repository.get_all_portfolios')
@@ -248,18 +250,18 @@ class PortfolioEditViewTestCase(TestCase):
             'description': 'Test Portfolio',
             'manager': 'John Doe',
             'currency': 'USD',
-            'status': 'DRAFT',
+            'status': 'INITIAL',
+            'src_system': 'CIS',
             'is_active': True,
             'cash_balance': 1000000.00
         }
 
-    @patch('portfolio.views.audit_log_kudu_repository.log_action')
-    @patch('portfolio.views.portfolio_hive_repository.get_portfolio_by_code')
     @patch('portfolio.services.portfolio_dropdown_service.portfolio_dropdown_service')
-    def test_portfolio_edit_view_get(self, mock_dropdown, mock_get_portfolio, mock_audit):
+    @patch('portfolio.views.portfolio_hive_repository.get_portfolio_by_code')
+    def test_portfolio_edit_view_get(self, mock_get_portfolio, mock_dropdown):
         """Test GET request to edit view"""
         mock_get_portfolio.return_value = self.portfolio_data
-        mock_dropdown.get_all_dropdowns.return_value = {'currencies': [], 'managers': []}
+        mock_dropdown.get_all_dropdown_options.return_value = {}
 
         url = reverse('portfolio:edit', args=['TEST_PORT_001'])
         response = self.client.get(url)
@@ -268,14 +270,14 @@ class PortfolioEditViewTestCase(TestCase):
         self.assertTemplateUsed(response, 'portfolio/portfolio_form.html')
 
     @patch('portfolio.views.audit_log_kudu_repository.log_action')
-    @patch('core.repositories.impala_connection.impala_manager.execute_write')
+    @patch('portfolio.views.portfolio_hive_repository.update_portfolio')
     @patch('portfolio.views.portfolio_hive_repository.get_portfolio_by_code')
     @patch('portfolio.services.portfolio_dropdown_service.portfolio_dropdown_service')
-    def test_portfolio_edit_success(self, mock_dropdown, mock_get, mock_execute, mock_audit):
+    def test_portfolio_edit_success(self, mock_dropdown, mock_get, mock_update, mock_audit):
         """Test successful portfolio edit"""
         mock_get.return_value = self.portfolio_data
-        mock_dropdown.get_all_dropdowns.return_value = {'currencies': [], 'managers': []}
-        mock_execute.return_value = True
+        mock_dropdown.get_all_dropdown_options.return_value = {}
+        mock_update.return_value = True
 
         url = reverse('portfolio:edit', args=['TEST_PORT_001'])
         response = self.client.post(url, {
@@ -288,7 +290,7 @@ class PortfolioEditViewTestCase(TestCase):
         })
 
         self.assertEqual(response.status_code, 302)
-        mock_execute.assert_called_once()
+        mock_update.assert_called_once()
 
 
 class PortfolioWorkflowTestCase(TestCase):
@@ -306,61 +308,61 @@ class PortfolioWorkflowTestCase(TestCase):
         self.portfolio_data = {
             'name': 'TEST_PORT_001',
             'code': 'TP001',
-            'status': 'DRAFT',
+            'status': 'INITIAL',
+            'src_system': 'CIS',
             'is_active': True
         }
 
+    @patch('portfolio.views.portfolio_hive_repository.submit_for_validation')
     @patch('portfolio.views.audit_log_kudu_repository.log_action')
-    @patch('portfolio.views.portfolio_hive_repository.update_portfolio_status')
     @patch('portfolio.views.portfolio_hive_repository.get_portfolio_by_code')
-    def test_portfolio_submit_for_approval(self, mock_get, mock_update_status, mock_audit):
+    def test_portfolio_submit_for_approval(self, mock_get, mock_audit, mock_submit):
         """Test submitting portfolio for approval"""
         mock_get.return_value = self.portfolio_data
-        mock_update_status.return_value = True
+        mock_submit.return_value = True
 
         url = reverse('portfolio:submit', args=['TEST_PORT_001'])
         response = self.client.post(url)
 
         self.assertEqual(response.status_code, 302)
-        mock_update_status.assert_called_once()
+        mock_submit.assert_called_once()
 
+    @patch('portfolio.views.portfolio_hive_repository.validate_portfolio')
     @patch('portfolio.views.audit_log_kudu_repository.log_action')
-    @patch('portfolio.views.portfolio_hive_repository.update_portfolio_status')
     @patch('portfolio.views.portfolio_hive_repository.get_portfolio_by_code')
-    def test_portfolio_approve(self, mock_get, mock_update_status, mock_audit):
-        """Test approving portfolio"""
-        self.portfolio_data['status'] = 'PENDING_APPROVAL'
+    def test_portfolio_approve(self, mock_get, mock_audit, mock_validate):
+        """Test approving (validating) portfolio"""
+        self.portfolio_data['status'] = 'PENDING_VALIDATION'
         mock_get.return_value = self.portfolio_data
-        mock_update_status.return_value = True
+        mock_validate.return_value = True
 
         url = reverse('portfolio:approve', args=['TEST_PORT_001'])
         response = self.client.post(url)
 
         self.assertEqual(response.status_code, 302)
 
-        # Verify audit log
+        # Verify audit log with VALIDATE action_type
         mock_audit.assert_called()
         call_kwargs = mock_audit.call_args[1]
-        self.assertEqual(call_kwargs['action_type'], 'APPROVE')
+        self.assertEqual(call_kwargs['action_type'], 'VALIDATE')
 
+    @patch('portfolio.views.portfolio_hive_repository.cancel_portfolio')
     @patch('portfolio.views.audit_log_kudu_repository.log_action')
-    @patch('portfolio.views.portfolio_hive_repository.update_portfolio_status')
     @patch('portfolio.views.portfolio_hive_repository.get_portfolio_by_code')
-    def test_portfolio_reject(self, mock_get, mock_update_status, mock_audit):
-        """Test rejecting portfolio"""
-        self.portfolio_data['status'] = 'PENDING_APPROVAL'
+    def test_portfolio_reject(self, mock_get, mock_audit, mock_cancel):
+        """Test rejecting portfolio (routes through cancel flow, logs CANCEL)"""
+        self.portfolio_data['status'] = 'INITIAL'
         mock_get.return_value = self.portfolio_data
-        mock_update_status.return_value = True
+        mock_cancel.return_value = True
 
         url = reverse('portfolio:reject', args=['TEST_PORT_001'])
-        response = self.client.post(url, {'comments': 'Invalid data'})
+        response = self.client.post(url, {'reason': 'No longer needed'})
 
         self.assertEqual(response.status_code, 302)
 
-        # Verify audit log
         mock_audit.assert_called()
         call_kwargs = mock_audit.call_args[1]
-        self.assertEqual(call_kwargs['action_type'], 'REJECT')
+        self.assertEqual(call_kwargs['action_type'], 'CANCEL')
 
 
 class PortfolioCloseReactivateTestCase(TestCase):

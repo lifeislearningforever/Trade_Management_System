@@ -151,18 +151,24 @@ class TestConnectionPoolStressMocked:
 
             def acquire_and_release():
                 nonlocal successful_connections, failed_connections
+                conn = None
                 try:
                     start = time.time()
-                    with manager.get_connection() as conn:
-                        elapsed = time.time() - start
-                        with lock:
-                            self.connection_times.append(elapsed)
+                    conn = manager.get_connection()
+                    elapsed = time.time() - start
+                    with lock:
+                        self.connection_times.append(elapsed)
 
-                        # Execute simple query
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT 1")
-                        cursor.fetchone()
-                        cursor.close()
+                    if conn is None:
+                        raise Exception("Failed to acquire connection from pool")
+
+                    # Execute simple query
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT 1")
+                    cursor.fetchone()
+                    cursor.close()
+                    manager.return_connection(conn)
+                    conn = None
 
                     with lock:
                         successful_connections += 1

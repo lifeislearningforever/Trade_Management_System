@@ -137,7 +137,7 @@ class FXRate(BaseModel):
                 self.quote_currency = parts[1].strip().upper()
 
         # Validate rate is positive
-        if self.rate and self.rate <= 0:
+        if self.rate is not None and self.rate <= 0:
             raise ValidationError('Rate must be positive')
 
         # Validate bid/ask relationship

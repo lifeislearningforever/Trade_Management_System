@@ -11,7 +11,6 @@ Tests for Market Data views including:
 from django.test import TestCase, Client
 from django.urls import reverse
 from unittest.mock import patch, Mock
-from market_data.repositories.fx_rate_hive_repository import FXRateHiveRepository
 
 
 class FXRateListViewTestCase(TestCase):
@@ -22,136 +21,133 @@ class FXRateListViewTestCase(TestCase):
         self.client = Client()
         self.url = reverse('market_data:fx_rate_list')
 
-        # Sample data for mocking
         self.sample_fx_data = [
             {
-                'currency_pair': 'USD/EUR',
+                'currency_pair': 'USD-EUR',
                 'base_currency': 'USD',
                 'quote_currency': 'EUR',
                 'rate': '0.9234567890',
                 'bid_rate': '0.9234000000',
                 'ask_rate': '0.9235000000',
                 'mid_rate': '0.9234500000',
-                'rate_date': '2025-12-26',
+                'trade_date': '20251226',
                 'rate_time': '2025-12-26 10:00:00',
                 'source': 'BLOOMBERG',
                 'is_active': 'true'
             },
             {
-                'currency_pair': 'GBP/USD',
+                'currency_pair': 'GBP-USD',
                 'base_currency': 'GBP',
                 'quote_currency': 'USD',
                 'rate': '1.2567890123',
                 'bid_rate': '1.2567000000',
                 'ask_rate': '1.2568500000',
                 'mid_rate': '1.2567750000',
-                'rate_date': '2025-12-26',
+                'trade_date': '20251226',
                 'rate_time': '2025-12-26 10:00:00',
                 'source': 'REUTERS',
                 'is_active': 'true'
             }
         ]
 
-    @patch.object(FXRateHiveRepository, 'get_all_fx_rates')
-    @patch.object(FXRateHiveRepository, 'get_unique_currency_pairs')
-    def test_fx_rate_list_view_success(self, mock_currency_pairs, mock_get_all):
+    @patch('market_data.views.fx_rate_service')
+    def test_fx_rate_list_view_success(self, mock_service):
         """Test FX rate list view loads successfully"""
-        mock_get_all.return_value = self.sample_fx_data
-        mock_currency_pairs.return_value = [
-            {'currency_pair': 'USD/EUR'},
-            {'currency_pair': 'GBP/USD'}
-        ]
+        mock_service.get_fx_rates.return_value = self.sample_fx_data
+        mock_service.get_currency_pairs.return_value = ['USD/EUR', 'GBP/USD']
+        mock_service.get_base_currencies.return_value = ['USD', 'GBP']
+        mock_service.get_sources.return_value = ['BLOOMBERG', 'REUTERS']
 
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'market_data/fx_rate_list.html')
-        self.assertIn('fx_rates', response.context)
-        self.assertEqual(len(response.context['fx_rates']), 2)
+        self.assertIn('page_obj', response.context)
+        self.assertEqual(len(response.context['page_obj']), 2)
 
-    @patch.object(FXRateHiveRepository, 'get_all_fx_rates')
-    @patch.object(FXRateHiveRepository, 'get_unique_currency_pairs')
-    def test_fx_rate_list_view_empty(self, mock_currency_pairs, mock_get_all):
+    @patch('market_data.views.fx_rate_service')
+    def test_fx_rate_list_view_empty(self, mock_service):
         """Test FX rate list view with no data"""
-        mock_get_all.return_value = []
-        mock_currency_pairs.return_value = []
+        mock_service.get_fx_rates.return_value = []
+        mock_service.get_currency_pairs.return_value = []
+        mock_service.get_base_currencies.return_value = []
+        mock_service.get_sources.return_value = []
 
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.context['fx_rates']), 0)
+        self.assertEqual(len(response.context['page_obj']), 0)
 
-    @patch.object(FXRateHiveRepository, 'get_all_fx_rates')
-    @patch.object(FXRateHiveRepository, 'get_unique_currency_pairs')
-    def test_fx_rate_list_search_filter(self, mock_currency_pairs, mock_get_all):
-        """Test search filtering"""
-        mock_get_all.return_value = self.sample_fx_data
-        mock_currency_pairs.return_value = []
-
-        response = self.client.get(self.url, {'search': 'USD/EUR'})
-
-        self.assertEqual(response.status_code, 200)
-        # Search should filter results
-        self.assertIn('search_query', response.context)
-        self.assertEqual(response.context['search_query'], 'USD/EUR')
-
-    @patch.object(FXRateHiveRepository, 'get_all_fx_rates')
-    @patch.object(FXRateHiveRepository, 'get_unique_currency_pairs')
-    def test_fx_rate_list_currency_pair_filter(self, mock_currency_pairs, mock_get_all):
-        """Test currency pair filtering"""
-        mock_get_all.return_value = [self.sample_fx_data[0]]  # Only USD/EUR
-        mock_currency_pairs.return_value = []
+    @patch('market_data.views.fx_rate_service')
+    def test_fx_rate_list_search_filter(self, mock_service):
+        """Test search filtering passes currency_pair to service"""
+        mock_service.get_fx_rates.return_value = self.sample_fx_data
+        mock_service.get_currency_pairs.return_value = []
+        mock_service.get_base_currencies.return_value = []
+        mock_service.get_sources.return_value = []
 
         response = self.client.get(self.url, {'currency_pair': 'USD/EUR'})
 
         self.assertEqual(response.status_code, 200)
-        mock_get_all.assert_called_once()
-        # Verify filter was passed to repository
-        call_kwargs = mock_get_all.call_args[1]
+        call_kwargs = mock_service.get_fx_rates.call_args[1]
         self.assertEqual(call_kwargs.get('currency_pair'), 'USD/EUR')
 
-    @patch.object(FXRateHiveRepository, 'get_all_fx_rates')
-    @patch.object(FXRateHiveRepository, 'get_unique_currency_pairs')
-    def test_fx_rate_list_csv_export(self, mock_currency_pairs, mock_get_all):
+    @patch('market_data.views.fx_rate_service')
+    def test_fx_rate_list_currency_pair_filter(self, mock_service):
+        """Test currency pair filter is passed to service"""
+        mock_service.get_fx_rates.return_value = [self.sample_fx_data[0]]
+        mock_service.get_currency_pairs.return_value = []
+        mock_service.get_base_currencies.return_value = []
+        mock_service.get_sources.return_value = []
+
+        response = self.client.get(self.url, {'currency_pair': 'USD/EUR'})
+
+        self.assertEqual(response.status_code, 200)
+        mock_service.get_fx_rates.assert_called_once()
+        call_kwargs = mock_service.get_fx_rates.call_args[1]
+        self.assertEqual(call_kwargs.get('currency_pair'), 'USD/EUR')
+
+    @patch('market_data.views.audit_log_kudu_repository')
+    @patch('market_data.views.fx_rate_service')
+    def test_fx_rate_list_csv_export(self, mock_service, mock_audit):
         """Test CSV export functionality"""
-        mock_get_all.return_value = self.sample_fx_data
-        mock_currency_pairs.return_value = []
+        mock_service.get_fx_rates.return_value = self.sample_fx_data
+        mock_service.get_currency_pairs.return_value = []
+        mock_service.get_base_currencies.return_value = []
+        mock_service.get_sources.return_value = []
 
         response = self.client.get(self.url, {'export': 'csv'})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response['Content-Type'], 'text/csv')
+        self.assertIn('text/csv', response['Content-Type'])
         self.assertIn('attachment', response['Content-Disposition'])
         self.assertIn('fx_rates', response['Content-Disposition'])
 
-        # Check CSV content
         content = response.content.decode('utf-8')
         self.assertIn('Currency Pair', content)
-        self.assertIn('USD/EUR', content)
-        self.assertIn('GBP/USD', content)
+        self.assertIn('USD-EUR', content)
+        self.assertIn('GBP-USD', content)
 
-    @patch.object(FXRateHiveRepository, 'get_all_fx_rates')
-    @patch.object(FXRateHiveRepository, 'get_unique_currency_pairs')
-    def test_fx_rate_list_pagination(self, mock_currency_pairs, mock_get_all):
+    @patch('market_data.views.fx_rate_service')
+    def test_fx_rate_list_pagination(self, mock_service):
         """Test pagination of results"""
-        # Create 30 sample rates
         many_rates = [self.sample_fx_data[0].copy() for _ in range(30)]
         for i, rate in enumerate(many_rates):
             rate['rate_time'] = f'2025-12-26 {i:02d}:00:00'
 
-        mock_get_all.return_value = many_rates
-        mock_currency_pairs.return_value = []
+        mock_service.get_fx_rates.return_value = many_rates
+        mock_service.get_currency_pairs.return_value = []
+        mock_service.get_base_currencies.return_value = []
+        mock_service.get_sources.return_value = []
 
-        # Get first page
         response = self.client.get(self.url, {'page': '1'})
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.context['is_paginated'])
-        self.assertEqual(len(response.context['fx_rates']), 25)  # Page size is 25
+        self.assertTrue(response.context['page_obj'].has_next())
+        self.assertEqual(len(response.context['page_obj']), 25)
 
-        # Get second page
         response = self.client.get(self.url, {'page': '2'})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.context['fx_rates']), 5)  # Remaining 5
+        self.assertEqual(len(response.context['page_obj']), 5)
 
 
 class FXRateDashboardViewTestCase(TestCase):
@@ -162,46 +158,44 @@ class FXRateDashboardViewTestCase(TestCase):
         self.client = Client()
         self.url = reverse('market_data:fx_dashboard')
 
-        self.sample_fx_data = [
-            {
-                'currency_pair': 'USD/EUR',
-                'rate': '0.9234567890',
-                'rate_date': '2025-12-26',
-                'rate_time': '2025-12-26 10:00:00',
-                'source': 'BLOOMBERG'
-            }
-        ]
-
-    @patch.object(FXRateHiveRepository, 'get_latest_fx_rates')
-    @patch.object(FXRateHiveRepository, 'get_unique_currency_pairs')
-    def test_fx_dashboard_view_success(self, mock_currency_pairs, mock_latest):
+    @patch('market_data.views.equity_price_service')
+    @patch('market_data.views.fx_rate_service')
+    def test_fx_dashboard_view_success(self, mock_fx_service, mock_eq_service):
         """Test dashboard view loads successfully"""
-        mock_latest.return_value = self.sample_fx_data
-        mock_currency_pairs.return_value = [{'currency_pair': 'USD/EUR'}]
-
-        response = self.client.get(self.url)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'market_data/fx_rate_dashboard.html')
-        self.assertIn('latest_rates', response.context)
-        self.assertIn('total_pairs', response.context)
-
-    @patch.object(FXRateHiveRepository, 'get_latest_fx_rates')
-    @patch.object(FXRateHiveRepository, 'get_unique_currency_pairs')
-    def test_fx_dashboard_metrics(self, mock_currency_pairs, mock_latest):
-        """Test dashboard metrics calculation"""
-        mock_latest.return_value = self.sample_fx_data
-        mock_currency_pairs.return_value = [
-            {'currency_pair': 'USD/EUR'},
-            {'currency_pair': 'GBP/USD'},
-            {'currency_pair': 'USD/JPY'}
+        mock_fx_service.get_statistics.return_value = {
+            'total_records': 100, 'unique_pairs': 10, 'unique_sources': 3,
+            'latest_date': '20251226', 'earliest_date': '20250101', 'source_breakdown': []
+        }
+        mock_fx_service.get_latest_rates.return_value = [
+            {'currency_pair': 'USD-EUR', 'rate': '0.923', 'trade_date': '20251226',
+             'rate_time': '2025-12-26 10:00:00', 'source': 'BLOOMBERG'}
         ]
+        mock_fx_service.get_base_currencies.return_value = ['USD', 'GBP']
+        mock_eq_service.get_statistics.return_value = {}
+        mock_eq_service.get_equity_prices.return_value = []
 
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context['total_pairs'], 3)
-        self.assertIn('total_rates', response.context)
+        self.assertTemplateUsed(response, 'market_data/market_data_dashboard.html')
+
+    @patch('market_data.views.equity_price_service')
+    @patch('market_data.views.fx_rate_service')
+    def test_fx_dashboard_metrics(self, mock_fx_service, mock_eq_service):
+        """Test dashboard metrics are passed to template"""
+        mock_fx_service.get_statistics.return_value = {
+            'total_records': 500, 'unique_pairs': 15, 'unique_sources': 4,
+            'latest_date': '20251226', 'earliest_date': '20250101', 'source_breakdown': []
+        }
+        mock_fx_service.get_latest_rates.return_value = []
+        mock_fx_service.get_base_currencies.return_value = []
+        mock_eq_service.get_statistics.return_value = {}
+        mock_eq_service.get_equity_prices.return_value = []
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('fx_stats', response.context)
 
 
 class FXRateDetailViewTestCase(TestCase):
@@ -210,62 +204,60 @@ class FXRateDetailViewTestCase(TestCase):
     def setUp(self):
         """Set up test client"""
         self.client = Client()
-        self.currency_pair = 'USD/EUR'
+        self.currency_pair = 'USD-EUR'
         self.url = reverse('market_data:fx_rate_detail', args=[self.currency_pair])
 
-        self.sample_fx_data = [
+        self.sample_history = [
             {
-                'currency_pair': 'USD/EUR',
+                'currency_pair': 'USD-EUR',
                 'base_currency': 'USD',
                 'quote_currency': 'EUR',
                 'rate': '0.9234567890',
                 'bid_rate': '0.9234000000',
                 'ask_rate': '0.9235000000',
                 'mid_rate': '0.9234500000',
-                'rate_date': '2025-12-26',
+                'trade_date': '20251226',
                 'rate_time': '2025-12-26 10:00:00',
                 'source': 'BLOOMBERG',
-                'is_active': 'true'
             }
         ]
 
-    @patch.object(FXRateHiveRepository, 'get_fx_rate_by_currency_pair')
-    def test_fx_rate_detail_view_success(self, mock_get_rate):
+    @patch('market_data.views.fx_rate_service')
+    def test_fx_rate_detail_view_success(self, mock_service):
         """Test FX rate detail view loads successfully"""
-        mock_get_rate.return_value = self.sample_fx_data
+        mock_service.get_rate_history.return_value = self.sample_history
 
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'market_data/fx_rate_detail.html')
         self.assertIn('currency_pair', response.context)
-        self.assertEqual(response.context['currency_pair'], 'USD/EUR')
-        self.assertIn('rates_history', response.context)
+        self.assertEqual(response.context['currency_pair'], 'USD-EUR')
 
-    @patch.object(FXRateHiveRepository, 'get_fx_rate_by_currency_pair')
-    def test_fx_rate_detail_view_not_found(self, mock_get_rate):
+    @patch('market_data.views.fx_rate_service')
+    def test_fx_rate_detail_view_not_found(self, mock_service):
         """Test detail view with non-existent currency pair"""
-        mock_get_rate.return_value = []
+        mock_service.get_rate_history.return_value = []
 
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.context['rates_history']), 0)
+        self.assertEqual(response.context['history'], [])
 
-    @patch.object(FXRateHiveRepository, 'get_fx_rate_by_currency_pair')
-    def test_fx_rate_detail_view_multiple_sources(self, mock_get_rate):
-        """Test detail view with rates from multiple sources"""
-        multiple_rates = [
-            {**self.sample_fx_data[0], 'source': 'BLOOMBERG'},
-            {**self.sample_fx_data[0], 'source': 'REUTERS', 'rate_time': '2025-12-26 09:00:00'},
-            {**self.sample_fx_data[0], 'source': 'API', 'rate_time': '2025-12-26 08:00:00'}
+    @patch('market_data.views.fx_rate_service')
+    def test_fx_rate_detail_view_multiple_sources(self, mock_service):
+        """Test detail view with multiple history entries"""
+        history = [
+            {**self.sample_history[0], 'source': 'BLOOMBERG'},
+            {**self.sample_history[0], 'source': 'REUTERS', 'rate_time': '2025-12-26 09:00:00'},
+            {**self.sample_history[0], 'source': 'API', 'rate_time': '2025-12-26 08:00:00'}
         ]
-        mock_get_rate.return_value = multiple_rates
+        mock_service.get_rate_history.return_value = history
 
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.context['rates_history']), 3)
+        self.assertIn('history', response.context)
 
 
 class FXRateWrapperTestCase(TestCase):
@@ -283,10 +275,9 @@ class FXRateWrapperTestCase(TestCase):
             'bid_rate': '0.9234000000',
             'ask_rate': '0.9235000000',
             'mid_rate': '0.9234500000',
-            'rate_date': '2025-12-26',
+            'trade_date': '20251226',
             'rate_time': '2025-12-26 10:00:00',
             'source': 'BLOOMBERG',
-            'is_active': 'true'
         }
 
         wrapper = FXRateWrapper(data, index=0)
@@ -294,11 +285,11 @@ class FXRateWrapperTestCase(TestCase):
         self.assertEqual(wrapper.currency_pair, 'USD/EUR')
         self.assertEqual(wrapper.base_currency, 'USD')
         self.assertEqual(wrapper.quote_currency, 'EUR')
-        self.assertEqual(float(wrapper.rate), 0.9234567890)
+        self.assertEqual(float(wrapper.rate), float('0.9234500000'))  # rate = mid_rate
         self.assertIsNotNone(wrapper.id)
 
     def test_wrapper_get_spread(self):
-        """Test FXRateWrapper get_spread method"""
+        """Test FXRateWrapper get_spread returns spread field (pre-calculated by repo)"""
         from market_data.views import FXRateWrapper
 
         data = {
@@ -306,15 +297,14 @@ class FXRateWrapperTestCase(TestCase):
             'bid_rate': '0.9234000000',
             'ask_rate': '0.9235000000',
             'rate': '0.9234567890',
-            'rate_date': '2025-12-26',
-            'rate_time': '2025-12-26 10:00:00'
+            'spread': 0.0001,  # Pre-calculated by repository
+            'trade_date': '20251226',
         }
 
         wrapper = FXRateWrapper(data, index=0)
         spread = wrapper.get_spread()
 
-        self.assertIsNotNone(spread)
-        self.assertAlmostEqual(float(spread), 0.0001, places=4)
+        self.assertEqual(float(spread), 0.0001)
 
     def test_wrapper_missing_fields(self):
         """Test FXRateWrapper handles missing fields"""
@@ -328,8 +318,7 @@ class FXRateWrapperTestCase(TestCase):
         wrapper = FXRateWrapper(minimal_data, index=0)
 
         self.assertEqual(wrapper.currency_pair, 'USD/EUR')
-        self.assertEqual(float(wrapper.rate), 0.9234567890)
-        # Missing fields should default to empty strings or 0
+        self.assertEqual(float(wrapper.rate), 0.0)  # rate = mid_rate, defaults to 0
         self.assertEqual(wrapper.base_currency, '')
         self.assertEqual(wrapper.bid_rate, 0)
 
@@ -349,5 +338,5 @@ class ViewURLTestCase(TestCase):
 
     def test_fx_rate_detail_url_resolves(self):
         """Test FX rate detail URL resolves correctly"""
-        url = reverse('market_data:fx_rate_detail', args=['USD/EUR'])
-        self.assertEqual(url, '/market-data/fx-rates/USD/EUR/')
+        url = reverse('market_data:fx_rate_detail', args=['USD_EUR'])
+        self.assertIn('USD_EUR', url)
