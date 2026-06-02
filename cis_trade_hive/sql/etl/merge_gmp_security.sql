@@ -28,8 +28,19 @@ USE gmp_cis;
 
 -- ============================================================================
 -- STEP 1: Attach natural keys to staging rows
---   Priority: ISIN → name+exchange → name only
---   Stored as a normalised uppercase string for O(1) registry lookup.
+--
+-- CRITICAL: same ISIN can appear on multiple exchanges (cross-listed).
+--   ANZ Banking Group: ISIN AU000000ANZ3 on ASX (AU) AND on NZX (NZ).
+--   These are different instruments. ISIN alone is NOT a unique key.
+--   The composite ISIN + exchange_code disambiguates them.
+--
+-- Priority (first matching rule wins):
+--   1. ISIN + exchange_code       → "ISIN_EXCH:<isin>:<exch>"
+--   2. ISIN + country_of_exchange → "ISIN_CTY:<isin>:<country>"
+--   3. ISIN only                  → "ISIN:<isin>"           (bonds, private)
+--   4. name + exchange_code       → "NAME_EXCH:<name>:<exch>"
+--   5. name + country_of_exchange → "NAME_CTY:<name>:<country>"
+--   6. name only                  → "NAME:<name>"           (last resort)
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS gmp_cis.stg_gmp_security_with_key
@@ -38,15 +49,28 @@ SELECT
     *,
     CASE
         WHEN isin IS NOT NULL AND TRIM(isin) != ''
+             AND exchange_code IS NOT NULL AND TRIM(exchange_code) != ''
+            THEN CONCAT('ISIN_EXCH:', UPPER(TRIM(isin)), ':', UPPER(TRIM(exchange_code)))
+        WHEN isin IS NOT NULL AND TRIM(isin) != ''
+             AND country_of_exchange IS NOT NULL AND TRIM(country_of_exchange) != ''
+            THEN CONCAT('ISIN_CTY:', UPPER(TRIM(isin)), ':', UPPER(TRIM(country_of_exchange)))
+        WHEN isin IS NOT NULL AND TRIM(isin) != ''
             THEN CONCAT('ISIN:', UPPER(TRIM(isin)))
         WHEN exchange_code IS NOT NULL AND TRIM(exchange_code) != ''
             THEN CONCAT('NAME_EXCH:', UPPER(TRIM(security_name)), ':', UPPER(TRIM(exchange_code)))
+        WHEN country_of_exchange IS NOT NULL AND TRIM(country_of_exchange) != ''
+            THEN CONCAT('NAME_CTY:', UPPER(TRIM(security_name)), ':', UPPER(TRIM(country_of_exchange)))
         ELSE
             CONCAT('NAME:', UPPER(TRIM(security_name)))
     END AS natural_key,
     CASE
-        WHEN isin IS NOT NULL AND TRIM(isin) != '' THEN 'ISIN'
-        WHEN exchange_code IS NOT NULL AND TRIM(exchange_code) != '' THEN 'NAME_EXCH'
+        WHEN isin IS NOT NULL AND TRIM(isin) != ''
+             AND exchange_code IS NOT NULL AND TRIM(exchange_code) != ''     THEN 'ISIN_EXCH'
+        WHEN isin IS NOT NULL AND TRIM(isin) != ''
+             AND country_of_exchange IS NOT NULL AND TRIM(country_of_exchange) != '' THEN 'ISIN_CTY'
+        WHEN isin IS NOT NULL AND TRIM(isin) != ''                          THEN 'ISIN'
+        WHEN exchange_code IS NOT NULL AND TRIM(exchange_code) != ''        THEN 'NAME_EXCH'
+        WHEN country_of_exchange IS NOT NULL AND TRIM(country_of_exchange) != '' THEN 'NAME_CTY'
         ELSE 'NAME'
     END AS key_type
 FROM gmp_cis.stg_gmp_security;
@@ -105,19 +129,19 @@ INNER JOIN gmp_cis.cis_security_id_registry r
 --      own natural_key entries from the migration, so they won't be re-added)
 
 UPSERT INTO gmp_cis.cis_security_id_registry (
-    natural_key, security_id, key_type, isin, security_name, exchange_code,
-    src_system, created_by, created_at
+    natural_key, security_id, key_type, isin, security_name,
+    exchange_code, country_of_exchange, src_system, created_by, created_at
 )
 SELECT
     stg.natural_key,
     -- Allocate: counter.next_id + row_number - 1
-    -- This gives a contiguous block of IDs for all new rows in this batch.
     (SELECT next_id FROM gmp_cis.cis_security_id_counter WHERE counter_id = 1)
         + ROW_NUMBER() OVER (ORDER BY stg.natural_key) - 1  AS security_id,
     stg.key_type,
     UPPER(TRIM(stg.isin))           AS isin,
     stg.security_name,
-    stg.exchange_code,
+    UPPER(TRIM(stg.exchange_code))  AS exchange_code,
+    UPPER(TRIM(stg.country_of_exchange)) AS country_of_exchange,
     'GMP'                           AS src_system,
     'GMP_ETL'                       AS created_by,
     UNIX_TIMESTAMP() * 1000         AS created_at

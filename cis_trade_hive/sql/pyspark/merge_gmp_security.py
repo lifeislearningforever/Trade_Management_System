@@ -124,38 +124,59 @@ def kudu_upsert(df: DataFrame, master: str, table: str):
 
 def build_natural_key(df: DataFrame) -> DataFrame:
     """
-    Add a `natural_key` column to the staging dataframe.
+    Add `natural_key` and `key_type` columns to the staging dataframe.
 
-    Priority:
-      1. ISIN present and non-empty  → "ISIN:<UPPER(isin)>"
-      2. name + exchange non-empty   → "NAME_EXCH:<UPPER(name)>:<UPPER(exchange)>"
-      3. name only                   → "NAME:<UPPER(name)>"
+    IMPORTANT — cross-listed securities:
+      The same ISIN can represent different securities on different exchanges.
+      Example: ANZ Banking Group is listed on both ASX (AU) and NZX (NZ) with
+      the same ISIN.  They are distinct instruments (different currency, price,
+      corporate actions).  ISIN alone is therefore NOT a unique natural key.
 
-    Also adds `key_type` column for the registry.
+    Priority (first matching rule wins):
+      1. ISIN + exchange_code          → "ISIN_EXCH:<isin>:<exch>"
+      2. ISIN + country_of_exchange    → "ISIN_CTY:<isin>:<country>"
+      3. ISIN only                     → "ISIN:<isin>"          (bonds, private)
+      4. name + exchange_code          → "NAME_EXCH:<name>:<exch>"
+      5. name + country_of_exchange    → "NAME_CTY:<name>:<country>"
+      6. name only                     → "NAME:<name>"          (last resort)
+
+    All components are upper-cased and trimmed for consistent matching.
     """
-    isin_clean = F.upper(F.trim(F.col("isin")))
-    name_clean = F.upper(F.trim(F.col("security_name")))
-    exch_clean = F.upper(F.trim(F.coalesce(F.col("exchange_code"), F.lit(""))))
+    isin_c  = F.upper(F.trim(F.col("isin")))
+    name_c  = F.upper(F.trim(F.col("security_name")))
+    exch_c  = F.upper(F.trim(F.coalesce(F.col("exchange_code"),       F.lit(""))))
+    cty_c   = F.upper(F.trim(F.coalesce(F.col("country_of_exchange"), F.lit(""))))
 
-    has_isin = F.col("isin").isNotNull() & (F.trim(F.col("isin")) != "")
-    has_exch = F.col("exchange_code").isNotNull() & (F.trim(F.col("exchange_code")) != "")
+    has_isin = F.col("isin").isNotNull()            & (F.trim(F.col("isin")) != "")
+    has_exch = F.col("exchange_code").isNotNull()   & (F.trim(F.col("exchange_code")) != "")
+    has_cty  = F.col("country_of_exchange").isNotNull() & (F.trim(F.col("country_of_exchange")) != "")
 
-    natural_key = F.when(
-        has_isin,
-        F.concat(F.lit("ISIN:"), isin_clean)
-    ).when(
-        has_exch,
-        F.concat(F.lit("NAME_EXCH:"), name_clean, F.lit(":"), exch_clean)
-    ).otherwise(
-        F.concat(F.lit("NAME:"), name_clean)
+    natural_key = (
+        F.when(has_isin & has_exch,
+               F.concat(F.lit("ISIN_EXCH:"), isin_c, F.lit(":"), exch_c))
+         .when(has_isin & has_cty,
+               F.concat(F.lit("ISIN_CTY:"),  isin_c, F.lit(":"), cty_c))
+         .when(has_isin,
+               F.concat(F.lit("ISIN:"), isin_c))
+         .when(has_exch,
+               F.concat(F.lit("NAME_EXCH:"), name_c, F.lit(":"), exch_c))
+         .when(has_cty,
+               F.concat(F.lit("NAME_CTY:"),  name_c, F.lit(":"), cty_c))
+         .otherwise(
+               F.concat(F.lit("NAME:"), name_c))
     )
 
-    key_type = F.when(has_isin, F.lit("ISIN")) \
-                .when(has_exch, F.lit("NAME_EXCH")) \
-                .otherwise(F.lit("NAME"))
+    key_type = (
+        F.when(has_isin & has_exch, F.lit("ISIN_EXCH"))
+         .when(has_isin & has_cty,  F.lit("ISIN_CTY"))
+         .when(has_isin,            F.lit("ISIN"))
+         .when(has_exch,            F.lit("NAME_EXCH"))
+         .when(has_cty,             F.lit("NAME_CTY"))
+         .otherwise(                F.lit("NAME"))
+    )
 
     return df.withColumn("natural_key", natural_key) \
-             .withColumn("key_type", key_type)
+             .withColumn("key_type",    key_type)
 
 
 # ============================================================================
@@ -237,6 +258,7 @@ def merge_securities(spark, kudu_master: str, batch_id=None, dry_run=False):
             F.upper(F.trim(F.col("stg.isin"))).alias("isin"),
             F.col("stg.security_name"),
             F.col("stg.exchange_code"),
+            F.col("stg.country_of_exchange"),
             F.lit("GMP").alias("src_system"),
             F.lit("GMP_ETL").alias("created_by"),
             F.lit(now_ms).alias("created_at"),

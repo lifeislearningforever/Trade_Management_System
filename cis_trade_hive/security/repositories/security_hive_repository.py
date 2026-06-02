@@ -154,20 +154,40 @@ class SecurityHiveRepository:
     @staticmethod
     def _build_natural_key(security_data: Dict[str, Any]) -> tuple:
         """
-        Derive the normalised natural key and its type from security data.
+        Derive the normalised composite natural key and its type.
+
+        Cross-listed securities share the same ISIN but trade on different
+        exchanges in different countries (e.g. ANZ Banking Group: same ISIN on
+        ASX/AU and NZX/NZ — completely different instruments with different
+        currencies and prices).  ISIN alone is therefore NOT unique.
+
+        Priority (first matching rule wins):
+          1. ISIN + exchange_code       → "ISIN_EXCH:<isin>:<exch>"
+          2. ISIN + country_of_exchange → "ISIN_CTY:<isin>:<country>"
+          3. ISIN only                  → "ISIN:<isin>"       (bonds/private)
+          4. name + exchange_code       → "NAME_EXCH:<name>:<exch>"
+          5. name + country_of_exchange → "NAME_CTY:<name>:<country>"
+          6. name only                  → "NAME:<name>"       (last resort)
 
         Returns:
             (natural_key: str, key_type: str)
         """
-        isin = (security_data.get('isin') or '').strip().upper()
-        name = (security_data.get('security_name') or '').strip().upper()
-        exch = (security_data.get('exchange_code') or '').strip().upper()
+        isin   = (security_data.get('isin')                or '').strip().upper()
+        name   = (security_data.get('security_name')       or '').strip().upper()
+        exch   = (security_data.get('exchange_code')       or '').strip().upper()
+        cty    = (security_data.get('country_of_exchange') or '').strip().upper()
 
+        if isin and exch:
+            return f'ISIN_EXCH:{isin}:{exch}', 'ISIN_EXCH'
+        if isin and cty:
+            return f'ISIN_CTY:{isin}:{cty}',   'ISIN_CTY'
         if isin:
-            return f'ISIN:{isin}', 'ISIN'
+            return f'ISIN:{isin}',              'ISIN'
         if exch:
-            return f'NAME_EXCH:{name}:{exch}', 'NAME_EXCH'
-        return f'NAME:{name}', 'NAME'
+            return f'NAME_EXCH:{name}:{exch}',  'NAME_EXCH'
+        if cty:
+            return f'NAME_CTY:{name}:{cty}',    'NAME_CTY'
+        return f'NAME:{name}',                  'NAME'
 
     @staticmethod
     def _get_or_allocate_security_id(
@@ -221,13 +241,14 @@ class SecurityHiveRepository:
             new_id = SecurityHiveRepository.ID_FLOOR + 1
 
         # 3. Write registry entry for this natural key
-        isin_val  = (security_data.get('isin') or '').strip().upper()
-        name_val  = (security_data.get('security_name') or '').strip()
-        exch_val  = (security_data.get('exchange_code') or '').strip()
+        isin_val = (security_data.get('isin')                or '').strip().upper()
+        name_val = (security_data.get('security_name')       or '').strip()
+        exch_val = (security_data.get('exchange_code')       or '').strip().upper()
+        cty_val  = (security_data.get('country_of_exchange') or '').strip().upper()
         registry_sql = f"""
             UPSERT INTO {db}.{SecurityHiveRepository.REGISTRY_TABLE}
             (natural_key, security_id, key_type, isin, security_name,
-             exchange_code, src_system, created_by, created_at)
+             exchange_code, country_of_exchange, src_system, created_by, created_at)
             VALUES (
                 {esc(natural_key)},
                 {new_id},
@@ -235,6 +256,7 @@ class SecurityHiveRepository:
                 {esc(isin_val) if isin_val else 'NULL'},
                 {esc(name_val)},
                 {esc(exch_val) if exch_val else 'NULL'},
+                {esc(cty_val)  if cty_val  else 'NULL'},
                 {esc(src_system)},
                 {esc(created_by)},
                 {now_ms}
