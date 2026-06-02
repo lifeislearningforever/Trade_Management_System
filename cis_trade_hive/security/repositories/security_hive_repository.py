@@ -144,10 +144,123 @@ class SecurityHiveRepository:
             logger.error(f"Error fetching security by ISIN {isin}: {str(e)}")
             return None
 
+    # -------------------------------------------------------------------------
+    # Registry constants
+    # -------------------------------------------------------------------------
+    REGISTRY_TABLE = 'cis_security_id_registry'
+    COUNTER_TABLE  = 'cis_security_id_counter'
+    ID_FLOOR       = 100_000_000_000   # 12-digit IDs start here
+
+    @staticmethod
+    def _build_natural_key(security_data: Dict[str, Any]) -> tuple:
+        """
+        Derive the normalised natural key and its type from security data.
+
+        Returns:
+            (natural_key: str, key_type: str)
+        """
+        isin = (security_data.get('isin') or '').strip().upper()
+        name = (security_data.get('security_name') or '').strip().upper()
+        exch = (security_data.get('exchange_code') or '').strip().upper()
+
+        if isin:
+            return f'ISIN:{isin}', 'ISIN'
+        if exch:
+            return f'NAME_EXCH:{name}:{exch}', 'NAME_EXCH'
+        return f'NAME:{name}', 'NAME'
+
+    @staticmethod
+    def _get_or_allocate_security_id(
+        security_data: Dict[str, Any],
+        src_system: str,
+        created_by: str,
+    ) -> int:
+        """
+        Look up or allocate a stable 12-digit security_id via the registry.
+
+        - If the natural key exists in cis_security_id_registry → return that ID.
+        - If not → read cis_security_id_counter, allocate next ID, write both
+          registry row and updated counter, then return the new ID.
+
+        Args:
+            security_data: Dict containing at least security_name + optionally isin/exchange_code
+            src_system:    'CIS' for UI-created, 'GMP' for ETL
+            created_by:    username or 'GMP_ETL'
+
+        Returns:
+            Stable 12-digit BIGINT security_id
+        """
+        natural_key, key_type = SecurityHiveRepository._build_natural_key(security_data)
+        now_ms = int(datetime.now().timestamp() * 1000)
+        db = SecurityHiveRepository.DATABASE
+        esc = SecurityHiveRepository.escape_value
+
+        # 1. Check registry
+        lookup_sql = f"""
+            SELECT security_id
+            FROM {db}.{SecurityHiveRepository.REGISTRY_TABLE}
+            WHERE natural_key = {esc(natural_key)}
+            LIMIT 1
+        """
+        rows = impala_manager.execute_query(lookup_sql, database=db)
+        if rows:
+            return int(rows[0]['security_id'])
+
+        # 2. Registry miss — read counter and claim next ID
+        counter_sql = f"""
+            SELECT next_id
+            FROM {db}.{SecurityHiveRepository.COUNTER_TABLE}
+            WHERE counter_id = 1
+            LIMIT 1
+        """
+        counter_rows = impala_manager.execute_query(counter_sql, database=db)
+        if counter_rows:
+            new_id = int(counter_rows[0]['next_id'])
+        else:
+            # Counter not seeded yet — start at floor+1
+            new_id = SecurityHiveRepository.ID_FLOOR + 1
+
+        # 3. Write registry entry for this natural key
+        isin_val  = (security_data.get('isin') or '').strip().upper()
+        name_val  = (security_data.get('security_name') or '').strip()
+        exch_val  = (security_data.get('exchange_code') or '').strip()
+        registry_sql = f"""
+            UPSERT INTO {db}.{SecurityHiveRepository.REGISTRY_TABLE}
+            (natural_key, security_id, key_type, isin, security_name,
+             exchange_code, src_system, created_by, created_at)
+            VALUES (
+                {esc(natural_key)},
+                {new_id},
+                {esc(key_type)},
+                {esc(isin_val) if isin_val else 'NULL'},
+                {esc(name_val)},
+                {esc(exch_val) if exch_val else 'NULL'},
+                {esc(src_system)},
+                {esc(created_by)},
+                {now_ms}
+            )
+        """
+        impala_manager.execute_write(registry_sql, database=db)
+
+        # 4. Advance the counter
+        counter_upsert_sql = f"""
+            UPSERT INTO {db}.{SecurityHiveRepository.COUNTER_TABLE}
+            (counter_id, next_id, updated_at)
+            VALUES (1, {new_id + 1}, {now_ms})
+        """
+        impala_manager.execute_write(counter_upsert_sql, database=db)
+
+        logger.info(f"Registry: allocated security_id={new_id} for natural_key='{natural_key}'")
+        return new_id
+
     @staticmethod
     def insert_security(security_data: Dict[str, Any], created_by: str) -> bool:
         """
-        Insert a new security record into Kudu.
+        Insert a new security record into cis_security via the ID registry.
+
+        The registry assigns a stable 12-digit ID based on the security's
+        natural key (ISIN > name+exchange > name).  Subsequent inserts or
+        reloads with the same natural key always receive the same ID.
 
         Args:
             security_data: Dictionary of security fields
@@ -157,9 +270,12 @@ class SecurityHiveRepository:
             True if successful, False otherwise
         """
         try:
-            # Generate security_id (BIGINT ms PK — intentional)
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
-            security_id = timestamp_ms
+            # Stable 12-digit ID from registry (replaces timestamp-based ID)
+            security_id = SecurityHiveRepository._get_or_allocate_security_id(
+                security_data,
+                src_system='CIS',
+                created_by=created_by,
+            )
             timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             # Build column and value lists

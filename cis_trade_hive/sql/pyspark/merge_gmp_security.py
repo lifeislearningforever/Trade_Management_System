@@ -1,40 +1,61 @@
 """
-PySpark Job: Merge GMP Security Data into CIS Security Table
-=============================================================
-Problem:
-  - GMP ETL sends security data WITHOUT security_id (surrogate key)
-  - CIS cis_security_kudu table requires security_id as PK (BIGINT)
-  - Need to match on natural key (ISIN) and generate IDs for new records
+PySpark Job: Merge GMP Security Data into cis_security
+=======================================================
 
-Strategy:
-  1. Read staging data from stg_gmp_security
-  2. LEFT JOIN with cis_security_kudu on isin to find existing records
-  3. For existing records: reuse their security_id (UPDATE via UPSERT)
-  4. For new records: generate new security_id (timestamp-based)
-  5. UPSERT all records into cis_security_kudu with src_system = 'GMP'
+Problem solved:
+  The old approach generated security_id from a millisecond timestamp at
+  insert time.  Because the ETL deleted all GMP rows and reinserted them every
+  day, every GMP security received a brand-new ID on each run.  Downstream
+  systems treat ID changes as data changes, causing false "updates".
+
+Solution — Registry-based stable IDs:
+  A permanent lookup table (cis_security_id_registry) maps each security's
+  natural key to a fixed 12-digit numeric ID that is allocated exactly once
+  and never changes.
+
+  Natural key priority:
+    1. ISIN  (globally unique — preferred)
+    2. security_name + exchange_code  (for unlisted / OTC without ISIN)
+    3. security_name alone            (last resort)
+
+  On each ETL run:
+    - Rows whose natural key is already in the registry  → reuse stored ID
+    - Rows whose natural key is new                      → allocate next ID,
+      write to registry, then write to cis_security
+
+  No truncate-and-reload needed.  Pure UPSERT on cis_security means:
+    - GMP rows are updated in place
+    - CIS rows (src_system='CIS') are never touched by this job
+
+ID range:
+  100_000_000_001 – 999_999_999_999  (12 digits)
+  Legacy timestamp IDs are 13 digits (1_700_000_000_000+) — no collision.
+
+Tables:
+  Read  : gmp_cis.stg_gmp_security_kudu   (staging, daily feed)
+  Read  : gmp_cis.cis_security_id_registry (stable ID ledger — Kudu)
+  Read  : gmp_cis.cis_security_id_counter  (next-ID counter — Kudu)
+  Write : gmp_cis.cis_security_kudu        (live security master — Kudu)
+  Write : gmp_cis.cis_security_id_registry (new entries only)
+  Write : gmp_cis.cis_security_id_counter  (updated next_id)
 
 Usage:
-  spark-submit --master yarn \
-    --conf spark.executor.memory=4g \
-    --conf spark.executor.cores=2 \
-    merge_gmp_security.py \
-    --kudu-master kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251 \
-    --batch-id BATCH_20260202_001
+  spark-submit merge_gmp_security.py \\
+    --kudu-master kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251 \\
+    --batch-id BATCH_20260603_001
 
-For local Docker:
-  spark-submit merge_gmp_security.py \
-    --kudu-master localhost:7051 \
-    --batch-id BATCH_20260202_001
+  For local Docker:
+  spark-submit merge_gmp_security.py --kudu-master localhost:7051
 
 Author: CisTrade Team
 Created: 2026-02-02
+Updated: 2026-06-02  — registry-based stable ID (no more truncate-reload)
 """
 
 import argparse
-import time
 from datetime import datetime
 
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
@@ -44,29 +65,30 @@ from pyspark.sql.window import Window
 # ============================================================================
 
 DATABASE = "gmp_cis"
-STAGING_TABLE = f"{DATABASE}.stg_gmp_security"
-TARGET_TABLE = f"{DATABASE}.cis_security_kudu"
-IMPALA_TARGET_TABLE = f"impala::{DATABASE}.cis_security_kudu"
 
+# Kudu table names (used by PySpark Kudu connector)
+KUDU_SECURITY      = f"impala::{DATABASE}.cis_security_kudu"
+KUDU_STAGING       = f"impala::{DATABASE}.stg_gmp_security_kudu"
+KUDU_REGISTRY      = f"impala::{DATABASE}.cis_security_id_registry"
+KUDU_COUNTER       = f"impala::{DATABASE}.cis_security_id_counter"
+
+# 12-digit ID floor — IDs start at 100_000_000_001
+ID_FLOOR = 100_000_000_000
+
+
+# ============================================================================
+# Helpers
+# ============================================================================
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Merge GMP security data into CIS")
-    parser.add_argument(
-        "--kudu-master",
-        required=True,
-        help="Kudu master addresses (e.g., kudu-master-1:7051,kudu-master-2:7151,kudu-master-3:7251)",
-    )
-    parser.add_argument(
-        "--batch-id",
-        default=None,
-        help="Optional batch ID to filter staging data",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Preview changes without writing to target",
-    )
-    return parser.parse_args()
+    p = argparse.ArgumentParser(description="Merge GMP security data into cis_security")
+    p.add_argument("--kudu-master", required=True,
+                   help="Kudu master addresses e.g. host1:7051,host2:7151")
+    p.add_argument("--batch-id", default=None,
+                   help="Filter staging to a specific ETL batch")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Preview without writing")
+    return p.parse_args()
 
 
 def create_spark_session():
@@ -78,92 +100,169 @@ def create_spark_session():
     )
 
 
-def read_staging_data(spark, kudu_master, batch_id=None):
-    """Read GMP security data from staging table."""
-    df = (
+def kudu_read(spark, master: str, table: str) -> DataFrame:
+    return (
         spark.read
         .format("kudu")
-        .option("kudu.master", kudu_master)
-        .option("kudu.table", IMPALA_TARGET_TABLE.replace("cis_security_kudu", "stg_gmp_security_kudu"))
+        .option("kudu.master", master)
+        .option("kudu.table", table)
         .load()
     )
 
-    if batch_id:
-        df = df.filter(F.col("etl_batch_id") == batch_id)
 
-    print(f"[INFO] Staging records to process: {df.count()}")
-    return df
-
-
-def read_existing_securities(spark, kudu_master):
-    """Read existing CIS securities for ISIN matching."""
-    df = (
-        spark.read
+def kudu_upsert(df: DataFrame, master: str, table: str):
+    (
+        df.write
         .format("kudu")
-        .option("kudu.master", kudu_master)
-        .option("kudu.table", IMPALA_TARGET_TABLE)
-        .load()
-        .select("security_id", "isin")
-        .filter(F.col("is_active") == True)
-        .filter(F.col("isin").isNotNull())
+        .option("kudu.master", master)
+        .option("kudu.table", table)
+        .option("kudu.operation", "upsert")
+        .mode("append")
+        .save()
     )
 
-    print(f"[INFO] Existing CIS securities with ISIN: {df.count()}")
-    return df
 
-
-def generate_security_ids(df_new, start_id):
-    """Generate timestamp-based security_id for new records.
-
-    Uses a base timestamp + row_number to ensure unique IDs.
-    This matches the CIS pattern: int(datetime.now().timestamp() * 1000)
+def build_natural_key(df: DataFrame) -> DataFrame:
     """
-    window = Window.orderBy("isin")
-    df_with_ids = df_new.withColumn(
-        "security_id",
-        F.lit(start_id) + F.row_number().over(window)
+    Add a `natural_key` column to the staging dataframe.
+
+    Priority:
+      1. ISIN present and non-empty  → "ISIN:<UPPER(isin)>"
+      2. name + exchange non-empty   → "NAME_EXCH:<UPPER(name)>:<UPPER(exchange)>"
+      3. name only                   → "NAME:<UPPER(name)>"
+
+    Also adds `key_type` column for the registry.
+    """
+    isin_clean = F.upper(F.trim(F.col("isin")))
+    name_clean = F.upper(F.trim(F.col("security_name")))
+    exch_clean = F.upper(F.trim(F.coalesce(F.col("exchange_code"), F.lit(""))))
+
+    has_isin = F.col("isin").isNotNull() & (F.trim(F.col("isin")) != "")
+    has_exch = F.col("exchange_code").isNotNull() & (F.trim(F.col("exchange_code")) != "")
+
+    natural_key = F.when(
+        has_isin,
+        F.concat(F.lit("ISIN:"), isin_clean)
+    ).when(
+        has_exch,
+        F.concat(F.lit("NAME_EXCH:"), name_clean, F.lit(":"), exch_clean)
+    ).otherwise(
+        F.concat(F.lit("NAME:"), name_clean)
     )
-    return df_with_ids
+
+    key_type = F.when(has_isin, F.lit("ISIN")) \
+                .when(has_exch, F.lit("NAME_EXCH")) \
+                .otherwise(F.lit("NAME"))
+
+    return df.withColumn("natural_key", natural_key) \
+             .withColumn("key_type", key_type)
 
 
-def merge_securities(spark, kudu_master, batch_id=None, dry_run=False):
-    """Main merge logic."""
+# ============================================================================
+# Main merge
+# ============================================================================
 
+def merge_securities(spark, kudu_master: str, batch_id=None, dry_run=False):
     now_ms = int(datetime.now().timestamp() * 1000)
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Step 1: Read staging data
-    stg_df = read_staging_data(spark, kudu_master, batch_id)
+    # ------------------------------------------------------------------
+    # 1. Read staging data
+    # ------------------------------------------------------------------
+    stg_raw = kudu_read(spark, kudu_master, KUDU_STAGING)
+    if batch_id:
+        stg_raw = stg_raw.filter(F.col("etl_batch_id") == batch_id)
 
-    if stg_df.count() == 0:
-        print("[INFO] No staging records found. Nothing to merge.")
+    stg_raw.cache()
+    stg_count = stg_raw.count()
+    if stg_count == 0:
+        print("[INFO] No staging records — nothing to merge.")
         return
+    print(f"[INFO] Staging records to process: {stg_count}")
 
-    # Step 2: Read existing securities for ISIN lookup
-    existing_df = read_existing_securities(spark, kudu_master)
+    # ------------------------------------------------------------------
+    # 2. Attach natural_key to each staging row
+    # ------------------------------------------------------------------
+    stg = build_natural_key(stg_raw)
 
-    # Step 3: LEFT JOIN staging with existing on isin
-    joined_df = stg_df.alias("stg").join(
-        existing_df.alias("existing"),
-        F.col("stg.isin") == F.col("existing.isin"),
+    # ------------------------------------------------------------------
+    # 3. Read the existing registry
+    #    (small table — all security IDs ever allocated)
+    # ------------------------------------------------------------------
+    registry = kudu_read(spark, kudu_master, KUDU_REGISTRY) \
+                   .select("natural_key", "security_id") \
+                   .cache()
+    print(f"[INFO] Registry entries: {registry.count()}")
+
+    # ------------------------------------------------------------------
+    # 4. Join staging against registry to split known / new
+    # ------------------------------------------------------------------
+    joined = stg.alias("stg").join(
+        registry.alias("reg"),
+        F.col("stg.natural_key") == F.col("reg.natural_key"),
         "left"
     )
 
-    # Step 4: Split into updates (existing ISIN match) and inserts (new)
-    updates_df = joined_df.filter(F.col("existing.security_id").isNotNull())
-    inserts_df = joined_df.filter(F.col("existing.security_id").isNull())
+    known_df = joined.filter(F.col("reg.security_id").isNotNull())
+    new_df   = joined.filter(F.col("reg.security_id").isNull())
 
-    update_count = updates_df.count()
-    insert_count = inserts_df.count()
+    known_count = known_df.count()
+    new_count   = new_df.count()
+    print(f"[INFO] Known (registry hit):  {known_count}")
+    print(f"[INFO] New   (no registry entry): {new_count}")
 
-    print(f"[INFO] Records to UPDATE (existing ISIN match): {update_count}")
-    print(f"[INFO] Records to INSERT (new securities):      {insert_count}")
+    # ------------------------------------------------------------------
+    # 5. Allocate IDs for new records
+    #    Read the counter, calculate IDs, then write counter back.
+    # ------------------------------------------------------------------
+    new_registry_rows = None
 
-    # Step 5: Build UPDATE records (reuse existing security_id)
-    update_records = (
-        updates_df
-        .select(
-            F.col("existing.security_id").alias("security_id"),
+    if new_count > 0:
+        counter_df = kudu_read(spark, kudu_master, KUDU_COUNTER)
+        current_next_id = counter_df.filter(F.col("counter_id") == 1) \
+                                     .select("next_id") \
+                                     .collect()[0]["next_id"]
+
+        # Assign IDs: current_next_id, current_next_id+1, ...
+        window = Window.orderBy("stg.natural_key")
+        new_with_ids = new_df.withColumn(
+            "security_id",
+            (F.lit(current_next_id) + F.row_number().over(window) - 1).cast("long")
+        )
+
+        # Build new registry entries (append-only, src_system='GMP')
+        new_registry_rows = new_with_ids.select(
+            F.col("stg.natural_key"),
+            F.col("security_id"),
+            F.col("stg.key_type"),
+            F.upper(F.trim(F.col("stg.isin"))).alias("isin"),
+            F.col("stg.security_name"),
+            F.col("stg.exchange_code"),
+            F.lit("GMP").alias("src_system"),
+            F.lit("GMP_ETL").alias("created_by"),
+            F.lit(now_ms).alias("created_at"),
+        )
+
+        # Advance the counter
+        updated_counter = spark.createDataFrame(
+            [(1, current_next_id + new_count, now_ms)],
+            ["counter_id", "next_id", "updated_at"]
+        )
+
+        if not dry_run:
+            kudu_upsert(new_registry_rows, kudu_master, KUDU_REGISTRY)
+            kudu_upsert(updated_counter,   kudu_master, KUDU_COUNTER)
+            print(f"[INFO] Registry: added {new_count} new entries "
+                  f"(IDs {current_next_id} – {current_next_id + new_count - 1})")
+
+    # ------------------------------------------------------------------
+    # 6. Build the final security records for cis_security
+    #    Known rows use existing security_id from registry.
+    #    New rows use freshly allocated security_id.
+    # ------------------------------------------------------------------
+    def build_security_record(df: DataFrame, id_col: str) -> DataFrame:
+        """Select all cis_security columns from a joined staging dataframe."""
+        return df.select(
+            F.col(id_col).cast("long").alias("security_id"),
             F.col("stg.record_type"),
             F.col("stg.security_name"),
             F.col("stg.isin"),
@@ -202,110 +301,105 @@ def merge_securities(spark, kudu_master, batch_id=None, dry_run=False):
             F.col("stg.fund_index_fund"),
             F.col("stg.management_limit_classification"),
             F.col("stg.relative_index"),
-        )
-        .withColumn("src_system", F.lit("GMP"))
-        .withColumn("is_active", F.lit(True))
-        .withColumn("created_by", F.lit("GMP_ETL"))
-        .withColumn("created_at", F.lit(now_ms))
-        .withColumn("updated_by", F.lit("GMP_ETL"))
-        .withColumn("updated_at", F.lit(now_ms))
-    )
-
-    # Step 6: Build INSERT records (generate new security_id)
-    insert_records = None
-    if insert_count > 0:
-        new_records_base = (
-            inserts_df
-            .select(
-                F.col("stg.record_type"),
-                F.col("stg.security_name"),
-                F.col("stg.isin"),
-                F.col("stg.security_description"),
-                F.col("stg.issuer"),
-                F.col("stg.ticker"),
-                F.col("stg.industry"),
-                F.col("stg.security_type"),
-                F.col("stg.investment_type"),
-                F.col("stg.issuer_type"),
-                F.col("stg.quoted_unquoted"),
-                F.col("stg.country_of_incorporation"),
-                F.col("stg.country_of_exchange"),
-                F.col("stg.country_of_issue"),
-                F.col("stg.exchange_code"),
-                F.col("stg.currency_code"),
-                F.col("stg.price"),
-                F.col("stg.shares_outstanding"),
-                F.col("stg.beta"),
-                F.col("stg.par_value"),
-                F.col("stg.pct_hld_entity_1"),
-                F.col("stg.pct_hld_entity_2"),
-                F.col("stg.pct_hld_entity_3"),
-                F.col("stg.pct_hld_entity_aggr"),
-                F.col("stg.substantial_10_pct"),
-                F.col("stg.cels"),
-                F.col("stg.pevc_s32_devest"),
-                F.col("stg.s32_representative"),
-                F.col("stg.basel_iv_fund"),
-                F.col("stg.mas_643_entity_type"),
-                F.col("stg.mas_6d_code"),
-                F.col("stg.fin_nonfin_ind"),
-                F.col("stg.business_unit_head"),
-                F.col("stg.person_in_charge"),
-                F.col("stg.core_noncore"),
-                F.col("stg.fund_index_fund"),
-                F.col("stg.management_limit_classification"),
-                F.col("stg.relative_index"),
-            )
-            .withColumn("src_system", F.lit("GMP"))
-            .withColumn("is_active", F.lit(True))
-            .withColumn("created_by", F.lit("GMP_ETL"))
-            .withColumn("created_at", F.lit(now_ms))
-            .withColumn("updated_by", F.lit("GMP_ETL"))
-            .withColumn("updated_at", F.lit(now_ms))
+            F.lit("GMP").alias("src_system"),
+            F.lit(True).alias("is_active"),
+            F.lit("GMP_ETL").alias("created_by"),
+            F.lit(now_ms).alias("created_at"),
+            F.lit("GMP_ETL").alias("updated_by"),
+            F.lit(now_ms).alias("updated_at"),
         )
 
-        # Generate security_id: base_timestamp + row_number
-        insert_records = generate_security_ids(new_records_base, now_ms)
+    known_records = build_security_record(known_df, "reg.security_id")
 
-    # Step 7: Union updates and inserts
-    if insert_records is not None and insert_count > 0:
-        # Ensure column order matches
-        final_df = update_records.unionByName(insert_records)
+    if new_count > 0:
+        new_records = build_security_record(
+            new_with_ids.alias("stg"),   # already has security_id column
+            "security_id"
+        )
+        # new_with_ids uses "stg.*" alias so re-alias correctly
+        new_records = new_with_ids.select(
+            F.col("security_id").cast("long"),
+            F.col("stg.record_type"),
+            F.col("stg.security_name"),
+            F.col("stg.isin"),
+            F.col("stg.security_description"),
+            F.col("stg.issuer"),
+            F.col("stg.ticker"),
+            F.col("stg.industry"),
+            F.col("stg.security_type"),
+            F.col("stg.investment_type"),
+            F.col("stg.issuer_type"),
+            F.col("stg.quoted_unquoted"),
+            F.col("stg.country_of_incorporation"),
+            F.col("stg.country_of_exchange"),
+            F.col("stg.country_of_issue"),
+            F.col("stg.exchange_code"),
+            F.col("stg.currency_code"),
+            F.col("stg.price"),
+            F.col("stg.shares_outstanding"),
+            F.col("stg.beta"),
+            F.col("stg.par_value"),
+            F.col("stg.pct_hld_entity_1"),
+            F.col("stg.pct_hld_entity_2"),
+            F.col("stg.pct_hld_entity_3"),
+            F.col("stg.pct_hld_entity_aggr"),
+            F.col("stg.substantial_10_pct"),
+            F.col("stg.cels"),
+            F.col("stg.pevc_s32_devest"),
+            F.col("stg.s32_representative"),
+            F.col("stg.basel_iv_fund"),
+            F.col("stg.mas_643_entity_type"),
+            F.col("stg.mas_6d_code"),
+            F.col("stg.fin_nonfin_ind"),
+            F.col("stg.business_unit_head"),
+            F.col("stg.person_in_charge"),
+            F.col("stg.core_noncore"),
+            F.col("stg.fund_index_fund"),
+            F.col("stg.management_limit_classification"),
+            F.col("stg.relative_index"),
+            F.lit("GMP").alias("src_system"),
+            F.lit(True).alias("is_active"),
+            F.lit("GMP_ETL").alias("created_by"),
+            F.lit(now_ms).alias("created_at"),
+            F.lit("GMP_ETL").alias("updated_by"),
+            F.lit(now_ms).alias("updated_at"),
+        )
+        final_df = known_records.unionByName(new_records)
     else:
-        final_df = update_records
+        final_df = known_records
 
-    print(f"[INFO] Total records to UPSERT: {final_df.count()}")
+    total = final_df.count()
+    print(f"[INFO] Total records to UPSERT into cis_security: {total}")
 
+    # ------------------------------------------------------------------
+    # 7. Dry-run preview
+    # ------------------------------------------------------------------
     if dry_run:
-        print("[DRY RUN] Preview of records to write:")
+        print("[DRY RUN] Sample of records to write:")
         final_df.select(
-            "security_id", "isin", "security_name", "currency_code", "src_system"
+            "security_id", "isin", "security_name",
+            "currency_code", "src_system"
         ).show(20, truncate=False)
         return
 
-    # Step 8: Write to target Kudu table via UPSERT
-    (
-        final_df.write
-        .format("kudu")
-        .option("kudu.master", kudu_master)
-        .option("kudu.table", IMPALA_TARGET_TABLE)
-        .option("kudu.operation", "upsert")
-        .mode("append")
-        .save()
-    )
+    # ------------------------------------------------------------------
+    # 8. UPSERT into cis_security — no DELETE, CIS rows are untouched
+    #    because the Kudu UPSERT only touches rows whose security_id
+    #    matches what we send (all GMP IDs).
+    # ------------------------------------------------------------------
+    kudu_upsert(final_df, kudu_master, KUDU_SECURITY)
 
-    print(f"[SUCCESS] Merged {update_count} updates + {insert_count} inserts into {TARGET_TABLE}")
+    print(f"[SUCCESS] Updated {known_count} + inserted {new_count} "
+          f"GMP securities into cis_security")
 
 
 # ============================================================================
-# Main
+# Entry point
 # ============================================================================
 
 if __name__ == "__main__":
     args = parse_args()
-
     spark = create_spark_session()
-
     try:
         merge_securities(
             spark,
