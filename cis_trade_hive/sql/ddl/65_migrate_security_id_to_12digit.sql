@@ -53,13 +53,14 @@ TBLPROPERTIES ('kudu.num_tablet_replicas' = '1');
 
 -- Populate mapping: one row per legacy ID
 -- new_security_id = counter_start + sequential offset (0-based)
+-- CROSS JOIN counter to avoid scalar subquery (Impala does not support them)
 INSERT INTO gmp_cis.cis_security_id_map (old_security_id, new_security_id, natural_key)
 SELECT
     r.security_id                                                   AS old_security_id,
-    (SELECT next_id FROM gmp_cis.cis_security_id_counter WHERE counter_id = 1)
-        + ROW_NUMBER() OVER (ORDER BY r.natural_key) - 1           AS new_security_id,
+    c.next_id + ROW_NUMBER() OVER (ORDER BY r.natural_key) - 1    AS new_security_id,
     r.natural_key
 FROM gmp_cis.cis_security_id_registry r
+CROSS JOIN (SELECT next_id FROM gmp_cis.cis_security_id_counter WHERE counter_id = 1) c
 WHERE LENGTH(CAST(r.security_id AS STRING)) != 12   -- only legacy IDs
   AND NOT EXISTS (
       SELECT 1 FROM gmp_cis.cis_security_id_map m
