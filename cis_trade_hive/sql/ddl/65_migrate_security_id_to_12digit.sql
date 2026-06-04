@@ -105,132 +105,25 @@ WHERE LENGTH(CAST(security_id AS STRING)) != 12;
 -- STEP 3: Swap cis_security PK (Kudu PK is immutable — must recreate table)
 -- ============================================================================
 -- Strategy:
---   a. Create cis_security_new with identical schema
---   b. INSERT all rows replacing old security_id with new_security_id
+--   a+b. CREATE TABLE AS SELECT with LEFT JOIN map — picks up live schema,
+--        no hardcoded column list needed.
 --   c. DROP cis_security (old)
 --   d. ALTER TABLE ... RENAME to cis_security
 -- ============================================================================
 
--- 3a. Create new table (identical schema to current cis_security)
-CREATE TABLE IF NOT EXISTS gmp_cis.cis_security_new (
-    security_id                      BIGINT NOT NULL,
-    security_name                    STRING NOT NULL,
-    isin                             STRING,
-    security_description             STRING,
-    issuer                           STRING,
-    ticker                           STRING,
-    industry                         STRING,
-    security_type                    STRING,
-    investment_type                  STRING,
-    issuer_type                      STRING,
-    quoted_unquoted                  STRING,
-    country_of_incorporation         STRING,
-    country_of_exchange              STRING,
-    country_of_issue                 STRING,
-    country_of_primary_exchange      STRING,
-    exchange_code                    STRING,
-    currency_code                    STRING,
-    price                            DECIMAL(20, 4),
-    price_date                       STRING,
-    price_source                     STRING,
-    shares_outstanding               BIGINT,
-    beta                             DECIMAL(10, 4),
-    par_value                        DECIMAL(20, 6),
-    shareholding_entity_1            DECIMAL(10, 4),
-    shareholding_entity_2            DECIMAL(10, 4),
-    shareholding_entity_3            DECIMAL(10, 4),
-    shareholding_aggregated          DECIMAL(10, 4),
-    substantial_10_pct               STRING,
-    bwciif                           BIGINT,
-    bwciif_others                    BIGINT,
-    cels                             STRING,
-    approved_s32                     STRING,
-    basel_iv_fund                    STRING,
-    mas_643_entity_type              STRING,
-    mas_6d_code                      STRING,
-    fin_nonfin_ind                   STRING,
-    business_unit_head               STRING,
-    person_in_charge                 STRING,
-    core_noncore                     STRING,
-    fund_index_fund                  STRING,
-    management_limit_classification  STRING,
-    relative_index                   STRING,
-    src_system                       STRING,
-    status                           STRING,
-    submitted_for_approval_at        STRING,
-    submitted_by                     STRING,
-    reviewed_at                      STRING,
-    reviewed_by                      STRING,
-    review_comments                  STRING,
-    is_active                        BOOLEAN,
-    created_by                       STRING NOT NULL,
-    created_at                       STRING NOT NULL,
-    updated_by                       STRING NOT NULL,
-    updated_at                       STRING NOT NULL,
-    PRIMARY KEY (security_id)
-)
+-- 3a+3b. Create new table from existing schema + copy all rows with swapped IDs.
+-- CREATE TABLE AS SELECT picks up the exact live schema — no hardcoded column list.
+-- LEFT JOIN + COALESCE: legacy rows get new 12-digit ID; already-12-digit rows
+-- keep their current ID unchanged.
+CREATE TABLE gmp_cis.cis_security_new
+PRIMARY KEY (security_id)
 PARTITION BY HASH (security_id) PARTITIONS 16
 STORED AS KUDU
-TBLPROPERTIES ('kudu.num_tablet_replicas' = '3');
-
--- 3b. Copy all rows with new security_id
--- LEFT JOIN so rows already having a 12-digit ID (not in map) are also copied
-INSERT INTO gmp_cis.cis_security_new
+TBLPROPERTIES ('kudu.num_tablet_replicas' = '3')
+AS
 SELECT
     COALESCE(m.new_security_id, s.security_id) AS security_id,
-    s.security_name,
-    s.isin,
-    s.security_description,
-    s.issuer,
-    s.ticker,
-    s.industry,
-    s.security_type,
-    s.investment_type,
-    s.issuer_type,
-    s.quoted_unquoted,
-    s.country_of_incorporation,
-    s.country_of_exchange,
-    s.country_of_issue,
-    s.country_of_primary_exchange,
-    s.exchange_code,
-    s.currency_code,
-    s.price,
-    s.price_date,
-    s.price_source,
-    s.shares_outstanding,
-    s.beta,
-    s.par_value,
-    s.shareholding_entity_1,
-    s.shareholding_entity_2,
-    s.shareholding_entity_3,
-    s.shareholding_aggregated,
-    s.substantial_10_pct,
-    s.bwciif,
-    s.bwciif_others,
-    s.cels,
-    s.approved_s32,
-    s.basel_iv_fund,
-    s.mas_643_entity_type,
-    s.mas_6d_code,
-    s.fin_nonfin_ind,
-    s.business_unit_head,
-    s.person_in_charge,
-    s.core_noncore,
-    s.fund_index_fund,
-    s.management_limit_classification,
-    s.relative_index,
-    s.src_system,
-    s.status,
-    s.submitted_for_approval_at,
-    s.submitted_by,
-    s.reviewed_at,
-    s.reviewed_by,
-    s.review_comments,
-    s.is_active,
-    s.created_by,
-    s.created_at,
-    s.updated_by,
-    s.updated_at
+    s.* EXCEPT (security_id)
 FROM gmp_cis.cis_security s
 LEFT JOIN gmp_cis.cis_security_id_map m ON m.old_security_id = s.security_id;
 
