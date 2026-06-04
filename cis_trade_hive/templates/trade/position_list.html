@@ -478,8 +478,22 @@ function togglePortfolioSelection(name) {
 function updatePortfolioCount() {
     document.getElementById('portfolioSelectedCount').textContent = `${selectedPortfolios.size} selected`;
 }
-function selectAllPortfolios() { portfolioData.forEach(p => selectedPortfolios.add(p.portfolio_short_name)); renderPortfolioTable(); }
-function clearAllPortfolios() { selectedPortfolios.clear(); renderPortfolioTable(); }
+function selectAllPortfolios() {
+    const term = document.getElementById('portfolioModalSearch').value.toLowerCase();
+    const filtered = portfolioData.filter(p =>
+        `${p.portfolio_short_name} ${p.portfolio_full_name} ${p.currency} ${p.manager}`.toLowerCase().includes(term)
+    );
+    filtered.forEach(p => selectedPortfolios.add(p.portfolio_short_name));
+    renderPortfolioTable();
+}
+function clearAllPortfolios() {
+    const term = document.getElementById('portfolioModalSearch').value.toLowerCase();
+    const filtered = portfolioData.filter(p =>
+        `${p.portfolio_short_name} ${p.portfolio_full_name} ${p.currency} ${p.manager}`.toLowerCase().includes(term)
+    );
+    filtered.forEach(p => selectedPortfolios.delete(p.portfolio_short_name));
+    renderPortfolioTable();
+}
 function toggleAllPortfolioCheckboxes(cb) { if (cb.checked) selectAllPortfolios(); else clearAllPortfolios(); }
 function applyPortfolioSelection() {
     const c = document.getElementById('selectedPortfoliosInputs');
@@ -554,8 +568,22 @@ function toggleSecuritySelection(label) {
 function updateSecurityCount() {
     document.getElementById('securitySelectedCount').textContent = `${selectedSecurities.size} selected`;
 }
-function selectAllSecurities() { securityData.forEach(s => selectedSecurities.add(s.security_label)); renderSecurityTable(); }
-function clearAllSecurities() { selectedSecurities.clear(); renderSecurityTable(); }
+function selectAllSecurities() {
+    const term = document.getElementById('securityModalSearch').value.toLowerCase();
+    const filtered = securityData.filter(s =>
+        `${s.security_label} ${s.security_name} ${s.isin} ${s.ticker} ${s.issuer}`.toLowerCase().includes(term)
+    );
+    filtered.forEach(s => selectedSecurities.add(s.security_label));
+    renderSecurityTable();
+}
+function clearAllSecurities() {
+    const term = document.getElementById('securityModalSearch').value.toLowerCase();
+    const filtered = securityData.filter(s =>
+        `${s.security_label} ${s.security_name} ${s.isin} ${s.ticker} ${s.issuer}`.toLowerCase().includes(term)
+    );
+    filtered.forEach(s => selectedSecurities.delete(s.security_label));
+    renderSecurityTable();
+}
 function toggleAllSecurityCheckboxes(cb) { if (cb.checked) selectAllSecurities(); else clearAllSecurities(); }
 function applySecuritySelection() {
     const c = document.getElementById('selectedSecuritiesInputs');
