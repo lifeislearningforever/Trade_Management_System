@@ -726,6 +726,7 @@ def load_trade(
     dry_run: bool,
     processing_date: str = '',
     with_positions: bool = False,
+    position_basis: str = 'BOTH',
 ) -> Tuple[int, int, List[str]]:
     ok = fail = 0
     pos_ok = pos_fail = 0
@@ -827,7 +828,7 @@ def load_trade(
 
         # Optionally trigger position calculation — same path as UI settle button
         if with_positions:
-            p_ok, p_err = _trigger_position(mapped, raw_id)
+            p_ok, p_err = _trigger_position(mapped, raw_id, position_basis=position_basis)
             if p_ok:
                 pos_ok += 1
             else:
@@ -846,11 +847,20 @@ def load_trade(
 POSITION_TRADE_TYPES = {'BUY', 'SELL'}
 
 
-def _trigger_position(mapped: Dict[str, Any], raw_id: str) -> Tuple[bool, str]:
+def _trigger_position(
+    mapped: Dict[str, Any],
+    raw_id: str,
+    position_basis: str = 'BOTH',
+) -> Tuple[bool, str]:
     """
     Call settlement_service.process_trade_settlement for one trade row.
     Returns (success, error_message).
     Only BUY / SELL trade types create positions; others are skipped silently.
+
+    position_basis:
+        'BOTH'       — create TRADE_DATE + SETTLE_DATE (default, normal behaviour)
+        'TRADE_DATE' — only the trade-date position (legacy migration behaviour)
+        'SETTLE_DATE'— only the settle-date position (backfill missing SETTLE rows)
     """
     trade_type = str(mapped.get('trade_type', '') or '').strip().upper()
     if trade_type not in POSITION_TRADE_TYPES:
@@ -873,6 +883,12 @@ def _trigger_position(mapped: Dict[str, Any], raw_id: str) -> Tuple[bool, str]:
         if not settle_date:
             settle_date = trade_date
 
+        # Map --basis CLI value to what settlement_service expects:
+        #   'BOTH'        → None   (service creates TRADE_DATE + SETTLE_DATE)
+        #   'TRADE_DATE'  → 'TRADE_DATE'
+        #   'SETTLE_DATE' → 'SETTLE_DATE'
+        svc_basis = None if position_basis == 'BOTH' else position_basis
+
         ok, msg, _ = settlement_service.process_trade_settlement(
             trade_id=int(raw_id),
             portfolio_id=mapped.get('portfolio_short_name', ''),
@@ -889,18 +905,14 @@ def _trigger_position(mapped: Dict[str, Any], raw_id: str) -> Tuple[bool, str]:
             isin=mapped.get('isin'),
             security_name=mapped.get('security_full_name') or mapped.get('security_label'),
             async_mode=False,
-            # Migration: TRADE_DATE basis only. Using dual (None) triggers a
-            # full _recalculate_position_chain per trade for backdated SETTLE_DATE
-            # which overwrites earlier positions — leaving only the last trade.
-            # Load all trades in chronological order on TRADE_DATE basis first;
-            # SETTLE_DATE positions can be derived separately if needed.
-            position_basis='TRADE_DATE',
+            position_basis=svc_basis,
         )
         if ok:
-            logger.info("Position OK  trade_id=%s %s %s qty=%s",
-                        raw_id, trade_type, mapped.get('security_label'), mapped.get('quantity'))
+            logger.info("Position OK  trade_id=%s %s %s qty=%s basis=%s",
+                        raw_id, trade_type, mapped.get('security_label'),
+                        mapped.get('quantity'), position_basis)
         else:
-            logger.warning("Position FAIL trade_id=%s: %s", raw_id, msg)
+            logger.warning("Position FAIL trade_id=%s basis=%s: %s", raw_id, position_basis, msg)
         return ok, '' if ok else f"trade_id={raw_id}: {msg}"
 
     except Exception as exc:
@@ -919,6 +931,7 @@ def load_position(
     trade_date_from: str = '',
     trade_date_to: str = '',
     dry_run: bool = False,
+    position_basis: str = 'BOTH',
 ) -> Tuple[int, int, List[str]]:
     """
     Read SETTLED or VALIDATED BUY/SELL trades from cis_trade and create positions.
@@ -933,6 +946,12 @@ def load_position(
         trade_type_filter — 'BUY' or 'SELL' (default: both)
         trade_date_from   — YYYY-MM-DD lower bound on trade_date
         trade_date_to     — YYYY-MM-DD upper bound on trade_date
+
+    position_basis:
+        'BOTH'        — create TRADE_DATE + SETTLE_DATE positions (default)
+        'TRADE_DATE'  — only TRADE_DATE positions
+        'SETTLE_DATE' — only SETTLE_DATE positions (use this to backfill
+                        missing SETTLE_DATE rows for already-migrated trades)
     """
     ok = fail = 0
     errors: List[str] = []
@@ -942,9 +961,7 @@ def load_position(
     # comparison against YYYY-MM-DD bounds gives wrong results in SQL).
     # Include VALIDATED: GMP trades land as VALIDATED (no separate settle step).
     conditions = ["status IN ('SETTLED', 'VALIDATED')", "trade_type IN ('BUY','SELL')",
-                  "is_deleted = false",
-                  "trade_date = '2026-02-27'",
-                  "settle_date = '2026-02-27'"]
+                  "is_deleted = false"]
     if portfolio_filter:
         conditions.append(f"portfolio_short_name = '{portfolio_filter.replace(chr(39), chr(92)+chr(39))}'")
     if trade_type_filter:
@@ -1005,7 +1022,7 @@ def load_position(
             ok += 1
             continue
 
-        p_ok, p_err = _trigger_position(row, raw_id)
+        p_ok, p_err = _trigger_position(row, raw_id, position_basis=position_basis)
         if p_ok:
             ok += 1
         else:
@@ -1069,21 +1086,26 @@ Examples:
   # Load trades from CSV (no positions)
   python scripts/load_migration_data.py --table trade --file trades.csv
 
-  # Load trades AND create positions in one pass
+  # Load trades AND create BOTH positions (TRADE_DATE + SETTLE_DATE) in one pass
   python scripts/load_migration_data.py --table trade --file trades.csv --positions
 
-  # Backfill positions for trades already in cis_trade (no CSV needed)
+  # Backfill BOTH positions for all trades already in cis_trade
   python scripts/load_migration_data.py --table position
 
-  # Backfill positions for one portfolio only
-  python scripts/load_migration_data.py --table position --portfolio UOB-KH-PTE-LTD
+  # Backfill ONLY missing SETTLE_DATE positions (trades were already migrated
+  # with TRADE_DATE only — this fills in the SETTLE_DATE gap for src_system=CIS)
+  python scripts/load_migration_data.py --table position --basis SETTLE_DATE
 
-  # Backfill positions for a date range
-  python scripts/load_migration_data.py --table position \\
+  # Backfill SETTLE_DATE positions for one portfolio only
+  python scripts/load_migration_data.py --table position --basis SETTLE_DATE \\
+      --portfolio UOB-KH-PTE-LTD
+
+  # Backfill SETTLE_DATE positions for a date range
+  python scripts/load_migration_data.py --table position --basis SETTLE_DATE \\
       --trade-date-from 2026-01-01 --trade-date-to 2026-05-23
 
   # Dry-run: see what would be processed without writing
-  python scripts/load_migration_data.py --table position --dry-run
+  python scripts/load_migration_data.py --table position --basis SETTLE_DATE --dry-run
 """)
     parser.add_argument('--table',           required=True, choices=ALL_TABLES,
                         help='Target table. Use "position" to backfill positions from existing cis_trade rows.')
@@ -1110,6 +1132,12 @@ Examples:
                         help='(--table position) Lower bound on trade_date (YYYY-MM-DD)')
     parser.add_argument('--trade-date-to',   default='',
                         help='(--table position) Upper bound on trade_date (YYYY-MM-DD, default: today)')
+    parser.add_argument('--basis',           default='BOTH',
+                        choices=['BOTH', 'TRADE_DATE', 'SETTLE_DATE'],
+                        help='Which position basis to create. '
+                             'BOTH=TRADE_DATE+SETTLE_DATE (default). '
+                             'Use SETTLE_DATE to backfill missing settle-date '
+                             'positions for trades already migrated with TRADE_DATE only.')
 
     args = parser.parse_args()
 
@@ -1119,8 +1147,10 @@ Examples:
     if args.table == 'position':
         date_to = args.trade_date_to or today_iso
         logger.info(
-            "Backfilling positions from cis_trade (portfolio=%r type=%r from=%r to=%r dry_run=%s)",
-            args.portfolio, args.trade_type, args.trade_date_from, date_to, args.dry_run
+            "Backfilling positions from cis_trade "
+            "(portfolio=%r type=%r from=%r to=%r basis=%s dry_run=%s)",
+            args.portfolio, args.trade_type, args.trade_date_from,
+            date_to, args.basis, args.dry_run
         )
         ok, fail, errors = load_position(
             portfolio_filter=args.portfolio,
@@ -1128,6 +1158,7 @@ Examples:
             trade_date_from=args.trade_date_from,
             trade_date_to=date_to,
             dry_run=args.dry_run,
+            position_basis=args.basis,
         )
         print()
         print("=" * 55)
@@ -1135,6 +1166,7 @@ Examples:
         print(f"  Portfolio filter : {args.portfolio or '(all)'}")
         print(f"  Trade type       : {args.trade_type or 'BUY + SELL'}")
         print(f"  Date range       : {args.trade_date_from or '(any)'} → {date_to}")
+        print(f"  Position basis   : {args.basis}")
         print(f"  Positions queued : {ok}")
         print(f"  Failed           : {fail}")
         if args.dry_run:
@@ -1176,6 +1208,7 @@ Examples:
         ok, fail, errors = load_trade(
             rows, effective_status, args.dry_run, proc_date,
             with_positions=args.positions,
+            position_basis=args.basis,
         )
     else:
         loader = LOADERS[args.table]
