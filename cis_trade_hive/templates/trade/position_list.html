@@ -66,15 +66,42 @@
                 </div>
             </div>
 
-            <!-- Src System -->
+            <!-- Src System multi-select -->
             <div class="col-md-1">
                 <label class="form-label form-label-sm">Src System</label>
-                <select name="src_system" class="form-select form-select-sm">
-                    <option value="">All</option>
-                    {% for s in src_systems %}
-                        <option value="{{ s }}" {% if f_src_system == s %}selected{% endif %}>{{ s }}</option>
+                <div id="srcSystemInputs">
+                    {% for s in selected_src_systems %}
+                    <input type="hidden" name="src_system" value="{{ s }}">
                     {% endfor %}
-                </select>
+                </div>
+                <div class="dropdown">
+                    <button type="button"
+                            class="btn btn-outline-secondary btn-sm w-100 d-flex justify-content-between align-items-center"
+                            data-bs-toggle="dropdown" aria-expanded="false">
+                        <span id="srcSystemLabel">
+                            {% if selected_src_systems %}{{ selected_src_systems|length }} selected{% else %}All{% endif %}
+                        </span>
+                        <i class="bi bi-chevron-down ms-1"></i>
+                    </button>
+                    <ul class="dropdown-menu p-2" style="min-width:140px;" onclick="event.stopPropagation()">
+                        {% for s in src_systems %}
+                        <li>
+                            <label class="dropdown-item d-flex align-items-center gap-2 py-1" style="cursor:pointer;">
+                                <input type="checkbox" class="form-check-input src-system-cb"
+                                       value="{{ s }}"
+                                       {% if s in selected_src_systems %}checked{% endif %}
+                                       onchange="updateSrcSystem()">
+                                {{ s }}
+                            </label>
+                        </li>
+                        {% endfor %}
+                        <li><hr class="dropdown-divider my-1"></li>
+                        <li>
+                            <button type="button" class="btn btn-link btn-sm p-0 px-2 text-secondary"
+                                    onclick="clearSrcSystems()">Clear all</button>
+                        </li>
+                    </ul>
+                </div>
             </div>
 
             <!-- Position Basis -->
@@ -602,5 +629,23 @@ function removeSecurityFilter(label) {
     document.getElementById('positionFilterForm').submit();
 }
 document.getElementById('securityModalSearch').addEventListener('input', renderSecurityTable);
+
+// ── Src System multi-select ───────────────────────────
+function updateSrcSystem() {
+    const checked = [...document.querySelectorAll('.src-system-cb:checked')].map(cb => cb.value);
+    const container = document.getElementById('srcSystemInputs');
+    container.innerHTML = '';
+    checked.forEach(v => {
+        const i = document.createElement('input');
+        i.type = 'hidden'; i.name = 'src_system'; i.value = v;
+        container.appendChild(i);
+    });
+    document.getElementById('srcSystemLabel').textContent =
+        checked.length > 0 ? `${checked.length} selected` : 'All';
+}
+function clearSrcSystems() {
+    document.querySelectorAll('.src-system-cb').forEach(cb => cb.checked = false);
+    updateSrcSystem();
+}
 </script>
 {% endblock %}

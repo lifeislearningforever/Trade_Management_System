@@ -29,7 +29,7 @@ class PositionRepository:
         self,
         portfolios: Optional[list] = None,
         securities: Optional[list] = None,
-        src_system: Optional[str] = None,
+        src_system: Optional[Any] = None,  # str or list[str]
         position_basis: Optional[str] = None,
         position_type: Optional[str] = None,
         date_from: Optional[str] = None,
@@ -56,7 +56,13 @@ class PositionRepository:
                 vals = "', '".join(self._escape(s) for s in securities)
                 conditions.append(f"security_label IN ('{vals}')")
             if src_system:
-                conditions.append(f"src_system = '{self._escape(src_system)}'")
+                src_list = src_system if isinstance(src_system, list) else [src_system]
+                src_list = [s for s in src_list if s]
+                if len(src_list) == 1:
+                    conditions.append(f"src_system = '{self._escape(src_list[0])}'")
+                elif len(src_list) > 1:
+                    vals = "', '".join(self._escape(s) for s in src_list)
+                    conditions.append(f"src_system IN ('{vals}')")
             if position_basis:
                 conditions.append(f"position_basis = '{self._escape(position_basis)}'")
             if position_type:
@@ -105,7 +111,7 @@ class PositionRepository:
         self,
         portfolios: Optional[list] = None,
         securities: Optional[list] = None,
-        src_system: Optional[str] = None,
+        src_system: Optional[Any] = None,  # str or list[str]
         position_basis: Optional[str] = None,
         position_type: Optional[str] = None,
         date_from: Optional[str] = None,
@@ -126,7 +132,13 @@ class PositionRepository:
                 vals = "', '".join(self._escape(s) for s in securities)
                 conditions.append(f"security_label IN ('{vals}')")
             if src_system:
-                conditions.append(f"src_system = '{self._escape(src_system)}'")
+                src_list = src_system if isinstance(src_system, list) else [src_system]
+                src_list = [s for s in src_list if s]
+                if len(src_list) == 1:
+                    conditions.append(f"src_system = '{self._escape(src_list[0])}'")
+                elif len(src_list) > 1:
+                    vals = "', '".join(self._escape(s) for s in src_list)
+                    conditions.append(f"src_system IN ('{vals}')")
             if position_basis:
                 conditions.append(f"position_basis = '{self._escape(position_basis)}'")
             if position_type:
@@ -150,7 +162,7 @@ class PositionRepository:
         self,
         portfolios: Optional[list] = None,
         securities: Optional[list] = None,
-        src_system: Optional[str] = None,
+        src_system: Optional[Any] = None,  # str or list[str]
         position_basis: Optional[str] = None,
         position_type: Optional[str] = None,
         date_from: Optional[str] = None,
@@ -171,7 +183,13 @@ class PositionRepository:
                 vals = "', '".join(self._escape(s) for s in securities)
                 conditions.append(f"security_label IN ('{vals}')")
             if src_system:
-                conditions.append(f"src_system = '{self._escape(src_system)}'")
+                src_list = src_system if isinstance(src_system, list) else [src_system]
+                src_list = [s for s in src_list if s]
+                if len(src_list) == 1:
+                    conditions.append(f"src_system = '{self._escape(src_list[0])}'")
+                elif len(src_list) > 1:
+                    vals = "', '".join(self._escape(s) for s in src_list)
+                    conditions.append(f"src_system IN ('{vals}')")
             if position_basis:
                 conditions.append(f"position_basis = '{self._escape(position_basis)}'")
             if position_type:

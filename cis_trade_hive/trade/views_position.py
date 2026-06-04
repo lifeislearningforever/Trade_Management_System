@@ -35,7 +35,7 @@ def position_list(request):
     # --- Filter params ---
     selected_portfolios = request.GET.getlist('portfolios')
     selected_securities = request.GET.getlist('securities')
-    src_system    = request.GET.get('src_system', '').strip()
+    selected_src_systems = request.GET.getlist('src_system')
     position_basis = request.GET.get('position_basis', '').strip()
     position_type = request.GET.get('position_type', '').strip()
     date_from     = request.GET.get('date_from', '').strip()
@@ -55,7 +55,7 @@ def position_list(request):
     filter_kwargs = dict(
         portfolios=selected_portfolios or None,
         securities=selected_securities or None,
-        src_system=src_system or None,
+        src_system=selected_src_systems or None,
         position_basis=position_basis or None,
         position_type=position_type or None,
         date_from=date_from or None,
@@ -93,9 +93,9 @@ def position_list(request):
         'page_range':      _page_range(page, total_pages),
 
         # Active filters (echo back)
-        'selected_portfolios': selected_portfolios,
-        'selected_securities': selected_securities,
-        'f_src_system':     src_system,
+        'selected_portfolios':  selected_portfolios,
+        'selected_securities':  selected_securities,
+        'selected_src_systems': selected_src_systems,
         'f_position_basis': position_basis,
         'f_position_type':  position_type,
         'f_date_from':      date_from,
