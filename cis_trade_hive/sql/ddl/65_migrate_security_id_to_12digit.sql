@@ -174,9 +174,10 @@ STORED AS KUDU
 TBLPROPERTIES ('kudu.num_tablet_replicas' = '3');
 
 -- 3b. Copy all rows with new security_id
+-- LEFT JOIN so rows already having a 12-digit ID (not in map) are also copied
 INSERT INTO gmp_cis.cis_security_new
 SELECT
-    m.new_security_id                AS security_id,
+    COALESCE(m.new_security_id, s.security_id) AS security_id,
     s.security_name,
     s.isin,
     s.security_description,
@@ -231,7 +232,7 @@ SELECT
     s.updated_by,
     s.updated_at
 FROM gmp_cis.cis_security s
-INNER JOIN gmp_cis.cis_security_id_map m ON m.old_security_id = s.security_id;
+LEFT JOIN gmp_cis.cis_security_id_map m ON m.old_security_id = s.security_id;
 
 -- Verify row counts match before dropping old table
 SELECT 'cis_security (old)' AS tbl, COUNT(*) AS cnt FROM gmp_cis.cis_security
