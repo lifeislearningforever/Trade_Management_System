@@ -78,7 +78,7 @@
                     <button type="button"
                             class="btn btn-outline-secondary btn-sm w-100 d-flex justify-content-between align-items-center"
                             data-bs-toggle="dropdown"
-                            data-bs-auto-close="outside"
+                            data-bs-auto-close="true"
                             aria-expanded="false">
                         <span id="srcSystemLabel">
                             {% if selected_src_systems %}{{ selected_src_systems|length }} selected{% else %}All{% endif %}
@@ -636,6 +636,20 @@ function removeSecurityFilter(label) {
 document.getElementById('securityModalSearch').addEventListener('input', renderSecurityTable);
 
 // ── Src System multi-select ───────────────────────────
+(function () {
+    const srcDropdownEl = document.querySelector('#srcSystemInputs')
+        ?.closest('.col-md-1')
+        ?.querySelector('.dropdown');
+    if (srcDropdownEl) {
+        srcDropdownEl.addEventListener('hide.bs.dropdown', function (e) {
+            // Cancel close if the click was inside the menu itself
+            if (e.clickEvent && srcDropdownEl.querySelector('.dropdown-menu').contains(e.clickEvent.target)) {
+                e.preventDefault();
+            }
+        });
+    }
+})();
+
 function updateSrcSystem() {
     const checked = [...document.querySelectorAll('.src-system-cb:checked')].map(cb => cb.value);
     const container = document.getElementById('srcSystemInputs');
