@@ -77,27 +77,32 @@
                 <div class="dropdown">
                     <button type="button"
                             class="btn btn-outline-secondary btn-sm w-100 d-flex justify-content-between align-items-center"
-                            data-bs-toggle="dropdown" aria-expanded="false">
+                            data-bs-toggle="dropdown"
+                            data-bs-auto-close="outside"
+                            aria-expanded="false">
                         <span id="srcSystemLabel">
                             {% if selected_src_systems %}{{ selected_src_systems|length }} selected{% else %}All{% endif %}
                         </span>
                         <i class="bi bi-chevron-down ms-1"></i>
                     </button>
-                    <ul class="dropdown-menu p-2" style="min-width:140px;" onclick="event.stopPropagation()">
+                    <ul class="dropdown-menu p-2" style="min-width:140px;">
                         {% for s in src_systems %}
                         <li>
-                            <label class="dropdown-item d-flex align-items-center gap-2 py-1" style="cursor:pointer;">
+                            <label class="d-flex align-items-center gap-2 px-2 py-1 rounded"
+                                   style="cursor:pointer; user-select:none;"
+                                   onmouseover="this.style.background='#f8f9fa'"
+                                   onmouseout="this.style.background=''">
                                 <input type="checkbox" class="form-check-input src-system-cb"
                                        value="{{ s }}"
                                        {% if s in selected_src_systems %}checked{% endif %}
                                        onchange="updateSrcSystem()">
-                                {{ s }}
+                                <span>{{ s }}</span>
                             </label>
                         </li>
                         {% endfor %}
                         <li><hr class="dropdown-divider my-1"></li>
-                        <li>
-                            <button type="button" class="btn btn-link btn-sm p-0 px-2 text-secondary"
+                        <li class="px-2">
+                            <button type="button" class="btn btn-link btn-sm p-0 text-secondary"
                                     onclick="clearSrcSystems()">Clear all</button>
                         </li>
                     </ul>
