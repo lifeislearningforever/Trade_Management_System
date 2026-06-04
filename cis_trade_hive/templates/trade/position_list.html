@@ -640,14 +640,16 @@ document.getElementById('securityModalSearch').addEventListener('input', renderS
     const srcDropdownEl = document.querySelector('#srcSystemInputs')
         ?.closest('.col-md-1')
         ?.querySelector('.dropdown');
-    if (srcDropdownEl) {
-        srcDropdownEl.addEventListener('hide.bs.dropdown', function (e) {
-            // Cancel close if the click was inside the menu itself
-            if (e.clickEvent && srcDropdownEl.querySelector('.dropdown-menu').contains(e.clickEvent.target)) {
-                e.preventDefault();
-            }
-        });
-    }
+    if (!srcDropdownEl) return;
+    const menu = srcDropdownEl.querySelector('.dropdown-menu');
+    let clickedInsideMenu = false;
+    menu.addEventListener('mousedown', function () { clickedInsideMenu = true; });
+    srcDropdownEl.addEventListener('hide.bs.dropdown', function (e) {
+        if (clickedInsideMenu) {
+            e.preventDefault();
+            clickedInsideMenu = false;
+        }
+    });
 })();
 
 function updateSrcSystem() {
