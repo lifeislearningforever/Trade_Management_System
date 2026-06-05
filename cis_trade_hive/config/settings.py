@@ -245,16 +245,13 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = '/static/'
-STATIC_ROOT = BASE_DIR / 'staticfiles'
-STATICFILES_DIRS = [BASE_DIR / 'static']
-# WhiteNoiseStaticFilesStorage — no manifest file required, works without
-# pre-running collectstatic, safe for all environments including UAT/PROD.
-# CompressedManifestStaticFilesStorage was causing 404s on UAT because
-# staticfiles/ is gitignored and the manifest was never present on the server.
+# Point STATIC_ROOT directly at the source static/ folder.
+# WhiteNoise 6.x serves from STATIC_ROOT only — no collectstatic needed
+# because all JS/CSS/images are committed local files in static/.
+# staticfiles/ (the old collectstatic output) is gitignored and was
+# causing 404s on UAT/PROD when collectstatic had never been run.
+STATIC_ROOT = BASE_DIR / 'static'
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedStaticFilesStorage'
-# Serve static files directly from STATICFILES_DIRS without collectstatic
-WHITENOISE_USE_FINDERS = True
-WHITENOISE_AUTOREFRESH = True
 
 # Media files
 MEDIA_URL = '/media/'
