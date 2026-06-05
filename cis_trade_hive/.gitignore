@@ -1,3 +1,6 @@
+# Session state (local only)
+WORK_IN_PROGRESS.md
+
 # Python
 __pycache__/
 *.py[cod]

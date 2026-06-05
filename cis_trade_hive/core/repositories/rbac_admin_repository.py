@@ -435,7 +435,7 @@ class RBACAdminRepository:
     # GROUP → PERMISSION MAPPINGS
     # =========================================================================
 
-    def get_group_permission_mappings(self, group_name: str) -> List[Dict]:
+    def get_group_permission_mappings(self, group_name: str, active_only: bool = False) -> List[Dict]:
         try:
             query = f"""
                 SELECT gpm.group_permission_id, gpm.group_name,
@@ -444,8 +444,10 @@ class RBACAdminRepository:
                 FROM {DB}.cis_group_permission_map gpm
                 WHERE gpm.group_name = '{self._escape(group_name)}'
                   AND gpm.is_deleted = false
-                ORDER BY gpm.permission_name
             """
+            if active_only:
+                query += "  AND gpm.is_active = true\n"
+            query += "ORDER BY gpm.permission_name"
             return impala_manager.execute_query(query, database=DB) or []
         except Exception as e:
             logger.error(f"get_group_permission_mappings error: {e}")
@@ -461,15 +463,26 @@ class RBACAdminRepository:
         """
         Replace all permission mappings for a group in one operation.
         Clears ACL cache for ALL users (group change affects everyone in it).
+
+        Existing active rows are soft-deleted (is_active=false, is_deleted=true).
+        If a permission is re-assigned, the same group_permission_id is reused so
+        inactive rows are not resurrected and the table does not accumulate duplicates.
         """
         try:
             now = self._now()
 
-            # Soft-delete existing via UPSERT (Kudu has no UPDATE)
-            existing_perms = self.get_group_permission_mappings(group_name)
-            for ep in existing_perms:
-                if ep.get('entity', '') != entity:
-                    continue
+            # Fetch only active rows to soft-delete — inactive rows are already excluded
+            # from permission checks and must not be resurrected by a new UPSERT on the
+            # same group_permission_id.
+            existing_perms = self.get_group_permission_mappings(group_name, active_only=True)
+            existing_by_perm = {
+                ep['permission_name']: ep
+                for ep in existing_perms
+                if ep.get('entity', '') == entity
+            }
+
+            # Soft-delete all currently active mappings for this group+entity
+            for ep in existing_by_perm.values():
                 del_perm_sql = f"""
                     UPSERT INTO {DB}.cis_group_permission_map
                     (group_permission_id, group_name, permission_name, entity,
@@ -489,9 +502,15 @@ class RBACAdminRepository:
                 """
                 impala_manager.execute_write(del_perm_sql, database=DB)
 
-            # Upsert new
+            # Upsert new permissions — reuse existing group_permission_id when the same
+            # permission_name is being re-assigned so Kudu updates the row in-place
+            # instead of leaving an orphaned inactive row alongside a new active one.
             for perm in permissions:
-                perm_id = self._id()
+                perm_name = perm.get("permission_name", "")
+                existing = existing_by_perm.get(perm_name)
+                perm_id = self._escape(existing["group_permission_id"]) if existing else self._id()
+                created_on = existing.get("created_on", now) if existing else now
+                created_by = self._escape(existing.get("created_by", updated_by)) if existing else self._escape(updated_by)
                 ins_sql = f"""
                     UPSERT INTO {DB}.cis_group_permission_map
                     (group_permission_id, group_name, permission_name, entity,
@@ -500,12 +519,12 @@ class RBACAdminRepository:
                     VALUES (
                         '{perm_id}',
                         '{self._escape(group_name)}',
-                        '{self._escape(perm.get("permission_name",""))}',
+                        '{self._escape(perm_name)}',
                         '{self._escape(entity)}',
                         '{self._escape(perm.get("mode","READ"))}',
                         '{self._escape(perm.get("description",""))}',
                         true, false,
-                        '{now}', '{self._escape(updated_by)}',
+                        '{created_on}', '{created_by}',
                         '{now}', '{self._escape(updated_by)}'
                     )
                 """
