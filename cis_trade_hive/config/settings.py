@@ -245,13 +245,12 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = '/static/'
-# Point STATIC_ROOT directly at the source static/ folder.
-# WhiteNoise 6.x serves from STATIC_ROOT only — no collectstatic needed
-# because all JS/CSS/images are committed local files in static/.
-# staticfiles/ (the old collectstatic output) is gitignored and was
-# causing 404s on UAT/PROD when collectstatic had never been run.
-STATIC_ROOT = BASE_DIR / 'static'
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedStaticFilesStorage'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_DIRS = [BASE_DIR / 'static']
+# Use plain StaticFilesStorage — no manifest, no hashing.
+# Works immediately after collectstatic copies static/ → staticfiles/.
+# collectstatic runs automatically at startup via cml_app.py for non-SIT envs.
+STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
 
 # Media files
 MEDIA_URL = '/media/'

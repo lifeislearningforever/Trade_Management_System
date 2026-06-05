@@ -885,6 +885,9 @@ def main():
         os.environ.setdefault("DJANGO_DEBUG", "True")
     else:
         os.environ.setdefault("DJANGO_DEBUG", "False")
+        # Always run collectstatic on non-SIT — copies static/ → staticfiles/
+        # so WhiteNoise can serve them with DEBUG=False.
+        os.environ["DJANGO_COLLECT_STATIC"] = "1"
 
     # ==================== REST Proxy Configuration ====================
     # Enable REST proxy mode for Hive operations (bypasses direct Hive connections)
@@ -928,8 +931,9 @@ def main():
     except Exception:
         print("create_hive_db failed or not available; continuing...")
 
-    if COLLECT_STATIC:
-        os.environ.setdefault("DJANGO_COLLECTSTATIC", "1")
+    # Re-read at runtime — DJANGO_COLLECT_STATIC may have been set above
+    # inside main() after the module-level COLLECT_STATIC was evaluated.
+    if os.environ.get("DJANGO_COLLECT_STATIC", "0") in ("1", "true", "True"):
         run([python_exec, "manage.py", "collectstatic", "--noinput"], check=True)
 
     # ==================== Background Workers ====================
