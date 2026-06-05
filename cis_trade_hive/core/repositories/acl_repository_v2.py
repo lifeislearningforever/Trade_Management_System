@@ -685,34 +685,58 @@ class ACLRepositoryV2:
             logger.error(f"Error getting all permissions: {str(e)}")
             return []
 
-    def update_last_login(self, user_id: str) -> bool:
+    def update_last_login(self, login: str) -> bool:
         """
-        Update user's last login timestamp.
+        Persist last_login timestamp on cis_user_info at successful login.
 
-        Note: Requires write access to Kudu table.
+        Fetches the current user row by login, then UPSERTs it back with
+        last_login = NOW() and updated_on = NOW().  All other columns are
+        preserved unchanged so no data is lost.
 
         Args:
-            user_id: User ID to update
+            login: User login ID (e.g. 'TMP3RC')
 
         Returns:
-            bool: True if successful, False otherwise
-
-        Example:
-            >>> repo.update_last_login('123')
+            bool: True if written, False if user not found or write failed
         """
         try:
-            # Clear cache for this user
-            user = self.get_user_by_id(user_id)
-            if user:
-                self.clear_cache(user.get('login'))
+            user = self.get_user_by_login(login)
+            if not user:
+                logger.warning(f"update_last_login: user '{login}' not found")
+                return False
 
-            # Note: UPSERT requires all primary key values
-            # For now, just log the login
-            logger.info(f"User login recorded: {user_id}")
-            return True
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            esc = lambda v: str(v).replace("'", "''") if v is not None else ''
+
+            upsert_sql = f"""
+                UPSERT INTO {self.database}.{self.TABLE_USER}
+                (user_id, login, email, name, default_entity,
+                 last_login, is_active, is_deleted,
+                 created_on, created_by, updated_on, updated_by)
+                VALUES (
+                    '{esc(user["user_id"])}',
+                    '{esc(user["login"])}',
+                    '{esc(user.get("email", ""))}',
+                    '{esc(user.get("name", ""))}',
+                    '{esc(user.get("default_entity", ""))}',
+                    '{now}',
+                    {str(user.get("is_active", True)).lower()},
+                    {str(user.get("is_deleted", False)).lower()},
+                    '{esc(user.get("created_on", now))}',
+                    '{esc(user.get("created_by", login))}',
+                    '{now}',
+                    '{esc(login)}'
+                )
+            """
+
+            ok = self.connection_manager.execute_write(upsert_sql, database=self.database)
+            if ok:
+                self.clear_cache(login)
+                logger.info(f"last_login updated for user '{login}'")
+            return bool(ok)
 
         except Exception as e:
-            logger.error(f"Error updating last login for '{user_id}': {str(e)}")
+            logger.error(f"Error updating last_login for '{login}': {str(e)}")
             return False
 
 

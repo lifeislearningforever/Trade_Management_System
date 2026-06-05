@@ -169,7 +169,7 @@ class LoginView(View):
             # Mark as v1 session
             request.session['rbac_version'] = 'v1'
 
-        # Update last login (logged only, not persisted)
+        # Persist last_login timestamp to cis_user_info
         acl_repo.update_last_login(login)
 
         # Rate limiting: Check last login audit timestamp
