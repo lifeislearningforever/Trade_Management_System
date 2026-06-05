@@ -313,13 +313,16 @@ class TradeKuduRepository:
 
             where_clause = " AND ".join(where_clauses)
 
-            # Join with portfolio table to get portfolio currency for LC calculation
-            # Portfolio table uses 'name' as identifier which matches trade's 'portfolio_short_name'
+            # Join portfolio for LC currency; join cis_security on ticker to get security_id
+            # trade.security_label = cis_security.ticker (no security_id stored on trade)
             query = f"""
             SELECT t.*,
-                   COALESCE(p.currency, t.currency_code) as portfolio_currency
+                   COALESCE(p.currency, t.currency_code) as portfolio_currency,
+                   s.security_id as security_id
             FROM {self.DATABASE}.{self.TABLE_NAME} t
             LEFT JOIN {self.DATABASE}.cis_portfolio p ON t.portfolio_short_name = p.name
+            LEFT JOIN {self.DATABASE}.cis_security s ON t.security_label = s.ticker
+                   AND s.is_active = true
             WHERE {where_clause}
             ORDER BY CASE WHEN UPPER(t.src_system) = 'CIS' THEN 0 ELSE 1 END,
                      t.created_at DESC
