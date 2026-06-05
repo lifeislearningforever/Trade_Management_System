@@ -54,6 +54,10 @@ class TradeWrapper:
         self.security_type = data.get('security_type', '')
         self.currency_code = data.get('currency_code', '')  # Portfolio Currency (Local CCY)
         self.security_currency = data.get('security_currency', '')  # Security Currency (Foreign CCY)
+        # security_id: cis_trade stores security_label (ticker) not the integer PK.
+        # Cast to int only if present and numeric so the template url tag works safely.
+        _sid = data.get('security_id')
+        self.security_id = int(_sid) if _sid and str(_sid).isdigit() else None
 
         # Dates & Quantities
         self.trade_status = data.get('trade_status', '')
