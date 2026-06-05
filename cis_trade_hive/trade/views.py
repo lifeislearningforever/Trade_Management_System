@@ -54,13 +54,6 @@ class TradeWrapper:
         self.security_type = data.get('security_type', '')
         self.currency_code = data.get('currency_code', '')  # Portfolio Currency (Local CCY)
         self.security_currency = data.get('security_currency', '')  # Security Currency (Foreign CCY)
-        # security_id: resolved via LEFT JOIN cis_security ON ticker in the trade list query.
-        # GMP-sourced trades with no matching security row will have None — template guards on this.
-        _sid = data.get('security_id')
-        try:
-            self.security_id = int(_sid) if _sid is not None else None
-        except (ValueError, TypeError):
-            self.security_id = None
 
         # Dates & Quantities
         self.trade_status = data.get('trade_status', '')
