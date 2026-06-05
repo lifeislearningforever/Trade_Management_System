@@ -48,8 +48,40 @@ class RBACAdminRepository:
 
     @staticmethod
     def _id() -> str:
-        """Generate a unique string ID based on epoch ms."""
+        """Fallback numeric ID (epoch ms). Use _next_id() for all new writes."""
         return str(int(datetime.now().timestamp() * 1000))
+
+    @staticmethod
+    def _next_id(sequence_name: str) -> str:
+        """
+        Allocate the next numeric ID from cis_sequence for the given RBAC sequence.
+
+        Sequences registered by DDL 67:
+          rbac_user_id, rbac_group_id, rbac_permission_id,
+          rbac_user_group_map_id, rbac_group_perm_map_id
+
+        Atomically increments current_value by 1 via UPSERT and returns the
+        allocated value as a string.  Falls back to epoch-ms if the sequence
+        row is missing (e.g. before DDL 67 has been run).
+        """
+        try:
+            row = impala_manager.execute_query(
+                f"SELECT current_value FROM {DB}.cis_sequence "
+                f"WHERE sequence_name = '{sequence_name}'",
+                database=DB
+            )
+            if not row:
+                return str(int(datetime.now().timestamp() * 1000))
+            next_val = int(row[0]['current_value']) + 1
+            impala_manager.execute_write(
+                f"UPSERT INTO {DB}.cis_sequence (sequence_name, current_value, increment_by) "
+                f"VALUES ('{sequence_name}', {next_val}, 1)",
+                database=DB
+            )
+            return str(next_val)
+        except Exception:
+            # Fallback — never break a write because of sequence failure
+            return str(int(datetime.now().timestamp() * 1000))
 
     # =========================================================================
     # USERS
@@ -86,7 +118,7 @@ class RBACAdminRepository:
 
     def create_user(self, data: Dict, created_by: str) -> tuple[bool, str]:
         try:
-            user_id = self._id()
+            user_id = self._next_id('rbac_user_id')
             now = self._now()
             sql = f"""
                 UPSERT INTO {DB}.cis_user_info
@@ -215,7 +247,7 @@ class RBACAdminRepository:
 
     def create_group(self, data: Dict, created_by: str) -> tuple[bool, str]:
         try:
-            group_id = self._id()
+            group_id = self._next_id('rbac_group_id')
             now = self._now()
             sql = f"""
                 UPSERT INTO {DB}.cis_user_group_info
@@ -306,7 +338,7 @@ class RBACAdminRepository:
 
     def create_permission(self, data: Dict, created_by: str) -> tuple[bool, str]:
         try:
-            perm_id = self._id()
+            perm_id = self._next_id('rbac_permission_id')
             now = self._now()
             sql = f"""
                 UPSERT INTO {DB}.cis_permission_info
@@ -397,7 +429,7 @@ class RBACAdminRepository:
 
             # Step 2: upsert new mappings
             for group_name in group_names:
-                mapping_id = self._id()
+                mapping_id = self._next_id('rbac_user_group_map_id')
                 ins_sql = f"""
                     UPSERT INTO {DB}.cis_user_group_mapping_info
                     (user_group_mapping_id, user_id, entity, group_name,
@@ -508,7 +540,7 @@ class RBACAdminRepository:
             for perm in permissions:
                 perm_name = perm.get("permission_name", "")
                 existing = existing_by_perm.get(perm_name)
-                perm_id = self._escape(existing["group_permission_id"]) if existing else self._id()
+                perm_id = self._escape(existing["group_permission_id"]) if existing else self._next_id('rbac_group_perm_map_id')
                 created_on = existing.get("created_on", now) if existing else now
                 created_by = self._escape(existing.get("created_by", updated_by)) if existing else self._escape(updated_by)
                 ins_sql = f"""
