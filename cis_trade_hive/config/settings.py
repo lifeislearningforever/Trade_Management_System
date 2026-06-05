@@ -247,7 +247,14 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [BASE_DIR / 'static']
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+# WhiteNoiseStaticFilesStorage — no manifest file required, works without
+# pre-running collectstatic, safe for all environments including UAT/PROD.
+# CompressedManifestStaticFilesStorage was causing 404s on UAT because
+# staticfiles/ is gitignored and the manifest was never present on the server.
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedStaticFilesStorage'
+# Serve static files directly from STATICFILES_DIRS without collectstatic
+WHITENOISE_USE_FINDERS = True
+WHITENOISE_AUTOREFRESH = True
 
 # Media files
 MEDIA_URL = '/media/'
