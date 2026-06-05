@@ -880,14 +880,13 @@ def main():
     # Set CIS_ENV for settings.py to pick up
     os.environ["CIS_ENV"] = cis_env
 
-    # Debug mode off for UAT, PROD, DR — only True for SIT/local
-    if cis_env in ("SIT",):
-        os.environ.setdefault("DJANGO_DEBUG", "True")
-    else:
+    # Debug mode — True for SIT and UAT, False for PROD/DR only
+    # TODO: set UAT to False once static file serving is confirmed working
+    if cis_env in ("PROD", "DR"):
         os.environ.setdefault("DJANGO_DEBUG", "False")
-        # Always run collectstatic on non-SIT — copies static/ → staticfiles/
-        # so WhiteNoise can serve them with DEBUG=False.
         os.environ["DJANGO_COLLECT_STATIC"] = "1"
+    else:
+        os.environ.setdefault("DJANGO_DEBUG", "True")
 
     # ==================== REST Proxy Configuration ====================
     # Enable REST proxy mode for Hive operations (bypasses direct Hive connections)
