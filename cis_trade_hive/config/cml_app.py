@@ -885,6 +885,10 @@ def main():
         os.environ.setdefault("DJANGO_DEBUG", "True")
     else:
         os.environ.setdefault("DJANGO_DEBUG", "False")
+        # collectstatic is required when DEBUG=False so WhiteNoise
+        # (CompressedManifestStaticFilesStorage) can serve static files.
+        # Force it on regardless of DJANGO_COLLECT_STATIC env var.
+        os.environ["DJANGO_COLLECT_STATIC"] = "1"
 
     # ==================== REST Proxy Configuration ====================
     # Enable REST proxy mode for Hive operations (bypasses direct Hive connections)
