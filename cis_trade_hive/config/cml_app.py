@@ -880,11 +880,11 @@ def main():
     # Set CIS_ENV for settings.py to pick up
     os.environ["CIS_ENV"] = cis_env
 
-    # Debug mode off for non-LOCAL environments
-    if cis_env in ("PROD", "DR"):
-        os.environ.setdefault("DJANGO_DEBUG", "False")
-    else:
+    # Debug mode off for UAT, PROD, DR — only True for SIT/local
+    if cis_env in ("SIT",):
         os.environ.setdefault("DJANGO_DEBUG", "True")
+    else:
+        os.environ.setdefault("DJANGO_DEBUG", "False")
 
     # ==================== REST Proxy Configuration ====================
     # Enable REST proxy mode for Hive operations (bypasses direct Hive connections)
