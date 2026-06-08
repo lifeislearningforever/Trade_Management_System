@@ -188,26 +188,14 @@ class CashFlowDropdownService:
 
         # Fallback to default options
         default_options = [
-            {'value': 'DIVIDEND', 'label': 'Dividend'},
-            {'value': 'INTEREST', 'label': 'Interest'},
-            {'value': 'COUPON', 'label': 'Coupon'},
-            {'value': 'PRINCIPAL', 'label': 'Principal'},
-            {'value': 'FEE', 'label': 'Fee'},
-            {'value': 'COMMISSION', 'label': 'Commission'},
-            {'value': 'TAX', 'label': 'Tax'},
-            {'value': 'WITHHOLDING_TAX', 'label': 'Withholding Tax'},
-            {'value': 'MANAGEMENT_FEE', 'label': 'Management Fee'},
-            {'value': 'CUSTODY_FEE', 'label': 'Custody Fee'},
-            {'value': 'REDEMPTION', 'label': 'Redemption'},
-            {'value': 'SUBSCRIPTION', 'label': 'Subscription'},
-            {'value': 'CAPITAL_GAIN', 'label': 'Capital Gain'},
-            {'value': 'CAPITAL_LOSS', 'label': 'Capital Loss'},
-            {'value': 'PROVISION', 'label': 'Provision'},
-            {'value': 'TRANSFER_IN', 'label': 'Transfer In'},
-            {'value': 'TRANSFER_OUT', 'label': 'Transfer Out'},
-            {'value': 'FX_GAIN', 'label': 'FX Gain'},
-            {'value': 'FX_LOSS', 'label': 'FX Loss'},
-            {'value': 'OTHER', 'label': 'Other'},
+            {'value': 'UNCALL_COMMITMENT',   'label': 'Uncall Commitment'},
+            {'value': 'PIPELINE',            'label': 'Pipeline'},
+            {'value': 'PROVISION',           'label': 'Provision'},
+            {'value': 'YTD_REALISE',         'label': 'YTD Realise'},
+            {'value': 'CAPITAL_DISTRIBUTION','label': 'Capital Distribution'},
+            {'value': 'CASH_DIVIDEND',       'label': 'Cash Dividend'},
+            {'value': 'INCOME_DISTRIBUTION', 'label': 'Income Distribution'},
+            {'value': 'RETURN_OF_CAPITAL',   'label': 'Return of Capital'},
         ]
 
         try:
