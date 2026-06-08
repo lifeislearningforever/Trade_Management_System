@@ -188,14 +188,14 @@ class CashFlowDropdownService:
 
         # Fallback to default options
         default_options = [
-            {'value': 'UNCALL_COMMITMENT',   'label': 'Uncall Commitment'},
-            {'value': 'PIPELINE',            'label': 'Pipeline'},
-            {'value': 'PROVISION',           'label': 'Provision'},
-            {'value': 'YTD_REALISE',         'label': 'YTD Realise'},
-            {'value': 'CAPITAL_DISTRIBUTION','label': 'Capital Distribution'},
-            {'value': 'CASH_DIVIDEND',       'label': 'Cash Dividend'},
-            {'value': 'INCOME_DISTRIBUTION', 'label': 'Income Distribution'},
-            {'value': 'RETURN_OF_CAPITAL',   'label': 'Return of Capital'},
+            {'value': 'CAPITAL_DISTRIBUTION', 'label': 'Capital Distribution'},
+            {'value': 'CASH_DIVIDEND',        'label': 'Cash Dividend'},
+            {'value': 'INCOME_DISTRIBUTION',  'label': 'Income Distribution'},
+            {'value': 'PIPELINE',             'label': 'Pipeline'},
+            {'value': 'PROVISION',            'label': 'Provision'},
+            {'value': 'RETURN_OF_CAPITAL',    'label': 'Return of Capital'},
+            {'value': 'UNCALL_COMMITMENT',    'label': 'Uncall Commitment'},
+            {'value': 'YTD_REALISE',          'label': 'YTD Realise'},
         ]
 
         try:
