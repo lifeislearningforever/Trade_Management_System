@@ -4,10 +4,13 @@ Kudu-backed notification store.
 Persists notifications to gmp_cis.cis_notification so they survive
 Gunicorn worker boundaries (InMemoryChannelLayer is per-process).
 
-The JS client polls /api/notifications/poll/ every 15 s as a fallback
+The JS client polls /api/notifications/poll/ every 5 s as a fallback
 alongside the WebSocket stream.  Only unread rows are returned; they are
-marked read on the next poll.  Rows older than 24 h are not returned
-(they will be garbage-collected by a management command later).
+marked read on the next poll.  Rows older than 24 h are not returned.
+
+Kudu limitations respected:
+  - No UPDATE: mark-as-read uses UPSERT with all columns re-supplied.
+  - No ORDER BY on STRING timestamps: rows sorted in Python after fetch.
 """
 
 import json
@@ -18,8 +21,8 @@ from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
-DATABASE  = 'gmp_cis'
-TABLE     = 'cis_notification'
+DATABASE   = 'gmp_cis'
+TABLE      = 'cis_notification'
 FULL_TABLE = f'{DATABASE}.{TABLE}'
 
 
@@ -35,8 +38,8 @@ def store(username: str, event_type: str, severity: str,
     """Write one notification row to Kudu. Fire-and-forget; never raises."""
     try:
         from core.repositories.impala_connection import impala_manager
-        notif_id   = str(uuid.uuid4())
-        created_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+        notif_id     = str(uuid.uuid4())
+        created_at   = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         payload_json = json.dumps(payload or {})[:4000]
 
         sql = (
@@ -59,33 +62,52 @@ def poll_unread(username: str, since_minutes: int = 60) -> List[Dict[str, Any]]:
     """
     Return unread notifications for username created in the last since_minutes.
     Marks them read immediately after fetching.
+
+    Kudu has no UPDATE — mark-as-read uses UPSERT with is_read=true,
+    re-supplying all columns fetched from the SELECT.
     """
     try:
         from core.repositories.impala_connection import impala_manager
-        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
-                  ).strftime('%Y-%m-%d %H:%M:%S')
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
+        ).strftime('%Y-%m-%d %H:%M:%S')
 
+        # Fetch all columns so we can UPSERT back with is_read=true
         rows = impala_manager.execute_query(
             f"""
-            SELECT notif_id, event_type, severity, title, message, payload_json, created_at
+            SELECT notif_id, username, event_type, severity,
+                   title, message, payload_json, is_read, created_at
             FROM {FULL_TABLE}
             WHERE username = {_esc(username)}
               AND is_read  = false
               AND created_at >= '{cutoff}'
-            ORDER BY created_at ASC
             """,
             database=DATABASE
         )
         if not rows:
             return []
 
-        # Mark all fetched rows as read
-        ids = ', '.join(_esc(r['notif_id']) for r in rows)
-        impala_manager.execute_write(
-            f"UPDATE {FULL_TABLE} SET is_read = true "
-            f"WHERE username = {_esc(username)} AND notif_id IN ({ids})",
-            database=DATABASE
-        )
+        # Sort by created_at ascending (STRING ISO timestamps sort lexicographically)
+        rows.sort(key=lambda r: str(r.get('created_at', '')))
+
+        # Mark each row as read via UPSERT (Kudu has no UPDATE)
+        for r in rows:
+            try:
+                impala_manager.execute_write(
+                    f"UPSERT INTO {FULL_TABLE} "
+                    f"(notif_id, username, event_type, severity, title, message, payload_json, is_read, created_at) "
+                    f"VALUES ("
+                    f"{_esc(r['notif_id'])}, {_esc(r['username'])}, "
+                    f"{_esc(r['event_type'])}, {_esc(r['severity'])}, "
+                    f"{_esc(r['title'])}, {_esc(r['message'])}, "
+                    f"{_esc(r.get('payload_json', '{}'))}, true, "
+                    f"{_esc(r['created_at'])}"
+                    f")",
+                    database=DATABASE
+                )
+            except Exception as _ue:
+                logger.debug('kudu_store: mark-read UPSERT failed for %s: %s', r.get('notif_id'), _ue)
+
         result = []
         for r in rows:
             payload = {}
