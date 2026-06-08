@@ -345,7 +345,7 @@ def upload_create(request):
                             _v = _v.replace('\0', '')
                             return _v
 
-                        def _build_direct_row_sql(_row, _cols, _fix, _tbl, _pd):
+                        def _build_direct_row_sql(_row, _cols, _fix, _tbl, _pd, _overwrite=False):
                             _col_exprs = []
                             for _col in _cols:
                                 _cl = _col.lower()
@@ -354,8 +354,14 @@ def upload_create(request):
                                 else:
                                     _v = str(_row.get(_col) or _row.get(_cl) or '')
                                 _col_exprs.append(f"'{_sql_escape(_v)}' AS `{_col}`")
+                            # INSERT OVERWRITE on the first row physically replaces the
+                            # HDFS partition directory — required for Hive external tables
+                            # where DROP PARTITION only removes the metastore entry but
+                            # leaves the old Parquet files on HDFS. Subsequent rows use
+                            # INSERT INTO which appends within the same clean directory.
+                            _verb = "OVERWRITE" if _overwrite else "INTO"
                             return (
-                                f"INSERT INTO gmp_cis.{_tbl} "
+                                f"INSERT {_verb} TABLE gmp_cis.{_tbl} "
                                 f"PARTITION (processing_date='{_pd}') "
                                 f"SELECT {', '.join(_col_exprs)}"
                             )
@@ -364,21 +370,28 @@ def upload_create(request):
                             from core.repositories.impala_connection import impala_manager as _imp2
                             from upload.repositories.upload_kudu_repository import upload_kudu_repository as _repo2
 
-                            # Drop existing partition so re-runs don't double-insert
-                            try:
-                                _imp2.execute_write(
-                                    f"ALTER TABLE gmp_cis.{_t_target} "
-                                    f"DROP IF EXISTS PARTITION (processing_date='{_t_pd}')",
-                                    database='gmp_cis'
-                                )
-                                logger.warning(f"[upload:direct:bg] dropped partition processing_date={_t_pd}")
-                            except Exception as _dp_ex:
-                                logger.warning(f"[upload:direct:bg] drop partition skipped: {_dp_ex}")
+                            # For Hive external tables, DROP PARTITION only removes the
+                            # metastore entry — the old Parquet files remain on HDFS.
+                            # We still drop the partition so Impala's metadata is clean,
+                            # but the real overwrite is handled by INSERT OVERWRITE on
+                            # the first row (which physically replaces the HDFS directory).
+                            _imp2.execute_write(
+                                f"ALTER TABLE gmp_cis.{_t_target} "
+                                f"DROP IF EXISTS PARTITION (processing_date='{_t_pd}')",
+                                database='gmp_cis'
+                            )
+                            logger.warning(f"[upload:direct:bg] dropped partition processing_date={_t_pd}")
 
                             _ins = 0
                             _fail = 0
                             for _ri, _row in enumerate(_t_rows):
-                                _sql = _build_direct_row_sql(_row, _t_non_part, _t_fixed, _t_target, _t_pd)
+                                # First row uses INSERT OVERWRITE — physically replaces
+                                # the HDFS partition directory, clearing any old Parquet
+                                # files left by previous uploads of the same processing_date.
+                                _sql = _build_direct_row_sql(
+                                    _row, _t_non_part, _t_fixed, _t_target, _t_pd,
+                                    _overwrite=(_ri == 0)
+                                )
                                 _ok = _imp2.execute_write(_sql, database='gmp_cis')
                                 if _ok:
                                     _ins += 1
