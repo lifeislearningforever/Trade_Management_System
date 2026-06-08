@@ -1064,18 +1064,22 @@ def upload_detail(request, upload_id: str):
         table_name = upload.get('target_table_name')
         if table_name:
             from .repositories.upload_kudu_repository import upload_kudu_repository
-            table_preview = upload_kudu_repository.get_table_preview(table_name, limit=10)
 
-            # Get reconciliation data
-            # Try to extract processing_date from description or use None
+            # Extract processing_date from description first — used for both
+            # preview (partition filter) and reconciliation count.
             processing_date = None
             description = upload.get('description', '')
             if description:
-                # Look for processing_date pattern in description
                 import re
                 date_match = re.search(r'processing_date[=:\s]+(\d{8})', description)
                 if date_match:
                     processing_date = date_match.group(1)
+
+            # Preview filtered to this upload's processing_date so we don't
+            # show rows from other dates already in the partitioned table.
+            table_preview = upload_kudu_repository.get_table_preview(
+                table_name, limit=10, processing_date=processing_date
+            )
 
             recon_data = upload_kudu_repository.get_reconciliation_data(
                 table_name=table_name,

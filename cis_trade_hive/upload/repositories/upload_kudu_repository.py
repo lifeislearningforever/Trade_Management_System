@@ -681,11 +681,19 @@ class UploadKuduRepository:
             logger.error(f"Error dropping external table: {str(e)}")
             return False
 
-    def get_table_preview(self, table_name: str, database: str = None, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get preview data from external table."""
+    def get_table_preview(self, table_name: str, database: str = None,
+                          limit: int = 10, processing_date: str = None) -> List[Dict[str, Any]]:
+        """Get preview data from external table, filtered to the given processing_date partition."""
         try:
             db = database or self.DATABASE
-            query = f"SELECT * FROM {db}.{table_name} LIMIT {limit}"
+            if processing_date:
+                query = (
+                    f"SELECT * FROM {db}.{table_name} "
+                    f"WHERE processing_date = '{processing_date}' "
+                    f"LIMIT {limit}"
+                )
+            else:
+                query = f"SELECT * FROM {db}.{table_name} LIMIT {limit}"
             results = impala_manager.execute_query(query, database=db)
             return results if results else []
         except Exception as e:
