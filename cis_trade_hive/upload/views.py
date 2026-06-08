@@ -345,36 +345,46 @@ def upload_create(request):
                             _v = _v.replace('\0', '')
                             return _v
 
-                        def _build_direct_row_sql(_row, _cols, _fix, _tbl, _pd, _overwrite=False):
+                        # Chunk size for UNION ALL batching.
+                        # 50 rows per INSERT keeps Impala query plan small while
+                        # reducing 801 round-trips down to ~17 statements.
+                        _CHUNK = 50
+
+                        def _row_select(_row, _cols, _fix):
+                            """Build one SELECT clause (no INSERT prefix) for a single row."""
                             _col_exprs = []
                             for _col in _cols:
                                 _cl = _col.lower()
-                                if _cl in _fix:
-                                    _v = str(_fix[_cl])
-                                else:
-                                    _v = str(_row.get(_col) or _row.get(_cl) or '')
+                                _v = str(_fix[_cl]) if _cl in _fix else str(_row.get(_col) or _row.get(_cl) or '')
                                 _col_exprs.append(f"'{_sql_escape(_v)}' AS `{_col}`")
-                            # INSERT OVERWRITE on the first row physically replaces the
-                            # HDFS partition directory — required for Hive external tables
-                            # where DROP PARTITION only removes the metastore entry but
-                            # leaves the old Parquet files on HDFS. Subsequent rows use
-                            # INSERT INTO which appends within the same clean directory.
+                            return f"SELECT {', '.join(_col_exprs)}"
+
+                        def _build_chunk_sql(_chunk_rows, _cols, _fix, _tbl, _pd, _overwrite):
+                            """
+                            Build one INSERT … SELECT … UNION ALL … for a batch of rows.
+                            INSERT OVERWRITE on the first chunk physically replaces the HDFS
+                            partition directory so re-uploads never accumulate stale files.
+                            Subsequent chunks use INSERT INTO within the clean directory.
+                            """
                             _verb = "OVERWRITE" if _overwrite else "INTO"
+                            _selects = '\nUNION ALL\n'.join(
+                                _row_select(_r, _cols, _fix) for _r in _chunk_rows
+                            )
                             return (
                                 f"INSERT {_verb} TABLE gmp_cis.{_tbl} "
                                 f"PARTITION (processing_date='{_pd}') "
-                                f"SELECT {', '.join(_col_exprs)}"
+                                f"{_selects}"
                             )
 
                         def _do_direct_insert():
                             from core.repositories.impala_connection import impala_manager as _imp2
                             from upload.repositories.upload_kudu_repository import upload_kudu_repository as _repo2
+                            from core.notifications import notify_user as _notify
+                            from core.notifications.constants import EVT_UPLOAD_COMPLETED, EVT_UPLOAD_FAILED
 
-                            # For Hive external tables, DROP PARTITION only removes the
-                            # metastore entry — the old Parquet files remain on HDFS.
-                            # We still drop the partition so Impala's metadata is clean,
-                            # but the real overwrite is handled by INSERT OVERWRITE on
-                            # the first row (which physically replaces the HDFS directory).
+                            # DROP PARTITION cleans the metastore entry.
+                            # The physical HDFS overwrite is handled by INSERT OVERWRITE
+                            # on the first chunk below.
                             _imp2.execute_write(
                                 f"ALTER TABLE gmp_cis.{_t_target} "
                                 f"DROP IF EXISTS PARTITION (processing_date='{_t_pd}')",
@@ -382,26 +392,32 @@ def upload_create(request):
                             )
                             logger.warning(f"[upload:direct:bg] dropped partition processing_date={_t_pd}")
 
+                            # Split rows into chunks and INSERT one chunk at a time.
+                            _total = len(_t_rows)
+                            _chunks = [_t_rows[i:i + _CHUNK] for i in range(0, _total, _CHUNK)]
                             _ins = 0
-                            _fail = 0
-                            for _ri, _row in enumerate(_t_rows):
-                                # First row uses INSERT OVERWRITE — physically replaces
-                                # the HDFS partition directory, clearing any old Parquet
-                                # files left by previous uploads of the same processing_date.
-                                _sql = _build_direct_row_sql(
-                                    _row, _t_non_part, _t_fixed, _t_target, _t_pd,
-                                    _overwrite=(_ri == 0)
+                            _fail_chunks = 0
+
+                            for _ci, _chunk in enumerate(_chunks):
+                                _sql = _build_chunk_sql(
+                                    _chunk, _t_non_part, _t_fixed, _t_target, _t_pd,
+                                    _overwrite=(_ci == 0)
                                 )
                                 _ok = _imp2.execute_write(_sql, database='gmp_cis')
                                 if _ok:
-                                    _ins += 1
-                                    if _ins % 100 == 0:
-                                        logger.warning(f"[upload:direct:bg] {_ins}/{len(_t_rows)} inserted")
+                                    _ins += len(_chunk)
+                                    logger.warning(
+                                        f"[upload:direct:bg] chunk {_ci+1}/{len(_chunks)} "
+                                        f"({len(_chunk)} rows) OK — {_ins}/{_total} total"
+                                    )
                                 else:
-                                    _fail += 1
-                                    logger.error(f"[upload:direct:bg] row {_ri} FAILED. SQL={_sql[:200]}")
-                                    if _fail > 10:
-                                        logger.error(f"[upload:direct:bg] too many failures — aborting")
+                                    _fail_chunks += 1
+                                    logger.error(
+                                        f"[upload:direct:bg] chunk {_ci+1}/{len(_chunks)} FAILED. "
+                                        f"SQL[:300]={_sql[:300]}"
+                                    )
+                                    if _fail_chunks >= 3:
+                                        logger.error("[upload:direct:bg] 3 consecutive chunk failures — aborting")
                                         break
 
                             if _ins > 0:
@@ -412,19 +428,33 @@ def upload_create(request):
                                     )
                                 except Exception:
                                     pass
-                                _final_desc = _t_desc + (f"\n{_ins} rows inserted" if _fail else '')
+                                _final_desc = _t_desc + f"\n{_ins}/{_total} rows inserted"
                                 _repo2.update_upload(_t_upload_id, {
                                     'status': UploadKuduRepository.STATUS_COMPLETED,
                                     'description': _final_desc,
                                     'row_count': _ins,
                                 }, _t_username)
                                 logger.warning(f"[upload:direct:bg] DONE — {_ins} rows into {_t_target}")
+                                _notify(_t_username, EVT_UPLOAD_COMPLETED, {
+                                    'upload_id': _t_upload_id,
+                                    'file_name': _file_name,
+                                    'target_table': _t_target,
+                                    'processing_date': _t_pd,
+                                    'rows_inserted': _ins,
+                                    'message': f'Upload complete: {_ins} rows inserted into {_t_target} (processing_date={_t_pd})',
+                                })
                             else:
                                 _repo2.update_upload(_t_upload_id, {
                                     'status': UploadKuduRepository.STATUS_FAILED,
-                                    'description': f"{_t_desc}\nAll rows failed to insert",
+                                    'description': f"{_t_desc}\nAll chunks failed to insert",
                                 }, _t_username)
                                 logger.error(f"[upload:direct:bg] FAILED — 0 rows inserted into {_t_target}")
+                                _notify(_t_username, EVT_UPLOAD_FAILED, {
+                                    'upload_id': _t_upload_id,
+                                    'file_name': _file_name,
+                                    'target_table': _t_target,
+                                    'message': f'Upload failed: no rows inserted into {_t_target}',
+                                })
 
                         import threading as _threading
                         _t = _threading.Thread(
@@ -438,9 +468,9 @@ def upload_create(request):
                         messages.success(request, (
                             f'File "{file_name}" uploading in background '
                             f'({len(_all_rows)} rows → {datasource_config.get("target_table", "")}). '
-                            f'Refresh the page in a moment to see the result.'
+                            f'You will receive a notification when complete — you can navigate freely.'
                         ))
-                        return redirect('upload:detail', upload_id=upload_id)
+                        return redirect('upload:list')
                     else:
                         # Table doesn't exist - use session fallback
                         import uuid
