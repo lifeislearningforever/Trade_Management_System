@@ -22,7 +22,7 @@
     var WS_URL         = (window.location.protocol === 'https:' ? 'wss://' : 'ws://') +
                          window.location.host + '/ws/notifications/';
     var POLL_URL       = '/core/api/notifications/poll/';
-    var POLL_INTERVAL  = 15000;  // 15 s — Kudu poll fallback interval
+    var POLL_INTERVAL  = 5000;   // 5 s — Kudu poll fallback interval
     var MAX_RETRIES    = 5;
     var BASE_DELAY_MS  = 1000;   // doubles each retry, max ~32 s
     var PING_INTERVAL  = 10000;  // 10 s — keeps connection alive through CML's ~13 s idle timeout
