@@ -327,6 +327,7 @@ def upload_create(request):
 
                         # Capture everything the thread needs before the request ends
                         _t_upload_id    = upload_id
+                        _t_file_name    = file_name
                         _t_rows         = _all_rows
                         _t_tbl_cols     = _tbl_cols
                         _t_non_part     = _tbl_cols
@@ -437,7 +438,7 @@ def upload_create(request):
                                 logger.warning(f"[upload:direct:bg] DONE — {_ins} rows into {_t_target}")
                                 _notify(_t_username, EVT_UPLOAD_COMPLETED, {
                                     'upload_id': _t_upload_id,
-                                    'file_name': _file_name,
+                                    'file_name': _t_file_name,
                                     'target_table': _t_target,
                                     'processing_date': _t_pd,
                                     'rows_inserted': _ins,
@@ -451,7 +452,7 @@ def upload_create(request):
                                 logger.error(f"[upload:direct:bg] FAILED — 0 rows inserted into {_t_target}")
                                 _notify(_t_username, EVT_UPLOAD_FAILED, {
                                     'upload_id': _t_upload_id,
-                                    'file_name': _file_name,
+                                    'file_name': _t_file_name,
                                     'target_table': _t_target,
                                     'message': f'Upload failed: no rows inserted into {_t_target}',
                                 })
