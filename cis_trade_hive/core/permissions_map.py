@@ -49,6 +49,10 @@ EXEMPT_URL_NAMES = frozenset([
     'core:reset_stats',
     'core:system_date_api',
 
+    # Notification poll — every logged-in user polls their own notifications.
+    # Blocked by DEFAULT_DENY if not exempted, causing silent 403 in JS fetch.
+    'core:notifications_poll',
+
     # Dashboard (permission checked inside the view itself via context)
     'dashboard',
     'global_search',
