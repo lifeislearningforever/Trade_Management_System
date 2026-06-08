@@ -1366,6 +1366,8 @@ def run_position_etl(request, upload_id: str):
     _proc_date  = processing_date
 
     def _do_etl():
+        from core.notifications import notify_user as _notify
+        from core.notifications.constants import EVT_UPLOAD_COMPLETED, EVT_UPLOAD_FAILED
         try:
             ok, msg, result = upload_service.run_position_etl(
                 upload_id=upload_id,
@@ -1374,7 +1376,6 @@ def run_position_etl(request, upload_id: str):
                 updated_by=_username,
             )
             if ok:
-                # Persist completed status + ETL identifiers so download report can find the partition
                 _etl_desc = (
                     f"Position ETL complete\n"
                     f"src_id={_src_id}\n"
@@ -1396,6 +1397,16 @@ def run_position_etl(request, upload_id: str):
                     request_method='POST', request_path=_req_path,
                     ip_address=_ip, user_agent=_ua, status='SUCCESS'
                 )
+                _notify(_username, EVT_UPLOAD_COMPLETED, {
+                    'upload_id': upload_id,
+                    'file_name': _file_name,
+                    'src_id': _src_id,
+                    'processing_date': _proc_date,
+                    'total': result.get('total', 0),
+                    'passed': result.get('passed', 0),
+                    'failed': result.get('failed', 0),
+                    'message': f'Position ETL complete for {_file_name}: {result.get("passed", 0)} passed, {result.get("failed", 0)} failed',
+                })
                 logger.info(f"[etl:bg] DONE upload_id={upload_id}: {msg}")
             else:
                 logger.error(f"[etl:bg] FAILED upload_id={upload_id}: {msg}")
@@ -1405,6 +1416,13 @@ def run_position_etl(request, upload_id: str):
                      'description': msg[:500]},
                     _username
                 )
+                _notify(_username, EVT_UPLOAD_FAILED, {
+                    'upload_id': upload_id,
+                    'file_name': _file_name,
+                    'src_id': _src_id,
+                    'processing_date': _proc_date,
+                    'message': f'Position ETL failed for {_file_name}: {msg[:200]}',
+                })
         except Exception as _ex:
             logger.error(f"[etl:bg] EXCEPTION upload_id={upload_id}: {_ex}", exc_info=True)
             upload_service.repository.update_upload(
@@ -1413,6 +1431,11 @@ def run_position_etl(request, upload_id: str):
                  'description': str(_ex)[:500]},
                 _username
             )
+            _notify(_username, EVT_UPLOAD_FAILED, {
+                'upload_id': upload_id,
+                'file_name': _file_name,
+                'message': f'Position ETL exception for {_file_name}: {str(_ex)[:200]}',
+            })
 
     import threading as _threading
     _t = _threading.Thread(target=_do_etl, daemon=True, name=f"etl-{upload_id[:8]}")
@@ -1421,9 +1444,9 @@ def run_position_etl(request, upload_id: str):
     messages.info(request, (
         f'Position ETL started for {_file_name} '
         f'(src_id={_src_id}, date={_proc_date}). '
-        f'Refresh this page in a moment to see the result.'
+        f'You will receive a notification when it completes — you can navigate freely.'
     ))
-    return redirect('upload:detail', upload_id=upload_id)
+    return redirect('upload:list')
 
 
 @require_http_methods(["GET"])

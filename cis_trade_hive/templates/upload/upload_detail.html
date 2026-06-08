@@ -695,19 +695,17 @@ $(document).ready(function() {
         });
     });
 
-    // Silent background poll — only reloads once when status changes.
-    // Page stays still while the job runs; no jarring 5 s refresh.
+    // Silent background poll — reloads once when status changes from INGESTING/VALIDATING.
     {% if upload.status == 'INGESTING' or upload.status == 'VALIDATING' %}
     (function() {
         var _pollCount = 0;
         var _timer = setInterval(function() {
             _pollCount++;
             $.get("{% url 'upload:api_status' upload.upload_id %}", function(data) {
-                // Update elapsed time indicator if banner exists
                 var banner = document.getElementById('ingestingBanner');
                 if (banner) {
                     var elapsed = document.getElementById('elapsedSeconds');
-                    if (elapsed) elapsed.textContent = (_pollCount * 15) + 's';
+                    if (elapsed) elapsed.textContent = (_pollCount * 5) + 's';
                 }
                 if (data.status !== '{{ upload.status }}') {
                     clearInterval(_timer);
@@ -716,7 +714,7 @@ $(document).ready(function() {
             }).fail(function() {
                 // Network blip — keep polling
             });
-        }, 15000);
+        }, 5000);
     })();
     {% endif %}
 });
