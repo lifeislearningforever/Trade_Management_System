@@ -11,6 +11,8 @@
 
 USE gmp_cis;
 
+-- PARTITIONS 1 — works on single-node Kudu (UAT/SIT).
+-- On multi-node clusters increase PARTITIONS to match tablet server count.
 CREATE TABLE IF NOT EXISTS gmp_cis.cis_notification (
     notif_id        STRING,
     username        STRING,
@@ -23,8 +25,9 @@ CREATE TABLE IF NOT EXISTS gmp_cis.cis_notification (
     created_at      STRING,
     PRIMARY KEY (notif_id)
 )
-PARTITION BY HASH(notif_id) PARTITIONS 4
-STORED AS KUDU;
+PARTITION BY HASH(notif_id) PARTITIONS 1
+STORED AS KUDU
+TBLPROPERTIES ('kudu.num_tablet_servers' = '1');
 
 -- Verify
 DESCRIBE gmp_cis.cis_notification;
