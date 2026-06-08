@@ -72,8 +72,12 @@ class SecurityHiveRepository:
 
             if search:
                 search_term = f"%{search}%"
-                query += f" AND (LOWER(security_name) LIKE LOWER({SecurityHiveRepository.escape_value(search_term)}) "
-                query += f"OR LOWER(isin) LIKE LOWER({SecurityHiveRepository.escape_value(search_term)}))"
+                sv = SecurityHiveRepository.escape_value(search_term)
+                query += (
+                    f" AND (LOWER(security_name) LIKE LOWER({sv})"
+                    f" OR LOWER(isin) LIKE LOWER({sv})"
+                    f" OR LOWER(security_description) LIKE LOWER({sv}))"
+                )
 
             if currency:
                 query += f" AND currency_code = {SecurityHiveRepository.escape_value(currency)}"
