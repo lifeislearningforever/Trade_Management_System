@@ -356,8 +356,9 @@ def portfolio_create(request):
             if not portfolio_name:
                 raise ValidationError("Portfolio name is required")
 
-            # Validate portfolio name is alphanumeric only (no special characters)
-            # Allow letters, numbers, and underscores
+            if len(portfolio_name) > 20:
+                raise ValidationError("Portfolio name must be 20 characters or fewer.")
+
             import re
             if not re.match(r'^[a-zA-Z0-9_]+$', portfolio_name):
                 raise ValidationError("Portfolio name must be alphanumeric only (letters, numbers, and underscores). No special characters or spaces allowed.")

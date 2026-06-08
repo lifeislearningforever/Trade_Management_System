@@ -52,12 +52,12 @@
                         <input type="text" class="form-control" id="name" name="name"
                                value="{{ portfolio.name|default:'' }}"
                                {% if portfolio %}readonly{% endif %}
-                               required maxlength="200"
+                               required maxlength="20"
                                pattern="^[a-zA-Z0-9_]+$"
-                               title="Only letters, numbers, and underscores allowed. No spaces or special characters."
-                               placeholder="Enter unique portfolio name (e.g., 'UOB_SINGAPORE_TRADING')">
+                               title="Only letters, numbers, and underscores allowed. No spaces or special characters. Max 20 characters."
+                               placeholder="Enter unique portfolio name (max 20 chars)">
                         <div class="form-text">
-                            <i class="bi bi-info-circle"></i> Alphanumeric only (letters, numbers, underscores). No spaces or special characters. Cannot be changed after creation.
+                            <i class="bi bi-info-circle"></i> Alphanumeric only (letters, numbers, underscores). Max 20 characters. Cannot be changed after creation.
                         </div>
                     </div>
                     <div class="col-12 mb-4">
