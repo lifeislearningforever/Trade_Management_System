@@ -102,61 +102,61 @@ class LookupKuduRepository:
     def get_table_columns(self, table_name: str) -> List[Dict[str, Any]]:
         """
         Get column metadata for a table.
-        Uses SELECT * LIMIT 0 to get column names from cursor.description — this is
-        immune to DESCRIBE format differences across Impala versions and avoids the
-        issue where Impala's extended DESCRIBE drops Kudu PK columns from the output.
-        Falls back to DESCRIBE if the SELECT approach fails.
+
+        Uses DESCRIBE (authoritative schema) for types so STRING columns that
+        happen to hold numeric-looking data are not misclassified as BIGINT/DECIMAL.
+        Then does a SELECT * LIMIT 1 probe solely to get the column *order* and
+        to confirm which columns Impala actually exposes (Kudu PK columns are
+        sometimes dropped from DESCRIBE output in older Impala versions).
         """
         try:
-            # Primary approach: derive columns from actual query result metadata
-            # cursor.description always matches what SELECT * returns — no filtering needed
-            probe_query = f"SELECT * FROM {self.database}.{table_name} LIMIT 1"
-            results = impala_manager.execute_query(probe_query)
-
-            if results:
-                # Build columns from the actual row keys (cursor.description mapped by execute_query)
-                first_row = results[0]
-                columns = []
-                for col_name in first_row.keys():
-                    # Infer type from value
-                    val = first_row[col_name]
-                    if isinstance(val, bool):
-                        col_type = 'BOOLEAN'
-                    elif isinstance(val, int):
-                        col_type = 'BIGINT'
-                    elif isinstance(val, float):
-                        col_type = 'DECIMAL'
-                    else:
-                        col_type = 'STRING'
-                    columns.append({
-                        'name': col_name,
-                        'type': col_type,
-                        'display_name': self._format_column_name(col_name),
-                        'is_nullable': True
-                    })
-                logger.debug(f"get_table_columns {table_name}: {len(columns)} cols from SELECT *")
-                return columns
-
-            # Fallback: DESCRIBE (works even on empty tables)
+            # --- Step 1: get authoritative types from DESCRIBE ---
             desc_query = f"DESCRIBE {self.database}.{table_name}"
             desc_results = impala_manager.execute_query(desc_query)
 
-            columns = []
+            type_map: Dict[str, str] = {}
             if desc_results:
                 for row in desc_results:
                     col_name = row.get('name') or row.get('col_name') or row.get('NAME') or ''
                     col_type = row.get('type') or row.get('data_type') or row.get('TYPE') or 'STRING'
-                    # Skip blank separator rows and comment rows (#...) from extended DESCRIBE
                     if not col_name or col_name.startswith('#') or col_name.startswith(' '):
                         continue
+                    type_map[col_name] = col_type.upper().split('(')[0].strip()
+
+            # --- Step 2: get column order from SELECT * (also catches PK cols DESCRIBE may miss) ---
+            probe_query = f"SELECT * FROM {self.database}.{table_name} LIMIT 1"
+            probe_results = impala_manager.execute_query(probe_query)
+
+            if probe_results:
+                ordered_names = list(probe_results[0].keys())
+            elif type_map:
+                ordered_names = list(type_map.keys())
+            else:
+                ordered_names = []
+
+            # Merge: use DESCRIBE type where available, fall back to STRING for unknown cols
+            columns = []
+            for col_name in ordered_names:
+                col_type = type_map.get(col_name, 'STRING')
+                columns.append({
+                    'name': col_name,
+                    'type': col_type,
+                    'display_name': self._format_column_name(col_name),
+                    'is_nullable': True,
+                })
+
+            # Add any cols DESCRIBE found that SELECT * missed (edge case)
+            probe_set = set(ordered_names)
+            for col_name, col_type in type_map.items():
+                if col_name not in probe_set:
                     columns.append({
                         'name': col_name,
-                        'type': col_type.upper(),
+                        'type': col_type,
                         'display_name': self._format_column_name(col_name),
-                        'is_nullable': True
+                        'is_nullable': True,
                     })
 
-            logger.debug(f"get_table_columns {table_name}: {len(columns)} cols from DESCRIBE fallback")
+            logger.debug(f"get_table_columns {table_name}: {len(columns)} cols")
             return columns
 
         except Exception as e:
@@ -488,10 +488,15 @@ class LookupKuduRepository:
         return None
 
     def _escape_sql(self, value: str) -> str:
-        """Escape SQL string to prevent injection."""
+        """Escape SQL string for Impala/Kudu (backslash escaping, not doubled quotes)."""
         if value is None:
             return ''
-        return str(value).replace("'", "''").replace("\\", "\\\\")
+        s = str(value)
+        s = s.replace('\\', '\\\\')   # backslash first
+        s = s.replace("'", "\\'")     # single quote → backslash-escaped
+        s = s.replace('\n', ' ')
+        s = s.replace('\r', ' ')
+        return s
 
 
 # Singleton instance

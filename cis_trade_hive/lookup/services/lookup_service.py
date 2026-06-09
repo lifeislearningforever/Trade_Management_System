@@ -315,15 +315,17 @@ class LookupService:
             if value is None or value == '':
                 processed[col_name] = None
             elif col_type_base in ('INT', 'INTEGER', 'BIGINT', 'SMALLINT', 'TINYINT'):
+                # Accept "423" or "423.00" — parse via float then truncate to int
                 try:
-                    processed[col_name] = int(value)
+                    processed[col_name] = int(float(str(value).strip()))
                 except (ValueError, TypeError):
-                    processed[col_name] = None
+                    # Not parseable as number — keep as string and let DB reject it
+                    processed[col_name] = str(value)
             elif col_type_base in ('FLOAT', 'DOUBLE', 'DECIMAL', 'REAL'):
                 try:
-                    processed[col_name] = float(value)
+                    processed[col_name] = float(str(value).strip())
                 except (ValueError, TypeError):
-                    processed[col_name] = None
+                    processed[col_name] = str(value)
             elif col_type_base in ('BOOLEAN', 'BOOL'):
                 if isinstance(value, bool):
                     processed[col_name] = value
@@ -332,6 +334,7 @@ class LookupService:
                 else:
                     processed[col_name] = bool(value)
             else:
+                # STRING / VARCHAR / DATE / TIMESTAMP / anything else — pass through as-is
                 processed[col_name] = str(value)
 
         return processed
