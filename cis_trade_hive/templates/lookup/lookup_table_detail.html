@@ -179,6 +179,8 @@
 document.addEventListener('DOMContentLoaded', function() {
     const tableName = '{{ table_name }}';
     const pkColumn = '{{ pk_column|default:"" }}';
+    // pkColumns intentionally aliased to pkColumn to guard stale references
+    var pkColumns = pkColumn;
     const columns = {{ columns_json }};
     const csrfToken = '{{ csrf_token }}';
     const initialRows = {{ rows_json }};
