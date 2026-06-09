@@ -313,7 +313,7 @@ class LookupKuduRepository:
                     values.append(f"'{self._escape_sql(str(val))}'")
 
             query = f"""
-                INSERT INTO {self.database}.{table_name}
+                UPSERT INTO {self.database}.{table_name}
                 ({', '.join(columns)})
                 VALUES ({', '.join(values)})
             """
