@@ -449,6 +449,7 @@ class CACashFlowService:
                 SELECT portfolio_short_name, security_label, MAX(position_date) as max_date
                 FROM {self.DATABASE}.{self.POSITION_TABLE}
                 WHERE ({security_conditions})
+                  AND position_basis = 'SETTLE_DATE'
                   AND position_date <= '{as_of_date}'
                   AND status = 'OPEN'
                   AND is_active = true
@@ -457,7 +458,8 @@ class CACashFlowService:
                     AND p.security_label = latest.security_label
                     AND p.position_date = latest.max_date
             LEFT JOIN {self.DATABASE}.cis_portfolio pf ON p.portfolio_short_name = pf.name
-            WHERE p.quantity > 0
+            WHERE p.position_basis = 'SETTLE_DATE'
+              AND p.quantity > 0
               AND p.status = 'OPEN'
               AND p.is_active = true
             ORDER BY p.portfolio_short_name, p.security_label
@@ -917,12 +919,13 @@ class CACashFlowService:
     def _get_current_position(
         self,
         portfolio_short_name: str,
-        security_name: str
+        security_name: str,
+        position_basis: str = 'SETTLE_DATE'
     ) -> Optional[Dict[str, Any]]:
-        """Get the current open SETTLE_DATE position for a portfolio/security combination.
+        """Get the current open position for a portfolio/security combination.
 
-        CA effects (dividends, splits, etc.) apply to the settled position only.
-        TRADE_DATE positions track committed exposure and are not adjusted by CA events.
+        Args:
+            position_basis: 'SETTLE_DATE' (default) or 'TRADE_DATE'
         """
         try:
             query = f"""
@@ -930,7 +933,7 @@ class CACashFlowService:
             FROM {self.DATABASE}.{self.POSITION_TABLE}
             WHERE portfolio_short_name = '{self._escape(portfolio_short_name)}'
               AND security_label = '{self._escape(security_name)}'
-              AND position_basis = 'SETTLE_DATE'
+              AND position_basis = '{position_basis}'
               AND status = 'OPEN'
               AND is_active = true
               AND (is_latest = true OR is_latest IS NULL)
@@ -940,7 +943,7 @@ class CACashFlowService:
             results = impala_manager.execute_query(query, database=self.DATABASE)
             return results[0] if results else None
         except Exception as e:
-            logger.error(f"[UPDATE_POS] Error getting current position: {str(e)}")
+            logger.error(f"[UPDATE_POS] Error getting current position ({position_basis}): {str(e)}")
             return None
 
     def _mark_old_version_not_latest(self, version_id: int) -> bool:
@@ -1471,8 +1474,24 @@ class CACashFlowService:
             success = impala_manager.execute_write(insert_sql, database=self.DATABASE)
 
             if success:
-                logger.info(f"[POS_ADJ] SUCCESS - Created new position version {new_version_id} "
+                logger.info(f"[POS_ADJ] SUCCESS - Created new SETTLE_DATE position version {new_version_id} "
                            f"for {ca_type}. New qty={new_quantity}, avg_cost={new_avg_cost}")
+                # Also update the TRADE_DATE position so committed-exposure view stays consistent
+                self._apply_ca_to_trade_date_position(
+                    portfolio_short_name=portfolio_short_name,
+                    security_name=security_name,
+                    new_quantity=new_quantity,
+                    new_avg_cost=new_avg_cost,
+                    new_total_cost=new_total_cost,
+                    ca_id=ca_id,
+                    ca_number=ca_number,
+                    ca_type=ca_type,
+                    ex_date=ex_date,
+                    security_currency=security_currency,
+                    portfolio_currency=portfolio_currency,
+                    fx_rate=fx_rate,
+                    updated_by=updated_by
+                )
             else:
                 logger.error(f"[POS_ADJ] FAILED - Could not create position version for {ca_type}")
 
@@ -1480,6 +1499,152 @@ class CACashFlowService:
 
         except Exception as e:
             logger.error(f"[POS_ADJ] Error creating position adjustment version: {str(e)}")
+            return False
+
+    def _apply_ca_to_trade_date_position(
+        self,
+        portfolio_short_name: str,
+        security_name: str,
+        new_quantity: Decimal,
+        new_avg_cost: Decimal,
+        new_total_cost: Decimal,
+        ca_id: int,
+        ca_number: str,
+        ca_type: str,
+        ex_date: str,
+        security_currency: str,
+        portfolio_currency: str,
+        fx_rate: Decimal,
+        updated_by: str
+    ) -> bool:
+        """Update the TRADE_DATE position after a CA split/bonus/reverse-split.
+
+        Keeps committed-exposure (TRADE_DATE) view consistent with the settled
+        position after a corporate action adjusts qty and AVP.
+        """
+        try:
+            td_position = self._get_current_position(
+                portfolio_short_name, security_name, position_basis='TRADE_DATE'
+            )
+            if not td_position:
+                logger.warning(
+                    f"[POS_ADJ] No TRADE_DATE position found for {portfolio_short_name}/{security_name} "
+                    f"— skipping TRADE_DATE update (may be AMS/upload-only position)"
+                )
+                return True  # Not a hard failure
+
+            td_version_id = td_position.get('version_id')
+            td_position_id = td_position.get('position_id')
+            td_market_price = Decimal(str(td_position.get('market_price', 0) or 0))
+            td_dividend_fc = Decimal(str(td_position.get('dividend_fc', 0) or 0))
+            td_dividend_lc = Decimal(str(td_position.get('dividend_lc', 0) or 0))
+            uncall_fc = float(td_position.get('uncall_fc', 0) or 0)
+            uncall_lc = float(td_position.get('uncall_lc', 0) or 0)
+            pipeline_fc = float(td_position.get('pipeline_fc', 0) or 0)
+            pipeline_lc = float(td_position.get('pipeline_lc', 0) or 0)
+            commit_fc = float(td_position.get('commit_fc', 0) or 0)
+            commit_lc = float(td_position.get('commit_lc', 0) or 0)
+            provision_fc_val = float(td_position.get('provision_fc', 0) or 0)
+            provision_lc_val = float(td_position.get('provision_lc', 0) or 0)
+            position_type = td_position.get('position_type') or 'NORMAL'
+
+            market_value_fc = (new_quantity * td_market_price).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+            market_value_lc = (market_value_fc * fx_rate).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+            new_total_cost_lc = (new_total_cost * fx_rate).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+            new_avg_cost_lc = (new_avg_cost * fx_rate).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+            unrealized_pnl_fc = market_value_fc - new_total_cost
+            unrealized_pnl_lc = market_value_lc - new_total_cost_lc
+
+            self._mark_old_version_not_latest(td_version_id)
+
+            timestamp = datetime.now()
+            timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
+            new_version_id = int(timestamp.timestamp() * 1000) + 1  # +1 to avoid collision with SETTLE_DATE version
+
+            insert_sql = f"""
+            UPSERT INTO {self.DATABASE}.{self.POSITION_TABLE} (
+                version_id, position_id, position_date, position_basis,
+                portfolio_short_name, security_label,
+                quantity,
+                average_cost_fc, total_cost_fc,
+                average_cost_lc, total_cost_lc,
+                market_price, market_value_fc, market_value_lc,
+                realized_pnl_fc, unrealized_pnl_fc,
+                realized_pnl_lc, unrealized_pnl_lc,
+                dividend_fc, dividend_lc,
+                uncall_fc, uncall_lc,
+                pipeline_fc, pipeline_lc,
+                commit_fc, commit_lc,
+                provision_fc, provision_lc,
+                position_type,
+                trade_type,
+                security_currency, portfolio_currency, fx_rate,
+                status, is_active, is_latest,
+                last_ca_id, last_ca_number, last_ca_type, last_ca_date,
+                created_by, created_at, updated_by, updated_at
+            ) VALUES (
+                {new_version_id},
+                {td_position_id},
+                '{ex_date}',
+                'TRADE_DATE',
+                '{self._escape(portfolio_short_name)}',
+                '{self._escape(security_name)}',
+                {float(new_quantity)},
+                {float(new_avg_cost)},
+                {float(new_total_cost)},
+                {float(new_avg_cost_lc)},
+                {float(new_total_cost_lc)},
+                {float(td_market_price)},
+                {float(market_value_fc)},
+                {float(market_value_lc)},
+                0,
+                {float(unrealized_pnl_fc)},
+                0,
+                {float(unrealized_pnl_lc)},
+                {float(td_dividend_fc)},
+                {float(td_dividend_lc)},
+                {uncall_fc},
+                {uncall_lc},
+                {pipeline_fc},
+                {pipeline_lc},
+                {commit_fc},
+                {commit_lc},
+                {provision_fc_val},
+                {provision_lc_val},
+                '{self._escape(position_type)}',
+                'CA_{ca_type}',
+                '{self._escape(security_currency or "")}',
+                '{self._escape(portfolio_currency or "")}',
+                {float(fx_rate)},
+                'OPEN',
+                true,
+                true,
+                {ca_id},
+                '{self._escape(ca_number)}',
+                '{self._escape(ca_type)}',
+                '{ex_date}',
+                '{self._escape(updated_by)}',
+                '{timestamp_str}',
+                '{self._escape(updated_by)}',
+                '{timestamp_str}'
+            )
+            """
+
+            td_success = impala_manager.execute_write(insert_sql, database=self.DATABASE)
+            if td_success:
+                logger.info(
+                    f"[POS_ADJ] SUCCESS - Created new TRADE_DATE position version {new_version_id} "
+                    f"for {ca_type}. New qty={new_quantity}, avg_cost={new_avg_cost}"
+                )
+            else:
+                logger.error(
+                    f"[POS_ADJ] FAILED - Could not update TRADE_DATE position for "
+                    f"{portfolio_short_name}/{security_name} after {ca_type}"
+                )
+            return td_success
+
+        except Exception as e:
+            logger.error(f"[POS_ADJ] Error updating TRADE_DATE position after {ca_type}: {str(e)}")
             return False
 
     def _create_rights_warrant_position(

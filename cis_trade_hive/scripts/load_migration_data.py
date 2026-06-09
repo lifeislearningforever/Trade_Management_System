@@ -1036,6 +1036,202 @@ def load_position(
 
 
 # ---------------------------------------------------------------------------
+# cis_cash_flow
+# ---------------------------------------------------------------------------
+
+CASH_FLOW_ALIASES: Dict[str, str] = {
+    # Identifiers (both auto-generated; CSV values ignored for PK)
+    'cash_flow_id':         'cash_flow_id',        # ignored — always auto-generated
+    'cash_flow_number':     'cash_flow_number',    # ignored — always auto-generated
+
+    # Required business fields
+    'portfolio_short_name': 'portfolio_short_name',
+    'portfolio':            'portfolio_short_name',
+    'portfolio_name':       'portfolio_short_name',
+
+    'security_label':       'security_label',
+    'security':             'security_label',
+    'security_name':        'security_label',
+
+    'cash_flow_type':       'cash_flow_type',
+    'type':                 'cash_flow_type',
+    'cf_type':              'cash_flow_type',
+
+    'send_receive':         'send_receive',
+    'direction':            'send_receive',
+
+    # Amount fields
+    'foreign_ccy':          'foreign_ccy',
+    'foreign_currency':     'foreign_ccy',
+    'local_ccy':            'local_ccy',
+    'local_currency':       'local_ccy',
+
+    'local_ccy_amt':        'local_ccy_amt',
+    'local_amount':         'local_ccy_amt',
+    'amount_lc':            'local_ccy_amt',
+
+    'foreign_ccy_amt':      'foreign_ccy_amt',
+    'foreign_amount':       'foreign_ccy_amt',
+    'amount_fc':            'foreign_ccy_amt',
+    'amount':               'foreign_ccy_amt',
+
+    'flow_amount_local':    'flow_amount_local',
+    'dividend_price':       'dividend_price',
+    'quantity':             'quantity',
+    'qty':                  'quantity',
+    'fx_rate':              'fx_rate',
+
+    'gl_acc_no':            'gl_acc_no',
+    'gl_account':           'gl_acc_no',
+
+    # Date fields
+    'payment_date':         'payment_date',
+    'pay_date':             'payment_date',
+    'trade_date':           'trade_date',
+    'value_date':           'value_date',
+    'dividend_date':        'dividend_date',
+    'ex_date':              'ex_date',
+    'record_date':          'record_date',
+
+    # CA reference (optional — leave blank for user-created migrations)
+    'ca_id':                'ca_id',
+    'ca_number':            'ca_number',
+
+    # Workflow
+    'status':               'status',
+    'is_active':            'is_active',
+    'is_deleted':           'is_deleted',
+    'created_by':           'created_by',
+    'updated_by':           'updated_by',
+}
+
+CASH_FLOW_DECIMAL_COLS = {
+    'local_ccy_amt', 'foreign_ccy_amt', 'flow_amount_local',
+    'dividend_price', 'quantity', 'fx_rate',
+}
+CASH_FLOW_BIGINT_COLS = {'ca_id'}
+CASH_FLOW_BOOL_COLS   = {'is_active', 'is_deleted', 'position_updated'}
+
+
+def _next_cf_number(index: int) -> str:
+    """Generate a cash_flow_number in the same format as the UI: CF-YYYYMMDD-NNNN."""
+    date_str = datetime.now().strftime('%Y%m%d')
+    return f"CF-{date_str}-{str(index).zfill(4)}"
+
+
+def load_cash_flow(rows: List[Dict], status: str, dry_run: bool, processing_date: str = '') -> Tuple[int, int, List[str]]:
+    ok = fail = 0
+    errors: List[str] = []
+    ts = _now()
+
+    for i, raw in enumerate(rows, 1):
+        mapped: Dict[str, Any] = {}
+        for raw_col, raw_val in raw.items():
+            db_col = CASH_FLOW_ALIASES.get(raw_col)
+            if db_col:
+                mapped[db_col] = raw_val
+
+        # Validate required fields
+        portfolio = str(mapped.get('portfolio_short_name', '') or '').strip()
+        if not portfolio:
+            msg = f"Row {i}: missing portfolio_short_name — skipped"
+            logger.warning(msg)
+            errors.append(msg)
+            fail += 1
+            continue
+
+        security = str(mapped.get('security_label', '') or '').strip()
+        if not security:
+            msg = f"Row {i}: missing security_label — skipped"
+            logger.warning(msg)
+            errors.append(msg)
+            fail += 1
+            continue
+
+        cf_type = str(mapped.get('cash_flow_type', '') or '').strip()
+        if not cf_type:
+            msg = f"Row {i} ({portfolio}/{security}): missing cash_flow_type — skipped"
+            logger.warning(msg)
+            errors.append(msg)
+            fail += 1
+            continue
+
+        payment_date = _normalise_date(mapped.get('payment_date', ''))
+        if not payment_date:
+            msg = f"Row {i} ({portfolio}/{security}): missing payment_date — skipped"
+            logger.warning(msg)
+            errors.append(msg)
+            fail += 1
+            continue
+
+        # Auto-generate PK and number — always, regardless of CSV content
+        cash_flow_id = _timestamp_ms() + i
+        cash_flow_number = _next_cf_number(cash_flow_id % 10000)  # last 4 digits of ms timestamp
+
+        # Normalise all date columns
+        for _dcol in ('payment_date', 'trade_date', 'value_date', 'dividend_date',
+                      'ex_date', 'record_date'):
+            if mapped.get(_dcol):
+                mapped[_dcol] = _normalise_date(mapped[_dcol])
+
+        # Fixed / derived fields
+        mapped['cash_flow_id']     = cash_flow_id
+        mapped['cash_flow_number'] = cash_flow_number
+        mapped['src_system']       = SRC_SYSTEM
+        mapped['position_updated'] = False
+        mapped.setdefault('status',     status)
+        mapped.setdefault('is_active',  True)
+        mapped.setdefault('is_deleted', False)
+        mapped.setdefault('send_receive', 'SEND')
+        mapped.setdefault('created_by', SRC_SYSTEM)
+        mapped.setdefault('updated_by', SRC_SYSTEM)
+        mapped['created_at'] = ts
+        mapped['updated_at'] = ts
+
+        if dry_run:
+            logger.info(
+                "[DRY-RUN] cash_flow row %d: cf_id=%s cf_number=%s portfolio=%s security=%s type=%s payment_date=%s",
+                i, cash_flow_id, cash_flow_number, portfolio, security, cf_type, payment_date
+            )
+            ok += 1
+            continue
+
+        col_names = []
+        col_vals  = []
+        for col, val in mapped.items():
+            col_names.append(col)
+            if col in CASH_FLOW_BOOL_COLS:
+                col_vals.append(_bool(val))
+            elif col in CASH_FLOW_DECIMAL_COLS:
+                col_vals.append(_decimal(val))
+            elif col in CASH_FLOW_BIGINT_COLS:
+                col_vals.append(_bigint(val))
+            elif col == 'cash_flow_id':
+                col_vals.append(str(val))          # bare BIGINT — no quotes
+            else:
+                col_vals.append(_escape(val))
+
+        sql = (
+            f"UPSERT INTO {DATABASE}.cis_cash_flow "
+            f"({', '.join(col_names)}) VALUES ({', '.join(col_vals)})"
+        )
+        try:
+            impala_manager.execute_write(sql, database=DATABASE)
+            logger.info(
+                "Loaded cash_flow row %d: cf_id=%s cf_number=%s portfolio=%s security=%s type=%s",
+                i, cash_flow_id, cash_flow_number, portfolio, security, cf_type
+            )
+            ok += 1
+        except Exception as exc:
+            msg = f"Row {i} ({portfolio}/{security}): {exc}"
+            logger.error(msg)
+            errors.append(msg)
+            fail += 1
+
+    return ok, fail, errors
+
+
+# ---------------------------------------------------------------------------
 # error report
 # ---------------------------------------------------------------------------
 
@@ -1057,18 +1253,20 @@ def _write_error_csv(table: str, errors: List[str]) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 LOADERS = {
-    'party':     load_party,
-    'party_cif': load_party_cif,
-    'security':  load_security,
-    'trade':     load_trade,
+    'party':      load_party,
+    'party_cif':  load_party_cif,
+    'security':   load_security,
+    'trade':      load_trade,
+    'cash_flow':  load_cash_flow,
 }
 
 # Default status per table (can be overridden with --status)
 DEFAULT_STATUS = {
-    'party':     'ACTIVE',
-    'party_cif': 'ACTIVE',
-    'security':  'ACTIVE',
-    'trade':     'SETTLED',
+    'party':      'ACTIVE',
+    'party_cif':  'ACTIVE',
+    'security':   'ACTIVE',
+    'trade':      'SETTLED',
+    'cash_flow':  'APPROVED',
 }
 
 ALL_TABLES = list(LOADERS) + ['position']
@@ -1088,6 +1286,15 @@ Examples:
 
   # Load trades AND create BOTH positions (TRADE_DATE + SETTLE_DATE) in one pass
   python scripts/load_migration_data.py --table trade --file trades.csv --positions
+
+  # Load cash flows from CSV (cash_flow_id + cash_flow_number auto-generated, src_system=CIS)
+  python scripts/load_migration_data.py --table cash_flow --file cashflows.csv
+
+  # Load cash flows with a specific status override (default: APPROVED)
+  python scripts/load_migration_data.py --table cash_flow --file cashflows.csv --status INITIAL
+
+  # Dry-run: validate cash flow CSV without writing
+  python scripts/load_migration_data.py --table cash_flow --file cashflows.csv --dry-run
 
   # Backfill BOTH positions for all trades already in cis_trade
   python scripts/load_migration_data.py --table position
