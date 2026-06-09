@@ -71,6 +71,7 @@ class LookupTableDetailView(View):
 
             # Prepare columns for JavaScript (only name and type)
             columns = table_info.get('columns', [])
+            col_names_ordered = [col['name'] for col in columns]
             columns_for_js = [{'name': col['name'], 'type': col['type']} for col in columns]
 
             # Serialize rows to JSON for JS rendering (avoids get_item filter issues)
@@ -79,21 +80,50 @@ class LookupTableDetailView(View):
                 if isinstance(v, decimal.Decimal):
                     return float(v)
                 return v
+
+            def _row_to_dict(row, col_names):
+                """Ensure row is a dict keyed by column name, not int index."""
+                if isinstance(row, dict):
+                    # Guard: if keys are all ints, remap to col names
+                    keys = list(row.keys())
+                    if keys and isinstance(keys[0], int):
+                        return dict(zip(col_names, row.values()))
+                    return row
+                # list/tuple fallback
+                return dict(zip(col_names, row))
+
+            rows_safe = [_row_to_dict(r, col_names_ordered) for r in result['rows']]
             rows_for_js = [
                 {k: _json_safe(v) for k, v in row.items()}
-                for row in result['rows']
+                for row in rows_safe
             ]
 
-            logger.warning(f"LookupDetailView: {table_name} columns={len(columns)} rows={len(result['rows'])} pk={table_info.get('pk_column')}")
+            pk_column = table_info.get('pk_column') or (col_names_ordered[0] if col_names_ordered else '')
+            logger.warning(
+                f"LookupDetailView: {table_name} | columns={len(columns)} | rows={len(rows_for_js)} "
+                f"| pk={pk_column!r} | col_names={col_names_ordered[:5]} "
+                f"| first_row_keys={list(rows_for_js[0].keys())[:5] if rows_for_js else []}"
+            )
+
+            try:
+                rows_json_str = json.dumps(rows_for_js, default=str)
+            except Exception as je:
+                logger.error(f"rows_json serialization failed for {table_name}: {je}")
+                rows_json_str = '[]'
+            try:
+                columns_json_str = json.dumps(columns_for_js)
+            except Exception as je:
+                logger.error(f"columns_json serialization failed for {table_name}: {je}")
+                columns_json_str = '[]'
 
             context = {
                 'table_info': table_info,
                 'table_name': table_name,
-                'rows': result['rows'],
-                'rows_json': mark_safe(json.dumps(rows_for_js, default=str)),
+                'rows': rows_safe,
+                'rows_json': mark_safe(rows_json_str),
                 'columns': columns,
-                'columns_json': mark_safe(json.dumps(columns_for_js)),
-                'pk_column': table_info.get('pk_column'),
+                'columns_json': mark_safe(columns_json_str),
+                'pk_column': pk_column,
                 'total_count': result['total_count'],
                 'page': result['page'],
                 'page_size': result['page_size'],

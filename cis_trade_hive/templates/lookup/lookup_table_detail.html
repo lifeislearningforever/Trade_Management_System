@@ -178,7 +178,7 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const tableName = '{{ table_name }}';
-    const pkColumn = '{{ pk_column }}';
+    const pkColumn = '{{ pk_column|default:"" }}';
     const columns = {{ columns_json }};
     const csrfToken = '{{ csrf_token }}';
     const initialRows = {{ rows_json }};
