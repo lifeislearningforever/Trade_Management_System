@@ -41,8 +41,14 @@ class LookupKuduRepository:
             tables = []
             if results:
                 for row in results:
-                    # Impala SHOW TABLES returns column 'tab_name' (not 'name')
-                    table_name = row.get('tab_name', row.get('name', row.get('NAME', list(row.values())[0] if row else '')))
+                    # Impala SHOW TABLES returns column 'tab_name' (not 'name').
+                    # Depending on Impala version / driver, row may be a dict or a list/tuple.
+                    if isinstance(row, dict):
+                        table_name = row.get('tab_name') or row.get('name') or row.get('NAME') or (list(row.values())[0] if row else '')
+                    else:
+                        # list or tuple — take the first element
+                        table_name = row[0] if row else ''
+                    table_name = str(table_name).strip() if table_name else ''
                     if table_name:
                         # Exclude tables with '_rep' prefix or suffix (report tables)
                         table_name_lower = table_name.lower()
@@ -117,8 +123,15 @@ class LookupKuduRepository:
             type_map: Dict[str, str] = {}
             if desc_results:
                 for row in desc_results:
-                    col_name = row.get('name') or row.get('col_name') or row.get('NAME') or ''
-                    col_type = row.get('type') or row.get('data_type') or row.get('TYPE') or 'STRING'
+                    if isinstance(row, dict):
+                        col_name = row.get('name') or row.get('col_name') or row.get('NAME') or ''
+                        col_type = row.get('type') or row.get('data_type') or row.get('TYPE') or 'STRING'
+                    else:
+                        # list/tuple: [col_name, col_type, comment, ...]
+                        col_name = str(row[0]).strip() if len(row) > 0 else ''
+                        col_type = str(row[1]).strip() if len(row) > 1 else 'STRING'
+                    col_name = str(col_name).strip()
+                    col_type = str(col_type).strip() if col_type else 'STRING'
                     if not col_name or col_name.startswith('#') or col_name.startswith(' '):
                         continue
                     type_map[col_name] = col_type.upper().split('(')[0].strip()
@@ -479,8 +492,12 @@ class LookupKuduRepository:
             query = f"DESCRIBE {self.database}.{table_name}"
             results = impala_manager.execute_query(query)
             for row in (results or []):
-                col_name = row.get('name') or row.get('col_name') or ''
-                is_pk = str(row.get('primary_key', '')).lower() == 'true'
+                if isinstance(row, dict):
+                    col_name = row.get('name') or row.get('col_name') or ''
+                    is_pk = str(row.get('primary_key', '')).lower() == 'true'
+                else:
+                    col_name = str(row[0]).strip() if len(row) > 0 else ''
+                    is_pk = str(row[3]).strip().lower() == 'true' if len(row) > 3 else False
                 if col_name and not col_name.startswith('#') and is_pk:
                     return col_name
         except Exception:
