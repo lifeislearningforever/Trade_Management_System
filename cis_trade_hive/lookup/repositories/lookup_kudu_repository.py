@@ -318,7 +318,9 @@ class LookupKuduRepository:
                 VALUES ({', '.join(values)})
             """
 
-            impala_manager.execute_query(query)
+            success = impala_manager.execute_write(query, database=self.database)
+            if not success:
+                raise RuntimeError(f"execute_write returned False — row was not inserted into {table_name}")
             logger.info(f"Inserted row into {table_name}")
             return True
 
@@ -364,7 +366,9 @@ class LookupKuduRepository:
                 WHERE {pk_column} = '{self._escape_sql(str(pk_value))}'
             """
 
-            impala_manager.execute_query(query)
+            success = impala_manager.execute_write(query, database=self.database)
+            if not success:
+                raise RuntimeError(f"execute_write returned False — row was not updated in {table_name}")
             logger.info(f"Updated row in {table_name} where {pk_column}={pk_value}")
             return True
 
@@ -390,7 +394,9 @@ class LookupKuduRepository:
                 WHERE {pk_column} = '{self._escape_sql(str(pk_value))}'
             """
 
-            impala_manager.execute_query(query)
+            success = impala_manager.execute_write(query, database=self.database)
+            if not success:
+                raise RuntimeError(f"execute_write returned False — row was not deleted from {table_name}")
             logger.info(f"Deleted row from {table_name} where {pk_column}={pk_value}")
             return True
 

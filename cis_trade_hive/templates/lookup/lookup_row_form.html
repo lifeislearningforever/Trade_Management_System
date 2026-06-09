@@ -79,6 +79,17 @@
                                    value="{{ row|get_item:col.name|default:'' }}"
                                    {% if col.name == pk_column and is_edit %}readonly{% endif %}>
 
+                        {% elif col.type == 'DATE' or col.type == 'TIMESTAMP' or col.name|slice:"-5:" == '_date' or col.name|slice:"-3:" == '_at' or col.name == 'date' %}
+                            <!-- Date picker -->
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-calendar3"></i></span>
+                                <input type="date" class="form-control" id="id_{{ col.name }}"
+                                       name="{{ col.name }}"
+                                       value="{{ row|get_item:col.name|default:'' }}"
+                                       {% if col.name == pk_column and is_edit %}readonly{% endif %}>
+                            </div>
+                            <small class="form-text text-muted">Format: YYYY-MM-DD</small>
+
                         {% elif col.name|lower == 'description' or col.name|lower == 'notes' or col.name|lower == 'comment' %}
                             <!-- Textarea for description fields -->
                             <textarea class="form-control" id="id_{{ col.name }}"
@@ -141,6 +152,8 @@
                                 <span class="badge badge-warning">Primary Key</span>
                             {% elif col.type == 'BOOLEAN' or col.type == 'BOOL' %}
                                 Yes/No toggle
+                            {% elif col.type == 'DATE' or col.type == 'TIMESTAMP' or col.name|slice:"-5:" == '_date' or col.name|slice:"-3:" == '_at' or col.name == 'date' %}
+                                Date picker (YYYY-MM-DD)
                             {% elif col.name == 'display_order' %}
                                 Numeric sort order
                             {% elif col.name == 'is_active' %}
