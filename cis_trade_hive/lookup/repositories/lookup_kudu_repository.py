@@ -84,7 +84,7 @@ class LookupKuduRepository:
             # Get row count
             count_query = f"SELECT COUNT(*) as cnt FROM {self.database}.{table_name}"
             count_result = impala_manager.execute_query(count_query)
-            row_count = count_result[0].get('cnt', 0) if count_result else 0
+            row_count = self._extract_count(count_result)
 
             # Derive display name from table name
             display_name = self._format_table_name(table_name)
@@ -109,14 +109,20 @@ class LookupKuduRepository:
         """
         Get column metadata for a table.
 
-        Uses DESCRIBE (authoritative schema) for types so STRING columns that
-        happen to hold numeric-looking data are not misclassified as BIGINT/DECIMAL.
-        Then does a SELECT * LIMIT 1 probe solely to get the column *order* and
-        to confirm which columns Impala actually exposes (Kudu PK columns are
-        sometimes dropped from DESCRIBE output in older Impala versions).
+        Uses SELECT * LIMIT 0 for authoritative column order (cursor.description
+        always has column names even with zero rows), then overlays types from
+        DESCRIBE for accuracy. Falls back gracefully if either step fails.
         """
         try:
-            # --- Step 1: get authoritative types from DESCRIBE ---
+            # --- Step 1: authoritative column names + order from SELECT * LIMIT 0 ---
+            # cursor.description is set even when 0 rows are returned, so this is safe.
+            probe_query = f"SELECT * FROM {self.database}.{table_name} LIMIT 0"
+            probe_results = impala_manager.execute_query(probe_query)
+            # execute_query returns [] for LIMIT 0 but we need column names.
+            # Call _get_column_names_from_select to get them from description.
+            ordered_names = self._get_column_names_from_select(table_name)
+
+            # --- Step 2: get authoritative types from DESCRIBE ---
             desc_query = f"DESCRIBE {self.database}.{table_name}"
             desc_results = impala_manager.execute_query(desc_query)
 
@@ -124,32 +130,43 @@ class LookupKuduRepository:
             if desc_results:
                 for row in desc_results:
                     if isinstance(row, dict):
-                        col_name = row.get('name') or row.get('col_name') or row.get('NAME') or ''
-                        col_type = row.get('type') or row.get('data_type') or row.get('TYPE') or 'STRING'
+                        col_name = (row.get('name') or row.get('col_name') or
+                                    row.get('NAME') or row.get('COL_NAME') or '')
+                        col_type = (row.get('type') or row.get('data_type') or
+                                    row.get('TYPE') or row.get('DATA_TYPE') or 'STRING')
                     else:
                         # list/tuple: [col_name, col_type, comment, ...]
                         col_name = str(row[0]).strip() if len(row) > 0 else ''
                         col_type = str(row[1]).strip() if len(row) > 1 else 'STRING'
                     col_name = str(col_name).strip()
                     col_type = str(col_type).strip() if col_type else 'STRING'
-                    if not col_name or col_name.startswith('#') or col_name.startswith(' '):
+                    # Skip header/separator rows from DESCRIBE FORMATTED/EXTENDED
+                    if not col_name or col_name.startswith('#') or col_name.startswith(' ') or col_name == '':
                         continue
                     type_map[col_name] = col_type.upper().split('(')[0].strip()
 
-            # --- Step 2: get column order from SELECT * (also catches PK cols DESCRIBE may miss) ---
-            probe_query = f"SELECT * FROM {self.database}.{table_name} LIMIT 1"
-            probe_results = impala_manager.execute_query(probe_query)
+            # If DESCRIBE gave nothing useful, fall back to using SELECT * LIMIT 1 for types
+            if not type_map:
+                logger.warning(f"get_table_columns {table_name}: DESCRIBE returned no type info, using SELECT * probe")
+                select_results = impala_manager.execute_query(
+                    f"SELECT * FROM {self.database}.{table_name} LIMIT 1"
+                )
+                if select_results and isinstance(select_results[0], dict):
+                    for k in select_results[0].keys():
+                        if k not in type_map:
+                            type_map[k] = 'STRING'
 
-            if probe_results:
-                ordered_names = list(probe_results[0].keys())
-            elif type_map:
+            # If ordered_names is empty, fall back to type_map keys
+            if not ordered_names:
                 ordered_names = list(type_map.keys())
-            else:
-                ordered_names = []
 
             # Merge: use DESCRIBE type where available, fall back to STRING for unknown cols
             columns = []
+            seen = set()
             for col_name in ordered_names:
+                if col_name in seen:
+                    continue
+                seen.add(col_name)
                 col_type = type_map.get(col_name, 'STRING')
                 columns.append({
                     'name': col_name,
@@ -159,9 +176,9 @@ class LookupKuduRepository:
                 })
 
             # Add any cols DESCRIBE found that SELECT * missed (edge case)
-            probe_set = set(ordered_names)
             for col_name, col_type in type_map.items():
-                if col_name not in probe_set:
+                if col_name not in seen:
+                    seen.add(col_name)
                     columns.append({
                         'name': col_name,
                         'type': col_type,
@@ -169,11 +186,46 @@ class LookupKuduRepository:
                         'is_nullable': True,
                     })
 
-            logger.debug(f"get_table_columns {table_name}: {len(columns)} cols")
+            logger.debug(f"get_table_columns {table_name}: {len(columns)} cols, types={[(c['name'], c['type']) for c in columns[:5]]}")
             return columns
 
         except Exception as e:
             logger.error(f"Error getting columns for {table_name}: {str(e)}", exc_info=True)
+            return []
+
+    def _get_column_names_from_select(self, table_name: str) -> List[str]:
+        """
+        Get ordered column names by executing SELECT * LIMIT 1 and reading
+        cursor.description (works even with 0 rows). Falls back to empty list.
+        """
+        try:
+            # We need direct cursor access to read description before fetchall
+            # Use execute_query which builds dicts — extract key order from first row
+            results = impala_manager.execute_query(
+                f"SELECT * FROM {self.database}.{table_name} LIMIT 1"
+            )
+            if results and isinstance(results[0], dict):
+                return list(results[0].keys())
+            # Table has no rows — try a different approach via impala_manager internals
+            # by running SHOW COLUMN STATS as a fallback
+            col_stats = impala_manager.execute_query(
+                f"SHOW COLUMN STATS {self.database}.{table_name}"
+            )
+            if col_stats:
+                names = []
+                for row in col_stats:
+                    if isinstance(row, dict):
+                        col_name = row.get('Column') or row.get('column') or ''
+                    else:
+                        col_name = str(row[0]).strip() if row else ''
+                    col_name = str(col_name).strip()
+                    if col_name and not col_name.startswith('#'):
+                        names.append(col_name)
+                if names:
+                    return names
+            return []
+        except Exception as e:
+            logger.debug(f"_get_column_names_from_select {table_name}: {e}")
             return []
 
     # =========================================================================
@@ -255,7 +307,7 @@ class LookupKuduRepository:
                 {where_sql}
             """
             count_result = impala_manager.execute_query(count_query)
-            total_count = count_result[0].get('cnt', 0) if count_result else 0
+            total_count = self._extract_count(count_result)
 
             # Get paginated rows
             data_query = f"""
@@ -266,8 +318,9 @@ class LookupKuduRepository:
                 LIMIT {limit} OFFSET {offset}
             """
             logger.warning(f"get_all_rows query for {table_name}: SELECT {select_cols} ... total_count={total_count}")
-            rows = impala_manager.execute_query(data_query) or []
-            logger.warning(f"get_all_rows {table_name}: got {len(rows)} rows")
+            raw_rows = impala_manager.execute_query(data_query) or []
+            rows = self._normalize_rows(raw_rows, col_names)
+            logger.warning(f"get_all_rows {table_name}: got {len(rows)} rows, first_keys={list(rows[0].keys())[:5] if rows else []}")
 
             return rows, total_count
 
@@ -293,7 +346,16 @@ class LookupKuduRepository:
                 WHERE {pk_column} = '{self._escape_sql(str(pk_value))}'
             """
             results = impala_manager.execute_query(query)
-            return results[0] if results else None
+            if not results:
+                return None
+            row = results[0]
+            if isinstance(row, dict):
+                return row
+            # list/tuple — need column names to build dict
+            col_names = self._get_column_names_from_select(table_name)
+            if col_names and len(col_names) == len(row):
+                return dict(zip(col_names, row))
+            return dict(enumerate(row))  # last-resort: numeric keys
 
         except Exception as e:
             logger.error(f"Error getting row from {table_name}: {str(e)}")
@@ -435,7 +497,7 @@ class LookupKuduRepository:
                 WHERE {pk_column} = '{self._escape_sql(str(pk_value))}'
             """
             result = impala_manager.execute_query(query)
-            return result[0].get('cnt', 0) > 0 if result else False
+            return self._extract_count(result) > 0
 
         except Exception as e:
             logger.error(f"Error checking PK existence: {str(e)}")
@@ -503,6 +565,31 @@ class LookupKuduRepository:
         except Exception:
             pass
         return None
+
+    def _extract_count(self, result) -> int:
+        """Safely extract COUNT(*) value from a query result row (dict or list/tuple)."""
+        if not result:
+            return 0
+        row = result[0]
+        if isinstance(row, dict):
+            # May be keyed as 'cnt', '8(count(*)', or the first key
+            for k in ('cnt', 'count(*)', 'count(1)', 'COUNT(*)', 'COUNT(1)'):
+                if k in row:
+                    return int(row[k] or 0)
+            # Fall back to first value
+            first_val = next(iter(row.values()), 0)
+            return int(first_val or 0)
+        else:
+            # list/tuple
+            return int(row[0] or 0) if row else 0
+
+    def _normalize_rows(self, rows, col_names: List[str]) -> List[Dict[str, Any]]:
+        """Convert list/tuple rows to dicts using col_names as keys."""
+        if not rows:
+            return []
+        if rows and isinstance(rows[0], dict):
+            return rows  # already dicts
+        return [dict(zip(col_names, row)) for row in rows]
 
     def _escape_sql(self, value: str) -> str:
         """Escape SQL string for Impala/Kudu (backslash escaping, not doubled quotes)."""
