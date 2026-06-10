@@ -351,8 +351,10 @@ class Command(BaseCommand):
 
     def _get_latest_price(self, security_label):
         """Fetch latest closing price from cis_equity_price; fallback to cis_security."""
+        safe = self._escape(security_label)
+
+        # Primary: cis_equity_price
         try:
-            safe = self._escape(security_label)
             results = impala_manager.execute_query(
                 f"""
                 SELECT main_closing_price
@@ -365,8 +367,11 @@ class Command(BaseCommand):
             )
             if results and results[0].get('main_closing_price') is not None:
                 return Decimal(str(results[0]['main_closing_price']))
+        except Exception as e:
+            logger.warning(f"cis_equity_price lookup failed for {security_label}: {str(e)}")
 
-            # Fallback: last known price on security master
+        # Fallback: last known price on security master (price column may not exist on all envs)
+        try:
             fallback = impala_manager.execute_query(
                 f"SELECT price FROM {DATABASE}.cis_security "
                 f"WHERE security_name = '{safe}' LIMIT 1",
@@ -374,11 +379,10 @@ class Command(BaseCommand):
             )
             if fallback and fallback[0].get('price') is not None:
                 return Decimal(str(fallback[0]['price']))
-
-            return None
-
         except Exception as e:
-            logger.error(f"Error fetching price for {security_label}: {str(e)}")
+            logger.debug(f"cis_security.price fallback unavailable for {security_label}: {str(e)}")
+
+        return None
             return None
 
     def _is_equity_method_security(self, security_label):
