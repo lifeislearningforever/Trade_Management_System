@@ -2191,7 +2191,7 @@ def corporate_action_create(request):
 
             ca_data = {
                 'ca_number': request.POST.get('ca_number', '').strip(),
-                'ca_type': request.POST.get('ca_type', '').strip(),
+                'ca_type': request.POST.get('ca_type', '').strip().upper(),
                 'security_name': ','.join(security_names) if security_names else '',
                 'portfolio_name': ','.join(portfolio_names) if portfolio_names else '',
                 'announcement_date': request.POST.get('announcement_date', '').strip(),
@@ -2278,7 +2278,7 @@ def corporate_action_edit(request, ca_id):
 
             ca_data = {
                 'ca_number': request.POST.get('ca_number', '').strip(),
-                'ca_type': request.POST.get('ca_type', '').strip(),
+                'ca_type': request.POST.get('ca_type', '').strip().upper(),
                 'security_name': ','.join(security_names) if security_names else '',
                 'portfolio_name': ','.join(portfolio_names) if portfolio_names else '',
                 'announcement_date': request.POST.get('announcement_date', '').strip(),

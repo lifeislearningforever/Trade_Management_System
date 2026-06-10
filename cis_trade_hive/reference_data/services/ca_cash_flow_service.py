@@ -142,7 +142,7 @@ class CACashFlowService:
             Tuple of (success, queue_id)
         """
         try:
-            ca_type = ca_data.get('ca_type', '')
+            ca_type = (ca_data.get('ca_type') or '').strip().upper()
 
             # Check if CA type requires processing
             if (ca_type not in self.CASH_FLOW_CA_TYPES
@@ -220,7 +220,7 @@ class CACashFlowService:
             if not dry_run:
                 ca_cash_flow_queue_repository.mark_processing(queue_id)
 
-            ca_type = queue_entry.get('ca_type')
+            ca_type = (queue_entry.get('ca_type') or '').strip().upper()
             security_name = queue_entry.get('security_name')
             ex_date = queue_entry.get('ex_date')
             price = Decimal(str(queue_entry.get('price') or 0))
@@ -1026,7 +1026,7 @@ class CACashFlowService:
             Tuple of (success, message, positions_adjusted, amount=0)
         """
         try:
-            ca_type = queue_entry.get('ca_type')
+            ca_type = (queue_entry.get('ca_type') or '').strip().upper()
             security_name = queue_entry.get('security_name')
             ex_date = queue_entry.get('ex_date')
             raw_price = queue_entry.get('price')
@@ -1815,7 +1815,7 @@ class CACashFlowService:
         LC = price × FX rate.
         """
         try:
-            ca_type = queue_entry.get('ca_type')
+            ca_type = (queue_entry.get('ca_type') or '').strip().upper()
             security_name = queue_entry.get('security_name')
             ex_date = queue_entry.get('ex_date')
             new_value_fc = Decimal(str(queue_entry.get('price') or 0))

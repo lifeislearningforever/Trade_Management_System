@@ -228,6 +228,7 @@ class CorporateActionDropdownService:
         # Fallback to default options
         default_options = [
             {'value': 'DIVIDEND', 'label': 'Dividend'},
+            {'value': 'SPLIT', 'label': 'Split'},
             {'value': 'STOCK_SPLIT', 'label': 'Stock Split'},
             {'value': 'REVERSE_SPLIT', 'label': 'Reverse Split'},
             {'value': 'BONUS_ISSUE', 'label': 'Bonus Issue'},
