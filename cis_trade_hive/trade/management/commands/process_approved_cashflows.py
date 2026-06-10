@@ -591,7 +591,7 @@ class Command(BaseCommand):
             nbv_lc = float(round(Decimal(str(_f('total_cost_lc'))) + Decimal(str(_f('unrealized_pnl_lc'))) - Decimal(str(_f('provision_lc'))), lc_dp))
 
             sql = f"""
-            UPSERT INTO {DATABASE}.{POSITION_TABLE} (
+            INSERT INTO {DATABASE}.{POSITION_TABLE} (
                 version_id, position_id, position_date, position_basis,
                 portfolio_short_name, security_label,
                 quantity,
@@ -763,7 +763,7 @@ class Command(BaseCommand):
             nbv_fc = float(round(Decimal(str(cost_fc_val)) + Decimal(str(upnl_fc_val)) - Decimal(str(provision_fc_val)), fc_dp))
             nbv_lc = float(round(Decimal(str(cost_lc_val)) + Decimal(str(upnl_lc_val)) - Decimal(str(provision_lc_val)), lc_dp))
 
-            upsert = f"""
+            insert_sql = f"""
             INSERT INTO {DATABASE}.{GOLDEN_TABLE} (
                 position_id, version_id,
                 portfolio, security_label,
@@ -803,10 +803,10 @@ class Command(BaseCommand):
                 {f"'{_escape(source_table)}'" if source_table else 'NULL'}
             )
             """
-            ok = impala_manager.execute_write(upsert, database=DATABASE)
+            ok = impala_manager.execute_write(insert_sql, database=DATABASE)
             if ok:
                 logger.info(
-                    f'[GOLDEN] cis_position upserted: position_id={position_id} '
+                    f'[GOLDEN] cis_position inserted: position_id={position_id} '
                     f'{portfolio}/{security} src={effective_src} cf_type={cf_type} '
                     f'last_cf={cf_number} amount_fc={cf_amount_fc}'
                 )
