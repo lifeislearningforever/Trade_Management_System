@@ -409,24 +409,25 @@ class Command(BaseCommand):
             logger.debug(f"Could not get portfolio info for {portfolio}: {str(e)}")
         return {}
 
-    def _get_fx_rate(self, from_ccy, to_ccy):
+    def _get_fx_rate(self, sec_ccy, port_ccy):
         """
-        Return latest spot FX rate from gmp_cis_sta_dly_fx_rates.
-        from_ccy = security currency (FC), to_ccy = portfolio base currency (LC).
+        Return spot FX rate to convert FC (security currency) → LC (portfolio currency).
+        Multiply FC amount by this rate to get LC amount.
+
+        ref_quot_ccy format is '{port_ccy}-{sec_ccy}' and spot_rate_d is the FC→LC rate.
+        If that pair is not found, try the reverse '{sec_ccy}-{port_ccy}' and invert.
         Returns Decimal('1') if same currency or rate not found.
         """
-        if not from_ccy or not to_ccy or from_ccy == to_ccy:
+        if not sec_ccy or not port_ccy or sec_ccy == port_ccy:
             return Decimal('1')
         try:
-            f = self._escape(from_ccy)
-            t = self._escape(to_ccy)
+            # Primary: port_ccy-sec_ccy → spot_rate_d is FC→LC multiplier
+            pair = self._escape(f'{port_ccy}-{sec_ccy}')
             results = impala_manager.execute_query(
                 f"""
                 SELECT spot_rate_d
                 FROM {DATABASE}.gmp_cis_sta_dly_fx_rates
-                WHERE underlying_cur = '{f}'
-                  AND base_cur = '{t}'
-                  AND record_type = 'D'
+                WHERE ref_quot_ccy = '{pair}'
                 ORDER BY `date` DESC
                 LIMIT 1
                 """,
@@ -434,8 +435,24 @@ class Command(BaseCommand):
             )
             if results and results[0].get('spot_rate_d') is not None:
                 return Decimal(str(results[0]['spot_rate_d']))
+
+            # Fallback: reverse pair — invert to get FC→LC rate
+            rev_pair = self._escape(f'{sec_ccy}-{port_ccy}')
+            results = impala_manager.execute_query(
+                f"""
+                SELECT spot_rate_d
+                FROM {DATABASE}.gmp_cis_sta_dly_fx_rates
+                WHERE ref_quot_ccy = '{rev_pair}'
+                ORDER BY `date` DESC
+                LIMIT 1
+                """,
+                database=DATABASE
+            )
+            if results and results[0].get('spot_rate_d') is not None:
+                rate = Decimal(str(results[0]['spot_rate_d']))
+                return (Decimal('1') / rate).quantize(Decimal('0.00000001')) if rate else Decimal('1')
         except Exception as e:
-            logger.debug(f"FX rate not found for {from_ccy}/{to_ccy}: {str(e)}")
+            logger.debug(f"FX rate not found for {sec_ccy}/{port_ccy}: {str(e)}")
         return Decimal('1')
 
     def _get_currency_dp(self, currency_code) -> int:
