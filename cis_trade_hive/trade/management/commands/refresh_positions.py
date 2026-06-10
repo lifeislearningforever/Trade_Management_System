@@ -209,6 +209,15 @@ class Command(BaseCommand):
         fc_dp = self._get_currency_dp(sec_ccy)
         lc_dp = self._get_currency_dp(port_ccy)
 
+        # cost_lc: recalculate from cost_fc × fx_rate for REVALUED; carry forward for NON-REVALUED
+        average_cost_fc = Decimal(str(position.get('average_cost_fc') or 0))
+        if reval_status == 'NON-REVALUED':
+            average_cost_lc = Decimal(str(position.get('average_cost_lc') or 0))
+            cost_lc_write   = cost_lc_dec  # carry forward unchanged
+        else:
+            average_cost_lc = round(average_cost_fc * fx_rate, lc_dp)
+            cost_lc_write   = round(cost_fc_dec * fx_rate, lc_dp)
+
         # --- Market value: always use latest equity price ---
         latest_price = self._get_latest_price(security)
 
@@ -226,16 +235,17 @@ class Command(BaseCommand):
         market_value_lc = round(market_value_fc * fx_rate, lc_dp)
 
         # Unrealized P&L: 0 for SUBSI/ASSOC; otherwise market_value - cost
+        # Use cost_lc_write (recalculated for REVALUED, carried for NON-REVALUED)
         if is_equity:
             unrealized_pnl_fc = Decimal('0')
             unrealized_pnl_lc = Decimal('0')
         else:
             unrealized_pnl_fc = round(market_value_fc - cost_fc_dec, fc_dp)
-            unrealized_pnl_lc = round(market_value_lc - cost_lc_dec, lc_dp)
+            unrealized_pnl_lc = round(market_value_lc - cost_lc_write, lc_dp)
 
         # net_book_value = cost + unrealized_pnl - provision
         nbv_fc = round(cost_fc_dec + unrealized_pnl_fc - provision_fc, fc_dp)
-        nbv_lc = round(cost_lc_dec + unrealized_pnl_lc - provision_lc, lc_dp)
+        nbv_lc = round(cost_lc_write + unrealized_pnl_lc - provision_lc, lc_dp)
 
         # NON-REVALUED: LC columns use FX-translated FC values but no MTM adjustment to cost basis
         # (market_value_fc still uses price; unrealized_pnl still calculated; LC just follows FC × FX)
@@ -254,6 +264,7 @@ class Command(BaseCommand):
                 market_value_fc, market_value_lc,
                 unrealized_pnl_fc, unrealized_pnl_lc,
                 nbv_fc, nbv_lc,
+                average_cost_lc, cost_lc_write,
                 fc_dp, lc_dp
             )
             if not success:
@@ -270,6 +281,7 @@ class Command(BaseCommand):
                               market_value_fc, market_value_lc,
                               unrealized_pnl_fc, unrealized_pnl_lc,
                               nbv_fc, nbv_lc,
+                              average_cost_lc, cost_lc_write,
                               fc_dp: int = 2, lc_dp: int = 2):
         """
         INSERT a new cis_position row per EOD run.
@@ -319,7 +331,7 @@ class Command(BaseCommand):
                     '{processing_date}',
                     {float(position.get('quantity') or 0)},
                     {_fc(position.get('average_cost_fc'))}, {_fc(position.get('cost_fc'))},
-                    {_lc(position.get('average_cost_lc'))}, {_lc(position.get('cost_lc'))},
+                    {float(round(average_cost_lc, lc_dp))}, {float(round(cost_lc_write, lc_dp))},
                     {float(round(market_value_fc, fc_dp))}, {float(round(market_value_lc, lc_dp))},
                     {float(round(nbv_fc, fc_dp))}, {float(round(nbv_lc, lc_dp))},
                     {float(round(unrealized_pnl_fc, fc_dp))}, {float(round(unrealized_pnl_lc, lc_dp))},
