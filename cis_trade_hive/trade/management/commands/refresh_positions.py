@@ -49,11 +49,16 @@ class Command(BaseCommand):
         )
         parser.add_argument('--dry-run', action='store_true',
                             help='Show what would be updated without writing to database')
+        parser.add_argument(
+            '--date', type=str, default=None,
+            help='Position date for EOD records (YYYY-MM-DD). Default: today'
+        )
 
     def handle(self, *args, **options):
         portfolio_filter = options.get('portfolio')
         source_filter = options.get('source')
         dry_run = options.get('dry_run', False)
+        run_date = options.get('date') or datetime.now().strftime('%Y-%m-%d')
 
         self.stdout.write(self.style.MIGRATE_HEADING('=' * 80))
         self.stdout.write(self.style.MIGRATE_HEADING('EOD Position Revaluation — cis_position (golden copy)'))
@@ -66,6 +71,7 @@ class Command(BaseCommand):
 
         sources = [source_filter] if source_filter else ALL_SOURCES
         self.stdout.write(f"Sources    : {', '.join(sources)}")
+        self.stdout.write(f"Position date: {run_date}")
         if portfolio_filter:
             self.stdout.write(f"Portfolio  : {portfolio_filter}")
         self.stdout.write('')
@@ -90,7 +96,7 @@ class Command(BaseCommand):
                     self.stdout.write(f"Processing {idx}/{total}...")
 
                 try:
-                    result = self._process_position(position, dry_run)
+                    result = self._process_position(position, dry_run, run_date)
                     if result == 'updated':
                         updated += 1
                     elif result == 'skipped':
@@ -173,7 +179,7 @@ class Command(BaseCommand):
     # Per-position processing
     # -------------------------------------------------------------------------
 
-    def _process_position(self, position, dry_run):
+    def _process_position(self, position, dry_run, run_date):
         position_id = position.get('position_id')
         portfolio   = position.get('portfolio')
         security    = position.get('security_label')
@@ -265,7 +271,8 @@ class Command(BaseCommand):
                 unrealized_pnl_fc, unrealized_pnl_lc,
                 nbv_fc, nbv_lc,
                 average_cost_lc, cost_lc_write,
-                fc_dp, lc_dp
+                fc_dp, lc_dp,
+                run_date
             )
             if not success:
                 self.stderr.write(self.style.ERROR(f"  Failed to insert EOD position {position_id}"))
@@ -282,17 +289,33 @@ class Command(BaseCommand):
                               unrealized_pnl_fc, unrealized_pnl_lc,
                               nbv_fc, nbv_lc,
                               average_cost_lc, cost_lc_write,
-                              fc_dp: int = 2, lc_dp: int = 2):
+                              fc_dp: int = 2, lc_dp: int = 2,
+                              run_date: str = None):
         """
-        INSERT a new cis_position row per EOD run.
-        Fresh position_id every time so EOD rows are distinct from INT/CA/CF rows.
-        processing_date uses YYYYMMDD format to match INT records.
+        INSERT a new EOD row into cis_position for the given run_date.
+        Deletes any existing EOD row for the same portfolio/security/position_basis/position_date
+        first so there is exactly one EOD record per combination per date.
         """
         try:
-            today           = datetime.now().strftime('%Y-%m-%d')
+            position_date   = run_date or datetime.now().strftime('%Y-%m-%d')
             processing_date = datetime.now().strftime('%Y%m%d')  # YYYYMMDD — matches INT records
             new_position_id = int(datetime.now().timestamp() * 1000) + (uuid.uuid4().int % 999999)
             version_id      = new_position_id
+
+            portfolio     = self._escape(position.get('portfolio', ''))
+            security      = self._escape(position.get('security_label', ''))
+            pos_basis     = self._escape(position.get('position_basis', 'TRADE_DATE'))
+
+            # Remove any existing EOD row for this portfolio/security/basis/date before inserting
+            impala_manager.execute_write(
+                f"""DELETE FROM {DATABASE}.cis_position
+                    WHERE portfolio = '{portfolio}'
+                      AND security_label = '{security}'
+                      AND position_basis = '{pos_basis}'
+                      AND position_date = '{position_date}'
+                      AND position_type = 'EOD'""",
+                database=DATABASE
+            )
 
             def _fc(v, default=0):
                 val = Decimal(str(v)) if v is not None else Decimal(str(default))
@@ -323,10 +346,10 @@ class Command(BaseCommand):
                     isin, source_table
                 ) VALUES (
                     {new_position_id}, {version_id},
-                    '{self._escape(position.get('portfolio', ''))}',
-                    '{self._escape(position.get('security_label', ''))}',
-                    '{self._escape(position.get('position_basis', 'TRADE_DATE'))}',
-                    '{today}',
+                    '{portfolio}',
+                    '{security}',
+                    '{pos_basis}',
+                    '{position_date}',
                     '{self._escape(position.get('src_system', 'CIS'))}',
                     '{processing_date}',
                     {float(position.get('quantity') or 0)},
