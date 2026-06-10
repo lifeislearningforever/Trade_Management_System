@@ -1183,8 +1183,8 @@ def load_cash_flow(rows: List[Dict], status: str, dry_run: bool, processing_date
         mapped.setdefault('is_active',  True)
         mapped.setdefault('is_deleted', False)
         mapped.setdefault('send_receive', 'SEND')
-        mapped.setdefault('created_by', SRC_SYSTEM)
-        mapped.setdefault('updated_by', SRC_SYSTEM)
+        mapped.setdefault('created_by', 'SYSTEM')
+        mapped.setdefault('updated_by', 'SYSTEM')
         mapped['created_at'] = ts
         mapped['updated_at'] = ts
 
