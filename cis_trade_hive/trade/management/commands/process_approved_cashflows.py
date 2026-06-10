@@ -693,6 +693,8 @@ class Command(BaseCommand):
         Non-fatal: logs errors but does not fail the parent write.
         """
         try:
+            import uuid as _uuid
+
             find_q = f"""
             SELECT position_id, version_id, realized_pnl_fc, realized_pnl_lc,
                    isin, source_table, src_system, position_basis,
@@ -706,28 +708,23 @@ class Command(BaseCommand):
             FROM {DATABASE}.{GOLDEN_TABLE}
             WHERE portfolio = '{_escape(portfolio)}'
               AND security_label = '{_escape(security)}'
-            ORDER BY position_date DESC
+              AND position_basis = 'SETTLE_DATE'
+            ORDER BY position_id DESC
             LIMIT 1
             """
             rows = impala_manager.execute_query(find_q, database=DATABASE)
-            today = datetime.now().strftime('%Y-%m-%d')
             processing_date = datetime.now().strftime('%Y%m%d')  # YYYYMMDD to match INT records
-            new_ver = int(datetime.now().timestamp() * 1000) + 3
 
-            # Always look up currencies from reference tables — position rows may be empty
-            sec_ccy  = self._get_security_currency(security)
-            port_ccy = self._get_portfolio_currency(portfolio)
+            # Always a fresh position_id for every INSERT — never reuse existing
+            new_position_id = int(datetime.now().timestamp() * 1000) + (_uuid.uuid4().int % 999999)
 
             if rows:
-                row = rows[0]
-                position_id   = row['position_id']
+                row           = rows[0]
                 isin          = row.get('isin')
                 source_table  = row.get('source_table')
                 effective_src = row.get('src_system') or src_system
                 pos_basis     = row.get('position_basis') or 'SETTLE_DATE'
             else:
-                import uuid as _uuid
-                position_id   = int(datetime.now().timestamp() * 1000) + (_uuid.uuid4().int % 9999)
                 row           = {}
                 isin          = current.get('isin')
                 source_table  = POSITION_TABLE
@@ -735,7 +732,7 @@ class Command(BaseCommand):
                 pos_basis     = current.get('position_basis') or 'SETTLE_DATE'
                 logger.info(
                     f'[GOLDEN] No existing cis_position row for {portfolio}/{security} '
-                    f'— creating new position_id={position_id}'
+                    f'— creating first INT row position_id={new_position_id}'
                 )
 
             def _gv(field, default=0.0):
@@ -783,7 +780,7 @@ class Command(BaseCommand):
                 position_type,
                 isin, source_table
             ) VALUES (
-                {position_id}, {new_ver},
+                {new_position_id}, {new_position_id},
                 '{_escape(portfolio)}', '{_escape(security)}',
                 '{_escape(pos_basis)}', '{_escape(position_date)}',
                 '{_escape(effective_src)}', '{processing_date}',
@@ -806,13 +803,13 @@ class Command(BaseCommand):
             ok = impala_manager.execute_write(insert_sql, database=DATABASE)
             if ok:
                 logger.info(
-                    f'[GOLDEN] cis_position inserted: position_id={position_id} '
+                    f'[GOLDEN] cis_position inserted: new_position_id={new_position_id} '
                     f'{portfolio}/{security} src={effective_src} cf_type={cf_type} '
                     f'last_cf={cf_number} amount_fc={cf_amount_fc}'
                 )
             else:
                 logger.error(
-                    f'[GOLDEN] Failed to upsert cis_position for {portfolio}/{security} '
+                    f'[GOLDEN] Failed to insert cis_position for {portfolio}/{security} '
                     f'cf_type={cf_type}'
                 )
         except Exception as e:
