@@ -269,11 +269,12 @@ class Command(BaseCommand):
         payment_date: str,
         dry_run: bool
     ) -> Tuple[bool, str]:
-        """Route to the correct position update logic based on cash flow type."""
+        """Route to the correct position update logic based on cash flow type.
+        Applies CF to both TRADE_DATE and SETTLE_DATE position bases."""
 
-        # Try CIS versioned ledger first; fall back to golden copy for non-CIS sources
-        position, pos_src = self._get_current_position(portfolio, security)
-        if not position:
+        # Fetch positions for both bases; apply to each independently
+        positions = self._get_current_positions(portfolio, security)
+        if not positions:
             return False, f'No open position for {portfolio}/{security} in cis_trade_position or cis_position'
 
         cf_id = cf.get('cash_flow_id')
@@ -289,88 +290,105 @@ class Command(BaseCommand):
         signed_fc = round(amount_fc * sign, fc_dp)
         signed_lc = round(amount_lc * sign, lc_dp)
 
-        if cf_type in ('UNCALL_COMMITMENT',):
-            return self._accumulate_field(
-                position, portfolio, security, payment_date,
-                fc_field='uncall_fc', lc_field='uncall_lc',
-                delta_fc=signed_fc, delta_lc=signed_lc,
-                cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
-                amount_fc=amount_fc, amount_lc=amount_lc,
-                fc_dp=fc_dp, lc_dp=lc_dp,
-                dry_run=dry_run, pos_src=pos_src
-            )
+        any_success = False
+        messages = []
 
-        if cf_type in ('PROVISION',):
-            return self._accumulate_field(
-                position, portfolio, security, payment_date,
-                fc_field='provision_fc', lc_field='provision_lc',
-                delta_fc=signed_fc, delta_lc=signed_lc,
-                cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
-                amount_fc=amount_fc, amount_lc=amount_lc,
-                fc_dp=fc_dp, lc_dp=lc_dp,
-                dry_run=dry_run, pos_src=pos_src
-            )
+        for position, pos_src in positions:
+            basis = position.get('position_basis') or position.get('pos_basis') or 'SETTLE_DATE'
 
-        if cf_type in ('PIPELINE',):
-            return self._accumulate_field(
-                position, portfolio, security, payment_date,
-                fc_field='pipeline_fc', lc_field='pipeline_lc',
-                delta_fc=signed_fc, delta_lc=signed_lc,
-                cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
-                amount_fc=amount_fc, amount_lc=amount_lc,
-                fc_dp=fc_dp, lc_dp=lc_dp,
-                dry_run=dry_run, pos_src=pos_src
-            )
+            if cf_type in ('UNCALL_COMMITMENT',):
+                ok, msg = self._accumulate_field(
+                    position, portfolio, security, payment_date,
+                    fc_field='uncall_fc', lc_field='uncall_lc',
+                    delta_fc=signed_fc, delta_lc=signed_lc,
+                    cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
+                    amount_fc=amount_fc, amount_lc=amount_lc,
+                    fc_dp=fc_dp, lc_dp=lc_dp,
+                    dry_run=dry_run, pos_src=pos_src
+                )
 
-        if cf_type in ('YTD_REALISE',):
-            return self._accumulate_field(
-                position, portfolio, security, payment_date,
-                fc_field='realized_pnl_fc', lc_field='realized_pnl_lc',
-                delta_fc=signed_fc, delta_lc=signed_lc,
-                cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
-                amount_fc=amount_fc, amount_lc=amount_lc,
-                fc_dp=fc_dp, lc_dp=lc_dp,
-                dry_run=dry_run, pos_src=pos_src
-            )
+            elif cf_type in ('PROVISION',):
+                ok, msg = self._accumulate_field(
+                    position, portfolio, security, payment_date,
+                    fc_field='provision_fc', lc_field='provision_lc',
+                    delta_fc=signed_fc, delta_lc=signed_lc,
+                    cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
+                    amount_fc=amount_fc, amount_lc=amount_lc,
+                    fc_dp=fc_dp, lc_dp=lc_dp,
+                    dry_run=dry_run, pos_src=pos_src
+                )
 
-        if cf_type in ('INCOME_DISTRIBUTION',):
-            return self._accumulate_field(
-                position, portfolio, security, payment_date,
-                fc_field='realized_pnl_fc', lc_field='realized_pnl_lc',
-                delta_fc=signed_fc, delta_lc=signed_lc,
-                cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
-                amount_fc=amount_fc, amount_lc=amount_lc,
-                fc_dp=fc_dp, lc_dp=lc_dp,
-                dry_run=dry_run, pos_src=pos_src
-            )
+            elif cf_type in ('PIPELINE',):
+                ok, msg = self._accumulate_field(
+                    position, portfolio, security, payment_date,
+                    fc_field='pipeline_fc', lc_field='pipeline_lc',
+                    delta_fc=signed_fc, delta_lc=signed_lc,
+                    cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
+                    amount_fc=amount_fc, amount_lc=amount_lc,
+                    fc_dp=fc_dp, lc_dp=lc_dp,
+                    dry_run=dry_run, pos_src=pos_src
+                )
 
-        # DIVIDEND: RECEIVE=increase, SEND=decrease (opposite of global convention)
-        if cf_type in ('DIVIDEND', 'CASH_DIVIDEND'):
-            div_sign = _sign_dividend(send_receive, cf_number)
-            div_fc = round(amount_fc * div_sign, fc_dp)
-            div_lc = round(amount_lc * div_sign, lc_dp)
-            return self._accumulate_field(
-                position, portfolio, security, payment_date,
-                fc_field='dividend_fc', lc_field='dividend_lc',
-                delta_fc=div_fc, delta_lc=div_lc,
-                cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
-                amount_fc=amount_fc, amount_lc=amount_lc,
-                fc_dp=fc_dp, lc_dp=lc_dp,
-                dry_run=dry_run, pos_src=pos_src
-            )
+            elif cf_type in ('YTD_REALISE',):
+                ok, msg = self._accumulate_field(
+                    position, portfolio, security, payment_date,
+                    fc_field='realized_pnl_fc', lc_field='realized_pnl_lc',
+                    delta_fc=signed_fc, delta_lc=signed_lc,
+                    cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
+                    amount_fc=amount_fc, amount_lc=amount_lc,
+                    fc_dp=fc_dp, lc_dp=lc_dp,
+                    dry_run=dry_run, pos_src=pos_src
+                )
 
-        # AVP REDUCTION
-        if cf_type in ('RETURN_OF_CAPITAL', 'CAPITAL_DISTRIBUTION'):
-            return self._reduce_avp(
-                position, portfolio, security, payment_date,
-                amount_fc=signed_fc, amount_lc=signed_lc,
-                cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
-                raw_amount_fc=amount_fc, raw_amount_lc=amount_lc,
-                fc_dp=fc_dp, lc_dp=lc_dp,
-                dry_run=dry_run, pos_src=pos_src
-            )
+            elif cf_type in ('INCOME_DISTRIBUTION',):
+                ok, msg = self._accumulate_field(
+                    position, portfolio, security, payment_date,
+                    fc_field='realized_pnl_fc', lc_field='realized_pnl_lc',
+                    delta_fc=signed_fc, delta_lc=signed_lc,
+                    cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
+                    amount_fc=amount_fc, amount_lc=amount_lc,
+                    fc_dp=fc_dp, lc_dp=lc_dp,
+                    dry_run=dry_run, pos_src=pos_src
+                )
 
-        return False, f'Unrecognised cash flow type: {cf_type}'
+            elif cf_type in ('DIVIDEND', 'CASH_DIVIDEND'):
+                # DIVIDEND: RECEIVE=increase, SEND=decrease (opposite of global convention)
+                div_sign = _sign_dividend(send_receive, cf_number)
+                div_fc = round(amount_fc * div_sign, fc_dp)
+                div_lc = round(amount_lc * div_sign, lc_dp)
+                ok, msg = self._accumulate_field(
+                    position, portfolio, security, payment_date,
+                    fc_field='dividend_fc', lc_field='dividend_lc',
+                    delta_fc=div_fc, delta_lc=div_lc,
+                    cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
+                    amount_fc=amount_fc, amount_lc=amount_lc,
+                    fc_dp=fc_dp, lc_dp=lc_dp,
+                    dry_run=dry_run, pos_src=pos_src
+                )
+
+            elif cf_type in ('RETURN_OF_CAPITAL', 'CAPITAL_DISTRIBUTION'):
+                ok, msg = self._reduce_avp(
+                    position, portfolio, security, payment_date,
+                    amount_fc=signed_fc, amount_lc=signed_lc,
+                    cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
+                    raw_amount_fc=amount_fc, raw_amount_lc=amount_lc,
+                    fc_dp=fc_dp, lc_dp=lc_dp,
+                    dry_run=dry_run, pos_src=pos_src
+                )
+
+            else:
+                ok, msg = False, f'Unrecognised cash flow type: {cf_type}'
+
+            messages.append(f'[{basis}] {msg}')
+            if ok:
+                any_success = True
+            else:
+                logger.warning(f'CF {cf_number} basis={basis}: {msg}')
+
+        combined = ' | '.join(messages)
+        if any_success:
+            return True, combined
+        return False, combined
 
     # =========================================================================
     # POSITION UPDATE HELPERS
@@ -598,7 +616,7 @@ class Command(BaseCommand):
                 {new_version_id},
                 {position_id},
                 '{_escape(position_date)}',
-                'SETTLE_DATE',
+                '{_escape(current.get("position_basis") or "SETTLE_DATE")}',
                 '{_escape(portfolio)}',
                 '{_escape(security)}',
                 {_f('quantity')},
@@ -612,8 +630,8 @@ class Command(BaseCommand):
                 {_ffc('pipeline_fc')},     {_flc('pipeline_lc')},
                 {_ffc('commit_fc')},       {_flc('commit_lc')},
                 {_ffc('provision_fc')},    {_flc('provision_lc')},
-                'EOD',
-                'EOD',
+                'INT',
+                {_s('trade_type', 'BUY')},
                 '{_escape(sec_ccy)}',
                 '{_escape(port_ccy)}',
                 {_f('fx_rate', 1)},
@@ -746,7 +764,7 @@ class Command(BaseCommand):
             nbv_lc = float(round(Decimal(str(cost_lc_val)) + Decimal(str(upnl_lc_val)) - Decimal(str(provision_lc_val)), lc_dp))
 
             upsert = f"""
-            UPSERT INTO {DATABASE}.{GOLDEN_TABLE} (
+            INSERT INTO {DATABASE}.{GOLDEN_TABLE} (
                 position_id, version_id,
                 portfolio, security_label,
                 position_basis, position_date,
@@ -780,7 +798,7 @@ class Command(BaseCommand):
                 {provision_fc_val}, {provision_lc_val},
                 {_gfc('uncall_fc')}, {_glc('uncall_lc')},
                 {_gfc('pipeline_fc')}, {_glc('pipeline_lc')},
-                'EOD',
+                'INT',
                 {f"'{_escape(isin)}'" if isin else 'NULL'},
                 {f"'{_escape(source_table)}'" if source_table else 'NULL'}
             )
@@ -868,85 +886,90 @@ class Command(BaseCommand):
             logger.debug(f'Could not get precision for {currency_code}: {e}')
         return DEFAULT_DP
 
-    def _get_current_position(
+    def _get_current_positions(
         self,
         portfolio: str,
         security: str
-    ) -> Tuple[Optional[Dict[str, Any]], str]:
+    ) -> List[Tuple[Dict[str, Any], str]]:
         """
-        Get latest open position for portfolio/security.
-        Returns (position_dict, src_system).
-        First tries cis_trade_position (CIS versioned ledger).
-        Falls back to cis_position (golden copy) for non-CIS sources.
+        Get latest open positions for portfolio/security for BOTH position bases.
+        Returns list of (position_dict, src_system) tuples — one per basis found.
+        First tries cis_trade_position (CIS versioned ledger) for each basis.
+        Falls back to cis_position (golden copy) per basis for non-CIS sources.
         """
-        try:
-            query = f"""
-            SELECT *
-            FROM {DATABASE}.{POSITION_TABLE}
-            WHERE portfolio_short_name = '{_escape(portfolio)}'
-              AND security_label = '{_escape(security)}'
-              AND position_basis = 'SETTLE_DATE'
-              AND status = 'OPEN'
-              AND is_active = true
-              AND (is_latest = true OR is_latest IS NULL)
-            ORDER BY position_date DESC, version_id DESC
-            LIMIT 1
-            """
-            results = impala_manager.execute_query(query, database=DATABASE)
-            if results:
-                return results[0], 'CIS'
-        except Exception as e:
-            logger.error(f'Error fetching CIS position for {portfolio}/{security}: {e}')
+        results_out = []
 
-        # Fallback: check golden copy for non-CIS sources (GMP, AMSICEQ, USER_UPLOAD)
-        try:
-            golden_query = f"""
-            SELECT
-                position_id,
-                position_id        AS version_id,
-                portfolio          AS portfolio_short_name,
-                security_label,
-                position_basis,
-                position_date,
-                src_system,
-                quantity,
-                average_cost_fc,
-                cost_fc            AS total_cost_fc,
-                average_cost_lc,
-                cost_lc            AS total_cost_lc,
-                market_value_fc,
-                market_value_lc,
-                unrealized_pnl_fc,
-                unrealized_pnl_lc,
-                realized_pnl_fc,
-                realized_pnl_lc,
-                dividend_fc,
-                dividend_lc,
-                provision_fc,
-                provision_lc,
-                uncall_fc,
-                uncall_lc,
-                pipeline_fc,
-                pipeline_lc,
-                isin,
-                source_table
-            FROM {DATABASE}.{GOLDEN_TABLE}
-            WHERE portfolio = '{_escape(portfolio)}'
-              AND security_label = '{_escape(security)}'
-              AND quantity > 0
-            ORDER BY position_date DESC
-            LIMIT 1
-            """
-            golden_results = impala_manager.execute_query(golden_query, database=DATABASE)
-            if golden_results:
-                row = golden_results[0]
-                src = row.get('src_system') or 'GMP'
-                logger.info(
-                    f'[CF] No CIS cis_trade_position for {portfolio}/{security} — '
-                    f'using golden copy row (src_system={src})'
-                )
-                return row, src
-        except Exception as e:
-            logger.error(f'Error fetching golden position for {portfolio}/{security}: {e}')
+        for basis in ('TRADE_DATE', 'SETTLE_DATE'):
+            try:
+                query = f"""
+                SELECT *
+                FROM {DATABASE}.{POSITION_TABLE}
+                WHERE portfolio_short_name = '{_escape(portfolio)}'
+                  AND security_label = '{_escape(security)}'
+                  AND position_basis = '{basis}'
+                  AND status = 'OPEN'
+                  AND is_active = true
+                  AND (is_latest = true OR is_latest IS NULL)
+                ORDER BY position_date DESC, version_id DESC
+                LIMIT 1
+                """
+                cis_rows = impala_manager.execute_query(query, database=DATABASE)
+                if cis_rows:
+                    results_out.append((cis_rows[0], 'CIS'))
+                    continue
+            except Exception as e:
+                logger.error(f'Error fetching CIS {basis} position for {portfolio}/{security}: {e}')
 
-        return None, ''
+            # Fallback: golden copy for non-CIS sources
+            try:
+                golden_query = f"""
+                SELECT
+                    position_id,
+                    position_id        AS version_id,
+                    portfolio          AS portfolio_short_name,
+                    security_label,
+                    position_basis,
+                    position_date,
+                    src_system,
+                    quantity,
+                    average_cost_fc,
+                    cost_fc            AS total_cost_fc,
+                    average_cost_lc,
+                    cost_lc            AS total_cost_lc,
+                    market_value_fc,
+                    market_value_lc,
+                    unrealized_pnl_fc,
+                    unrealized_pnl_lc,
+                    realized_pnl_fc,
+                    realized_pnl_lc,
+                    dividend_fc,
+                    dividend_lc,
+                    provision_fc,
+                    provision_lc,
+                    uncall_fc,
+                    uncall_lc,
+                    pipeline_fc,
+                    pipeline_lc,
+                    isin,
+                    source_table
+                FROM {DATABASE}.{GOLDEN_TABLE}
+                WHERE portfolio = '{_escape(portfolio)}'
+                  AND security_label = '{_escape(security)}'
+                  AND position_basis = '{basis}'
+                  AND quantity > 0
+                ORDER BY position_date DESC
+                LIMIT 1
+                """
+                golden_rows = impala_manager.execute_query(golden_query, database=DATABASE)
+                if golden_rows:
+                    row = golden_rows[0]
+                    src = row.get('src_system') or 'GMP'
+                    logger.info(
+                        f'[CF] No CIS {basis} position for {portfolio}/{security} — '
+                        f'using golden copy (src_system={src})'
+                    )
+                    results_out.append((row, src))
+            except Exception as e:
+                logger.error(f'Error fetching golden {basis} position for {portfolio}/{security}: {e}')
+
+        return results_out

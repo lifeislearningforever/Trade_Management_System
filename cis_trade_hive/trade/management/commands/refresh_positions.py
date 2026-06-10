@@ -10,7 +10,7 @@ For each position:
   3. unrealized_pnl = 0 if security_investment IN (ASSOC, SUBSI), else market_value_fc - cost_fc
   4. NON-REVALUED: LC columns recalculated from FC × latest FX rate (no MTM override)
   5. net_book_value = cost + unrealized_pnl - provision
-  6. INSERT new cis_position row per run (position_type='EOD') — never overwrite
+  6. INSERT new cis_position row per run (position_type='EOD', position_basis both TRADE_DATE+SETTLE_DATE) — never overwrite
 
 Usage:
     python manage.py refresh_positions
@@ -303,7 +303,7 @@ class Command(BaseCommand):
                 return float(round(val, lc_dp))
 
             query = f"""
-                UPSERT INTO {DATABASE}.cis_position (
+                INSERT INTO {DATABASE}.cis_position (
                     position_id, version_id,
                     portfolio, security_label,
                     position_basis, position_date,
