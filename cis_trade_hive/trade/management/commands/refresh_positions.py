@@ -222,40 +222,41 @@ class Command(BaseCommand):
 
         latest_price = self._get_latest_price(security)
 
-        if latest_price is None:
-            self.stdout.write(
-                self.style.WARNING(
-                    f"  Skipping {position_id} ({portfolio}/{security}): no price found"
-                )
-            )
-            return 'skipped'
-
         qty = Decimal(str(quantity))
         cost_fc_dec = Decimal(str(cost_fc or 0))
-        price_dec = Decimal(str(latest_price))
-
-        market_value_fc = qty * price_dec
-
-        # Equity method: associates/subsidiaries carried at cost — no MTM
         is_equity = self._is_equity_method_security(security)
-        unrealized_pnl_fc = Decimal('0') if is_equity else market_value_fc - cost_fc_dec
 
-        # LC: reapply FX if we have a stored LC cost and FC cost is non-zero, else mirror FC
-        cost_lc_dec = Decimal(str(position.get('cost_lc') or 0))
-        if cost_lc_dec != Decimal('0') and cost_fc_dec != Decimal('0'):
-            implied_fx = cost_lc_dec / cost_fc_dec
-            market_value_lc = market_value_fc * implied_fx
+        # Determine security ccy and portfolio ccy for FX lookup
+        sec_ccy = self._get_security_currency(security)
+        port_ccy = self._get_portfolio_currency(portfolio)
+        fx_rate = self._get_fx_rate(sec_ccy, port_ccy) if sec_ccy and port_ccy and sec_ccy != port_ccy else Decimal('1')
+
+        if latest_price is not None:
+            # Full revaluation: recalculate FC and LC from latest price
+            price_dec = Decimal(str(latest_price))
+            market_value_fc = qty * price_dec
+            unrealized_pnl_fc = Decimal('0') if is_equity else market_value_fc - cost_fc_dec
+            market_value_lc = market_value_fc * fx_rate
+            cost_lc_dec = Decimal(str(position.get('cost_lc') or 0))
             unrealized_pnl_lc = Decimal('0') if is_equity else market_value_lc - cost_lc_dec
+            self.stdout.write(
+                f"  {portfolio}/{security} [{position.get('src_system')}]: "
+                f"px={latest_price:.4f}  mkt_fc={market_value_fc:.2f}  upnl_fc={unrealized_pnl_fc:.2f}"
+                + ("  [EQUITY METHOD — pnl=0]" if is_equity else "")
+            )
         else:
-            market_value_lc = market_value_fc
-            unrealized_pnl_lc = unrealized_pnl_fc
-
-        self.stdout.write(
-            f"  {portfolio}/{security} [{position.get('src_system')}]: "
-            f"px={latest_price:.4f}  mkt_fc={market_value_fc:.2f}  "
-            f"upnl_fc={unrealized_pnl_fc:.2f}"
-            + ("  [EQUITY METHOD — pnl=0]" if self._is_equity_method_security(security) else "")
-        )
+            # No new price — keep existing FC values unchanged, recalculate LC using latest FX
+            price_dec = Decimal(str(position.get('market_value_fc') or 0)) / qty if qty else Decimal('0')
+            market_value_fc = Decimal(str(position.get('market_value_fc') or 0))
+            unrealized_pnl_fc = Decimal('0') if is_equity else Decimal(str(position.get('unrealized_pnl_fc') or 0))
+            market_value_lc = market_value_fc * fx_rate
+            cost_lc_dec = Decimal(str(position.get('cost_lc') or 0))
+            unrealized_pnl_lc = Decimal('0') if is_equity else market_value_lc - cost_lc_dec
+            self.stdout.write(
+                f"  {portfolio}/{security} [{position.get('src_system')}]: "
+                f"[NO PRICE — LC recalc only] fx={fx_rate:.6f}  "
+                f"mkt_fc={market_value_fc:.2f}  mkt_lc={market_value_lc:.2f}"
+            )
 
         if not dry_run:
             success = self._upsert_eod_position(
@@ -366,6 +367,65 @@ class Command(BaseCommand):
             logger.warning(f"cis_equity_price lookup failed for {security_label}: {str(e)}")
 
         return None
+
+    def _get_security_currency(self, security_label):
+        """Return currency_code for a security from cis_security."""
+        try:
+            safe = self._escape(security_label)
+            results = impala_manager.execute_query(
+                f"SELECT currency_code FROM {DATABASE}.cis_security "
+                f"WHERE security_name = '{safe}' LIMIT 1",
+                database=DATABASE
+            )
+            if results:
+                return results[0].get('currency_code') or None
+        except Exception as e:
+            logger.debug(f"Could not get currency for {security_label}: {str(e)}")
+        return None
+
+    def _get_portfolio_currency(self, portfolio):
+        """Return base currency for a portfolio from cis_portfolio."""
+        try:
+            safe = self._escape(portfolio)
+            results = impala_manager.execute_query(
+                f"SELECT currency FROM {DATABASE}.cis_portfolio "
+                f"WHERE name = '{safe}' LIMIT 1",
+                database=DATABASE
+            )
+            if results:
+                return results[0].get('currency') or None
+        except Exception as e:
+            logger.debug(f"Could not get currency for portfolio {portfolio}: {str(e)}")
+        return None
+
+    def _get_fx_rate(self, from_ccy, to_ccy):
+        """
+        Return latest spot FX rate from gmp_cis_sta_dly_fx_rates.
+        from_ccy = security currency, to_ccy = portfolio base currency.
+        Returns Decimal('1') if same currency or rate not found.
+        """
+        if not from_ccy or not to_ccy or from_ccy == to_ccy:
+            return Decimal('1')
+        try:
+            f = self._escape(from_ccy)
+            t = self._escape(to_ccy)
+            results = impala_manager.execute_query(
+                f"""
+                SELECT spot_rate_d
+                FROM {DATABASE}.gmp_cis_sta_dly_fx_rates
+                WHERE underlying_cur = '{f}'
+                  AND base_cur = '{t}'
+                  AND record_type = 'D'
+                ORDER BY `date` DESC
+                LIMIT 1
+                """,
+                database=DATABASE
+            )
+            if results and results[0].get('spot_rate_d') is not None:
+                return Decimal(str(results[0]['spot_rate_d']))
+        except Exception as e:
+            logger.debug(f"FX rate not found for {from_ccy}/{to_ccy}: {str(e)}")
+        return Decimal('1')
 
     def _is_equity_method_security(self, security_label):
         """Return True if security_investment is ASSOC or SUBSI (equity method — no MTM)."""
