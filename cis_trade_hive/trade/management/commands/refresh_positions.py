@@ -5,7 +5,7 @@ Refreshes market values for all open positions in cis_position (the golden copy)
 covering all source systems: CIS, GMP, AMS/AMSICEQ, USER_UPLOAD.
 
 For each position:
-  1. Fetch latest price from cis_equity_price (fallback: cis_security_kudu.price)
+  1. Fetch latest price from cis_equity_price (fallback: cis_security.price)
   2. Apply equity-method rule: if security_investment IN (ASSOC, SUBSI) → unrealized_pnl = 0
   3. UPSERT back into cis_position with updated market values and position_type = 'EOD'
 
@@ -350,7 +350,7 @@ class Command(BaseCommand):
     # -------------------------------------------------------------------------
 
     def _get_latest_price(self, security_label):
-        """Fetch latest closing price from cis_equity_price; fallback to cis_security_kudu."""
+        """Fetch latest closing price from cis_equity_price; fallback to cis_security."""
         try:
             safe = self._escape(security_label)
             results = impala_manager.execute_query(
@@ -368,8 +368,8 @@ class Command(BaseCommand):
 
             # Fallback: last known price on security master
             fallback = impala_manager.execute_query(
-                f"SELECT price FROM {DATABASE}.cis_security_kudu "
-                f"WHERE security_label = '{safe}' LIMIT 1",
+                f"SELECT price FROM {DATABASE}.cis_security "
+                f"WHERE security_name = '{safe}' LIMIT 1",
                 database=DATABASE
             )
             if fallback and fallback[0].get('price') is not None:
@@ -386,8 +386,8 @@ class Command(BaseCommand):
         try:
             safe = self._escape(security_label)
             results = impala_manager.execute_query(
-                f"SELECT security_investment FROM {DATABASE}.cis_security_kudu "
-                f"WHERE security_label = '{safe}' LIMIT 1",
+                f"SELECT security_investment FROM {DATABASE}.cis_security "
+                f"WHERE security_name = '{safe}' LIMIT 1",
                 database=DATABASE
             )
             if results:

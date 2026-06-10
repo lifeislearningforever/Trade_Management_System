@@ -396,6 +396,48 @@ class CACashFlowService:
                 ca_cash_flow_queue_repository.mark_failed(queue_id, error_msg)
             return False, error_msg, 0, Decimal('0')
 
+    def _resolve_security_labels(self, ca_security_names: List[str]) -> List[str]:
+        """
+        CA stores security_name = GMP description string (cis_security.security_description).
+        cis_position.security_label = cis_security.security_name (the short name/code).
+        This method resolves one to the other via a lookup on cis_security.
+
+        Falls back to the original value if no match found (handles CIS-native CAs
+        where security_name already equals the security_name/label directly).
+        """
+        if not ca_security_names:
+            return []
+
+        escaped = ", ".join(f"'{self._escape(s)}'" for s in ca_security_names)
+
+        # Match on security_description (GMP source) OR security_name (CIS source)
+        query = f"""
+        SELECT security_name, security_description
+        FROM {self.DATABASE}.cis_security
+        WHERE security_description IN ({escaped})
+           OR security_name IN ({escaped})
+        """
+        try:
+            rows = impala_manager.execute_query(query, database=self.DATABASE) or []
+        except Exception as e:
+            logger.error(f"[HOLDINGS] Security label lookup failed: {e}")
+            return ca_security_names  # fallback: pass through as-is
+
+        # Build mapping: input value → security_name (position label)
+        resolved = set()
+        lookup = {r.get('security_description'): r.get('security_name') for r in rows if r.get('security_description')}
+        lookup.update({r.get('security_name'): r.get('security_name') for r in rows if r.get('security_name')})
+
+        for s in ca_security_names:
+            mapped = lookup.get(s)
+            if mapped:
+                resolved.add(mapped)
+            else:
+                resolved.add(s)  # fallback: try as-is
+                logger.warning(f"[HOLDINGS] No cis_security match for '{s}' — using as-is")
+
+        return list(resolved)
+
     def get_holdings_for_ca(
         self,
         security_name: str,
@@ -406,7 +448,8 @@ class CACashFlowService:
         CA applies at security level - finds all portfolios holding the security.
 
         Args:
-            security_name: Security name (comma-separated if multiple)
+            security_name: Security name from CA (comma-separated if multiple).
+                           May be security_description (GMP source) or security_name (CIS source).
             as_of_date: Date to check holdings (YYYY-MM-DD), defaults to today
 
         Returns:
@@ -417,12 +460,17 @@ class CACashFlowService:
                 as_of_date = datetime.now().strftime('%Y-%m-%d')
 
             # Handle multiple securities (comma-separated)
-            securities = [s.strip() for s in security_name.split(',') if s.strip()]
-            if not securities:
+            ca_securities = [s.strip() for s in security_name.split(',') if s.strip()]
+            if not ca_securities:
                 return []
 
+            # CA security_name (GMP = description, CIS = name) → cis_position.security_label
+            # cis_position.security_label = cis_security.security_name
+            position_labels = self._resolve_security_labels(ca_securities)
+            logger.info(f"[HOLDINGS] CA security '{security_name}' resolved to position labels: {position_labels}")
+
             security_conditions = " OR ".join([
-                f"security_label = '{self._escape(s)}'" for s in securities
+                f"security_label = '{self._escape(s)}'" for s in position_labels
             ])
 
             # Query cis_position (golden copy — all sources: CIS, GMP, AMSICEQ, USER_UPLOAD).
@@ -442,7 +490,7 @@ class CACashFlowService:
                 p.dividend_lc,
                 p.isin,
                 pf.currency             AS portfolio_base_currency,
-                sec.currency            AS security_currency
+                sec.currency_code       AS security_currency
             FROM {self.DATABASE}.{self.POSITION_TABLE} p
             INNER JOIN (
                 SELECT portfolio, security_label, MAX(position_date) AS max_date
@@ -454,7 +502,7 @@ class CACashFlowService:
                     AND p.security_label = latest.security_label
                     AND p.position_date = latest.max_date
             LEFT JOIN {self.DATABASE}.cis_portfolio pf ON p.portfolio = pf.name
-            LEFT JOIN {self.DATABASE}.cis_security_kudu sec ON p.security_label = sec.security_label
+            LEFT JOIN {self.DATABASE}.cis_security sec ON p.security_label = sec.security_name
             WHERE p.quantity > 0
             ORDER BY p.portfolio, p.security_label
             """

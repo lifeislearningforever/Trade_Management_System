@@ -1317,8 +1317,8 @@ class PositionService:
         try:
             query = f"""
             SELECT security_investment
-            FROM {self.DATABASE}.cis_security_kudu
-            WHERE security_label = '{self._escape(security_label)}'
+            FROM {self.DATABASE}.cis_security
+            WHERE security_name = '{self._escape(security_label)}'
             LIMIT 1
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
