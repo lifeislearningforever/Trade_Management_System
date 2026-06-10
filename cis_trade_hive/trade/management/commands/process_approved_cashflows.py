@@ -254,10 +254,10 @@ class Command(BaseCommand):
     ) -> Tuple[bool, str]:
         """Route to the correct position update logic based on cash flow type."""
 
-        # Get current SETTLE_DATE position
-        position = self._get_current_position(portfolio, security)
+        # Try CIS versioned ledger first; fall back to golden copy for non-CIS sources
+        position, pos_src = self._get_current_position(portfolio, security)
         if not position:
-            return False, f'No open SETTLE_DATE position for {portfolio}/{security}'
+            return False, f'No open position for {portfolio}/{security} in cis_trade_position or cis_position'
 
         sign = _sign(send_receive, cf.get('cash_flow_number', ''))
         signed_fc = (amount_fc * sign).quantize(PRECISION, rounding=ROUND_HALF_UP)
@@ -269,7 +269,7 @@ class Command(BaseCommand):
                 position, portfolio, security, payment_date,
                 fc_field='uncall_fc', lc_field='uncall_lc',
                 delta_fc=signed_fc, delta_lc=signed_lc,
-                cf_type=cf_type, dry_run=dry_run
+                cf_type=cf_type, dry_run=dry_run, pos_src=pos_src
             )
 
         if cf_type in ('PROVISION',):
@@ -277,7 +277,7 @@ class Command(BaseCommand):
                 position, portfolio, security, payment_date,
                 fc_field='provision_fc', lc_field='provision_lc',
                 delta_fc=signed_fc, delta_lc=signed_lc,
-                cf_type=cf_type, dry_run=dry_run
+                cf_type=cf_type, dry_run=dry_run, pos_src=pos_src
             )
 
         if cf_type in ('PIPELINE',):
@@ -285,7 +285,7 @@ class Command(BaseCommand):
                 position, portfolio, security, payment_date,
                 fc_field='pipeline_fc', lc_field='pipeline_lc',
                 delta_fc=signed_fc, delta_lc=signed_lc,
-                cf_type=cf_type, dry_run=dry_run
+                cf_type=cf_type, dry_run=dry_run, pos_src=pos_src
             )
 
         if cf_type in ('YTD_REALISE',):
@@ -293,7 +293,7 @@ class Command(BaseCommand):
                 position, portfolio, security, payment_date,
                 fc_field='realized_pnl_fc', lc_field='realized_pnl_lc',
                 delta_fc=signed_fc, delta_lc=signed_lc,
-                cf_type=cf_type, dry_run=dry_run
+                cf_type=cf_type, dry_run=dry_run, pos_src=pos_src
             )
 
         # --- ACCUMULATE TYPES ---
@@ -302,7 +302,7 @@ class Command(BaseCommand):
                 position, portfolio, security, payment_date,
                 fc_field='dividend_fc', lc_field='dividend_lc',
                 delta_fc=signed_fc, delta_lc=signed_lc,
-                cf_type=cf_type, dry_run=dry_run
+                cf_type=cf_type, dry_run=dry_run, pos_src=pos_src
             )
 
         if cf_type in ('INCOME_DISTRIBUTION',):
@@ -310,7 +310,7 @@ class Command(BaseCommand):
                 position, portfolio, security, payment_date,
                 fc_field='realized_pnl_fc', lc_field='realized_pnl_lc',
                 delta_fc=signed_fc, delta_lc=signed_lc,
-                cf_type=cf_type, dry_run=dry_run
+                cf_type=cf_type, dry_run=dry_run, pos_src=pos_src
             )
 
         # --- AVP REDUCTION TYPES ---
@@ -318,7 +318,7 @@ class Command(BaseCommand):
             return self._reduce_avp(
                 position, portfolio, security, payment_date,
                 amount_fc=signed_fc, amount_lc=signed_lc,
-                cf_type=cf_type, dry_run=dry_run
+                cf_type=cf_type, dry_run=dry_run, pos_src=pos_src
             )
 
         return False, f'Unrecognised cash flow type: {cf_type}'
@@ -338,7 +338,8 @@ class Command(BaseCommand):
         delta_fc: Decimal,
         delta_lc: Decimal,
         cf_type: str,
-        dry_run: bool
+        dry_run: bool,
+        pos_src: str = 'CIS',
     ) -> Tuple[bool, str]:
         """Add delta to existing FC/LC field (running total)."""
         old_fc = Decimal(str(position.get(fc_field, 0) or 0))
@@ -353,7 +354,7 @@ class Command(BaseCommand):
 
         overrides = {fc_field: float(new_fc), lc_field: float(new_lc)}
         success = self._write_new_position_version(
-            position, portfolio, security, position_date, cf_type, overrides
+            position, portfolio, security, position_date, cf_type, overrides, pos_src=pos_src
         )
         if success:
             return True, f'{cf_type}: {fc_field} {old_fc} + {delta_fc} = {new_fc}'
@@ -368,7 +369,8 @@ class Command(BaseCommand):
         amount_fc: Decimal,
         amount_lc: Decimal,
         cf_type: str,
-        dry_run: bool
+        dry_run: bool,
+        pos_src: str = 'CIS',
     ) -> Tuple[bool, str]:
         """
         AVP reduction: avp_new = avp_old - (amount_fc / qty)
@@ -402,7 +404,7 @@ class Command(BaseCommand):
             'total_cost_lc': float(new_total_cost_lc),
         }
         success = self._write_new_position_version(
-            position, portfolio, security, position_date, cf_type, overrides
+            position, portfolio, security, position_date, cf_type, overrides, pos_src=pos_src
         )
         if success:
             return True, f'{cf_type}: avp_fc {old_avp_fc} → {new_avp_fc}'
@@ -419,13 +421,29 @@ class Command(BaseCommand):
         security: str,
         position_date: str,
         cf_type: str,
-        overrides: Dict[str, Any]
+        overrides: Dict[str, Any],
+        pos_src: str = 'CIS',
     ) -> bool:
         """
-        Mark current version is_latest=false, insert new version with overrides applied.
-        All other fields carried forward from current position.
+        For CIS positions: mark current version is_latest=false, insert new version,
+        then sync to golden copy.
+        For non-CIS positions (GMP, AMSICEQ, USER_UPLOAD): skip cis_trade_position
+        entirely and write directly to cis_position (golden copy).
         """
         try:
+            # Non-CIS: golden copy only — no cis_trade_position ledger for these sources
+            if pos_src != 'CIS':
+                self._sync_to_golden_position(
+                    portfolio=portfolio,
+                    security=security,
+                    position_date=position_date,
+                    cf_type=cf_type,
+                    current=current,
+                    overrides=overrides,
+                    src_system=pos_src,
+                )
+                return True
+
             old_version_id = current.get('version_id')
             position_id = current.get('position_id')
 
@@ -542,11 +560,12 @@ class Command(BaseCommand):
         cf_type: str,
         current: Dict[str, Any],
         overrides: Dict[str, Any],
+        src_system: str = 'CIS',
     ) -> None:
         """
         Mirror the cash-flow position update into cis_position (golden copy).
-        Finds the existing cis_position row for this portfolio+security (src_system=CIS)
-        and UPSERTs with the overridden field values carried forward.
+        Looks up existing row for this portfolio+security across any src_system.
+        If no row exists, creates a new one with a fresh position_id.
         Non-fatal: logs errors but does not fail the parent write.
         """
         try:
@@ -563,34 +582,40 @@ class Command(BaseCommand):
             FROM {DATABASE}.{GOLDEN_TABLE}
             WHERE portfolio = '{_escape(portfolio)}'
               AND security_label = '{_escape(security)}'
-              AND src_system = 'CIS'
             ORDER BY position_date DESC
             LIMIT 1
             """
             rows = impala_manager.execute_query(find_q, database=DATABASE)
-            if not rows:
-                logger.warning(
-                    f'[GOLDEN] No cis_position row for {portfolio}/{security} src_system=CIS '
-                    f'— skipping golden copy sync for cf_type={cf_type}'
-                )
-                return
+            today = datetime.now().strftime('%Y-%m-%d')
+            new_ver = int(datetime.now().timestamp() * 1000) + 3
 
-            row = rows[0]
-            position_id  = row['position_id']
-            new_ver      = int(datetime.now().timestamp() * 1000) + 3
-            today        = datetime.now().strftime('%Y-%m-%d')
-            isin         = row.get('isin')
-            source_table = row.get('source_table')
-            src_system   = row.get('src_system') or 'CIS'
-            pos_basis    = row.get('position_basis') or 'SETTLE_DATE'
+            if rows:
+                row = rows[0]
+                position_id  = row['position_id']
+                isin         = row.get('isin')
+                source_table = row.get('source_table')
+                effective_src = row.get('src_system') or src_system
+                pos_basis    = row.get('position_basis') or 'SETTLE_DATE'
+            else:
+                # No golden row yet — create a new one
+                import uuid as _uuid
+                position_id  = int(datetime.now().timestamp() * 1000) + (_uuid.uuid4().int % 9999)
+                row          = {}
+                isin         = current.get('isin')
+                source_table = POSITION_TABLE
+                effective_src = src_system
+                pos_basis    = current.get('position_basis') or 'SETTLE_DATE'
+                logger.info(
+                    f'[GOLDEN] No existing cis_position row for {portfolio}/{security} '
+                    f'— creating new position_id={position_id}'
+                )
 
             def _gv(field, default=0.0):
-                """Get value: prefer override, then cis_trade_position current, then golden row."""
+                """Prefer override → cis_trade_position current → golden row."""
                 if field in overrides:
                     return float(overrides[field])
-                tp_field = field  # same name in both tables (fc/lc columns match)
-                if current.get(tp_field) is not None:
-                    return float(current[tp_field])
+                if current.get(field) is not None:
+                    return float(current[field])
                 v = row.get(field)
                 return float(v) if v is not None else float(default)
 
@@ -617,7 +642,7 @@ class Command(BaseCommand):
                 {position_id}, {new_ver},
                 '{_escape(portfolio)}', '{_escape(security)}',
                 '{_escape(pos_basis)}', '{_escape(position_date)}',
-                '{_escape(src_system)}', '{today}',
+                '{_escape(effective_src)}', '{today}',
                 {_gv('quantity')},
                 {_gv('average_cost_fc')}, {_gv('cost_fc', _gv('total_cost_fc'))},
                 {_gv('average_cost_lc')}, {_gv('cost_lc', _gv('total_cost_lc'))},
@@ -637,12 +662,12 @@ class Command(BaseCommand):
             ok = impala_manager.execute_write(upsert, database=DATABASE)
             if ok:
                 logger.info(
-                    f'[GOLDEN] cis_position updated: position_id={position_id} '
-                    f'{portfolio}/{security} cf_type={cf_type}'
+                    f'[GOLDEN] cis_position upserted: position_id={position_id} '
+                    f'{portfolio}/{security} src={effective_src} cf_type={cf_type}'
                 )
             else:
                 logger.error(
-                    f'[GOLDEN] Failed to update cis_position for {portfolio}/{security} '
+                    f'[GOLDEN] Failed to upsert cis_position for {portfolio}/{security} '
                     f'cf_type={cf_type}'
                 )
         except Exception as e:
@@ -673,8 +698,13 @@ class Command(BaseCommand):
         self,
         portfolio: str,
         security: str
-    ) -> Optional[Dict[str, Any]]:
-        """Get latest open SETTLE_DATE position for portfolio/security."""
+    ) -> Tuple[Optional[Dict[str, Any]], str]:
+        """
+        Get latest open position for portfolio/security.
+        Returns (position_dict, src_system).
+        First tries cis_trade_position (CIS versioned ledger).
+        Falls back to cis_position (golden copy) for non-CIS sources.
+        """
         try:
             query = f"""
             SELECT *
@@ -689,7 +719,60 @@ class Command(BaseCommand):
             LIMIT 1
             """
             results = impala_manager.execute_query(query, database=DATABASE)
-            return results[0] if results else None
+            if results:
+                return results[0], 'CIS'
         except Exception as e:
-            logger.error(f'Error fetching position for {portfolio}/{security}: {e}')
-            return None
+            logger.error(f'Error fetching CIS position for {portfolio}/{security}: {e}')
+
+        # Fallback: check golden copy for non-CIS sources (GMP, AMSICEQ, USER_UPLOAD)
+        try:
+            golden_query = f"""
+            SELECT
+                position_id,
+                position_id        AS version_id,
+                portfolio          AS portfolio_short_name,
+                security_label,
+                position_basis,
+                position_date,
+                src_system,
+                quantity,
+                average_cost_fc,
+                cost_fc            AS total_cost_fc,
+                average_cost_lc,
+                cost_lc            AS total_cost_lc,
+                market_value_fc,
+                market_value_lc,
+                unrealized_pnl_fc,
+                unrealized_pnl_lc,
+                realized_pnl_fc,
+                realized_pnl_lc,
+                dividend_fc,
+                dividend_lc,
+                provision_fc,
+                provision_lc,
+                uncall_fc,
+                uncall_lc,
+                pipeline_fc,
+                pipeline_lc,
+                isin,
+                source_table
+            FROM {DATABASE}.{GOLDEN_TABLE}
+            WHERE portfolio = '{_escape(portfolio)}'
+              AND security_label = '{_escape(security)}'
+              AND quantity > 0
+            ORDER BY position_date DESC
+            LIMIT 1
+            """
+            golden_results = impala_manager.execute_query(golden_query, database=DATABASE)
+            if golden_results:
+                row = golden_results[0]
+                src = row.get('src_system') or 'GMP'
+                logger.info(
+                    f'[CF] No CIS cis_trade_position for {portfolio}/{security} — '
+                    f'using golden copy row (src_system={src})'
+                )
+                return row, src
+        except Exception as e:
+            logger.error(f'Error fetching golden position for {portfolio}/{security}: {e}')
+
+        return None, ''
