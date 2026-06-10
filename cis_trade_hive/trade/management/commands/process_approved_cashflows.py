@@ -504,6 +504,10 @@ class Command(BaseCommand):
             old_version_id = current.get('version_id')
             position_id = current.get('position_id')
 
+            # Look up currencies from reference tables (not position row — may be empty)
+            sec_ccy  = self._get_security_currency(security)
+            port_ccy = self._get_portfolio_currency(portfolio)
+
             # Mark old as not latest
             ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             processing_date = datetime.now().strftime('%Y%m%d')  # YYYYMMDD to match INT records
@@ -582,8 +586,8 @@ class Command(BaseCommand):
                 {_f('provision_fc')},     {_f('provision_lc')},
                 'EOD',
                 'EOD',
-                {_s('security_currency', '')},
-                {_s('portfolio_currency', '')},
+                '{_escape(sec_ccy)}',
+                '{_escape(port_ccy)}',
                 {_f('fx_rate', 1)},
                 'OPEN', true, true,
                 {current.get('last_ca_id') or 'NULL'},
@@ -661,6 +665,10 @@ class Command(BaseCommand):
             processing_date = datetime.now().strftime('%Y%m%d')  # YYYYMMDD to match INT records
             new_ver = int(datetime.now().timestamp() * 1000) + 3
 
+            # Always look up currencies from reference tables — position rows may be empty
+            sec_ccy  = self._get_security_currency(security)
+            port_ccy = self._get_portfolio_currency(portfolio)
+
             if rows:
                 row = rows[0]
                 position_id   = row['position_id']
@@ -668,9 +676,6 @@ class Command(BaseCommand):
                 source_table  = row.get('source_table')
                 effective_src = row.get('src_system') or src_system
                 pos_basis     = row.get('position_basis') or 'SETTLE_DATE'
-                # Use currencies from golden row; fall back to current position or CF record
-                sec_ccy  = row.get('security_currency') or current.get('security_currency', '')
-                port_ccy = row.get('portfolio_currency') or current.get('portfolio_currency', '')
             else:
                 import uuid as _uuid
                 position_id   = int(datetime.now().timestamp() * 1000) + (_uuid.uuid4().int % 9999)
@@ -679,8 +684,6 @@ class Command(BaseCommand):
                 source_table  = POSITION_TABLE
                 effective_src = src_system
                 pos_basis     = current.get('position_basis') or 'SETTLE_DATE'
-                sec_ccy  = current.get('security_currency', '')
-                port_ccy = current.get('portfolio_currency', '')
                 logger.info(
                     f'[GOLDEN] No existing cis_position row for {portfolio}/{security} '
                     f'— creating new position_id={position_id}'
@@ -782,6 +785,34 @@ class Command(BaseCommand):
     # =========================================================================
     # POSITION FETCH
     # =========================================================================
+
+    def _get_security_currency(self, security: str) -> str:
+        """Return currency_code from cis_security for the given security_name."""
+        try:
+            results = impala_manager.execute_query(
+                f"SELECT currency_code FROM {DATABASE}.cis_security "
+                f"WHERE security_name = '{_escape(security)}' LIMIT 1",
+                database=DATABASE
+            )
+            if results:
+                return results[0].get('currency_code') or ''
+        except Exception as e:
+            logger.debug(f'Could not get security currency for {security}: {e}')
+        return ''
+
+    def _get_portfolio_currency(self, portfolio: str) -> str:
+        """Return currency from cis_portfolio for the given portfolio name."""
+        try:
+            results = impala_manager.execute_query(
+                f"SELECT currency FROM {DATABASE}.cis_portfolio "
+                f"WHERE name = '{_escape(portfolio)}' LIMIT 1",
+                database=DATABASE
+            )
+            if results:
+                return results[0].get('currency') or ''
+        except Exception as e:
+            logger.debug(f'Could not get portfolio currency for {portfolio}: {e}')
+        return ''
 
     def _get_current_position(
         self,
