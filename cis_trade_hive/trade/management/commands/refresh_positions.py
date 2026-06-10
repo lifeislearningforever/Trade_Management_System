@@ -220,43 +220,57 @@ class Command(BaseCommand):
             )
             return 'skipped'
 
-        latest_price = self._get_latest_price(security)
-
         qty = Decimal(str(quantity))
         cost_fc_dec = Decimal(str(cost_fc or 0))
+        cost_lc_dec = Decimal(str(position.get('cost_lc') or 0))
         is_equity = self._is_equity_method_security(security)
 
-        # Determine security ccy and portfolio ccy for FX lookup
+        # Portfolio revaluation status and currencies
+        port_info = self._get_portfolio_info(portfolio)
+        port_ccy = port_info.get('currency')
+        reval_status = (port_info.get('revaluation_status') or '').strip().upper()
         sec_ccy = self._get_security_currency(security)
-        port_ccy = self._get_portfolio_currency(portfolio)
         fx_rate = self._get_fx_rate(sec_ccy, port_ccy) if sec_ccy and port_ccy and sec_ccy != port_ccy else Decimal('1')
 
-        if latest_price is not None:
-            # Full revaluation: recalculate FC and LC from latest price
-            price_dec = Decimal(str(latest_price))
-            market_value_fc = qty * price_dec
-            unrealized_pnl_fc = Decimal('0') if is_equity else market_value_fc - cost_fc_dec
-            market_value_lc = market_value_fc * fx_rate
-            cost_lc_dec = Decimal(str(position.get('cost_lc') or 0))
-            unrealized_pnl_lc = Decimal('0') if is_equity else market_value_lc - cost_lc_dec
+        # NON-REVALUED: carry at cost, no MTM, only recalculate LC via FX
+        if reval_status == 'NON-REVALUED':
+            market_value_fc = cost_fc_dec
+            unrealized_pnl_fc = Decimal('0')
+            market_value_lc = cost_fc_dec * fx_rate
+            unrealized_pnl_lc = Decimal('0')
+            price_dec = Decimal(str(position.get('market_value_fc') or 0)) / qty if qty else Decimal('0')
             self.stdout.write(
                 f"  {portfolio}/{security} [{position.get('src_system')}]: "
-                f"px={latest_price:.4f}  mkt_fc={market_value_fc:.2f}  upnl_fc={unrealized_pnl_fc:.2f}"
-                + ("  [EQUITY METHOD — pnl=0]" if is_equity else "")
+                f"[NON-REVALUED] mkt_fc=cost={market_value_fc:.2f}  mkt_lc={market_value_lc:.2f}  fx={fx_rate:.6f}"
             )
         else:
-            # No new price — keep existing FC values unchanged, recalculate LC using latest FX
-            price_dec = Decimal(str(position.get('market_value_fc') or 0)) / qty if qty else Decimal('0')
-            market_value_fc = Decimal(str(position.get('market_value_fc') or 0))
-            unrealized_pnl_fc = Decimal('0') if is_equity else Decimal(str(position.get('unrealized_pnl_fc') or 0))
-            market_value_lc = market_value_fc * fx_rate
-            cost_lc_dec = Decimal(str(position.get('cost_lc') or 0))
-            unrealized_pnl_lc = Decimal('0') if is_equity else market_value_lc - cost_lc_dec
-            self.stdout.write(
-                f"  {portfolio}/{security} [{position.get('src_system')}]: "
-                f"[NO PRICE — LC recalc only] fx={fx_rate:.6f}  "
-                f"mkt_fc={market_value_fc:.2f}  mkt_lc={market_value_lc:.2f}"
-            )
+            # REVALUED (or blank — default to revaluation)
+            latest_price = self._get_latest_price(security)
+
+            if latest_price is not None:
+                # Full revaluation: recalculate FC and LC from latest price
+                price_dec = Decimal(str(latest_price))
+                market_value_fc = qty * price_dec
+                unrealized_pnl_fc = Decimal('0') if is_equity else market_value_fc - cost_fc_dec
+                market_value_lc = market_value_fc * fx_rate
+                unrealized_pnl_lc = Decimal('0') if is_equity else market_value_lc - cost_lc_dec
+                self.stdout.write(
+                    f"  {portfolio}/{security} [{position.get('src_system')}]: "
+                    f"px={latest_price:.4f}  mkt_fc={market_value_fc:.2f}  upnl_fc={unrealized_pnl_fc:.2f}"
+                    + ("  [EQUITY METHOD — pnl=0]" if is_equity else "")
+                )
+            else:
+                # No price — keep existing FC unchanged, recalculate LC via latest FX
+                price_dec = Decimal(str(position.get('market_value_fc') or 0)) / qty if qty else Decimal('0')
+                market_value_fc = Decimal(str(position.get('market_value_fc') or 0))
+                unrealized_pnl_fc = Decimal('0') if is_equity else Decimal(str(position.get('unrealized_pnl_fc') or 0))
+                market_value_lc = market_value_fc * fx_rate
+                unrealized_pnl_lc = Decimal('0') if is_equity else market_value_lc - cost_lc_dec
+                self.stdout.write(
+                    f"  {portfolio}/{security} [{position.get('src_system')}]: "
+                    f"[NO PRICE — LC recalc only] fx={fx_rate:.6f}  "
+                    f"mkt_fc={market_value_fc:.2f}  mkt_lc={market_value_lc:.2f}"
+                )
 
         if not dry_run:
             success = self._upsert_eod_position(
@@ -383,20 +397,20 @@ class Command(BaseCommand):
             logger.debug(f"Could not get currency for {security_label}: {str(e)}")
         return None
 
-    def _get_portfolio_currency(self, portfolio):
-        """Return base currency for a portfolio from cis_portfolio."""
+    def _get_portfolio_info(self, portfolio):
+        """Return currency and revaluation_status for a portfolio from cis_portfolio."""
         try:
             safe = self._escape(portfolio)
             results = impala_manager.execute_query(
-                f"SELECT currency FROM {DATABASE}.cis_portfolio "
+                f"SELECT currency, revaluation_status FROM {DATABASE}.cis_portfolio "
                 f"WHERE name = '{safe}' LIMIT 1",
                 database=DATABASE
             )
             if results:
-                return results[0].get('currency') or None
+                return results[0]
         except Exception as e:
-            logger.debug(f"Could not get currency for portfolio {portfolio}: {str(e)}")
-        return None
+            logger.debug(f"Could not get portfolio info for {portfolio}: {str(e)}")
+        return {}
 
     def _get_fx_rate(self, from_ccy, to_ccy):
         """
