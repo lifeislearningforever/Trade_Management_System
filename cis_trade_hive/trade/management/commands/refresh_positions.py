@@ -141,34 +141,50 @@ class Command(BaseCommand):
     # -------------------------------------------------------------------------
 
     def _get_open_positions(self, portfolio_filter, sources):
-        """Fetch all positions from cis_position (golden copy) for the given sources."""
+        """
+        Fetch the single latest row per portfolio/security/position_basis from cis_position.
+        Latest = highest position_id (most recently inserted row of any type).
+        This ensures the EOD revaluation carries forward all accumulated CF/CA amounts
+        and only creates one EOD record per combination per run date.
+        """
         try:
-            conditions = []
             src_list = "', '".join(self._escape(s) for s in sources)
-            conditions.append(f"src_system IN ('{src_list}')")
-            if portfolio_filter:
-                conditions.append(f"portfolio = '{self._escape(portfolio_filter)}'")
-            where = "WHERE " + " AND ".join(conditions)
+            portfolio_clause = (
+                f"AND portfolio = '{self._escape(portfolio_filter)}'"
+                if portfolio_filter else ""
+            )
 
             query = f"""
                 SELECT
-                    position_id, version_id,
-                    portfolio, security_label,
-                    position_basis, position_date,
-                    src_system, processing_date,
-                    quantity,
-                    average_cost_fc, cost_fc,
-                    average_cost_lc, cost_lc,
-                    market_value_fc, market_value_lc,
-                    unrealized_pnl_fc, unrealized_pnl_lc,
-                    realized_pnl_fc, realized_pnl_lc,
-                    provision_fc, provision_lc,
-                    dividend_fc, dividend_lc,
-                    uncall_fc, uncall_lc,
-                    pipeline_fc, pipeline_lc,
-                    position_type, isin, source_table
-                FROM {DATABASE}.cis_position
-                {where}
+                    p.position_id, p.version_id,
+                    p.portfolio, p.security_label,
+                    p.position_basis, p.position_date,
+                    p.src_system, p.processing_date,
+                    p.quantity,
+                    p.average_cost_fc, p.cost_fc,
+                    p.average_cost_lc, p.cost_lc,
+                    p.market_value_fc, p.market_value_lc,
+                    p.unrealized_pnl_fc, p.unrealized_pnl_lc,
+                    p.realized_pnl_fc, p.realized_pnl_lc,
+                    p.provision_fc, p.provision_lc,
+                    p.dividend_fc, p.dividend_lc,
+                    p.uncall_fc, p.uncall_lc,
+                    p.pipeline_fc, p.pipeline_lc,
+                    p.position_type, p.isin, p.source_table
+                FROM {DATABASE}.cis_position p
+                INNER JOIN (
+                    SELECT portfolio, security_label, position_basis,
+                           MAX(position_id) AS max_position_id
+                    FROM {DATABASE}.cis_position
+                    WHERE src_system IN ('{src_list}')
+                      AND quantity > 0
+                      {portfolio_clause}
+                    GROUP BY portfolio, security_label, position_basis
+                ) latest
+                  ON p.portfolio       = latest.portfolio
+                 AND p.security_label  = latest.security_label
+                 AND p.position_basis  = latest.position_basis
+                 AND p.position_id     = latest.max_position_id
             """
             return impala_manager.execute_query(query, database=DATABASE) or []
         except Exception as e:
