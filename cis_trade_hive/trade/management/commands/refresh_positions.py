@@ -366,7 +366,6 @@ class Command(BaseCommand):
             logger.warning(f"cis_equity_price lookup failed for {security_label}: {str(e)}")
 
         return None
-            return None
 
     def _is_equity_method_security(self, security_label):
         """Return True if security_investment is ASSOC or SUBSI (equity method — no MTM)."""
