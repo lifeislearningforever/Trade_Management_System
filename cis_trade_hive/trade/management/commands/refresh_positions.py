@@ -232,16 +232,20 @@ class Command(BaseCommand):
         sec_ccy = self._get_security_currency(security)
         fx_rate = self._get_fx_rate(sec_ccy, port_ccy) if sec_ccy and port_ccy and sec_ccy != port_ccy else Decimal('1')
 
+        # Currency decimal places for rounding: FC = security ccy, LC = portfolio ccy
+        fc_dp = self._get_currency_dp(sec_ccy)
+        lc_dp = self._get_currency_dp(port_ccy)
+
         # NON-REVALUED: carry at cost, no MTM, only recalculate LC via FX
         if reval_status == 'NON-REVALUED':
-            market_value_fc = cost_fc_dec
+            market_value_fc = round(cost_fc_dec, fc_dp)
             unrealized_pnl_fc = Decimal('0')
-            market_value_lc = cost_fc_dec * fx_rate
+            market_value_lc = round(cost_fc_dec * fx_rate, lc_dp)
             unrealized_pnl_lc = Decimal('0')
             price_dec = Decimal(str(position.get('market_value_fc') or 0)) / qty if qty else Decimal('0')
             self.stdout.write(
                 f"  {portfolio}/{security} [{position.get('src_system')}]: "
-                f"[NON-REVALUED] mkt_fc=cost={market_value_fc:.2f}  mkt_lc={market_value_lc:.2f}  fx={fx_rate:.6f}"
+                f"[NON-REVALUED] mkt_fc=cost={market_value_fc}  mkt_lc={market_value_lc}  fx={fx_rate:.6f}"
             )
         else:
             # REVALUED (or blank — default to revaluation)
@@ -250,32 +254,34 @@ class Command(BaseCommand):
             if latest_price is not None:
                 # Full revaluation: recalculate FC and LC from latest price
                 price_dec = Decimal(str(latest_price))
-                market_value_fc = qty * price_dec
-                unrealized_pnl_fc = Decimal('0') if is_equity else market_value_fc - cost_fc_dec
-                market_value_lc = market_value_fc * fx_rate
-                unrealized_pnl_lc = Decimal('0') if is_equity else market_value_lc - cost_lc_dec
+                market_value_fc = round(qty * price_dec, fc_dp)
+                unrealized_pnl_fc = Decimal('0') if is_equity else round(market_value_fc - cost_fc_dec, fc_dp)
+                market_value_lc = round(market_value_fc * fx_rate, lc_dp)
+                unrealized_pnl_lc = Decimal('0') if is_equity else round(market_value_lc - cost_lc_dec, lc_dp)
                 self.stdout.write(
                     f"  {portfolio}/{security} [{position.get('src_system')}]: "
-                    f"px={latest_price:.4f}  mkt_fc={market_value_fc:.2f}  upnl_fc={unrealized_pnl_fc:.2f}"
+                    f"px={latest_price}  mkt_fc={market_value_fc}  upnl_fc={unrealized_pnl_fc}"
                     + ("  [EQUITY METHOD — pnl=0]" if is_equity else "")
                 )
             else:
                 # No price — keep existing FC unchanged, recalculate LC via latest FX
                 price_dec = Decimal(str(position.get('market_value_fc') or 0)) / qty if qty else Decimal('0')
-                market_value_fc = Decimal(str(position.get('market_value_fc') or 0))
-                unrealized_pnl_fc = Decimal('0') if is_equity else Decimal(str(position.get('unrealized_pnl_fc') or 0))
-                market_value_lc = market_value_fc * fx_rate
-                unrealized_pnl_lc = Decimal('0') if is_equity else market_value_lc - cost_lc_dec
+                market_value_fc = round(Decimal(str(position.get('market_value_fc') or 0)), fc_dp)
+                unrealized_pnl_fc = Decimal('0') if is_equity else round(
+                    Decimal(str(position.get('unrealized_pnl_fc') or 0)), fc_dp
+                )
+                market_value_lc = round(market_value_fc * fx_rate, lc_dp)
+                unrealized_pnl_lc = Decimal('0') if is_equity else round(market_value_lc - cost_lc_dec, lc_dp)
                 self.stdout.write(
                     f"  {portfolio}/{security} [{position.get('src_system')}]: "
                     f"[NO PRICE — LC recalc only] fx={fx_rate:.6f}  "
-                    f"mkt_fc={market_value_fc:.2f}  mkt_lc={market_value_lc:.2f}"
+                    f"mkt_fc={market_value_fc}  mkt_lc={market_value_lc}"
                 )
 
         if not dry_run:
             success = self._insert_eod_position(
                 position, price_dec, market_value_fc, market_value_lc,
-                unrealized_pnl_fc, unrealized_pnl_lc
+                unrealized_pnl_fc, unrealized_pnl_lc, fc_dp, lc_dp
             )
             if not success:
                 self.stderr.write(self.style.ERROR(f"  Failed to upsert position {position_id}"))
@@ -288,12 +294,14 @@ class Command(BaseCommand):
     # -------------------------------------------------------------------------
 
     def _insert_eod_position(self, position, price, market_value_fc, market_value_lc,
-                              unrealized_pnl_fc, unrealized_pnl_lc):
+                              unrealized_pnl_fc, unrealized_pnl_lc,
+                              fc_dp: int = 2, lc_dp: int = 2):
         """
         INSERT a new cis_position row for each EOD run.
         A fresh position_id is generated each time so EOD records are
         distinct from INT/CA/CF rows — full audit trail, no overwrite.
-        All cost/dividend/provision columns carried forward from the source row.
+        All cost/dividend/provision columns carried forward from the source row,
+        rounded to the currency's decimal precision (fc_dp for FC, lc_dp for LC).
         """
         try:
             today = datetime.now().strftime('%Y-%m-%d')
@@ -301,8 +309,15 @@ class Command(BaseCommand):
             new_position_id = int(datetime.now().timestamp() * 1000) + (uuid.uuid4().int % 999999)
             version_id = new_position_id
 
-            def _f(v, default=0):
-                return float(v) if v is not None else float(default)
+            def _fc(v, default=0):
+                """Round FC value to security currency decimal places."""
+                val = Decimal(str(v)) if v is not None else Decimal(str(default))
+                return float(round(val, fc_dp))
+
+            def _lc(v, default=0):
+                """Round LC value to portfolio currency decimal places."""
+                val = Decimal(str(v)) if v is not None else Decimal(str(default))
+                return float(round(val, lc_dp))
 
             query = f"""
                 UPSERT INTO {DATABASE}.cis_position (
@@ -331,17 +346,17 @@ class Command(BaseCommand):
                     '{today}',
                     '{self._escape(position.get('src_system', 'CIS'))}',
                     '{today}',
-                    {_f(position.get('quantity'))},
-                    {_f(position.get('average_cost_fc'))}, {_f(position.get('cost_fc'))},
-                    {_f(position.get('average_cost_lc'))}, {_f(position.get('cost_lc'))},
-                    {float(market_value_fc)}, {float(market_value_lc)},
-                    {float(market_value_fc)}, {float(market_value_lc)},
-                    {float(unrealized_pnl_fc)}, {float(unrealized_pnl_lc)},
-                    {_f(position.get('realized_pnl_fc'))}, {_f(position.get('realized_pnl_lc'))},
-                    {_f(position.get('provision_fc'))}, {_f(position.get('provision_lc'))},
-                    {_f(position.get('dividend_fc'))}, {_f(position.get('dividend_lc'))},
-                    {_f(position.get('uncall_fc'))}, {_f(position.get('uncall_lc'))},
-                    {_f(position.get('pipeline_fc'))}, {_f(position.get('pipeline_lc'))},
+                    {float(position.get('quantity') or 0)},
+                    {_fc(position.get('average_cost_fc'))}, {_fc(position.get('cost_fc'))},
+                    {_lc(position.get('average_cost_lc'))}, {_lc(position.get('cost_lc'))},
+                    {float(round(market_value_fc, fc_dp))}, {float(round(market_value_lc, lc_dp))},
+                    {float(round(market_value_fc, fc_dp))}, {float(round(market_value_lc, lc_dp))},
+                    {float(round(unrealized_pnl_fc, fc_dp))}, {float(round(unrealized_pnl_lc, lc_dp))},
+                    {_fc(position.get('realized_pnl_fc'))}, {_lc(position.get('realized_pnl_lc'))},
+                    {_fc(position.get('provision_fc'))}, {_lc(position.get('provision_lc'))},
+                    {_fc(position.get('dividend_fc'))}, {_lc(position.get('dividend_lc'))},
+                    {_fc(position.get('uncall_fc'))}, {_lc(position.get('uncall_lc'))},
+                    {_fc(position.get('pipeline_fc'))}, {_lc(position.get('pipeline_lc'))},
                     'EOD',
                     {f"'{self._escape(position['isin'])}'" if position.get('isin') else 'NULL'},
                     {f"'{self._escape(position['source_table'])}'" if position.get('source_table') else 'NULL'}
@@ -440,6 +455,29 @@ class Command(BaseCommand):
         except Exception as e:
             logger.debug(f"FX rate not found for {from_ccy}/{to_ccy}: {str(e)}")
         return Decimal('1')
+
+    def _get_currency_dp(self, currency_code) -> int:
+        """
+        Return decimal places for a currency using the precision string from
+        gmp_cis_sta_dly_currency, e.g. '0000000000.01' → 2, '0000000000.001' → 3.
+        Falls back to 2 (standard monetary) if not found or unparseable.
+        """
+        if not currency_code:
+            return 2
+        try:
+            safe = self._escape(currency_code)
+            results = impala_manager.execute_query(
+                f"SELECT precision FROM {DATABASE}.gmp_cis_sta_dly_currency "
+                f"WHERE iso_code = '{safe}' LIMIT 1",
+                database=DATABASE
+            )
+            if results:
+                prec_str = str(results[0].get('precision') or '')
+                if '.' in prec_str:
+                    return len(prec_str.split('.')[1].rstrip('0') or '0')
+        except Exception as e:
+            logger.debug(f"Could not get precision for {currency_code}: {str(e)}")
+        return 2
 
     def _is_equity_method_security(self, security_label):
         """Return True if security_investment is ASSOC or SUBSI (equity method — no MTM)."""

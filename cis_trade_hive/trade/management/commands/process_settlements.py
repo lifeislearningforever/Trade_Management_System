@@ -60,6 +60,15 @@ class Command(BaseCommand):
             default=100,
             help='Number of records to process per batch. Default: 100'
         )
+        parser.add_argument(
+            '--backfill-queue',
+            action='store_true',
+            help=(
+                'Scan cis_trade for SETTLED/VALIDATED BUY/SELL trades with future '
+                'settle_date that have no entry in cis_settlement_queue, and insert them. '
+                'Use this after bulk migration to repair missing queue entries.'
+            )
+        )
 
     def handle(self, *args, **options):
         """Main entry point for the command."""
@@ -68,6 +77,7 @@ class Command(BaseCommand):
         verbose = options['verbose']
         run_by = options['user']
         batch_size = options['batch_size']
+        backfill_queue = options['backfill_queue']
 
         self.stdout.write(self.style.HTTP_INFO('=' * 70))
         self.stdout.write(self.style.HTTP_INFO('  CIS Trade Hive - EOD Settlement Processing'))
@@ -79,6 +89,20 @@ class Command(BaseCommand):
         self.stdout.write('')
 
         try:
+            # Optional: backfill missing queue entries from migrated cis_trade records
+            if backfill_queue:
+                self.stdout.write(self.style.HTTP_INFO('\n--- Backfilling Settlement Queue ---'))
+                queued, skipped, failed = self._backfill_settlement_queue(
+                    run_by=run_by, dry_run=dry_run
+                )
+                self.stdout.write(
+                    self.style.SUCCESS(f'  Queued  : {queued}') if queued else f'  Queued  : {queued}'
+                )
+                self.stdout.write(f'  Skipped : {skipped} (already in queue or position exists)')
+                if failed:
+                    self.stdout.write(self.style.ERROR(f'  Failed  : {failed}'))
+                self.stdout.write('')
+
             # Step 1: Get pending settlements
             self.stdout.write(self.style.HTTP_INFO('\n--- Checking Pending Settlements ---'))
             pending = self._get_pending_settlements(settle_date)
@@ -118,6 +142,106 @@ class Command(BaseCommand):
         except Exception as e:
             logger.exception('EOD settlement processing failed')
             raise CommandError(f'EOD settlement processing failed: {str(e)}')
+
+    def _backfill_settlement_queue(
+        self, run_by: str, dry_run: bool
+    ) -> Tuple[int, int, int]:
+        """
+        Find SETTLED/VALIDATED BUY/SELL trades in cis_trade with settle_date > today
+        that have no entry in cis_settlement_queue (PENDING or COMPLETED), and queue them.
+
+        Returns (queued, skipped, failed).
+        """
+        today = datetime.now().strftime('%Y-%m-%d')
+        queued = skipped = failed = 0
+
+        try:
+            # Trades with future settle_date not yet in the queue
+            find_q = f"""
+            SELECT
+                t.trade_id, t.portfolio_short_name, t.security_label,
+                t.trade_type, t.quantity, t.price,
+                t.commission, t.sec_fee, t.other_charges,
+                t.trade_date, t.settle_date,
+                t.currency_code, t.portfolio_currency, t.isin,
+                t.security_full_name
+            FROM gmp_cis.cis_trade t
+            WHERE t.trade_type IN ('BUY', 'SELL')
+              AND t.status IN ('SETTLED', 'VALIDATED')
+              AND t.settle_date > '{today}'
+              AND (t.is_deleted = false OR t.is_deleted IS NULL)
+              AND NOT EXISTS (
+                  SELECT 1 FROM gmp_cis.cis_settlement_queue q
+                  WHERE q.trade_id = t.trade_id
+                    AND q.position_basis = 'SETTLE_DATE'
+              )
+            ORDER BY t.settle_date, t.trade_id
+            """
+            rows = impala_manager.execute_query(find_q, database='gmp_cis')
+            if not rows:
+                self.stdout.write('  No unqueued future-settle trades found.')
+                return 0, 0, 0
+
+            self.stdout.write(f'  Found {len(rows)} trade(s) with future settle_date not in queue')
+
+            for row in rows:
+                trade_id = row.get('trade_id')
+                portfolio = row.get('portfolio_short_name', '')
+                security = row.get('security_label', '')
+                settle_dt = row.get('settle_date', '')
+                trade_type = row.get('trade_type', '')
+                qty = Decimal(str(row.get('quantity') or 0))
+                price = Decimal(str(row.get('price') or 0))
+                charges = (
+                    Decimal(str(row.get('commission') or 0)) +
+                    Decimal(str(row.get('sec_fee') or 0)) +
+                    Decimal(str(row.get('other_charges') or 0))
+                )
+                trade_date = row.get('trade_date', '')
+
+                self.stdout.write(
+                    f'  {"[DRY RUN] " if dry_run else ""}Queuing trade {trade_id} '
+                    f'{trade_type} {portfolio}/{security} settle={settle_dt}'
+                )
+
+                if dry_run:
+                    queued += 1
+                    continue
+
+                try:
+                    ok, msg, _ = settlement_service.process_trade_settlement(
+                        trade_id=int(trade_id),
+                        portfolio_id=portfolio,
+                        security_id=security,
+                        trade_type=trade_type,
+                        quantity=qty,
+                        price=price,
+                        charges=charges,
+                        trade_date=trade_date,
+                        settle_date=settle_dt,
+                        updated_by=run_by,
+                        security_currency=row.get('currency_code'),
+                        portfolio_currency=row.get('portfolio_currency'),
+                        isin=row.get('isin'),
+                        security_name=row.get('security_full_name') or security,
+                        async_mode=True,
+                        position_basis='SETTLE_DATE',
+                    )
+                    if ok:
+                        queued += 1
+                    else:
+                        self.stdout.write(self.style.WARNING(f'    → {msg}'))
+                        failed += 1
+                except Exception as e:
+                    self.stdout.write(self.style.ERROR(f'    → Error: {e}'))
+                    logger.error(f'Backfill queue error for trade {trade_id}: {e}')
+                    failed += 1
+
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'  Backfill query failed: {e}'))
+            logger.error(f'_backfill_settlement_queue error: {e}')
+
+        return queued, skipped, failed
 
     def _get_pending_settlements(self, settle_date: str) -> List[Dict[str, Any]]:
         """Get pending settlements from the queue."""
