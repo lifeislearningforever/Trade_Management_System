@@ -54,6 +54,7 @@ POSITION_TABLE = 'cis_trade_position'   # versioned CIS ledger
 GOLDEN_TABLE   = 'cis_position'         # golden copy (all sources)
 CASH_FLOW_TABLE = 'cis_cash_flow'
 PRECISION = Decimal('0.00000001')
+DEFAULT_DP = 2
 
 
 def _escape(value: str) -> str:
@@ -278,9 +279,15 @@ class Command(BaseCommand):
         cf_id = cf.get('cash_flow_id')
         cf_number = cf.get('cash_flow_number', str(cf_id))
 
+        # Currency precision from reference tables (same approach as refresh_positions)
+        sec_ccy  = self._get_security_currency(security)
+        port_ccy = self._get_portfolio_currency(portfolio)
+        fc_dp    = self._get_currency_dp(sec_ccy)
+        lc_dp    = self._get_currency_dp(port_ccy)
+
         sign = _sign(send_receive, cf_number)
-        signed_fc = (amount_fc * sign).quantize(PRECISION, rounding=ROUND_HALF_UP)
-        signed_lc = (amount_lc * sign).quantize(PRECISION, rounding=ROUND_HALF_UP)
+        signed_fc = round(amount_fc * sign, fc_dp)
+        signed_lc = round(amount_lc * sign, lc_dp)
 
         if cf_type in ('UNCALL_COMMITMENT',):
             return self._accumulate_field(
@@ -289,6 +296,7 @@ class Command(BaseCommand):
                 delta_fc=signed_fc, delta_lc=signed_lc,
                 cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
                 amount_fc=amount_fc, amount_lc=amount_lc,
+                fc_dp=fc_dp, lc_dp=lc_dp,
                 dry_run=dry_run, pos_src=pos_src
             )
 
@@ -299,6 +307,7 @@ class Command(BaseCommand):
                 delta_fc=signed_fc, delta_lc=signed_lc,
                 cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
                 amount_fc=amount_fc, amount_lc=amount_lc,
+                fc_dp=fc_dp, lc_dp=lc_dp,
                 dry_run=dry_run, pos_src=pos_src
             )
 
@@ -309,6 +318,7 @@ class Command(BaseCommand):
                 delta_fc=signed_fc, delta_lc=signed_lc,
                 cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
                 amount_fc=amount_fc, amount_lc=amount_lc,
+                fc_dp=fc_dp, lc_dp=lc_dp,
                 dry_run=dry_run, pos_src=pos_src
             )
 
@@ -319,6 +329,7 @@ class Command(BaseCommand):
                 delta_fc=signed_fc, delta_lc=signed_lc,
                 cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
                 amount_fc=amount_fc, amount_lc=amount_lc,
+                fc_dp=fc_dp, lc_dp=lc_dp,
                 dry_run=dry_run, pos_src=pos_src
             )
 
@@ -329,20 +340,22 @@ class Command(BaseCommand):
                 delta_fc=signed_fc, delta_lc=signed_lc,
                 cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
                 amount_fc=amount_fc, amount_lc=amount_lc,
+                fc_dp=fc_dp, lc_dp=lc_dp,
                 dry_run=dry_run, pos_src=pos_src
             )
 
         # DIVIDEND: RECEIVE=increase, SEND=decrease (opposite of global convention)
         if cf_type in ('DIVIDEND', 'CASH_DIVIDEND'):
             div_sign = _sign_dividend(send_receive, cf_number)
-            div_fc = (amount_fc * div_sign).quantize(PRECISION, rounding=ROUND_HALF_UP)
-            div_lc = (amount_lc * div_sign).quantize(PRECISION, rounding=ROUND_HALF_UP)
+            div_fc = round(amount_fc * div_sign, fc_dp)
+            div_lc = round(amount_lc * div_sign, lc_dp)
             return self._accumulate_field(
                 position, portfolio, security, payment_date,
                 fc_field='dividend_fc', lc_field='dividend_lc',
                 delta_fc=div_fc, delta_lc=div_lc,
                 cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
                 amount_fc=amount_fc, amount_lc=amount_lc,
+                fc_dp=fc_dp, lc_dp=lc_dp,
                 dry_run=dry_run, pos_src=pos_src
             )
 
@@ -353,6 +366,7 @@ class Command(BaseCommand):
                 amount_fc=signed_fc, amount_lc=signed_lc,
                 cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
                 raw_amount_fc=amount_fc, raw_amount_lc=amount_lc,
+                fc_dp=fc_dp, lc_dp=lc_dp,
                 dry_run=dry_run, pos_src=pos_src
             )
 
@@ -377,14 +391,16 @@ class Command(BaseCommand):
         cf_number: str,
         amount_fc: Decimal,
         amount_lc: Decimal,
-        dry_run: bool,
+        fc_dp: int = DEFAULT_DP,
+        lc_dp: int = DEFAULT_DP,
+        dry_run: bool = False,
         pos_src: str = 'CIS',
     ) -> Tuple[bool, str]:
         """Add delta to existing FC/LC field (running total)."""
         old_fc = Decimal(str(position.get(fc_field, 0) or 0))
         old_lc = Decimal(str(position.get(lc_field, 0) or 0))
-        new_fc = (old_fc + delta_fc).quantize(PRECISION, rounding=ROUND_HALF_UP)
-        new_lc = (old_lc + delta_lc).quantize(PRECISION, rounding=ROUND_HALF_UP)
+        new_fc = round(old_fc + delta_fc, fc_dp)
+        new_lc = round(old_lc + delta_lc, lc_dp)
 
         if dry_run:
             return True, (
@@ -395,8 +411,8 @@ class Command(BaseCommand):
         success = self._write_new_position_version(
             position, portfolio, security, position_date, cf_type, overrides,
             cf_id=cf_id, cf_number=cf_number,
-            cf_amount_fc=float(amount_fc), cf_amount_lc=float(amount_lc),
-            pos_src=pos_src
+            cf_amount_fc=float(round(amount_fc, fc_dp)), cf_amount_lc=float(round(amount_lc, lc_dp)),
+            fc_dp=fc_dp, lc_dp=lc_dp, pos_src=pos_src
         )
         if success:
             return True, f'{cf_type}: {fc_field} {old_fc} + {delta_fc} = {new_fc}'
@@ -415,7 +431,9 @@ class Command(BaseCommand):
         cf_number: str,
         raw_amount_fc: Decimal,
         raw_amount_lc: Decimal,
-        dry_run: bool,
+        fc_dp: int = DEFAULT_DP,
+        lc_dp: int = DEFAULT_DP,
+        dry_run: bool = False,
         pos_src: str = 'CIS',
     ) -> Tuple[bool, str]:
         """
@@ -429,13 +447,13 @@ class Command(BaseCommand):
         old_avp_fc = Decimal(str(position.get('average_cost_fc', 0) or 0))
         old_avp_lc = Decimal(str(position.get('average_cost_lc', 0) or 0))
 
-        per_share_fc = (amount_fc / qty).quantize(PRECISION, rounding=ROUND_HALF_UP)
-        per_share_lc = (amount_lc / qty).quantize(PRECISION, rounding=ROUND_HALF_UP)
+        per_share_fc = round(amount_fc / qty, fc_dp)
+        per_share_lc = round(amount_lc / qty, lc_dp)
 
-        new_avp_fc = max(Decimal('0'), (old_avp_fc - per_share_fc).quantize(PRECISION, rounding=ROUND_HALF_UP))
-        new_avp_lc = max(Decimal('0'), (old_avp_lc - per_share_lc).quantize(PRECISION, rounding=ROUND_HALF_UP))
-        new_total_cost_fc = (new_avp_fc * qty).quantize(PRECISION, rounding=ROUND_HALF_UP)
-        new_total_cost_lc = (new_avp_lc * qty).quantize(PRECISION, rounding=ROUND_HALF_UP)
+        new_avp_fc = max(Decimal('0'), round(old_avp_fc - per_share_fc, fc_dp))
+        new_avp_lc = max(Decimal('0'), round(old_avp_lc - per_share_lc, lc_dp))
+        new_total_cost_fc = round(new_avp_fc * qty, fc_dp)
+        new_total_cost_lc = round(new_avp_lc * qty, lc_dp)
 
         if dry_run:
             return True, (
@@ -452,8 +470,8 @@ class Command(BaseCommand):
         success = self._write_new_position_version(
             position, portfolio, security, position_date, cf_type, overrides,
             cf_id=cf_id, cf_number=cf_number,
-            cf_amount_fc=float(raw_amount_fc), cf_amount_lc=float(raw_amount_lc),
-            pos_src=pos_src
+            cf_amount_fc=float(round(raw_amount_fc, fc_dp)), cf_amount_lc=float(round(raw_amount_lc, lc_dp)),
+            fc_dp=fc_dp, lc_dp=lc_dp, pos_src=pos_src
         )
         if success:
             return True, f'{cf_type}: avp_fc {old_avp_fc} → {new_avp_fc}'
@@ -475,6 +493,8 @@ class Command(BaseCommand):
         cf_number: str,
         cf_amount_fc: float,
         cf_amount_lc: float,
+        fc_dp: int = DEFAULT_DP,
+        lc_dp: int = DEFAULT_DP,
         pos_src: str = 'CIS',
     ) -> bool:
         """
@@ -497,6 +517,8 @@ class Command(BaseCommand):
                     cf_number=cf_number,
                     cf_amount_fc=cf_amount_fc,
                     cf_amount_lc=cf_amount_lc,
+                    fc_dp=fc_dp,
+                    lc_dp=lc_dp,
                     src_system=pos_src,
                 )
                 return True
@@ -536,13 +558,19 @@ class Command(BaseCommand):
                     return 0.0
                 return float(val)
 
+            def _ffc(field, default=0):
+                return float(round(Decimal(str(_f(field, default))), fc_dp))
+
+            def _flc(field, default=0):
+                return float(round(Decimal(str(_f(field, default))), lc_dp))
+
             def _b(field, default=True):
                 val = current.get(field, default)
                 return 'true' if val else 'false'
 
             # net_book_value = cost + unrealized_pnl - provision
-            nbv_fc = float(_f('total_cost_fc') + _f('unrealized_pnl_fc') - _f('provision_fc'))
-            nbv_lc = float(_f('total_cost_lc') + _f('unrealized_pnl_lc') - _f('provision_lc'))
+            nbv_fc = float(round(Decimal(str(_f('total_cost_fc'))) + Decimal(str(_f('unrealized_pnl_fc'))) - Decimal(str(_f('provision_fc'))), fc_dp))
+            nbv_lc = float(round(Decimal(str(_f('total_cost_lc'))) + Decimal(str(_f('unrealized_pnl_lc'))) - Decimal(str(_f('provision_lc'))), lc_dp))
 
             sql = f"""
             UPSERT INTO {DATABASE}.{POSITION_TABLE} (
@@ -574,16 +602,16 @@ class Command(BaseCommand):
                 '{_escape(portfolio)}',
                 '{_escape(security)}',
                 {_f('quantity')},
-                {_f('average_cost_fc')},  {_f('total_cost_fc')},
-                {_f('average_cost_lc')},  {_f('total_cost_lc')},
-                {_f('market_price')},     {_f('market_value_fc')}, {_f('market_value_lc')},
-                {_f('realized_pnl_fc')},  {_f('unrealized_pnl_fc')},
-                {_f('realized_pnl_lc')},  {_f('unrealized_pnl_lc')},
-                {_f('dividend_fc')},      {_f('dividend_lc')},
-                {_f('uncall_fc')},        {_f('uncall_lc')},
-                {_f('pipeline_fc')},      {_f('pipeline_lc')},
-                {_f('commit_fc')},        {_f('commit_lc')},
-                {_f('provision_fc')},     {_f('provision_lc')},
+                {_ffc('average_cost_fc')}, {_ffc('total_cost_fc')},
+                {_flc('average_cost_lc')}, {_flc('total_cost_lc')},
+                {_f('market_price')},      {_ffc('market_value_fc')}, {_flc('market_value_lc')},
+                {_ffc('realized_pnl_fc')}, {_ffc('unrealized_pnl_fc')},
+                {_flc('realized_pnl_lc')}, {_flc('unrealized_pnl_lc')},
+                {_ffc('dividend_fc')},     {_flc('dividend_lc')},
+                {_ffc('uncall_fc')},       {_flc('uncall_lc')},
+                {_ffc('pipeline_fc')},     {_flc('pipeline_lc')},
+                {_ffc('commit_fc')},       {_flc('commit_lc')},
+                {_ffc('provision_fc')},    {_flc('provision_lc')},
                 'EOD',
                 'EOD',
                 '{_escape(sec_ccy)}',
@@ -615,6 +643,8 @@ class Command(BaseCommand):
                     cf_number=cf_number,
                     cf_amount_fc=cf_amount_fc,
                     cf_amount_lc=cf_amount_lc,
+                    fc_dp=fc_dp,
+                    lc_dp=lc_dp,
                 )
             return success
 
@@ -634,6 +664,8 @@ class Command(BaseCommand):
         cf_number: str,
         cf_amount_fc: float,
         cf_amount_lc: float,
+        fc_dp: int = DEFAULT_DP,
+        lc_dp: int = DEFAULT_DP,
         src_system: str = 'CIS',
     ) -> None:
         """
@@ -697,15 +729,21 @@ class Command(BaseCommand):
                 v = row.get(field)
                 return float(v) if v is not None else float(default)
 
+            def _gfc(field, default=0.0):
+                return float(round(Decimal(str(_gv(field, default))), fc_dp))
+
+            def _glc(field, default=0.0):
+                return float(round(Decimal(str(_gv(field, default))), lc_dp))
+
             # net_book_value = cost + unrealized_pnl - provision
-            cost_fc_val      = _gv('cost_fc', _gv('total_cost_fc'))
-            cost_lc_val      = _gv('cost_lc', _gv('total_cost_lc'))
-            upnl_fc_val      = _gv('unrealized_pnl_fc')
-            upnl_lc_val      = _gv('unrealized_pnl_lc')
-            provision_fc_val = _gv('provision_fc')
-            provision_lc_val = _gv('provision_lc')
-            nbv_fc = cost_fc_val + upnl_fc_val - provision_fc_val
-            nbv_lc = cost_lc_val + upnl_lc_val - provision_lc_val
+            cost_fc_val      = _gfc('cost_fc', _gv('total_cost_fc'))
+            cost_lc_val      = _glc('cost_lc', _gv('total_cost_lc'))
+            upnl_fc_val      = _gfc('unrealized_pnl_fc')
+            upnl_lc_val      = _glc('unrealized_pnl_lc')
+            provision_fc_val = _gfc('provision_fc')
+            provision_lc_val = _glc('provision_lc')
+            nbv_fc = float(round(Decimal(str(cost_fc_val)) + Decimal(str(upnl_fc_val)) - Decimal(str(provision_fc_val)), fc_dp))
+            nbv_lc = float(round(Decimal(str(cost_lc_val)) + Decimal(str(upnl_lc_val)) - Decimal(str(provision_lc_val)), lc_dp))
 
             upsert = f"""
             UPSERT INTO {DATABASE}.{GOLDEN_TABLE} (
@@ -732,16 +770,16 @@ class Command(BaseCommand):
                 '{_escape(pos_basis)}', '{_escape(position_date)}',
                 '{_escape(effective_src)}', '{processing_date}',
                 {_gv('quantity')},
-                {_gv('average_cost_fc')}, {cost_fc_val},
-                {_gv('average_cost_lc')}, {cost_lc_val},
-                {_gv('market_value_fc')}, {_gv('market_value_lc')},
+                {_gfc('average_cost_fc')}, {cost_fc_val},
+                {_glc('average_cost_lc')}, {cost_lc_val},
+                {_gfc('market_value_fc')}, {_glc('market_value_lc')},
                 {nbv_fc}, {nbv_lc},
                 {upnl_fc_val}, {upnl_lc_val},
-                {_gv('realized_pnl_fc')}, {_gv('realized_pnl_lc')},
-                {_gv('dividend_fc')}, {_gv('dividend_lc')},
+                {_gfc('realized_pnl_fc')}, {_glc('realized_pnl_lc')},
+                {_gfc('dividend_fc')}, {_glc('dividend_lc')},
                 {provision_fc_val}, {provision_lc_val},
-                {_gv('uncall_fc')}, {_gv('uncall_lc')},
-                {_gv('pipeline_fc')}, {_gv('pipeline_lc')},
+                {_gfc('uncall_fc')}, {_glc('uncall_lc')},
+                {_gfc('pipeline_fc')}, {_glc('pipeline_lc')},
                 'EOD',
                 {f"'{_escape(isin)}'" if isin else 'NULL'},
                 {f"'{_escape(source_table)}'" if source_table else 'NULL'}
@@ -810,6 +848,25 @@ class Command(BaseCommand):
         except Exception as e:
             logger.debug(f'Could not get portfolio currency for {portfolio}: {e}')
         return ''
+
+    def _get_currency_dp(self, currency_code: str) -> int:
+        """Return decimal places for a currency from gmp_cis_sta_dly_currency.
+        e.g. '0000000000.01' → 2.  Falls back to 2 if not found."""
+        if not currency_code:
+            return DEFAULT_DP
+        try:
+            results = impala_manager.execute_query(
+                f"SELECT precision FROM {DATABASE}.gmp_cis_sta_dly_currency "
+                f"WHERE iso_code = '{_escape(currency_code)}' LIMIT 1",
+                database=DATABASE
+            )
+            if results:
+                prec_str = str(results[0].get('precision') or '')
+                if '.' in prec_str:
+                    return len(prec_str.split('.')[1].rstrip('0') or '0')
+        except Exception as e:
+            logger.debug(f'Could not get precision for {currency_code}: {e}')
+        return DEFAULT_DP
 
     def _get_current_position(
         self,
