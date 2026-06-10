@@ -270,7 +270,7 @@ class Command(BaseCommand):
         dry_run: bool
     ) -> Tuple[bool, str]:
         """Route to the correct position update logic based on cash flow type.
-        Applies CF to both TRADE_DATE and SETTLE_DATE position bases."""
+        Applies CF to the SETTLE_DATE position in cis_trade_position (CIS) or cis_position (non-CIS)."""
 
         # Fetch positions for both bases; apply to each independently
         positions = self._get_current_positions(portfolio, security)
@@ -892,84 +892,80 @@ class Command(BaseCommand):
         security: str
     ) -> List[Tuple[Dict[str, Any], str]]:
         """
-        Get latest open positions for portfolio/security for BOTH position bases.
-        Returns list of (position_dict, src_system) tuples — one per basis found.
-        First tries cis_trade_position (CIS versioned ledger) for each basis.
-        Falls back to cis_position (golden copy) per basis for non-CIS sources.
+        Get latest open SETTLE_DATE position for portfolio/security.
+        Returns list of (position_dict, src_system) with one entry if found.
+        First tries cis_trade_position (CIS versioned ledger).
+        Falls back to cis_position (golden copy) for non-CIS sources.
         """
-        results_out = []
+        try:
+            query = f"""
+            SELECT *
+            FROM {DATABASE}.{POSITION_TABLE}
+            WHERE portfolio_short_name = '{_escape(portfolio)}'
+              AND security_label = '{_escape(security)}'
+              AND position_basis = 'SETTLE_DATE'
+              AND status = 'OPEN'
+              AND is_active = true
+              AND (is_latest = true OR is_latest IS NULL)
+            ORDER BY position_date DESC, version_id DESC
+            LIMIT 1
+            """
+            cis_rows = impala_manager.execute_query(query, database=DATABASE)
+            if cis_rows:
+                return [(cis_rows[0], 'CIS')]
+        except Exception as e:
+            logger.error(f'Error fetching CIS SETTLE_DATE position for {portfolio}/{security}: {e}')
 
-        for basis in ('TRADE_DATE', 'SETTLE_DATE'):
-            try:
-                query = f"""
-                SELECT *
-                FROM {DATABASE}.{POSITION_TABLE}
-                WHERE portfolio_short_name = '{_escape(portfolio)}'
-                  AND security_label = '{_escape(security)}'
-                  AND position_basis = '{basis}'
-                  AND status = 'OPEN'
-                  AND is_active = true
-                  AND (is_latest = true OR is_latest IS NULL)
-                ORDER BY position_date DESC, version_id DESC
-                LIMIT 1
-                """
-                cis_rows = impala_manager.execute_query(query, database=DATABASE)
-                if cis_rows:
-                    results_out.append((cis_rows[0], 'CIS'))
-                    continue
-            except Exception as e:
-                logger.error(f'Error fetching CIS {basis} position for {portfolio}/{security}: {e}')
+        # Fallback: golden copy for non-CIS sources
+        try:
+            golden_query = f"""
+            SELECT
+                position_id,
+                position_id        AS version_id,
+                portfolio          AS portfolio_short_name,
+                security_label,
+                position_basis,
+                position_date,
+                src_system,
+                quantity,
+                average_cost_fc,
+                cost_fc            AS total_cost_fc,
+                average_cost_lc,
+                cost_lc            AS total_cost_lc,
+                market_value_fc,
+                market_value_lc,
+                unrealized_pnl_fc,
+                unrealized_pnl_lc,
+                realized_pnl_fc,
+                realized_pnl_lc,
+                dividend_fc,
+                dividend_lc,
+                provision_fc,
+                provision_lc,
+                uncall_fc,
+                uncall_lc,
+                pipeline_fc,
+                pipeline_lc,
+                isin,
+                source_table
+            FROM {DATABASE}.{GOLDEN_TABLE}
+            WHERE portfolio = '{_escape(portfolio)}'
+              AND security_label = '{_escape(security)}'
+              AND position_basis = 'SETTLE_DATE'
+              AND quantity > 0
+            ORDER BY position_date DESC
+            LIMIT 1
+            """
+            golden_rows = impala_manager.execute_query(golden_query, database=DATABASE)
+            if golden_rows:
+                row = golden_rows[0]
+                src = row.get('src_system') or 'GMP'
+                logger.info(
+                    f'[CF] No CIS SETTLE_DATE position for {portfolio}/{security} — '
+                    f'using golden copy (src_system={src})'
+                )
+                return [(row, src)]
+        except Exception as e:
+            logger.error(f'Error fetching golden SETTLE_DATE position for {portfolio}/{security}: {e}')
 
-            # Fallback: golden copy for non-CIS sources
-            try:
-                golden_query = f"""
-                SELECT
-                    position_id,
-                    position_id        AS version_id,
-                    portfolio          AS portfolio_short_name,
-                    security_label,
-                    position_basis,
-                    position_date,
-                    src_system,
-                    quantity,
-                    average_cost_fc,
-                    cost_fc            AS total_cost_fc,
-                    average_cost_lc,
-                    cost_lc            AS total_cost_lc,
-                    market_value_fc,
-                    market_value_lc,
-                    unrealized_pnl_fc,
-                    unrealized_pnl_lc,
-                    realized_pnl_fc,
-                    realized_pnl_lc,
-                    dividend_fc,
-                    dividend_lc,
-                    provision_fc,
-                    provision_lc,
-                    uncall_fc,
-                    uncall_lc,
-                    pipeline_fc,
-                    pipeline_lc,
-                    isin,
-                    source_table
-                FROM {DATABASE}.{GOLDEN_TABLE}
-                WHERE portfolio = '{_escape(portfolio)}'
-                  AND security_label = '{_escape(security)}'
-                  AND position_basis = '{basis}'
-                  AND quantity > 0
-                ORDER BY position_date DESC
-                LIMIT 1
-                """
-                golden_rows = impala_manager.execute_query(golden_query, database=DATABASE)
-                if golden_rows:
-                    row = golden_rows[0]
-                    src = row.get('src_system') or 'GMP'
-                    logger.info(
-                        f'[CF] No CIS {basis} position for {portfolio}/{security} — '
-                        f'using golden copy (src_system={src})'
-                    )
-                    results_out.append((row, src))
-            except Exception as e:
-                logger.error(f'Error fetching golden {basis} position for {portfolio}/{security}: {e}')
-
-        return results_out
+        return []
