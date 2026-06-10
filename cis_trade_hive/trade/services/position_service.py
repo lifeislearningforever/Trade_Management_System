@@ -288,7 +288,11 @@ class PositionService:
         market_price_raw = self._get_market_price(security_id)
         market_price = Decimal(str(market_price_raw)) if market_price_raw else price
         market_value = new_qty * market_price
-        unrealized_pnl = market_value - new_total_cost
+        # Associates/subsidiaries are carried at cost (equity method) — no MTM
+        if self._is_equity_method_security(security_id):
+            unrealized_pnl = Decimal('0')
+        else:
+            unrealized_pnl = market_value - new_total_cost
 
         # Calculate LC values for NON-REVALUED portfolios (historical cost basis)
         # Get current FX rate at trade time - this becomes the "historical" rate
@@ -513,7 +517,11 @@ class PositionService:
             market_price = Decimal(str(market_price_raw)) if market_price_raw else old_avg_cost
             market_value = new_qty * market_price
             market_value_lc = market_value * fx_rate  # Calculate market_value_lc
-            unrealized_pnl = market_value - new_total_cost
+            # Associates/subsidiaries are carried at cost (equity method) — no MTM
+            if self._is_equity_method_security(security_id):
+                unrealized_pnl = Decimal('0')
+            else:
+                unrealized_pnl = market_value - new_total_cost
 
             # FC = Foreign Currency (Security Currency)
             # LC = Local Currency (Portfolio Currency)
@@ -1303,6 +1311,23 @@ class PositionService:
         except Exception as e:
             logger.error(f"Error fetching market price for {security_label}: {str(e)}")
             return None
+
+    def _is_equity_method_security(self, security_label: str) -> bool:
+        """Return True if security_investment is ASSOC or SUBSI (carried at cost, no MTM)."""
+        try:
+            query = f"""
+            SELECT security_investment
+            FROM {self.DATABASE}.cis_security_kudu
+            WHERE security_label = '{self._escape(security_label)}'
+            LIMIT 1
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            if results:
+                inv_type = (results[0].get('security_investment') or '').upper()
+                return inv_type in ('ASSOC', 'SUBSI')
+        except Exception as e:
+            logger.error(f"Error checking security_investment for {security_label}: {str(e)}")
+        return False
 
     def _get_fx_rate(self, from_ccy: str, to_ccy: str, strict: bool = False) -> Decimal:
         """
