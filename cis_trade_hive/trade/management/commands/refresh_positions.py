@@ -87,16 +87,24 @@ class Command(BaseCommand):
 
             total = len(positions)
             self.stdout.write(f"Found {total} position(s) to process")
+
+            # Batch-load all reference data in a handful of queries
+            self.stdout.write('Loading reference data...')
+            ref = self._load_reference_data(positions)
+            self.stdout.write(f"  securities={len(ref['sec_ccy'])}  portfolios={len(ref['port_info'])}  "
+                              f"prices={len(ref['prices'])}  fx_rates={len(ref['fx_rates'])}")
             self.stdout.write('')
+
+            insert_rows = []  # accumulate VALUES tuples for batch INSERT
 
             for idx, position in enumerate(positions, 1):
                 processed += 1
 
-                if idx % 50 == 0 or idx == total:
+                if idx % 200 == 0 or idx == total:
                     self.stdout.write(f"Processing {idx}/{total}...")
 
                 try:
-                    result = self._process_position(position, dry_run, run_date)
+                    result = self._process_position(position, dry_run, run_date, ref, insert_rows)
                     if result == 'updated':
                         updated += 1
                     elif result == 'skipped':
@@ -112,6 +120,12 @@ class Command(BaseCommand):
                         f"  Error on position {position.get('position_id')} "
                         f"({position.get('portfolio')}/{position.get('security_label')}): {str(e)}"
                     ))
+
+            # Batch DELETE existing EOD rows then batch INSERT new ones
+            if not dry_run and insert_rows:
+                self.stdout.write(f'Writing {len(insert_rows)} EOD rows...')
+                self._batch_delete_eod(insert_rows, run_date)
+                self._batch_insert_eod(insert_rows, run_date)
 
             self.stdout.write('')
             self.stdout.write(self.style.MIGRATE_HEADING('=' * 80))
@@ -195,16 +209,13 @@ class Command(BaseCommand):
     # Per-position processing
     # -------------------------------------------------------------------------
 
-    def _process_position(self, position, dry_run, run_date):
+    def _process_position(self, position, dry_run, run_date, ref, insert_rows):
         position_id = position.get('position_id')
         portfolio   = position.get('portfolio')
         security    = position.get('security_label')
         quantity    = position.get('quantity')
 
         if not quantity:
-            self.stdout.write(self.style.WARNING(
-                f"  Skipping {position_id} ({portfolio}/{security}): missing quantity"
-            ))
             return 'skipped'
 
         qty          = Decimal(str(quantity))
@@ -212,52 +223,39 @@ class Command(BaseCommand):
         cost_lc_dec  = Decimal(str(position.get('cost_lc') or 0))
         provision_fc = Decimal(str(position.get('provision_fc') or 0))
         provision_lc = Decimal(str(position.get('provision_lc') or 0))
-        is_equity    = self._is_equity_method_security(security)
 
-        # Portfolio info: base currency and revaluation status
-        port_info    = self._get_portfolio_info(portfolio)
+        # All lookups from pre-loaded cache — no per-row DB queries
+        port_info    = ref['port_info'].get(portfolio, {})
         port_ccy     = port_info.get('currency')
         reval_status = (port_info.get('revaluation_status') or '').strip().upper()
+        sec_ccy      = ref['sec_ccy'].get(security)
+        is_equity    = ref['equity_method'].get(security, False)
+        latest_price = ref['prices'].get(security)
+        fx_pair      = f'{sec_ccy}-{port_ccy}' if sec_ccy and port_ccy and sec_ccy != port_ccy else None
+        fx_rate      = ref['fx_rates'].get(fx_pair, Decimal('1')) if fx_pair else Decimal('1')
+        fc_dp        = ref['currency_dp'].get(sec_ccy, 2)
+        lc_dp        = ref['currency_dp'].get(port_ccy, 2)
 
-        # Security currency and FX rate
-        sec_ccy  = self._get_security_currency(security)
-        fx_rate  = (
-            self._get_fx_rate(sec_ccy, port_ccy)
-            if sec_ccy and port_ccy and sec_ccy != port_ccy
-            else Decimal('1')
-        )
-
-        # Currency decimal places for rounding
-        fc_dp = self._get_currency_dp(sec_ccy)
-        lc_dp = self._get_currency_dp(port_ccy)
-
-        # cost_lc: recalculate from cost_fc × fx_rate for REVALUED; carry forward for NON-REVALUED
+        # cost_lc: recalculate for REVALUED; carry forward for NON-REVALUED
         average_cost_fc = Decimal(str(position.get('average_cost_fc') or 0))
         if reval_status == 'NON-REVALUED':
             average_cost_lc = Decimal(str(position.get('average_cost_lc') or 0))
-            cost_lc_write   = cost_lc_dec  # carry forward unchanged
+            cost_lc_write   = cost_lc_dec
         else:
             average_cost_lc = round(average_cost_fc * fx_rate, lc_dp)
             cost_lc_write   = round(cost_fc_dec * fx_rate, lc_dp)
 
-        # --- Market value: always use latest equity price ---
-        latest_price = self._get_latest_price(security)
-
+        # Market value
         if latest_price is not None:
             price_dec       = Decimal(str(latest_price))
             market_value_fc = round(qty * price_dec, fc_dp)
-            price_source    = f"px={latest_price}"
         else:
-            # No price available — keep existing FC market value unchanged
             price_dec       = Decimal(str(position.get('market_value_fc') or 0)) / qty if qty else Decimal('0')
             market_value_fc = round(Decimal(str(position.get('market_value_fc') or 0)), fc_dp)
-            price_source    = "[NO PRICE — FC unchanged]"
 
-        # Market value LC always recalculated from FC × latest FX rate
         market_value_lc = round(market_value_fc * fx_rate, lc_dp)
 
-        # Unrealized P&L: 0 for SUBSI/ASSOC; otherwise market_value - cost
-        # Use cost_lc_write (recalculated for REVALUED, carried for NON-REVALUED)
+        # Unrealized P&L
         if is_equity:
             unrealized_pnl_fc = Decimal('0')
             unrealized_pnl_lc = Decimal('0')
@@ -269,35 +267,283 @@ class Command(BaseCommand):
         nbv_fc = round(cost_fc_dec + unrealized_pnl_fc - provision_fc, fc_dp)
         nbv_lc = round(cost_lc_write + unrealized_pnl_lc - provision_lc, lc_dp)
 
-        # NON-REVALUED: LC columns use FX-translated FC values but no MTM adjustment to cost basis
-        # (market_value_fc still uses price; unrealized_pnl still calculated; LC just follows FC × FX)
-        reval_tag = f"[{reval_status}]" if reval_status == 'NON-REVALUED' else ""
-
-        self.stdout.write(
-            f"  {portfolio}/{security} [{position.get('src_system')}]{reval_tag}: "
-            f"{price_source}  mkt_fc={market_value_fc}  mkt_lc={market_value_lc}  "
-            f"upnl_fc={unrealized_pnl_fc}  fx={fx_rate:.6f}"
-            + ("  [EQUITY METHOD — pnl=0]" if is_equity else "")
-        )
-
         if not dry_run:
-            success = self._insert_eod_position(
-                position, price_dec,
-                market_value_fc, market_value_lc,
-                unrealized_pnl_fc, unrealized_pnl_lc,
-                nbv_fc, nbv_lc,
-                average_cost_lc, cost_lc_write,
-                fc_dp, lc_dp,
-                run_date
-            )
-            if not success:
-                self.stderr.write(self.style.ERROR(f"  Failed to insert EOD position {position_id}"))
-                return 'error'
+            insert_rows.append({
+                'position': position,
+                'price_dec': price_dec,
+                'market_value_fc': market_value_fc, 'market_value_lc': market_value_lc,
+                'unrealized_pnl_fc': unrealized_pnl_fc, 'unrealized_pnl_lc': unrealized_pnl_lc,
+                'nbv_fc': nbv_fc, 'nbv_lc': nbv_lc,
+                'average_cost_lc': average_cost_lc, 'cost_lc_write': cost_lc_write,
+                'fc_dp': fc_dp, 'lc_dp': lc_dp,
+            })
 
         return 'updated'
 
     # -------------------------------------------------------------------------
-    # INSERT new EOD row into cis_position
+    # Batch reference-data loading (avoids N+1 per-position queries)
+    # -------------------------------------------------------------------------
+
+    def _load_reference_data(self, positions):
+        """
+        Load all reference data needed for EOD revaluation in ~6 queries.
+        Returns a dict with keys:
+          sec_ccy        : {security_label: currency_code}
+          equity_method  : {security_label: bool}  (True if ASSOC/SUBSI)
+          port_info      : {portfolio: {currency, revaluation_status}}
+          prices         : {security_label: Decimal}  (latest closing price)
+          fx_rates       : {'SEC-PORT': Decimal}  (spot_rate_d)
+          currency_dp    : {iso_code: int}  (decimal places)
+        """
+        securities  = list({p.get('security_label') for p in positions if p.get('security_label')})
+        portfolios  = list({p.get('portfolio') for p in positions if p.get('portfolio')})
+
+        ref = {
+            'sec_ccy':       {},
+            'equity_method': {},
+            'port_info':     {},
+            'prices':        {},
+            'fx_rates':      {},
+            'currency_dp':   {},
+        }
+
+        if not securities and not portfolios:
+            return ref
+
+        def _in_list(items):
+            escaped = [f"'{self._escape(i)}'" for i in items]
+            return ', '.join(escaped)
+
+        # 1. Securities: currency_code + security_investment
+        if securities:
+            rows = impala_manager.execute_query(
+                f"SELECT security_name, currency_code, security_investment "
+                f"FROM {DATABASE}.cis_security "
+                f"WHERE security_name IN ({_in_list(securities)})",
+                database=DATABASE
+            ) or []
+            for r in rows:
+                lbl = r.get('security_name')
+                ref['sec_ccy'][lbl] = r.get('currency_code')
+                inv = (r.get('security_investment') or '').upper()
+                ref['equity_method'][lbl] = inv in ('ASSOC', 'SUBSI')
+
+        # 2. Portfolios: currency + revaluation_status
+        if portfolios:
+            rows = impala_manager.execute_query(
+                f"SELECT name, currency, revaluation_status "
+                f"FROM {DATABASE}.cis_portfolio "
+                f"WHERE name IN ({_in_list(portfolios)})",
+                database=DATABASE
+            ) or []
+            for r in rows:
+                ref['port_info'][r.get('name')] = {
+                    'currency': r.get('currency'),
+                    'revaluation_status': r.get('revaluation_status'),
+                }
+
+        # 3. Latest closing prices for all securities
+        if securities:
+            rows = impala_manager.execute_query(
+                f"""
+                SELECT ep.security_label, ep.main_closing_price
+                FROM {DATABASE}.cis_equity_price ep
+                INNER JOIN (
+                    SELECT security_label, MAX(price_date) AS max_date
+                    FROM {DATABASE}.cis_equity_price
+                    WHERE security_label IN ({_in_list(securities)}) AND is_active = true
+                    GROUP BY security_label
+                ) latest
+                  ON ep.security_label = latest.security_label
+                 AND ep.price_date      = latest.max_date
+                WHERE ep.is_active = true
+                """,
+                database=DATABASE
+            ) or []
+            for r in rows:
+                v = r.get('main_closing_price')
+                if v is not None:
+                    ref['prices'][r.get('security_label')] = Decimal(str(v))
+
+        # 4. Collect all sec_ccy-port_ccy pairs that need FX rates
+        pairs = set()
+        for p in positions:
+            sec   = p.get('security_label')
+            port  = p.get('portfolio')
+            s_ccy = ref['sec_ccy'].get(sec)
+            p_ccy = ref['port_info'].get(port, {}).get('currency')
+            if s_ccy and p_ccy and s_ccy != p_ccy:
+                pairs.add(f'{s_ccy}-{p_ccy}')
+
+        if pairs:
+            rows = impala_manager.execute_query(
+                f"""
+                SELECT fr.ref_quot_ccy, fr.spot_rate_d
+                FROM {DATABASE}.gmp_cis_sta_dly_fx_rates fr
+                INNER JOIN (
+                    SELECT ref_quot_ccy, MAX(`date`) AS max_date
+                    FROM {DATABASE}.gmp_cis_sta_dly_fx_rates
+                    WHERE ref_quot_ccy IN ({_in_list(list(pairs))})
+                    GROUP BY ref_quot_ccy
+                ) latest
+                  ON fr.ref_quot_ccy = latest.ref_quot_ccy
+                 AND fr.`date`        = latest.max_date
+                """,
+                database=DATABASE
+            ) or []
+            for r in rows:
+                v = r.get('spot_rate_d')
+                if v is not None:
+                    ref['fx_rates'][r.get('ref_quot_ccy')] = Decimal(str(v))
+
+        # 5. Currency decimal places for all currencies involved
+        all_ccys = set()
+        for v in ref['sec_ccy'].values():
+            if v:
+                all_ccys.add(v)
+        for info in ref['port_info'].values():
+            c = info.get('currency')
+            if c:
+                all_ccys.add(c)
+
+        if all_ccys:
+            rows = impala_manager.execute_query(
+                f"SELECT iso_code, precision FROM {DATABASE}.gmp_cis_sta_dly_currency "
+                f"WHERE iso_code IN ({_in_list(list(all_ccys))})",
+                database=DATABASE
+            ) or []
+            for r in rows:
+                prec_str = str(r.get('precision') or '')
+                if '.' in prec_str:
+                    dp = len(prec_str.split('.')[1].rstrip('0') or '0')
+                else:
+                    dp = 2
+                ref['currency_dp'][r.get('iso_code')] = dp
+
+        return ref
+
+    # -------------------------------------------------------------------------
+    # Batch write: DELETE existing EOD rows then INSERT new ones
+    # -------------------------------------------------------------------------
+
+    def _batch_delete_eod(self, insert_rows, run_date):
+        """
+        Delete all existing EOD rows for the (portfolio, security_label, position_basis, position_date)
+        combinations we are about to insert.  Uses a single DELETE per batch of 500 tuples.
+        """
+        BATCH = 500
+        tuples = [
+            (
+                self._escape(r['position'].get('portfolio', '')),
+                self._escape(r['position'].get('security_label', '')),
+                self._escape(r['position'].get('position_basis', 'TRADE_DATE')),
+            )
+            for r in insert_rows
+        ]
+        position_date = run_date
+
+        for i in range(0, len(tuples), BATCH):
+            chunk = tuples[i: i + BATCH]
+            in_clause = ', '.join(
+                f"('{p}', '{s}', '{b}')" for p, s, b in chunk
+            )
+            impala_manager.execute_write(
+                f"""DELETE FROM {DATABASE}.cis_position
+                    WHERE position_type = 'EOD'
+                      AND position_date  = '{position_date}'
+                      AND (portfolio, security_label, position_basis)
+                          IN ({in_clause})""",
+                database=DATABASE
+            )
+
+    def _batch_insert_eod(self, insert_rows, run_date):
+        """
+        INSERT all accumulated EOD rows in batches of 500.
+        Each row dict comes from _process_position().
+        run_date is the --date arg (YYYY-MM-DD), used as position_date for all EOD rows.
+        """
+        BATCH = 500
+        now_ms = int(datetime.now().timestamp() * 1000)
+
+        def _build_value(idx, row):
+            position  = row['position']
+            fc_dp     = row['fc_dp']
+            lc_dp     = row['lc_dp']
+            avg_cost_lc   = row['average_cost_lc']
+            cost_lc_write = row['cost_lc_write']
+            mkt_fc    = row['market_value_fc']
+            mkt_lc    = row['market_value_lc']
+            upnl_fc   = row['unrealized_pnl_fc']
+            upnl_lc   = row['unrealized_pnl_lc']
+            nbv_fc    = row['nbv_fc']
+            nbv_lc    = row['nbv_lc']
+
+            new_id    = now_ms + idx  # unique within this batch run
+            pos_date  = run_date      # EOD position_date = the --date run arg
+            proc_date = pos_date.replace('-', '')  # YYYYMMDD
+
+            def fc(v, default=0):
+                val = Decimal(str(v)) if v is not None else Decimal(str(default))
+                return float(round(val, fc_dp))
+
+            def lc(v, default=0):
+                val = Decimal(str(v)) if v is not None else Decimal(str(default))
+                return float(round(val, lc_dp))
+
+            portfolio = self._escape(position.get('portfolio', ''))
+            security  = self._escape(position.get('security_label', ''))
+            pos_basis = self._escape(position.get('position_basis', 'TRADE_DATE'))
+            src_sys   = self._escape(position.get('src_system', 'CIS'))
+            isin_val  = f"'{self._escape(position['isin'])}'" if position.get('isin') else 'NULL'
+            src_tbl   = f"'{self._escape(position['source_table'])}'" if position.get('source_table') else 'NULL'
+
+            return (
+                f"({new_id}, {new_id}, "
+                f"'{portfolio}', '{security}', '{pos_basis}', '{pos_date}', "
+                f"'{src_sys}', '{proc_date}', "
+                f"{float(position.get('quantity') or 0)}, "
+                f"{fc(position.get('average_cost_fc'))}, {fc(position.get('cost_fc'))}, "
+                f"{float(round(avg_cost_lc, lc_dp))}, {float(round(cost_lc_write, lc_dp))}, "
+                f"{float(round(mkt_fc, fc_dp))}, {float(round(mkt_lc, lc_dp))}, "
+                f"{float(round(nbv_fc, fc_dp))}, {float(round(nbv_lc, lc_dp))}, "
+                f"{float(round(upnl_fc, fc_dp))}, {float(round(upnl_lc, lc_dp))}, "
+                f"{fc(position.get('realized_pnl_fc'))}, {lc(position.get('realized_pnl_lc'))}, "
+                f"{fc(position.get('provision_fc'))}, {lc(position.get('provision_lc'))}, "
+                f"{fc(position.get('dividend_fc'))}, {lc(position.get('dividend_lc'))}, "
+                f"{fc(position.get('uncall_fc'))}, {lc(position.get('uncall_lc'))}, "
+                f"{fc(position.get('pipeline_fc'))}, {lc(position.get('pipeline_lc'))}, "
+                f"'EOD', {isin_val}, {src_tbl})"
+            )
+
+        col_list = """(
+            position_id, version_id,
+            portfolio, security_label, position_basis, position_date,
+            src_system, processing_date,
+            quantity,
+            average_cost_fc, cost_fc,
+            average_cost_lc, cost_lc,
+            market_value_fc, market_value_lc,
+            net_book_value_fc, net_book_value_lc,
+            unrealized_pnl_fc, unrealized_pnl_lc,
+            realized_pnl_fc, realized_pnl_lc,
+            provision_fc, provision_lc,
+            dividend_fc, dividend_lc,
+            uncall_fc, uncall_lc,
+            pipeline_fc, pipeline_lc,
+            position_type, isin, source_table
+        )"""
+
+        for i in range(0, len(insert_rows), BATCH):
+            chunk = insert_rows[i: i + BATCH]
+            values = ',\n'.join(_build_value(i + j, r) for j, r in enumerate(chunk))
+            impala_manager.execute_write(
+                f"INSERT INTO {DATABASE}.cis_position {col_list} VALUES {values}",
+                database=DATABASE
+            )
+            self.stdout.write(f"  Inserted rows {i + 1}–{i + len(chunk)}")
+
+    # -------------------------------------------------------------------------
+    # INSERT new EOD row into cis_position (legacy single-row path, kept for reference)
     # -------------------------------------------------------------------------
 
     def _insert_eod_position(self, position, price,
