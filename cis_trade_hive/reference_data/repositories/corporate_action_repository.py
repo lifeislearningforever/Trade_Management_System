@@ -237,10 +237,10 @@ class CorporateActionRepository:
                 if field in ca_data and ca_data[field] is not None and ca_data[field] != '':
                     columns.append(field)
                     raw = ca_data[field]
-                    # Numeric fields: cast to float to guarantee unquoted SQL literal
+                    # Numeric fields: cast to float rounded to 6dp to match DECIMAL(20,6)
                     if field_type == float:
                         try:
-                            raw = float(str(raw))
+                            raw = round(float(str(raw)), 6)
                         except (ValueError, TypeError):
                             raw = None
                     if raw is None:
