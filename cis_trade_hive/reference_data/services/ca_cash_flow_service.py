@@ -476,6 +476,7 @@ class CACashFlowService:
             # Query cis_position (golden copy — all sources: CIS, GMP, AMSICEQ, USER_UPLOAD).
             # cis_position has one row per position_id (no status/is_active flags).
             # Use MAX(position_date) per portfolio+security to get the latest snapshot.
+            # Only process portfolios belonging to entity_group = 'UOBS'.
             query = f"""
             SELECT
                 p.portfolio              AS portfolio_short_name,
@@ -493,15 +494,20 @@ class CACashFlowService:
                 sec.currency_code       AS security_currency
             FROM {self.DATABASE}.{self.POSITION_TABLE} p
             INNER JOIN (
-                SELECT portfolio, security_label, MAX(position_date) AS max_date
-                FROM {self.DATABASE}.{self.POSITION_TABLE}
+                SELECT pos.portfolio, pos.security_label, MAX(pos.position_date) AS max_date
+                FROM {self.DATABASE}.{self.POSITION_TABLE} pos
+                INNER JOIN {self.DATABASE}.cis_portfolio pf2
+                    ON pos.portfolio = pf2.name
+                    AND pf2.entity_group = 'UOBS'
                 WHERE ({security_conditions})
-                  AND position_date <= '{as_of_date}'
-                GROUP BY portfolio, security_label
+                  AND pos.position_date <= '{as_of_date}'
+                GROUP BY pos.portfolio, pos.security_label
             ) latest ON p.portfolio = latest.portfolio
                     AND p.security_label = latest.security_label
                     AND p.position_date = latest.max_date
-            LEFT JOIN {self.DATABASE}.cis_portfolio pf ON p.portfolio = pf.name
+            INNER JOIN {self.DATABASE}.cis_portfolio pf
+                ON p.portfolio = pf.name
+                AND pf.entity_group = 'UOBS'
             LEFT JOIN {self.DATABASE}.cis_security sec ON p.security_label = sec.security_name
             WHERE p.quantity > 0
             ORDER BY p.portfolio, p.security_label
