@@ -273,7 +273,7 @@ class Command(BaseCommand):
                 )
 
         if not dry_run:
-            success = self._upsert_eod_position(
+            success = self._insert_eod_position(
                 position, price_dec, market_value_fc, market_value_lc,
                 unrealized_pnl_fc, unrealized_pnl_lc
             )
@@ -287,19 +287,19 @@ class Command(BaseCommand):
     # UPSERT back to cis_position
     # -------------------------------------------------------------------------
 
-    def _upsert_eod_position(self, position, price, market_value_fc, market_value_lc,
+    def _insert_eod_position(self, position, price, market_value_fc, market_value_lc,
                               unrealized_pnl_fc, unrealized_pnl_lc):
         """
-        UPSERT the same position_id back into cis_position with:
-          - updated market_value_fc/lc, unrealized_pnl_fc/lc, market_price (via net_book_value proxy)
-          - position_type = 'EOD'
-          - new version_id (timestamp-based)
-          - processing_date = today
-        All other columns (cost, realized_pnl, dividends, etc.) carried forward unchanged.
+        INSERT a new cis_position row for each EOD run.
+        A fresh position_id is generated each time so EOD records are
+        distinct from INT/CA/CF rows — full audit trail, no overwrite.
+        All cost/dividend/provision columns carried forward from the source row.
         """
         try:
             today = datetime.now().strftime('%Y-%m-%d')
-            version_id = int(datetime.now().timestamp() * 1000) + (uuid.uuid4().int % 1000)
+            # New position_id every run — EOD creates a new row, not an overwrite
+            new_position_id = int(datetime.now().timestamp() * 1000) + (uuid.uuid4().int % 999999)
+            version_id = new_position_id
 
             def _f(v, default=0):
                 return float(v) if v is not None else float(default)
@@ -324,11 +324,11 @@ class Command(BaseCommand):
                     position_type,
                     isin, source_table
                 ) VALUES (
-                    {position['position_id']}, {version_id},
+                    {new_position_id}, {version_id},
                     '{self._escape(position.get('portfolio', ''))}',
                     '{self._escape(position.get('security_label', ''))}',
                     '{self._escape(position.get('position_basis', 'TRADE_DATE'))}',
-                    '{self._escape(position.get('position_date', today))}',
+                    '{today}',
                     '{self._escape(position.get('src_system', 'CIS'))}',
                     '{today}',
                     {_f(position.get('quantity'))},
@@ -350,7 +350,7 @@ class Command(BaseCommand):
 
             success = impala_manager.execute_write(query, database=DATABASE)
             if success:
-                logger.debug(f"EOD upsert OK: position_id={position['position_id']}")
+                logger.debug(f"EOD insert OK: new position_id={new_position_id} (src={position.get('position_id')})")
             return success
 
         except Exception as e:
