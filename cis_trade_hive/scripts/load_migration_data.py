@@ -1266,7 +1266,7 @@ DEFAULT_STATUS = {
     'party_cif':  'ACTIVE',
     'security':   'ACTIVE',
     'trade':      'SETTLED',
-    'cash_flow':  'APPROVED',
+    'cash_flow':  'VALIDATED',
 }
 
 ALL_TABLES = list(LOADERS) + ['position']
