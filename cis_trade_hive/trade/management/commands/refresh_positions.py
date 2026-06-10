@@ -314,7 +314,7 @@ class Command(BaseCommand):
         """
         try:
             position_date   = run_date or datetime.now().strftime('%Y-%m-%d')
-            processing_date = datetime.now().strftime('%Y%m%d')  # YYYYMMDD — matches INT records
+            processing_date = position_date.replace('-', '')  # YYYYMMDD — same date as position_date
             new_position_id = int(datetime.now().timestamp() * 1000) + (uuid.uuid4().int % 999999)
             version_id      = new_position_id
 
