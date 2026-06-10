@@ -212,10 +212,10 @@ class Command(BaseCommand):
         quantity = position.get('quantity')
         cost_fc = position.get('cost_fc')
 
-        if not quantity or not cost_fc:
+        if not quantity:
             self.stdout.write(
                 self.style.WARNING(
-                    f"  Skipping {position_id} ({portfolio}/{security}): missing quantity or cost_fc"
+                    f"  Skipping {position_id} ({portfolio}/{security}): missing quantity"
                 )
             )
             return 'skipped'
@@ -231,24 +231,21 @@ class Command(BaseCommand):
             return 'skipped'
 
         qty = Decimal(str(quantity))
-        cost_fc_dec = Decimal(str(cost_fc))
+        cost_fc_dec = Decimal(str(cost_fc or 0))
         price_dec = Decimal(str(latest_price))
 
         market_value_fc = qty * price_dec
 
         # Equity method: associates/subsidiaries carried at cost — no MTM
-        if self._is_equity_method_security(security):
-            unrealized_pnl_fc = Decimal('0')
-        else:
-            unrealized_pnl_fc = market_value_fc - cost_fc_dec
+        is_equity = self._is_equity_method_security(security)
+        unrealized_pnl_fc = Decimal('0') if is_equity else market_value_fc - cost_fc_dec
 
-        # LC: reapply FX if we have a stored LC cost, else mirror FC
-        cost_lc_dec = Decimal(str(position.get('cost_lc') or cost_fc))
-        if cost_lc_dec != cost_fc_dec and cost_fc_dec != 0:
-            # Derive implied FX rate from stored values and reapply
+        # LC: reapply FX if we have a stored LC cost and FC cost is non-zero, else mirror FC
+        cost_lc_dec = Decimal(str(position.get('cost_lc') or 0))
+        if cost_lc_dec != Decimal('0') and cost_fc_dec != Decimal('0'):
             implied_fx = cost_lc_dec / cost_fc_dec
             market_value_lc = market_value_fc * implied_fx
-            unrealized_pnl_lc = Decimal('0') if self._is_equity_method_security(security) else market_value_lc - cost_lc_dec
+            unrealized_pnl_lc = Decimal('0') if is_equity else market_value_lc - cost_lc_dec
         else:
             market_value_lc = market_value_fc
             unrealized_pnl_lc = unrealized_pnl_fc
@@ -350,10 +347,8 @@ class Command(BaseCommand):
     # -------------------------------------------------------------------------
 
     def _get_latest_price(self, security_label):
-        """Fetch latest closing price from cis_equity_price; fallback to cis_security."""
+        """Fetch latest closing price from cis_equity_price."""
         safe = self._escape(security_label)
-
-        # Primary: cis_equity_price
         try:
             results = impala_manager.execute_query(
                 f"""
@@ -369,18 +364,6 @@ class Command(BaseCommand):
                 return Decimal(str(results[0]['main_closing_price']))
         except Exception as e:
             logger.warning(f"cis_equity_price lookup failed for {security_label}: {str(e)}")
-
-        # Fallback: last known price on security master (price column may not exist on all envs)
-        try:
-            fallback = impala_manager.execute_query(
-                f"SELECT price FROM {DATABASE}.cis_security "
-                f"WHERE security_name = '{safe}' LIMIT 1",
-                database=DATABASE
-            )
-            if fallback and fallback[0].get('price') is not None:
-                return Decimal(str(fallback[0]['price']))
-        except Exception as e:
-            logger.debug(f"cis_security.price fallback unavailable for {security_label}: {str(e)}")
 
         return None
             return None
