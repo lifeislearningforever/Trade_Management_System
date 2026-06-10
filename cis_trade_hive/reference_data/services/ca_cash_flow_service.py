@@ -22,7 +22,8 @@ class CACashFlowService:
     """Service for generating cash flows from corporate actions"""
 
     DATABASE = 'gmp_cis'
-    POSITION_TABLE = 'cis_trade_position'
+    POSITION_TABLE = 'cis_position'         # read: golden copy (all sources)
+    WRITE_POSITION_TABLE = 'cis_trade_position'  # write: CIS working ledger (versioned)
 
     # CA types that generate cash flows (payment to holder)
     CASH_FLOW_CA_TYPES = [
@@ -424,45 +425,38 @@ class CACashFlowService:
                 f"security_label = '{self._escape(s)}'" for s in securities
             ])
 
-            # Build query for holdings as of ex_date
-            # Get the latest position version for each portfolio+security as of the ex_date
-            # This finds ALL portfolios holding the security - no portfolio filter
-            # Also join with portfolio table to get portfolio currency (for local amount calculation)
+            # Query cis_position (golden copy — all sources: CIS, GMP, AMSICEQ, USER_UPLOAD).
+            # cis_position has one row per position_id (no status/is_active flags).
+            # Use MAX(position_date) per portfolio+security to get the latest snapshot.
             query = f"""
             SELECT
-                p.portfolio_short_name,
+                p.portfolio              AS portfolio_short_name,
                 p.security_label,
                 p.quantity,
                 p.average_cost_fc,
                 p.average_cost_lc,
-                p.total_cost_fc,
-                p.total_cost_lc,
-                p.market_price,
+                p.cost_fc,
+                p.cost_lc,
                 p.market_value_fc,
                 p.dividend_fc,
                 p.dividend_lc,
-                p.security_currency,
-                p.portfolio_currency,
-                pf.currency as portfolio_base_currency
+                p.isin,
+                pf.currency             AS portfolio_base_currency,
+                sec.currency            AS security_currency
             FROM {self.DATABASE}.{self.POSITION_TABLE} p
             INNER JOIN (
-                SELECT portfolio_short_name, security_label, MAX(position_date) as max_date
+                SELECT portfolio, security_label, MAX(position_date) AS max_date
                 FROM {self.DATABASE}.{self.POSITION_TABLE}
                 WHERE ({security_conditions})
-                  AND position_basis = 'SETTLE_DATE'
                   AND position_date <= '{as_of_date}'
-                  AND status = 'OPEN'
-                  AND is_active = true
-                GROUP BY portfolio_short_name, security_label
-            ) latest ON p.portfolio_short_name = latest.portfolio_short_name
+                GROUP BY portfolio, security_label
+            ) latest ON p.portfolio = latest.portfolio
                     AND p.security_label = latest.security_label
                     AND p.position_date = latest.max_date
-            LEFT JOIN {self.DATABASE}.cis_portfolio pf ON p.portfolio_short_name = pf.name
-            WHERE p.position_basis = 'SETTLE_DATE'
-              AND p.quantity > 0
-              AND p.status = 'OPEN'
-              AND p.is_active = true
-            ORDER BY p.portfolio_short_name, p.security_label
+            LEFT JOIN {self.DATABASE}.cis_portfolio pf ON p.portfolio = pf.name
+            LEFT JOIN {self.DATABASE}.cis_security_kudu sec ON p.security_label = sec.security_label
+            WHERE p.quantity > 0
+            ORDER BY p.portfolio, p.security_label
             """
 
             logger.info(f"[HOLDINGS] Executing holdings query:\n{query}")
@@ -826,7 +820,7 @@ class CACashFlowService:
             new_version_id = int(timestamp.timestamp() * 1000)
 
             insert_sql = f"""
-            UPSERT INTO {self.DATABASE}.{self.POSITION_TABLE} (
+            UPSERT INTO {self.DATABASE}.{self.WRITE_POSITION_TABLE} (
                 version_id, position_id, position_date, position_basis,
                 portfolio_short_name, security_label,
                 quantity,
@@ -930,7 +924,7 @@ class CACashFlowService:
         try:
             query = f"""
             SELECT *
-            FROM {self.DATABASE}.{self.POSITION_TABLE}
+            FROM {self.DATABASE}.{self.WRITE_POSITION_TABLE}
             WHERE portfolio_short_name = '{self._escape(portfolio_short_name)}'
               AND security_label = '{self._escape(security_name)}'
               AND position_basis = '{position_basis}'
@@ -950,7 +944,7 @@ class CACashFlowService:
         """Mark an existing position version as not latest."""
         try:
             update_sql = f"""
-            UPDATE {self.DATABASE}.{self.POSITION_TABLE}
+            UPDATE {self.DATABASE}.{self.WRITE_POSITION_TABLE}
             SET is_latest = false,
                 updated_at = '{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}'
             WHERE version_id = {version_id}
@@ -1403,7 +1397,7 @@ class CACashFlowService:
             new_version_id = int(timestamp.timestamp() * 1000)
 
             insert_sql = f"""
-            UPSERT INTO {self.DATABASE}.{self.POSITION_TABLE} (
+            UPSERT INTO {self.DATABASE}.{self.WRITE_POSITION_TABLE} (
                 version_id, position_id, position_date, position_basis,
                 portfolio_short_name, security_label,
                 quantity,
@@ -1562,7 +1556,7 @@ class CACashFlowService:
             new_version_id = int(timestamp.timestamp() * 1000) + 1  # +1 to avoid collision with SETTLE_DATE version
 
             insert_sql = f"""
-            UPSERT INTO {self.DATABASE}.{self.POSITION_TABLE} (
+            UPSERT INTO {self.DATABASE}.{self.WRITE_POSITION_TABLE} (
                 version_id, position_id, position_date, position_basis,
                 portfolio_short_name, security_label,
                 quantity,
@@ -1683,7 +1677,7 @@ class CACashFlowService:
                     fx_rate = Decimal('1')
 
             insert_sql = f"""
-            UPSERT INTO {self.DATABASE}.{self.POSITION_TABLE} (
+            UPSERT INTO {self.DATABASE}.{self.WRITE_POSITION_TABLE} (
                 version_id, position_id, position_date, position_basis,
                 portfolio_short_name, security_label,
                 quantity,
@@ -1950,7 +1944,7 @@ class CACashFlowService:
             new_version_id = int(timestamp.timestamp() * 1000)
 
             insert_sql = f"""
-            UPSERT INTO {self.DATABASE}.{self.POSITION_TABLE} (
+            UPSERT INTO {self.DATABASE}.{self.WRITE_POSITION_TABLE} (
                 version_id, position_id, position_date, position_basis,
                 portfolio_short_name, security_label,
                 quantity,
