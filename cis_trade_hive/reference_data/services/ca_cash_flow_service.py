@@ -1524,7 +1524,7 @@ class CACashFlowService:
             if success:
                 logger.info(f"[POS_ADJ] SUCCESS - Created new SETTLE_DATE position version {new_version_id} "
                            f"for {ca_type}. New qty={new_quantity}, avg_cost={new_avg_cost}")
-                # Also update the TRADE_DATE position so committed-exposure view stays consistent
+                # Update TRADE_DATE position so committed-exposure view stays consistent
                 self._apply_ca_to_trade_date_position(
                     portfolio_short_name=portfolio_short_name,
                     security_name=security_name,
@@ -1540,6 +1540,30 @@ class CACashFlowService:
                     fx_rate=fx_rate,
                     updated_by=updated_by
                 )
+                # Sync new qty/AVP into cis_position (golden copy) so EOD reval
+                # and all downstream reads see the post-split position
+                self._sync_ca_adjustment_to_golden_position(
+                    portfolio_short_name=portfolio_short_name,
+                    security_name=security_name,
+                    new_quantity=new_quantity,
+                    new_avg_cost=new_avg_cost,
+                    new_total_cost=new_total_cost,
+                    market_value_fc=market_value_fc,
+                    market_value_lc=market_value_lc,
+                    unrealized_pnl_fc=unrealized_pnl_fc,
+                    unrealized_pnl_lc=unrealized_pnl_lc,
+                    dividend_fc=dividend_fc,
+                    dividend_lc=dividend_lc,
+                    uncall_fc=Decimal(str(uncall_fc)),
+                    uncall_lc=Decimal(str(uncall_lc)),
+                    pipeline_fc=Decimal(str(pipeline_fc)),
+                    pipeline_lc=Decimal(str(pipeline_lc)),
+                    provision_fc=Decimal(str(provision_fc_val)),
+                    provision_lc=Decimal(str(provision_lc_val)),
+                    position_date=ex_date,
+                    ca_type=ca_type,
+                    updated_by=updated_by
+                )
             else:
                 logger.error(f"[POS_ADJ] FAILED - Could not create position version for {ca_type}")
 
@@ -1547,6 +1571,128 @@ class CACashFlowService:
 
         except Exception as e:
             logger.error(f"[POS_ADJ] Error creating position adjustment version: {str(e)}")
+            return False
+
+    def _sync_ca_adjustment_to_golden_position(
+        self,
+        portfolio_short_name: str,
+        security_name: str,
+        new_quantity: Decimal,
+        new_avg_cost: Decimal,
+        new_total_cost: Decimal,
+        market_value_fc: Decimal,
+        market_value_lc: Decimal,
+        unrealized_pnl_fc: Decimal,
+        unrealized_pnl_lc: Decimal,
+        dividend_fc: Decimal,
+        dividend_lc: Decimal,
+        uncall_fc: Decimal,
+        uncall_lc: Decimal,
+        pipeline_fc: Decimal,
+        pipeline_lc: Decimal,
+        provision_fc: Decimal,
+        provision_lc: Decimal,
+        position_date: str,
+        ca_type: str,
+        updated_by: str
+    ) -> bool:
+        """
+        Sync a CA position adjustment (SPLIT, BONUS, REVERSE_SPLIT) into cis_position
+        (the golden copy). cis_position PK = position_id — find the existing row for
+        this portfolio+security (src_system='CIS') and UPSERT the updated qty/AVP.
+        All other columns (realized_pnl, isin, src_system) are carried forward unchanged.
+        """
+        try:
+            # Find the current row in cis_position for this portfolio+security (CIS source)
+            find_query = f"""
+            SELECT position_id, version_id, realized_pnl_fc, realized_pnl_lc,
+                   isin, source_table, src_system, position_basis
+            FROM {self.DATABASE}.{self.POSITION_TABLE}
+            WHERE portfolio = '{self._escape(portfolio_short_name)}'
+              AND security_label = '{self._escape(security_name)}'
+              AND src_system = 'CIS'
+            ORDER BY position_date DESC
+            LIMIT 1
+            """
+            rows = impala_manager.execute_query(find_query, database=self.DATABASE)
+            if not rows:
+                logger.warning(
+                    f"[POS_ADJ] No cis_position row found for {portfolio_short_name}/{security_name} "
+                    f"src_system=CIS — skipping golden copy sync"
+                )
+                return False
+
+            row = rows[0]
+            position_id = row.get('position_id')
+            new_version_id = int(datetime.now().timestamp() * 1000) + 2  # +2 avoids collision
+            today = datetime.now().strftime('%Y-%m-%d')
+
+            realized_pnl_fc = Decimal(str(row.get('realized_pnl_fc') or 0))
+            realized_pnl_lc = Decimal(str(row.get('realized_pnl_lc') or 0))
+            isin = row.get('isin')
+            source_table = row.get('source_table')
+            src_system = row.get('src_system') or 'CIS'
+            position_basis = row.get('position_basis') or 'SETTLE_DATE'
+
+            upsert_sql = f"""
+            UPSERT INTO {self.DATABASE}.{self.POSITION_TABLE} (
+                position_id, version_id,
+                portfolio, security_label,
+                position_basis, position_date,
+                src_system, processing_date,
+                quantity,
+                average_cost_fc, cost_fc,
+                average_cost_lc, cost_lc,
+                market_value_fc, market_value_lc,
+                net_book_value_fc, net_book_value_lc,
+                unrealized_pnl_fc, unrealized_pnl_lc,
+                realized_pnl_fc, realized_pnl_lc,
+                dividend_fc, dividend_lc,
+                provision_fc, provision_lc,
+                uncall_fc, uncall_lc,
+                pipeline_fc, pipeline_lc,
+                position_type,
+                isin, source_table
+            ) VALUES (
+                {position_id}, {new_version_id},
+                '{self._escape(portfolio_short_name)}',
+                '{self._escape(security_name)}',
+                '{self._escape(position_basis)}',
+                '{self._escape(position_date)}',
+                '{self._escape(src_system)}',
+                '{today}',
+                {float(new_quantity)},
+                {float(new_avg_cost)}, {float(new_total_cost)},
+                {float(new_avg_cost)}, {float(new_total_cost)},
+                {float(market_value_fc)}, {float(market_value_lc)},
+                {float(market_value_fc)}, {float(market_value_lc)},
+                {float(unrealized_pnl_fc)}, {float(unrealized_pnl_lc)},
+                {float(realized_pnl_fc)}, {float(realized_pnl_lc)},
+                {float(dividend_fc)}, {float(dividend_lc)},
+                {float(provision_fc)}, {float(provision_lc)},
+                {float(uncall_fc)}, {float(uncall_lc)},
+                {float(pipeline_fc)}, {float(pipeline_lc)},
+                'CA_{self._escape(ca_type)}',
+                {f"'{self._escape(isin)}'" if isin else 'NULL'},
+                {f"'{self._escape(source_table)}'" if source_table else 'NULL'}
+            )
+            """
+
+            success = impala_manager.execute_write(upsert_sql, database=self.DATABASE)
+            if success:
+                logger.info(
+                    f"[POS_ADJ] Golden copy updated: cis_position position_id={position_id} "
+                    f"portfolio={portfolio_short_name} security={security_name} "
+                    f"qty={new_quantity} avg_cost_fc={new_avg_cost} ca_type={ca_type}"
+                )
+            else:
+                logger.error(
+                    f"[POS_ADJ] Failed to update cis_position for {portfolio_short_name}/{security_name}"
+                )
+            return success
+
+        except Exception as e:
+            logger.error(f"[POS_ADJ] Error syncing CA adjustment to cis_position: {str(e)}")
             return False
 
     def _apply_ca_to_trade_date_position(
