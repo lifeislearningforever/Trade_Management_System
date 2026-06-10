@@ -46,7 +46,8 @@ from trade.services.multicurrency_service import multicurrency_service
 logger = logging.getLogger(__name__)
 
 DATABASE = 'gmp_cis'
-POSITION_TABLE = 'cis_trade_position'
+POSITION_TABLE = 'cis_trade_position'   # versioned CIS ledger
+GOLDEN_TABLE   = 'cis_position'         # golden copy (all sources)
 CASH_FLOW_TABLE = 'cis_cash_flow'
 PRECISION = Decimal('0.00000001')
 
@@ -517,11 +518,135 @@ class Command(BaseCommand):
                 'SYSTEM_CF', '{ts}'
             )
             """
-            return impala_manager.execute_write(sql, database=DATABASE)
+            success = impala_manager.execute_write(sql, database=DATABASE)
+            if success:
+                self._sync_to_golden_position(
+                    portfolio=portfolio,
+                    security=security,
+                    position_date=position_date,
+                    cf_type=cf_type,
+                    current=current,
+                    overrides=overrides,
+                )
+            return success
 
         except Exception as e:
             logger.error(f'Error writing position version for {portfolio}/{security}: {e}')
             return False
+
+    def _sync_to_golden_position(
+        self,
+        portfolio: str,
+        security: str,
+        position_date: str,
+        cf_type: str,
+        current: Dict[str, Any],
+        overrides: Dict[str, Any],
+    ) -> None:
+        """
+        Mirror the cash-flow position update into cis_position (golden copy).
+        Finds the existing cis_position row for this portfolio+security (src_system=CIS)
+        and UPSERTs with the overridden field values carried forward.
+        Non-fatal: logs errors but does not fail the parent write.
+        """
+        try:
+            find_q = f"""
+            SELECT position_id, version_id, realized_pnl_fc, realized_pnl_lc,
+                   isin, source_table, src_system, position_basis,
+                   quantity, average_cost_fc, cost_fc, average_cost_lc, cost_lc,
+                   market_value_fc, market_value_lc,
+                   unrealized_pnl_fc, unrealized_pnl_lc,
+                   dividend_fc, dividend_lc,
+                   provision_fc, provision_lc,
+                   uncall_fc, uncall_lc,
+                   pipeline_fc, pipeline_lc
+            FROM {DATABASE}.{GOLDEN_TABLE}
+            WHERE portfolio = '{_escape(portfolio)}'
+              AND security_label = '{_escape(security)}'
+              AND src_system = 'CIS'
+            ORDER BY position_date DESC
+            LIMIT 1
+            """
+            rows = impala_manager.execute_query(find_q, database=DATABASE)
+            if not rows:
+                logger.warning(
+                    f'[GOLDEN] No cis_position row for {portfolio}/{security} src_system=CIS '
+                    f'— skipping golden copy sync for cf_type={cf_type}'
+                )
+                return
+
+            row = rows[0]
+            position_id  = row['position_id']
+            new_ver      = int(datetime.now().timestamp() * 1000) + 3
+            today        = datetime.now().strftime('%Y-%m-%d')
+            isin         = row.get('isin')
+            source_table = row.get('source_table')
+            src_system   = row.get('src_system') or 'CIS'
+            pos_basis    = row.get('position_basis') or 'SETTLE_DATE'
+
+            def _gv(field, default=0.0):
+                """Get value: prefer override, then cis_trade_position current, then golden row."""
+                if field in overrides:
+                    return float(overrides[field])
+                tp_field = field  # same name in both tables (fc/lc columns match)
+                if current.get(tp_field) is not None:
+                    return float(current[tp_field])
+                v = row.get(field)
+                return float(v) if v is not None else float(default)
+
+            upsert = f"""
+            UPSERT INTO {DATABASE}.{GOLDEN_TABLE} (
+                position_id, version_id,
+                portfolio, security_label,
+                position_basis, position_date,
+                src_system, processing_date,
+                quantity,
+                average_cost_fc, cost_fc,
+                average_cost_lc, cost_lc,
+                market_value_fc, market_value_lc,
+                net_book_value_fc, net_book_value_lc,
+                unrealized_pnl_fc, unrealized_pnl_lc,
+                realized_pnl_fc, realized_pnl_lc,
+                dividend_fc, dividend_lc,
+                provision_fc, provision_lc,
+                uncall_fc, uncall_lc,
+                pipeline_fc, pipeline_lc,
+                position_type,
+                isin, source_table
+            ) VALUES (
+                {position_id}, {new_ver},
+                '{_escape(portfolio)}', '{_escape(security)}',
+                '{_escape(pos_basis)}', '{_escape(position_date)}',
+                '{_escape(src_system)}', '{today}',
+                {_gv('quantity')},
+                {_gv('average_cost_fc')}, {_gv('cost_fc', _gv('total_cost_fc'))},
+                {_gv('average_cost_lc')}, {_gv('cost_lc', _gv('total_cost_lc'))},
+                {_gv('market_value_fc')}, {_gv('market_value_lc')},
+                {_gv('market_value_fc')}, {_gv('market_value_lc')},
+                {_gv('unrealized_pnl_fc')}, {_gv('unrealized_pnl_lc')},
+                {_gv('realized_pnl_fc')}, {_gv('realized_pnl_lc')},
+                {_gv('dividend_fc')}, {_gv('dividend_lc')},
+                {_gv('provision_fc')}, {_gv('provision_lc')},
+                {_gv('uncall_fc')}, {_gv('uncall_lc')},
+                {_gv('pipeline_fc')}, {_gv('pipeline_lc')},
+                'CF_{_escape(cf_type)}',
+                {f"'{_escape(isin)}'" if isin else 'NULL'},
+                {f"'{_escape(source_table)}'" if source_table else 'NULL'}
+            )
+            """
+            ok = impala_manager.execute_write(upsert, database=DATABASE)
+            if ok:
+                logger.info(
+                    f'[GOLDEN] cis_position updated: position_id={position_id} '
+                    f'{portfolio}/{security} cf_type={cf_type}'
+                )
+            else:
+                logger.error(
+                    f'[GOLDEN] Failed to update cis_position for {portfolio}/{security} '
+                    f'cf_type={cf_type}'
+                )
+        except Exception as e:
+            logger.error(f'[GOLDEN] Error syncing to cis_position for {portfolio}/{security}: {e}')
 
     # =========================================================================
     # MARK PROCESSED

@@ -948,6 +948,29 @@ class CACashFlowService:
             if success:
                 logger.info(f"[UPDATE_POS] SUCCESS - Created new position version {new_version_id} "
                            f"with CA/cash flow details. New avg_cost_fc={new_avg_cost_fc}, avg_cost_lc={new_avg_cost_lc}")
+                # Mirror dividend/AVP changes into cis_position (golden copy)
+                self._sync_ca_adjustment_to_golden_position(
+                    portfolio_short_name=portfolio_short_name,
+                    security_name=security_name,
+                    new_quantity=quantity,
+                    new_avg_cost=new_avg_cost_fc,
+                    new_total_cost=new_total_cost_fc,
+                    market_value_fc=market_value_fc,
+                    market_value_lc=market_value_lc,
+                    unrealized_pnl_fc=new_unrealized_pnl_fc,
+                    unrealized_pnl_lc=new_unrealized_pnl_lc,
+                    dividend_fc=new_dividend_fc,
+                    dividend_lc=new_dividend_lc,
+                    uncall_fc=Decimal(str(uncall_fc)),
+                    uncall_lc=Decimal(str(uncall_lc)),
+                    pipeline_fc=Decimal(str(pipeline_fc)),
+                    pipeline_lc=Decimal(str(pipeline_lc)),
+                    provision_fc=Decimal(str(provision_fc)),
+                    provision_lc=Decimal(str(provision_lc)),
+                    position_date=ex_date,
+                    ca_type=ca_type,
+                    updated_by=updated_by
+                )
             else:
                 logger.error(f"[UPDATE_POS] FAILED - Could not create new position version")
 
