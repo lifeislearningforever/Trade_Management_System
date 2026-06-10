@@ -5,9 +5,12 @@ Refreshes market values for all open positions in cis_position (the golden copy)
 covering all source systems: CIS, GMP, AMS/AMSICEQ, USER_UPLOAD.
 
 For each position:
-  1. Fetch latest price from cis_equity_price (fallback: cis_security.price)
-  2. Apply equity-method rule: if security_investment IN (ASSOC, SUBSI) → unrealized_pnl = 0
-  3. UPSERT back into cis_position with updated market values and position_type = 'EOD'
+  1. Fetch latest price from cis_equity_price (always used; REVALUED and NON-REVALUED)
+  2. If no price found, keep existing market_value_fc; recalculate LC via latest FX rate
+  3. unrealized_pnl = 0 if security_investment IN (ASSOC, SUBSI), else market_value_fc - cost_fc
+  4. NON-REVALUED: LC columns recalculated from FC × latest FX rate (no MTM override)
+  5. net_book_value = cost + unrealized_pnl - provision
+  6. INSERT new cis_position row per run (position_type='EOD') — never overwrite
 
 Usage:
     python manage.py refresh_positions
@@ -32,7 +35,6 @@ logger = logging.getLogger(__name__)
 
 DATABASE = 'gmp_cis'
 
-# All src_system values considered OPEN/active positions in cis_position
 ALL_SOURCES = ['CIS', 'GMP', 'AMSICEQ', 'USER_UPLOAD']
 
 
@@ -40,22 +42,13 @@ class Command(BaseCommand):
     help = 'EOD revaluation: refresh market values for all positions in cis_position (golden copy)'
 
     def add_arguments(self, parser):
+        parser.add_argument('--portfolio', type=str, help='Filter by portfolio short name (optional)')
         parser.add_argument(
-            '--portfolio',
-            type=str,
-            help='Filter by portfolio short name (optional)'
-        )
-        parser.add_argument(
-            '--source',
-            type=str,
-            choices=ALL_SOURCES,
+            '--source', type=str, choices=ALL_SOURCES,
             help='Filter by source system: CIS, GMP, AMSICEQ, USER_UPLOAD (default: all)'
         )
-        parser.add_argument(
-            '--dry-run',
-            action='store_true',
-            help='Show what would be updated without writing to database'
-        )
+        parser.add_argument('--dry-run', action='store_true',
+                            help='Show what would be updated without writing to database')
 
     def handle(self, *args, **options):
         portfolio_filter = options.get('portfolio')
@@ -109,12 +102,10 @@ class Command(BaseCommand):
                         f"Error on position {position.get('position_id')}: {str(e)}",
                         exc_info=True
                     )
-                    self.stderr.write(
-                        self.style.ERROR(
-                            f"  Error on position {position.get('position_id')} "
-                            f"({position.get('portfolio')}/{position.get('security_label')}): {str(e)}"
-                        )
-                    )
+                    self.stderr.write(self.style.ERROR(
+                        f"  Error on position {position.get('position_id')} "
+                        f"({position.get('portfolio')}/{position.get('security_label')}): {str(e)}"
+                    ))
 
             self.stdout.write('')
             self.stdout.write(self.style.MIGRATE_HEADING('=' * 80))
@@ -122,7 +113,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.MIGRATE_HEADING('=' * 80))
             self.stdout.write(f"Total Processed : {processed}")
             self.stdout.write(self.style.SUCCESS(f"Updated         : {updated}"))
-            self.stdout.write(self.style.WARNING(f"Skipped (no px) : {skipped}"))
+            self.stdout.write(self.style.WARNING(f"Skipped         : {skipped}"))
             if errors:
                 self.stdout.write(self.style.ERROR(f"Errors          : {errors}"))
             else:
@@ -144,59 +135,36 @@ class Command(BaseCommand):
     # -------------------------------------------------------------------------
 
     def _get_open_positions(self, portfolio_filter, sources):
-        """
-        Fetch latest version of every position from cis_position (golden copy).
-        cis_position PK is position_id — one row per position, so no version JOIN needed.
-        """
+        """Fetch all positions from cis_position (golden copy) for the given sources."""
         try:
             conditions = []
-
             src_list = "', '".join(self._escape(s) for s in sources)
             conditions.append(f"src_system IN ('{src_list}')")
-
             if portfolio_filter:
                 conditions.append(f"portfolio = '{self._escape(portfolio_filter)}'")
-
             where = "WHERE " + " AND ".join(conditions)
 
             query = f"""
                 SELECT
-                    position_id,
-                    version_id,
-                    portfolio,
-                    security_label,
-                    position_basis,
-                    position_date,
-                    src_system,
-                    processing_date,
+                    position_id, version_id,
+                    portfolio, security_label,
+                    position_basis, position_date,
+                    src_system, processing_date,
                     quantity,
-                    average_cost_fc,
-                    cost_fc,
-                    average_cost_lc,
-                    cost_lc,
-                    market_value_fc,
-                    market_value_lc,
-                    unrealized_pnl_fc,
-                    unrealized_pnl_lc,
-                    realized_pnl_fc,
-                    realized_pnl_lc,
-                    provision_fc,
-                    provision_lc,
-                    dividend_fc,
-                    dividend_lc,
-                    uncall_fc,
-                    uncall_lc,
-                    pipeline_fc,
-                    pipeline_lc,
-                    position_type,
-                    isin,
-                    source_table
+                    average_cost_fc, cost_fc,
+                    average_cost_lc, cost_lc,
+                    market_value_fc, market_value_lc,
+                    unrealized_pnl_fc, unrealized_pnl_lc,
+                    realized_pnl_fc, realized_pnl_lc,
+                    provision_fc, provision_lc,
+                    dividend_fc, dividend_lc,
+                    uncall_fc, uncall_lc,
+                    pipeline_fc, pipeline_lc,
+                    position_type, isin, source_table
                 FROM {DATABASE}.cis_position
                 {where}
             """
-
             return impala_manager.execute_query(query, database=DATABASE) or []
-
         except Exception as e:
             logger.error(f"Error fetching positions: {str(e)}")
             raise
@@ -207,115 +175,118 @@ class Command(BaseCommand):
 
     def _process_position(self, position, dry_run):
         position_id = position.get('position_id')
-        portfolio = position.get('portfolio')
-        security = position.get('security_label')
-        quantity = position.get('quantity')
-        cost_fc = position.get('cost_fc')
+        portfolio   = position.get('portfolio')
+        security    = position.get('security_label')
+        quantity    = position.get('quantity')
 
         if not quantity:
-            self.stdout.write(
-                self.style.WARNING(
-                    f"  Skipping {position_id} ({portfolio}/{security}): missing quantity"
-                )
-            )
+            self.stdout.write(self.style.WARNING(
+                f"  Skipping {position_id} ({portfolio}/{security}): missing quantity"
+            ))
             return 'skipped'
 
-        qty = Decimal(str(quantity))
-        cost_fc_dec = Decimal(str(cost_fc or 0))
-        cost_lc_dec = Decimal(str(position.get('cost_lc') or 0))
-        is_equity = self._is_equity_method_security(security)
+        qty          = Decimal(str(quantity))
+        cost_fc_dec  = Decimal(str(position.get('cost_fc') or 0))
+        cost_lc_dec  = Decimal(str(position.get('cost_lc') or 0))
+        provision_fc = Decimal(str(position.get('provision_fc') or 0))
+        provision_lc = Decimal(str(position.get('provision_lc') or 0))
+        is_equity    = self._is_equity_method_security(security)
 
-        # Portfolio revaluation status and currencies
-        port_info = self._get_portfolio_info(portfolio)
-        port_ccy = port_info.get('currency')
+        # Portfolio info: base currency and revaluation status
+        port_info    = self._get_portfolio_info(portfolio)
+        port_ccy     = port_info.get('currency')
         reval_status = (port_info.get('revaluation_status') or '').strip().upper()
-        sec_ccy = self._get_security_currency(security)
-        fx_rate = self._get_fx_rate(sec_ccy, port_ccy) if sec_ccy and port_ccy and sec_ccy != port_ccy else Decimal('1')
 
-        # Currency decimal places for rounding: FC = security ccy, LC = portfolio ccy
+        # Security currency and FX rate
+        sec_ccy  = self._get_security_currency(security)
+        fx_rate  = (
+            self._get_fx_rate(sec_ccy, port_ccy)
+            if sec_ccy and port_ccy and sec_ccy != port_ccy
+            else Decimal('1')
+        )
+
+        # Currency decimal places for rounding
         fc_dp = self._get_currency_dp(sec_ccy)
         lc_dp = self._get_currency_dp(port_ccy)
 
-        # NON-REVALUED: carry at cost, no MTM, only recalculate LC via FX
-        if reval_status == 'NON-REVALUED':
-            market_value_fc = round(cost_fc_dec, fc_dp)
-            unrealized_pnl_fc = Decimal('0')
-            market_value_lc = round(cost_fc_dec * fx_rate, lc_dp)
-            unrealized_pnl_lc = Decimal('0')
-            price_dec = Decimal(str(position.get('market_value_fc') or 0)) / qty if qty else Decimal('0')
-            self.stdout.write(
-                f"  {portfolio}/{security} [{position.get('src_system')}]: "
-                f"[NON-REVALUED] mkt_fc=cost={market_value_fc}  mkt_lc={market_value_lc}  fx={fx_rate:.6f}"
-            )
-        else:
-            # REVALUED (or blank — default to revaluation)
-            latest_price = self._get_latest_price(security)
+        # --- Market value: always use latest equity price ---
+        latest_price = self._get_latest_price(security)
 
-            if latest_price is not None:
-                # Full revaluation: recalculate FC and LC from latest price
-                price_dec = Decimal(str(latest_price))
-                market_value_fc = round(qty * price_dec, fc_dp)
-                unrealized_pnl_fc = Decimal('0') if is_equity else round(market_value_fc - cost_fc_dec, fc_dp)
-                market_value_lc = round(market_value_fc * fx_rate, lc_dp)
-                unrealized_pnl_lc = Decimal('0') if is_equity else round(market_value_lc - cost_lc_dec, lc_dp)
-                self.stdout.write(
-                    f"  {portfolio}/{security} [{position.get('src_system')}]: "
-                    f"px={latest_price}  mkt_fc={market_value_fc}  upnl_fc={unrealized_pnl_fc}"
-                    + ("  [EQUITY METHOD — pnl=0]" if is_equity else "")
-                )
-            else:
-                # No price — keep existing FC unchanged, recalculate LC via latest FX
-                price_dec = Decimal(str(position.get('market_value_fc') or 0)) / qty if qty else Decimal('0')
-                market_value_fc = round(Decimal(str(position.get('market_value_fc') or 0)), fc_dp)
-                unrealized_pnl_fc = Decimal('0') if is_equity else round(
-                    Decimal(str(position.get('unrealized_pnl_fc') or 0)), fc_dp
-                )
-                market_value_lc = round(market_value_fc * fx_rate, lc_dp)
-                unrealized_pnl_lc = Decimal('0') if is_equity else round(market_value_lc - cost_lc_dec, lc_dp)
-                self.stdout.write(
-                    f"  {portfolio}/{security} [{position.get('src_system')}]: "
-                    f"[NO PRICE — LC recalc only] fx={fx_rate:.6f}  "
-                    f"mkt_fc={market_value_fc}  mkt_lc={market_value_lc}"
-                )
+        if latest_price is not None:
+            price_dec       = Decimal(str(latest_price))
+            market_value_fc = round(qty * price_dec, fc_dp)
+            price_source    = f"px={latest_price}"
+        else:
+            # No price available — keep existing FC market value unchanged
+            price_dec       = Decimal(str(position.get('market_value_fc') or 0)) / qty if qty else Decimal('0')
+            market_value_fc = round(Decimal(str(position.get('market_value_fc') or 0)), fc_dp)
+            price_source    = "[NO PRICE — FC unchanged]"
+
+        # Market value LC always recalculated from FC × latest FX rate
+        market_value_lc = round(market_value_fc * fx_rate, lc_dp)
+
+        # Unrealized P&L: 0 for SUBSI/ASSOC; otherwise market_value - cost
+        if is_equity:
+            unrealized_pnl_fc = Decimal('0')
+            unrealized_pnl_lc = Decimal('0')
+        else:
+            unrealized_pnl_fc = round(market_value_fc - cost_fc_dec, fc_dp)
+            unrealized_pnl_lc = round(market_value_lc - cost_lc_dec, lc_dp)
+
+        # net_book_value = cost + unrealized_pnl - provision
+        nbv_fc = round(cost_fc_dec + unrealized_pnl_fc - provision_fc, fc_dp)
+        nbv_lc = round(cost_lc_dec + unrealized_pnl_lc - provision_lc, lc_dp)
+
+        # NON-REVALUED: LC columns use FX-translated FC values but no MTM adjustment to cost basis
+        # (market_value_fc still uses price; unrealized_pnl still calculated; LC just follows FC × FX)
+        reval_tag = f"[{reval_status}]" if reval_status == 'NON-REVALUED' else ""
+
+        self.stdout.write(
+            f"  {portfolio}/{security} [{position.get('src_system')}]{reval_tag}: "
+            f"{price_source}  mkt_fc={market_value_fc}  mkt_lc={market_value_lc}  "
+            f"upnl_fc={unrealized_pnl_fc}  fx={fx_rate:.6f}"
+            + ("  [EQUITY METHOD — pnl=0]" if is_equity else "")
+        )
 
         if not dry_run:
             success = self._insert_eod_position(
-                position, price_dec, market_value_fc, market_value_lc,
-                unrealized_pnl_fc, unrealized_pnl_lc, fc_dp, lc_dp
+                position, price_dec,
+                market_value_fc, market_value_lc,
+                unrealized_pnl_fc, unrealized_pnl_lc,
+                nbv_fc, nbv_lc,
+                fc_dp, lc_dp
             )
             if not success:
-                self.stderr.write(self.style.ERROR(f"  Failed to upsert position {position_id}"))
+                self.stderr.write(self.style.ERROR(f"  Failed to insert EOD position {position_id}"))
                 return 'error'
 
         return 'updated'
 
     # -------------------------------------------------------------------------
-    # UPSERT back to cis_position
+    # INSERT new EOD row into cis_position
     # -------------------------------------------------------------------------
 
-    def _insert_eod_position(self, position, price, market_value_fc, market_value_lc,
+    def _insert_eod_position(self, position, price,
+                              market_value_fc, market_value_lc,
                               unrealized_pnl_fc, unrealized_pnl_lc,
+                              nbv_fc, nbv_lc,
                               fc_dp: int = 2, lc_dp: int = 2):
         """
-        INSERT a new cis_position row for each EOD run.
-        A fresh position_id is generated each time so EOD records are
-        distinct from INT/CA/CF rows — full audit trail, no overwrite.
-        All cost/dividend/provision columns carried forward from the source row,
-        rounded to the currency's decimal precision (fc_dp for FC, lc_dp for LC).
+        INSERT a new cis_position row per EOD run.
+        Fresh position_id every time so EOD rows are distinct from INT/CA/CF rows.
+        processing_date uses YYYYMMDD format to match INT records.
         """
         try:
-            today = datetime.now().strftime('%Y-%m-%d')
-            # New position_id every run — EOD creates a new row, not an overwrite
+            today           = datetime.now().strftime('%Y-%m-%d')
+            processing_date = datetime.now().strftime('%Y%m%d')  # YYYYMMDD — matches INT records
             new_position_id = int(datetime.now().timestamp() * 1000) + (uuid.uuid4().int % 999999)
-            version_id = new_position_id
+            version_id      = new_position_id
 
             def _fc(v, default=0):
-                """Round FC value to security currency decimal places."""
                 val = Decimal(str(v)) if v is not None else Decimal(str(default))
                 return float(round(val, fc_dp))
 
             def _lc(v, default=0):
-                """Round LC value to portfolio currency decimal places."""
                 val = Decimal(str(v)) if v is not None else Decimal(str(default))
                 return float(round(val, lc_dp))
 
@@ -345,12 +316,12 @@ class Command(BaseCommand):
                     '{self._escape(position.get('position_basis', 'TRADE_DATE'))}',
                     '{today}',
                     '{self._escape(position.get('src_system', 'CIS'))}',
-                    '{today}',
+                    '{processing_date}',
                     {float(position.get('quantity') or 0)},
                     {_fc(position.get('average_cost_fc'))}, {_fc(position.get('cost_fc'))},
                     {_lc(position.get('average_cost_lc'))}, {_lc(position.get('cost_lc'))},
                     {float(round(market_value_fc, fc_dp))}, {float(round(market_value_lc, lc_dp))},
-                    {float(round(market_value_fc, fc_dp))}, {float(round(market_value_lc, lc_dp))},
+                    {float(round(nbv_fc, fc_dp))}, {float(round(nbv_lc, lc_dp))},
                     {float(round(unrealized_pnl_fc, fc_dp))}, {float(round(unrealized_pnl_lc, lc_dp))},
                     {_fc(position.get('realized_pnl_fc'))}, {_lc(position.get('realized_pnl_lc'))},
                     {_fc(position.get('provision_fc'))}, {_lc(position.get('provision_lc'))},
@@ -365,11 +336,11 @@ class Command(BaseCommand):
 
             success = impala_manager.execute_write(query, database=DATABASE)
             if success:
-                logger.debug(f"EOD insert OK: new position_id={new_position_id} (src={position.get('position_id')})")
+                logger.debug(f"EOD insert OK: new_id={new_position_id} src_id={position.get('position_id')}")
             return success
 
         except Exception as e:
-            logger.error(f"Error upserting position {position.get('position_id')}: {str(e)}")
+            logger.error(f"Error inserting EOD position {position.get('position_id')}: {str(e)}")
             return False
 
     # -------------------------------------------------------------------------
@@ -377,7 +348,7 @@ class Command(BaseCommand):
     # -------------------------------------------------------------------------
 
     def _get_latest_price(self, security_label):
-        """Fetch latest closing price from cis_equity_price."""
+        """Fetch latest closing price from cis_equity_price (is_active=true)."""
         safe = self._escape(security_label)
         try:
             results = impala_manager.execute_query(
@@ -394,7 +365,6 @@ class Command(BaseCommand):
                 return Decimal(str(results[0]['main_closing_price']))
         except Exception as e:
             logger.warning(f"cis_equity_price lookup failed for {security_label}: {str(e)}")
-
         return None
 
     def _get_security_currency(self, security_label):
@@ -430,7 +400,7 @@ class Command(BaseCommand):
     def _get_fx_rate(self, from_ccy, to_ccy):
         """
         Return latest spot FX rate from gmp_cis_sta_dly_fx_rates.
-        from_ccy = security currency, to_ccy = portfolio base currency.
+        from_ccy = security currency (FC), to_ccy = portfolio base currency (LC).
         Returns Decimal('1') if same currency or rate not found.
         """
         if not from_ccy or not to_ccy or from_ccy == to_ccy:
@@ -458,9 +428,8 @@ class Command(BaseCommand):
 
     def _get_currency_dp(self, currency_code) -> int:
         """
-        Return decimal places for a currency using the precision string from
-        gmp_cis_sta_dly_currency, e.g. '0000000000.01' → 2, '0000000000.001' → 3.
-        Falls back to 2 (standard monetary) if not found or unparseable.
+        Return decimal places for a currency from gmp_cis_sta_dly_currency.
+        e.g. '0000000000.01' → 2.  Falls back to 2 if not found.
         """
         if not currency_code:
             return 2
@@ -480,7 +449,7 @@ class Command(BaseCommand):
         return 2
 
     def _is_equity_method_security(self, security_label):
-        """Return True if security_investment is ASSOC or SUBSI (equity method — no MTM)."""
+        """Return True if security_investment is ASSOC or SUBSI (equity method — no unrealized P&L)."""
         try:
             safe = self._escape(security_label)
             results = impala_manager.execute_query(

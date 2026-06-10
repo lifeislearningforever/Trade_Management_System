@@ -17,10 +17,14 @@ Logic per cash_flow_type (ALL types accumulate — SA confirmed 2026-06-09):
   RETURN_OF_CAPITAL   → AVP reduction: avp_new = avp_old - (amount_fc / qty)
   OTHER               → skip (log warning)
 
-send_receive sign convention (SA spec):
+send_receive sign convention (global):
   SEND    → increase (positive)
   RECEIVE → decrease (negative)
   NULL    → treated as SEND (positive, logged)
+
+Exception — DIVIDEND / CASH_DIVIDEND:
+  RECEIVE → increase (fund received dividend)
+  SEND    → decrease (fund distributed/paid out dividend)
 
 Idempotency: once processed, position_updated=true is set on the cash flow
 record so re-runs on the same date skip already-processed records.
@@ -59,12 +63,22 @@ def _escape(value: str) -> str:
 
 
 def _sign(send_receive: str, cf_number: str) -> Decimal:
-    """SEND=+1, RECEIVE=-1, NULL=+1 (logged)."""
+    """Global convention: SEND=+1, RECEIVE=-1, NULL=+1 (logged)."""
     sr = (send_receive or '').upper().strip()
     if sr == 'RECEIVE':
         return Decimal('-1')
     if not sr:
         logger.warning(f"[CF {cf_number}] send_receive is NULL — treating as SEND (positive)")
+    return Decimal('1')
+
+
+def _sign_dividend(send_receive: str, cf_number: str) -> Decimal:
+    """Dividend convention: RECEIVE=+1 (fund got paid), SEND=-1 (fund paid out)."""
+    sr = (send_receive or '').upper().strip()
+    if sr == 'SEND':
+        return Decimal('-1')
+    if not sr:
+        logger.warning(f"[CF {cf_number}] send_receive is NULL for DIVIDEND — treating as RECEIVE (positive)")
     return Decimal('1')
 
 
@@ -134,13 +148,15 @@ class Command(BaseCommand):
             portfolio = cf.get('portfolio_short_name', '')
             security = cf.get('security_label', '')
             send_receive = cf.get('send_receive', '')
-            amount_fc = Decimal(str(cf.get('foreign_ccy_amt') or cf.get('local_ccy_amt') or 0))
+            # FIX: no fallback from local to foreign — zero is correct if foreign_ccy_amt is null
+            amount_fc = Decimal(str(cf.get('foreign_ccy_amt') or 0))
             amount_lc = Decimal(str(cf.get('local_ccy_amt') or 0))
             payment_date = cf.get('payment_date') or run_date
 
             self.stdout.write(
                 f'  [{cf_number}] {cf_type} | {portfolio}/{security} | '
-                f'{send_receive} | FC={amount_fc} LC={amount_lc}'
+                f'{send_receive} | FC={amount_fc} ({cf.get("foreign_ccy","")}) '
+                f'LC={amount_lc} ({cf.get("local_ccy","")})'
             )
 
             if cf_type == 'OTHER':
@@ -259,17 +275,21 @@ class Command(BaseCommand):
         if not position:
             return False, f'No open position for {portfolio}/{security} in cis_trade_position or cis_position'
 
-        sign = _sign(send_receive, cf.get('cash_flow_number', ''))
+        cf_id = cf.get('cash_flow_id')
+        cf_number = cf.get('cash_flow_number', str(cf_id))
+
+        sign = _sign(send_receive, cf_number)
         signed_fc = (amount_fc * sign).quantize(PRECISION, rounding=ROUND_HALF_UP)
         signed_lc = (amount_lc * sign).quantize(PRECISION, rounding=ROUND_HALF_UP)
 
-        # --- ALL TYPES ACCUMULATE (SA confirmed 2026-06-09) ---
         if cf_type in ('UNCALL_COMMITMENT',):
             return self._accumulate_field(
                 position, portfolio, security, payment_date,
                 fc_field='uncall_fc', lc_field='uncall_lc',
                 delta_fc=signed_fc, delta_lc=signed_lc,
-                cf_type=cf_type, dry_run=dry_run, pos_src=pos_src
+                cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
+                amount_fc=amount_fc, amount_lc=amount_lc,
+                dry_run=dry_run, pos_src=pos_src
             )
 
         if cf_type in ('PROVISION',):
@@ -277,7 +297,9 @@ class Command(BaseCommand):
                 position, portfolio, security, payment_date,
                 fc_field='provision_fc', lc_field='provision_lc',
                 delta_fc=signed_fc, delta_lc=signed_lc,
-                cf_type=cf_type, dry_run=dry_run, pos_src=pos_src
+                cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
+                amount_fc=amount_fc, amount_lc=amount_lc,
+                dry_run=dry_run, pos_src=pos_src
             )
 
         if cf_type in ('PIPELINE',):
@@ -285,7 +307,9 @@ class Command(BaseCommand):
                 position, portfolio, security, payment_date,
                 fc_field='pipeline_fc', lc_field='pipeline_lc',
                 delta_fc=signed_fc, delta_lc=signed_lc,
-                cf_type=cf_type, dry_run=dry_run, pos_src=pos_src
+                cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
+                amount_fc=amount_fc, amount_lc=amount_lc,
+                dry_run=dry_run, pos_src=pos_src
             )
 
         if cf_type in ('YTD_REALISE',):
@@ -293,16 +317,9 @@ class Command(BaseCommand):
                 position, portfolio, security, payment_date,
                 fc_field='realized_pnl_fc', lc_field='realized_pnl_lc',
                 delta_fc=signed_fc, delta_lc=signed_lc,
-                cf_type=cf_type, dry_run=dry_run, pos_src=pos_src
-            )
-
-        # --- ACCUMULATE TYPES ---
-        if cf_type in ('DIVIDEND', 'CASH_DIVIDEND'):
-            return self._accumulate_field(
-                position, portfolio, security, payment_date,
-                fc_field='dividend_fc', lc_field='dividend_lc',
-                delta_fc=signed_fc, delta_lc=signed_lc,
-                cf_type=cf_type, dry_run=dry_run, pos_src=pos_src
+                cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
+                amount_fc=amount_fc, amount_lc=amount_lc,
+                dry_run=dry_run, pos_src=pos_src
             )
 
         if cf_type in ('INCOME_DISTRIBUTION',):
@@ -310,15 +327,33 @@ class Command(BaseCommand):
                 position, portfolio, security, payment_date,
                 fc_field='realized_pnl_fc', lc_field='realized_pnl_lc',
                 delta_fc=signed_fc, delta_lc=signed_lc,
-                cf_type=cf_type, dry_run=dry_run, pos_src=pos_src
+                cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
+                amount_fc=amount_fc, amount_lc=amount_lc,
+                dry_run=dry_run, pos_src=pos_src
             )
 
-        # --- AVP REDUCTION TYPES ---
+        # DIVIDEND: RECEIVE=increase, SEND=decrease (opposite of global convention)
+        if cf_type in ('DIVIDEND', 'CASH_DIVIDEND'):
+            div_sign = _sign_dividend(send_receive, cf_number)
+            div_fc = (amount_fc * div_sign).quantize(PRECISION, rounding=ROUND_HALF_UP)
+            div_lc = (amount_lc * div_sign).quantize(PRECISION, rounding=ROUND_HALF_UP)
+            return self._accumulate_field(
+                position, portfolio, security, payment_date,
+                fc_field='dividend_fc', lc_field='dividend_lc',
+                delta_fc=div_fc, delta_lc=div_lc,
+                cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
+                amount_fc=amount_fc, amount_lc=amount_lc,
+                dry_run=dry_run, pos_src=pos_src
+            )
+
+        # AVP REDUCTION
         if cf_type in ('RETURN_OF_CAPITAL', 'CAPITAL_DISTRIBUTION'):
             return self._reduce_avp(
                 position, portfolio, security, payment_date,
                 amount_fc=signed_fc, amount_lc=signed_lc,
-                cf_type=cf_type, dry_run=dry_run, pos_src=pos_src
+                cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
+                raw_amount_fc=amount_fc, raw_amount_lc=amount_lc,
+                dry_run=dry_run, pos_src=pos_src
             )
 
         return False, f'Unrecognised cash flow type: {cf_type}'
@@ -338,6 +373,10 @@ class Command(BaseCommand):
         delta_fc: Decimal,
         delta_lc: Decimal,
         cf_type: str,
+        cf_id: int,
+        cf_number: str,
+        amount_fc: Decimal,
+        amount_lc: Decimal,
         dry_run: bool,
         pos_src: str = 'CIS',
     ) -> Tuple[bool, str]:
@@ -354,7 +393,10 @@ class Command(BaseCommand):
 
         overrides = {fc_field: float(new_fc), lc_field: float(new_lc)}
         success = self._write_new_position_version(
-            position, portfolio, security, position_date, cf_type, overrides, pos_src=pos_src
+            position, portfolio, security, position_date, cf_type, overrides,
+            cf_id=cf_id, cf_number=cf_number,
+            cf_amount_fc=float(amount_fc), cf_amount_lc=float(amount_lc),
+            pos_src=pos_src
         )
         if success:
             return True, f'{cf_type}: {fc_field} {old_fc} + {delta_fc} = {new_fc}'
@@ -369,6 +411,10 @@ class Command(BaseCommand):
         amount_fc: Decimal,
         amount_lc: Decimal,
         cf_type: str,
+        cf_id: int,
+        cf_number: str,
+        raw_amount_fc: Decimal,
+        raw_amount_lc: Decimal,
         dry_run: bool,
         pos_src: str = 'CIS',
     ) -> Tuple[bool, str]:
@@ -404,7 +450,10 @@ class Command(BaseCommand):
             'total_cost_lc': float(new_total_cost_lc),
         }
         success = self._write_new_position_version(
-            position, portfolio, security, position_date, cf_type, overrides, pos_src=pos_src
+            position, portfolio, security, position_date, cf_type, overrides,
+            cf_id=cf_id, cf_number=cf_number,
+            cf_amount_fc=float(raw_amount_fc), cf_amount_lc=float(raw_amount_lc),
+            pos_src=pos_src
         )
         if success:
             return True, f'{cf_type}: avp_fc {old_avp_fc} → {new_avp_fc}'
@@ -422,6 +471,10 @@ class Command(BaseCommand):
         position_date: str,
         cf_type: str,
         overrides: Dict[str, Any],
+        cf_id: int,
+        cf_number: str,
+        cf_amount_fc: float,
+        cf_amount_lc: float,
         pos_src: str = 'CIS',
     ) -> bool:
         """
@@ -440,6 +493,10 @@ class Command(BaseCommand):
                     cf_type=cf_type,
                     current=current,
                     overrides=overrides,
+                    cf_id=cf_id,
+                    cf_number=cf_number,
+                    cf_amount_fc=cf_amount_fc,
+                    cf_amount_lc=cf_amount_lc,
                     src_system=pos_src,
                 )
                 return True
@@ -449,6 +506,7 @@ class Command(BaseCommand):
 
             # Mark old as not latest
             ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            processing_date = datetime.now().strftime('%Y%m%d')  # YYYYMMDD to match INT records
             impala_manager.execute_write(
                 f"""UPDATE {DATABASE}.{POSITION_TABLE}
                     SET is_latest = false, updated_at = '{ts}'
@@ -477,6 +535,10 @@ class Command(BaseCommand):
             def _b(field, default=True):
                 val = current.get(field, default)
                 return 'true' if val else 'false'
+
+            # net_book_value = cost + unrealized_pnl - provision
+            nbv_fc = float(_f('total_cost_fc') + _f('unrealized_pnl_fc') - _f('provision_fc'))
+            nbv_lc = float(_f('total_cost_lc') + _f('unrealized_pnl_lc') - _f('provision_lc'))
 
             sql = f"""
             UPSERT INTO {DATABASE}.{POSITION_TABLE} (
@@ -518,8 +580,8 @@ class Command(BaseCommand):
                 {_f('pipeline_fc')},      {_f('pipeline_lc')},
                 {_f('commit_fc')},        {_f('commit_lc')},
                 {_f('provision_fc')},     {_f('provision_lc')},
-                {_s('position_type', 'NORMAL')},
-                'CF_{_escape(cf_type)}',
+                'EOD',
+                'EOD',
                 {_s('security_currency', '')},
                 {_s('portfolio_currency', '')},
                 {_f('fx_rate', 1)},
@@ -528,10 +590,10 @@ class Command(BaseCommand):
                 {_s('last_ca_number', '')},
                 {_s('last_ca_type', '')},
                 {_s('last_ca_date', '')},
-                {current.get('last_cash_flow_id') or 'NULL'},
-                {_s('last_cash_flow_number', '')},
-                {_f('last_cash_flow_amount_fc')},
-                {_f('last_cash_flow_amount_lc')},
+                {cf_id if cf_id else 'NULL'},
+                '{_escape(str(cf_number))}',
+                {cf_amount_fc},
+                {cf_amount_lc},
                 'SYSTEM_CF', '{ts}',
                 'SYSTEM_CF', '{ts}'
             )
@@ -545,6 +607,10 @@ class Command(BaseCommand):
                     cf_type=cf_type,
                     current=current,
                     overrides=overrides,
+                    cf_id=cf_id,
+                    cf_number=cf_number,
+                    cf_amount_fc=cf_amount_fc,
+                    cf_amount_lc=cf_amount_lc,
                 )
             return success
 
@@ -560,6 +626,10 @@ class Command(BaseCommand):
         cf_type: str,
         current: Dict[str, Any],
         overrides: Dict[str, Any],
+        cf_id: int,
+        cf_number: str,
+        cf_amount_fc: float,
+        cf_amount_lc: float,
         src_system: str = 'CIS',
     ) -> None:
         """
@@ -578,7 +648,8 @@ class Command(BaseCommand):
                    dividend_fc, dividend_lc,
                    provision_fc, provision_lc,
                    uncall_fc, uncall_lc,
-                   pipeline_fc, pipeline_lc
+                   pipeline_fc, pipeline_lc,
+                   security_currency, portfolio_currency
             FROM {DATABASE}.{GOLDEN_TABLE}
             WHERE portfolio = '{_escape(portfolio)}'
               AND security_label = '{_escape(security)}'
@@ -587,24 +658,29 @@ class Command(BaseCommand):
             """
             rows = impala_manager.execute_query(find_q, database=DATABASE)
             today = datetime.now().strftime('%Y-%m-%d')
+            processing_date = datetime.now().strftime('%Y%m%d')  # YYYYMMDD to match INT records
             new_ver = int(datetime.now().timestamp() * 1000) + 3
 
             if rows:
                 row = rows[0]
-                position_id  = row['position_id']
-                isin         = row.get('isin')
-                source_table = row.get('source_table')
+                position_id   = row['position_id']
+                isin          = row.get('isin')
+                source_table  = row.get('source_table')
                 effective_src = row.get('src_system') or src_system
-                pos_basis    = row.get('position_basis') or 'SETTLE_DATE'
+                pos_basis     = row.get('position_basis') or 'SETTLE_DATE'
+                # Use currencies from golden row; fall back to current position or CF record
+                sec_ccy  = row.get('security_currency') or current.get('security_currency', '')
+                port_ccy = row.get('portfolio_currency') or current.get('portfolio_currency', '')
             else:
-                # No golden row yet — create a new one
                 import uuid as _uuid
-                position_id  = int(datetime.now().timestamp() * 1000) + (_uuid.uuid4().int % 9999)
-                row          = {}
-                isin         = current.get('isin')
-                source_table = POSITION_TABLE
+                position_id   = int(datetime.now().timestamp() * 1000) + (_uuid.uuid4().int % 9999)
+                row           = {}
+                isin          = current.get('isin')
+                source_table  = POSITION_TABLE
                 effective_src = src_system
-                pos_basis    = current.get('position_basis') or 'SETTLE_DATE'
+                pos_basis     = current.get('position_basis') or 'SETTLE_DATE'
+                sec_ccy  = current.get('security_currency', '')
+                port_ccy = current.get('portfolio_currency', '')
                 logger.info(
                     f'[GOLDEN] No existing cis_position row for {portfolio}/{security} '
                     f'— creating new position_id={position_id}'
@@ -618,6 +694,16 @@ class Command(BaseCommand):
                     return float(current[field])
                 v = row.get(field)
                 return float(v) if v is not None else float(default)
+
+            # net_book_value = cost + unrealized_pnl - provision
+            cost_fc_val      = _gv('cost_fc', _gv('total_cost_fc'))
+            cost_lc_val      = _gv('cost_lc', _gv('total_cost_lc'))
+            upnl_fc_val      = _gv('unrealized_pnl_fc')
+            upnl_lc_val      = _gv('unrealized_pnl_lc')
+            provision_fc_val = _gv('provision_fc')
+            provision_lc_val = _gv('provision_lc')
+            nbv_fc = cost_fc_val + upnl_fc_val - provision_fc_val
+            nbv_lc = cost_lc_val + upnl_lc_val - provision_lc_val
 
             upsert = f"""
             UPSERT INTO {DATABASE}.{GOLDEN_TABLE} (
@@ -636,25 +722,27 @@ class Command(BaseCommand):
                 provision_fc, provision_lc,
                 uncall_fc, uncall_lc,
                 pipeline_fc, pipeline_lc,
+                security_currency, portfolio_currency,
                 position_type,
                 isin, source_table
             ) VALUES (
                 {position_id}, {new_ver},
                 '{_escape(portfolio)}', '{_escape(security)}',
                 '{_escape(pos_basis)}', '{_escape(position_date)}',
-                '{_escape(effective_src)}', '{today}',
+                '{_escape(effective_src)}', '{processing_date}',
                 {_gv('quantity')},
-                {_gv('average_cost_fc')}, {_gv('cost_fc', _gv('total_cost_fc'))},
-                {_gv('average_cost_lc')}, {_gv('cost_lc', _gv('total_cost_lc'))},
+                {_gv('average_cost_fc')}, {cost_fc_val},
+                {_gv('average_cost_lc')}, {cost_lc_val},
                 {_gv('market_value_fc')}, {_gv('market_value_lc')},
-                {_gv('market_value_fc')}, {_gv('market_value_lc')},
-                {_gv('unrealized_pnl_fc')}, {_gv('unrealized_pnl_lc')},
+                {nbv_fc}, {nbv_lc},
+                {upnl_fc_val}, {upnl_lc_val},
                 {_gv('realized_pnl_fc')}, {_gv('realized_pnl_lc')},
                 {_gv('dividend_fc')}, {_gv('dividend_lc')},
-                {_gv('provision_fc')}, {_gv('provision_lc')},
+                {provision_fc_val}, {provision_lc_val},
                 {_gv('uncall_fc')}, {_gv('uncall_lc')},
                 {_gv('pipeline_fc')}, {_gv('pipeline_lc')},
-                'CF_{_escape(cf_type)}',
+                '{_escape(sec_ccy)}', '{_escape(port_ccy)}',
+                'EOD',
                 {f"'{_escape(isin)}'" if isin else 'NULL'},
                 {f"'{_escape(source_table)}'" if source_table else 'NULL'}
             )
@@ -663,7 +751,8 @@ class Command(BaseCommand):
             if ok:
                 logger.info(
                     f'[GOLDEN] cis_position upserted: position_id={position_id} '
-                    f'{portfolio}/{security} src={effective_src} cf_type={cf_type}'
+                    f'{portfolio}/{security} src={effective_src} cf_type={cf_type} '
+                    f'last_cf={cf_number} amount_fc={cf_amount_fc}'
                 )
             else:
                 logger.error(
@@ -754,6 +843,8 @@ class Command(BaseCommand):
                 uncall_lc,
                 pipeline_fc,
                 pipeline_lc,
+                security_currency,
+                portfolio_currency,
                 isin,
                 source_table
             FROM {DATABASE}.{GOLDEN_TABLE}
