@@ -2212,6 +2212,16 @@ def corporate_action_create(request):
                 except ValueError:
                     ca_data['price'] = None
 
+            # Price (split ratio / dividend amount) is mandatory for position-adjustment types
+            PRICE_REQUIRED_TYPES = {'SPLIT', 'STOCK_SPLIT', 'REVERSE_SPLIT', 'BONUS_ISSUE', 'CONSOLIDATION'}
+            if ca_data.get('ca_type') in PRICE_REQUIRED_TYPES and not ca_data.get('price'):
+                messages.error(request, f"Price / ratio is required for CA type '{ca_data['ca_type']}'")
+                dropdown_options = corporate_action_dropdown_service.get_all_dropdown_options()
+                return render(request, 'reference_data/corporate_action_form.html', {
+                    'dropdown_options': dropdown_options,
+                    'form_data': ca_data,
+                })
+
             success, ca_id, error_msg = corporate_action_service.create(
                 ca_data=ca_data,
                 user_id=user_id,
@@ -2288,6 +2298,17 @@ def corporate_action_edit(request, ca_id):
                     ca_data['price'] = float(ca_data['price'])
                 except ValueError:
                     ca_data['price'] = None
+
+            # Price (split ratio / dividend amount) is mandatory for position-adjustment types
+            PRICE_REQUIRED_TYPES = {'SPLIT', 'STOCK_SPLIT', 'REVERSE_SPLIT', 'BONUS_ISSUE', 'CONSOLIDATION'}
+            if ca_data.get('ca_type') in PRICE_REQUIRED_TYPES and not ca_data.get('price'):
+                messages.error(request, f"Price / ratio is required for CA type '{ca_data['ca_type']}'")
+                dropdown_options = corporate_action_dropdown_service.get_all_dropdown_options()
+                return render(request, 'reference_data/corporate_action_form.html', {
+                    'dropdown_options': dropdown_options,
+                    'ca': ca,
+                    'form_data': ca_data,
+                })
 
             success, error_msg = corporate_action_service.update(
                 ca_id=int(ca_id),

@@ -1029,7 +1029,13 @@ class CACashFlowService:
             ca_type = queue_entry.get('ca_type')
             security_name = queue_entry.get('security_name')
             ex_date = queue_entry.get('ex_date')
-            price = Decimal(str(queue_entry.get('price') or 1))  # Price is ratio for BONUS/SPLIT
+            raw_price = queue_entry.get('price')
+            if raw_price is None or str(raw_price).strip() in ('', 'None', '0'):
+                msg = (f"CA {queue_entry.get('ca_number')} ({ca_type}): price/ratio is NULL or zero in queue. "
+                       f"Edit the CA record and set the correct ratio before reprocessing.")
+                logger.error(f"[POS_ADJ] {msg}")
+                return False, msg, 0, Decimal('0')
+            price = Decimal(str(raw_price))  # ratio for BONUS/SPLIT/REVERSE_SPLIT
             ca_id = queue_entry.get('ca_id')
             ca_number = queue_entry.get('ca_number')
             created_by = queue_entry.get('created_by', 'system')
