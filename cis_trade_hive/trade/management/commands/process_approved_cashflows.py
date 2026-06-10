@@ -205,12 +205,12 @@ class Command(BaseCommand):
         reprocess: bool
     ) -> List[Dict[str, Any]]:
         """
-        Fetch APPROVED CIS cash flows where payment_date <= run_date.
+        Fetch APPROVED or VALIDATED cash flows (src_system CIS or CA) where payment_date <= run_date.
         Excludes already-processed records unless --reprocess is set.
         """
         clauses = [
-            "status = 'APPROVED'",
-            "src_system = 'CIS'",
+            "status IN ('APPROVED', 'VALIDATED')",
+            "src_system IN ('CIS', 'CA')",
             "(is_deleted = false OR is_deleted IS NULL)",
             f"payment_date <= '{_escape(run_date)}'",
         ]
