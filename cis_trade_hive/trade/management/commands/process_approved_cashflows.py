@@ -652,8 +652,7 @@ class Command(BaseCommand):
                    dividend_fc, dividend_lc,
                    provision_fc, provision_lc,
                    uncall_fc, uncall_lc,
-                   pipeline_fc, pipeline_lc,
-                   security_currency, portfolio_currency
+                   pipeline_fc, pipeline_lc
             FROM {DATABASE}.{GOLDEN_TABLE}
             WHERE portfolio = '{_escape(portfolio)}'
               AND security_label = '{_escape(security)}'
@@ -725,7 +724,6 @@ class Command(BaseCommand):
                 provision_fc, provision_lc,
                 uncall_fc, uncall_lc,
                 pipeline_fc, pipeline_lc,
-                security_currency, portfolio_currency,
                 position_type,
                 isin, source_table
             ) VALUES (
@@ -744,7 +742,6 @@ class Command(BaseCommand):
                 {provision_fc_val}, {provision_lc_val},
                 {_gv('uncall_fc')}, {_gv('uncall_lc')},
                 {_gv('pipeline_fc')}, {_gv('pipeline_lc')},
-                '{_escape(sec_ccy)}', '{_escape(port_ccy)}',
                 'EOD',
                 {f"'{_escape(isin)}'" if isin else 'NULL'},
                 {f"'{_escape(source_table)}'" if source_table else 'NULL'}
@@ -874,8 +871,6 @@ class Command(BaseCommand):
                 uncall_lc,
                 pipeline_fc,
                 pipeline_lc,
-                security_currency,
-                portfolio_currency,
                 isin,
                 source_table
             FROM {DATABASE}.{GOLDEN_TABLE}
