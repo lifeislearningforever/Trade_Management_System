@@ -1088,12 +1088,11 @@ class CACashFlowService:
                             dry_run=dry_run
                         )
                     elif ca_type in ['SPLIT', 'STOCK_SPLIT']:
-                        # Stock Split (Forward): 1:3 means 1 share becomes 3 shares
-                        # Price field stores the FRACTION (e.g., 0.33 for 1:3 split)
-                        # So ratio = 1/price (e.g., 1/0.33 = 3)
+                        # Price field stores the split ratio directly.
+                        # e.g. price=2 means 1 share → 2 shares (2:1 forward split)
                         # qty_new = qty_old × ratio, AVP = AVP_old / ratio
-                        split_ratio = Decimal('1') / price if price > 0 else Decimal('1')
-                        logger.info(f"[STOCK_SPLIT] Price={price}, calculated ratio={split_ratio}")
+                        split_ratio = price if price > 0 else Decimal('1')
+                        logger.info(f"[STOCK_SPLIT] Price={price}, ratio={split_ratio}")
                         success = self._process_stock_split(
                             portfolio_short_name=portfolio_short_name,
                             security_name=security_name,
@@ -1282,9 +1281,10 @@ class CACashFlowService:
         """
         Process STOCK SPLIT (Forward Split): qty_new = qty_old × ratio, AVP = AVP_old / ratio
 
-        Example: 1:3 stock split (ratio=3) with 88 shares @ $49.67
-        - New qty = 88 × 3 = 264 shares
-        - New AVP = $49.67 / 3 = $16.56
+        Price field = ratio (e.g. price=2 means 1 share becomes 2 shares).
+        Example: 2:1 split (ratio=2) with 88 shares @ $49.67
+        - New qty = 88 × 2 = 176 shares
+        - New AVP = $49.67 / 2 = $24.835
         - Total cost stays same = $4,370.96
         """
         try:
