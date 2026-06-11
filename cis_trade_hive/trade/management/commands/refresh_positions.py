@@ -49,16 +49,12 @@ class Command(BaseCommand):
         )
         parser.add_argument('--dry-run', action='store_true',
                             help='Show what would be updated without writing to database')
-        parser.add_argument(
-            '--date', type=str, default=None,
-            help='Position date for EOD records (YYYY-MM-DD). Default: today'
-        )
 
     def handle(self, *args, **options):
         portfolio_filter = options.get('portfolio')
         source_filter = options.get('source')
         dry_run = options.get('dry_run', False)
-        run_date = options.get('date') or datetime.now().strftime('%Y-%m-%d')
+        run_date = datetime.now().strftime('%Y-%m-%d')  # fallback only; position_date comes from each row
 
         self.stdout.write(self.style.MIGRATE_HEADING('=' * 80))
         self.stdout.write(self.style.MIGRATE_HEADING('EOD Position Revaluation — cis_position (golden copy)'))
@@ -71,7 +67,6 @@ class Command(BaseCommand):
 
         sources = [source_filter] if source_filter else ALL_SOURCES
         self.stdout.write(f"Sources    : {', '.join(sources)}")
-        self.stdout.write(f"Position date: {run_date}")
         if portfolio_filter:
             self.stdout.write(f"Portfolio  : {portfolio_filter}")
         self.stdout.write('')
@@ -429,7 +424,7 @@ class Command(BaseCommand):
     def _batch_delete_eod(self, insert_rows, run_date):
         """
         Delete all existing EOD rows for the (portfolio, security_label, position_basis, position_date)
-        combinations we are about to insert.  Uses a single DELETE per batch of 500 tuples.
+        combinations we are about to insert.  Uses a single DELETE per batch of 500 4-tuples.
         """
         BATCH = 500
         tuples = [
@@ -437,21 +432,20 @@ class Command(BaseCommand):
                 self._escape(r['position'].get('portfolio', '')),
                 self._escape(r['position'].get('security_label', '')),
                 self._escape(r['position'].get('position_basis', 'TRADE_DATE')),
+                str(r['position'].get('position_date') or run_date)[:10],
             )
             for r in insert_rows
         ]
-        position_date = run_date
 
         for i in range(0, len(tuples), BATCH):
             chunk = tuples[i: i + BATCH]
             in_clause = ', '.join(
-                f"('{p}', '{s}', '{b}')" for p, s, b in chunk
+                f"('{p}', '{s}', '{b}', '{d}')" for p, s, b, d in chunk
             )
             impala_manager.execute_write(
                 f"""DELETE FROM {DATABASE}.cis_position
                     WHERE position_type = 'EOD'
-                      AND position_date  = '{position_date}'
-                      AND (portfolio, security_label, position_basis)
+                      AND (portfolio, security_label, position_basis, position_date)
                           IN ({in_clause})""",
                 database=DATABASE
             )
@@ -479,7 +473,9 @@ class Command(BaseCommand):
             nbv_lc    = row['nbv_lc']
 
             new_id    = now_ms + idx  # unique within this batch run
-            pos_date  = run_date      # EOD position_date = the --date run arg
+            # Use the source position's own position_date; fall back to run_date if missing
+            raw_pos_date = position.get('position_date')
+            pos_date  = str(raw_pos_date)[:10] if raw_pos_date else run_date
             proc_date = pos_date.replace('-', '')  # YYYYMMDD
 
             def fc(v, default=0):
