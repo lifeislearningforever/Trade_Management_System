@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 PAGE_SIZE = 100
 
 POSITION_BASIS_CHOICES = ['TRADE_DATE', 'SETTLE_DATE']
-POSITION_TYPE_CHOICES = ['LONG', 'SHORT', 'COMMITTED', 'PIPELINE', 'HEDGE', 'SYNTHETIC']
+POSITION_TYPE_CHOICES = ['INT', 'EOD', 'SOD']
 
 
 @require_login
@@ -37,7 +37,7 @@ def position_list(request):
     selected_securities = request.GET.getlist('securities')
     selected_src_systems = request.GET.getlist('src_system')
     position_basis = request.GET.get('position_basis', '').strip()
-    position_type = request.GET.get('position_type', '').strip()
+    position_type  = request.GET.get('position_type', 'INT').strip()
     date_from     = request.GET.get('date_from', '').strip()
     date_to       = request.GET.get('date_to', '').strip()
     export        = request.GET.get('export', '').strip()
