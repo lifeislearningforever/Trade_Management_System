@@ -76,7 +76,7 @@ class CashFlowDropdownService:
             options = [
                 {
                     'value': p.get('portfolio_short_name', ''),
-                    'label': f"{p.get('portfolio_short_name', '')} - {p.get('portfolio_full_name', '')}",
+                    'label': p.get('portfolio_short_name', ''),
                     'currency': p.get('currency', ''),
                     'status': p.get('status', ''),
                 }
