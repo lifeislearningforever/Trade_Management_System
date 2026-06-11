@@ -1,6 +1,11 @@
 {% extends 'base.html' %}
 {% load static %}
 
+{% block extra_css %}
+<link href="{% static 'css/select2.min.css' %}" rel="stylesheet" />
+<link href="{% static 'css/select2-bootstrap-5-theme.min.css' %}" rel="stylesheet" />
+{% endblock %}
+
 {% block title %}Cash Flows - CisTrade{% endblock %}
 
 {% block breadcrumb %}
@@ -55,7 +60,7 @@
                 <!-- Portfolio Filter -->
                 <div class="col-md-3">
                     <label class="form-label">Portfolio</label>
-                    <select class="form-select" name="portfolio">
+                    <select class="form-select" id="cf_portfolio_filter" name="portfolio">
                         <option value="">All Portfolios</option>
                         {% for p in portfolios %}
                             <option value="{{ p.value }}" {% if selected_portfolio == p.value %}selected{% endif %}>
@@ -274,4 +279,18 @@
         New records require approval by another user (Four-Eyes Principle).
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/select2.min.js' %}"></script>
+<script>
+$(document).ready(function () {
+    $('#cf_portfolio_filter').select2({
+        theme: 'bootstrap-5',
+        placeholder: 'All Portfolios',
+        allowClear: true,
+        width: '100%',
+    });
+});
+</script>
 {% endblock %}
