@@ -23,7 +23,7 @@ class PositionRepository:
     def _escape(value: str) -> str:
         if value is None:
             return ''
-        return str(value).replace("'", "''")
+        return str(value).replace("\\", "\\\\").replace("'", "\\'")
 
     def get_positions(
         self,

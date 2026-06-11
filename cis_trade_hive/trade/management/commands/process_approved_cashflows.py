@@ -60,7 +60,7 @@ DEFAULT_DP = 2
 def _escape(value: str) -> str:
     if value is None:
         return ''
-    return str(value).replace("'", "''")
+    return str(value).replace("\\", "\\\\").replace("'", "\\'")
 
 
 def _sign(send_receive: str, cf_number: str) -> Decimal:

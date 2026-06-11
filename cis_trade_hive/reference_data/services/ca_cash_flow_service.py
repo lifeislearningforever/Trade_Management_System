@@ -73,7 +73,7 @@ class CACashFlowService:
         """Escape string for SQL."""
         if value is None:
             return ''
-        return str(value).replace("'", "''")
+        return str(value).replace("\\", "\\\\").replace("'", "\\'")
 
     def _check_existing_cash_flow(
         self,
