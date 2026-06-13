@@ -300,7 +300,7 @@ def security_create(request: HttpRequest) -> HttpResponse:
 
             # Parse all fields directly from POST (flat form, no modals)
             security_data = {
-                'record_type': request.POST.get('record_type', '').strip(),
+                'record_type': 'C',
                 'security_name': request.POST.get('security_name', '').strip(),
                 'isin': request.POST.get('isin', '').strip(),
                 'security_description': request.POST.get('security_description', '').strip(),
@@ -426,7 +426,7 @@ def security_edit(request: HttpRequest, security_id: int) -> HttpResponse:
 
             # Parse all fields directly from POST (flat form, no modals)
             security_data = {
-                'record_type': request.POST.get('record_type', '').strip(),
+                'record_type': 'C',
                 'security_name': request.POST.get('security_name', '').strip(),
                 'isin': request.POST.get('isin', '').strip(),
                 'security_description': request.POST.get('security_description', '').strip(),
