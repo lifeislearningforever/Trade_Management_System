@@ -531,6 +531,7 @@ class SecurityDropdownService:
             'business_unit_head_options':               udf_field('Business Unit Head'),
             'person_in_charge_options':                 udf_field('Person in Charge'),
             'pevc_options':                             udf_field('PEVC'),
+            'related_company_options':                  udf_field('Related Company'),
             # Hardcoded (not in UDF)
             'quoted_unquoted_options':                  quoted_unquoted_options,
             # Reference data

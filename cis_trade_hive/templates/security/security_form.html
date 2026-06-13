@@ -361,8 +361,11 @@
 
                     <div class="col-md-4 mb-3">
                         <label for="related_company" class="form-label">Related Company</label>
-                        <input type="text" class="form-control" id="related_company" name="related_company"
-                               value="{{ security.related_company|default:'' }}" placeholder="Related company">
+                        <select class="form-select" id="related_company" name="related_company">
+                            {% for option in dropdown_options.related_company_options %}
+                                <option value="{{ option.value }}" {% if security.related_company == option.value %}selected{% endif %}>{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                 </div>
 
@@ -526,7 +529,7 @@ $(document).ready(function() {
         'country_of_incorporation', 'country_of_exchange', 'country_of_issue',
         'country_of_primary_exchange', 'exchange_code', 'currency_code',
         'substantial_10_pct', 'pevc_s32_devest', 's32_representative',
-        'approved_s32', 'fintech_speculative', 'unlistedeq_speculative',
+        'approved_s32', 'fintech_speculative', 'unlistedeq_speculative', 'related_company',
         'mas_643_entity_type', 'fin_nonfin_ind', 'base_liv_fund',
         'fund_index_fund', 'core_noncore', 'management_limit_classification',
         'relative_index', 'business_unit_head', 'person_in_charge'
