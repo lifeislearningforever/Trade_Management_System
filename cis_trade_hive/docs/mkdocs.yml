@@ -123,6 +123,7 @@ nav:
     - Overview: business/index.md
     - Portfolio Management: business/portfolio-management.md
     - Four-Eyes Workflow: business/four-eyes-workflow.md
+    - File Upload Guide: business/file-upload-guide.md
     - Quick Reference: business/quick-reference.md
     - UDF Management: business/udf-management.md
     - Market Data: business/market-data.md
