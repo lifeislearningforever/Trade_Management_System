@@ -42,6 +42,20 @@ def security_list(request: HttpRequest) -> HttpResponse:
     src_system_filter = request.GET.get('src_system', '')
     export = request.GET.get('export', '').strip()
 
+    # Sort params — default: security_name asc
+    VALID_SORT_FIELDS = {
+        'security_name', 'isin', 'ticker', 'issuer', 'security_type',
+        'security_sub_type', 'investment_type', 'quoted_unquoted', 'market',
+        'industry', 'currency_code', 'country_of_incorporation',
+        'country_of_issue', 'exchange_code', 'status', 'created_at', 'src_system',
+    }
+    sort_by = request.GET.get('sort_by', 'security_name')
+    sort_order = request.GET.get('sort_order', 'asc')
+    if sort_by not in VALID_SORT_FIELDS:
+        sort_by = 'security_name'
+    if sort_order not in ('asc', 'desc'):
+        sort_order = 'asc'
+
     # Fetch securities
     securities = security_hive_repository.get_all_securities(
         limit=1000,
@@ -50,6 +64,12 @@ def security_list(request: HttpRequest) -> HttpResponse:
         currency=currency_filter if currency_filter else None,
         security_type=security_type_filter if security_type_filter else None,
         src_system=src_system_filter if src_system_filter else None
+    )
+
+    # Server-side sort (applied to full result set before pagination)
+    securities.sort(
+        key=lambda s: (s.get(sort_by) or '').lower() if isinstance(s.get(sort_by), str) else (s.get(sort_by) or ''),
+        reverse=(sort_order == 'desc')
     )
 
     # CSV Export
@@ -188,6 +208,8 @@ def security_list(request: HttpRequest) -> HttpResponse:
         'security_type': security_type_filter,
         'src_system': src_system_filter,
         'pending_count': pending_count,
+        'sort_by': sort_by,
+        'sort_order': sort_order,
         # Permission flags
         **perms,
     }
