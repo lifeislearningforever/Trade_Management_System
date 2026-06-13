@@ -16,6 +16,7 @@ All data fetched from Kudu tables via Impala.
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any
 
 from core.repositories.impala_connection import impala_manager
@@ -177,6 +178,34 @@ class SecurityDropdownRepository:
         except Exception as e:
             logger.error(f"Error fetching currencies: {str(e)}")
             return []
+
+    @staticmethod
+    def get_all_udf_options(object_type: str = 'SECURITY') -> Dict[str, List[Dict[str, str]]]:
+        """
+        Fetch ALL UDF dropdown options for object_type in a single query,
+        grouped by field_name. Replaces N individual queries with 1.
+        """
+        try:
+            query = f"""
+            SELECT field_name, field_value
+            FROM {SecurityDropdownRepository.DATABASE}.{SecurityDropdownRepository.UDF_FIELD_TABLE}
+            WHERE object_type = '{object_type}'
+              AND field_value IS NOT NULL
+              AND field_value != ''
+              AND is_active = true
+            ORDER BY field_name, field_value
+            """
+            result = impala_manager.execute_query(query, database=SecurityDropdownRepository.DATABASE)
+            grouped: Dict[str, List[Dict[str, str]]] = {}
+            for row in (result or []):
+                fname = row.get('field_name', '')
+                fval = row.get('field_value', '')
+                if fname and fval:
+                    grouped.setdefault(fname, []).append({'value': fval})
+            return grouped
+        except Exception as e:
+            logger.error(f"Error fetching bulk UDF options: {str(e)}")
+            return {}
 
     @staticmethod
     def get_markets() -> List[Dict[str, str]]:
@@ -432,46 +461,67 @@ class SecurityDropdownService:
         """
         Get all dropdown options for security forms.
 
-        UDF field names match production cis_udf_field.field_value exactly.
-
-        Returns:
-            Dictionary containing all dropdown lists
+        Strategy: 1 bulk UDF query + 4 parallel reference-data queries
+        instead of 28 serial Impala round trips.
         """
         logger.info(f"Fetching all security dropdown options for user: {user}")
 
-        return {
-            # UDF-based dropdowns - field names match production exactly
-            'industries': self.get_industries(user),                                         # Industry
-            'country_of_incorporation_options': self.get_country_of_incorporation_options(user),  # Country of Incorporation
-            'exchange_codes': self.get_exchange_codes(user),                                 # Exchange Code
-            'security_types': self.get_security_types(user),                                 # Security Type
-            'investment_types': self.get_investment_types(user),                             # Investment Type
-            'price_source_of_issue_options': self.get_price_source_of_issue_options(user),   # Price Source of Issue
-            'country_of_issue_options': self.get_country_of_issue_options(user),             # Country of Issue
-            'country_of_primary_exchange_options': self.get_country_of_primary_exchange_options(user),  # Country of Primary Exchange
-            'bwciif_options': self.get_bwciif_options(user),                                 # BWCIIF
-            'bwciif_others_options': self.get_bwciif_others_options(user),                   # BWCIIF Others
-            'issuer_types': self.get_issuer_types(user),                                     # Issuer Type
-            'approved_s32_options': self.get_approved_s32_options(user),                     # Approved S32
-            'basel_iv_fund_options': self.get_basel_iv_fund_options(user),                   # BASEL IV - FUND
-            'business_unit_head_options': self.get_business_unit_head_options(user),         # Business Unit Head
-            'core_non_core_options': self.get_core_non_core_options(user),                   # Core/Non Core
-            'fund_index_fund_options': self.get_fund_index_fund_options(user),               # Fund / Index Fund
-            'management_limit_classification_options': self.get_management_limit_classification_options(user),  # Management Limit Classification
-            'mas_643_entity_type_options': self.get_mas_643_entity_type_options(user),       # MAS 643 Entity Type
-            'person_in_charge_options': self.get_person_in_charge_options(user),             # Person In Charge
-            'substantial_gt_10_percent_options': self.get_substantial_gt_10_percent_options(user),  # Substantial >10%
-            'pewc_options': self.get_pewc_options(user),                                     # PEWC
-            's32_representative_options': self.get_s32_representative_options(user),         # S32 Representative
-            'quoted_unquoted_options': self.get_quoted_unquoted_options(user),               # Quoted/Unquoted
-            'fin_non_fin_ind_options': self.get_fin_non_fin_ind_options(user),               # Fin/Non-Fin IND
-            'relative_index_options': self.get_relative_index_options(user),                 # Relative Index
+        # Run bulk UDF query and 4 reference queries in parallel
+        ref_results: Dict[str, Any] = {}
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {
+                executor.submit(self.repository.get_all_udf_options, 'SECURITY'): 'udf',
+                executor.submit(self.repository.get_issuers): 'issuers',
+                executor.submit(self.repository.get_countries): 'countries',
+                executor.submit(self.repository.get_currencies): 'currencies',
+                executor.submit(self.repository.get_markets): 'markets',
+            }
+            for future in as_completed(futures):
+                key = futures[future]
+                try:
+                    ref_results[key] = future.result()
+                except Exception as e:
+                    logger.error(f"Error fetching dropdown '{key}': {e}")
+                    ref_results[key] = [] if key != 'udf' else {}
 
-            # Reference data dropdowns
-            'issuers': self.get_issuers(user),
-            'countries': self.get_countries(user),
-            'currencies': self.get_currencies(user),
-            'markets': self.get_markets(user),
+        udf = ref_results.get('udf', {})
+
+        def udf_field(name: str) -> List[Dict[str, str]]:
+            return udf.get(name, [])
+
+        return {
+            'industries':                               udf_field('Industry'),
+            'exchange_codes':                           udf_field('Exchange Code'),
+            'security_types':                           udf_field('Security Type'),
+            'investment_types':                         udf_field('Investment Type'),
+            'issuer_types':                             udf_field('Issuer Type'),
+            'quoted_unquoted_options':                  udf_field('Quoted/Unquoted'),
+            'markets':                                  ref_results.get('markets', []),
+            'country_of_incorporation_options':         udf_field('Country of Incorporation'),
+            'country_of_issue_options':                 udf_field('Country of Issue'),
+            'country_of_primary_exchange_options':      udf_field('Country of Primary Exchange'),
+            'price_source_of_issue_options':            udf_field('Price Source of Issue'),
+            'substantial_gt_10_percent_options':        udf_field('Substantial >10%'),
+            'pevc_s32_devest_options':                  udf_field('PEWC'),
+            's32_representative_options':               udf_field('S32 Representative'),
+            'approved_s32_options':                     udf_field('Approved S32'),
+            'mas_643_entity_type_options':              udf_field('MAS 643 Entity Type'),
+            'fin_non_fin_ind_options':                  udf_field('Fin/Non-Fin IND'),
+            'base_liv_fund_options':                    udf_field('BASEL IV - FUND'),
+            'fund_index_fund_options':                  udf_field('Fund / Index Fund'),
+            'core_non_core_options':                    udf_field('Core/Non Core'),
+            'management_limit_classification_options':  udf_field('Management Limit Classification'),
+            'relative_index_options':                   udf_field('Relative Index'),
+            'business_unit_head_options':               udf_field('Business Unit Head'),
+            'person_in_charge_options':                 udf_field('Person In Charge'),
+            'bwciif_options':                           udf_field('BWCIIF'),
+            'bwciif_others_options':                    udf_field('BWCIIF Others'),
+            'pewc_options':                             udf_field('PEWC'),
+            'basel_iv_fund_options':                    udf_field('BASEL IV - FUND'),
+            # Reference data
+            'issuers':    ref_results.get('issuers', []),
+            'countries':  ref_results.get('countries', []),
+            'currencies': ref_results.get('currencies', []),
         }
 
 
