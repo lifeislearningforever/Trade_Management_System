@@ -167,7 +167,7 @@
                                         <span class="badge badge-secondary">{{ security.src_system|upper|default:"GMP" }}</span>
                                     {% endif %}
                                 </td>
-                                <td><strong class="text-primary">{{ security.security_name }}</strong></td>
+                                <td><a href="{% url 'security:detail' security.security_id %}" class="text-decoration-none"><strong>{{ security.security_name }}</strong></a></td>
                                 <td>{{ security.isin|default:"-" }}</td>
                                 <td>{{ security.ticker|default:"-" }}</td>
                                 <td>
