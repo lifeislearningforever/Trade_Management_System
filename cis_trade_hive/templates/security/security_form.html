@@ -30,7 +30,6 @@
         <div class="card-body">
             <form method="post" action="" id="securityForm">
                 {% csrf_token %}
-                <input type="hidden" id="record_type" name="record_type" value="{{ security.record_type|default:'' }}">
 
                 <!-- Section 1: Core Identity -->
                 <div class="row mb-5">

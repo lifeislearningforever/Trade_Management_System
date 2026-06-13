@@ -317,7 +317,6 @@ class SecurityHiveRepository:
 
             # Add all business fields from security_data
             field_mapping = {
-                'record_type': str,
                 'security_name': str,
                 'isin': str,
                 'security_description': str,
@@ -427,7 +426,7 @@ class SecurityHiveRepository:
 
             # Update business fields if provided
             updatable_fields = [
-                'record_type', 'security_name', 'isin', 'security_description', 'issuer', 'ticker',
+                'security_name', 'isin', 'security_description', 'issuer', 'ticker',
                 'industry', 'security_type', 'security_sub_type', 'investment_type', 'security_investment',
                 'issuer_type', 'quoted_unquoted', 'market',
                 'country_of_incorporation', 'country_of_exchange', 'country_of_issue',
