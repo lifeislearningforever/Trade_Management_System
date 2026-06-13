@@ -139,16 +139,19 @@
                             <tr>
                                 <th class="sortable" data-sort-type="text" style="min-width: 80px;">Source</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 200px;">Security Name</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 120px;">Record Type</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 200px;">Description</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Issuer</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Security Type</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 130px;">Quoted/Unquoted</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 130px;">ISIN</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 100px;">Ticker</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Issuer</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Security Type</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Security Sub Type</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Investment Type</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 130px;">Quoted/Unquoted</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 120px;">Market</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 150px;">Industry</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 100px;">Currency</th>
-                                <th class="sortable" data-sort-type="text" style="min-width: 150px;">Country of Inc.</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 160px;">Country of Inc.</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 160px;">Country of Issue</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 130px;">Exchange Code</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 120px;">Status</th>
                                 <th class="sortable" data-sort-type="date" style="min-width: 140px;">Created At</th>
                                 <th class="sticky-action-column" style="min-width: 120px;">Actions</th>
@@ -164,31 +167,26 @@
                                         <span class="badge badge-secondary">{{ security.src_system|upper|default:"GMP" }}</span>
                                     {% endif %}
                                 </td>
-                                <td>
-                                    <strong class="text-primary">{{ security.security_name }}</strong>
-                                </td>
-                                <td>{{ security.record_type|default:"-" }}</td>
-                                <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ security.security_description|default:'' }}">
-                                    {{ security.security_description|default:"-"|truncatechars:40 }}
-                                </td>
+                                <td><strong class="text-primary">{{ security.security_name }}</strong></td>
+                                <td>{{ security.isin|default:"-" }}</td>
+                                <td>{{ security.ticker|default:"-" }}</td>
                                 <td>
                                     {% if security.issuer %}
                                         <a href="{% url 'reference_data:party_detail' security.issuer %}" class="text-decoration-none" title="View party: {{ security.issuer }}">
                                             {{ security.issuer }}
                                         </a>
-                                    {% else %}
-                                        -
-                                    {% endif %}
+                                    {% else %}-{% endif %}
                                 </td>
                                 <td>{{ security.security_type|default:"-" }}</td>
+                                <td>{{ security.security_sub_type|default:"-" }}</td>
+                                <td>{{ security.investment_type|default:"-" }}</td>
                                 <td>{{ security.quoted_unquoted|default:"-" }}</td>
-                                <td>{{ security.isin|default:"-" }}</td>
-                                <td>{{ security.ticker|default:"-" }}</td>
+                                <td>{{ security.market|default:"-" }}</td>
                                 <td>{{ security.industry|default:"-" }}</td>
-                                <td>
-                                    <span class="badge badge-info">{{ security.currency_code|default:"-" }}</span>
-                                </td>
+                                <td><span class="badge badge-info">{{ security.currency_code|default:"-" }}</span></td>
                                 <td>{{ security.country_of_incorporation|default:"-" }}</td>
+                                <td>{{ security.country_of_issue|default:"-" }}</td>
+                                <td>{{ security.exchange_code|default:"-" }}</td>
                                 <td>
                                     {% if security.status == 'INITIAL' %}
                                         <span class="badge badge-secondary">Initial</span>

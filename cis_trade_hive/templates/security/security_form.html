@@ -4,10 +4,8 @@
 {% block title %}{% if security %}Edit{% else %}Create{% endif %} Security - CisTrade{% endblock %}
 
 {% block extra_css %}
-<!-- Select2 CSS - Local -->
 <link href="{% static 'css/select2.min.css' %}" rel="stylesheet" />
 <link href="{% static 'css/select2-bootstrap-5-theme.min.css' %}" rel="stylesheet" />
-<!-- CIS Trade Hive Select2 Custom Styles -->
 <link href="{% static 'css/select2-custom.css' %}" rel="stylesheet" />
 {% endblock %}
 
@@ -20,58 +18,47 @@
 
 {% block content %}
 <div class="security-form-container">
-    <!-- Page Header -->
     <div class="content-header">
         <h1 class="content-title">
             <i class="bi bi-{% if security %}pencil{% else %}plus-circle{% endif %} text-primary"></i>
             {% if security %}Edit Security{% else %}Create New Security{% endif %}
         </h1>
-        <p class="content-subtitle">All fields marked with * are required</p>
+        <p class="content-subtitle">Fields marked with * are required</p>
     </div>
 
-    <!-- Form Card -->
     <div class="card">
         <div class="card-body">
             <form method="post" action="" id="securityForm">
                 {% csrf_token %}
+                <input type="hidden" id="record_type" name="record_type" value="{{ security.record_type|default:'' }}">
 
-                <!-- Section 1: Core Information -->
+                <!-- Section 1: Core Identity -->
                 <div class="row mb-5">
                     <div class="col-12">
                         <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
-                            <i class="bi bi-info-circle"></i> Core Information
+                            <i class="bi bi-info-circle"></i> Core Identity
                         </h5>
                     </div>
 
-                    <!-- Hidden: Record Type removed per requirement -->
-                    <input type="hidden" id="record_type" name="record_type" value="{{ security.record_type|default:'' }}">
-
                     <div class="col-md-12 mb-3">
-                        <label for="security_name" class="form-label required">Security Label</label>
+                        <label for="security_name" class="form-label required">Security Name</label>
                         <input type="text" class="form-control" id="security_name" name="security_name"
-                               value="{{ security.security_name|default:'' }}"
-                               required maxlength="200"
-                               placeholder="Enter security label">
+                               value="{{ security.security_name|default:'' }}" required maxlength="200"
+                               placeholder="Enter security name">
                     </div>
 
                     <div class="col-md-4 mb-3">
                         <label for="isin" class="form-label">ISIN</label>
                         <input type="text" class="form-control" id="isin" name="isin"
-                               value="{{ security.isin|default:'' }}"
-                               maxlength="12"
+                               value="{{ security.isin|default:'' }}" maxlength="12"
                                placeholder="e.g., US0378331005">
-                        <div class="form-text">
-                            <i class="bi bi-info-circle"></i> International Securities Identification Number
-                        </div>
                     </div>
 
-                    <div class="col-md-8 mb-3">
-                        <label for="security_description" class="form-label">Security Full Name</label>
-                        <textarea class="form-control" id="security_description" name="security_description" rows="3"
-                                  placeholder="Enter full name of the security">{{ security.security_description|default:'' }}</textarea>
-                        <div class="form-text">
-                            <i class="bi bi-info-circle"></i> Full name of the security
-                        </div>
+                    <div class="col-md-4 mb-3">
+                        <label for="ticker" class="form-label">Ticker</label>
+                        <input type="text" class="form-control" id="ticker" name="ticker"
+                               value="{{ security.ticker|default:'' }}" maxlength="20"
+                               placeholder="e.g., AAPL">
                     </div>
 
                     <div class="col-md-4 mb-3">
@@ -79,9 +66,60 @@
                         <select class="form-select" id="issuer" name="issuer">
                             <option value="">Select Issuer</option>
                             {% for iss in dropdown_options.issuers %}
-                                <option value="{{ iss.name }}" {% if security.issuer == iss.name %}selected{% endif %}>
-                                    {{ iss.name }}
-                                </option>
+                                <option value="{{ iss.name }}" {% if security.issuer == iss.name %}selected{% endif %}>{{ iss.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-12 mb-3">
+                        <label for="security_description" class="form-label">Security Full Name / Description</label>
+                        <textarea class="form-control" id="security_description" name="security_description" rows="2"
+                                  placeholder="Full name or description of the security">{{ security.security_description|default:'' }}</textarea>
+                    </div>
+                </div>
+
+                <!-- Section 2: Classification -->
+                <div class="row mb-5">
+                    <div class="col-12">
+                        <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
+                            <i class="bi bi-tag"></i> Classification
+                        </h5>
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="security_type" class="form-label">Security Type</label>
+                        <select class="form-select" id="security_type" name="security_type">
+                            <option value="">Select Type</option>
+                            {% for st in dropdown_options.security_types %}
+                                <option value="{{ st.value }}" {% if security.security_type == st.value %}selected{% endif %}>{{ st.value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="security_sub_type" class="form-label">Security Sub Type</label>
+                        <input type="text" class="form-control" id="security_sub_type" name="security_sub_type"
+                               value="{{ security.security_sub_type|default:'' }}" placeholder="Sub type">
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="investment_type" class="form-label">Investment Type</label>
+                        <input type="text" class="form-control" id="investment_type" name="investment_type"
+                               value="{{ security.investment_type|default:'' }}" placeholder="Investment type">
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="security_investment" class="form-label">Security Investment</label>
+                        <input type="text" class="form-control" id="security_investment" name="security_investment"
+                               value="{{ security.security_investment|default:'' }}" placeholder="Security investment">
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="issuer_type" class="form-label">Issuer Type</label>
+                        <select class="form-select" id="issuer_type" name="issuer_type">
+                            <option value="">Select Type</option>
+                            {% for it in dropdown_options.issuer_types %}
+                                <option value="{{ it.value }}" {% if security.issuer_type == it.value %}selected{% endif %}>{{ it.value }}</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -91,11 +129,38 @@
                         <select class="form-select" id="industry" name="industry">
                             <option value="">Select Industry</option>
                             {% for ind in dropdown_options.industries %}
-                                <option value="{{ ind.value }}" {% if security.industry == ind.value %}selected{% endif %}>
-                                    {{ ind.value }}
-                                </option>
+                                <option value="{{ ind.value }}" {% if security.industry == ind.value %}selected{% endif %}>{{ ind.value }}</option>
                             {% endfor %}
                         </select>
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="quoted_unquoted" class="form-label required">Quoted / Unquoted</label>
+                        <select class="form-select" id="quoted_unquoted" name="quoted_unquoted" required>
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.quoted_unquoted_options %}
+                                <option value="{{ option.value }}" {% if security.quoted_unquoted == option.value %}selected{% endif %}>{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="market" class="form-label">Market</label>
+                        <select class="form-select" id="market" name="market">
+                            <option value="">Select Market</option>
+                            {% for mkt in dropdown_options.markets %}
+                                <option value="{{ mkt.value }}" {% if security.market == mkt.value %}selected{% endif %}>{{ mkt.value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Section 3: Geography & Exchange -->
+                <div class="row mb-5">
+                    <div class="col-12">
+                        <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
+                            <i class="bi bi-globe"></i> Geography & Exchange
+                        </h5>
                     </div>
 
                     <div class="col-md-4 mb-3">
@@ -103,43 +168,9 @@
                         <select class="form-select" id="country_of_incorporation" name="country_of_incorporation">
                             <option value="">Select Country</option>
                             {% for country in dropdown_options.countries %}
-                                <option value="{{ country.name }}" {% if security.country_of_incorporation == country.name %}selected{% endif %}>
-                                    {{ country.name }}
-                                </option>
+                                <option value="{{ country.name }}" {% if security.country_of_incorporation == country.name %}selected{% endif %}>{{ country.name }}</option>
                             {% endfor %}
                         </select>
-                    </div>
-
-                    <div class="col-md-6 mb-3">
-                        <label for="shares_outstanding" class="form-label">Shares Outstanding</label>
-                        <input type="number" class="form-control" id="shares_outstanding" name="shares_outstanding"
-                               value="{{ security.shares_outstanding|default:'' }}"
-                               step="1"
-                               placeholder="Number of shares">
-                    </div>
-
-                    <div class="col-md-6 mb-3">
-                        <label for="market" class="form-label">Market</label>
-                        <select class="form-select" id="market" name="market">
-                            <option value="">Select Market</option>
-                            {% for mkt in dropdown_options.markets %}
-                                <option value="{{ mkt.value }}" {% if security.market == mkt.value %}selected{% endif %}>
-                                    {{ mkt.value }}
-                                </option>
-                            {% endfor %}
-                        </select>
-                    </div>
-
-                    <!-- Hidden: Price field removed per requirement -->
-                    <input type="hidden" id="price" name="price" value="{{ security.price|default:'' }}">
-                </div>
-
-                <!-- Section 2: Exchange & Trading -->
-                <div class="row mb-5">
-                    <div class="col-12">
-                        <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
-                            <i class="bi bi-graph-up"></i> Exchange & Trading
-                        </h5>
                     </div>
 
                     <div class="col-md-4 mb-3">
@@ -147,11 +178,35 @@
                         <select class="form-select" id="country_of_exchange" name="country_of_exchange">
                             <option value="">Select Country</option>
                             {% for country in dropdown_options.countries %}
-                                <option value="{{ country.name }}" {% if security.country_of_exchange == country.name %}selected{% endif %}>
-                                    {{ country.name }}
-                                </option>
+                                <option value="{{ country.name }}" {% if security.country_of_exchange == country.name %}selected{% endif %}>{{ country.name }}</option>
                             {% endfor %}
                         </select>
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="country_of_issue" class="form-label">Country of Issue</label>
+                        <select class="form-select" id="country_of_issue" name="country_of_issue">
+                            <option value="">Select Country</option>
+                            {% for option in dropdown_options.countries %}
+                                <option value="{{ option.name }}" {% if security.country_of_issue == option.name %}selected{% endif %}>{{ option.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="country_of_primary_exchange" class="form-label">Country of Primary Exchange</label>
+                        <select class="form-select" id="country_of_primary_exchange" name="country_of_primary_exchange">
+                            <option value="">Select Country</option>
+                            {% for country in dropdown_options.countries %}
+                                <option value="{{ country.name }}" {% if security.country_of_primary_exchange == country.name %}selected{% endif %}>{{ country.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="udf_country_issue" class="form-label">UDF Country Issue</label>
+                        <input type="text" class="form-control" id="udf_country_issue" name="udf_country_issue"
+                               value="{{ security.udf_country_issue|default:'' }}" placeholder="UDF country issue">
                     </div>
 
                     <div class="col-md-4 mb-3">
@@ -159,9 +214,7 @@
                         <select class="form-select" id="exchange_code" name="exchange_code">
                             <option value="">Select Exchange Code</option>
                             {% for ec in dropdown_options.exchange_codes %}
-                                <option value="{{ ec.value }}" {% if security.exchange_code == ec.value %}selected{% endif %}>
-                                    {{ ec.value }}
-                                </option>
+                                <option value="{{ ec.value }}" {% if security.exchange_code == ec.value %}selected{% endif %}>{{ ec.value }}</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -177,99 +230,81 @@
                             {% endfor %}
                         </select>
                     </div>
-
-                    <div class="col-md-4 mb-3">
-                        <label for="ticker" class="form-label">Ticker</label>
-                        <input type="text" class="form-control" id="ticker" name="ticker"
-                               value="{{ security.ticker|default:'' }}"
-                               maxlength="20"
-                               placeholder="e.g., AAPL">
-                    </div>
-
-                    <div class="col-md-4 mb-3">
-                        <label for="country_of_issue" class="form-label">Country of Issue</label>
-                        <select class="form-select" id="country_of_issue" name="country_of_issue">
-                            <option value="">Select Country</option>
-                            {% for option in dropdown_options.country_of_issue_options %}
-                                <option value="{{ option.value }}" {% if security.country_of_issue == option.value %}selected{% endif %}>
-                                    {{ option.value }}
-                                </option>
-                            {% endfor %}
-                        </select>
-                    </div>
-
-                    <div class="col-md-4 mb-3">
-                        <label for="issuer_type" class="form-label">Issuer Type</label>
-                        <select class="form-select" id="issuer_type" name="issuer_type">
-                            <option value="">Select Type</option>
-                            {% for it in dropdown_options.issuer_types %}
-                                <option value="{{ it.value }}" {% if security.issuer_type == it.value %}selected{% endif %}>
-                                    {{ it.value }}
-                                </option>
-                            {% endfor %}
-                        </select>
-                    </div>
-
-                    <div class="col-md-4 mb-3">
-                        <label for="quoted_unquoted" class="form-label required">Quoted / Unquoted</label>
-                        <select class="form-select" id="quoted_unquoted" name="quoted_unquoted" required>
-                            <option value="">Select Option</option>
-                            {% for option in dropdown_options.quoted_unquoted_options %}
-                                <option value="{{ option.value }}" {% if security.quoted_unquoted == option.value %}selected{% endif %}>
-                                    {{ option.value }}
-                                </option>
-                            {% endfor %}
-                        </select>
-                    </div>
-
-                    <div class="col-md-4 mb-3">
-                        <label for="security_type" class="form-label">Security Type</label>
-                        <select class="form-select" id="security_type" name="security_type">
-                            <option value="">Select Type</option>
-                            {% for st in dropdown_options.security_types %}
-                                <option value="{{ st.value }}" {% if security.security_type == st.value or st.value == 'COMMON STOCK' and not security.security_type %}selected{% endif %}>
-                                    {{ st.value }}
-                                </option>
-                            {% endfor %}
-                        </select>
-                    </div>
-
-                    <!-- Hidden: Investment Type removed per requirement -->
-                    <input type="hidden" id="investment_type" name="investment_type" value="{{ security.investment_type|default:'' }}">
                 </div>
 
-                <!-- Hidden: Holdings section (PCT HLD Entity 1-3, AGGR) removed per requirement -->
-                <input type="hidden" id="pct_hld_entity_1" name="pct_hld_entity_1" value="{{ security.pct_hld_entity_1|default:'' }}">
-                <input type="hidden" id="pct_hld_entity_2" name="pct_hld_entity_2" value="{{ security.pct_hld_entity_2|default:'' }}">
-                <input type="hidden" id="pct_hld_entity_3" name="pct_hld_entity_3" value="{{ security.pct_hld_entity_3|default:'' }}">
-                <input type="hidden" id="pct_hld_entity_aggr" name="pct_hld_entity_aggr" value="{{ security.pct_hld_entity_aggr|default:'' }}">
-
-                <!-- Section 4: Regulatory & Compliance -->
+                <!-- Section 4: Financial Data -->
                 <div class="row mb-5">
                     <div class="col-12">
                         <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
-                            <i class="bi bi-shield-fill-check"></i> Regulatory & Compliance
+                            <i class="bi bi-graph-up"></i> Financial Data
                         </h5>
                     </div>
 
                     <div class="col-md-4 mb-3">
-                        <label for="substantial_10_pct" class="form-label">Substantial >10%</label>
-                        <select class="form-select" id="substantial_10_pct" name="substantial_10_pct">
-                            <option value="">Select Option</option>
-                            {% for option in dropdown_options.substantial_gt_10_percent_options %}
-                                <option value="{{ option.value }}" {% if security.substantial_gt_10_percent == option.value %}selected{% endif %}>
-                                    {{ option.value }}
-                                </option>
-                            {% endfor %}
-                        </select>
+                        <label for="shares_outstanding" class="form-label">Shares Outstanding</label>
+                        <input type="number" class="form-control" id="shares_outstanding" name="shares_outstanding"
+                               value="{{ security.shares_outstanding|default:'' }}" step="1" placeholder="Number of shares">
                     </div>
 
                     <div class="col-md-4 mb-3">
-                        <label for="cels" class="form-label">CELS</label>
-                        <input type="text" class="form-control" id="cels" name="cels"
-                               value="{{ security.cels|default:'' }}"
-                               maxlength="100"
-                               placeholder="Enter CELS">
+                        <label for="beta" class="form-label">Beta</label>
+                        <input type="number" class="form-control" id="beta" name="beta"
+                               value="{{ security.beta|default:'' }}" step="0.0001" placeholder="0.0000">
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="par_value" class="form-label">Par Value</label>
+                        <input type="number" class="form-control" id="par_value" name="par_value"
+                               value="{{ security.par_value|default:'' }}" step="0.000001" placeholder="0.000000">
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="price_source" class="form-label">Price Source</label>
+                        <input type="text" class="form-control" id="price_source" name="price_source"
+                               value="{{ security.price_source|default:'' }}" placeholder="Price source">
+                    </div>
+                </div>
+
+                <!-- Section 5: Shareholding / Ownership -->
+                <div class="row mb-5">
+                    <div class="col-12">
+                        <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
+                            <i class="bi bi-people"></i> Shareholding / Ownership
+                        </h5>
+                    </div>
+
+                    <div class="col-md-3 mb-3">
+                        <label for="pct_hld_entity_1" class="form-label">PCT HLD Entity 1</label>
+                        <input type="text" class="form-control" id="pct_hld_entity_1" name="pct_hld_entity_1"
+                               value="{{ security.pct_hld_entity_1|default:'' }}" placeholder="Entity 1">
+                    </div>
+
+                    <div class="col-md-3 mb-3">
+                        <label for="pct_hld_entity_2" class="form-label">PCT HLD Entity 2</label>
+                        <input type="text" class="form-control" id="pct_hld_entity_2" name="pct_hld_entity_2"
+                               value="{{ security.pct_hld_entity_2|default:'' }}" placeholder="Entity 2">
+                    </div>
+
+                    <div class="col-md-3 mb-3">
+                        <label for="pct_hld_entity_3" class="form-label">PCT HLD Entity 3</label>
+                        <input type="text" class="form-control" id="pct_hld_entity_3" name="pct_hld_entity_3"
+                               value="{{ security.pct_hld_entity_3|default:'' }}" placeholder="Entity 3">
+                    </div>
+
+                    <div class="col-md-3 mb-3">
+                        <label for="pct_hld_entity_aggr" class="form-label">PCT HLD Entity AGGR</label>
+                        <input type="text" class="form-control" id="pct_hld_entity_aggr" name="pct_hld_entity_aggr"
+                               value="{{ security.pct_hld_entity_aggr|default:'' }}" placeholder="Aggregate">
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="substantial_10_pct" class="form-label">Substantial &gt;10%</label>
+                        <select class="form-select" id="substantial_10_pct" name="substantial_10_pct">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.substantial_gt_10_percent_options %}
+                                <option value="{{ option.value }}" {% if security.substantial_10_pct == option.value %}selected{% endif %}>{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
 
                     <div class="col-md-4 mb-3">
@@ -277,9 +312,7 @@
                         <select class="form-select" id="pevc_s32_devest" name="pevc_s32_devest">
                             <option value="">Select Option</option>
                             {% for option in dropdown_options.pevc_s32_devest_options %}
-                                <option value="{{ option.value }}" {% if security.pevc_s32_devest == option.value %}selected{% endif %}>
-                                    {{ option.value }}
-                                </option>
+                                <option value="{{ option.value }}" {% if security.pevc_s32_devest == option.value %}selected{% endif %}>{{ option.value }}</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -289,23 +322,48 @@
                         <select class="form-select" id="s32_representative" name="s32_representative">
                             <option value="">Select Option</option>
                             {% for option in dropdown_options.s32_representative_options %}
-                                <option value="{{ option.value }}" {% if security.s32_representative == option.value %}selected{% endif %}>
-                                    {{ option.value }}
-                                </option>
+                                <option value="{{ option.value }}" {% if security.s32_representative == option.value %}selected{% endif %}>{{ option.value }}</option>
                             {% endfor %}
                         </select>
                     </div>
 
                     <div class="col-md-4 mb-3">
-                        <label for="basel_iv_fund" class="form-label">BASEL IV - FUND</label>
-                        <select class="form-select" id="basel_iv_fund" name="basel_iv_fund">
-                            <option value="">Select Option</option>
-                            {% for option in dropdown_options.basel_iv_fund_options %}
-                                <option value="{{ option.value }}" {% if security.basel_iv_fund == option.value %}selected{% endif %}>
-                                    {{ option.value }}
-                                </option>
-                            {% endfor %}
-                        </select>
+                        <label for="approved_s32" class="form-label">Approved S32</label>
+                        <input type="text" class="form-control" id="approved_s32" name="approved_s32"
+                               value="{{ security.approved_s32|default:'' }}" placeholder="Approved S32">
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="fintech_speculative" class="form-label">Fintech / Speculative</label>
+                        <input type="text" class="form-control" id="fintech_speculative" name="fintech_speculative"
+                               value="{{ security.fintech_speculative|default:'' }}" placeholder="Fintech speculative">
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="unlistedeq_speculative" class="form-label">Unlisted Eq. Speculative</label>
+                        <input type="text" class="form-control" id="unlistedeq_speculative" name="unlistedeq_speculative"
+                               value="{{ security.unlistedeq_speculative|default:'' }}" placeholder="Unlisted eq speculative">
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="related_company" class="form-label">Related Company</label>
+                        <input type="text" class="form-control" id="related_company" name="related_company"
+                               value="{{ security.related_company|default:'' }}" placeholder="Related company">
+                    </div>
+                </div>
+
+                <!-- Section 6: MAS / Regulatory -->
+                <div class="row mb-5">
+                    <div class="col-12">
+                        <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
+                            <i class="bi bi-shield-fill-check"></i> MAS / Regulatory
+                        </h5>
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="mas_6d_code" class="form-label">MAS 6D Code</label>
+                        <input type="text" class="form-control" id="mas_6d_code" name="mas_6d_code"
+                               value="{{ security.mas_6d_code|default:'' }}" placeholder="MAS 6D Code">
                     </div>
 
                     <div class="col-md-4 mb-3">
@@ -313,135 +371,107 @@
                         <select class="form-select" id="mas_643_entity_type" name="mas_643_entity_type">
                             <option value="">Select Option</option>
                             {% for option in dropdown_options.mas_643_entity_type_options %}
-                                <option value="{{ option.value }}" {% if security.mas_643_entity_type == option.value %}selected{% endif %}>
-                                    {{ option.value }}
-                                </option>
+                                <option value="{{ option.value }}" {% if security.mas_643_entity_type == option.value %}selected{% endif %}>{{ option.value }}</option>
                             {% endfor %}
                         </select>
                     </div>
 
                     <div class="col-md-4 mb-3">
-                        <label for="mas_6d_code" class="form-label">MAS 6D Code</label>
-                        <input type="text" class="form-control" id="mas_6d_code" name="mas_6d_code"
-                               value="{{ security.mas_6d_code|default:'' }}"
-                               maxlength="100"
-                               placeholder="Enter MAS 6D Code">
-                    </div>
-
-                    <div class="col-md-4 mb-3">
-                        <label for="fin_nonfin_ind" class="form-label">Fin/Non-fin IND</label>
+                        <label for="fin_nonfin_ind" class="form-label">Fin / Non-fin IND</label>
                         <select class="form-select" id="fin_nonfin_ind" name="fin_nonfin_ind">
                             <option value="">Select Option</option>
                             {% for option in dropdown_options.fin_non_fin_ind_options %}
-                                <option value="{{ option.value }}" {% if security.fin_non_fin_ind == option.value %}selected{% endif %}>
-                                    {{ option.value }}
-                                </option>
+                                <option value="{{ option.value }}" {% if security.fin_nonfin_ind == option.value %}selected{% endif %}>{{ option.value }}</option>
                             {% endfor %}
                         </select>
                     </div>
 
                     <div class="col-md-4 mb-3">
-                        <label for="beta" class="form-label">Beta</label>
-                        <input type="number" class="form-control" id="beta" name="beta"
-                               value="{{ security.beta|default:'' }}"
-                               step="0.0001"
-                               placeholder="0.0000">
+                        <label for="base_liv_fund" class="form-label">Base LIV Fund</label>
+                        <select class="form-select" id="base_liv_fund" name="base_liv_fund">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.base_liv_fund_options %}
+                                <option value="{{ option.value }}" {% if security.base_liv_fund == option.value %}selected{% endif %}>{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
-
-                    <!-- Hidden: PAR Value removed per requirement -->
-                    <input type="hidden" id="par_value" name="par_value" value="{{ security.par_value|default:'' }}">
                 </div>
 
-                <!-- Section 5: Management -->
+                <!-- Section 7: Fund / Portfolio Classification -->
                 <div class="row mb-5">
                     <div class="col-12">
                         <h5 class="border-bottom pb-3 mb-4" style="color: var(--primary); font-weight: 600;">
-                            <i class="bi bi-people"></i> Management
+                            <i class="bi bi-briefcase"></i> Fund / Portfolio Classification
                         </h5>
                     </div>
 
-                    <div class="col-md-6 mb-3">
-                        <label for="business_unit_head" class="form-label">Business Unit Head (BSU)</label>
-                        <select class="form-select" id="business_unit_head" name="business_unit_head">
-                            <option value="">Select Option</option>
-                            {% for option in dropdown_options.business_unit_head_options %}
-                                <option value="{{ option.value }}" {% if security.business_unit_head == option.value %}selected{% endif %}>
-                                    {{ option.value }}
-                                </option>
-                            {% endfor %}
-                        </select>
-                    </div>
-
-                    <div class="col-md-6 mb-3">
-                        <label for="person_in_charge" class="form-label">Person In Charge (PIC)</label>
-                        <select class="form-select" id="person_in_charge" name="person_in_charge">
-                            <option value="">Select Option</option>
-                            {% for option in dropdown_options.person_in_charge_options %}
-                                <option value="{{ option.value }}" {% if security.person_in_charge == option.value %}selected{% endif %}>
-                                    {{ option.value }}
-                                </option>
-                            {% endfor %}
-                        </select>
-                    </div>
-
-                    <div class="col-md-6 mb-3">
-                        <label for="core_noncore" class="form-label">Core/Non-core</label>
-                        <select class="form-select" id="core_noncore" name="core_noncore">
-                            <option value="">Select Option</option>
-                            {% for option in dropdown_options.core_non_core_options %}
-                                <option value="{{ option.value }}" {% if security.core_non_core == option.value %}selected{% endif %}>
-                                    {{ option.value }}
-                                </option>
-                            {% endfor %}
-                        </select>
-                    </div>
-
-                    <div class="col-md-6 mb-3">
+                    <div class="col-md-4 mb-3">
                         <label for="fund_index_fund" class="form-label">Fund / Index Fund</label>
                         <select class="form-select" id="fund_index_fund" name="fund_index_fund">
                             <option value="">Select Option</option>
                             {% for option in dropdown_options.fund_index_fund_options %}
-                                <option value="{{ option.value }}" {% if security.fund_index_fund == option.value %}selected{% endif %}>
-                                    {{ option.value }}
-                                </option>
+                                <option value="{{ option.value }}" {% if security.fund_index_fund == option.value %}selected{% endif %}>{{ option.value }}</option>
                             {% endfor %}
                         </select>
                     </div>
 
-                    <div class="col-md-6 mb-3">
+                    <div class="col-md-4 mb-3">
+                        <label for="core_noncore" class="form-label">Core / Non-core</label>
+                        <select class="form-select" id="core_noncore" name="core_noncore">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.core_non_core_options %}
+                                <option value="{{ option.value }}" {% if security.core_noncore == option.value %}selected{% endif %}>{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-4 mb-3">
                         <label for="management_limit_classification" class="form-label">Management Limit Classification</label>
                         <select class="form-select" id="management_limit_classification" name="management_limit_classification">
                             <option value="">Select Option</option>
                             {% for option in dropdown_options.management_limit_classification_options %}
-                                <option value="{{ option.value }}" {% if security.management_limit_classification == option.value %}selected{% endif %}>
-                                    {{ option.value }}
-                                </option>
+                                <option value="{{ option.value }}" {% if security.management_limit_classification == option.value %}selected{% endif %}>{{ option.value }}</option>
                             {% endfor %}
                         </select>
                     </div>
 
-                    <div class="col-md-6 mb-3">
+                    <div class="col-md-4 mb-3">
                         <label for="relative_index" class="form-label">Relative Index</label>
                         <select class="form-select" id="relative_index" name="relative_index">
                             <option value="">Select Option</option>
                             {% for option in dropdown_options.relative_index_options %}
-                                <option value="{{ option.value }}" {% if security.relative_index == option.value %}selected{% endif %}>
-                                    {{ option.value }}
-                                </option>
+                                <option value="{{ option.value }}" {% if security.relative_index == option.value %}selected{% endif %}>{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="business_unit_head" class="form-label">Business Unit Head</label>
+                        <select class="form-select" id="business_unit_head" name="business_unit_head">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.business_unit_head_options %}
+                                <option value="{{ option.value }}" {% if security.business_unit_head == option.value %}selected{% endif %}>{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-4 mb-3">
+                        <label for="person_in_charge" class="form-label">Person In Charge</label>
+                        <select class="form-select" id="person_in_charge" name="person_in_charge">
+                            <option value="">Select Option</option>
+                            {% for option in dropdown_options.person_in_charge_options %}
+                                <option value="{{ option.value }}" {% if security.person_in_charge == option.value %}selected{% endif %}>{{ option.value }}</option>
                             {% endfor %}
                         </select>
                     </div>
                 </div>
 
                 {% if security %}
-                {# Status field only visible when editing (read-only, managed by workflow) #}
                 <div class="mb-4">
                     <label for="status" class="form-label">Status</label>
                     <input type="text" class="form-control" id="status" name="status"
                            value="{{ security.status }}" readonly>
-                    <div class="form-text">
-                        <i class="bi bi-info-circle"></i> Status is managed by the Four-Eyes workflow
-                    </div>
+                    <div class="form-text"><i class="bi bi-info-circle"></i> Status is managed by the Four-Eyes workflow</div>
                 </div>
                 {% endif %}
 
@@ -458,7 +488,6 @@
         </div>
     </div>
 
-    <!-- Info Alert -->
     <div class="alert alert-info mt-4">
         <i class="bi bi-info-circle"></i>
         {% if security %}
@@ -471,54 +500,26 @@
     </div>
 </div>
 
-<!-- jQuery (required for Select2) - Local -->
 <script src="{% static 'js/jquery-3.7.1.min.js' %}"></script>
-
-<!-- Select2 JS - Local -->
 <script src="{% static 'js/select2.min.js' %}"></script>
-
-<!-- CIS Trade Hive Select2 Global Initialization -->
 <script src="{% static 'js/select2-init.js' %}"></script>
 
 <script>
-// Initialize Select2 on ALL security form dropdowns
 $(document).ready(function() {
-    // List of ALL visible dropdown IDs in the security form
     var allDropdownIds = [
-        'issuer',
-        'industry',
-        'country_of_incorporation',
-        'country_of_exchange',
-        'exchange_code',
-        'currency_code',
-        'country_of_issue',
-        'issuer_type',
-        'quoted_unquoted',
-        'security_type',
-        'market',
-        'substantial_10_pct',
-        'pevc_s32_devest',
-        's32_representative',
-        'basel_iv_fund',
-        'mas_643_entity_type',
-        'fin_nonfin_ind',
-        'business_unit_head',
-        'person_in_charge',
-        'core_noncore',
-        'fund_index_fund',
-        'management_limit_classification',
-        'relative_index'
+        'issuer', 'industry', 'security_type', 'issuer_type', 'quoted_unquoted', 'market',
+        'country_of_incorporation', 'country_of_exchange', 'country_of_issue',
+        'country_of_primary_exchange', 'exchange_code', 'currency_code',
+        'substantial_10_pct', 'pevc_s32_devest', 's32_representative',
+        'mas_643_entity_type', 'fin_nonfin_ind', 'base_liv_fund',
+        'fund_index_fund', 'core_noncore', 'management_limit_classification',
+        'relative_index', 'business_unit_head', 'person_in_charge'
     ];
-
-    // Initialize all dropdowns using the global CISSelect2 utility
     CISSelect2.initByIds(allDropdownIds);
 });
 </script>
 
 <style>
-.required::after {
-    content: " *";
-    color: red;
-}
+.required::after { content: " *"; color: red; }
 </style>
 {% endblock %}
