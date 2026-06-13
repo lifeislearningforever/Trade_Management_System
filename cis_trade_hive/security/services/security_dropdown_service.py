@@ -193,7 +193,7 @@ class SecurityDropdownRepository:
             WHERE object_type = '{object_type}'
               AND field_value IS NOT NULL
               AND field_value != ''
-              AND is_active = true
+              AND (is_active = true OR is_active IS NULL)
             ORDER BY field_name, field_value
             """
             result = impala_manager.execute_query(query, database=SecurityDropdownRepository.DATABASE)
@@ -206,6 +206,7 @@ class SecurityDropdownRepository:
             # Prepend blank option to every field list
             for fname in grouped:
                 grouped[fname] = [{'value': ''}] + grouped[fname]
+            logger.info(f"Bulk UDF query returned {len(grouped)} field names: {sorted(grouped.keys())}")
             return grouped
         except Exception as e:
             logger.error(f"Error fetching bulk UDF options: {str(e)}")
