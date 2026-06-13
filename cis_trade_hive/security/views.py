@@ -39,6 +39,7 @@ def security_list(request: HttpRequest) -> HttpResponse:
     search_term = request.GET.get('search', '')
     currency_filter = request.GET.get('currency', '')
     security_type_filter = request.GET.get('security_type', '')
+    src_system_filter = request.GET.get('src_system', '')
     export = request.GET.get('export', '').strip()
 
     # Fetch securities
@@ -47,7 +48,8 @@ def security_list(request: HttpRequest) -> HttpResponse:
         status=status_filter if status_filter else None,
         search=search_term if search_term else None,
         currency=currency_filter if currency_filter else None,
-        security_type=security_type_filter if security_type_filter else None
+        security_type=security_type_filter if security_type_filter else None,
+        src_system=src_system_filter if src_system_filter else None
     )
 
     # CSV Export
@@ -132,6 +134,7 @@ def security_list(request: HttpRequest) -> HttpResponse:
         'search': search_term,
         'currency': currency_filter,
         'security_type': security_type_filter,
+        'src_system': src_system_filter,
         'pending_count': pending_count,
         # Permission flags
         **perms,

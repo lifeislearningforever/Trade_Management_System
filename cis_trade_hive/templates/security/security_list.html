@@ -59,7 +59,7 @@
             <i class="bi bi-graph-up"></i> Dashboard
         </a>
         {% if can_download and not is_pending_view %}
-        <a href="{% url 'security:list' %}?export=csv{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}" class="btn btn-outline-success">
+        <a href="{% url 'security:list' %}?export=csv{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="btn btn-outline-success">
             <i class="bi bi-download"></i> Export CSV
         </a>
         {% endif %}
@@ -80,10 +80,10 @@
                     <div class="input-group">
                         <span class="input-group-text"><i class="bi bi-search"></i></span>
                         <input type="text" class="form-control" name="search" value="{{ search }}"
-                               placeholder="Search by name, ISIN, ticker...">
+                               placeholder="Name, ISIN, ticker, issuer...">
                     </div>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <label class="form-label">Status</label>
                     <select class="form-select" name="status">
                         <option value="">All Statuses</option>
@@ -92,7 +92,15 @@
                         <option value="VALIDATED" {% if status == 'VALIDATED' %}selected{% endif %}>Validated</option>
                     </select>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
+                    <label class="form-label">Source System</label>
+                    <select class="form-select" name="src_system">
+                        <option value="">All Sources</option>
+                        <option value="CIS" {% if src_system == 'CIS' %}selected{% endif %}>CIS</option>
+                        <option value="GMP" {% if src_system == 'GMP' %}selected{% endif %}>GMP</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
                     <label class="form-label">Security Type</label>
                     <input type="text" class="form-control" name="security_type" value="{{ security_type }}"
                            placeholder="e.g., ETF, Common Stock">
@@ -163,7 +171,15 @@
                                 <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ security.security_description|default:'' }}">
                                     {{ security.security_description|default:"-"|truncatechars:40 }}
                                 </td>
-                                <td>{{ security.issuer|default:"-" }}</td>
+                                <td>
+                                    {% if security.issuer %}
+                                        <a href="{% url 'reference_data:party_detail' security.issuer %}" class="text-decoration-none" title="View party: {{ security.issuer }}">
+                                            {{ security.issuer }}
+                                        </a>
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
                                 <td>{{ security.security_type|default:"-" }}</td>
                                 <td>{{ security.quoted_unquoted|default:"-" }}</td>
                                 <td>{{ security.isin|default:"-" }}</td>
@@ -213,10 +229,10 @@
                         <ul class="pagination justify-content-center mb-0">
                             {% if page_obj.has_previous %}
                                 <li class="page-item">
-                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}">First</a>
+                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}">First</a>
                                 </li>
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}">Previous</a>
+                                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}">Previous</a>
                                 </li>
                             {% endif %}
 
@@ -228,10 +244,10 @@
 
                             {% if page_obj.has_next %}
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}">Next</a>
+                                    <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}">Next</a>
                                 </li>
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}">Last</a>
+                                    <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}">Last</a>
                                 </li>
                             {% endif %}
                         </ul>
@@ -242,7 +258,7 @@
                 <div class="text-center py-5" style="color: var(--gray-500);">
                     <i class="bi bi-shield-check" style="font-size: 3rem; opacity: 0.3;"></i>
                     <p class="mt-3 mb-0">No securities found</p>
-                    {% if search or status or security_type %}
+                    {% if search or status or security_type or src_system %}
                         <p class="text-muted">Try adjusting your filters</p>
                     {% else %}
                         <p class="text-muted mt-2">

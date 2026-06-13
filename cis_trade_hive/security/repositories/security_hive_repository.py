@@ -44,7 +44,8 @@ class SecurityHiveRepository:
         status: Optional[str] = None,
         search: Optional[str] = None,
         currency: Optional[str] = None,
-        security_type: Optional[str] = None
+        security_type: Optional[str] = None,
+        src_system: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Fetch all securities from Kudu with optional filters.
@@ -52,9 +53,10 @@ class SecurityHiveRepository:
         Args:
             limit: Maximum number of records to return
             status: Filter by status (INITIAL, MODIFIED, VALIDATED)
-            search: Search term for security_name or ISIN
+            search: Search term for security_name, ISIN, ticker, or issuer
             currency: Filter by currency_code
             security_type: Filter by security_type
+            src_system: Filter by source system (CIS, GMP, etc.)
 
         Returns:
             List of security dictionaries
@@ -76,6 +78,8 @@ class SecurityHiveRepository:
                 query += (
                     f" AND (LOWER(security_name) LIKE LOWER({sv})"
                     f" OR LOWER(isin) LIKE LOWER({sv})"
+                    f" OR LOWER(ticker) LIKE LOWER({sv})"
+                    f" OR LOWER(issuer) LIKE LOWER({sv})"
                     f" OR LOWER(security_description) LIKE LOWER({sv}))"
                 )
 
@@ -84,6 +88,9 @@ class SecurityHiveRepository:
 
             if security_type:
                 query += f" AND security_type = {SecurityHiveRepository.escape_value(security_type)}"
+
+            if src_system:
+                query += f" AND UPPER(src_system) = UPPER({SecurityHiveRepository.escape_value(src_system)})"
 
             # Order by src_system='CIS' first, then by most recent
             query += " ORDER BY CASE WHEN UPPER(src_system) = 'CIS' THEN 0 ELSE 1 END, created_at DESC"
