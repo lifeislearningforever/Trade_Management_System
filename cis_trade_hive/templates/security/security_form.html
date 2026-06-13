@@ -98,20 +98,29 @@
 
                     <div class="col-md-4 mb-3">
                         <label for="security_sub_type" class="form-label">Security Sub Type</label>
-                        <input type="text" class="form-control" id="security_sub_type" name="security_sub_type"
-                               value="{{ security.security_sub_type|default:'' }}" placeholder="Sub type">
+                        <select class="form-select" id="security_sub_type" name="security_sub_type">
+                            {% for option in dropdown_options.security_sub_type_options %}
+                                <option value="{{ option.value }}" {% if security.security_sub_type == option.value %}selected{% endif %}>{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
 
                     <div class="col-md-4 mb-3">
                         <label for="investment_type" class="form-label">Investment Type</label>
-                        <input type="text" class="form-control" id="investment_type" name="investment_type"
-                               value="{{ security.investment_type|default:'' }}" placeholder="Investment type">
+                        <select class="form-select" id="investment_type" name="investment_type">
+                            {% for option in dropdown_options.investment_types %}
+                                <option value="{{ option.value }}" {% if security.investment_type == option.value %}selected{% endif %}>{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
 
                     <div class="col-md-4 mb-3">
-                        <label for="security_investment" class="form-label">Security Investment</label>
-                        <input type="text" class="form-control" id="security_investment" name="security_investment"
-                               value="{{ security.security_investment|default:'' }}" placeholder="Security investment">
+                        <label for="security_investment" class="form-label">Security Investment Type</label>
+                        <select class="form-select" id="security_investment" name="security_investment">
+                            {% for option in dropdown_options.security_investment_type_options %}
+                                <option value="{{ option.value }}" {% if security.security_investment == option.value %}selected{% endif %}>{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
 
                     <div class="col-md-4 mb-3">
@@ -310,7 +319,6 @@
                     <div class="col-md-4 mb-3">
                         <label for="pevc_s32_devest" class="form-label">PEVC S32 Devest</label>
                         <select class="form-select" id="pevc_s32_devest" name="pevc_s32_devest">
-                            <option value="">Select Option</option>
                             {% for option in dropdown_options.pevc_s32_devest_options %}
                                 <option value="{{ option.value }}" {% if security.pevc_s32_devest == option.value %}selected{% endif %}>{{ option.value }}</option>
                             {% endfor %}
@@ -335,14 +343,20 @@
 
                     <div class="col-md-4 mb-3">
                         <label for="fintech_speculative" class="form-label">Fintech / Speculative</label>
-                        <input type="text" class="form-control" id="fintech_speculative" name="fintech_speculative"
-                               value="{{ security.fintech_speculative|default:'' }}" placeholder="Fintech speculative">
+                        <select class="form-select" id="fintech_speculative" name="fintech_speculative">
+                            {% for option in dropdown_options.fintech_speculative_options %}
+                                <option value="{{ option.value }}" {% if security.fintech_speculative == option.value %}selected{% endif %}>{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
 
                     <div class="col-md-4 mb-3">
                         <label for="unlistedeq_speculative" class="form-label">Unlisted Eq. Speculative</label>
-                        <input type="text" class="form-control" id="unlistedeq_speculative" name="unlistedeq_speculative"
-                               value="{{ security.unlistedeq_speculative|default:'' }}" placeholder="Unlisted eq speculative">
+                        <select class="form-select" id="unlistedeq_speculative" name="unlistedeq_speculative">
+                            {% for option in dropdown_options.unlistedeq_speculative_options %}
+                                <option value="{{ option.value }}" {% if security.unlistedeq_speculative == option.value %}selected{% endif %}>{{ option.value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
 
                     <div class="col-md-4 mb-3">
@@ -507,10 +521,12 @@
 <script>
 $(document).ready(function() {
     var allDropdownIds = [
-        'issuer', 'industry', 'security_type', 'issuer_type', 'quoted_unquoted', 'market',
+        'issuer', 'industry', 'security_type', 'security_sub_type', 'investment_type',
+        'security_investment', 'issuer_type', 'quoted_unquoted', 'market',
         'country_of_incorporation', 'country_of_exchange', 'country_of_issue',
         'country_of_primary_exchange', 'exchange_code', 'currency_code',
         'substantial_10_pct', 'pevc_s32_devest', 's32_representative',
+        'approved_s32', 'fintech_speculative', 'unlistedeq_speculative',
         'mas_643_entity_type', 'fin_nonfin_ind', 'base_liv_fund',
         'fund_index_fund', 'core_noncore', 'management_limit_classification',
         'relative_index', 'business_unit_head', 'person_in_charge'

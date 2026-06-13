@@ -183,7 +183,8 @@ class SecurityDropdownRepository:
     def get_all_udf_options(object_type: str = 'SECURITY') -> Dict[str, List[Dict[str, str]]]:
         """
         Fetch ALL UDF dropdown options for object_type in a single query,
-        grouped by field_name. Replaces N individual queries with 1.
+        grouped by field_name. Each list starts with a blank entry so users
+        can clear/leave a field empty.
         """
         try:
             query = f"""
@@ -202,6 +203,9 @@ class SecurityDropdownRepository:
                 fval = row.get('field_value', '')
                 if fname and fval:
                     grouped.setdefault(fname, []).append({'value': fval})
+            # Prepend blank option to every field list
+            for fname in grouped:
+                grouped[fname] = [{'value': ''}] + grouped[fname]
             return grouped
         except Exception as e:
             logger.error(f"Error fetching bulk UDF options: {str(e)}")
@@ -487,37 +491,48 @@ class SecurityDropdownService:
         udf = ref_results.get('udf', {})
 
         def udf_field(name: str) -> List[Dict[str, str]]:
-            return udf.get(name, [])
+            return udf.get(name, [{'value': ''}])
+
+        # Quoted/Unquoted not in UDF — hardcoded with blank first
+        quoted_unquoted_options = [
+            {'value': ''},
+            {'value': 'QUOTED'},
+            {'value': 'UNQUOTED'},
+        ]
 
         return {
+            # UDF-backed dropdowns — field names match cis_udf_field.field_name exactly
             'industries':                               udf_field('Industry'),
             'exchange_codes':                           udf_field('Exchange Code'),
             'security_types':                           udf_field('Security Type'),
             'investment_types':                         udf_field('Investment Type'),
             'issuer_types':                             udf_field('Issuer Type'),
-            'quoted_unquoted_options':                  udf_field('Quoted/Unquoted'),
-            'markets':                                  ref_results.get('markets', []),
+            'security_sub_type_options':                udf_field('Security Sub Type'),
+            'security_investment_type_options':         udf_field('Security Investment Type'),
+            'fintech_speculative_options':              udf_field('Fintech Speculative'),
+            'unlistedeq_speculative_options':           udf_field('Unlisted EQ Speculative'),
+            'markets':                                  udf_field('Market Company'),
             'country_of_incorporation_options':         udf_field('Country of Incorporation'),
             'country_of_issue_options':                 udf_field('Country of Issue'),
             'country_of_primary_exchange_options':      udf_field('Country of Primary Exchange'),
             'price_source_of_issue_options':            udf_field('Price Source of Issue'),
-            'substantial_gt_10_percent_options':        udf_field('Substantial >10%'),
-            'pevc_s32_devest_options':                  udf_field('PEWC'),
+            'substantial_gt_10_percent_options':        udf_field('Substantial'),
+            'pevc_s32_devest_options':                  udf_field('PEVC'),
             's32_representative_options':               udf_field('S32 Representative'),
             'approved_s32_options':                     udf_field('Approved S32'),
             'mas_643_entity_type_options':              udf_field('MAS 643 Entity Type'),
             'fin_non_fin_ind_options':                  udf_field('Fin/Non-Fin IND'),
-            'base_liv_fund_options':                    udf_field('BASEL IV - FUND'),
+            'base_liv_fund_options':                    udf_field('BIG_BASEL fund'),
+            'basel_iv_fund_options':                    udf_field('BIG_BASEL fund'),
             'fund_index_fund_options':                  udf_field('Fund / Index Fund'),
-            'core_non_core_options':                    udf_field('Core/Non Core'),
+            'core_non_core_options':                    udf_field('Core/Non core'),
             'management_limit_classification_options':  udf_field('Management Limit Classification'),
             'relative_index_options':                   udf_field('Relative Index'),
             'business_unit_head_options':               udf_field('Business Unit Head'),
-            'person_in_charge_options':                 udf_field('Person In Charge'),
-            'bwciif_options':                           udf_field('BWCIIF'),
-            'bwciif_others_options':                    udf_field('BWCIIF Others'),
-            'pewc_options':                             udf_field('PEWC'),
-            'basel_iv_fund_options':                    udf_field('BASEL IV - FUND'),
+            'person_in_charge_options':                 udf_field('Person in Charge'),
+            'pevc_options':                             udf_field('PEVC'),
+            # Hardcoded (not in UDF)
+            'quoted_unquoted_options':                  quoted_unquoted_options,
             # Reference data
             'issuers':    ref_results.get('issuers', []),
             'countries':  ref_results.get('countries', []),
