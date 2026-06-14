@@ -265,6 +265,20 @@ class TradeKuduRepository:
         Returns:
             List of trade dictionaries
         """
+        import hashlib, json as _json
+        # Cache simple single-filter queries (status/type only, no text search, no date range)
+        # These are the common dashboard click-throughs — cache for 20s to survive the redirect
+        _is_simple = (not search and not portfolios and not securities
+                      and not trade_date_from and not trade_date_to
+                      and not settle_date_from and not settle_date_to
+                      and not src_system)
+        if _is_simple:
+            _ck = f"trade_list:{status or ''}:{trade_type or ''}:{limit}"
+            _cached = query_cache.get(_ck)
+            if _cached is not None:
+                logger.debug(f"[CACHE HIT] trade_list {_ck}")
+                return _cached
+
         try:
             where_clauses = ["(t.is_deleted = false OR t.is_deleted IS NULL)"]
 
@@ -327,7 +341,10 @@ class TradeKuduRepository:
             """
 
             results = impala_manager.execute_query(query, database=self.DATABASE)
-            return results if results else []
+            out = results if results else []
+            if _is_simple:
+                query_cache.set(_ck, out, 20)  # 20s TTL — short enough to stay fresh
+            return out
 
         except Exception as e:
             logger.error(f"Error retrieving trades with multi-filter: {str(e)}")
@@ -2178,9 +2195,13 @@ class TradeKuduRepository:
             }
 
     def invalidate_statistics_cache(self) -> None:
-        """Invalidate statistics cache. Call after trade create/update/delete."""
+        """Invalidate statistics + trade list caches. Call after trade create/update/delete."""
         query_cache.invalidate(self.STATS_CACHE_KEY)
-        logger.debug("Trade statistics cache invalidated")
+        # Invalidate simple trade list caches so stale data isn't served after mutations
+        for _status in ('', 'INITIAL', 'MODIFIED', 'PENDING_VALIDATION', 'VALIDATED', 'SETTLED', 'CANCELLED'):
+            for _type in ('', 'BUY', 'SELL'):
+                query_cache.invalidate(f"trade_list:{_status}:{_type}:1000")
+        logger.debug("Trade statistics + list caches invalidated")
 
     def get_pending_validation_trades(self, limit: int = 100, cis_only: bool = True) -> List[Dict[str, Any]]:
         """

@@ -215,7 +215,13 @@
                     {% for p in positions %}
                     <tr>
                         <td style="position: sticky; left: 0; background:#fff; z-index:1;">
-                            <strong class="text-primary">{{ p.portfolio|default:"-" }}</strong>
+                            {% if p.portfolio %}
+                                <a href="{% url 'portfolio:detail' p.portfolio %}" class="text-primary fw-semibold">
+                                    {{ p.portfolio }}
+                                </a>
+                            {% else %}
+                                <strong class="text-muted">-</strong>
+                            {% endif %}
                         </td>
                         <td style="max-width:180px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"
                             title="{{ p.security_label }}">
