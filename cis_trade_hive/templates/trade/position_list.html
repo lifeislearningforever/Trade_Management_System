@@ -237,12 +237,18 @@
                         </td>
                         <td style="max-width:180px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"
                             title="{{ p.security_label }}">
-                            {% if p.security_id %}
-                                <a href="{% url 'security:detail' p.security_id %}" class="text-primary fw-semibold">
-                                    {{ p.security_label|default:"-" }}
-                                </a>
+                            {% if p.security_label %}
+                                {% if p.security_id %}
+                                    <a href="{% url 'security:detail' p.security_id %}" class="text-primary fw-semibold">
+                                        {{ p.security_label }}
+                                    </a>
+                                {% else %}
+                                    <a href="{% url 'security:list' %}?search={{ p.security_label|urlencode }}" class="text-primary fw-semibold">
+                                        {{ p.security_label }}
+                                    </a>
+                                {% endif %}
                             {% else %}
-                                {{ p.security_label|default:"-" }}
+                                <span class="text-muted">-</span>
                             {% endif %}
                         </td>
                         <td><code class="small">{{ p.isin|default:"-" }}</code></td>
