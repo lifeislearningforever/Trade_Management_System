@@ -53,7 +53,7 @@ class SecurityHiveRepository:
         Args:
             limit: Maximum number of records to return
             status: Filter by status (INITIAL, MODIFIED, VALIDATED)
-            search: Search term for security_name, ISIN, ticker, or issuer
+            search: Search term for security_name, security_description, ISIN, ticker, or issuer
             currency: Filter by currency_code
             security_type: Filter by security_type
             src_system: Filter by source system (CIS, GMP, etc.)
