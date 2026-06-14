@@ -35,67 +35,79 @@
     <!-- Overview Statistics -->
     <div class="row mb-4">
         <div class="col-md-3">
-            <div class="card text-white bg-primary h-100">
-                <div class="card-body">
-                    <div class="d-flex align-items-center">
-                        <div class="flex-grow-1">
-                            <h6 class="card-title text-white">Total Trades</h6>
-                            <h2 class="mb-0">{{ stats.total_trades|default:0 }}</h2>
-                        </div>
-                        <div class="flex-shrink-0">
-                            <i class="bi bi-graph-up" style="font-size: 3rem; opacity: 0.3;"></i>
+            <a href="{% url 'trade:list' %}" class="text-decoration-none">
+                <div class="card text-white bg-primary h-100 stat-card">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div class="flex-grow-1">
+                                <h6 class="card-title text-white">Total Trades</h6>
+                                <h2 class="mb-0">{{ stats.total_trades|default:0 }}</h2>
+                                <small class="text-white-50">Click to view all</small>
+                            </div>
+                            <div class="flex-shrink-0">
+                                <i class="bi bi-graph-up" style="font-size: 3rem; opacity: 0.3;"></i>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
+            </a>
         </div>
 
         <div class="col-md-3">
-            <div class="card text-white bg-success h-100">
-                <div class="card-body">
-                    <div class="d-flex align-items-center">
-                        <div class="flex-grow-1">
-                            <h6 class="card-title text-white">Settled</h6>
-                            <h2 class="mb-0">{{ stats.settled|default:0 }}</h2>
-                        </div>
-                        <div class="flex-shrink-0">
-                            <i class="bi bi-check-circle" style="font-size: 3rem; opacity: 0.3;"></i>
+            <a href="{% url 'trade:list' %}?status=SETTLED" class="text-decoration-none">
+                <div class="card text-white bg-success h-100 stat-card">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div class="flex-grow-1">
+                                <h6 class="card-title text-white">Settled</h6>
+                                <h2 class="mb-0">{{ stats.settled|default:0 }}</h2>
+                                <small class="text-white-50">Click to filter</small>
+                            </div>
+                            <div class="flex-shrink-0">
+                                <i class="bi bi-check-circle" style="font-size: 3rem; opacity: 0.3;"></i>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
+            </a>
         </div>
 
         <div class="col-md-3">
-            <div class="card text-white bg-warning h-100">
-                <div class="card-body">
-                    <div class="d-flex align-items-center">
-                        <div class="flex-grow-1">
-                            <h6 class="card-title text-white">Pending Validation</h6>
-                            <h2 class="mb-0">{{ stats.pending_validation|default:0 }}</h2>
-                        </div>
-                        <div class="flex-shrink-0">
-                            <i class="bi bi-clock-history" style="font-size: 3rem; opacity: 0.3;"></i>
+            <a href="{% url 'trade:list' %}?status=PENDING_VALIDATION" class="text-decoration-none">
+                <div class="card text-white bg-warning h-100 stat-card">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div class="flex-grow-1">
+                                <h6 class="card-title text-white">Pending Validation</h6>
+                                <h2 class="mb-0">{{ stats.pending_validation|default:0 }}</h2>
+                                <small class="text-white-50">Click to filter</small>
+                            </div>
+                            <div class="flex-shrink-0">
+                                <i class="bi bi-clock-history" style="font-size: 3rem; opacity: 0.3;"></i>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
+            </a>
         </div>
 
         <div class="col-md-3">
-            <div class="card text-white bg-info h-100">
-                <div class="card-body">
-                    <div class="d-flex align-items-center">
-                        <div class="flex-grow-1">
-                            <h6 class="card-title text-white">Pending Settlement</h6>
-                            <h2 class="mb-0">{{ stats.pending_settlement|default:0 }}</h2>
-                        </div>
-                        <div class="flex-shrink-0">
-                            <i class="bi bi-hourglass-split" style="font-size: 3rem; opacity: 0.3;"></i>
+            <a href="{% url 'trade:list' %}?status=VALIDATED" class="text-decoration-none">
+                <div class="card text-white bg-info h-100 stat-card">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div class="flex-grow-1">
+                                <h6 class="card-title text-white">Pending Settlement</h6>
+                                <h2 class="mb-0">{{ stats.pending_settlement|default:0 }}</h2>
+                                <small class="text-white-50">Click to filter</small>
+                            </div>
+                            <div class="flex-shrink-0">
+                                <i class="bi bi-hourglass-split" style="font-size: 3rem; opacity: 0.3;"></i>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
+            </a>
         </div>
     </div>
 
@@ -120,7 +132,7 @@
                             </thead>
                             <tbody>
                                 {% for item in stats.status_breakdown %}
-                                <tr>
+                                <tr style="cursor:pointer;" onclick="window.location='{% url 'trade:list' %}?status={{ item.status }}'">
                                     <td>
                                         {% if item.status == 'INITIAL' %}
                                             <span class="badge badge-secondary">{{ item.status }}</span>
@@ -178,7 +190,7 @@
                             </thead>
                             <tbody>
                                 {% for item in stats.type_breakdown %}
-                                <tr>
+                                <tr style="cursor:pointer;" onclick="window.location='{% url 'trade:list' %}?trade_type={{ item.trade_type }}'">
                                     <td>
                                         {% if item.trade_type == 'BUY' %}
                                             <span class="badge badge-success">{{ item.trade_type }}</span>
@@ -240,4 +252,19 @@
         </a>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .stat-card {
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .stat-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+    }
+    tbody tr[onclick]:hover {
+        background-color: rgba(0,0,0,0.04);
+    }
+</style>
 {% endblock %}
