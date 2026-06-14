@@ -134,6 +134,7 @@ def _export_csv(positions):
         'Dividend FC', 'Dividend LC',
         'Uncall FC', 'Uncall LC',
         'Pipeline FC', 'Pipeline LC',
+        'Reval Status',
         'Processing Date',
     ])
 
@@ -167,6 +168,7 @@ def _export_csv(positions):
             p.get('uncall_lc'),
             p.get('pipeline_fc'),
             p.get('pipeline_lc'),
+            p.get('revaluation_status', ''),
             p.get('processing_date'),
         ])
 

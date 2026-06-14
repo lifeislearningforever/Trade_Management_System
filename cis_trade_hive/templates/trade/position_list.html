@@ -205,9 +205,12 @@
                         <th class="text-end" style="min-width: 120px;">Unreal PnL LC</th>
                         <th class="text-end" style="min-width: 110px;">Real PnL FC</th>
                         <th class="text-end" style="min-width: 100px;">Provision FC</th>
+                        <th class="text-end" style="min-width: 100px;">Provision LC</th>
                         <th class="text-end" style="min-width: 100px;">Dividend FC</th>
                         <th class="text-end" style="min-width: 100px;">Uncall FC</th>
+                        <th class="text-end" style="min-width: 100px;">Uncall LC</th>
                         <th class="text-end" style="min-width: 100px;">Pipeline FC</th>
+                        <th style="min-width: 100px;">Reval</th>
                         <th style="min-width: 100px;">Proc Date</th>
                     </tr>
                 </thead>
@@ -275,9 +278,20 @@
                         </td>
                         <td class="text-end">{{ p.realized_pnl_fc|default:0|floatformat:2 }}</td>
                         <td class="text-end">{{ p.provision_fc|default:0|floatformat:2 }}</td>
+                        <td class="text-end">{{ p.provision_lc|default:0|floatformat:2 }}</td>
                         <td class="text-end">{{ p.dividend_fc|default:0|floatformat:2 }}</td>
                         <td class="text-end">{{ p.uncall_fc|default:0|floatformat:2 }}</td>
+                        <td class="text-end">{{ p.uncall_lc|default:0|floatformat:2 }}</td>
                         <td class="text-end">{{ p.pipeline_fc|default:0|floatformat:2 }}</td>
+                        <td>
+                            {% if p.revaluation_status %}
+                                <span class="badge {% if p.revaluation_status == 'Y' or p.revaluation_status|upper == 'REVAL' %}bg-success{% else %}bg-secondary{% endif %}">
+                                    {{ p.revaluation_status }}
+                                </span>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
                         <td class="small text-muted">{{ p.processing_date|default:"-" }}</td>
                     </tr>
                     {% endfor %}

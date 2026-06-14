@@ -74,28 +74,35 @@ class PositionRepository:
 
             where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
+            # prefix WHERE conditions with pos. alias since we now JOIN
+            where_pos = where.replace("WHERE ", "WHERE pos.").replace(" AND ", " AND pos.") if where else ""
+
             query = f"""
                 SELECT
-                    position_id, version_id,
-                    portfolio, security_label,
-                    position_basis, position_date,
-                    src_system, processing_date,
-                    quantity,
-                    average_cost_fc, average_cost_lc,
-                    cost_fc, cost_lc,
-                    market_value_fc, market_value_lc,
-                    net_book_value_fc, net_book_value_lc,
-                    unrealized_pnl_fc, unrealized_pnl_lc,
-                    realized_pnl_fc, realized_pnl_lc,
-                    provision_fc, provision_lc,
-                    dividend_fc, dividend_lc,
-                    uncall_fc, uncall_lc,
-                    pipeline_fc, pipeline_lc,
-                    position_type,
-                    isin
-                FROM {DATABASE}.{TABLE}
-                {where}
-                ORDER BY position_date DESC, portfolio, security_label
+                    pos.position_id, pos.version_id,
+                    pos.portfolio, pos.security_label,
+                    pos.position_basis, pos.position_date,
+                    pos.src_system, pos.processing_date,
+                    pos.quantity,
+                    pos.average_cost_fc, pos.average_cost_lc,
+                    pos.cost_fc, pos.cost_lc,
+                    pos.market_value_fc, pos.market_value_lc,
+                    pos.net_book_value_fc, pos.net_book_value_lc,
+                    pos.unrealized_pnl_fc, pos.unrealized_pnl_lc,
+                    pos.realized_pnl_fc, pos.realized_pnl_lc,
+                    pos.provision_fc, pos.provision_lc,
+                    pos.dividend_fc, pos.dividend_lc,
+                    pos.uncall_fc, pos.uncall_lc,
+                    pos.pipeline_fc, pos.pipeline_lc,
+                    pos.position_type,
+                    pos.isin,
+                    COALESCE(p.revaluation_status, '') AS revaluation_status
+                FROM {DATABASE}.{TABLE} pos
+                LEFT JOIN {DATABASE}.cis_portfolio p
+                    ON pos.portfolio = p.name
+                    AND (p.is_active = true OR p.is_active IS NULL)
+                {where_pos}
+                ORDER BY pos.position_date DESC, pos.portfolio, pos.security_label
                 LIMIT {limit}
                 OFFSET {offset}
             """
