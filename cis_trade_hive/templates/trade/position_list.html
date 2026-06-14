@@ -219,7 +219,13 @@
                         </td>
                         <td style="max-width:180px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"
                             title="{{ p.security_label }}">
-                            {{ p.security_label|default:"-" }}
+                            {% if p.security_id %}
+                                <a href="{% url 'security:detail' p.security_id %}" class="text-primary fw-semibold">
+                                    {{ p.security_label|default:"-" }}
+                                </a>
+                            {% else %}
+                                {{ p.security_label|default:"-" }}
+                            {% endif %}
                         </td>
                         <td><code class="small">{{ p.isin|default:"-" }}</code></td>
                         <td>
