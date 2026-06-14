@@ -58,7 +58,7 @@ class CashFlowDropdownService:
         Returns:
             List of portfolio options
         """
-        cache_key = f"{CACHE_PREFIX}portfolios_v2"  # v2: includes description as full_name
+        cache_key = f"{CACHE_PREFIX}portfolios_v3"  # v3: subtitle = manager + currency
 
         # Try cache first (only for non-search requests)
         if not search:
@@ -73,16 +73,27 @@ class CashFlowDropdownService:
             # Use trade validation repository - same source as trade create
             portfolios = trade_validation_repository.get_valid_portfolios(search=search)
 
-            options = [
-                {
-                    'value': p.get('portfolio_short_name', ''),
-                    'label': p.get('portfolio_short_name', ''),
-                    'full_name': p.get('portfolio_full_name', '') or p.get('portfolio_short_name', ''),
-                    'currency': p.get('currency', ''),
+            options = []
+            for p in portfolios:
+                short_name = p.get('portfolio_short_name', '')
+                manager = p.get('manager', '') or ''
+                currency = p.get('currency', '') or ''
+                # Build a meaningful subtitle: manager + currency, or just currency, or short_name
+                if manager and currency:
+                    full_name = f"{manager} ({currency})"
+                elif manager:
+                    full_name = manager
+                elif currency:
+                    full_name = currency
+                else:
+                    full_name = short_name
+                options.append({
+                    'value': short_name,
+                    'label': short_name,
+                    'full_name': full_name,
+                    'currency': currency,
                     'status': p.get('status', ''),
-                }
-                for p in portfolios
-            ]
+                })
 
             # Cache non-search results
             if not search and options:
@@ -426,7 +437,7 @@ class CashFlowDropdownService:
                 logger.info(f"Invalidated cache for: {field_name}")
             else:
                 # Invalidate all
-                for key in ['portfolios_v2', 'securities', 'cash_flow_types', 'send_receive', 'cash_flow_status', 'currencies']:
+                for key in ['portfolios_v3', 'securities', 'cash_flow_types', 'send_receive', 'cash_flow_status', 'currencies']:
                     cache.delete(f"{CACHE_PREFIX}{key}")
                 logger.info("Invalidated all cash flow dropdown caches")
 
