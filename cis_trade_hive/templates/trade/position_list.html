@@ -9,27 +9,95 @@
     <li class="breadcrumb-item active">Positions</li>
 {% endblock %}
 
+{% block extra_css %}
+<style>
+.pos-stat-card { border-left: 3px solid; border-radius: 6px; padding: 10px 14px; background: #fff; }
+.pos-stat-card.blue  { border-color: #0d6efd; }
+.pos-stat-card.green { border-color: #198754; }
+.pos-stat-card.red   { border-color: #dc3545; }
+.pos-stat-card.teal  { border-color: #0dcaf0; }
+.pos-stat-card .label { font-size: 0.70rem; text-transform: uppercase; letter-spacing: .05em; color: #6c757d; margin-bottom: 2px; }
+.pos-stat-card .value { font-size: 1.05rem; font-weight: 700; }
+.pos-stat-card .sub   { font-size: 0.75rem; color: #6c757d; }
+.pos-table th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em; color: #495057; white-space: nowrap; padding: 6px 8px; }
+.pos-table td { font-size: 0.82rem; padding: 5px 8px; vertical-align: middle; }
+.pos-table tbody tr:hover { background: #f0f4ff !important; }
+.num { font-variant-numeric: tabular-nums; }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="content-header d-flex justify-content-between align-items-start">
+<div class="content-header d-flex justify-content-between align-items-start mb-2">
     <div>
-        <h1 class="content-title">
+        <h1 class="content-title mb-0">
             <i class="bi bi-pie-chart text-primary"></i> Positions
         </h1>
-        <p class="content-subtitle">Read-only view of cis_position &mdash; {{ total }} record{{ total|pluralize }} found</p>
+        <p class="content-subtitle mb-0">Read-only view of cis_position &mdash; <strong>{{ total }}</strong> record{{ total|pluralize }} found</p>
     </div>
-    <div class="d-flex gap-2">
-        <a href="?{{ request.GET.urlencode }}&export=csv" class="btn btn-success">
-            <i class="bi bi-download"></i> Export CSV
-        </a>
-    </div>
+    <a href="?{{ request.GET.urlencode }}&export=csv" class="btn btn-success btn-sm">
+        <i class="bi bi-download"></i> Export CSV
+    </a>
 </div>
 
-<!-- Filters -->
-<div class="card mb-3" style="overflow: visible;">
-    <div class="card-header">
-        <h6 class="mb-0"><i class="bi bi-funnel"></i> Filters</h6>
+<!-- Summary Stats -->
+{% if stats %}
+<div class="row g-2 mb-3">
+    <div class="col">
+        <div class="pos-stat-card blue">
+            <div class="label">Total Cost FC</div>
+            <div class="value num">{{ stats.total_cost_fc|default:0|floatformat:0 }}</div>
+        </div>
     </div>
-    <div class="card-body" style="overflow: visible;">
+    <div class="col">
+        <div class="pos-stat-card blue">
+            <div class="label">Total Cost LC</div>
+            <div class="value num">{{ stats.total_cost_lc|default:0|floatformat:0 }}</div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="pos-stat-card teal">
+            <div class="label">Mkt Val FC</div>
+            <div class="value num">{{ stats.total_market_value_fc|default:0|floatformat:0 }}</div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="pos-stat-card teal">
+            <div class="label">Mkt Val LC</div>
+            <div class="value num">{{ stats.total_market_value_lc|default:0|floatformat:0 }}</div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="pos-stat-card {% if stats.total_unrealized_pnl_fc >= 0 %}green{% else %}red{% endif %}">
+            <div class="label">Unreal PnL FC</div>
+            <div class="value num {% if stats.total_unrealized_pnl_fc >= 0 %}text-success{% else %}text-danger{% endif %}">
+                {{ stats.total_unrealized_pnl_fc|default:0|floatformat:0 }}
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="pos-stat-card {% if stats.total_realized_pnl_fc >= 0 %}green{% else %}red{% endif %}">
+            <div class="label">Real PnL FC</div>
+            <div class="value num {% if stats.total_realized_pnl_fc >= 0 %}text-success{% else %}text-danger{% endif %}">
+                {{ stats.total_realized_pnl_fc|default:0|floatformat:0 }}
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="pos-stat-card blue">
+            <div class="label">Uncall FC</div>
+            <div class="value num">{{ stats.total_uncall_fc|default:0|floatformat:0 }}</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Filters -->
+<div class="card mb-3 shadow-sm" style="overflow: visible;">
+    <div class="card-header py-2 d-flex align-items-center gap-2" style="background:linear-gradient(135deg,#f8f9fa,#e9ecef);">
+        <i class="bi bi-funnel-fill text-primary"></i>
+        <span class="fw-semibold small">Filters</span>
+    </div>
+    <div class="card-body py-2" style="overflow: visible;">
         <form method="get" id="positionFilterForm" class="row g-2 align-items-end">
 
             <!-- Portfolio Multi-Select -->
@@ -183,8 +251,8 @@
 <div class="card">
     <div class="card-body p-0">
         {% if positions %}
-        <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
-            <table class="table table-hover table-sm mb-0" style="width: max-content; min-width: 100%;">
+        <div class="table-responsive" style="max-height: 65vh; overflow-y: auto;">
+            <table class="table table-hover table-sm mb-0 pos-table" style="width: max-content; min-width: 100%;">
                 <thead class="table-light" style="position: sticky; top: 0; z-index: 10;">
                     <tr>
                         <th style="min-width: 120px; position: sticky; left: 0; background:#f8f9fa; z-index:11;">Portfolio</th>
@@ -228,11 +296,14 @@
                         </td>
                         <td>
                             {% if p.revaluation_status %}
-                                <span class="badge {% if p.revaluation_status == 'Y' or p.revaluation_status|upper == 'REVAL' %}bg-success{% else %}bg-secondary{% endif %}">
-                                    {{ p.revaluation_status }}
+                                {% with rs=p.revaluation_status|upper %}
+                                <span class="badge {% if rs == 'Y' or rs == 'REVAL' or 'NON' not in rs %}bg-success{% else %}bg-secondary{% endif %}"
+                                      title="{{ p.revaluation_status }}">
+                                    {% if 'NON' in rs %}NR{% else %}R{% endif %}
                                 </span>
+                                {% endwith %}
                             {% else %}
-                                <span class="text-muted">-</span>
+                                <span class="text-muted small">-</span>
                             {% endif %}
                         </td>
                         <td style="max-width:180px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"
@@ -274,30 +345,26 @@
                                 <span class="badge bg-secondary">{{ p.position_type|default:"-" }}</span>
                             {% endif %}
                         </td>
-                        <td class="text-end">{{ p.quantity|default:0|floatformat:4 }}</td>
-                        <td class="text-end">{{ p.average_cost_fc|default:0|floatformat:4 }}</td>
-                        <td class="text-end">{{ p.cost_fc|default:0|floatformat:2 }}</td>
-                        <td class="text-end">{{ p.cost_lc|default:0|floatformat:2 }}</td>
-                        <td class="text-end fw-semibold">{{ p.market_value_fc|default:0|floatformat:2 }}</td>
-                        <td class="text-end fw-semibold">{{ p.market_value_lc|default:0|floatformat:2 }}</td>
-                        <td class="text-end">{{ p.net_book_value_fc|default:0|floatformat:2 }}</td>
-                        <td class="text-end
-                            {% if p.unrealized_pnl_fc > 0 %}text-success fw-bold
-                            {% elif p.unrealized_pnl_fc < 0 %}text-danger fw-bold{% endif %}">
+                        <td class="text-end num">{{ p.quantity|default:0|floatformat:4 }}</td>
+                        <td class="text-end num">{{ p.average_cost_fc|default:0|floatformat:4 }}</td>
+                        <td class="text-end num">{{ p.cost_fc|default:0|floatformat:2 }}</td>
+                        <td class="text-end num">{{ p.cost_lc|default:0|floatformat:2 }}</td>
+                        <td class="text-end num fw-semibold">{{ p.market_value_fc|default:0|floatformat:2 }}</td>
+                        <td class="text-end num fw-semibold">{{ p.market_value_lc|default:0|floatformat:2 }}</td>
+                        <td class="text-end num">{{ p.net_book_value_fc|default:0|floatformat:2 }}</td>
+                        <td class="text-end num {% if p.unrealized_pnl_fc > 0 %}text-success fw-bold{% elif p.unrealized_pnl_fc < 0 %}text-danger fw-bold{% endif %}">
                             {{ p.unrealized_pnl_fc|default:0|floatformat:2 }}
                         </td>
-                        <td class="text-end
-                            {% if p.unrealized_pnl_lc > 0 %}text-success
-                            {% elif p.unrealized_pnl_lc < 0 %}text-danger{% endif %}">
+                        <td class="text-end num {% if p.unrealized_pnl_lc > 0 %}text-success{% elif p.unrealized_pnl_lc < 0 %}text-danger{% endif %}">
                             {{ p.unrealized_pnl_lc|default:0|floatformat:2 }}
                         </td>
-                        <td class="text-end">{{ p.realized_pnl_fc|default:0|floatformat:2 }}</td>
-                        <td class="text-end">{{ p.provision_fc|default:0|floatformat:2 }}</td>
-                        <td class="text-end">{{ p.provision_lc|default:0|floatformat:2 }}</td>
-                        <td class="text-end">{{ p.dividend_fc|default:0|floatformat:2 }}</td>
-                        <td class="text-end">{{ p.uncall_fc|default:0|floatformat:2 }}</td>
-                        <td class="text-end">{{ p.uncall_lc|default:0|floatformat:2 }}</td>
-                        <td class="text-end">{{ p.pipeline_fc|default:0|floatformat:2 }}</td>
+                        <td class="text-end num">{{ p.realized_pnl_fc|default:0|floatformat:2 }}</td>
+                        <td class="text-end num">{{ p.provision_fc|default:0|floatformat:2 }}</td>
+                        <td class="text-end num">{{ p.provision_lc|default:0|floatformat:2 }}</td>
+                        <td class="text-end num">{{ p.dividend_fc|default:0|floatformat:2 }}</td>
+                        <td class="text-end num">{{ p.uncall_fc|default:0|floatformat:2 }}</td>
+                        <td class="text-end num">{{ p.uncall_lc|default:0|floatformat:2 }}</td>
+                        <td class="text-end num">{{ p.pipeline_fc|default:0|floatformat:2 }}</td>
                         <td class="small text-muted">{{ p.processing_date|default:"-" }}</td>
                     </tr>
                     {% endfor %}
