@@ -2062,19 +2062,11 @@ class TradeKuduRepository:
     STATS_CACHE_TTL = 30  # seconds - short TTL to keep stats fresh
 
     def get_trade_statistics(self, use_cache: bool = True) -> Dict[str, Any]:
-        """
-        Get trade statistics for dashboard.
-
-        Args:
-            use_cache: If True, check cache first (default). Set to False to force refresh.
-
-        Returns:
-            Dict with statistics (total_trades, pending_validation, etc.)
-        """
+        """Get trade statistics for dashboard. Single query, cached 30s."""
         import time
+        from datetime import date
         perf_start = time.time()
 
-        # Check cache first (30 second TTL)
         if use_cache:
             cached = query_cache.get(self.STATS_CACHE_KEY)
             if cached is not None:
@@ -2083,9 +2075,17 @@ class TradeKuduRepository:
 
         logger.debug("[PERF] Trade statistics cache MISS - querying DB")
 
+        today = date.today().strftime('%Y-%m-%d')
+
         try:
+            # Single query: group by status + trade_type, sum notional, count today
             query = f"""
-            SELECT status, trade_type, COUNT(*) as count
+            SELECT
+                status,
+                trade_type,
+                COUNT(*) AS cnt,
+                SUM(CASE WHEN trade_date = '{today}' THEN 1 ELSE 0 END) AS today_cnt,
+                SUM(COALESCE(gross_amount, 0)) AS total_notional
             FROM {self.DATABASE}.{self.TABLE_NAME}
             WHERE is_deleted = false OR is_deleted IS NULL
             GROUP BY status, trade_type
@@ -2097,43 +2097,83 @@ class TradeKuduRepository:
                 'pending_validation': 0,
                 'pending_settlement': 0,
                 'settled': 0,
+                'cancelled': 0,
+                'drafts': 0,
+                'today_trades': 0,
+                'buy_notional': 0.0,
+                'sell_notional': 0.0,
                 'status_breakdown': {},
-                'type_breakdown': {}
+                'type_breakdown': {},
             }
 
             if results:
                 for row in results:
-                    status = row.get('status', 'Unknown')
-                    trade_type = row.get('trade_type', 'Unknown')
-                    count = row.get('count', 0)
+                    status = row.get('status') or 'Unknown'
+                    trade_type = row.get('trade_type') or 'Unknown'
+                    count = int(row.get('cnt') or 0)
+                    today_cnt = int(row.get('today_cnt') or 0)
+                    notional = float(row.get('total_notional') or 0)
 
                     stats['total_trades'] += count
-                    stats['status_breakdown'][status] = stats['status_breakdown'].get(status, 0) + count
-                    stats['type_breakdown'][trade_type] = stats['type_breakdown'].get(trade_type, 0) + count
+                    stats['today_trades'] += today_cnt
 
-                    # Only PENDING_VALIDATION counts toward the checker's queue
+                    # Status bucket
+                    prev = stats['status_breakdown'].get(status, {'count': 0})
+                    prev['count'] += count
+                    stats['status_breakdown'][status] = prev
+
+                    # Type bucket (notional per type across all statuses)
+                    tb = stats['type_breakdown'].get(trade_type, {'count': 0, 'notional': 0.0})
+                    tb['count'] += count
+                    tb['notional'] += notional
+                    stats['type_breakdown'][trade_type] = tb
+
                     if status == self.STATUS_PENDING_VALIDATION:
                         stats['pending_validation'] += count
                     elif status == self.STATUS_VALIDATED:
                         stats['pending_settlement'] += count
                     elif status == self.STATUS_SETTLED:
                         stats['settled'] += count
+                    elif status == self.STATUS_CANCELLED:
+                        stats['cancelled'] += count
+                    elif status in (self.STATUS_INITIAL, self.STATUS_MODIFIED):
+                        stats['drafts'] += count
 
-            # Cache the result
+                    if trade_type == 'BUY':
+                        stats['buy_notional'] += notional
+                    elif trade_type == 'SELL':
+                        stats['sell_notional'] += notional
+
+            # Convert to sorted lists for template/JSON consumption
+            status_order = [
+                self.STATUS_INITIAL, self.STATUS_MODIFIED,
+                self.STATUS_PENDING_VALIDATION, self.STATUS_VALIDATED,
+                self.STATUS_SETTLED, self.STATUS_CANCELLED,
+            ]
+            stats['status_breakdown'] = [
+                {'status': s, 'count': stats['status_breakdown'][s]['count']}
+                for s in status_order if s in stats['status_breakdown']
+            ] + [
+                {'status': s, 'count': v['count']}
+                for s, v in stats['status_breakdown'].items() if s not in status_order
+            ]
+            stats['type_breakdown'] = sorted(
+                [{'trade_type': t, 'count': v['count'], 'notional': round(v['notional'], 2)}
+                 for t, v in stats['type_breakdown'].items()],
+                key=lambda x: x['count'], reverse=True
+            )
+
             query_cache.set(self.STATS_CACHE_KEY, stats, self.STATS_CACHE_TTL)
             logger.debug(f"[PERF] Trade statistics loaded in {(time.time() - perf_start)*1000:.0f}ms")
-
             return stats
 
         except Exception as e:
             logger.error(f"Error getting trade statistics: {str(e)}")
             return {
-                'total_trades': 0,
-                'pending_validation': 0,
-                'pending_settlement': 0,
-                'settled': 0,
-                'status_breakdown': {},
-                'type_breakdown': {}
+                'total_trades': 0, 'pending_validation': 0, 'pending_settlement': 0,
+                'settled': 0, 'cancelled': 0, 'drafts': 0, 'today_trades': 0,
+                'buy_notional': 0.0, 'sell_notional': 0.0,
+                'status_breakdown': [], 'type_breakdown': [],
             }
 
     def invalidate_statistics_cache(self) -> None:

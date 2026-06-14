@@ -474,14 +474,15 @@ def trade_list(request):
 
 
 def trade_dashboard(request):
-    """Trade dashboard with statistics."""
-    stats = trade_kudu_repository.get_trade_statistics()
+    """Render dashboard shell; stats are loaded async via api_trade_statistics."""
+    return render(request, 'trade/trade_dashboard.html', {})
 
-    context = {
-        'stats': stats,
-    }
 
-    return render(request, 'trade/trade_dashboard.html', context)
+def api_trade_statistics(request):
+    """JSON endpoint for trade dashboard statistics. Cached 30s."""
+    force_refresh = request.GET.get('refresh') == '1'
+    stats = trade_kudu_repository.get_trade_statistics(use_cache=not force_refresh)
+    return JsonResponse(stats)
 
 
 # =============================================================================

@@ -17,6 +17,7 @@ urlpatterns = [
 
     # Dashboard
     path('dashboard/', views.trade_dashboard, name='dashboard'),
+    path('api/statistics/', views.api_trade_statistics, name='api_statistics'),
 
     # Trade CRUD
     path('create/', views.trade_create, name='create'),
