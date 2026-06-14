@@ -330,7 +330,10 @@ class TradeKuduRepository:
             query = f"""
             SELECT t.*,
                    COALESCE(p.currency, t.currency_code) AS portfolio_currency,
-                   s.security_id AS security_id
+                   s.security_id AS security_id,
+                   COALESCE(p.description, '') AS portfolio_description,
+                   COALESCE(p.manager, '') AS portfolio_manager,
+                   COALESCE(s.security_description, '') AS security_description
             FROM {self.DATABASE}.{self.TABLE_NAME} t
             LEFT JOIN {self.DATABASE}.cis_portfolio p ON t.portfolio_short_name = p.name
             LEFT JOIN {self.DATABASE}.cis_security s ON t.security_label = s.security_name
@@ -351,12 +354,19 @@ class TradeKuduRepository:
             return []
 
     def get_trade_by_id(self, trade_id: int) -> Optional[Dict[str, Any]]:
-        """Get trade by ID."""
+        """Get trade by ID with portfolio and security descriptions."""
         try:
             query = f"""
-            SELECT *
-            FROM {self.DATABASE}.{self.TABLE_NAME}
-            WHERE trade_id = {trade_id}
+            SELECT t.*,
+                   COALESCE(p.currency, t.currency_code) AS portfolio_currency,
+                   COALESCE(p.description, '') AS portfolio_description,
+                   COALESCE(p.manager, '') AS portfolio_manager,
+                   s.security_id AS security_id,
+                   COALESCE(s.security_description, '') AS security_description
+            FROM {self.DATABASE}.{self.TABLE_NAME} t
+            LEFT JOIN {self.DATABASE}.cis_portfolio p ON t.portfolio_short_name = p.name
+            LEFT JOIN {self.DATABASE}.cis_security s ON t.security_label = s.security_name
+            WHERE t.trade_id = {trade_id}
             LIMIT 1
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
@@ -366,12 +376,19 @@ class TradeKuduRepository:
             return None
 
     def get_trade_by_deal_number(self, deal_number: str) -> Optional[Dict[str, Any]]:
-        """Get trade by deal number."""
+        """Get trade by deal number with portfolio and security descriptions."""
         try:
             query = f"""
-            SELECT *
-            FROM {self.DATABASE}.{self.TABLE_NAME}
-            WHERE deal_number = {self.escape_value(deal_number)}
+            SELECT t.*,
+                   COALESCE(p.currency, t.currency_code) AS portfolio_currency,
+                   COALESCE(p.description, '') AS portfolio_description,
+                   COALESCE(p.manager, '') AS portfolio_manager,
+                   s.security_id AS security_id,
+                   COALESCE(s.security_description, '') AS security_description
+            FROM {self.DATABASE}.{self.TABLE_NAME} t
+            LEFT JOIN {self.DATABASE}.cis_portfolio p ON t.portfolio_short_name = p.name
+            LEFT JOIN {self.DATABASE}.cis_security s ON t.security_label = s.security_name
+            WHERE t.deal_number = {self.escape_value(deal_number)}
             LIMIT 1
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)

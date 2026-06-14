@@ -122,6 +122,16 @@
                             </div>
                         </div>
                         <div class="col-md-4 mb-3">
+                            <label class="form-label text-muted">Trade Status</label>
+                            <div>
+                                {% if trade.trade_status %}
+                                    <span class="badge bg-secondary fs-6">{{ trade.trade_status }}</span>
+                                {% else %}
+                                    <span class="text-muted">-</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="col-md-4 mb-3">
                             <label class="form-label text-muted">Source System</label>
                             <div>
                                 {% if trade.src_system|upper == 'CIS' %}
@@ -137,7 +147,9 @@
                         <div class="col-md-4 mb-3">
                             <label class="form-label text-muted">Portfolio</label>
                             <div class="fw-bold">{{ trade.portfolio_short_name|default:"-" }}</div>
-                            <small class="text-muted">{{ trade.portfolio_full_name|default:"" }}</small>
+                            {% if trade.portfolio_full_name %}
+                            <small class="text-muted">{{ trade.portfolio_full_name }}</small>
+                            {% endif %}
                         </div>
                         <div class="col-md-2 mb-3">
                             <label class="form-label text-muted">Local CCY</label>
@@ -154,7 +166,9 @@
                         <div class="col-md-4 mb-3">
                             <label class="form-label text-muted">Security</label>
                             <div class="fw-bold">{{ trade.security_label|default:"-" }}</div>
-                            <small class="text-muted">{{ trade.security_full_name|default:"" }}</small>
+                            {% if trade.security_full_name %}
+                            <small class="text-muted">{{ trade.security_full_name }}</small>
+                            {% endif %}
                         </div>
                         <div class="col-md-2 mb-3">
                             <label class="form-label text-muted">Foreign CCY</label>

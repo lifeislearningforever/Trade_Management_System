@@ -48,9 +48,31 @@ class TradeWrapper:
 
         # Portfolio & Security
         self.portfolio_short_name = data.get('portfolio_short_name', '')
-        self.portfolio_full_name = data.get('portfolio_full_name', '')
+        # Build portfolio_full_name: prefer stored value, then description, then manager+currency
+        _p_desc = (data.get('portfolio_description') or '').strip()
+        _p_mgr  = (data.get('portfolio_manager') or '').strip()
+        _p_ccy  = (data.get('portfolio_currency') or '').strip()
+        _stored_pfn = (data.get('portfolio_full_name') or '').strip()
+        if _stored_pfn and _stored_pfn != self.portfolio_short_name:
+            self.portfolio_full_name = _stored_pfn
+        elif _p_desc:
+            self.portfolio_full_name = _p_desc
+        elif _p_mgr and _p_ccy:
+            self.portfolio_full_name = f"{_p_mgr} ({_p_ccy})"
+        elif _p_mgr:
+            self.portfolio_full_name = _p_mgr
+        else:
+            self.portfolio_full_name = ''
         self.security_label = data.get('security_label', '')
-        self.security_full_name = data.get('security_full_name', '')
+        # Build security_full_name: prefer stored value, then security_description
+        _s_desc = (data.get('security_description') or '').strip()
+        _stored_sfn = (data.get('security_full_name') or '').strip()
+        if _stored_sfn and _stored_sfn != self.security_label:
+            self.security_full_name = _stored_sfn
+        elif _s_desc:
+            self.security_full_name = _s_desc
+        else:
+            self.security_full_name = ''
         self.security_type = data.get('security_type', '')
         self.currency_code = data.get('currency_code', '')  # Portfolio Currency (Local CCY)
         self.security_currency = data.get('security_currency', '')  # Security Currency (Foreign CCY)
