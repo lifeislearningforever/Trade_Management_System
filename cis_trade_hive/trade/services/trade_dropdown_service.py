@@ -343,15 +343,27 @@ class TradeDropdownService:
     def get_portfolios(self, search: str = None) -> List[Dict[str, Any]]:
         """Get valid portfolios for dropdown."""
         portfolios = trade_validation_repository.get_valid_portfolios(search=search)
-        return [
-            {
-                'value': p.get('portfolio_short_name', ''),
-                'label': p.get('portfolio_short_name', ''),
-                'currency': p.get('currency', ''),
-                'manager': p.get('manager', '')
-            }
-            for p in portfolios
-        ]
+        result = []
+        for p in portfolios:
+            short_name = p.get('portfolio_short_name', '')
+            manager = p.get('manager', '') or ''
+            currency = p.get('currency', '') or ''
+            if manager and currency:
+                full_name = f"{manager} ({currency})"
+            elif manager:
+                full_name = manager
+            elif currency:
+                full_name = currency
+            else:
+                full_name = short_name
+            result.append({
+                'value': short_name,
+                'label': short_name,
+                'full_name': full_name,
+                'currency': currency,
+                'manager': manager,
+            })
+        return result
 
     def get_securities(self, search: str = None) -> List[Dict[str, Any]]:
         """Get valid securities for dropdown."""
@@ -359,7 +371,9 @@ class TradeDropdownService:
         return [
             {
                 'value': s.get('security_label', ''),
-                'label': f"{s.get('security_label', '')} ({s.get('ticker', s.get('isin', ''))})",
+                'label': s.get('security_label', ''),
+                'full_name': s.get('security_full_name', '') or s.get('security_label', ''),
+                'isin': s.get('isin', ''),
                 'security_type': s.get('security_type', ''),
                 'currency': s.get('currency_code', ''),
                 'price': s.get('current_price', 0)

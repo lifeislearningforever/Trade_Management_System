@@ -129,7 +129,8 @@
                                         <option value="{{ p.value }}"
                                             {% if trade.portfolio_short_name == p.value %}selected{% endif %}
                                             data-currency="{{ p.currency }}"
-                                            data-manager="{{ p.manager }}">
+                                            data-manager="{{ p.manager }}"
+                                            data-fullname="{{ p.full_name }}">
                                             {{ p.label }}
                                         </option>
                                         {% endfor %}
@@ -165,6 +166,8 @@
                                         <option value="{{ s.value }}"
                                             data-currency="{{ s.currency }}"
                                             data-price="{{ s.price|default:0 }}"
+                                            data-fullname="{{ s.full_name }}"
+                                            data-isin="{{ s.isin }}"
                                             {% if trade.security_label == s.value %}selected{% endif %}>
                                             {{ s.label }}
                                         </option>
@@ -1608,6 +1611,32 @@ $(document).ready(function() {
 
     // Initialize all dropdowns using the global CISSelect2 utility
     CISSelect2.initByIds(allDropdownIds);
+
+    // Two-line Select2 helpers (shortname + subtitle in open list, shortname only when closed)
+    function twoLineResult(item) {
+        if (!item.id) return item.text;
+        var el = item.element;
+        var sub = el ? ($(el).data('fullname') || '') : '';
+        if (!sub || sub === item.text) return $('<span><strong>' + item.text + '</strong></span>');
+        return $(
+            '<span style="line-height:1.3;">' +
+                '<strong style="display:block;">' + item.text + '</strong>' +
+                '<small style="color:#6c757d;white-space:normal;display:block;max-width:420px;">' + sub + '</small>' +
+            '</span>'
+        );
+    }
+    function shortNameSelection(item) {
+        return $('<span>' + (item.text || item.id || '') + '</span>');
+    }
+    // Reinit portfolio and security with two-line display
+    $('#portfolio_short_name').select2('destroy').select2({
+        theme: 'bootstrap-5', placeholder: 'Select Portfolio', allowClear: true, width: '100%',
+        templateResult: twoLineResult, templateSelection: shortNameSelection,
+    });
+    $('#security_label').select2('destroy').select2({
+        theme: 'bootstrap-5', placeholder: 'Select Security', allowClear: true, width: '100%',
+        templateResult: twoLineResult, templateSelection: shortNameSelection,
+    });
 
     // Add Select2 change event for broker dropdown to trigger charge calculation
     $('#brokers').on('select2:select', function(e) {
