@@ -564,29 +564,29 @@ def cash_flow_restore(request, cash_flow_id):
 
 @require_login
 def api_validate_cf_portfolio(request):
-    """
-    API endpoint to validate portfolio for cash flow (same as trade).
-    Returns: JSON with valid: boolean and message
-    """
+    """API: Validate portfolio for cash flow."""
     portfolio_short_name = request.GET.get('portfolio', '').strip()
-
     if not portfolio_short_name:
-        return JsonResponse({'valid': False, 'message': 'Portfolio short name is required'})
-
+        return JsonResponse({'valid': False, 'is_valid': False, 'message': 'Portfolio short name is required'})
     result = trade_validation_repository.validate_portfolio(portfolio_short_name)
-    return JsonResponse(result)
+    return JsonResponse({
+        'valid': result.is_valid,
+        'is_valid': result.is_valid,
+        'message': result.message,
+        'details': result.details,
+    })
 
 
 @require_login
 def api_validate_cf_security(request):
-    """
-    API endpoint to validate security for cash flow (same as trade).
-    Returns: JSON with valid: boolean and message
-    """
+    """API: Validate security for cash flow."""
     security_name = request.GET.get('security', '').strip()
-
     if not security_name:
-        return JsonResponse({'valid': False, 'message': 'Security name is required'})
-
+        return JsonResponse({'valid': False, 'is_valid': False, 'message': 'Security name is required'})
     result = trade_validation_repository.validate_security(security_name)
-    return JsonResponse(result)
+    return JsonResponse({
+        'valid': result.is_valid,
+        'is_valid': result.is_valid,
+        'message': result.message,
+        'details': result.details,
+    })
