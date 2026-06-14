@@ -325,7 +325,7 @@ def trade_list(request):
         writer = csv.writer(response)
         writer.writerow([
             # Identity
-            'Deal Number', 'Trade Type', 'Status', 'Trade Status',
+            'Deal Number', 'Trade Type', 'Trade Status',
             # Portfolio & Security
             'Portfolio', 'Portfolio Full Name', 'Security', 'Security Full Name', 'Security Type',
             # Dates
@@ -359,16 +359,37 @@ def trade_list(request):
             'Remarks',
         ])
 
+        def _csv_portfolio_full_name(t):
+            desc = (t.get('portfolio_description') or '').strip()
+            mgr  = (t.get('portfolio_manager') or '').strip()
+            ccy  = (t.get('portfolio_currency') or '').strip()
+            short = (t.get('portfolio_short_name') or '').strip()
+            stored = (t.get('portfolio_full_name') or '').strip()
+            if stored and stored != short:
+                return stored
+            if desc:
+                return desc
+            if mgr and ccy:
+                return f"{mgr} ({ccy})"
+            return mgr or ''
+
+        def _csv_security_full_name(t):
+            desc = (t.get('security_description') or '').strip()
+            label = (t.get('security_label') or '').strip()
+            stored = (t.get('security_full_name') or '').strip()
+            if stored and stored != label:
+                return stored
+            return desc
+
         for trade in trades_data:
             writer.writerow([
                 trade.get('deal_number', ''),
                 trade.get('trade_type', ''),
-                trade.get('status', ''),
                 trade.get('trade_status', ''),
                 trade.get('portfolio_short_name', ''),
-                trade.get('portfolio_full_name', ''),
+                _csv_portfolio_full_name(trade),
                 trade.get('security_label', ''),
-                trade.get('security_full_name', ''),
+                _csv_security_full_name(trade),
                 trade.get('security_type', ''),
                 trade.get('trade_date', ''),
                 trade.get('settle_date', ''),
