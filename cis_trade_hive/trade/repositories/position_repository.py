@@ -46,36 +46,33 @@ class PositionRepository:
             conditions = []
 
             if portfolios and len(portfolios) == 1:
-                conditions.append(f"UPPER(portfolio) LIKE '%{self._escape(portfolios[0].upper())}%'")
+                conditions.append(f"UPPER(pos.portfolio) LIKE '%{self._escape(portfolios[0].upper())}%'")
             elif portfolios and len(portfolios) > 1:
                 vals = "', '".join(self._escape(p) for p in portfolios)
-                conditions.append(f"portfolio IN ('{vals}')")
+                conditions.append(f"pos.portfolio IN ('{vals}')")
             if securities and len(securities) == 1:
-                conditions.append(f"UPPER(security_label) LIKE '%{self._escape(securities[0].upper())}%'")
+                conditions.append(f"UPPER(pos.security_label) LIKE '%{self._escape(securities[0].upper())}%'")
             elif securities and len(securities) > 1:
                 vals = "', '".join(self._escape(s) for s in securities)
-                conditions.append(f"security_label IN ('{vals}')")
+                conditions.append(f"pos.security_label IN ('{vals}')")
             if src_system:
                 src_list = src_system if isinstance(src_system, list) else [src_system]
                 src_list = [s for s in src_list if s]
                 if len(src_list) == 1:
-                    conditions.append(f"src_system = '{self._escape(src_list[0])}'")
+                    conditions.append(f"pos.src_system = '{self._escape(src_list[0])}'")
                 elif len(src_list) > 1:
                     vals = "', '".join(self._escape(s) for s in src_list)
-                    conditions.append(f"src_system IN ('{vals}')")
+                    conditions.append(f"pos.src_system IN ('{vals}')")
             if position_basis:
-                conditions.append(f"position_basis = '{self._escape(position_basis)}'")
+                conditions.append(f"pos.position_basis = '{self._escape(position_basis)}'")
             if position_type:
-                conditions.append(f"position_type = '{self._escape(position_type)}'")
+                conditions.append(f"pos.position_type = '{self._escape(position_type)}'")
             if date_from:
-                conditions.append(f"position_date >= '{self._escape(date_from)}'")
+                conditions.append(f"pos.position_date >= '{self._escape(date_from)}'")
             if date_to:
-                conditions.append(f"position_date <= '{self._escape(date_to)}'")
+                conditions.append(f"pos.position_date <= '{self._escape(date_to)}'")
 
             where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
-            # prefix WHERE conditions with pos. alias since we now JOIN
-            where_pos = where.replace("WHERE ", "WHERE pos.").replace(" AND ", " AND pos.") if where else ""
 
             query = f"""
                 SELECT
@@ -104,7 +101,7 @@ class PositionRepository:
                     AND (p.is_active = true OR p.is_active IS NULL)
                 LEFT JOIN {DATABASE}.cis_security s
                     ON pos.security_label = s.security_name
-                {where_pos}
+                {where}
                 ORDER BY pos.position_date DESC, pos.portfolio, pos.security_label
                 LIMIT {limit}
                 OFFSET {offset}
