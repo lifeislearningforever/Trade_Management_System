@@ -477,23 +477,6 @@
         document.getElementById('last-updated').textContent = 'Updated ' + h + ':' + m + ':' + s;
     }
 
-    /* ── background prefetch to warm server-side cache ─── */
-    function prefetchTradeList() {
-        var urls = [
-            LIST_URL,
-            LIST_URL + '?status=PENDING_VALIDATION',
-            LIST_URL + '?status=VALIDATED',
-            LIST_URL + '?status=SETTLED',
-            LIST_URL + '?trade_type=BUY',
-            LIST_URL + '?trade_type=SELL',
-        ];
-        urls.forEach(function (u) {
-            fetch(u, { method: 'GET', credentials: 'same-origin',
-                       headers: { 'X-Prefetch': '1' } })
-                .catch(function () {});  // silently ignore errors
-        });
-    }
-
     /* ── fetch stats ────────────────────────────────────── */
     function loadStats(forceRefresh) {
         const icon = document.getElementById('refresh-icon');
@@ -507,8 +490,6 @@
                 renderStatusBreakdown(data, data.total_trades || 0);
                 renderTypeBreakdown(data, data.total_trades || 0);
                 setLastUpdated();
-                // Warm the trade list cache in the background after stats arrive
-                if (!forceRefresh) { prefetchTradeList(); }
             })
             .catch(function (err) {
                 console.error('Stats fetch error:', err);
