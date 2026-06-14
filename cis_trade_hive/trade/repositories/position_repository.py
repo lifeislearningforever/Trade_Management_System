@@ -96,11 +96,14 @@ class PositionRepository:
                     pos.pipeline_fc, pos.pipeline_lc,
                     pos.position_type,
                     pos.isin,
-                    COALESCE(p.revaluation_status, '') AS revaluation_status
+                    COALESCE(p.revaluation_status, '') AS revaluation_status,
+                    s.security_id AS security_id
                 FROM {DATABASE}.{TABLE} pos
                 LEFT JOIN {DATABASE}.cis_portfolio p
                     ON pos.portfolio = p.name
                     AND (p.is_active = true OR p.is_active IS NULL)
+                LEFT JOIN {DATABASE}.cis_security s
+                    ON pos.security_label = s.security_name
                 {where_pos}
                 ORDER BY pos.position_date DESC, pos.portfolio, pos.security_label
                 LIMIT {limit}

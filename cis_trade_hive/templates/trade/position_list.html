@@ -188,6 +188,7 @@
                 <thead class="table-light" style="position: sticky; top: 0; z-index: 10;">
                     <tr>
                         <th style="min-width: 120px; position: sticky; left: 0; background:#f8f9fa; z-index:11;">Portfolio</th>
+                        <th style="min-width: 90px;">Reval</th>
                         <th style="min-width: 180px;">Security</th>
                         <th style="min-width: 100px;">ISIN</th>
                         <th style="min-width: 100px;">Basis</th>
@@ -210,7 +211,6 @@
                         <th class="text-end" style="min-width: 100px;">Uncall FC</th>
                         <th class="text-end" style="min-width: 100px;">Uncall LC</th>
                         <th class="text-end" style="min-width: 100px;">Pipeline FC</th>
-                        <th style="min-width: 100px;">Reval</th>
                         <th style="min-width: 100px;">Proc Date</th>
                     </tr>
                 </thead>
@@ -224,6 +224,15 @@
                                 </a>
                             {% else %}
                                 <strong class="text-muted">-</strong>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if p.revaluation_status %}
+                                <span class="badge {% if p.revaluation_status == 'Y' or p.revaluation_status|upper == 'REVAL' %}bg-success{% else %}bg-secondary{% endif %}">
+                                    {{ p.revaluation_status }}
+                                </span>
+                            {% else %}
+                                <span class="text-muted">-</span>
                             {% endif %}
                         </td>
                         <td style="max-width:180px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"
@@ -283,15 +292,6 @@
                         <td class="text-end">{{ p.uncall_fc|default:0|floatformat:2 }}</td>
                         <td class="text-end">{{ p.uncall_lc|default:0|floatformat:2 }}</td>
                         <td class="text-end">{{ p.pipeline_fc|default:0|floatformat:2 }}</td>
-                        <td>
-                            {% if p.revaluation_status %}
-                                <span class="badge {% if p.revaluation_status == 'Y' or p.revaluation_status|upper == 'REVAL' %}bg-success{% else %}bg-secondary{% endif %}">
-                                    {{ p.revaluation_status }}
-                                </span>
-                            {% else %}
-                                <span class="text-muted">-</span>
-                            {% endif %}
-                        </td>
                         <td class="small text-muted">{{ p.processing_date|default:"-" }}</td>
                     </tr>
                     {% endfor %}
