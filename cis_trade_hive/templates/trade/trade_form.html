@@ -9,6 +9,74 @@
 <link href="{% static 'css/select2-bootstrap-5-theme.min.css' %}" rel="stylesheet" />
 <!-- CIS Trade Hive Select2 Custom Styles -->
 <link href="{% static 'css/select2-custom.css' %}" rel="stylesheet" />
+<style>
+/* Trade form label styling — uppercase, tight tracking, muted */
+.trade-form-container .form-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #5a6a7a;
+    margin-bottom: 0.3rem;
+}
+/* Section divider headers */
+.trade-form-container .section-header {
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #3d5a80;
+    padding: 0.4rem 0.6rem;
+    background: #f0f4f8;
+    border-left: 3px solid #3d5a80;
+    border-radius: 3px;
+    margin-bottom: 1rem;
+}
+/* Read-only display fields (CCY, status) */
+.trade-form-container input[readonly].form-control,
+.trade-form-container input[disabled].form-control {
+    background-color: #f5f7fa;
+    color: #495057;
+    border-color: #dee2e6;
+    font-weight: 500;
+}
+/* Validation status icons inside input-group */
+.trade-form-container .input-group-text {
+    background: #f5f7fa;
+    border-color: #dee2e6;
+    min-width: 2.4rem;
+    justify-content: center;
+}
+/* Card headers in the form */
+.trade-form-container .card-header {
+    background: linear-gradient(90deg, #f8f9fa 0%, #ffffff 100%);
+    border-bottom: 2px solid #e9ecef;
+    padding: 0.75rem 1.25rem;
+}
+.trade-form-container .card-header .card-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #2c3e50;
+    letter-spacing: 0.03em;
+}
+/* Nav tabs styling */
+.trade-form-container .nav-tabs .nav-link {
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: #6c757d;
+    padding: 0.6rem 1.2rem;
+}
+.trade-form-container .nav-tabs .nav-link.active {
+    color: #3d5a80;
+    border-bottom: 2px solid #3d5a80;
+}
+/* hr dividers */
+.trade-form-container hr.my-4 {
+    border-color: #e9ecef;
+    opacity: 1;
+}
+</style>
 {% endblock %}
 
 {% block breadcrumb %}
@@ -147,12 +215,12 @@
 
                             <!-- Portfolio Currency (auto-populated from portfolio selection - readonly) -->
                             <div class="col-md-2">
-                                <label class="form-label">Port CCY</label>
+                                <label class="form-label">Portfolio CCY <span class="text-danger">*</span></label>
                                 <input type="text" class="form-control bg-light" id="portfolio_currency_display"
                                        value="{{ trade.portfolio_currency|default:'' }}"
                                        readonly placeholder="-">
                                 <input type="hidden" name="portfolio_currency" id="portfolio_currency"
-                                       value="{{ trade.portfolio_currency|default:'' }}">
+                                       value="{{ trade.portfolio_currency|default:'' }}" required>
                             </div>
 
                             <!-- Security (primary dropdown - select first) -->
@@ -185,7 +253,7 @@
 
                             <!-- Currency (auto-populated from security selection - readonly) -->
                             <div class="col-md-2">
-                                <label class="form-label">Sec CCY <span class="text-danger">*</span></label>
+                                <label class="form-label">Security CCY <span class="text-danger">*</span></label>
                                 <input type="text" class="form-control bg-light" id="currency_code_display"
                                        value="{{ trade.currency_code|default:'' }}"
                                        readonly placeholder="-">
@@ -226,7 +294,7 @@
                         </div>
 
                         <hr class="my-4">
-                        <h6><i class="bi bi-building"></i> Broker & Custodian</h6>
+                        <div class="section-header"><i class="bi bi-building"></i> Broker & Custodian</div>
 
                         <div class="row g-3">
                             <!-- Broker (moved from GL & Broker tab) -->
@@ -319,7 +387,7 @@
                         </div>
 
                         <hr class="my-4">
-                        <h6>Costs & Fees</h6>
+                        <div class="section-header"><i class="bi bi-receipt"></i> Costs & Fees</div>
 
                         <div class="row g-3">
                             <div class="col-md-2">
@@ -508,7 +576,7 @@
                         </div>
 
                         <hr class="my-4">
-                        <h6>GL Codes</h6>
+                        <div class="section-header"><i class="bi bi-journal-code"></i> GL Codes</div>
 
                         <div class="row g-3">
                             <div class="col-md-4">
@@ -550,7 +618,7 @@
                         </div>
 
                         <hr class="my-4">
-                        <h6>Settlement</h6>
+                        <div class="section-header"><i class="bi bi-bank2"></i> Settlement</div>
 
                         <!-- Cash Balance and Amor/Accr Method removed per SA feedback #13 -->
                         <input type="hidden" name="amor_accr_method" value="">
@@ -672,7 +740,7 @@
                         </div>
 
                         <hr class="my-4">
-                        <h6>Boolean Flags</h6>
+                        <div class="section-header"><i class="bi bi-toggle-on"></i> Boolean Flags</div>
 
                         <div class="row g-3">
                             <div class="col-md-4">
