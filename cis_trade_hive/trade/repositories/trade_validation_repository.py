@@ -185,7 +185,7 @@ class TradeValidationRepository:
         """
         try:
             # Check cache first (only for non-search queries)
-            cache_key = f"portfolios:{search or 'all'}:{limit}"
+            cache_key = f"portfolios_v2:{search or 'all'}:{limit}"  # v2: includes description
             if not search:  # Cache only full list queries
                 cached = query_cache.get(cache_key)
                 if cached:

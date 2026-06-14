@@ -58,7 +58,7 @@ class CashFlowDropdownService:
         Returns:
             List of portfolio options
         """
-        cache_key = f"{CACHE_PREFIX}portfolios"
+        cache_key = f"{CACHE_PREFIX}portfolios_v2"  # v2: includes description as full_name
 
         # Try cache first (only for non-search requests)
         if not search:
@@ -426,7 +426,7 @@ class CashFlowDropdownService:
                 logger.info(f"Invalidated cache for: {field_name}")
             else:
                 # Invalidate all
-                for key in ['portfolios', 'securities', 'cash_flow_types', 'send_receive', 'cash_flow_status', 'currencies']:
+                for key in ['portfolios_v2', 'securities', 'cash_flow_types', 'send_receive', 'cash_flow_status', 'currencies']:
                     cache.delete(f"{CACHE_PREFIX}{key}")
                 logger.info("Invalidated all cash flow dropdown caches")
 
