@@ -151,6 +151,7 @@
                                         Security Name {% if sort_by == 'security_name' %}{% if sort_order == 'asc' %}<i class="bi bi-sort-up"></i>{% else %}<i class="bi bi-sort-down"></i>{% endif %}{% else %}<i class="bi bi-arrow-down-up text-muted" style="opacity:.4;"></i>{% endif %}
                                     </a>
                                 </th>
+                                <th style="min-width: 280px;">Description</th>
                                 <th style="min-width: 130px;">
                                     <a href="?sort_by=isin&sort_order={% if sort_by == 'isin' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if security_type %}&security_type={{ security_type }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}" class="text-dark text-decoration-none">
                                         ISIN {% if sort_by == 'isin' %}{% if sort_order == 'asc' %}<i class="bi bi-sort-up"></i>{% else %}<i class="bi bi-sort-down"></i>{% endif %}{% else %}<i class="bi bi-arrow-down-up text-muted" style="opacity:.4;"></i>{% endif %}
@@ -240,6 +241,7 @@
                                     {% endif %}
                                 </td>
                                 <td><a href="{% url 'security:detail' security.security_id %}" class="text-decoration-none"><strong>{{ security.security_name }}</strong></a></td>
+                                <td class="text-muted" style="font-size:0.85rem;">{{ security.security_description|default:"-" }}</td>
                                 <td>{{ security.isin|default:"-" }}</td>
                                 <td>{{ security.ticker|default:"-" }}</td>
                                 <td>

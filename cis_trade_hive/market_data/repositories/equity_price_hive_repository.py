@@ -90,7 +90,10 @@ class EquityPriceHiveRepository:
 
             if security_label:
                 escaped_security = security_label.replace("'", "\\'").lower()
-                where_clauses.append(f"LOWER(ep.security_label) LIKE '%{escaped_security}%'")
+                where_clauses.append(
+                    f"(LOWER(ep.security_label) LIKE '%{escaped_security}%'"
+                    f" OR LOWER(COALESCE(s.security_description, '')) LIKE '%{escaped_security}%')"
+                )
 
             if isin:
                 escaped_isin = isin.replace("'", "\\'")
