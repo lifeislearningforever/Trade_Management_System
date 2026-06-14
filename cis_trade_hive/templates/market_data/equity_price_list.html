@@ -115,7 +115,8 @@
                         <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
                             <tr>
                                 <th style="min-width: 150px;">Currency</th>
-                                <th style="min-width: 250px;">Security</th>
+                                <th style="min-width: 200px;">Security</th>
+                                <th style="min-width: 280px;">Description</th>
                                 <th style="min-width: 150px;">ISIN</th>
                                 <th style="min-width: 120px;">Date</th>
                                 <th style="min-width: 150px;">Closing Price</th>
@@ -135,6 +136,7 @@
                                 <td>
                                     <strong class="text-primary">{{ price.security_label }}</strong>
                                 </td>
+                                <td class="text-muted" style="font-size:0.85rem;">{{ price.security_description|default:"-" }}</td>
                                 <td>{{ price.isin|default:"-" }}</td>
                                 <td>{{ price.price_date }}</td>
                                 <td class="text-end">

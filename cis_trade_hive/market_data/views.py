@@ -434,6 +434,7 @@ class EquityPriceWrapper:
         self.security_label = data.get('security_label', '')
 
         # Business fields
+        self.security_description = data.get('security_description', '')
         self.isin = data.get('isin', '')
         self.price_date = data.get('price_date', '')
         self.main_closing_price = data.get('main_closing_price', 0)
@@ -484,7 +485,7 @@ def equity_price_list(request):
 
         writer = csv.writer(response)
         writer.writerow([
-            'Currency', 'Security', 'ISIN', 'Date', 'Price',
+            'Currency', 'Security', 'Security Description', 'ISIN', 'Date', 'Price',
             'Timestamp', 'Source System', 'Created By', 'Created At'
         ])
 
@@ -493,6 +494,7 @@ def equity_price_list(request):
             writer.writerow([
                 price.currency_code,
                 price.security_label,
+                price.security_description,
                 price.isin,
                 price.price_date,
                 price.main_closing_price,

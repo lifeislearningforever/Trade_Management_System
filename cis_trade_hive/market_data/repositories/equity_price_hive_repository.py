@@ -103,24 +103,30 @@ class EquityPriceHiveRepository:
 
             where_clause = " AND ".join(where_clauses)
 
-            # Build query - removed market and group_name, using composite key
+            # Build query - LEFT JOIN cis_security to enrich with security_description
             query = f"""
             SELECT
-                currency_code,
-                security_label,
-                isin,
-                price_date,
-                main_closing_price,
-                price_timestamp,
-                src_system,
-                is_active,
-                created_by,
-                created_at,
-                updated_by,
-                updated_at
-            FROM {EquityPriceHiveRepository.TABLE_NAME}
-            WHERE {where_clause}
-            ORDER BY price_date DESC, security_label
+                ep.currency_code,
+                ep.security_label,
+                ep.isin,
+                ep.price_date,
+                ep.main_closing_price,
+                ep.price_timestamp,
+                ep.src_system,
+                ep.is_active,
+                ep.created_by,
+                ep.created_at,
+                ep.updated_by,
+                ep.updated_at,
+                COALESCE(s.security_description, '') AS security_description
+            FROM {EquityPriceHiveRepository.TABLE_NAME} ep
+            LEFT JOIN gmp_cis.cis_security s ON ep.security_label = s.security_name
+            WHERE {where_clause.replace('currency_code', 'ep.currency_code')
+                               .replace('security_label', 'ep.security_label')
+                               .replace('is_active', 'ep.is_active')
+                               .replace('isin', 'ep.isin')
+                               .replace('price_date', 'ep.price_date')}
+            ORDER BY ep.price_date DESC, ep.security_label
             LIMIT {limit}
             """
 
