@@ -77,6 +77,7 @@ class CashFlowDropdownService:
                 {
                     'value': p.get('portfolio_short_name', ''),
                     'label': p.get('portfolio_short_name', ''),
+                    'full_name': p.get('portfolio_full_name', '') or p.get('portfolio_short_name', ''),
                     'currency': p.get('currency', ''),
                     'status': p.get('status', ''),
                 }
@@ -124,7 +125,8 @@ class CashFlowDropdownService:
             options = [
                 {
                     'value': s.get('security_label', ''),
-                    'label': f"{s.get('security_label', '')} ({s.get('ticker', s.get('isin', ''))})",
+                    'label': s.get('security_label', ''),
+                    'full_name': s.get('security_full_name', '') or s.get('security_label', ''),
                     'security_type': s.get('security_type', ''),
                     'currency': s.get('currency_code', ''),
                     'isin': s.get('isin', ''),

@@ -195,7 +195,7 @@ class TradeValidationRepository:
             # Include both VALIDATED and SETTLED portfolios for trade entry
             query = f"""
             SELECT name AS portfolio_short_name,
-                   name AS portfolio_full_name,
+                   COALESCE(description, name) AS portfolio_full_name,
                    currency,
                    manager,
                    cash_balance,

@@ -9,6 +9,25 @@
 <link href="{% static 'css/select2-bootstrap-5-theme.min.css' %}" rel="stylesheet" />
 <!-- CIS Trade Hive Select2 Custom Styles -->
 <link href="{% static 'css/select2-custom.css' %}" rel="stylesheet" />
+<style>
+/* Keep the closed selection pill compact — truncate if still too long */
+#portfolio_short_name + .select2-container .select2-selection__rendered,
+#security_name       + .select2-container .select2-selection__rendered {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: calc(100% - 30px);
+}
+/* Open dropdown: allow two-line items to breathe */
+.select2-results__option {
+    padding: 6px 10px !important;
+    line-height: 1.3;
+}
+/* Dropdown panel wide enough for full names */
+.select2-dropdown {
+    min-width: 320px;
+}
+</style>
 {% endblock %}
 
 {% block breadcrumb %}
@@ -71,6 +90,7 @@
                                     {% for p in dropdown_options.portfolios %}
                                         <option value="{{ p.value }}"
                                                 data-currency="{{ p.currency }}"
+                                                data-fullname="{{ p.full_name }}"
                                                 {% if cash_flow.portfolio_short_name == p.value %}selected{% endif %}>
                                             {{ p.label }}
                                         </option>
@@ -98,6 +118,8 @@
                                     {% for s in dropdown_options.securities %}
                                         <option value="{{ s.value }}"
                                                 data-currency="{{ s.currency }}"
+                                                data-fullname="{{ s.full_name }}"
+                                                data-isin="{{ s.isin }}"
                                                 {% if cash_flow.security_name == s.value %}selected{% endif %}>
                                             {{ s.label }}
                                         </option>
@@ -382,16 +404,50 @@
 <script src="{% static 'js/select2-init.js' %}"></script>
 
 <script>
+/* ── Two-line Select2 helpers ────────────────────────────────
+   templateResult  : shown in the open dropdown list
+   templateSelection: shown in the closed input (compact, shortname only)
+──────────────────────────────────────────────────────────── */
+function twoLineResult(item, subtextFn) {
+    if (!item.id) return item.text;   // placeholder
+    var el = item.element;
+    var sub = el ? ($(el).data('fullname') || '') : '';
+    if (!sub || sub === item.text) return $('<span><strong>' + item.text + '</strong></span>');
+    var $wrap = $(
+        '<span style="line-height:1.3;">' +
+            '<strong style="display:block;">' + item.text + '</strong>' +
+            '<small style="color:#6c757d;white-space:normal;display:block;max-width:420px;">' + sub + '</small>' +
+        '</span>'
+    );
+    return $wrap;
+}
+function shortNameSelection(item) {
+    // Closed pill: show only the shortname so it fits
+    return item.text || item.id;
+}
+
 // Initialize Select2 on all dropdowns
 $(document).ready(function() {
-    // Initialize portfolio dropdown
-    $('.select2-portfolio').each(function() {
-        CISSelect2.initElement($(this));
+    // Portfolio dropdown — two-line result, compact selection
+    $('#portfolio_short_name').select2({
+        theme: 'bootstrap-5',
+        placeholder: 'Search or select portfolio...',
+        allowClear: true,
+        width: '100%',
+        dropdownParent: $('#portfolio_short_name').closest('.input-group').parent(),
+        templateResult: twoLineResult,
+        templateSelection: shortNameSelection,
     });
 
-    // Initialize security dropdown
-    $('.select2-security').each(function() {
-        CISSelect2.initElement($(this));
+    // Security dropdown — two-line result, compact selection
+    $('#security_name').select2({
+        theme: 'bootstrap-5',
+        placeholder: 'Search or select security...',
+        allowClear: true,
+        width: '100%',
+        dropdownParent: $('#security_name').closest('.input-group').parent(),
+        templateResult: twoLineResult,
+        templateSelection: shortNameSelection,
     });
 
     // Initialize cash flow type dropdown
