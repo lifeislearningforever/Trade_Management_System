@@ -422,19 +422,20 @@ function twoLineResult(item, subtextFn) {
     return $wrap;
 }
 function shortNameSelection(item) {
-    // Closed pill: show only the shortname so it fits
-    return item.text || item.id;
+    // Closed pill: show only the shortname — return $element so Select2
+    // renders it correctly and change events still fire
+    return $('<span>' + (item.text || item.id || '') + '</span>');
 }
 
 // Initialize Select2 on all dropdowns
 $(document).ready(function() {
     // Portfolio dropdown — two-line result, compact selection
+    // No dropdownParent: Select2 appends to <body> so it floats over other fields
     $('#portfolio_short_name').select2({
         theme: 'bootstrap-5',
         placeholder: 'Search or select portfolio...',
         allowClear: true,
         width: '100%',
-        dropdownParent: $('#portfolio_short_name').closest('.input-group').parent(),
         templateResult: twoLineResult,
         templateSelection: shortNameSelection,
     });
@@ -445,7 +446,6 @@ $(document).ready(function() {
         placeholder: 'Search or select security...',
         allowClear: true,
         width: '100%',
-        dropdownParent: $('#security_name').closest('.input-group').parent(),
         templateResult: twoLineResult,
         templateSelection: shortNameSelection,
     });
