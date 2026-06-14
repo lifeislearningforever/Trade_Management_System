@@ -62,7 +62,8 @@ class EquityPriceHiveRepository:
         security_label: Optional[str] = None,
         isin: Optional[str] = None,
         date_from: Optional[str] = None,
-        date_to: Optional[str] = None
+        date_to: Optional[str] = None,
+        src_system: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Retrieve equity prices from Kudu with filters.
@@ -74,32 +75,36 @@ class EquityPriceHiveRepository:
             isin: Filter by ISIN code
             date_from: Filter by start date (YYYY-MM-DD format)
             date_to: Filter by end date (YYYY-MM-DD format)
+            src_system: Filter by source system (CIS or GMP)
 
         Returns:
             List of equity price records
         """
         try:
             # Build WHERE clause
-            where_clauses = ["(is_active = true OR is_active IS NULL)"]
+            where_clauses = ["(ep.is_active = true OR ep.is_active IS NULL)"]
 
             if currency_code:
                 escaped_currency = currency_code.replace("'", "\\'")
-                where_clauses.append(f"currency_code = '{escaped_currency}'")
+                where_clauses.append(f"ep.currency_code = '{escaped_currency}'")
 
             if security_label:
                 escaped_security = security_label.replace("'", "\\'").lower()
-                # Use LIKE with wildcards for partial matching (case-insensitive)
-                where_clauses.append(f"LOWER(security_label) LIKE '%{escaped_security}%'")
+                where_clauses.append(f"LOWER(ep.security_label) LIKE '%{escaped_security}%'")
 
             if isin:
                 escaped_isin = isin.replace("'", "\\'")
-                where_clauses.append(f"isin = '{escaped_isin}'")
+                where_clauses.append(f"ep.isin = '{escaped_isin}'")
 
             if date_from:
-                where_clauses.append(f"price_date >= '{date_from}'")
+                where_clauses.append(f"ep.price_date >= '{date_from}'")
 
             if date_to:
-                where_clauses.append(f"price_date <= '{date_to}'")
+                where_clauses.append(f"ep.price_date <= '{date_to}'")
+
+            if src_system:
+                escaped_src = src_system.replace("'", "\\'")
+                where_clauses.append(f"UPPER(ep.src_system) = '{escaped_src.upper()}'")
 
             where_clause = " AND ".join(where_clauses)
 
@@ -121,11 +126,7 @@ class EquityPriceHiveRepository:
                 COALESCE(s.security_description, '') AS security_description
             FROM {EquityPriceHiveRepository.TABLE_NAME} ep
             LEFT JOIN gmp_cis.cis_security s ON ep.security_label = s.security_name
-            WHERE {where_clause.replace('currency_code', 'ep.currency_code')
-                               .replace('security_label', 'ep.security_label')
-                               .replace('is_active', 'ep.is_active')
-                               .replace('isin', 'ep.isin')
-                               .replace('price_date', 'ep.price_date')}
+            WHERE {where_clause}
             ORDER BY ep.price_date DESC, ep.security_label
             LIMIT {limit}
             """

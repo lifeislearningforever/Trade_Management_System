@@ -463,6 +463,7 @@ def equity_price_list(request):
     isin = request.GET.get('isin', '').strip()
     date_from = request.GET.get('date_from', '').strip()
     date_to = request.GET.get('date_to', '').strip()
+    src_system = request.GET.get('src_system', '').strip()
     export = request.GET.get('export', '').strip()
 
     # Get equity prices from service layer
@@ -473,7 +474,8 @@ def equity_price_list(request):
             security_label=security_label if security_label else None,
             isin=isin if isin else None,
             date_from=date_from if date_from else None,
-            date_to=date_to if date_to else None
+            date_to=date_to if date_to else None,
+            src_system=src_system if src_system else None
         )
     except ValidationError as e:
         equity_prices_data = []
@@ -570,6 +572,7 @@ def equity_price_list(request):
         'isin': isin,
         'date_from': date_from,
         'date_to': date_to,
+        'src_system': src_system,
         'currencies': dropdown_options.get('currencies', []),
         'securities': dropdown_options.get('securities', []),
         'total_count': len(equity_prices_data),

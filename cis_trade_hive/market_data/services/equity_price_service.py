@@ -53,7 +53,8 @@ class EquityPriceService:
         security_label: Optional[str] = None,
         isin: Optional[str] = None,
         date_from: Optional[str] = None,
-        date_to: Optional[str] = None
+        date_to: Optional[str] = None,
+        src_system: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Get equity prices with filters and business logic.
@@ -90,7 +91,8 @@ class EquityPriceService:
                 security_label=security_label,
                 isin=isin,
                 date_from=date_from,
-                date_to=date_to
+                date_to=date_to,
+                src_system=src_system
             )
 
             logger.info(f"Retrieved {len(prices)} equity prices with filters")

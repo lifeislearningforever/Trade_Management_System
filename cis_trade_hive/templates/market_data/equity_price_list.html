@@ -35,7 +35,7 @@
         <a href="{% url 'upload:create' %}" class="btn btn-info text-white">
             <i class="bi bi-upload"></i> Upload CSV
         </a>
-        <a href="?export=csv{% if currency_code %}&currency_code={{ currency_code }}{% endif %}{% if security_label %}&security_label={{ security_label }}{% endif %}{% if isin %}&isin={{ isin }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}" class="btn btn-success">
+        <a href="?export=csv{% if currency_code %}&currency_code={{ currency_code }}{% endif %}{% if security_label %}&security_label={{ security_label }}{% endif %}{% if isin %}&isin={{ isin }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}" class="btn btn-success">
             <i class="bi bi-download"></i> Export to CSV
         </a>
     </div>
@@ -79,6 +79,14 @@
                     <label class="form-label">ISIN</label>
                     <input type="text" class="form-control" name="isin" value="{{ isin }}"
                            placeholder="ISIN code">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Source System</label>
+                    <select class="form-select" name="src_system">
+                        <option value="">All Sources</option>
+                        <option value="CIS" {% if src_system == 'CIS' %}selected{% endif %}>CIS</option>
+                        <option value="GMP" {% if src_system == 'GMP' %}selected{% endif %}>GMP</option>
+                    </select>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label">Date From</label>
@@ -179,10 +187,10 @@
                         <ul class="pagination justify-content-center mb-0">
                             {% if page_obj.has_previous %}
                                 <li class="page-item">
-                                    <a class="page-link" href="?page=1{% if currency_code %}&currency_code={{ currency_code }}{% endif %}{% if security_label %}&security_label={{ security_label }}{% endif %}{% if isin %}&isin={{ isin }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}">First</a>
+                                    <a class="page-link" href="?page=1{% if currency_code %}&currency_code={{ currency_code }}{% endif %}{% if security_label %}&security_label={{ security_label }}{% endif %}{% if isin %}&isin={{ isin }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}">First</a>
                                 </li>
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if currency_code %}&currency_code={{ currency_code }}{% endif %}{% if security_label %}&security_label={{ security_label }}{% endif %}{% if isin %}&isin={{ isin }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}">Previous</a>
+                                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if currency_code %}&currency_code={{ currency_code }}{% endif %}{% if security_label %}&security_label={{ security_label }}{% endif %}{% if isin %}&isin={{ isin }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}">Previous</a>
                                 </li>
                             {% endif %}
 
@@ -194,10 +202,10 @@
 
                             {% if page_obj.has_next %}
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if currency_code %}&currency_code={{ currency_code }}{% endif %}{% if security_label %}&security_label={{ security_label }}{% endif %}{% if isin %}&isin={{ isin }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}">Next</a>
+                                    <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if currency_code %}&currency_code={{ currency_code }}{% endif %}{% if security_label %}&security_label={{ security_label }}{% endif %}{% if isin %}&isin={{ isin }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}">Next</a>
                                 </li>
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if currency_code %}&currency_code={{ currency_code }}{% endif %}{% if security_label %}&security_label={{ security_label }}{% endif %}{% if isin %}&isin={{ isin }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}">Last</a>
+                                    <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if currency_code %}&currency_code={{ currency_code }}{% endif %}{% if security_label %}&security_label={{ security_label }}{% endif %}{% if isin %}&isin={{ isin }}{% endif %}{% if src_system %}&src_system={{ src_system }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}">Last</a>
                                 </li>
                             {% endif %}
                         </ul>
