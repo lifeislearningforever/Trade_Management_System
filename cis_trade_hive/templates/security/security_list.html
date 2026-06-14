@@ -273,11 +273,9 @@
                                 <td style="font-size: 0.85rem;">{{ security.created_at|default:"-" }}</td>
                                 <td class="sticky-action-column" style="background-color: white;">
                                     <div class="btn-group btn-group-sm" role="group">
-                                        {% if can_view %}
                                         <a href="{% url 'security:detail' security.security_id %}" class="btn btn-sm btn-outline-primary" title="View Details">
                                             <i class="bi bi-eye"></i>
                                         </a>
-                                        {% endif %}
                                         {% can_act security "security" as sa %}
                                         {% if sa.can_edit %}
                                             <a href="{% url 'security:edit' security.security_id %}" class="btn btn-sm btn-outline-warning" title="Edit">
