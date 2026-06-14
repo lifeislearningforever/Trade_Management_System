@@ -92,7 +92,6 @@ class EquityPriceDropdownService:
             SELECT DISTINCT
                 security_id,
                 security_name,
-                COALESCE(security_description, security_name) AS security_full_name,
                 isin,
                 currency_code
             FROM gmp_cis.cis_security

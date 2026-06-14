@@ -146,7 +146,6 @@
         {
             security_id: {{ sec.security_id }},
             security_name: "{{ sec.security_name|escapejs }}",
-            security_full_name: "{{ sec.security_full_name|default:sec.security_name|escapejs }}",
             isin: "{{ sec.isin|escapejs }}",
             currency_code: "{{ sec.currency_code|escapejs }}"
         }{% if not forloop.last %},{% endif %}
@@ -170,19 +169,16 @@
         // Clear current options
         securitySelect.innerHTML = '<option value="">-- Select Security --</option>';
 
-        function makeSecOption(sec) {
-            const option = document.createElement('option');
-            option.value = sec.security_name;
-            option.textContent = sec.security_name;
-            option.dataset.isin = sec.isin;
-            option.dataset.currencyCode = sec.currency_code;
-            option.dataset.fullname = sec.security_full_name || sec.security_name;
-            return option;
-        }
-
         if (!selectedCurrency) {
             // No currency selected - show all securities
-            allSecurities.forEach(sec => securitySelect.appendChild(makeSecOption(sec)));
+            allSecurities.forEach(sec => {
+                const option = document.createElement('option');
+                option.value = sec.security_name;
+                option.textContent = sec.security_name;
+                option.dataset.isin = sec.isin;
+                option.dataset.currencyCode = sec.currency_code;
+                securitySelect.appendChild(option);
+            });
         } else {
             // Filter securities by selected currency
             const filteredSecurities = allSecurities.filter(sec => sec.currency_code === selectedCurrency);
@@ -194,7 +190,14 @@
                 option.disabled = true;
                 securitySelect.appendChild(option);
             } else {
-                filteredSecurities.forEach(sec => securitySelect.appendChild(makeSecOption(sec)));
+                filteredSecurities.forEach(sec => {
+                    const option = document.createElement('option');
+                    option.value = sec.security_name;
+                    option.textContent = sec.security_name;
+                    option.dataset.isin = sec.isin;
+                    option.dataset.currencyCode = sec.currency_code;
+                    securitySelect.appendChild(option);
+                });
             }
         }
 
@@ -207,7 +210,6 @@
                 existingOption.value = preSelectedSecurity;
                 existingOption.textContent = preSelectedSecurity;
                 existingOption.dataset.isin = preSelectedIsin || '';
-                existingOption.dataset.fullname = preSelectedSecurity;
                 securitySelect.appendChild(existingOption);
             }
             securitySelect.value = preSelectedSecurity;
@@ -294,32 +296,16 @@
 <script src="{% static 'js/select2-init.js' %}"></script>
 
 <script>
+// Initialize Select2 on ALL equity price form dropdowns
 $(document).ready(function() {
-    // Currency dropdown — standard
-    CISSelect2.initByIds(['currency_code']);
+    // List of ALL dropdown IDs in the equity price form
+    var allDropdownIds = [
+        'currency_code',
+        'security_label'
+    ];
 
-    // Two-line helpers
-    function twoLineResult(item) {
-        if (!item.id) return item.text;
-        var el = item.element;
-        var sub = el ? ($(el).data('fullname') || '') : '';
-        if (!sub || sub === item.text) return $('<span><strong>' + item.text + '</strong></span>');
-        return $(
-            '<span style="line-height:1.3;">' +
-                '<strong style="display:block;">' + item.text + '</strong>' +
-                '<small style="color:#6c757d;white-space:normal;display:block;max-width:420px;">' + sub + '</small>' +
-            '</span>'
-        );
-    }
-    function shortNameSelection(item) {
-        return $('<span>' + (item.text || item.id || '') + '</span>');
-    }
-
-    // Security dropdown — two-line
-    $('#security_label').select2({
-        theme: 'bootstrap-5', placeholder: '-- Select Security --', allowClear: true, width: '100%',
-        templateResult: twoLineResult, templateSelection: shortNameSelection,
-    });
+    // Initialize all dropdowns using the global CISSelect2 utility
+    CISSelect2.initByIds(allDropdownIds);
 });
 </script>
 {% endblock %}
