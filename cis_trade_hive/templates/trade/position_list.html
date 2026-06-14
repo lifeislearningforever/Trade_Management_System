@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load static %}
+{% load static humanize %}
 
 {% block title %}Positions - CisTrade{% endblock %}
 
@@ -45,32 +45,32 @@
     <div class="col">
         <div class="pos-stat-card blue">
             <div class="label">Total Cost FC</div>
-            <div class="value num">{{ stats.total_cost_fc|default:0|floatformat:0 }}</div>
+            <div class="value num">{{ stats.total_cost_fc|default:0|floatformat:0|intcomma }}</div>
         </div>
     </div>
     <div class="col">
         <div class="pos-stat-card blue">
             <div class="label">Total Cost LC</div>
-            <div class="value num">{{ stats.total_cost_lc|default:0|floatformat:0 }}</div>
+            <div class="value num">{{ stats.total_cost_lc|default:0|floatformat:0|intcomma }}</div>
         </div>
     </div>
     <div class="col">
         <div class="pos-stat-card teal">
             <div class="label">Mkt Val FC</div>
-            <div class="value num">{{ stats.total_market_value_fc|default:0|floatformat:0 }}</div>
+            <div class="value num">{{ stats.total_market_value_fc|default:0|floatformat:0|intcomma }}</div>
         </div>
     </div>
     <div class="col">
         <div class="pos-stat-card teal">
             <div class="label">Mkt Val LC</div>
-            <div class="value num">{{ stats.total_market_value_lc|default:0|floatformat:0 }}</div>
+            <div class="value num">{{ stats.total_market_value_lc|default:0|floatformat:0|intcomma }}</div>
         </div>
     </div>
     <div class="col">
         <div class="pos-stat-card {% if stats.total_unrealized_pnl_fc >= 0 %}green{% else %}red{% endif %}">
             <div class="label">Unreal PnL FC</div>
             <div class="value num {% if stats.total_unrealized_pnl_fc >= 0 %}text-success{% else %}text-danger{% endif %}">
-                {{ stats.total_unrealized_pnl_fc|default:0|floatformat:0 }}
+                {{ stats.total_unrealized_pnl_fc|default:0|floatformat:0|intcomma }}
             </div>
         </div>
     </div>
@@ -78,14 +78,14 @@
         <div class="pos-stat-card {% if stats.total_realized_pnl_fc >= 0 %}green{% else %}red{% endif %}">
             <div class="label">Real PnL FC</div>
             <div class="value num {% if stats.total_realized_pnl_fc >= 0 %}text-success{% else %}text-danger{% endif %}">
-                {{ stats.total_realized_pnl_fc|default:0|floatformat:0 }}
+                {{ stats.total_realized_pnl_fc|default:0|floatformat:0|intcomma }}
             </div>
         </div>
     </div>
     <div class="col">
         <div class="pos-stat-card blue">
             <div class="label">Uncall FC</div>
-            <div class="value num">{{ stats.total_uncall_fc|default:0|floatformat:0 }}</div>
+            <div class="value num">{{ stats.total_uncall_fc|default:0|floatformat:0|intcomma }}</div>
         </div>
     </div>
 </div>
@@ -345,26 +345,26 @@
                                 <span class="badge bg-secondary">{{ p.position_type|default:"-" }}</span>
                             {% endif %}
                         </td>
-                        <td class="text-end num">{{ p.quantity|default:0|floatformat:4 }}</td>
-                        <td class="text-end num">{{ p.average_cost_fc|default:0|floatformat:4 }}</td>
-                        <td class="text-end num">{{ p.cost_fc|default:0|floatformat:2 }}</td>
-                        <td class="text-end num">{{ p.cost_lc|default:0|floatformat:2 }}</td>
-                        <td class="text-end num fw-semibold">{{ p.market_value_fc|default:0|floatformat:2 }}</td>
-                        <td class="text-end num fw-semibold">{{ p.market_value_lc|default:0|floatformat:2 }}</td>
-                        <td class="text-end num">{{ p.net_book_value_fc|default:0|floatformat:2 }}</td>
+                        <td class="text-end num">{{ p.quantity|default:0|floatformat:4|intcomma }}</td>
+                        <td class="text-end num">{{ p.average_cost_fc|default:0|floatformat:4|intcomma }}</td>
+                        <td class="text-end num">{{ p.cost_fc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num">{{ p.cost_lc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num fw-semibold">{{ p.market_value_fc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num fw-semibold">{{ p.market_value_lc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num">{{ p.net_book_value_fc|default:0|floatformat:2|intcomma }}</td>
                         <td class="text-end num {% if p.unrealized_pnl_fc > 0 %}text-success fw-bold{% elif p.unrealized_pnl_fc < 0 %}text-danger fw-bold{% endif %}">
-                            {{ p.unrealized_pnl_fc|default:0|floatformat:2 }}
+                            {{ p.unrealized_pnl_fc|default:0|floatformat:2|intcomma }}
                         </td>
                         <td class="text-end num {% if p.unrealized_pnl_lc > 0 %}text-success{% elif p.unrealized_pnl_lc < 0 %}text-danger{% endif %}">
-                            {{ p.unrealized_pnl_lc|default:0|floatformat:2 }}
+                            {{ p.unrealized_pnl_lc|default:0|floatformat:2|intcomma }}
                         </td>
-                        <td class="text-end num">{{ p.realized_pnl_fc|default:0|floatformat:2 }}</td>
-                        <td class="text-end num">{{ p.provision_fc|default:0|floatformat:2 }}</td>
-                        <td class="text-end num">{{ p.provision_lc|default:0|floatformat:2 }}</td>
-                        <td class="text-end num">{{ p.dividend_fc|default:0|floatformat:2 }}</td>
-                        <td class="text-end num">{{ p.uncall_fc|default:0|floatformat:2 }}</td>
-                        <td class="text-end num">{{ p.uncall_lc|default:0|floatformat:2 }}</td>
-                        <td class="text-end num">{{ p.pipeline_fc|default:0|floatformat:2 }}</td>
+                        <td class="text-end num">{{ p.realized_pnl_fc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num">{{ p.provision_fc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num">{{ p.provision_lc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num">{{ p.dividend_fc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num">{{ p.uncall_fc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num">{{ p.uncall_lc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="text-end num">{{ p.pipeline_fc|default:0|floatformat:2|intcomma }}</td>
                         <td class="small text-muted">{{ p.processing_date|default:"-" }}</td>
                     </tr>
                     {% endfor %}

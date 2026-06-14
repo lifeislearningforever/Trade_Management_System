@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',  # Required for session-based ACL auth
     'django.contrib.messages',  # Required for flash messages
     'django.contrib.staticfiles',
+    'django.contrib.humanize',
 
     # Third Party Apps
     'rest_framework',
