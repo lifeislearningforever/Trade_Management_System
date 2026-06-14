@@ -219,8 +219,8 @@
                             <!-- FX Rate (auto-populated from security/portfolio currencies) -->
                             <div class="col-md-2">
                                 <label class="form-label">FX Rate</label>
-                                <input type="number" class="form-control bg-light" name="open_fx_rate" id="open_fx_rate"
-                                       step="0.000001" value="{{ trade.open_fx_rate|default:'' }}" readonly>
+                                <input type="number" class="form-control" name="open_fx_rate" id="open_fx_rate"
+                                       step="0.000001" value="{{ trade.open_fx_rate|default:'' }}" placeholder="Auto-set or override">
                                 <small class="text-muted" id="fx_rate_info">Auto-set from currencies</small>
                             </div>
                         </div>
