@@ -363,7 +363,7 @@ class TradeValidationRepository:
             # Include INITIAL and VALIDATED statuses
             query = f"""
             SELECT security_name AS security_label,
-                   security_name AS security_full_name,
+                   COALESCE(security_description, security_name) AS security_full_name,
                    security_type,
                    isin,
                    ticker,
