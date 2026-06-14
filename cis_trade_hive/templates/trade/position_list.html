@@ -11,14 +11,6 @@
 
 {% block extra_css %}
 <style>
-.pos-stat-card { border-left: 3px solid; border-radius: 6px; padding: 10px 14px; background: #fff; }
-.pos-stat-card.blue  { border-color: #0d6efd; }
-.pos-stat-card.green { border-color: #198754; }
-.pos-stat-card.red   { border-color: #dc3545; }
-.pos-stat-card.teal  { border-color: #0dcaf0; }
-.pos-stat-card .label { font-size: 0.70rem; text-transform: uppercase; letter-spacing: .05em; color: #6c757d; margin-bottom: 2px; }
-.pos-stat-card .value { font-size: 1.05rem; font-weight: 700; }
-.pos-stat-card .sub   { font-size: 0.75rem; color: #6c757d; }
 .pos-table th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em; color: #495057; white-space: nowrap; padding: 6px 8px; }
 .pos-table td { font-size: 0.82rem; padding: 5px 8px; vertical-align: middle; }
 .pos-table tbody tr:hover { background: #f0f4ff !important; }
@@ -38,58 +30,6 @@
         <i class="bi bi-download"></i> Export CSV
     </a>
 </div>
-
-<!-- Summary Stats -->
-{% if stats %}
-<div class="row g-2 mb-3">
-    <div class="col">
-        <div class="pos-stat-card blue">
-            <div class="label">Total Cost FC</div>
-            <div class="value num">{{ stats.total_cost_fc|default:0|floatformat:0|intcomma }}</div>
-        </div>
-    </div>
-    <div class="col">
-        <div class="pos-stat-card blue">
-            <div class="label">Total Cost LC</div>
-            <div class="value num">{{ stats.total_cost_lc|default:0|floatformat:0|intcomma }}</div>
-        </div>
-    </div>
-    <div class="col">
-        <div class="pos-stat-card teal">
-            <div class="label">Mkt Val FC</div>
-            <div class="value num">{{ stats.total_market_value_fc|default:0|floatformat:0|intcomma }}</div>
-        </div>
-    </div>
-    <div class="col">
-        <div class="pos-stat-card teal">
-            <div class="label">Mkt Val LC</div>
-            <div class="value num">{{ stats.total_market_value_lc|default:0|floatformat:0|intcomma }}</div>
-        </div>
-    </div>
-    <div class="col">
-        <div class="pos-stat-card {% if stats.total_unrealized_pnl_fc >= 0 %}green{% else %}red{% endif %}">
-            <div class="label">Unreal PnL FC</div>
-            <div class="value num {% if stats.total_unrealized_pnl_fc >= 0 %}text-success{% else %}text-danger{% endif %}">
-                {{ stats.total_unrealized_pnl_fc|default:0|floatformat:0|intcomma }}
-            </div>
-        </div>
-    </div>
-    <div class="col">
-        <div class="pos-stat-card {% if stats.total_realized_pnl_fc >= 0 %}green{% else %}red{% endif %}">
-            <div class="label">Real PnL FC</div>
-            <div class="value num {% if stats.total_realized_pnl_fc >= 0 %}text-success{% else %}text-danger{% endif %}">
-                {{ stats.total_realized_pnl_fc|default:0|floatformat:0|intcomma }}
-            </div>
-        </div>
-    </div>
-    <div class="col">
-        <div class="pos-stat-card blue">
-            <div class="label">Uncall FC</div>
-            <div class="value num">{{ stats.total_uncall_fc|default:0|floatformat:0|intcomma }}</div>
-        </div>
-    </div>
-</div>
-{% endif %}
 
 <!-- Filters -->
 <div class="card mb-3 shadow-sm" style="overflow: visible;">
