@@ -48,19 +48,21 @@ class TradeWrapper:
 
         # Portfolio & Security
         self.portfolio_short_name = data.get('portfolio_short_name', '')
-        # Build portfolio_full_name: prefer stored value, then description, then manager+currency
-        _p_desc = (data.get('portfolio_description') or '').strip()
-        _p_mgr  = (data.get('portfolio_manager') or '').strip()
-        _p_ccy  = (data.get('portfolio_currency') or '').strip()
+        # Build portfolio_full_name: prefer stored value, then description, then manager/client+currency
+        _p_desc   = (data.get('portfolio_description') or '').strip()
+        _p_mgr    = (data.get('portfolio_manager') or '').strip()
+        _p_client = (data.get('portfolio_client_name') or '').strip()
+        _p_ccy    = (data.get('portfolio_currency') or '').strip()
         _stored_pfn = (data.get('portfolio_full_name') or '').strip()
+        _p_label = _p_mgr or _p_client
         if _stored_pfn and _stored_pfn != self.portfolio_short_name:
             self.portfolio_full_name = _stored_pfn
         elif _p_desc:
             self.portfolio_full_name = _p_desc
-        elif _p_mgr and _p_ccy:
-            self.portfolio_full_name = f"{_p_mgr} ({_p_ccy})"
-        elif _p_mgr:
-            self.portfolio_full_name = _p_mgr
+        elif _p_label and _p_ccy:
+            self.portfolio_full_name = f"{_p_label} ({_p_ccy})"
+        elif _p_label:
+            self.portfolio_full_name = _p_label
         else:
             self.portfolio_full_name = ''
         self.security_label = data.get('security_label', '')
@@ -360,18 +362,20 @@ def trade_list(request):
         ])
 
         def _csv_portfolio_full_name(t):
-            desc = (t.get('portfolio_description') or '').strip()
-            mgr  = (t.get('portfolio_manager') or '').strip()
-            ccy  = (t.get('portfolio_currency') or '').strip()
-            short = (t.get('portfolio_short_name') or '').strip()
-            stored = (t.get('portfolio_full_name') or '').strip()
+            desc    = (t.get('portfolio_description') or '').strip()
+            mgr     = (t.get('portfolio_manager') or '').strip()
+            client  = (t.get('portfolio_client_name') or '').strip()
+            ccy     = (t.get('portfolio_currency') or '').strip()
+            short   = (t.get('portfolio_short_name') or '').strip()
+            stored  = (t.get('portfolio_full_name') or '').strip()
             if stored and stored != short:
                 return stored
             if desc:
                 return desc
-            if mgr and ccy:
-                return f"{mgr} ({ccy})"
-            return mgr or ''
+            label = mgr or client
+            if label and ccy:
+                return f"{label} ({ccy})"
+            return label or short
 
         def _csv_security_full_name(t):
             desc = (t.get('security_description') or '').strip()

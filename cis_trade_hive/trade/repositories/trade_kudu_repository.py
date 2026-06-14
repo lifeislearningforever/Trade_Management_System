@@ -273,7 +273,7 @@ class TradeKuduRepository:
                       and not settle_date_from and not settle_date_to
                       and not src_system)
         if _is_simple:
-            _ck = f"trade_list:{status or ''}:{trade_type or ''}:{limit}"
+            _ck = f"trade_list_v2:{status or ''}:{trade_type or ''}:{limit}"
             _cached = query_cache.get(_ck)
             if _cached is not None:
                 logger.debug(f"[CACHE HIT] trade_list {_ck}")
@@ -333,9 +333,10 @@ class TradeKuduRepository:
                    s.security_id AS security_id,
                    COALESCE(p.description, '') AS portfolio_description,
                    COALESCE(p.manager, '') AS portfolio_manager,
+                   COALESCE(p.portfolio_client, '') AS portfolio_client_name,
                    COALESCE(s.security_description, '') AS security_description
             FROM {self.DATABASE}.{self.TABLE_NAME} t
-            LEFT JOIN {self.DATABASE}.cis_portfolio p ON t.portfolio_short_name = p.name
+            LEFT JOIN {self.DATABASE}.cis_portfolio p ON t.portfolio_short_name = p.name AND (p.is_active = true OR p.is_active IS NULL)
             LEFT JOIN {self.DATABASE}.cis_security s ON t.security_label = s.security_name
             WHERE {where_clause}
             ORDER BY CASE WHEN UPPER(t.src_system) = 'CIS' THEN 0 ELSE 1 END,
@@ -361,10 +362,11 @@ class TradeKuduRepository:
                    COALESCE(p.currency, t.currency_code) AS portfolio_currency,
                    COALESCE(p.description, '') AS portfolio_description,
                    COALESCE(p.manager, '') AS portfolio_manager,
+                   COALESCE(p.portfolio_client, '') AS portfolio_client_name,
                    s.security_id AS security_id,
                    COALESCE(s.security_description, '') AS security_description
             FROM {self.DATABASE}.{self.TABLE_NAME} t
-            LEFT JOIN {self.DATABASE}.cis_portfolio p ON t.portfolio_short_name = p.name
+            LEFT JOIN {self.DATABASE}.cis_portfolio p ON t.portfolio_short_name = p.name AND (p.is_active = true OR p.is_active IS NULL)
             LEFT JOIN {self.DATABASE}.cis_security s ON t.security_label = s.security_name
             WHERE t.trade_id = {trade_id}
             LIMIT 1
@@ -383,10 +385,11 @@ class TradeKuduRepository:
                    COALESCE(p.currency, t.currency_code) AS portfolio_currency,
                    COALESCE(p.description, '') AS portfolio_description,
                    COALESCE(p.manager, '') AS portfolio_manager,
+                   COALESCE(p.portfolio_client, '') AS portfolio_client_name,
                    s.security_id AS security_id,
                    COALESCE(s.security_description, '') AS security_description
             FROM {self.DATABASE}.{self.TABLE_NAME} t
-            LEFT JOIN {self.DATABASE}.cis_portfolio p ON t.portfolio_short_name = p.name
+            LEFT JOIN {self.DATABASE}.cis_portfolio p ON t.portfolio_short_name = p.name AND (p.is_active = true OR p.is_active IS NULL)
             LEFT JOIN {self.DATABASE}.cis_security s ON t.security_label = s.security_name
             WHERE t.deal_number = {self.escape_value(deal_number)}
             LIMIT 1
@@ -2217,7 +2220,7 @@ class TradeKuduRepository:
         # Invalidate simple trade list caches so stale data isn't served after mutations
         for _status in ('', 'INITIAL', 'MODIFIED', 'PENDING_VALIDATION', 'VALIDATED', 'SETTLED', 'CANCELLED'):
             for _type in ('', 'BUY', 'SELL'):
-                query_cache.invalidate(f"trade_list:{_status}:{_type}:1000")
+                query_cache.invalidate(f"trade_list_v2:{_status}:{_type}:1000")
         logger.debug("Trade statistics + list caches invalidated")
 
     def get_pending_validation_trades(self, limit: int = 100, cis_only: bool = True) -> List[Dict[str, Any]]:
