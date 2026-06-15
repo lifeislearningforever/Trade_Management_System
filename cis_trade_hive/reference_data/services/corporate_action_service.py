@@ -292,9 +292,11 @@ class CorporateActionService:
             if current_status not in [self.STATUS_INITIAL, self.STATUS_MODIFIED]:
                 return False, f"Cannot validate corporate action with status {current_status}. Only INITIAL or MODIFIED can be validated."
 
-            # Four-Eyes check: validator cannot be the creator
-            created_by = ca.get('created_by', '')
-            if created_by == username:
+            # Four-Eyes check: validator cannot be the last modifier
+            # Use updated_by (whoever last edited) not created_by, so that if U2 edits
+            # a validated CA the original creator U1 can act as checker.
+            last_modified_by = ca.get('updated_by') or ca.get('created_by', '')
+            if last_modified_by == username:
                 return False, "You cannot validate your own corporate action (Four-Eyes principle)"
 
             # Update status to VALIDATED
@@ -384,9 +386,9 @@ class CorporateActionService:
             if current_status not in [self.STATUS_INITIAL, self.STATUS_MODIFIED]:
                 return False, f"Cannot reject corporate action with status {current_status}."
 
-            # Four-Eyes check
-            created_by = ca.get('created_by', '')
-            if created_by == username:
+            # Four-Eyes check: checker cannot be the last modifier
+            last_modified_by = ca.get('updated_by') or ca.get('created_by', '')
+            if last_modified_by == username:
                 return False, "You cannot reject your own corporate action (Four-Eyes principle)"
 
             # Update status to REJECTED
@@ -618,11 +620,13 @@ class CorporateActionService:
         if not ca:
             return False
 
-        # Can validate if status is INITIAL or MODIFIED and user is not the creator
+        # Can validate if status is INITIAL or MODIFIED and user is not the last modifier.
+        # updated_by reflects whoever last touched the record (create or edit), so if U2
+        # edits a validated CA the original creator U1 is unblocked as checker.
         status = ca.get('status', '')
-        created_by = ca.get('created_by', '')
+        last_modified_by = ca.get('updated_by') or ca.get('created_by', '')
 
-        return status in [self.STATUS_INITIAL, self.STATUS_MODIFIED] and created_by != username
+        return status in [self.STATUS_INITIAL, self.STATUS_MODIFIED] and last_modified_by != username
 
     @staticmethod
     def get_status_display_color(status: str) -> str:
