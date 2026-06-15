@@ -274,7 +274,11 @@ function createToastContainer() {
  */
 
 /**
- * Initialize sortable tables
+ * Initialize sortable tables.
+ * Sort state (column index + direction) is persisted in the URL as
+ * ?sort=<index>&dir=asc|desc so that pagination links automatically
+ * carry the sort through page navigation, and the active sort is
+ * restored visually on each page load.
  */
 function initSortableTables() {
     const tables = document.querySelectorAll('.sortable-table');
@@ -282,69 +286,106 @@ function initSortableTables() {
     tables.forEach(function(table) {
         const headers = table.querySelectorAll('th.sortable');
 
+        // Attach click handlers
         headers.forEach(function(header, columnIndex) {
+            header.style.cursor = 'pointer';
             header.addEventListener('click', function() {
                 sortTable(table, columnIndex, header);
             });
         });
+
+        // Restore sort from URL on page load
+        const params = new URLSearchParams(window.location.search);
+        const savedCol = params.get('sort');
+        const savedDir = params.get('dir');
+        if (savedCol !== null && headers[savedCol]) {
+            const ascending = savedDir !== 'desc';
+            _applySortClasses(table, headers[savedCol], ascending);
+            _sortRows(table, parseInt(savedCol, 10), headers[savedCol], ascending);
+        }
+
+        // Inject sort params into all pagination links on the page
+        _patchPaginationLinks();
     });
 }
 
 /**
- * Sort table by column
+ * Called when a column header is clicked.
+ * Toggles direction, updates URL, patches pagination links, sorts DOM.
  */
 function sortTable(table, columnIndex, header) {
     const tbody = table.querySelector('tbody');
     if (!tbody) return;
 
-    const rows = Array.from(tbody.querySelectorAll('tr'));
-    const sortType = header.getAttribute('data-sort-type') || 'text';
+    const ascending = !header.classList.contains('sort-asc');
 
-    // Determine sort direction
-    let ascending = true;
-    if (header.classList.contains('sort-asc')) {
-        ascending = false;
-    }
+    _applySortClasses(table, header, ascending);
+    _sortRows(table, columnIndex, header, ascending);
 
-    // Remove sort classes from all headers
+    // Persist sort state in URL without reloading
+    const params = new URLSearchParams(window.location.search);
+    params.set('sort', columnIndex);
+    params.set('dir', ascending ? 'asc' : 'desc');
+    // Reset to page 1 when sort changes so results make sense
+    params.set('page', '1');
+    const newUrl = window.location.pathname + '?' + params.toString();
+    history.replaceState(null, '', newUrl);
+
+    // Update all pagination links to carry the new sort params
+    _patchPaginationLinks();
+}
+
+function _applySortClasses(table, activeHeader, ascending) {
     table.querySelectorAll('th.sortable').forEach(function(th) {
         th.classList.remove('sort-asc', 'sort-desc');
     });
+    activeHeader.classList.add(ascending ? 'sort-asc' : 'sort-desc');
+}
 
-    // Add appropriate sort class
-    header.classList.add(ascending ? 'sort-asc' : 'sort-desc');
+function _sortRows(table, columnIndex, header, ascending) {
+    const tbody = table.querySelector('tbody');
+    if (!tbody) return;
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const sortType = header.getAttribute('data-sort-type') || 'text';
 
-    // Sort rows
     rows.sort(function(rowA, rowB) {
         const cellA = rowA.cells[columnIndex];
         const cellB = rowB.cells[columnIndex];
-
         if (!cellA || !cellB) return 0;
 
-        let valueA = getCellValue(cellA, sortType);
-        let valueB = getCellValue(cellB, sortType);
+        const valueA = getCellValue(cellA, sortType);
+        const valueB = getCellValue(cellB, sortType);
 
         let comparison = 0;
-
         switch (sortType) {
             case 'number':
-                comparison = valueA - valueB;
-                break;
             case 'date':
                 comparison = valueA - valueB;
                 break;
-            case 'text':
             default:
                 comparison = valueA.localeCompare(valueB, undefined, {numeric: true, sensitivity: 'base'});
-                break;
         }
-
         return ascending ? comparison : -comparison;
     });
 
-    // Re-append sorted rows
-    rows.forEach(function(row) {
-        tbody.appendChild(row);
+    rows.forEach(function(row) { tbody.appendChild(row); });
+}
+
+/**
+ * Patch all pagination <a> links to include current sort+dir params
+ * so the sort is preserved when navigating between pages.
+ */
+function _patchPaginationLinks() {
+    const params = new URLSearchParams(window.location.search);
+    const sortCol = params.get('sort');
+    const sortDir = params.get('dir');
+    if (sortCol === null) return;
+
+    document.querySelectorAll('.pagination a.page-link').forEach(function(link) {
+        const url = new URL(link.href, window.location.href);
+        url.searchParams.set('sort', sortCol);
+        url.searchParams.set('dir', sortDir || 'asc');
+        link.href = url.toString();
     });
 }
 
@@ -352,22 +393,18 @@ function sortTable(table, columnIndex, header) {
  * Get cell value for sorting
  */
 function getCellValue(cell, sortType) {
-    // Get text content, handling badges and other elements
     let text = cell.textContent.trim();
 
-    // Also check for data-sort-value attribute for custom sort values
     if (cell.hasAttribute('data-sort-value')) {
         text = cell.getAttribute('data-sort-value');
     }
 
     switch (sortType) {
         case 'number':
-            // Remove currency symbols, commas, and parse as float
             const numStr = text.replace(/[^0-9.-]/g, '');
             return parseFloat(numStr) || 0;
 
         case 'date':
-            // Parse date string
             const date = new Date(text);
             return isNaN(date.getTime()) ? 0 : date.getTime();
 
