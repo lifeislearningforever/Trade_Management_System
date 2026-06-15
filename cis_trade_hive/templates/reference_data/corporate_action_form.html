@@ -110,15 +110,13 @@
                         <!-- Announcement Date -->
                         <div class="col-md-4">
                             <label for="announcement_date" class="form-label">
-                                Announce Date <span class="text-danger">*</span>
+                                Announce Date
                             </label>
                             <input type="date"
                                    class="form-control"
                                    id="announcement_date"
                                    name="announcement_date"
-                                   value="{{ corporate_action.announcement_date|default:'' }}"
-                                   required>
-                            <div class="invalid-feedback">Announcement date is required</div>
+                                   value="{{ corporate_action.announcement_date|default:'' }}">
                         </div>
 
                         <!-- Ex Date -->
@@ -166,15 +164,13 @@
                         <!-- Effective Date -->
                         <div class="col-md-4">
                             <label for="effective_date" class="form-label">
-                                Effective Date <span class="text-danger">*</span>
+                                Effective Date
                             </label>
                             <input type="date"
                                    class="form-control"
                                    id="effective_date"
                                    name="effective_date"
-                                   value="{{ corporate_action.effective_date|default:'' }}"
-                                   required>
-                            <div class="invalid-feedback">Effective date is required</div>
+                                   value="{{ corporate_action.effective_date|default:'' }}">
                         </div>
                     </div>
                 </div>
@@ -307,7 +303,7 @@
         <strong>Note:</strong>
         <ul class="mb-0 mt-2">
             <li>CA Number is auto-generated when you create a new corporate action</li>
-            <li>All key dates are required - use the date pickers to select dates</li>
+            <li>Ex Date, Record Date and Payment Date are required; Announce Date and Effective Date are optional</li>
             <li><strong>Subscription Period</strong> is only required for: Bonus Issue, Rights Entitlement, Warrant Entitlement</li>
             <li>New corporate actions are created with <strong>INITIAL</strong> status</li>
             <li>A different user must validate the record (Four-Eyes Principle)</li>
