@@ -633,6 +633,32 @@ class TradeKuduRepositoryTestCase(TestCase):
             self.assertFalse(result)
 
     # =========================================================================
+    # CANCEL_TRADE TESTS
+    # =========================================================================
+
+    @patch('core.repositories.impala_connection.impala_manager.execute_write')
+    def test_cancel_trade_success(self, mock_execute_write):
+        """Test cancelling a trade sets status=CANCELLED without soft-deleting it"""
+        mock_execute_write.return_value = True
+
+        with patch.object(self.repository, 'get_trade_by_id', return_value=self.sample_trade):
+            with patch.object(self.repository, 'insert_trade_history', return_value=True):
+                result = self.repository.cancel_trade(1001, 'testuser', 'Test reason')
+
+        self.assertTrue(result)
+        mock_execute_write.assert_called_once()
+        query = mock_execute_write.call_args[0][0]
+        self.assertIn("status = 'CANCELLED'", query)
+        self.assertNotIn('is_deleted', query)
+        self.assertNotIn('is_active', query)
+
+    def test_cancel_trade_not_found(self):
+        """Test cancel fails when trade not found"""
+        with patch.object(self.repository, 'get_trade_by_id', return_value=None):
+            with self.assertRaises(ValueError):
+                self.repository.cancel_trade(9999, 'testuser')
+
+    # =========================================================================
     # WORKFLOW TESTS - SUBMIT_FOR_VALIDATION
     # =========================================================================
 

@@ -1205,7 +1205,7 @@ def trade_cancel(request, trade_id):
     reason = request.POST.get('reason', '').strip()
 
     try:
-        success = trade_kudu_repository.soft_delete_trade(trade_id, user_info['username'], reason)
+        success = trade_kudu_repository.cancel_trade(trade_id, user_info['username'], reason)
 
         if not success:
             raise Exception('Failed to cancel trade')
@@ -1243,11 +1243,11 @@ def trade_cancel(request, trade_id):
             user_id=user_info['user_id'],
             username=user_info['username'],
             user_email=user_info['user_email'],
-            action_type='DELETE',
+            action_type='CANCEL',
             entity_type='TRADE',
             entity_id=str(trade_id),
             entity_name=trade_data.get('deal_number', ''),
-            action_description=f'Cancelled/Deleted trade: {trade_data.get("deal_number", "")}' + (f'. Reason: {reason}' if reason else ''),
+            action_description=f'Cancelled trade: {trade_data.get("deal_number", "")}' + (f'. Reason: {reason}' if reason else ''),
             field_name='status',
             old_value=json.dumps(old_values),
             new_value=json.dumps({'status': 'CANCELLED', 'cancel_reason': reason}),
@@ -1276,8 +1276,77 @@ def trade_reactivate(request, trade_id):
 
 
 def trade_delete(request, trade_id):
-    """Soft delete trade."""
-    return trade_cancel(request, trade_id)
+    """Soft delete trade (removes it from trade lists entirely)."""
+    if request.method != 'POST':
+        return redirect('trade:detail', trade_id=trade_id)
+
+    trade_data = trade_kudu_repository.get_trade_by_id(trade_id)
+    if not trade_data:
+        messages.error(request, f'Trade {trade_id} not found')
+        return redirect('trade:list')
+
+    user_info = get_user_info(request)
+    reason = request.POST.get('reason', '').strip()
+
+    try:
+        success = trade_kudu_repository.soft_delete_trade(trade_id, user_info['username'], reason)
+
+        if not success:
+            raise Exception('Failed to delete trade')
+
+        # Handle position: either reverse or cancel pending events
+        from trade.services.trade_event_queue_service import trade_event_queue_service
+
+        if trade_event_queue_service.check_position_exists(trade_id):
+            # Position exists - queue POSITION_CANCEL event to reverse
+            trade_event_queue_service.queue_position_cancel_event(
+                trade_id=trade_id,
+                deal_number=trade_data.get('deal_number', ''),
+                trade_data=trade_data,
+                created_by=user_info['username']
+            )
+            logger.info(f"Queued POSITION_CANCEL event for trade {trade_id}")
+        else:
+            # Position not calculated yet - cancel any pending events
+            cancelled_count, _ = trade_event_queue_service.cancel_pending_events(trade_id)
+            if cancelled_count > 0:
+                logger.info(f"Cancelled {cancelled_count} pending events for trade {trade_id}")
+
+        old_values = {
+            'trade_type': trade_data.get('trade_type', ''),
+            'portfolio_short_name': trade_data.get('portfolio_short_name', ''),
+            'security_label': trade_data.get('security_label', ''),
+            'quantity': str(trade_data.get('quantity', '')),
+            'price': str(trade_data.get('price', '')),
+            'total_amount': str(trade_data.get('total_amount', '')),
+            'status': trade_data.get('status', ''),
+        }
+
+        audit_log_kudu_repository.log_action_async(
+            user_id=user_info['user_id'],
+            username=user_info['username'],
+            user_email=user_info['user_email'],
+            action_type='DELETE',
+            entity_type='TRADE',
+            entity_id=str(trade_id),
+            entity_name=trade_data.get('deal_number', ''),
+            action_description=f'Deleted trade: {trade_data.get("deal_number", "")}' + (f'. Reason: {reason}' if reason else ''),
+            field_name='status',
+            old_value=json.dumps(old_values),
+            new_value=json.dumps({'status': 'CANCELLED', 'is_deleted': True, 'cancel_reason': reason}),
+            request_method='POST',
+            request_path=request.path,
+            request_params=json.dumps(dict(request.POST)) if request.POST else None,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            status='SUCCESS'
+        )
+
+        messages.warning(request, 'Trade has been deleted.')
+    except Exception as e:
+        messages.error(request, f'Error deleting trade: {str(e)}')
+
+    return redirect('trade:detail', trade_id=trade_id)
 
 
 # =============================================================================

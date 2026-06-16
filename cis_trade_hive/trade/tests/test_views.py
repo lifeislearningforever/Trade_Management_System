@@ -646,7 +646,7 @@ class TradeWorkflowViewsTestCase(TestCase):
             'deal_number': 'DEAL-001',
             'status': 'INITIAL'
         }
-        mock_repo.soft_delete_trade.return_value = True
+        mock_repo.cancel_trade.return_value = True
 
         response = self.client.post(
             reverse('trade:cancel', kwargs={'trade_id': 1}),
@@ -654,7 +654,7 @@ class TradeWorkflowViewsTestCase(TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
-        mock_repo.soft_delete_trade.assert_called_once()
+        mock_repo.cancel_trade.assert_called_once()
 
 
 class PendingApprovalsViewsTestCase(TestCase):
@@ -1312,7 +1312,7 @@ class TradeWorkflowExceptionsTestCase(TestCase):
     def test_trade_cancel_failure(self, mock_repo):
         """Test trade cancel when repository returns False"""
         mock_repo.get_trade_by_id.return_value = self.trade_data
-        mock_repo.soft_delete_trade.return_value = False
+        mock_repo.cancel_trade.return_value = False
 
         response = self.client.post(reverse('trade:cancel', args=[1]))
 
@@ -1322,7 +1322,7 @@ class TradeWorkflowExceptionsTestCase(TestCase):
     def test_trade_cancel_exception(self, mock_repo):
         """Test trade cancel with exception"""
         mock_repo.get_trade_by_id.return_value = self.trade_data
-        mock_repo.soft_delete_trade.side_effect = Exception("Database error")
+        mock_repo.cancel_trade.side_effect = Exception("Database error")
 
         response = self.client.post(reverse('trade:cancel', args=[1]))
 
@@ -1350,14 +1350,17 @@ class TradeReactivateDeleteTestCase(TestCase):
         self.assertEqual(response.status_code, 302)
 
     @patch('trade.views.trade_kudu_repository')
-    def test_trade_delete_calls_cancel(self, mock_repo):
-        """Test trade delete delegates to cancel"""
+    @patch('trade.views.audit_log_kudu_repository')
+    def test_trade_delete_calls_soft_delete(self, mock_audit, mock_repo):
+        """Test trade delete calls soft_delete_trade directly (no longer aliases cancel)"""
         mock_repo.get_trade_by_id.return_value = {'trade_id': 1, 'deal_number': 'DL001'}
         mock_repo.soft_delete_trade.return_value = True
 
         response = self.client.post(reverse('trade:delete', args=[1]))
 
         self.assertEqual(response.status_code, 302)
+        mock_repo.soft_delete_trade.assert_called_once()
+        mock_repo.cancel_trade.assert_not_called()
 
 
 class TradeAPIPositionTestCase(TestCase):

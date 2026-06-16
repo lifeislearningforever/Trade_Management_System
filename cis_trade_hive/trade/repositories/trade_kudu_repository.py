@@ -1424,6 +1424,51 @@ class TradeKuduRepository:
             logger.error(f"Error rejecting trade: {str(e)}")
             raise
 
+    def cancel_trade(self, trade_id: int, cancelled_by: str, reason: str = '') -> bool:
+        """Cancel a trade (status -> CANCELLED). Does not soft-delete the record;
+        the trade remains visible in trade lists with status=CANCELLED."""
+        try:
+            current_trade = self.get_trade_by_id(trade_id)
+            if not current_trade:
+                raise ValueError(f"Trade {trade_id} not found")
+
+            current_status = current_trade.get('status', '')
+
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            query = f"""
+            UPDATE {self.DATABASE}.{self.TABLE_NAME}
+            SET status = '{self.STATUS_CANCELLED}',
+                cancelled_by = {self.escape_value(cancelled_by)},
+                cancelled_at = '{timestamp}',
+                cancel_reason = {self.escape_value(reason)},
+                updated_by = {self.escape_value(cancelled_by)},
+                updated_at = '{timestamp}'
+            WHERE trade_id = {trade_id}
+            """
+
+            success = impala_manager.execute_write(query, database=self.DATABASE)
+
+            if success:
+                self.insert_trade_history(
+                    trade_id=trade_id,
+                    deal_number=current_trade.get('deal_number', ''),
+                    action='CANCEL',
+                    old_status=current_status,
+                    new_status=self.STATUS_CANCELLED,
+                    changes={},
+                    comments=f'Trade cancelled. Reason: {reason}',
+                    performed_by=cancelled_by,
+                    async_write=True  # Async write for fast UI response
+                )
+                logger.info(f"Trade {trade_id} cancelled")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Error cancelling trade: {str(e)}")
+            raise
+
     def settle_trade(self, trade_id: int, settled_by: str, comments: str = '') -> bool:
         """Settle trade (VALIDATED -> SETTLED). Updates position."""
         try:
