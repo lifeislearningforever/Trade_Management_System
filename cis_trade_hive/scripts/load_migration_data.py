@@ -404,6 +404,7 @@ def load_party_cif(rows: List[Dict], status: str, dry_run: bool, processing_date
 # ---------------------------------------------------------------------------
 
 SECURITY_ALIASES: Dict[str, str] = {
+    # Core identification
     'security_name':        'security_name',
     'name':                 'security_name',
 
@@ -416,9 +417,7 @@ SECURITY_ALIASES: Dict[str, str] = {
     'ticker':               'ticker',
     'symbol':               'ticker',
 
-    'record_type':          'record_type',
-    'type':                 'record_type',
-
+    # Classification
     'industry':             'industry',
     'security_type':        'security_type',
     'investment_type':      'investment_type',
@@ -426,67 +425,120 @@ SECURITY_ALIASES: Dict[str, str] = {
     'quoted_unquoted':      'quoted_unquoted',
     'quoted':               'quoted_unquoted',
 
-    'country_of_incorporation': 'country_of_incorporation',
-    'country_of_exchange':      'country_of_exchange',
-    'country_of_issue':         'country_of_issue',
-    'exchange_code':            'exchange_code',
+    # Geographic
+    'country_of_incorporation':    'country_of_incorporation',
+    'country_of_exchange':         'country_of_exchange',
+    'country_of_issue':            'country_of_issue',
+    'country_of_primary_exchange': 'country_of_primary_exchange',
+    'primary_exchange_country':    'country_of_primary_exchange',
+    'exchange_code':               'exchange_code',
 
+    # Trading & pricing
     'currency_code':    'currency_code',
     'currency':         'currency_code',
-
     'price':            'price',
+    'price_date':       'price_date',
+    'price_source':     'price_source',
+
+    # Numeric / statistical
     'shares_outstanding': 'shares_outstanding',
-    'beta':             'beta',
-    'par_value':        'par_value',
+    'beta':               'beta',
+    'par_value':          'par_value',
 
-    'pct_hld_entity_1': 'pct_hld_entity_1',
-    'pct_hld_entity_2': 'pct_hld_entity_2',
-    'pct_hld_entity_3': 'pct_hld_entity_3',
-    'pct_hld_entity_aggr': 'pct_hld_entity_aggr',
-    'substantial_10_pct': 'substantial_10_pct',
-    'substantial':      'substantial_10_pct',
+    # Shareholding (old CSV names → new column names)
+    'shareholding_entity_1':  'shareholding_entity_1',
+    'pct_hld_entity_1':       'shareholding_entity_1',
+    'shareholding_entity_2':  'shareholding_entity_2',
+    'pct_hld_entity_2':       'shareholding_entity_2',
+    'shareholding_entity_3':  'shareholding_entity_3',
+    'pct_hld_entity_3':       'shareholding_entity_3',
+    'shareholding_aggregated': 'shareholding_aggregated',
+    'pct_hld_entity_aggr':    'shareholding_aggregated',
+    'substantial_10_pct':     'substantial_10_pct',
+    'substantial':            'substantial_10_pct',
 
-    'cels':             'cels',
-    'cels_code':        'cels',
-    'pevc_s32_devest':  'pevc_s32_devest',
-    's32_representative': 's32_representative',
-    'basel_iv_fund':    'basel_iv_fund',
-    'mas_643_entity_type': 'mas_643_entity_type',
-    'mas_6d_code':      'mas_6d_code',
-    'fin_nonfin_ind':   'fin_nonfin_ind',
-    'business_unit_head': 'business_unit_head',
-    'person_in_charge': 'person_in_charge',
-    'core_noncore':     'core_noncore',
-    'fund_index_fund':  'fund_index_fund',
+    # Regulatory & compliance
+    'bwciif':               'bwciif',
+    'bwciif_others':        'bwciif_others',
+    'cels':                 'cels',
+    'cels_code':            'cels',
+    'approved_s32':         'approved_s32',
+    'basel_iv_fund':        'basel_iv_fund',
+    'mas_643_entity_type':  'mas_643_entity_type',
+    'mas_6d_code':          'mas_6d_code',
+    'fin_nonfin_ind':       'fin_nonfin_ind',
+
+    # Management & operational
+    'business_unit_head':              'business_unit_head',
+    'person_in_charge':                'person_in_charge',
+    'core_noncore':                    'core_noncore',
+    'fund_index_fund':                 'fund_index_fund',
     'management_limit_classification': 'management_limit_classification',
-    'relative_index':   'relative_index',
+    'relative_index':                  'relative_index',
 
+    # Workflow (Four-Eyes)
+    'submitted_for_approval_at': 'submitted_for_approval_at',
+    'submitted_by':              'submitted_by',
+    'reviewed_at':               'reviewed_at',
+    'reviewed_by':               'reviewed_by',
+    'review_comments':           'review_comments',
+
+    # Status & audit
     'status':           'status',
     'is_active':        'is_active',
     'created_by':       'created_by',
     'updated_by':       'updated_by',
+
+    # Ignored migration-only columns (silently dropped via SECURITY_VALID_COLS)
     'src_id':           'src_id',
     'processing_date':  'processing_date',
+    'record_type':      'record_type',
+    'pevc_s32_devest':  'pevc_s32_devest',
+    's32_representative': 's32_representative',
 }
 
-SECURITY_DECIMAL_COLS = {'price', 'beta', 'par_value'}
-SECURITY_BIGINT_COLS  = {'shares_outstanding'}
-SECURITY_BOOL_COLS    = {'is_active'}
+# DECIMAL columns (precision per DDL: price=20,4  beta=10,4  par_value=20,6  shareholding=10,4)
+SECURITY_DECIMAL_COLS = {
+    'price', 'beta', 'par_value',
+    'shareholding_entity_1', 'shareholding_entity_2', 'shareholding_entity_3',
+    'shareholding_aggregated',
+}
+# BIGINT columns (security_id handled separately; created_at/updated_at are ms timestamps)
+SECURITY_BIGINT_COLS = {
+    'shares_outstanding', 'bwciif', 'bwciif_others',
+    'submitted_for_approval_at', 'reviewed_at',
+}
+SECURITY_BOOL_COLS = {'is_active'}
 
-# Exact columns that exist in the live cis_security Kudu table.
+# Exact columns that exist in the live cis_security Kudu table (v2 schema).
 # Any mapped key NOT in this set is silently dropped before the UPSERT
-# to avoid "Unknown column" analysis errors (e.g. processing_date, src_id).
+# to avoid "Unknown column" analysis errors.
 SECURITY_VALID_COLS = {
-    'security_id', 'record_type', 'security_name', 'isin', 'security_description',
-    'issuer', 'ticker', 'industry', 'security_type', 'investment_type', 'issuer_type',
-    'quoted_unquoted', 'country_of_incorporation', 'country_of_exchange',
-    'country_of_issue', 'exchange_code', 'currency_code',
-    'price', 'shares_outstanding', 'beta', 'par_value',
-    'pct_hld_entity_1', 'pct_hld_entity_2', 'pct_hld_entity_3', 'pct_hld_entity_aggr',
-    'substantial_10_pct', 'cels', 'pevc_s32_devest', 's32_representative',
+    # PK
+    'security_id',
+    # Identification
+    'security_name', 'isin', 'security_description', 'issuer', 'ticker',
+    # Classification
+    'industry', 'security_type', 'investment_type', 'issuer_type', 'quoted_unquoted',
+    # Geographic
+    'country_of_incorporation', 'country_of_exchange', 'country_of_issue',
+    'country_of_primary_exchange', 'exchange_code',
+    # Trading & pricing
+    'currency_code', 'price', 'price_date', 'price_source',
+    # Numeric / statistical
+    'shares_outstanding', 'beta', 'par_value',
+    # Shareholding
+    'shareholding_entity_1', 'shareholding_entity_2', 'shareholding_entity_3',
+    'shareholding_aggregated', 'substantial_10_pct',
+    # Regulatory & compliance
+    'bwciif', 'bwciif_others', 'cels', 'approved_s32',
     'basel_iv_fund', 'mas_643_entity_type', 'mas_6d_code', 'fin_nonfin_ind',
-    'business_unit_head', 'person_in_charge', 'core_noncore', 'fund_index_fund',
-    'management_limit_classification', 'relative_index',
+    # Management & operational
+    'business_unit_head', 'person_in_charge', 'core_noncore',
+    'fund_index_fund', 'management_limit_classification', 'relative_index',
+    # Workflow
+    'submitted_for_approval_at', 'submitted_by', 'reviewed_at', 'reviewed_by', 'review_comments',
+    # Status & audit
     'status', 'src_system', 'is_active',
     'created_by', 'created_at', 'updated_by', 'updated_at',
 }
@@ -495,6 +547,12 @@ SECURITY_VALID_COLS = {
 def load_security(rows: List[Dict], status: str, dry_run: bool, processing_date: str = '') -> Tuple[int, int, List[str]]:
     ok = fail = 0
     errors: List[str] = []
+
+    # Shareholding columns use DECIMAL(10,4) in the schema — different scale from the default 6
+    SHAREHOLDING_COLS = {
+        'shareholding_entity_1', 'shareholding_entity_2', 'shareholding_entity_3',
+        'shareholding_aggregated',
+    }
 
     for i, raw in enumerate(rows, 1):
         mapped: Dict[str, Any] = {}
@@ -510,41 +568,47 @@ def load_security(rows: List[Dict], status: str, dry_run: bool, processing_date:
             fail += 1
             continue
 
-        # PK: unique ms timestamp per row; add small offset to avoid collision
+        # PK: unique ms timestamp per row; small offset per row avoids collisions
         security_id = _timestamp_ms() + i
-        ts = _now()
+        ts_ms = security_id          # reuse same ms value for created_at / updated_at
+        ts_str = _now()              # human-readable fallback for logs only
 
-        mapped['security_id'] = security_id       # bare BIGINT for PK
-        mapped['src_system'] = SRC_SYSTEM
+        mapped['security_id'] = security_id   # bare BIGINT PK
+        mapped['src_system']  = SRC_SYSTEM
         mapped.setdefault('status', status)
         mapped.setdefault('is_active', True)
         mapped.setdefault('created_by', SRC_SYSTEM)
         mapped.setdefault('updated_by', SRC_SYSTEM)
-        # created_at / updated_at are STRING in the live table
-        mapped['created_at'] = ts
-        mapped['updated_at'] = ts
+        # created_at / updated_at are BIGINT (ms timestamps) in the v2 schema
+        mapped['created_at'] = ts_ms
+        mapped['updated_at'] = ts_ms
 
-        # Drop any keys that don't exist as columns in cis_security
-        # (e.g. processing_date, src_id from CSV or alias mapping)
+        # Drop columns absent from cis_security (e.g. processing_date, src_id,
+        # record_type, pevc_s32_devest, s32_representative, is_deleted)
         mapped = {k: v for k, v in mapped.items() if k in SECURITY_VALID_COLS}
 
         col_names = []
-        col_vals = []
+        col_vals  = []
         for col, val in mapped.items():
             col_names.append(col)
-            if col in SECURITY_DECIMAL_COLS:
-                col_vals.append(_decimal(val))
-            elif col in SECURITY_BIGINT_COLS:
-                col_vals.append(_bigint(val))
+            if col in SHAREHOLDING_COLS:
+                col_vals.append(_decimal(val, scale=4))
+            elif col == 'price':
+                col_vals.append(_decimal(val, scale=4))
+            elif col == 'par_value':
+                col_vals.append(_decimal(val, scale=6))
+            elif col == 'beta':
+                col_vals.append(_decimal(val, scale=4))
+            elif col in SECURITY_BIGINT_COLS or col == 'security_id':
+                col_vals.append(_bigint(val))   # bare BIGINT — no quotes
             elif col in SECURITY_BOOL_COLS:
                 col_vals.append(_bool(val))
-            elif col == 'security_id':
-                col_vals.append(str(val))          # bare BIGINT, no quotes
             else:
-                col_vals.append(_escape(val))      # STRING — quoted
+                col_vals.append(_escape(val))   # STRING — quoted
 
         if dry_run:
-            logger.info("[DRY-RUN] security row %d: %s", i, mapped.get('security_name'))
+            logger.info("[DRY-RUN] security row %d: %s (security_id=%s)", i,
+                        mapped.get('security_name'), security_id)
             ok += 1
             continue
 
