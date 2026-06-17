@@ -556,7 +556,22 @@ SECURITY_VALID_COLS = {
 
 def load_security(rows: List[Dict], status: str, dry_run: bool, processing_date: str = '') -> Tuple[int, int, List[str]]:
     ok = fail = 0
+    would_insert = would_update = 0
     errors: List[str] = []
+
+    # For dry-run: pre-fetch all existing security_ids in one query so we can
+    # report "would INSERT" vs "would UPDATE" without hitting the DB per row.
+    existing_ids: set = set()
+    if dry_run:
+        try:
+            result = impala_manager.execute_query(
+                f"SELECT security_id FROM {DATABASE}.cis_security",
+                database=DATABASE,
+            )
+            existing_ids = {row['security_id'] for row in (result or [])}
+            logger.info("[DRY-RUN] %d existing rows fetched for INSERT/UPDATE check", len(existing_ids))
+        except Exception as exc:
+            logger.warning("[DRY-RUN] Could not fetch existing IDs (DB unreachable?): %s", exc)
 
     for i, raw in enumerate(rows, 1):
         mapped: Dict[str, Any] = {}
@@ -607,8 +622,13 @@ def load_security(rows: List[Dict], status: str, dry_run: bool, processing_date:
                 col_vals.append(_escape(val))   # STRING — quoted
 
         if dry_run:
-            logger.info("[DRY-RUN] security row %d: %s (security_id=%s)", i,
-                        mapped.get('security_name'), security_id)
+            action = 'UPDATE' if security_id in existing_ids else 'INSERT'
+            if action == 'UPDATE':
+                would_update += 1
+            else:
+                would_insert += 1
+            logger.info("[DRY-RUN] row %d: would %-6s %s (security_id=%s isin=%s)",
+                        i, action, security_name, security_id, isin_val or '—')
             ok += 1
             continue
 
@@ -622,6 +642,9 @@ def load_security(rows: List[Dict], status: str, dry_run: bool, processing_date:
             errors.append(msg)
             fail += 1
 
+    if dry_run:
+        logger.info("[DRY-RUN] Summary: would INSERT=%d  would UPDATE=%d  skipped=%d",
+                    would_insert, would_update, fail)
     return ok, fail, errors
 
 
@@ -1491,12 +1514,18 @@ Examples:
     print(f"  File             : {args.file}")
     print(f"  processing_date  : {proc_date}")
     print(f"  Total rows       : {len(rows)}")
-    print(f"  Loaded           : {ok}")
-    print(f"  Failed           : {fail}")
-    if args.table == 'trade' and args.positions:
-        print(f"  Positions        : triggered alongside each trade")
     if args.dry_run:
         print("  Mode             : DRY RUN — no data written")
+        if args.table == 'security':
+            print(f"  Would INSERT     : (see log — rows not yet in DB)")
+            print(f"  Would UPDATE     : (see log — rows already in DB)")
+        else:
+            print(f"  Would process    : {ok}")
+    else:
+        print(f"  Loaded           : {ok}")
+    print(f"  Failed/Skipped   : {fail}")
+    if args.table == 'trade' and args.positions:
+        print(f"  Positions        : triggered alongside each trade")
     print("=" * 55)
 
     if errors:
