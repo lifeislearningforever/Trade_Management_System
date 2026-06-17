@@ -359,6 +359,16 @@ $(document).ready(function() {
         CISSelect2.initElement($(this));
     });
 
+    // In edit mode, explicitly set the CA type value after Select2 init.
+    // Select2 does not always reflect the native HTML `selected` attribute,
+    // especially when the stored value differs in case from the option value.
+    {% if is_edit and corporate_action.ca_type %}
+    var preselectedCAType = "{{ corporate_action.ca_type|escapejs }}";
+    if (preselectedCAType) {
+        $('#ca_type').val(preselectedCAType).trigger('change');
+    }
+    {% endif %}
+
     // Handle CA type change to show/hide subscription period
     $('#ca_type').on('change', function() {
         var selectedType = $(this).val();
