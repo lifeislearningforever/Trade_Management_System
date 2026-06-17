@@ -625,9 +625,18 @@ class CashFlowService:
             limit: Maximum records
 
         Returns:
-            List of history records
+            List of history records with performed_at as human-readable string
         """
-        return self.repository.get_history(cf_id, limit=limit)
+        records = self.repository.get_history(cf_id, limit=limit)
+        for r in records:
+            pa = r.get('performed_at')
+            if pa and isinstance(pa, (int, float)):
+                try:
+                    from datetime import datetime as _dt
+                    r['performed_at'] = _dt.fromtimestamp(pa / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                except Exception:
+                    pass
+        return records
 
     def get_statistics(self) -> Dict[str, Any]:
         """

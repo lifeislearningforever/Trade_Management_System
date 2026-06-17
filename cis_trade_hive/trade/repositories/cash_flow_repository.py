@@ -641,7 +641,6 @@ class CashFlowRepository:
             # Embed cash_flow_id in upper bits + random salt to avoid PK collisions
             # when two history rows are written within the same millisecond.
             history_id = (cash_flow_id % 10**6) * 10**10 + timestamp_ms * 10**3 + random.randint(0, 999)
-            timestamp_str = now.strftime('%Y-%m-%d %H:%M:%S')
 
             # Convert changes dict to JSON string
             changes_json = json.dumps(changes) if changes else '{}'
@@ -659,7 +658,7 @@ class CashFlowRepository:
                 {CashFlowRepository.escape_value(changes_json)},
                 {CashFlowRepository.escape_value(comments)},
                 {CashFlowRepository.escape_value(performed_by)},
-                '{timestamp_str}'
+                {timestamp_ms}
             )
             """
 
