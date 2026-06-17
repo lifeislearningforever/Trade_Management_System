@@ -559,19 +559,22 @@ def load_security(rows: List[Dict], status: str, dry_run: bool, processing_date:
     would_insert = would_update = 0
     errors: List[str] = []
 
-    # For dry-run: pre-fetch all existing security_ids in one query so we can
-    # report "would INSERT" vs "would UPDATE" without hitting the DB per row.
-    existing_ids: set = set()
-    if dry_run:
-        try:
-            result = impala_manager.execute_query(
-                f"SELECT security_id FROM {DATABASE}.cis_security",
-                database=DATABASE,
-            )
-            existing_ids = {row['security_id'] for row in (result or [])}
-            logger.info("[DRY-RUN] %d existing rows fetched for INSERT/UPDATE check", len(existing_ids))
-        except Exception as exc:
-            logger.warning("[DRY-RUN] Could not fetch existing IDs (DB unreachable?): %s", exc)
+    # Pre-fetch all existing rows keyed by security_name (normalised to upper).
+    # This lets us look up the real DB security_id by name, so we UPDATE the
+    # correct existing row rather than inserting with a new ID.
+    existing: Dict[str, int] = {}   # security_name.upper() -> security_id
+    try:
+        result = impala_manager.execute_query(
+            f"SELECT security_id, security_name FROM {DATABASE}.cis_security",
+            database=DATABASE,
+        )
+        for row in (result or []):
+            name_key = str(row.get('security_name') or '').strip().upper()
+            if name_key:
+                existing[name_key] = row['security_id']
+        logger.info("Fetched %d existing securities from DB for name-based lookup", len(existing))
+    except Exception as exc:
+        logger.warning("Could not fetch existing securities (DB unreachable?): %s", exc)
 
     for i, raw in enumerate(rows, 1):
         mapped: Dict[str, Any] = {}
@@ -588,25 +591,33 @@ def load_security(rows: List[Dict], status: str, dry_run: bool, processing_date:
             fail += 1
             continue
 
-        # Stable PK: hash of security_name + isin — same key every run so
-        # UPSERT updates the existing row instead of inserting a duplicate.
-        isin_val = mapped.get('isin', '') or ''
-        security_id = _security_id(security_name, isin_val)
         ts = _now()
+        name_key = security_name.upper()
 
-        mapped['security_id'] = security_id       # bare BIGINT for PK
+        # Look up real security_id from DB by name; fall back to hash if new.
+        if name_key in existing:
+            security_id = existing[name_key]
+            action = 'UPDATE'
+        else:
+            security_id = _security_id(security_name, mapped.get('isin', '') or '')
+            action = 'INSERT'
+
+        mapped['security_id'] = security_id
         mapped['src_system']  = SRC_SYSTEM
         mapped.setdefault('status', status)
         mapped.setdefault('is_active', True)
         mapped.setdefault('created_by', SRC_SYSTEM)
         mapped.setdefault('updated_by', SRC_SYSTEM)
-        # created_at is set once; updated_at always reflects this run
-        mapped.setdefault('created_at', ts)
+        # Preserve original created_at on UPDATE; set it only for new rows
+        if action == 'INSERT':
+            mapped.setdefault('created_at', ts)
         mapped['updated_at'] = ts
 
         # Drop any keys not in the live cis_security schema
-        # (e.g. processing_date, src_id, v2-only columns like shareholding_*, bwciif)
         mapped = {k: v for k, v in mapped.items() if k in SECURITY_VALID_COLS}
+        # Never overwrite created_at on an existing row
+        if action == 'UPDATE':
+            mapped.pop('created_at', None)
 
         col_names = []
         col_vals  = []
@@ -615,33 +626,37 @@ def load_security(rows: List[Dict], status: str, dry_run: bool, processing_date:
             if col in SECURITY_DECIMAL_COLS:
                 col_vals.append(_decimal(val))
             elif col in SECURITY_BIGINT_COLS or col == 'security_id':
-                col_vals.append(_bigint(val))   # bare BIGINT — no quotes
+                col_vals.append(_bigint(val))
             elif col in SECURITY_BOOL_COLS:
                 col_vals.append(_bool(val))
             else:
-                col_vals.append(_escape(val))   # STRING — quoted
+                col_vals.append(_escape(val))
 
         if dry_run:
-            action = 'UPDATE' if security_id in existing_ids else 'INSERT'
             if action == 'UPDATE':
                 would_update += 1
             else:
                 would_insert += 1
-            logger.info("[DRY-RUN] row %d: would %-6s %s (security_id=%s isin=%s)",
-                        i, action, security_name, security_id, isin_val or '—')
+            logger.info("[DRY-RUN] row %d: would %-6s %s (security_id=%s)",
+                        i, action, security_name, security_id)
             ok += 1
             continue
 
+        # UPDATE existing row by its real DB security_id (no new row created).
+        # INSERT new row with hash-based security_id.
         sql = f"UPSERT INTO {DATABASE}.cis_security ({', '.join(col_names)}) VALUES ({', '.join(col_vals)})"
         try:
             impala_manager.execute_write(sql, database=DATABASE)
+            logger.info("row %d: %s %s (security_id=%s)", i, action, security_name, security_id)
             ok += 1
         except Exception as exc:
-            msg = f"Row {i} ({mapped.get('security_name')}): {exc}"
+            msg = f"Row {i} ({security_name}): {exc}"
             logger.error(msg)
             errors.append(msg)
             fail += 1
 
+    logger.info("Done: updated=%d  inserted=%d  failed=%d",
+                would_update if dry_run else ok, would_insert if dry_run else 0, fail)
     if dry_run:
         logger.info("[DRY-RUN] Summary: would INSERT=%d  would UPDATE=%d  skipped=%d",
                     would_insert, would_update, fail)
