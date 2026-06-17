@@ -27,6 +27,7 @@ import csv
 import sys
 import os
 import argparse
+import hashlib
 import logging
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -128,6 +129,19 @@ def _normalise_date(val: Any) -> str:
 
 def _timestamp_ms() -> int:
     return int(datetime.now().timestamp() * 1000)
+
+
+def _security_id(security_name: str, isin: str = '') -> int:
+    """Return a stable 12-digit BIGINT derived from security_name + isin.
+
+    Using a deterministic hash means re-running the loader UPSERTs (updates)
+    the same row rather than inserting duplicates. The ID is consistent across
+    runs as long as security_name (and isin when present) don't change.
+    """
+    key = f"{security_name.strip().upper()}|{isin.strip().upper()}"
+    digest = hashlib.sha256(key.encode()).hexdigest()
+    # Take first 15 hex digits → fits in BIGINT (max ~922 trillion)
+    return int(digest[:15], 16)
 
 
 def _normalise_header(raw: str) -> str:
@@ -551,15 +565,18 @@ def load_security(rows: List[Dict], status: str, dry_run: bool, processing_date:
             if db_col:
                 mapped[db_col] = raw_val
 
-        if not mapped.get('security_name', '').strip():
+        security_name = mapped.get('security_name', '').strip()
+        if not security_name:
             msg = f"Row {i}: missing security_name — skipped"
             logger.warning(msg)
             errors.append(msg)
             fail += 1
             continue
 
-        # PK: unique ms timestamp per row; small offset per row avoids collisions
-        security_id = _timestamp_ms() + i
+        # Stable PK: hash of security_name + isin — same key every run so
+        # UPSERT updates the existing row instead of inserting a duplicate.
+        isin_val = mapped.get('isin', '') or ''
+        security_id = _security_id(security_name, isin_val)
         ts = _now()
 
         mapped['security_id'] = security_id       # bare BIGINT for PK
@@ -568,8 +585,8 @@ def load_security(rows: List[Dict], status: str, dry_run: bool, processing_date:
         mapped.setdefault('is_active', True)
         mapped.setdefault('created_by', SRC_SYSTEM)
         mapped.setdefault('updated_by', SRC_SYSTEM)
-        # created_at / updated_at are STRING in the live table
-        mapped['created_at'] = ts
+        # created_at is set once; updated_at always reflects this run
+        mapped.setdefault('created_at', ts)
         mapped['updated_at'] = ts
 
         # Drop any keys not in the live cis_security schema
