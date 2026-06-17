@@ -94,7 +94,7 @@
                                     </a>
                                 </td>
                                 <td>{{ cf.portfolio_short_name|default:"-" }}</td>
-                                <td>{{ cf.security_label|default:cf.security_name|default:"-"|truncatechars:20 }}</td>
+                                <td>{{ cf.security_label|default:"-"|truncatechars:20 }}</td>
                                 <td>{{ cf.cash_flow_type|default:"-" }}</td>
                                 <td>{{ cf.send_receive|default:"-" }}</td>
                                 <td>{{ cf.value_date|default:"-" }}</td>

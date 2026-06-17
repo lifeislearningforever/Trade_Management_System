@@ -148,7 +148,7 @@ class CashFlowService:
         """
         try:
             # Validate required fields
-            required_fields = ['portfolio_short_name', 'cash_flow_type', 'value_date', 'payment_date', 'local_ccy']
+            required_fields = ['portfolio_short_name', 'cash_flow_type', 'value_date', 'local_ccy']
             for field in required_fields:
                 if not cf_data.get(field):
                     return False, None, f"{field.replace('_', ' ').title()} is required"

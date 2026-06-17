@@ -120,7 +120,7 @@
                                                 data-currency="{{ s.currency }}"
                                                 data-fullname="{{ s.full_name }}"
                                                 data-isin="{{ s.isin }}"
-                                                {% if cash_flow.security_name == s.value %}selected{% endif %}>
+                                                {% if cash_flow.security_label == s.value or cash_flow.security_name == s.value %}selected{% endif %}>
                                             {{ s.label }}
                                         </option>
                                     {% endfor %}

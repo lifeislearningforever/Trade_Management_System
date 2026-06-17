@@ -148,24 +148,46 @@ class SecurityService:
             if src_system and src_system.upper() != 'CIS':
                 return False, f"Cannot edit security with source system '{src_system}'. Only CIS records can be edited."
 
-            # Track changes
+            def _normalise(v):
+                if v is None or v == '' or str(v).strip() in ('None', 'null'):
+                    return None
+                return v
+
+            # Track changes (treat None and '' as equivalent)
             changes = {}
             for field, new_value in security_data.items():
                 old_value = security.get(field)
-                if old_value != new_value:
+                if _normalise(old_value) != _normalise(new_value):
                     changes[field] = {'old': old_value, 'new': new_value}
 
+            logger.info(f"Security {security_id} edit: detected {len(changes)} changed fields: {list(changes.keys())}")
+
             if not changes:
-                return False, "No changes to update"
+                logger.info(f"No meaningful changes for security {security_id}, forcing status update")
+                security_data['status'] = 'MODIFIED'
+                security_hive_repository.update_security(
+                    security_id=security_id,
+                    security_data={'status': 'MODIFIED'},
+                    updated_by=username
+                )
+                return True, None
+
+            # Merge: preserve existing DB values for fields the form sent as empty
+            # (prevents wiping data when dropdown pre-selection didn't match)
+            merged_data = dict(security)  # start with full existing record
+            for field, new_value in security_data.items():
+                if _normalise(new_value) is not None:
+                    merged_data[field] = new_value  # use submitted value if non-empty
+                # else: keep existing DB value for this field
 
             # Set status to MODIFIED after edit
-            current_status = security.get('status', '')
+            merged_data['status'] = 'MODIFIED'
             security_data['status'] = 'MODIFIED'
 
             # Update security
             success = security_hive_repository.update_security(
                 security_id=security_id,
-                security_data=security_data,
+                security_data=merged_data,
                 updated_by=username
             )
 

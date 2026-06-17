@@ -443,7 +443,9 @@ class SecurityHiveRepository:
 
             for field in updatable_fields:
                 if field in security_data:
-                    set_clauses.append(f"{field} = {SecurityHiveRepository.escape_value(security_data[field])}")
+                    val = security_data[field]
+                    # Explicitly passed None/empty means "clear the field"; skip only if key absent
+                    set_clauses.append(f"{field} = {SecurityHiveRepository.escape_value(val)}")
 
             # Always update audit fields
             set_clauses.append(f"updated_by = {SecurityHiveRepository.escape_value(updated_by)}")
@@ -460,10 +462,13 @@ class SecurityHiveRepository:
             WHERE security_id = {security_id}
             """
 
+            logger.info(f"Security UPDATE SQL: {update_sql}")
             success = impala_manager.execute_write(update_sql, database=SecurityHiveRepository.DATABASE)
 
             if success:
                 logger.info(f"Successfully updated security {security_id}")
+            else:
+                logger.error(f"execute_write returned False for security {security_id} UPDATE")
 
             return success
 
@@ -680,9 +685,9 @@ class SecurityHiveRepository:
             True if successful, False otherwise
         """
         try:
+            import random
             timestamp_ms = int(datetime.now().timestamp() * 1000)
-            history_id = timestamp_ms  # PK — keep as BIGINT ms
-            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            history_id = (security_id % 10**6) * 10**10 + timestamp_ms * 10**3 + random.randint(0, 999)
 
             # Convert changes dict to JSON string
             changes_json = json.dumps(changes) if changes else '{}'
@@ -700,7 +705,7 @@ class SecurityHiveRepository:
                 {SecurityHiveRepository.escape_value(changes_json)},
                 {SecurityHiveRepository.escape_value(comments)},
                 {SecurityHiveRepository.escape_value(performed_by)},
-                '{timestamp_str}'
+                {timestamp_ms}
             )
             """
 

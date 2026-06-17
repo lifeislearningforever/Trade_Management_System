@@ -7,6 +7,7 @@ All data operations use Kudu tables (no Django ORM).
 
 import csv
 import logging
+from datetime import datetime as _dt
 from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
@@ -234,8 +235,12 @@ def security_detail(request: HttpRequest, security_id: int) -> HttpResponse:
         messages.error(request, f'Security {security_id} not found')
         return redirect('security:list')
 
-    # Fetch history
+    # Fetch history and convert BIGINT performed_at to readable string
     history = security_hive_repository.get_security_history(security_id, limit=50)
+    for rec in history:
+        pa = rec.get('performed_at')
+        if pa and isinstance(pa, (int, float)):
+            rec['performed_at'] = _dt.fromtimestamp(pa / 1000).strftime('%Y-%m-%d %H:%M:%S')
 
     # Check permissions
     can_edit = security_service.can_user_edit(security, user_id)
