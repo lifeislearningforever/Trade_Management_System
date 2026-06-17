@@ -51,6 +51,78 @@ class CorporateActionDropdownService:
         'roc':                  'ROC',
     }
 
+    # Normalises any dirty/legacy ca_type value (from GMP migration or inconsistent
+    # manual entry) to the canonical internal code used by the dropdown and service.
+    # Keys are lowercased stripped values; values are canonical dropdown option values.
+    CA_TYPE_NORMALISE_MAP = {
+        # Dividend variants (GMP sends 'DIVIDEND', CIS may have 'Cash Dividend' etc.)
+        'dividend':             'DIVIDEND',
+        'cash dividend':        'DIVIDEND',
+        'cash_dividend':        'DIVIDEND',
+        'cashdividend':         'DIVIDEND',
+        # Special dividend
+        'special dividend':     'SPECIAL_DIVIDEND',
+        'special_dividend':     'SPECIAL_DIVIDEND',
+        # Split variants
+        'split':                'STOCK_SPLIT',
+        'stock split':          'STOCK_SPLIT',
+        'stock_split':          'STOCK_SPLIT',
+        'reverse split':        'REVERSE_SPLIT',
+        'reverse_split':        'REVERSE_SPLIT',
+        # Bonus
+        'bonus issue':          'BONUS_ISSUE',
+        'bonus_issue':          'BONUS_ISSUE',
+        'bonus':                'BONUS_ISSUE',
+        # Rights
+        'rights issue':         'RIGHTS_ISSUE',
+        'rights_issue':         'RIGHTS_ISSUE',
+        'rights':               'RIGHTS_ISSUE',
+        'rights entitlement':   'RIGHTS_ENTITLEMENT',
+        'rights_entitlement':   'RIGHTS_ENTITLEMENT',
+        # Warrants
+        'warrants':             'WARRANT_ENTITLEMENT',
+        'warrant entitlement':  'WARRANT_ENTITLEMENT',
+        'warrant_entitlement':  'WARRANT_ENTITLEMENT',
+        # Capital
+        'capital distribution': 'CAPITAL_DISTRIBUTION',
+        'capital_distribution': 'CAPITAL_DISTRIBUTION',
+        'capital reduction':    'CAPITAL_REDUCTION',
+        'capital_reduction':    'CAPITAL_REDUCTION',
+        # Income
+        'income distribution':  'INCOME_DISTRIBUTION',
+        'income_distribution':  'INCOME_DISTRIBUTION',
+        # Others
+        'interest':             'INTEREST',
+        'coupon':               'COUPON',
+        'roc':                  'ROC',
+        'consolidation':        'CONSOLIDATION',
+        'merger':               'MERGER',
+        'acquisition':          'ACQUISITION',
+        'spin off':             'SPIN_OFF',
+        'spin_off':             'SPIN_OFF',
+        'tender offer':         'TENDER_OFFER',
+        'tender_offer':         'TENDER_OFFER',
+        'share buyback':        'SHARE_BUYBACK',
+        'share_buyback':        'SHARE_BUYBACK',
+        'name change':          'NAME_CHANGE',
+        'name_change':          'NAME_CHANGE',
+        'delisting':            'DELISTING',
+        'other':                'OTHER',
+    }
+
+    def normalise_ca_type(self, raw_value: str) -> str:
+        """Map any legacy/inconsistent ca_type string to the canonical dropdown value.
+
+        Handles GMP migration variants (e.g. 'DIVIDEND'), mixed-case CIS entries
+        (e.g. 'Cash Dividend', 'CASH DIVIDEND') and underscore variants.
+        Returns the original value unchanged if no mapping is found (already canonical
+        or truly unknown).
+        """
+        if not raw_value:
+            return raw_value
+        key = raw_value.strip().lower()
+        return self.CA_TYPE_NORMALISE_MAP.get(key, raw_value.strip().upper())
+
     def get_all_dropdown_options(self) -> Dict[str, List[Dict[str, Any]]]:
         """
         Get all dropdown options for corporate action form.

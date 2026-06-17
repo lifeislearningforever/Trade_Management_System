@@ -2191,7 +2191,9 @@ def corporate_action_create(request):
 
             ca_data = {
                 'ca_number': request.POST.get('ca_number', '').strip(),
-                'ca_type': request.POST.get('ca_type', '').strip().upper(),
+                'ca_type': corporate_action_dropdown_service.normalise_ca_type(
+                    request.POST.get('ca_type', '').strip()
+                ),
                 'security_name': ','.join(security_names) if security_names else '',
                 'portfolio_name': ','.join(portfolio_names) if portfolio_names else '',
                 'announcement_date': request.POST.get('announcement_date', '').strip(),
@@ -2278,7 +2280,9 @@ def corporate_action_edit(request, ca_id):
 
             ca_data = {
                 'ca_number': request.POST.get('ca_number', '').strip(),
-                'ca_type': request.POST.get('ca_type', '').strip().upper(),
+                'ca_type': corporate_action_dropdown_service.normalise_ca_type(
+                    request.POST.get('ca_type', '').strip()
+                ),
                 'security_name': ','.join(security_names) if security_names else '',
                 'portfolio_name': ','.join(portfolio_names) if portfolio_names else '',
                 'announcement_date': request.POST.get('announcement_date', '').strip(),
@@ -2326,6 +2330,11 @@ def corporate_action_edit(request, ca_id):
 
         # GET request - show form with existing data
         dropdown_options = corporate_action_dropdown_service.get_all_dropdown_options()
+
+        # Normalise ca_type to canonical value so the dropdown pre-selects correctly
+        # regardless of how it was stored (GMP 'DIVIDEND', 'Cash Dividend', 'CASH DIVIDEND' etc.)
+        if ca.get('ca_type'):
+            ca['ca_type'] = corporate_action_dropdown_service.normalise_ca_type(ca['ca_type'])
 
         # Convert comma-separated strings to lists for multi-select
         if ca.get('security_name'):
