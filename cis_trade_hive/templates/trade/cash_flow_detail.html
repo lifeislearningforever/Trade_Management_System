@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load static %}
+{% load static humanize %}
 
 {% block title %}Cash Flow {{ cash_flow.cf_number }} - CisTrade{% endblock %}
 
@@ -56,7 +56,7 @@
                             <p class="mb-2 fw-bold">{{ cash_flow.cash_flow_type|default:"-" }}</p>
                         </div>
                         <div class="col-md-4">
-                            <label class="text-muted small">Send/Receive</label>
+                            <label class="text-muted small">Increase/Decrease</label>
                             <p class="mb-2 fw-bold">{{ cash_flow.send_receive|default:"-" }}</p>
                         </div>
                         <div class="col-md-6">
@@ -160,7 +160,7 @@
                         </div>
                         <div class="col-md-3">
                             <label class="text-muted small">Local Amount</label>
-                            <p class="mb-2 fw-bold fs-5 text-success">{{ cash_flow.local_ccy_amt|floatformat:2|default:"0.00" }}</p>
+                            <p class="mb-2 fw-bold fs-5 text-success">{{ cash_flow.local_ccy_amt|floatformat:2|intcomma|default:"0.00" }}</p>
                         </div>
                         <!-- Foreign Currency (Security Currency) -->
                         <div class="col-md-3">
@@ -175,23 +175,27 @@
                         </div>
                         <div class="col-md-3">
                             <label class="text-muted small">Foreign Amount</label>
-                            <p class="mb-2 fw-bold fs-5 text-primary">{{ cash_flow.foreign_ccy_amt|floatformat:2|default:"0.00" }}</p>
+                            <p class="mb-2 fw-bold fs-5 text-primary">{{ cash_flow.foreign_ccy_amt|floatformat:2|intcomma|default:"0.00" }}</p>
                         </div>
                     </div>
                     <hr>
-                    <!-- Tax & Charges -->
+                    <!-- Withholding Tax & Charges (item 9) -->
                     <div class="row g-3">
-                        <div class="col-md-4">
-                            <label class="text-muted small">Tax Deducted FC</label>
-                            <p class="mb-2 fw-bold text-danger">{{ cash_flow.tax_deducted_fc|floatformat:2|default:"0.00" }}</p>
+                        <div class="col-md-3">
+                            <label class="text-muted small">Withholding Tax (FC)</label>
+                            <p class="mb-2 fw-bold text-danger">{{ cash_flow.tax_deducted_fc|floatformat:2|intcomma|default:"0.00" }}</p>
                         </div>
-                        <div class="col-md-4">
-                            <label class="text-muted small">Tax Deducted LC</label>
-                            <p class="mb-2 fw-bold text-danger">{{ cash_flow.tax_deducted_lc|floatformat:2|default:"0.00" }}</p>
+                        <div class="col-md-3">
+                            <label class="text-muted small">Withholding Tax (LC)</label>
+                            <p class="mb-2 fw-bold text-danger">{{ cash_flow.tax_deducted_lc|floatformat:2|intcomma|default:"0.00" }}</p>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label class="text-muted small">Other Charges FC</label>
-                            <p class="mb-2 fw-bold text-warning">{{ cash_flow.other_charges_fc|floatformat:2|default:"0.00" }}</p>
+                            <p class="mb-2 fw-bold text-warning">{{ cash_flow.other_charges_fc|floatformat:2|intcomma|default:"0.00" }}</p>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="text-muted small">FX Rate</label>
+                            <p class="mb-2 fw-bold">{{ cash_flow.fx_rate|floatformat:6|default:"-" }}</p>
                         </div>
                     </div>
                 </div>

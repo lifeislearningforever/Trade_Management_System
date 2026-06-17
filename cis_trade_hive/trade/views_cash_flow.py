@@ -123,13 +123,22 @@ def cash_flow_list(request):
 
             writer = csv.writer(response)
             writer.writerow([
-                'CF Number', 'Portfolio', 'Security', 'Cash Flow Type', 'Send/Receive',
-                'Value Date', 'Payment Date', 'Local CCY', 'Local Amount',
-                'Foreign CCY', 'Foreign Amount', 'Cash Flow Status', 'Workflow Status',
-                'Created By', 'Created At'
+                'CF Number', 'Portfolio', 'Security', 'Cash Flow Type', 'Increase/Decrease',
+                'Value Date', 'Payment Date', 'Ex Date', 'Record Date',
+                'Local CCY', 'Local Amount', 'Foreign CCY', 'Foreign Amount',
+                'FX Rate', 'Withholding Tax (FC)', 'Withholding Tax (LC)',
+                'Cash Flow Status', 'Workflow Status', 'Created By', 'Created At'
             ])
 
             for cf in cash_flows:
+                local_amt = cf.get('local_ccy_amt') or 0
+                foreign_amt = cf.get('foreign_ccy_amt') or 0
+                fx_rate = cf.get('fx_rate')
+                if not fx_rate and local_amt and foreign_amt:
+                    try:
+                        fx_rate = round(float(foreign_amt) / float(local_amt), 6)
+                    except (ZeroDivisionError, TypeError, ValueError):
+                        fx_rate = ''
                 writer.writerow([
                     cf.get('cash_flow_number', ''),
                     cf.get('portfolio_short_name', ''),
@@ -138,10 +147,15 @@ def cash_flow_list(request):
                     cf.get('send_receive', ''),
                     cf.get('value_date', ''),
                     cf.get('payment_date', ''),
+                    cf.get('ex_date', ''),
+                    cf.get('record_date', ''),
                     cf.get('local_ccy', ''),
-                    cf.get('local_ccy_amt', ''),
+                    local_amt,
                     cf.get('foreign_ccy', ''),
-                    cf.get('foreign_ccy_amt', ''),
+                    foreign_amt,
+                    fx_rate,
+                    cf.get('tax_deducted_fc', ''),
+                    cf.get('tax_deducted_lc', ''),
                     cf.get('cash_flow_status', ''),
                     cf.get('status', ''),
                     cf.get('created_by', ''),
@@ -306,29 +320,30 @@ def cash_flow_create(request):
 
             cf_data = {
                 'cf_number': request.POST.get('cf_number', '').strip(),
-                'cash_flow_number': request.POST.get('cf_number', '').strip(),  # Alias for repository
+                'cash_flow_number': request.POST.get('cf_number', '').strip(),
                 'portfolio_short_name': request.POST.get('portfolio_short_name', '').strip(),
                 'security_name': request.POST.get('security_name', '').strip(),
-                'security_label': request.POST.get('security_name', '').strip(),  # Repository uses security_label
+                'security_label': request.POST.get('security_name', '').strip(),
                 'cash_flow_type': request.POST.get('cash_flow_type', '').strip(),
                 'send_receive': request.POST.get('send_receive', '').strip(),
                 'value_date': request.POST.get('value_date', '').strip(),
-                'payment_date': request.POST.get('payment_date', '').strip(),
-                'dividend_date': request.POST.get('dividend_date', '').strip(),
-                'ex_date': request.POST.get('ex_date', '').strip(),
-                'record_date': request.POST.get('record_date', '').strip(),
-                'gl_acc_no': request.POST.get('gl_acc_no', '').strip(),
+                'payment_date': request.POST.get('payment_date', '').strip() or None,  # optional (item 3)
+                'dividend_date': request.POST.get('dividend_date', '').strip() or None,
+                'ex_date': request.POST.get('ex_date', '').strip() or None,
+                'record_date': request.POST.get('record_date', '').strip() or None,
+                'gl_acc_no': request.POST.get('gl_acc_no', '').strip() or None,
                 'local_ccy': request.POST.get('local_ccy', '').strip(),
-                'local_ccy_amt': request.POST.get('local_amount', '').strip() or None,  # Repository uses local_ccy_amt
+                'local_ccy_amt': request.POST.get('local_amount', '').strip() or None,
                 'flow_amount_local': request.POST.get('flow_amount_local', '').strip() or None,
                 'foreign_ccy': request.POST.get('foreign_ccy', '').strip(),
-                'foreign_ccy_amt': request.POST.get('foreign_ccy_amount', '').strip() or None,  # Repository uses foreign_ccy_amt
-                # Note: cash_flow_status is NOT taken from form - backend sets INITIAL on create
-                # Status follows Four-Eyes workflow: INITIAL -> APPROVED/REJECTED
+                'foreign_ccy_amt': request.POST.get('foreign_ccy_amount', '').strip() or None,
+                'tax_deducted_fc': request.POST.get('withholding_tax_fc', '').strip() or None,  # item 9
+                'tax_deducted_lc': request.POST.get('withholding_tax_lc', '').strip() or None,  # item 9
             }
 
             # Convert numeric fields
-            for field in ['local_ccy_amt', 'flow_amount_local', 'foreign_ccy_amt']:
+            for field in ['local_ccy_amt', 'flow_amount_local', 'foreign_ccy_amt',
+                          'tax_deducted_fc', 'tax_deducted_lc']:
                 if cf_data.get(field):
                     try:
                         cf_data[field] = float(cf_data[field])
@@ -387,25 +402,28 @@ def cash_flow_edit(request, cash_flow_id):
             cf_data = {
                 'portfolio_short_name': request.POST.get('portfolio_short_name', '').strip(),
                 'security_name': request.POST.get('security_name', '').strip(),
-                'security_label': request.POST.get('security_name', '').strip(),  # Repository uses security_label
+                'security_label': request.POST.get('security_name', '').strip(),
                 'cash_flow_type': request.POST.get('cash_flow_type', '').strip(),
                 'send_receive': request.POST.get('send_receive', '').strip(),
                 'value_date': request.POST.get('value_date', '').strip(),
-                'payment_date': request.POST.get('payment_date', '').strip(),
-                'dividend_date': request.POST.get('dividend_date', '').strip(),
-                'ex_date': request.POST.get('ex_date', '').strip(),
-                'record_date': request.POST.get('record_date', '').strip(),
-                'gl_acc_no': request.POST.get('gl_acc_no', '').strip(),
+                'payment_date': request.POST.get('payment_date', '').strip() or None,  # optional (item 3)
+                'dividend_date': request.POST.get('dividend_date', '').strip() or None,
+                'ex_date': request.POST.get('ex_date', '').strip() or None,
+                'record_date': request.POST.get('record_date', '').strip() or None,
+                'gl_acc_no': request.POST.get('gl_acc_no', '').strip() or None,
                 'local_ccy': request.POST.get('local_ccy', '').strip(),
-                'local_ccy_amt': request.POST.get('local_amount', '').strip() or None,  # Repository uses local_ccy_amt
+                'local_ccy_amt': request.POST.get('local_amount', '').strip() or None,
                 'flow_amount_local': request.POST.get('flow_amount_local', '').strip() or None,
                 'foreign_ccy': request.POST.get('foreign_ccy', '').strip(),
-                'foreign_ccy_amt': request.POST.get('foreign_ccy_amount', '').strip() or None,  # Repository uses foreign_ccy_amt
+                'foreign_ccy_amt': request.POST.get('foreign_ccy_amount', '').strip() or None,
                 'cash_flow_status': request.POST.get('cash_flow_status', '').strip(),
+                'tax_deducted_fc': request.POST.get('withholding_tax_fc', '').strip() or None,  # item 9
+                'tax_deducted_lc': request.POST.get('withholding_tax_lc', '').strip() or None,  # item 9
             }
 
             # Convert numeric fields
-            for field in ['local_ccy_amt', 'flow_amount_local', 'foreign_ccy_amt']:
+            for field in ['local_ccy_amt', 'flow_amount_local', 'foreign_ccy_amt',
+                          'tax_deducted_fc', 'tax_deducted_lc']:
                 if cf_data.get(field):
                     try:
                         cf_data[field] = float(cf_data[field])

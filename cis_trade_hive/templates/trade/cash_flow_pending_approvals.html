@@ -69,18 +69,20 @@
                     <table class="table table-hover table-sm mb-0" style="font-size: 0.875rem; white-space: nowrap;">
                         <thead class="table-light" style="position: sticky; top: 0; z-index: 10; background-color: #f8f9fa;">
                             <tr>
-                                <th style="width: 130px;">CF Number</th>
-                                <th style="width: 120px;">Portfolio</th>
-                                <th style="width: 150px;">Security</th>
-                                <th style="width: 100px;">Type</th>
-                                <th style="width: 80px;">Send/Recv</th>
-                                <th style="width: 100px;">Value Date</th>
-                                <th style="width: 120px;">Local Amount</th>
-                                <th style="width: 60px;">CCY</th>
-                                <th style="width: 90px;">Status</th>
-                                <th style="width: 100px;">Created By</th>
-                                <th style="width: 120px;">Created At</th>
-                                <th style="width: 200px;">Actions</th>
+                                <th style="width: 120px;">CF Number</th>
+                                <th style="width: 110px;">Portfolio</th>
+                                <th style="width: 140px;">Security</th>
+                                <th style="width: 90px;">Type</th>
+                                <th style="width: 80px;">Inc/Dec</th>
+                                <th style="width: 95px;">Value Date</th>
+                                <th style="width: 55px;">L.CCY</th>
+                                <th style="width: 110px;">Local Amount</th>
+                                <th style="width: 55px;">F.CCY</th>
+                                <th style="width: 110px;">Foreign Amount</th>
+                                <th style="width: 80px;">Status</th>
+                                <th style="width: 90px;">Created By</th>
+                                <th style="width: 110px;">Created At</th>
+                                <th style="width: 180px;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -92,12 +94,14 @@
                                     </a>
                                 </td>
                                 <td>{{ cf.portfolio_short_name|default:"-" }}</td>
-                                <td>{{ cf.security_name|default:"-"|truncatechars:20 }}</td>
+                                <td>{{ cf.security_label|default:cf.security_name|default:"-"|truncatechars:20 }}</td>
                                 <td>{{ cf.cash_flow_type|default:"-" }}</td>
                                 <td>{{ cf.send_receive|default:"-" }}</td>
                                 <td>{{ cf.value_date|default:"-" }}</td>
-                                <td class="text-end">{{ cf.local_amount|default:"-" }}</td>
                                 <td>{{ cf.local_ccy|default:"-" }}</td>
+                                <td class="text-end">{{ cf.local_ccy_amt|floatformat:2|default:"-" }}</td>
+                                <td>{{ cf.foreign_ccy|default:"-" }}</td>
+                                <td class="text-end">{{ cf.foreign_ccy_amt|floatformat:2|default:"-" }}</td>
                                 <td>
                                     <span class="badge badge-{% if cf.status == 'INITIAL' %}warning{% elif cf.status == 'MODIFIED' %}info{% else %}secondary{% endif %}">
                                         {{ cf.status|default:"-" }}
@@ -176,7 +180,8 @@
                         <li><strong>CF Number:</strong> {{ cf.cash_flow_number }}</li>
                         <li><strong>Portfolio:</strong> {{ cf.portfolio_short_name }}</li>
                         <li><strong>Type:</strong> {{ cf.cash_flow_type }}</li>
-                        <li><strong>Amount:</strong> {{ cf.local_amount }} {{ cf.local_ccy }}</li>
+                        <li><strong>Local Amount:</strong> {{ cf.local_ccy_amt|floatformat:2 }} {{ cf.local_ccy }}</li>
+                        <li><strong>Foreign Amount:</strong> {{ cf.foreign_ccy_amt|floatformat:2 }} {{ cf.foreign_ccy }}</li>
                     </ul>
                     <div class="mb-3">
                         <label class="form-label">Comments (optional)</label>
@@ -213,7 +218,8 @@
                         <li><strong>CF Number:</strong> {{ cf.cash_flow_number }}</li>
                         <li><strong>Portfolio:</strong> {{ cf.portfolio_short_name }}</li>
                         <li><strong>Type:</strong> {{ cf.cash_flow_type }}</li>
-                        <li><strong>Amount:</strong> {{ cf.local_amount }} {{ cf.local_ccy }}</li>
+                        <li><strong>Local Amount:</strong> {{ cf.local_ccy_amt|floatformat:2 }} {{ cf.local_ccy }}</li>
+                        <li><strong>Foreign Amount:</strong> {{ cf.foreign_ccy_amt|floatformat:2 }} {{ cf.foreign_ccy }}</li>
                     </ul>
                     <div class="mb-3">
                         <label class="form-label">Rejection Reason <span class="text-danger">*</span></label>

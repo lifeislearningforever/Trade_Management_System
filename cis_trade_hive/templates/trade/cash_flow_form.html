@@ -153,13 +153,13 @@
                             <div class="invalid-feedback">Cash Flow Type is required</div>
                         </div>
 
-                        <!-- Send / Receive -->
+                        <!-- Increase / Decrease (item 6) -->
                         <div class="col-md-4">
-                            <label for="send_receive" class="form-label">Send / Receive</label>
+                            <label for="send_receive" class="form-label">Increase / Decrease</label>
                             <select class="form-select"
                                     id="send_receive"
                                     name="send_receive">
-                                <option value="">Select Status...</option>
+                                <option value="">Select...</option>
                                 {% for sr in dropdown_options.send_receive_options %}
                                     <option value="{{ sr.value }}"
                                             {% if cash_flow.send_receive == sr.value %}selected{% endif %}>
@@ -205,18 +205,14 @@
                             <div class="invalid-feedback">Value date is required</div>
                         </div>
 
-                        <!-- Payment Date (Required) -->
+                        <!-- Payment Date (optional — item 3) -->
                         <div class="col-md-4">
-                            <label for="payment_date" class="form-label">
-                                Payment Date <span class="text-danger">*</span>
-                            </label>
+                            <label for="payment_date" class="form-label">Payment Date</label>
                             <input type="date"
                                    class="form-control"
                                    id="payment_date"
                                    name="payment_date"
-                                   value="{{ cash_flow.payment_date|default:'' }}"
-                                   required>
-                            <div class="invalid-feedback">Payment date is required</div>
+                                   value="{{ cash_flow.payment_date|default:'' }}">
                         </div>
 
                         <!-- Dividend Date -->
@@ -285,26 +281,22 @@
                             <div class="invalid-feedback">Local currency is required</div>
                         </div>
 
-                        <!-- Local Amount (Required) -->
+                        <!-- Local Amount (optional — item 8) -->
                         <div class="col-md-3">
-                            <label for="local_amount" class="form-label">
-                                Local Amount <span class="text-danger">*</span>
-                            </label>
+                            <label for="local_amount" class="form-label">Local Amount</label>
                             <input type="number"
                                    class="form-control"
                                    id="local_amount"
                                    name="local_amount"
                                    step="0.01"
-                                   value="{{ cash_flow.local_amount|default:'' }}"
-                                   placeholder="0.00"
-                                   required>
-                            <div class="invalid-feedback">Local amount is required</div>
+                                   value="{{ cash_flow.local_ccy_amt|default:'' }}"
+                                   placeholder="0.00">
                         </div>
 
                         <!-- Foreign Currency (Auto-populated from Security - Readonly) -->
                         <div class="col-md-3">
                             <label for="foreign_ccy" class="form-label">
-                                Foreign Ccy <span class="text-danger">*</span>
+                                Foreign Ccy
                                 <small class="text-muted">(Security)</small>
                             </label>
                             <input type="text"
@@ -312,26 +304,46 @@
                                    id="foreign_ccy_display"
                                    readonly
                                    placeholder="Select Security..."
-                                   value="{{ cash_flow.foreign_ccy|default:'' }}"
-                                   required>
-                            <input type="hidden" id="foreign_ccy" name="foreign_ccy" value="{{ cash_flow.foreign_ccy|default:'' }}" required>
-                            <div class="invalid-feedback">Foreign currency is required</div>
+                                   value="{{ cash_flow.foreign_ccy|default:'' }}">
+                            <input type="hidden" id="foreign_ccy" name="foreign_ccy" value="{{ cash_flow.foreign_ccy|default:'' }}">
                         </div>
 
-                        <!-- Foreign Ccy Amount (Required) -->
+                        <!-- Foreign Ccy Amount (optional — item 8) -->
                         <div class="col-md-3">
-                            <label for="foreign_ccy_amount" class="form-label">
-                                Foreign Amount <span class="text-danger">*</span>
-                            </label>
+                            <label for="foreign_ccy_amount" class="form-label">Foreign Amount</label>
                             <input type="number"
                                    class="form-control"
                                    id="foreign_ccy_amount"
                                    name="foreign_ccy_amount"
                                    step="0.01"
-                                   value="{{ cash_flow.foreign_ccy_amount|default:'' }}"
-                                   placeholder="0.00"
-                                   required>
-                            <div class="invalid-feedback">Foreign amount is required</div>
+                                   value="{{ cash_flow.foreign_ccy_amt|default:'' }}"
+                                   placeholder="0.00">
+                        </div>
+
+                        <!-- Withholding Tax (item 9) -->
+                        <div class="col-md-3">
+                            <label for="withholding_tax_fc" class="form-label">
+                                Withholding Tax (FC)
+                            </label>
+                            <input type="number"
+                                   class="form-control"
+                                   id="withholding_tax_fc"
+                                   name="withholding_tax_fc"
+                                   step="0.000001"
+                                   value="{{ cash_flow.tax_deducted_fc|default:'' }}"
+                                   placeholder="0.00">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="withholding_tax_lc" class="form-label">
+                                Withholding Tax (LC)
+                            </label>
+                            <input type="number"
+                                   class="form-control"
+                                   id="withholding_tax_lc"
+                                   name="withholding_tax_lc"
+                                   step="0.000001"
+                                   value="{{ cash_flow.tax_deducted_lc|default:'' }}"
+                                   placeholder="0.00">
                         </div>
                     </div>
                 </div>

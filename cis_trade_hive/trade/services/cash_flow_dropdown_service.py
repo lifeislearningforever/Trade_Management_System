@@ -259,10 +259,10 @@ class CashFlowDropdownService:
         except Exception as e:
             logger.debug(f"UDF not found for Send Receive: {str(e)}")
 
-        # Fallback to default options
+        # Fallback to default options (item 6: Increase/Decrease terminology)
         default_options = [
-            {'value': 'SEND', 'label': 'Send'},
-            {'value': 'RECEIVE', 'label': 'Receive'},
+            {'value': 'INCREASE', 'label': 'Increase'},
+            {'value': 'DECREASE', 'label': 'Decrease'},
         ]
 
         try:

@@ -116,7 +116,8 @@ class CashFlowRepository:
                 query += f" AND portfolio_short_name = {CashFlowRepository.escape_value(portfolio_short_name)}"
 
             if cash_flow_type:
-                query += f" AND cash_flow_type = {CashFlowRepository.escape_value(cash_flow_type)}"
+                # Case-insensitive match to handle 'Cash Dividend' vs 'CASH_DIVIDEND' etc. (item 10)
+                query += f" AND LOWER(cash_flow_type) = LOWER({CashFlowRepository.escape_value(cash_flow_type)})"
 
             # Order by most recent first
             query += " ORDER BY created_at DESC"
@@ -282,7 +283,9 @@ class CashFlowRepository:
                 'flow_amount_local': float,
                 'dividend_price': float,
                 'quantity': float,      # Quantity held at ex-date (for CA cash flows)
-                'fx_rate': float,       # FX rate used for LC conversion
+                'fx_rate': float,
+                'tax_deducted_fc': float,
+                'tax_deducted_lc': float,
                 'gl_acc_no': str,
                 'src_system': str,
                 'payment_date': str,
@@ -415,9 +418,11 @@ class CashFlowRepository:
                 'flow_amount_local', 'dividend_price', 'gl_acc_no', 'src_system',
                 'payment_date', 'trade_date', 'value_date', 'dividend_date',
                 'ex_date', 'record_date', 'status',
+                'tax_deducted_fc', 'tax_deducted_lc',
             ]
 
-            decimal_fields = ['local_ccy_amt', 'foreign_ccy_amt', 'flow_amount_local', 'dividend_price']
+            decimal_fields = ['local_ccy_amt', 'foreign_ccy_amt', 'flow_amount_local', 'dividend_price',
+                              'tax_deducted_fc', 'tax_deducted_lc']
             boolean_fields = ['position_updated']
 
             for field in updatable_fields:
@@ -630,9 +635,13 @@ class CashFlowRepository:
             True if successful, False otherwise
         """
         try:
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
-            history_id = timestamp_ms  # PK — keep as BIGINT ms
-            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            import random
+            now = datetime.now()
+            timestamp_ms = int(now.timestamp() * 1000)
+            # Embed cash_flow_id in upper bits + random salt to avoid PK collisions
+            # when two history rows are written within the same millisecond.
+            history_id = (cash_flow_id % 10**6) * 10**10 + timestamp_ms * 10**3 + random.randint(0, 999)
+            timestamp_str = now.strftime('%Y-%m-%d %H:%M:%S')
 
             # Convert changes dict to JSON string
             changes_json = json.dumps(changes) if changes else '{}'
