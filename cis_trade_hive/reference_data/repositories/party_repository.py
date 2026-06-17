@@ -265,8 +265,7 @@ class PartyRepository(ImpalaReferenceRepository):
             SELECT * FROM {self.TABLE_NAME}
             WHERE status IN ({status_list})
             AND (is_deleted = FALSE OR is_deleted IS NULL)
-            ORDER BY CASE WHEN UPPER(src_system) = 'CIS' THEN 0 ELSE 1 END,
-                     updated_at DESC
+            ORDER BY src_system ASC, created_at DESC
         """
         return self._execute_query(query)
 
