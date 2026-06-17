@@ -197,11 +197,15 @@ class CorporateActionService:
             if src_system and src_system.upper() != 'CIS':
                 return False, f"Cannot edit corporate action with source system '{src_system}'. Only CIS records can be edited."
 
-            # Track changes
+            # Track changes — treat None and '' as equivalent so blank form fields
+            # submitted for optional dates don't count as changes.
+            def _normalise(v):
+                return None if v in (None, '', 'None') else v
+
             changes = {}
             for field, new_value in ca_data.items():
                 old_value = ca.get(field)
-                if old_value != new_value:
+                if _normalise(old_value) != _normalise(new_value):
                     changes[field] = {'old': old_value, 'new': new_value}
 
             if not changes:

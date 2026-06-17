@@ -9,6 +9,7 @@ import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import json
+import random
 
 from core.repositories.impala_connection import impala_manager
 
@@ -566,9 +567,12 @@ class CorporateActionRepository:
             True if successful, False otherwise
         """
         try:
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
-            history_id = timestamp_ms
-            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            now = datetime.now()
+            timestamp_ms = int(now.timestamp() * 1000)
+            # Embed ca_id in upper bits and add random salt to avoid collisions when
+            # multiple history rows are written within the same millisecond for the same CA.
+            history_id = (ca_id % 10**6) * 10**10 + timestamp_ms * 10**3 + random.randint(0, 999)
+            timestamp_str = now.strftime('%Y-%m-%d %H:%M:%S')
 
             # Convert changes dict to JSON string
             changes_json = json.dumps(changes) if changes else '{}'
