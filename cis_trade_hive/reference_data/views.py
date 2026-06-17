@@ -2329,12 +2329,18 @@ def corporate_action_edit(request, ca_id):
                 messages.error(request, error_msg)
 
         # GET request - show form with existing data
+        # Invalidate ca_types cache so latest UDF values are always used on edit
+        corporate_action_dropdown_service.invalidate_cache()
         dropdown_options = corporate_action_dropdown_service.get_all_dropdown_options()
 
         # Normalise ca_type to canonical value so the dropdown pre-selects correctly
         # regardless of how it was stored (GMP 'DIVIDEND', 'Cash Dividend', 'CASH DIVIDEND' etc.)
-        if ca.get('ca_type'):
-            ca['ca_type'] = corporate_action_dropdown_service.normalise_ca_type(ca['ca_type'])
+        raw_ca_type = ca.get('ca_type', '')
+        normalised_ca_type = corporate_action_dropdown_service.normalise_ca_type(raw_ca_type) if raw_ca_type else ''
+        ca['ca_type'] = normalised_ca_type
+        logger.debug("CA edit id=%s raw_ca_type=%r normalised=%r dropdown_values=%s",
+                     ca_id, raw_ca_type, normalised_ca_type,
+                     [o['value'] for o in dropdown_options.get('ca_types', [])])
 
         # Convert comma-separated strings to lists for multi-select
         if ca.get('security_name'):

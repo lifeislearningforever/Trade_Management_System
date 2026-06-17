@@ -359,27 +359,35 @@ $(document).ready(function() {
         CISSelect2.initElement($(this));
     });
 
-    // In edit mode, explicitly set the CA type value after Select2 init.
-    // Select2 does not always reflect the native HTML `selected` attribute,
-    // especially when the stored value differs in case from the option value.
-    {% if is_edit and corporate_action.ca_type %}
-    var preselectedCAType = "{{ corporate_action.ca_type|escapejs }}";
-    if (preselectedCAType) {
-        $('#ca_type').val(preselectedCAType).trigger('change');
-    }
-    {% endif %}
-
     // Handle CA type change to show/hide subscription period
     $('#ca_type').on('change', function() {
         var selectedType = $(this).val();
         toggleSubscriptionPeriod(selectedType);
     });
 
-    // On page load, check current CA type and toggle subscription period
+    // In edit mode, force Select2 to show the saved ca_type.
+    // Select2 with allowClear+placeholder resets the display even when the native
+    // <select> has a `selected` attribute — must set it explicitly after init.
+    {% if is_edit and corporate_action.ca_type %}
+    var preselectedCAType = "{{ corporate_action.ca_type|escapejs }}";
+    if (preselectedCAType) {
+        setTimeout(function() {
+            var $caType = $('#ca_type');
+            var $opt = $caType.find('option[value="' + preselectedCAType + '"]');
+            if ($opt.length > 0) {
+                $caType.val(preselectedCAType).trigger('change');
+            } else {
+                console.warn('CA type "' + preselectedCAType + '" not found in dropdown. Available:', $caType.find('option').map(function() { return $(this).val(); }).get());
+            }
+        }, 0);
+    }
+    {% else %}
+    // On page load (create mode), check current CA type and toggle subscription period
     var currentCAType = $('#ca_type').val();
     if (currentCAType) {
         toggleSubscriptionPeriod(currentCAType);
     }
+    {% endif %}
 
     // Auto-populate currency when security is selected
     // Currency is readonly and auto-set from security

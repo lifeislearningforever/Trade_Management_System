@@ -36,6 +36,8 @@ class CorporateActionDropdownService:
         'special dividend':     'SPECIAL_DIVIDEND',
         'capital distribution': 'CAPITAL_DISTRIBUTION',
         'income distribution':  'INCOME_DISTRIBUTION',
+        'return of capital':    'ROC',
+        'roc':                  'ROC',
         'rights':               'RIGHTS_ISSUE',
         'rights issue':         'RIGHTS_ISSUE',
         'rights entitlement':   'RIGHTS_ENTITLEMENT',
@@ -44,11 +46,11 @@ class CorporateActionDropdownService:
         'split':                'STOCK_SPLIT',
         'stock split':          'STOCK_SPLIT',
         'reverse split':        'REVERSE_SPLIT',
+        'bonus':                'BONUS_ISSUE',
         'bonus issue':          'BONUS_ISSUE',
         'consolidation':        'CONSOLIDATION',
         'interest':             'INTEREST',
         'coupon':               'COUPON',
-        'roc':                  'ROC',
     }
 
     # Normalises any dirty/legacy ca_type value (from GMP migration or inconsistent
