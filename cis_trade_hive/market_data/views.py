@@ -418,6 +418,8 @@ def fx_rate_detail(request, currency_pair):
 from market_data.services.equity_price_service import equity_price_service
 from market_data.services.equity_price_dropdown_service import equity_price_dropdown_service
 from django.shortcuts import redirect
+from django.http import JsonResponse
+from django.views.decorators.http import require_POST
 
 
 class EquityPriceWrapper:
@@ -839,3 +841,68 @@ def equity_price_edit(request, currency_code: str, price_date: str):
         }
 
         return render(request, 'market_data/equity_price_form.html', context)
+
+
+# ============================================================================
+# EQUITY PRICE UPLOAD VIEWS
+# ============================================================================
+
+def equity_price_upload(request):
+    """Render the equity price CSV upload page."""
+    return render(request, 'market_data/equity_price_upload.html')
+
+
+@require_POST
+def equity_price_validate_file(request):
+    """
+    API: Validate uploaded CSV and return preview data.
+    POST with multipart file field 'csv_file'.
+    Returns JSON: {valid_rows, invalid_rows, total, columns_found, error}
+    """
+    csv_file = request.FILES.get('csv_file')
+    if not csv_file:
+        return JsonResponse({'error': 'No file uploaded'}, status=400)
+
+    if not csv_file.name.lower().endswith('.csv'):
+        return JsonResponse({'error': 'Only CSV files are supported'}, status=400)
+
+    if csv_file.size > 10 * 1024 * 1024:  # 10 MB guard
+        return JsonResponse({'error': 'File too large (max 10 MB)'}, status=400)
+
+    try:
+        result = equity_price_service.build_upload_preview(csv_file)
+        # Convert valid_rows to plain dicts for JSON serialisation
+        return JsonResponse({
+            'error':         result['error'],
+            'total':         result['total'],
+            'valid_count':   len(result['valid_rows']),
+            'invalid_count': len(result['invalid_rows']),
+            'columns_found': result['columns_found'],
+            'valid_rows':    result['valid_rows'],
+            'invalid_rows':  result['invalid_rows'],
+        })
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@require_POST
+def equity_price_upload_chunk(request):
+    """
+    API: Upsert a chunk of pre-validated equity price rows.
+    POST JSON body: { "rows": [ {security_label, currency_code, price_date,
+                                  main_closing_price, isin}, ... ] }
+    Returns JSON: {success_count, failure_count, failures}
+    """
+    try:
+        body = json.loads(request.body)
+        rows = body.get('rows', [])
+        if not rows:
+            return JsonResponse({'error': 'No rows provided'}, status=400)
+
+        username = request.session.get('user_login', 'SYSTEM')
+        result = equity_price_service.bulk_upload_equity_prices(rows, username=username)
+        return JsonResponse(result)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON body'}, status=400)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)

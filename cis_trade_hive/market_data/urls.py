@@ -19,6 +19,9 @@ urlpatterns = [
     # Equity Prices
     path('equity-prices/', views.equity_price_list, name='equity_price_list'),
     path('equity-prices/create/', views.equity_price_create, name='equity_price_create'),
+    path('equity-prices/upload/', views.equity_price_upload, name='equity_price_upload'),
+    path('equity-prices/upload/validate/', views.equity_price_validate_file, name='equity_price_validate_file'),
+    path('equity-prices/upload/submit/', views.equity_price_upload_chunk, name='equity_price_upload_chunk'),
 
     path('equity-prices/<str:currency_code>/<str:price_date>/detail/', views.equity_price_detail, name='equity_price_detail'),
     path('equity-prices/<str:currency_code>/<str:price_date>/edit/', views.equity_price_edit, name='equity_price_edit'),

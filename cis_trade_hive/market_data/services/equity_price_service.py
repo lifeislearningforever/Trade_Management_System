@@ -16,9 +16,11 @@ Author: CisTrade Team
 Last Updated: 2026-01-31
 """
 
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+import csv
+import io
 import logging
 import time
 from django.core.exceptions import ValidationError
@@ -543,6 +545,143 @@ class EquityPriceService:
             datetime(year, month, day)
         except ValueError:
             raise ValidationError(f"Invalid date: {date_str}")
+
+    # Required CSV columns (case-insensitive header match)
+    UPLOAD_REQUIRED_COLUMNS = {'security_label', 'currency_code', 'price_date', 'main_closing_price'}
+    UPLOAD_OPTIONAL_COLUMNS = {'isin'}
+
+    @staticmethod
+    def build_upload_preview(file_obj) -> Dict[str, Any]:
+        """
+        Parse and validate a CSV file for equity price upload.
+
+        Returns a dict with:
+          - valid_rows    : list of clean dicts ready for upsert
+          - invalid_rows  : list of {'row': n, 'data': {}, 'errors': [...]}
+          - total         : total rows parsed
+          - columns_found : list of header columns detected
+          - error         : top-level parse error string (or None)
+        """
+        result = {
+            'valid_rows': [],
+            'invalid_rows': [],
+            'total': 0,
+            'columns_found': [],
+            'error': None,
+        }
+
+        try:
+            raw = file_obj.read()
+            try:
+                text = raw.decode('utf-8-sig')
+            except UnicodeDecodeError:
+                text = raw.decode('latin-1')
+
+            reader = csv.DictReader(io.StringIO(text))
+            headers = [h.strip().lower() for h in (reader.fieldnames or [])]
+            result['columns_found'] = headers
+
+            missing = EquityPriceService.UPLOAD_REQUIRED_COLUMNS - set(headers)
+            if missing:
+                result['error'] = f"Missing required columns: {', '.join(sorted(missing))}"
+                return result
+
+            for row_num, raw_row in enumerate(reader, start=2):
+                row = {k.strip().lower(): (v or '').strip() for k, v in raw_row.items()}
+                errors = []
+
+                security_label = row.get('security_label', '')
+                currency_code  = row.get('currency_code', '')
+                price_date     = row.get('price_date', '')
+                price_str      = row.get('main_closing_price', '')
+                isin           = row.get('isin', '') or None
+
+                if not security_label:
+                    errors.append('security_label is required')
+                if not currency_code:
+                    errors.append('currency_code is required')
+                if not price_date:
+                    errors.append('price_date is required')
+                else:
+                    try:
+                        EquityPriceService._validate_date_format(price_date)
+                    except ValidationError as e:
+                        errors.append(str(e.message))
+
+                if not price_str:
+                    errors.append('main_closing_price is required')
+                else:
+                    try:
+                        price_val = Decimal(price_str)
+                        if price_val <= 0:
+                            errors.append('main_closing_price must be positive')
+                    except InvalidOperation:
+                        errors.append(f'main_closing_price "{price_str}" is not a valid number')
+                        price_val = None
+
+                result['total'] += 1
+
+                if errors:
+                    result['invalid_rows'].append({
+                        'row': row_num,
+                        'data': row,
+                        'errors': errors,
+                    })
+                else:
+                    result['valid_rows'].append({
+                        'security_label':    security_label,
+                        'currency_code':     currency_code,
+                        'price_date':        price_date,
+                        'main_closing_price': str(price_val),
+                        'isin':              isin,
+                        'src_system':        'CIS',
+                    })
+
+        except Exception as e:
+            logger.error(f"Error parsing equity price CSV: {e}")
+            result['error'] = str(e)
+
+        return result
+
+    @staticmethod
+    def bulk_upload_equity_prices(
+        rows: List[Dict[str, Any]],
+        username: str = 'SYSTEM',
+        chunk_size: int = 50,
+    ) -> Dict[str, Any]:
+        """
+        Upsert a list of equity price rows (already validated).
+
+        Returns:
+          - success_count : int
+          - failure_count : int
+          - failures      : list of {'row': dict, 'error': str}
+        """
+        success_count = 0
+        failure_count = 0
+        failures = []
+
+        for row in rows:
+            try:
+                row['created_by'] = username
+                ok = equity_price_hive_repository.upsert_equity_price(row, username=username)
+                if ok:
+                    success_count += 1
+                else:
+                    failure_count += 1
+                    failures.append({'row': row, 'error': 'Upsert returned False'})
+            except Exception as e:
+                failure_count += 1
+                failures.append({'row': row, 'error': str(e)})
+                logger.error(f"Error upserting row {row}: {e}")
+
+        EquityPriceService.clear_cache()
+        logger.info(f"Bulk upload: {success_count} success, {failure_count} failure")
+        return {
+            'success_count': success_count,
+            'failure_count': failure_count,
+            'failures': failures,
+        }
 
     @staticmethod
     def clear_cache() -> None:

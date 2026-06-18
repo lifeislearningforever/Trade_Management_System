@@ -1,0 +1,459 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Upload Equity Prices - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'market_data:market_data_dashboard' %}">Market Data</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'market_data:equity_price_list' %}">Equity Prices</a></li>
+    <li class="breadcrumb-item active">Upload</li>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+#drop-zone {
+    border: 2px dashed #0d6efd;
+    border-radius: 0.5rem;
+    padding: 3rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+#drop-zone.dragover { background: #e8f0fe; }
+#drop-zone.has-file  { border-color: #198754; background: #f0fdf4; }
+
+.upload-progress { height: 8px; }
+
+.invalid-row td { background: #fff5f5; }
+.valid-preview-table th { position: sticky; top: 0; background: #f8f9fa; z-index: 1; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="max-width: 1100px; margin: 0 auto;">
+
+    <!-- Header -->
+    <div class="content-header d-flex justify-content-between align-items-start mb-4">
+        <div>
+            <h1 class="content-title">
+                <i class="bi bi-cloud-upload text-primary"></i> Upload Equity Prices
+            </h1>
+            <p class="content-subtitle">Upload a CSV file to bulk-insert or update equity closing prices</p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{% url 'market_data:equity_price_list' %}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Back to List
+            </a>
+        </div>
+    </div>
+
+    <!-- Step 1: Upload -->
+    <div class="card mb-4" id="step-upload">
+        <div class="card-header">
+            <h5 class="card-title mb-0"><i class="bi bi-1-circle text-primary"></i> Select CSV File</h5>
+        </div>
+        <div class="card-body">
+            <!-- Expected format info -->
+            <div class="alert alert-info mb-3">
+                <strong>Expected columns:</strong>
+                <code>security_label</code>,
+                <code>currency_code</code>,
+                <code>price_date</code> (YYYY-MM-DD),
+                <code>main_closing_price</code> (positive number),
+                <code>isin</code> (optional)
+            </div>
+
+            <div id="drop-zone" onclick="document.getElementById('csv-file-input').click()">
+                <i class="bi bi-file-earmark-arrow-up" style="font-size:2.5rem; color:#0d6efd;"></i>
+                <p class="mt-2 mb-1 fw-bold">Drag &amp; drop your CSV here</p>
+                <p class="text-muted small">or click to browse</p>
+                <p class="text-muted small mb-0" id="file-name-display">No file selected</p>
+            </div>
+            <input type="file" id="csv-file-input" accept=".csv" class="d-none">
+
+            <div class="mt-3 d-flex gap-2">
+                <button class="btn btn-primary" id="btn-validate" disabled>
+                    <i class="bi bi-search"></i> Validate &amp; Preview
+                </button>
+                <button class="btn btn-outline-secondary" id="btn-clear" style="display:none;">
+                    <i class="bi bi-x-circle"></i> Clear
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step 2: Preview -->
+    <div id="step-preview" style="display:none;">
+
+        <!-- Validation summary -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0"><i class="bi bi-2-circle text-primary"></i> Validation Summary</h5>
+                <div id="summary-badges"></div>
+            </div>
+            <div class="card-body" id="summary-body"></div>
+        </div>
+
+        <!-- Invalid rows -->
+        <div class="card mb-4" id="card-invalid" style="display:none;">
+            <div class="card-header bg-danger text-white">
+                <h5 class="card-title mb-0"><i class="bi bi-exclamation-triangle"></i> Invalid Records (will be skipped)</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive" style="max-height:240px; overflow-y:auto;">
+                    <table class="table table-sm mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Row</th>
+                                <th>Security</th>
+                                <th>Currency</th>
+                                <th>Price Date</th>
+                                <th>Price</th>
+                                <th>Errors</th>
+                            </tr>
+                        </thead>
+                        <tbody id="invalid-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Valid rows preview -->
+        <div class="card mb-4" id="card-valid" style="display:none;">
+            <div class="card-header bg-success text-white">
+                <h5 class="card-title mb-0"><i class="bi bi-check-circle"></i> Valid Records — Preview</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive" style="max-height:320px; overflow-y:auto;">
+                    <table class="table table-sm mb-0 valid-preview-table">
+                        <thead class="table-light">
+                            <tr>
+                                <th>#</th>
+                                <th>Security Label</th>
+                                <th>Currency</th>
+                                <th>Price Date</th>
+                                <th>Closing Price</th>
+                                <th>ISIN</th>
+                            </tr>
+                        </thead>
+                        <tbody id="valid-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Upload button -->
+        <div class="card mb-4" id="card-upload-action" style="display:none;">
+            <div class="card-body d-flex align-items-center gap-3">
+                <button class="btn btn-success btn-lg" id="btn-upload">
+                    <i class="bi bi-cloud-upload"></i> Upload <span id="btn-upload-count"></span> Records
+                </button>
+                <div class="flex-grow-1">
+                    <div class="progress upload-progress" id="progress-bar-wrap" style="display:none;">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-success"
+                             id="progress-bar" role="progressbar" style="width:0%"></div>
+                    </div>
+                    <small class="text-muted" id="progress-label"></small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step 3: Result -->
+    <div class="card mb-4" id="step-result" style="display:none;">
+        <div class="card-header">
+            <h5 class="card-title mb-0"><i class="bi bi-3-circle text-primary"></i> Upload Result</h5>
+        </div>
+        <div class="card-body" id="result-body"></div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const VALIDATE_URL = "{% url 'market_data:equity_price_validate_file' %}";
+const UPLOAD_URL   = "{% url 'market_data:equity_price_upload_chunk' %}";
+const CSRF_TOKEN   = "{{ csrf_token }}";
+const CHUNK_SIZE   = 50;
+
+let validRows = [];
+
+/* ── File selection ─────────────────────────────────────── */
+const fileInput  = document.getElementById('csv-file-input');
+const dropZone   = document.getElementById('drop-zone');
+const btnValidate = document.getElementById('btn-validate');
+const btnClear   = document.getElementById('btn-clear');
+const fileNameDisplay = document.getElementById('file-name-display');
+
+function setFile(file) {
+    if (!file) return;
+    fileInput._selectedFile = file;
+    fileNameDisplay.textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+    dropZone.classList.add('has-file');
+    btnValidate.disabled = false;
+    btnClear.style.display = '';
+    // Hide previous results
+    document.getElementById('step-preview').style.display = 'none';
+    document.getElementById('step-result').style.display = 'none';
+    validRows = [];
+}
+
+fileInput.addEventListener('change', () => setFile(fileInput.files[0]));
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    setFile(e.dataTransfer.files[0]);
+});
+
+btnClear.addEventListener('click', () => {
+    fileInput.value = '';
+    fileInput._selectedFile = null;
+    fileNameDisplay.textContent = 'No file selected';
+    dropZone.classList.remove('has-file');
+    btnValidate.disabled = true;
+    btnClear.style.display = 'none';
+    document.getElementById('step-preview').style.display = 'none';
+    document.getElementById('step-result').style.display = 'none';
+    validRows = [];
+});
+
+/* ── Validate ────────────────────────────────────────────── */
+btnValidate.addEventListener('click', async () => {
+    const file = fileInput._selectedFile || fileInput.files[0];
+    if (!file) return;
+
+    btnValidate.disabled = true;
+    btnValidate.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Validating…';
+
+    const fd = new FormData();
+    fd.append('csv_file', file);
+    fd.append('csrfmiddlewaretoken', CSRF_TOKEN);
+
+    try {
+        const resp = await fetch(VALIDATE_URL, { method: 'POST', body: fd });
+        const data = await resp.json();
+
+        btnValidate.disabled = false;
+        btnValidate.innerHTML = '<i class="bi bi-search"></i> Validate &amp; Preview';
+
+        if (data.error) {
+            showAlert('danger', '<i class="bi bi-exclamation-triangle"></i> ' + data.error);
+            return;
+        }
+
+        renderPreview(data);
+    } catch (err) {
+        btnValidate.disabled = false;
+        btnValidate.innerHTML = '<i class="bi bi-search"></i> Validate &amp; Preview';
+        showAlert('danger', 'Network error: ' + err.message);
+    }
+});
+
+/* ── Render preview ──────────────────────────────────────── */
+function renderPreview(data) {
+    validRows = data.valid_rows || [];
+    const invalidRows = data.invalid_rows || [];
+
+    document.getElementById('step-preview').style.display = '';
+
+    // Summary badges
+    const badges = document.getElementById('summary-badges');
+    badges.innerHTML =
+        `<span class="badge bg-secondary me-1">Total: ${data.total}</span>` +
+        `<span class="badge bg-success me-1">Valid: ${data.valid_count}</span>` +
+        (data.invalid_count ? `<span class="badge bg-danger">Invalid: ${data.invalid_count}</span>` : '');
+
+    // Summary body
+    const summaryBody = document.getElementById('summary-body');
+    if (validRows.length === 0 && invalidRows.length === 0) {
+        summaryBody.innerHTML = '<p class="text-muted mb-0">No data rows found in the file.</p>';
+    } else {
+        summaryBody.innerHTML =
+            `<p class="mb-1">Parsed <strong>${data.total}</strong> rows — ` +
+            `<span class="text-success fw-bold">${data.valid_count} valid</span>` +
+            (data.invalid_count ? `, <span class="text-danger fw-bold">${data.invalid_count} invalid</span>` : '') +
+            `.</p>` +
+            (data.invalid_count ? '<p class="mb-0 text-muted">Invalid rows are shown below and will be skipped during upload.</p>' : '');
+    }
+
+    // Invalid table
+    const cardInvalid = document.getElementById('card-invalid');
+    const invalidTbody = document.getElementById('invalid-tbody');
+    if (invalidRows.length) {
+        cardInvalid.style.display = '';
+        invalidTbody.innerHTML = invalidRows.map(r =>
+            `<tr class="invalid-row">
+                <td>${r.row}</td>
+                <td>${esc(r.data.security_label || '')}</td>
+                <td>${esc(r.data.currency_code  || '')}</td>
+                <td>${esc(r.data.price_date      || '')}</td>
+                <td>${esc(r.data.main_closing_price || '')}</td>
+                <td><span class="text-danger small">${r.errors.join('; ')}</span></td>
+            </tr>`
+        ).join('');
+    } else {
+        cardInvalid.style.display = 'none';
+    }
+
+    // Valid table preview (cap display at 200 rows for performance)
+    const cardValid = document.getElementById('card-valid');
+    const validTbody = document.getElementById('valid-tbody');
+    if (validRows.length) {
+        cardValid.style.display = '';
+        const displayRows = validRows.slice(0, 200);
+        validTbody.innerHTML = displayRows.map((r, i) =>
+            `<tr>
+                <td>${i + 1}</td>
+                <td>${esc(r.security_label)}</td>
+                <td>${esc(r.currency_code)}</td>
+                <td>${esc(r.price_date)}</td>
+                <td class="text-end">${esc(r.main_closing_price)}</td>
+                <td>${esc(r.isin || '-')}</td>
+            </tr>`
+        ).join('');
+        if (validRows.length > 200) {
+            validTbody.innerHTML += `<tr><td colspan="6" class="text-center text-muted small">… and ${validRows.length - 200} more rows</td></tr>`;
+        }
+    } else {
+        cardValid.style.display = 'none';
+    }
+
+    // Upload action button
+    const cardAction = document.getElementById('card-upload-action');
+    if (validRows.length) {
+        cardAction.style.display = '';
+        document.getElementById('btn-upload-count').textContent = validRows.length;
+    } else {
+        cardAction.style.display = 'none';
+    }
+}
+
+/* ── Upload in chunks ────────────────────────────────────── */
+document.getElementById('btn-upload').addEventListener('click', async () => {
+    if (!validRows.length) return;
+
+    const btnUpload = document.getElementById('btn-upload');
+    btnUpload.disabled = true;
+    btnUpload.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Uploading…';
+
+    const progressWrap = document.getElementById('progress-bar-wrap');
+    const progressBar  = document.getElementById('progress-bar');
+    const progressLabel = document.getElementById('progress-label');
+    progressWrap.style.display = '';
+
+    let totalSuccess = 0;
+    let totalFailure = 0;
+    const allFailures = [];
+    const chunks = chunkArray(validRows, CHUNK_SIZE);
+
+    for (let i = 0; i < chunks.length; i++) {
+        const pct = Math.round(((i) / chunks.length) * 100);
+        progressBar.style.width = pct + '%';
+        progressLabel.textContent = `Uploading chunk ${i + 1} of ${chunks.length}…`;
+
+        try {
+            const resp = await fetch(UPLOAD_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': CSRF_TOKEN,
+                },
+                body: JSON.stringify({ rows: chunks[i] }),
+            });
+            const data = await resp.json();
+            totalSuccess += data.success_count || 0;
+            totalFailure += data.failure_count || 0;
+            if (data.failures) allFailures.push(...data.failures);
+        } catch (err) {
+            totalFailure += chunks[i].length;
+            allFailures.push({ row: {}, error: 'Network error: ' + err.message });
+        }
+    }
+
+    progressBar.style.width = '100%';
+    progressLabel.textContent = 'Done.';
+
+    btnUpload.disabled = false;
+    btnUpload.innerHTML = '<i class="bi bi-cloud-upload"></i> Upload ' + validRows.length + ' Records';
+
+    renderResult(totalSuccess, totalFailure, allFailures);
+});
+
+/* ── Result ──────────────────────────────────────────────── */
+function renderResult(success, failure, failures) {
+    const stepResult = document.getElementById('step-result');
+    const resultBody = document.getElementById('result-body');
+    stepResult.style.display = '';
+
+    let html = '';
+    if (success > 0) {
+        html += `<div class="alert alert-success">
+            <i class="bi bi-check-circle-fill"></i>
+            <strong>${success}</strong> record${success !== 1 ? 's' : ''} uploaded successfully.
+        </div>`;
+    }
+    if (failure > 0) {
+        html += `<div class="alert alert-danger">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            <strong>${failure}</strong> record${failure !== 1 ? 's' : ''} failed.
+        </div>`;
+        if (failures.length) {
+            html += `<div class="table-responsive" style="max-height:200px;overflow-y:auto;">
+                <table class="table table-sm table-bordered">
+                    <thead class="table-light"><tr><th>Security</th><th>Currency</th><th>Price Date</th><th>Error</th></tr></thead>
+                    <tbody>` +
+                failures.map(f => `<tr>
+                    <td>${esc(f.row.security_label || '-')}</td>
+                    <td>${esc(f.row.currency_code  || '-')}</td>
+                    <td>${esc(f.row.price_date      || '-')}</td>
+                    <td class="text-danger small">${esc(f.error)}</td>
+                </tr>`).join('') +
+                `</tbody></table></div>`;
+        }
+    }
+    if (success === 0 && failure === 0) {
+        html = '<p class="text-muted">Nothing was uploaded.</p>';
+    }
+    html += `<div class="mt-3">
+        <a href="{% url 'market_data:equity_price_list' %}" class="btn btn-primary">
+            <i class="bi bi-list"></i> View Equity Prices
+        </a>
+        <a href="{% url 'market_data:equity_price_upload' %}" class="btn btn-outline-secondary ms-2">
+            <i class="bi bi-arrow-repeat"></i> Upload Another File
+        </a>
+    </div>`;
+
+    resultBody.innerHTML = html;
+    stepResult.scrollIntoView({ behavior: 'smooth' });
+}
+
+/* ── Helpers ─────────────────────────────────────────────── */
+function chunkArray(arr, size) {
+    const chunks = [];
+    for (let i = 0; i < arr.length; i += size) {
+        chunks.push(arr.slice(i, i + size));
+    }
+    return chunks;
+}
+
+function esc(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function showAlert(type, msg) {
+    const div = document.createElement('div');
+    div.className = `alert alert-${type} alert-dismissible mt-3`;
+    div.innerHTML = msg + '<button type="button" class="btn-close" data-bs-dismiss="alert"></button>';
+    document.getElementById('step-upload').querySelector('.card-body').appendChild(div);
+}
+</script>
+{% endblock %}
