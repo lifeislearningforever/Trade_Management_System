@@ -48,7 +48,7 @@
             </h1>
             <p class="content-subtitle">
                 {% if is_edit %}
-                    Update cash flow: <strong>{{ cash_flow.cf_number }}</strong>
+                    Update cash flow: <strong>{{ cash_flow.cash_flow_number|default:"-" }}</strong>
                 {% else %}
                     Fill in the cash flow details. Cash flow will be created with INITIAL status.
                 {% endif %}
@@ -357,7 +357,7 @@
                     <div class="row g-3">
                         <div class="col-md-4">
                             <label class="form-label">CF Number</label>
-                            <input type="text" class="form-control" value="{{ cash_flow.cf_number|default:'' }}" readonly>
+                            <input type="text" class="form-control" value="{{ cash_flow.cash_flow_number|default:'' }}" readonly>
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Workflow Status</label>
