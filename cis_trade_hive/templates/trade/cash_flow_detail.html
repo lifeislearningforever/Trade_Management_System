@@ -1,13 +1,13 @@
 {% extends 'base.html' %}
 {% load static humanize %}
 
-{% block title %}Cash Flow {{ cash_flow.cash_flow_number|default:cash_flow.cf_number }} - CisTrade{% endblock %}
+{% block title %}Cash Flow {{ cash_flow.cash_flow_number|default:"-" }} - CisTrade{% endblock %}
 
 {% block breadcrumb %}
     <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
     <li class="breadcrumb-item"><a href="{% url 'trade:list' %}">Trade</a></li>
     <li class="breadcrumb-item"><a href="{% url 'trade:cash_flow_list' %}">Cash Flows</a></li>
-    <li class="breadcrumb-item active">{{ cash_flow.cash_flow_number|default:cash_flow.cf_number }}</li>
+    <li class="breadcrumb-item active">{{ cash_flow.cash_flow_number|default:"-" }}</li>
 {% endblock %}
 
 {% block content %}
@@ -17,7 +17,7 @@
         <div>
             <h1 class="content-title">
                 <i class="bi bi-cash-stack text-primary"></i>
-                Cash Flow: <span class="text-primary">{{ cash_flow.cash_flow_number|default:cash_flow.cf_number|default:"—" }}</span>
+                Cash Flow: <span class="text-primary">{{ cash_flow.cash_flow_number|default:"—" }}</span>
             </h1>
             <p class="content-subtitle">
                 {{ cash_flow.cash_flow_type }} for {{ cash_flow.portfolio_short_name }}
@@ -50,7 +50,7 @@
                     <div class="row g-3">
                         <div class="col-md-4">
                             <label class="text-muted small">CF Number</label>
-                            <p class="mb-2 fw-bold">{{ cash_flow.cash_flow_number|default:cash_flow.cf_number|default:"-" }}</p>
+                            <p class="mb-2 fw-bold">{{ cash_flow.cash_flow_number|default:"-" }}</p>
                         </div>
                         <div class="col-md-4">
                             <label class="text-muted small">Cash Flow Type</label>
