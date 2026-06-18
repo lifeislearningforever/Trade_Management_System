@@ -116,6 +116,16 @@
     overflow-y: auto;
 }
 
+/* Two-line option: subtext always readable on both white and blue highlight */
+.select2-results__option .s2-subtext {
+    display: block;
+    font-size: 0.78rem;
+    opacity: 0.85;
+    white-space: normal;
+    max-width: 420px;
+    line-height: 1.2;
+}
+
 /* Responsive adjustments for small screens */
 @media (max-width: 576px) {
     .select2-container--bootstrap-5 .select2-selection {
