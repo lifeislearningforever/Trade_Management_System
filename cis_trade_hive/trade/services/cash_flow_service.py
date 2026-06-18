@@ -666,9 +666,10 @@ class CashFlowService:
         if src_system and src_system.upper() != 'CIS':
             return False
 
-        # Can edit INITIAL, MODIFIED, REJECTED status
+        # Can edit INITIAL, MODIFIED, REJECTED, APPROVED status
+        # APPROVED records go back to MODIFIED after edit (maker-checker re-approval flow)
         status = cf.get('status', '')
-        return status in [self.STATUS_INITIAL, self.STATUS_MODIFIED, self.STATUS_REJECTED]
+        return status in [self.STATUS_INITIAL, self.STATUS_MODIFIED, self.STATUS_REJECTED, self.STATUS_APPROVED]
 
     def can_user_approve(self, cf: Dict[str, Any], username: str) -> bool:
         """
