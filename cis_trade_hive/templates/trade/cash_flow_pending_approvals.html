@@ -94,7 +94,14 @@
                                     </a>
                                 </td>
                                 <td>{{ cf.portfolio_short_name|default:"-" }}</td>
-                                <td>{{ cf.security_label|default:"-"|truncatechars:20 }}</td>
+                                <td>
+                                    <span title="{{ cf.security_full_name|default:cf.security_label|default:'-' }}">
+                                        {{ cf.security_label|default:"-"|truncatechars:15 }}
+                                    </span>
+                                    {% if cf.security_full_name and cf.security_full_name != cf.security_label %}
+                                    <br><small class="text-muted">{{ cf.security_full_name|truncatechars:25 }}</small>
+                                    {% endif %}
+                                </td>
                                 <td>{{ cf.cash_flow_type|default:"-" }}</td>
                                 <td>{{ cf.send_receive|default:"-" }}</td>
                                 <td>{{ cf.value_date|default:"-" }}</td>

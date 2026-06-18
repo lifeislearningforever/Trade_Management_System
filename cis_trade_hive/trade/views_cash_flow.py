@@ -41,6 +41,22 @@ def get_client_ip(request):
     return request.META.get('REMOTE_ADDR')
 
 
+def _build_security_fullname_map():
+    """Return {security_label: full_name} from cached dropdown securities."""
+    try:
+        securities = cash_flow_dropdown_service.get_securities()
+        return {s['value']: s['full_name'] for s in securities if s.get('value')}
+    except Exception:
+        return {}
+
+
+def _enrich_security_fullname(cash_flows, sec_map):
+    """Add security_full_name to each cash flow dict in-place."""
+    for cf in cash_flows:
+        label = cf.get('security_label') or ''
+        cf['security_full_name'] = sec_map.get(label, label)
+
+
 class CashFlowWrapper:
     """Wrapper to convert Kudu dict data to object with attributes for template compatibility."""
 
@@ -111,7 +127,9 @@ def cash_flow_list(request):
             portfolio_short_name=portfolio_filter if portfolio_filter else None
         )
 
-        # Add can_approve flag and status color to each record
+        # Enrich with security full name and add workflow flags
+        sec_map = _build_security_fullname_map()
+        _enrich_security_fullname(cash_flows, sec_map)
         for cf in cash_flows:
             cf['can_approve'] = cash_flow_service.can_user_approve(cf, username)
             cf['status_color'] = cash_flow_service.get_status_display_color(cf.get('status', ''))
@@ -226,7 +244,9 @@ def cash_flow_pending_approvals(request):
 
         username = request.session.get('user_login', 'anonymous')
 
-        # Add approval flags
+        # Enrich with security full name and add workflow flags
+        sec_map = _build_security_fullname_map()
+        _enrich_security_fullname(cash_flows, sec_map)
         for cf in cash_flows:
             cf['can_approve'] = cash_flow_service.can_user_approve(cf, username)
             cf['status_color'] = cash_flow_service.get_status_display_color(cf.get('status', ''))
@@ -285,6 +305,10 @@ def cash_flow_detail(request, cash_flow_id):
 
         # Get history
         history = cash_flow_service.get_history(int(cash_flow_id))
+
+        # Enrich with security full name
+        sec_map = _build_security_fullname_map()
+        _enrich_security_fullname([cf], sec_map)
 
         context = {
             'cash_flow': cf,

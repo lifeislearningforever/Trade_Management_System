@@ -121,7 +121,7 @@
                                                 data-fullname="{{ s.full_name }}"
                                                 data-isin="{{ s.isin }}"
                                                 {% if cash_flow.security_label == s.value or cash_flow.security_name == s.value %}selected{% endif %}>
-                                            {{ s.label }}
+                                            {% if s.full_name and s.full_name != s.label %}{{ s.full_name }} ({{ s.label }}){% else %}{{ s.label }}{% endif %}
                                         </option>
                                     {% endfor %}
                                 </select>

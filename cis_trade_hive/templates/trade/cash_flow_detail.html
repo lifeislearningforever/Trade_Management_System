@@ -66,6 +66,9 @@
                         <div class="col-md-6">
                             <label class="text-muted small">Security</label>
                             <p class="mb-2 fw-bold">{{ cash_flow.security_label|default:"-" }}</p>
+                            {% if cash_flow.security_full_name and cash_flow.security_full_name != cash_flow.security_label %}
+                            <p class="mb-2 text-muted small">{{ cash_flow.security_full_name }}</p>
+                            {% endif %}
                         </div>
                         <div class="col-md-6">
                             <label class="text-muted small">Cash Flow Status</label>
