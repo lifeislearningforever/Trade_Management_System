@@ -272,13 +272,15 @@ class EquityPriceHiveRepository:
             return None
 
     @staticmethod
-    def upsert_equity_price(equity_price_data: Dict[str, Any], username: str = 'SYSTEM') -> bool:
+    def upsert_equity_price(equity_price_data: Dict[str, Any], username: str = 'SYSTEM', is_update: bool = False, _skip_audit: bool = False) -> bool:
         """
         Insert or update equity price using UPSERT (composite key).
 
         Args:
             equity_price_data: Dictionary with equity price fields
             username: User performing the operation (for audit)
+            is_update: True if record already exists (affects audit action_type)
+            _skip_audit: Skip internal audit log (used when caller handles its own audit)
 
         Returns:
             True if successful, False otherwise
@@ -349,17 +351,17 @@ class EquityPriceHiveRepository:
             return False
 
         finally:
-            # Audit logging (fire and forget - non-blocking)
-            log_audit(
-                action_type='UPSERT',
-                entity_type='EQUITY_PRICE',
-                entity_id=f"{equity_price_data.get('currency_code')}/{equity_price_data.get('security_label')}",
-                entity_name=equity_price_data.get('security_label'),
-                new_value=equity_price_data,
-                success=success,
-                error_message=error_msg,
-                username=username
-            )
+            if not _skip_audit:
+                log_audit(
+                    action_type='UPDATE' if is_update else 'CREATE',
+                    entity_type='EQUITY_PRICE',
+                    entity_id=f"{equity_price_data.get('currency_code')}/{equity_price_data.get('security_label')}",
+                    entity_name=equity_price_data.get('security_label'),
+                    new_value=equity_price_data,
+                    success=success,
+                    error_message=error_msg,
+                    username=username
+                )
 
     @staticmethod
     def update_equity_price(currency_code: str, security_label: str, equity_price_data: Dict[str, Any], username: str = 'SYSTEM', price_date: Optional[str] = None) -> bool:
@@ -398,8 +400,8 @@ class EquityPriceHiveRepository:
             merged_data['updated_by'] = username
             merged_data['updated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            # Use upsert
-            success = EquityPriceHiveRepository.upsert_equity_price(merged_data, username)
+            # Use upsert; skip its own audit — update_equity_price's finally block handles it
+            success = EquityPriceHiveRepository.upsert_equity_price(merged_data, username, is_update=True, _skip_audit=True)
 
             if not success:
                 error_msg = "Update operation returned False"

@@ -164,12 +164,12 @@ class EquityPriceService:
         # Validate date format
         EquityPriceService._validate_date_format(equity_price_data['price_date'])
 
-        # Validate price is positive
+        # Validate price is not negative (0 is allowed, e.g. suspended securities)
         price = equity_price_data.get('main_closing_price')
         try:
             price_decimal = Decimal(str(price))
-            if price_decimal <= 0:
-                raise ValidationError("Main closing price must be positive")
+            if price_decimal < 0:
+                raise ValidationError("Main closing price must not be negative")
         except (ValueError, TypeError):
             raise ValidationError("Invalid price value")
 
@@ -613,8 +613,8 @@ class EquityPriceService:
                 else:
                     try:
                         price_val = Decimal(price_str)
-                        if price_val <= 0:
-                            errors.append('main_closing_price must be positive')
+                        if price_val < 0:
+                            errors.append('main_closing_price must not be negative')
                     except InvalidOperation:
                         errors.append(f'main_closing_price "{price_str}" is not a valid number')
                         price_val = None
@@ -663,8 +663,27 @@ class EquityPriceService:
 
         for row in rows:
             try:
+                currency_code  = row.get('currency_code', '')
+                security_label = row.get('security_label', '')
+                price_date     = row.get('price_date', '')
+
+                # Block upload if an existing GMP record covers this composite key
+                existing = equity_price_hive_repository.get_equity_price_by_key(
+                    currency_code, security_label, price_date
+                )
+                if existing and str(existing.get('src_system', '')).upper() == 'GMP':
+                    failure_count += 1
+                    failures.append({
+                        'row': row,
+                        'error': f'Record already exists with src_system=GMP — upload blocked to protect source data',
+                    })
+                    continue
+
+                is_update = existing is not None
                 row['created_by'] = username
-                ok = equity_price_hive_repository.upsert_equity_price(row, username=username)
+                ok = equity_price_hive_repository.upsert_equity_price(
+                    row, username=username, is_update=is_update
+                )
                 if ok:
                     success_count += 1
                 else:
