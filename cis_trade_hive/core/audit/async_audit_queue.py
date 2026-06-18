@@ -284,9 +284,91 @@ class AsyncAuditQueue:
             logger.error(f"Kudu batch insert failed: {e}")
             return False
 
-    def _format_audit_values(self, entry: Dict[str, Any]) -> str:
-        """Format audit entry as SQL VALUES string."""
+    def _process_audit_entry(self, audit_entry) -> bool:
+        """
+        Process a single audit entry — handles both plain dicts and AuditEntry objects.
+        Called by prod worker loops that iterate entries individually.
+        """
+        try:
+            entry_dict = self._to_dict(audit_entry)
+            from core.audit.audit_kudu_repository import audit_log_kudu_repository
+            return audit_log_kudu_repository.log_action(
+                user_id=entry_dict.get('user_id', '0') or '0',
+                username=entry_dict.get('username', 'SYSTEM'),
+                action_type=entry_dict.get('action_type', 'UNKNOWN'),
+                entity_type=entry_dict.get('entity_type', ''),
+                entity_id=entry_dict.get('entity_id', ''),
+                entity_name=entry_dict.get('entity_name', ''),
+                action_description=entry_dict.get('action_description', ''),
+                old_value=entry_dict.get('old_value'),
+                new_value=entry_dict.get('new_value'),
+                status=entry_dict.get('status', 'SUCCESS'),
+                error_message=entry_dict.get('error_message'),
+                request_method=entry_dict.get('request_method', ''),
+                request_path=entry_dict.get('request_path', ''),
+                ip_address=entry_dict.get('ip_address', ''),
+                user_agent=entry_dict.get('user_agent', ''),
+                user_email=entry_dict.get('user_email', ''),
+                action_category=entry_dict.get('action_category', 'DATA'),
+                status_code=entry_dict.get('status_code', 200),
+                duration_ms=entry_dict.get('duration_ms', 0),
+            )
+        except Exception as e:
+            logger.error(f"Failed to log audit entry: {e} by {self._get_username(audit_entry)}")
+            return False
+
+    @staticmethod
+    def _to_dict(entry) -> Dict[str, Any]:
+        """
+        Normalise an audit entry to a plain dict regardless of whether it arrived
+        as a dict, an AuditEntry dataclass, or any other object.
+        Enum fields are converted to their string values.
+        """
+        if isinstance(entry, dict):
+            # Flatten any enum values that may have slipped in
+            result = {}
+            for k, v in entry.items():
+                result[k] = v.value if hasattr(v, 'value') else v
+            return result
+
+        # AuditEntry dataclass or similar object — pull attributes
+        def _val(attr):
+            v = getattr(entry, attr, None)
+            return v.value if hasattr(v, 'value') else v
+
+        return {
+            'action_type':        _val('action_type'),
+            'action_category':    _val('action_category'),
+            'username':           _val('username'),
+            'user_id':            _val('user_id'),
+            'user_email':         _val('user_email'),
+            'entity_type':        _val('entity_type'),
+            'entity_id':          _val('entity_id'),
+            'entity_name':        _val('entity_name'),
+            'action_description': _val('action_description'),
+            'old_value':          _val('old_value'),
+            'new_value':          _val('new_value'),
+            'status':             _val('status'),
+            'status_code':        _val('status_code'),
+            'duration_ms':        _val('duration_ms'),
+            'error_message':      _val('error_message'),
+            'request_method':     _val('request_method'),
+            'request_path':       _val('request_path'),
+            'ip_address':         _val('ip_address'),
+            'user_agent':         _val('user_agent'),
+        }
+
+    @staticmethod
+    def _get_username(entry) -> str:
+        """Extract username safely from dict or object."""
+        if isinstance(entry, dict):
+            return entry.get('username', 'UNKNOWN')
+        return getattr(entry, 'username', 'UNKNOWN')
+
+    def _format_audit_values(self, entry) -> str:
+        """Format audit entry as SQL VALUES string. Accepts dict or AuditEntry object."""
         now = datetime.now()
+        entry_dict = self._to_dict(entry)
 
         # Generate unique audit_id
         audit_id = int(now.timestamp() * 1000) + (uuid.uuid4().int % 1000)
@@ -296,30 +378,30 @@ class AsyncAuditQueue:
             if val is None:
                 return 'NULL'
             val_str = str(val)
-            # Escape backslashes and single quotes
-            val_str = val_str.replace("\\", "\\\\").replace("'", "\\'")
+            # Escape single quotes for Impala (doubled, not backslash)
+            val_str = val_str.replace("'", "''")
             # Truncate long values
             if len(val_str) > 4000:
                 val_str = val_str[:4000] + '...[truncated]'
             return f"'{val_str}'"
 
         return ', '.join([
-            str(audit_id),                                          # audit_id
-            f"'{now.strftime('%Y-%m-%d %H:%M:%S')}'",               # audit_timestamp
-            esc(entry.get('user_id', '0')),                         # user_id
-            esc(entry.get('username', 'SYSTEM')),                   # username
-            esc(entry.get('action_type', 'UNKNOWN')),               # action_type
-            esc(entry.get('action_category', 'DATA')),              # action_category
-            esc(entry.get('action_description', '')),               # action_description
-            esc(entry.get('entity_type', '')),                      # entity_type
-            esc(entry.get('entity_id', '')),                        # entity_id
-            esc(entry.get('entity_name', '')),                      # entity_name
-            esc(entry.get('old_value')),                            # old_value
-            esc(entry.get('new_value')),                            # new_value
-            esc(entry.get('status', 'SUCCESS')),                    # status
-            str(entry.get('status_code', 200)),                     # status_code
-            str(entry.get('duration_ms', 0)),                       # duration_ms
-            f"'{now.strftime('%Y-%m-%d')}'"                         # audit_date
+            str(audit_id),                                               # audit_id
+            f"'{now.strftime('%Y-%m-%d %H:%M:%S')}'",                    # audit_timestamp
+            esc(entry_dict.get('user_id', '0')),                         # user_id
+            esc(entry_dict.get('username', 'SYSTEM')),                   # username
+            esc(entry_dict.get('action_type', 'UNKNOWN')),               # action_type
+            esc(entry_dict.get('action_category', 'DATA')),              # action_category
+            esc(entry_dict.get('action_description', '')),               # action_description
+            esc(entry_dict.get('entity_type', '')),                      # entity_type
+            esc(entry_dict.get('entity_id', '')),                        # entity_id
+            esc(entry_dict.get('entity_name', '')),                      # entity_name
+            esc(entry_dict.get('old_value')),                            # old_value
+            esc(entry_dict.get('new_value')),                            # new_value
+            esc(entry_dict.get('status', 'SUCCESS')),                    # status
+            str(entry_dict.get('status_code', 200)),                     # status_code
+            str(entry_dict.get('duration_ms', 0)),                       # duration_ms
+            f"'{now.strftime('%Y-%m-%d')}'"                              # audit_date
         ])
 
     def _write_to_fallback(self, entry: Dict[str, Any]):

@@ -217,7 +217,8 @@ def _queue_audit_entry(
                 except Exception:
                     new_value_str = str(new_value)
 
-            # Build audit entry
+            # Build audit entry as plain dict (works with both _format_audit_values
+            # and any _process_audit_entry that accepts dicts)
             audit_data = {
                 'action_type': action_type,
                 'action_category': 'DATA',
@@ -230,8 +231,9 @@ def _queue_audit_entry(
                 'status': 'SUCCESS' if success else 'FAILURE',
                 'status_code': 200 if success else 500,
                 'duration_ms': duration_ms,
-                'username': username,
-                'user_id': '0'  # Can be enhanced to include actual user_id
+                'username': username or 'SYSTEM',
+                'user_id': '0',
+                'error_message': error_message,
             }
 
             # Non-blocking enqueue
