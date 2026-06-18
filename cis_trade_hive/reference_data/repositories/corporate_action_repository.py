@@ -25,10 +25,7 @@ class CorporateActionRepository:
 
     @staticmethod
     def escape_value(value: Any) -> str:
-        """
-        Escape value for SQL query.
-        Uses backslash escaping for Impala compatibility.
-        """
+        """Escape value for Impala SQL. Impala uses doubled single quotes, not backslash."""
         if value is None or value == '':
             return 'NULL'
         if isinstance(value, bool):
@@ -42,12 +39,11 @@ class CorporateActionRepository:
                 return str(value)
         except ImportError:
             pass
-        # String — if it looks purely numeric, emit unquoted (handles str(Decimal))
+        # String — if it looks purely numeric, emit unquoted
         s = str(value).strip()
         if s and s.lstrip('-').replace('.', '', 1).isdigit():
             return s
-        # General string — escape backslashes and single quotes
-        escaped = s.replace('\\', '\\\\').replace("'", "\\'")
+        escaped = s.replace("'", "''")
         return f"'{escaped}'"
 
     @staticmethod

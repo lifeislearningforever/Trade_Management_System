@@ -89,6 +89,11 @@ class Command(BaseCommand):
             action='store_true',
             help='Show queue statistics only, do not process'
         )
+        parser.add_argument(
+            '--correction',
+            action='store_true',
+            help='Correction run: void existing cash flows for CA, reset queue to PENDING, re-process. Requires --ca-id.'
+        )
 
     def handle(self, *args, **options):
         """Main entry point for the command."""
@@ -102,6 +107,7 @@ class Command(BaseCommand):
         retry_failed = options['retry_failed']
         reset_stuck = options['reset_stuck']
         show_status = options['status']
+        correction = options['correction']
 
         # Print header
         self.stdout.write(self.style.HTTP_INFO('=' * 70))
@@ -134,6 +140,13 @@ class Command(BaseCommand):
             # Process specific queue entry
             if queue_id:
                 self._process_single_queue_entry(queue_id, dry_run, verbose)
+                return
+
+            # Correction run: void old cash flows + reset queue + re-process
+            if correction:
+                if not ca_id:
+                    raise CommandError('--correction requires --ca-id')
+                self._correction_run(ca_id, run_by, dry_run, verbose)
                 return
 
             # Process specific CA
@@ -401,6 +414,167 @@ class Command(BaseCommand):
 
         except Exception as e:
             self.stdout.write(self.style.ERROR(f'Error retrying failed entries: {str(e)}'))
+
+    def _correction_run(self, ca_id: int, run_by: str, dry_run: bool, verbose: bool):
+        """
+        Correction run: void existing cash flows for a CA, reset queue entry to PENDING,
+        refresh queue fields from the current CA record, then re-process.
+
+        Use when: EOD already ran and generated cash flows, but the CA was subsequently
+        modified and re-validated, and the old cash flows must be replaced.
+        """
+        from core.repositories.impala_connection import impala_manager
+        from reference_data.repositories.corporate_action_repository import CorporateActionRepository
+
+        self.stdout.write(self.style.HTTP_INFO(f'\n--- Correction Run for CA ID: {ca_id} ---\n'))
+        if dry_run:
+            self.stdout.write(self.style.WARNING('Mode: DRY RUN — no changes will be written\n'))
+
+        # 1. Load the current (modified) CA record
+        ca = CorporateActionRepository.get_by_id(ca_id)
+        if not ca:
+            raise CommandError(f'Corporate action {ca_id} not found')
+
+        ca_number = ca.get('ca_number', 'Unknown')
+        ca_status = ca.get('status', '')
+        self.stdout.write(f'CA Number : {ca_number}')
+        self.stdout.write(f'CA Status : {ca_status}')
+        self.stdout.write(f'Security  : {ca.get("security_name")}')
+        self.stdout.write(f'Price     : {ca.get("price")} {ca.get("currency")}')
+        self.stdout.write(f'Ex Date   : {ca.get("ex_date")}')
+        self.stdout.write(f'Rec Date  : {ca.get("record_date")}')
+        self.stdout.write(f'Pay Date  : {ca.get("payment_date")}')
+        self.stdout.write('')
+
+        if ca_status not in ('VALIDATED', 'APPROVED'):
+            raise CommandError(
+                f'CA {ca_number} has status "{ca_status}". '
+                f'Correction requires a VALIDATED or APPROVED CA.'
+            )
+
+        # 2. Find queue entries for this CA
+        entries = ca_cash_flow_queue_repository.get_by_ca_id(ca_id)
+        if not entries:
+            raise CommandError(f'No queue entries found for CA {ca_id} ({ca_number})')
+
+        self.stdout.write(f'Found {len(entries)} queue entry(ies)')
+
+        # 3. For each queue entry: void existing cash flows, reset to PENDING
+        total_voided = 0
+        queue_ids_to_reprocess = []
+
+        for entry in entries:
+            queue_id = entry.get('queue_id')
+            q_status = entry.get('status', '')
+            cf_created = entry.get('cash_flows_created', 0) or 0
+            self.stdout.write(f'\n  Queue {queue_id} — status={q_status}, cash_flows_created={cf_created}')
+
+            # --- void existing cash flows tied to this ca_number ---
+            void_query = f"""
+            SELECT cash_flow_id
+            FROM gmp_cis.cis_cash_flow
+            WHERE ca_number = '{ca_number}'
+              AND (is_deleted = false OR is_deleted IS NULL)
+            """
+            existing_cfs = impala_manager.execute_query(void_query, database='gmp_cis')
+            cf_ids = [row['cash_flow_id'] for row in (existing_cfs or []) if row.get('cash_flow_id')]
+
+            self.stdout.write(f'  Found {len(cf_ids)} active cash flow(s) to void')
+
+            if cf_ids and not dry_run:
+                now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                for cf_id in cf_ids:
+                    void_sql = f"""
+                    UPDATE gmp_cis.cis_cash_flow
+                    SET is_deleted = true,
+                        is_active = false,
+                        updated_by = '{run_by}',
+                        updated_at = '{now_str}'
+                    WHERE cash_flow_id = {cf_id}
+                    """
+                    ok = impala_manager.execute_write(void_sql, database='gmp_cis')
+                    if ok:
+                        total_voided += 1
+                        if verbose:
+                            self.stdout.write(f'    Voided cash_flow_id={cf_id}')
+                    else:
+                        self.stdout.write(self.style.ERROR(f'    Failed to void cash_flow_id={cf_id}'))
+
+            elif cf_ids and dry_run:
+                self.stdout.write(f'  [DRY RUN] Would void {len(cf_ids)} cash flow(s): {cf_ids}')
+                total_voided += len(cf_ids)
+
+            # --- reset queue entry ---
+            if q_status in ('PROCESSING',):
+                self.stdout.write(self.style.WARNING(
+                    f'  Queue {queue_id} is PROCESSING — skipping (use --reset-stuck first)'
+                ))
+                continue
+
+            # Refresh queue entry fields from current CA
+            now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            ex_date_val = f"'{ca.get('ex_date')}'" if ca.get('ex_date') else 'NULL'
+            record_date_val = f"'{ca.get('record_date')}'" if ca.get('record_date') else 'NULL'
+            payment_date_val = f"'{ca.get('payment_date')}'" if ca.get('payment_date') else 'NULL'
+            price_val = str(ca.get('price')) if ca.get('price') is not None else 'NULL'
+
+            reset_sql = f"""
+            UPDATE gmp_cis.cis_ca_cash_flow_queue
+            SET status = 'PENDING',
+                price = {price_val},
+                ex_date = {ex_date_val},
+                record_date = {record_date_val},
+                payment_date = {payment_date_val},
+                error_message = NULL,
+                retry_count = 0,
+                cash_flows_created = 0,
+                total_amount = 0,
+                processed_at = NULL
+            WHERE queue_id = {queue_id}
+            """
+
+            if not dry_run:
+                ok = impala_manager.execute_write(reset_sql, database='gmp_cis')
+                if ok:
+                    self.stdout.write(self.style.SUCCESS(f'  Queue {queue_id} reset to PENDING'))
+                    queue_ids_to_reprocess.append(queue_id)
+                else:
+                    self.stdout.write(self.style.ERROR(f'  Failed to reset queue {queue_id}'))
+            else:
+                self.stdout.write(f'  [DRY RUN] Would reset queue {queue_id} to PENDING with updated CA fields')
+                queue_ids_to_reprocess.append(queue_id)
+
+        # 4. Re-process each reset queue entry
+        self.stdout.write('')
+        if not queue_ids_to_reprocess:
+            self.stdout.write(self.style.WARNING('No queue entries to re-process'))
+        else:
+            self.stdout.write(self.style.HTTP_INFO(f'--- Re-processing {len(queue_ids_to_reprocess)} queue entry(ies) ---\n'))
+            total_cf_created = 0
+            for queue_id in queue_ids_to_reprocess:
+                self.stdout.write(f'Re-processing queue {queue_id}...')
+                if dry_run:
+                    self.stdout.write(f'  [DRY RUN] Would call process_ca_cash_flows(queue_id={queue_id})')
+                    continue
+
+                success, message, cf_count, amount = ca_cash_flow_service.process_ca_cash_flows(
+                    queue_id=queue_id,
+                    dry_run=False
+                )
+                if success:
+                    total_cf_created += cf_count
+                    self.stdout.write(self.style.SUCCESS(f'  ✓ {message}'))
+                else:
+                    self.stdout.write(self.style.ERROR(f'  ✗ Failed: {message}'))
+
+        # 5. Summary
+        self.stdout.write('')
+        self.stdout.write(self.style.HTTP_INFO('--- Correction Run Summary ---'))
+        self.stdout.write(f'  CA          : {ca_number}')
+        self.stdout.write(f'  Voided CFs  : {total_voided}')
+        if not dry_run:
+            self.stdout.write(f'  New CFs     : {total_cf_created if queue_ids_to_reprocess else 0}')
+        self.stdout.write(self.style.SUCCESS('\n  Correction run complete.' if not dry_run else '\n  DRY RUN complete — no changes written.'))
 
     def _show_pending_entries(self, entries: List[Dict[str, Any]]):
         """Display pending queue entries."""

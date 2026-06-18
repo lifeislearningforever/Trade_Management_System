@@ -33,18 +33,14 @@ class CACashFlowQueueRepository:
 
     @staticmethod
     def escape_value(value: Any) -> str:
-        """
-        Escape value for SQL query.
-        Uses backslash escaping for Impala compatibility.
-        """
+        """Escape value for Impala SQL. Impala uses doubled single quotes, not backslash."""
         if value is None or value == '':
             return 'NULL'
         if isinstance(value, bool):
             return 'true' if value else 'false'
         if isinstance(value, (int, float, Decimal)):
             return str(value)
-        # String - escape backslashes and single quotes
-        escaped = str(value).replace('\\', '\\\\').replace("'", "\\'")
+        escaped = str(value).replace("'", "''")
         return f"'{escaped}'"
 
     @staticmethod
