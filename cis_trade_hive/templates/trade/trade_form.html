@@ -288,7 +288,7 @@
                             <div class="col-md-2">
                                 <label class="form-label">FX Rate</label>
                                 <input type="number" class="form-control" name="open_fx_rate" id="open_fx_rate"
-                                       step="0.000001" value="{{ trade.open_fx_rate|default:'' }}" placeholder="Auto-set or override">
+                                       step="any" value="{{ trade.open_fx_rate|default:'' }}" placeholder="Auto-set or override">
                                 <small class="text-muted" id="fx_rate_info">Auto-set from currencies</small>
                             </div>
                         </div>
@@ -1047,7 +1047,7 @@ document.getElementById('trade_type').addEventListener('change', function() {
 });
 
 // Auto-calculate on input change
-['quantity', 'price', 'commission', 'sec_fee', 'other_charges'].forEach(function(fieldId) {
+['quantity', 'price', 'commission', 'sec_fee', 'other_charges', 'open_fx_rate'].forEach(function(fieldId) {
     const el = document.getElementById(fieldId);
     if (el) {
         el.addEventListener('input', calculateTotal);
@@ -1622,7 +1622,7 @@ function fetchFxRate() {
 
     // Same currency - rate is 1.0
     if (securityCurrency === portfolioCurrency) {
-        fxRateField.value = '1.000000';
+        fxRateField.value = '1.0000000000';
         if (fxRateInfo) {
             fxRateInfo.textContent = 'Same currency (1.0)';
             fxRateInfo.className = 'text-info small';
@@ -1643,14 +1643,14 @@ function fetchFxRate() {
         .then(data => {
             console.log('FX Rate API response:', data);
             if (data.rate && data.rate > 0) {
-                fxRateField.value = parseFloat(data.rate).toFixed(6);
+                fxRateField.value = parseFloat(data.rate).toFixed(10);
                 if (fxRateInfo) {
                     fxRateInfo.textContent = `${securityCurrency}-${portfolioCurrency}: ${data.rate} (${data.date || 'latest'})`;
                     fxRateInfo.className = 'text-success small';
                 }
             } else {
                 // No rate found - default to 1.0
-                fxRateField.value = '1.000000';
+                fxRateField.value = '1.0000000000';
                 if (fxRateInfo) {
                     fxRateInfo.textContent = `No rate found for ${securityCurrency}-${portfolioCurrency}, using 1.0`;
                     fxRateInfo.className = 'text-warning small';
@@ -1661,7 +1661,7 @@ function fetchFxRate() {
         })
         .catch(error => {
             console.error('Error fetching FX rate:', error);
-            fxRateField.value = '1.000000';
+            fxRateField.value = '1.0000000000';
             if (fxRateInfo) {
                 fxRateInfo.textContent = 'Error fetching rate, using 1.0';
                 fxRateInfo.className = 'text-danger small';
