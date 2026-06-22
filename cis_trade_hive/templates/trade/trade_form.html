@@ -1490,6 +1490,9 @@ function calculateBrokerCharges() {
                 commissionField.value = data.total_charges.toFixed(6);
             }
 
+            // Apply UOB Kay Hian + SGX charge rounding after API population
+            applyChargeRoundingRule();
+
             // Recalculate total
             calculateTotal();
         })
