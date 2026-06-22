@@ -46,7 +46,7 @@
                     <div class="row">
                         <div class="col-6 mb-3">
                             <small class="text-muted d-block">Closing Price</small>
-                            <h3 class="mb-0">{{ price.main_closing_price|floatformat:4 }}</h3>
+                            <h3 class="mb-0">{{ price.main_closing_price|floatformat:6 }}</h3>
                         </div>
                         <div class="col-6 mb-3">
                             <small class="text-muted d-block">Currency</small>
@@ -130,19 +130,19 @@
                     <table class="table table-sm mb-0">
                         <tr>
                             <td class="text-muted">Min Price</td>
-                            <td>{{ trend.min_price|floatformat:4 }}</td>
+                            <td>{{ trend.min_price|floatformat:6 }}</td>
                         </tr>
                         <tr>
                             <td class="text-muted">Max Price</td>
-                            <td>{{ trend.max_price|floatformat:4 }}</td>
+                            <td>{{ trend.max_price|floatformat:6 }}</td>
                         </tr>
                         <tr>
                             <td class="text-muted">Avg Price</td>
-                            <td>{{ trend.avg_price|floatformat:4 }}</td>
+                            <td>{{ trend.avg_price|floatformat:6 }}</td>
                         </tr>
                         <tr>
                             <td class="text-muted">Volatility</td>
-                            <td>{{ trend.volatility|floatformat:4 }}</td>
+                            <td>{{ trend.volatility|floatformat:6 }}</td>
                         </tr>
                     </table>
                     {% else %}
@@ -188,7 +188,7 @@
                                 {% endif %}
                             </td>
                             <td><span class="badge badge-info">{{ hp.currency_code }}</span></td>
-                            <td class="text-end"><strong>{{ hp.main_closing_price|floatformat:4 }}</strong></td>
+                            <td class="text-end"><strong>{{ hp.main_closing_price|floatformat:6 }}</strong></td>
                             <td>{{ hp.isin|default:"-" }}</td>
                             <td><span class="badge badge-secondary">{{ hp.src_system|default:"CIS" }}</span></td>
                             <td style="font-size: 0.85rem;">{{ hp.price_datetime|default:"-" }}</td>
@@ -241,7 +241,7 @@
                                     <span class="badge bg-secondary">{{ vh.change_type }}</span>
                                 {% endif %}
                             </td>
-                            <td class="text-end"><strong>{{ vh.main_closing_price|floatformat:4 }}</strong></td>
+                            <td class="text-end"><strong>{{ vh.main_closing_price|floatformat:6 }}</strong></td>
                             <td><span class="badge badge-secondary">{{ vh.src_system|default:"-" }}</span></td>
                             <td>{{ vh.isin|default:"-" }}</td>
                         </tr>

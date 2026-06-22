@@ -148,7 +148,7 @@
                                 <td>{{ price.isin|default:"-" }}</td>
                                 <td>{{ price.price_date }}</td>
                                 <td class="text-end">
-                                    <strong>{{ price.main_closing_price|floatformat:4 }}</strong>
+                                    <strong>{{ price.main_closing_price|floatformat:6 }}</strong>
                                 </td>
                                 <td style="font-size: 0.85rem;">{{ price.price_datetime|default:"-" }}</td>
                                 <td>
