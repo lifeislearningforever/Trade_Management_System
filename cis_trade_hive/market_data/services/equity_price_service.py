@@ -233,8 +233,8 @@ class EquityPriceService:
             price = equity_price_data['main_closing_price']
             try:
                 price_decimal = Decimal(str(price))
-                if price_decimal <= 0:
-                    raise ValidationError("Main closing price must be positive")
+                if price_decimal < 0:
+                    raise ValidationError("Main closing price must not be negative")
             except (ValueError, TypeError):
                 raise ValidationError("Invalid price value")
 
