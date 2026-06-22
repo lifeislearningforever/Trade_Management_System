@@ -30,11 +30,27 @@
 
     <!-- Error Alert -->
     {% if error %}
-    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+    {% if "updated by another user" in error %}
+    <div id="conflict-alert" class="alert alert-warning border border-warning-emphasis shadow" role="alert"
+         style="position: sticky; top: 0; z-index: 1050;">
+        <div class="d-flex align-items-start gap-3">
+            <i class="bi bi-exclamation-triangle-fill fs-3 text-warning flex-shrink-0"></i>
+            <div class="flex-grow-1">
+                <strong class="d-block mb-1" style="font-size:1.05rem;">Concurrent Edit Conflict</strong>
+                {{ error }}
+            </div>
+            <a href="{{ request.get_full_path }}" class="btn btn-warning btn-sm flex-shrink-0">
+                <i class="bi bi-arrow-clockwise"></i> Reload &amp; Get Latest
+            </a>
+        </div>
+    </div>
+    {% else %}
+    <div id="error-alert" class="alert alert-danger alert-dismissible fade show" role="alert">
         <i class="bi bi-exclamation-triangle"></i>
         <strong>Error:</strong> {{ error }}
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
+    {% endif %}
     {% endif %}
 
     <!-- Form Card -->
@@ -297,6 +313,18 @@
 <script src="{% static 'js/select2-init.js' %}"></script>
 
 <script>
+// Scroll to conflict alert if present
+$(document).ready(function() {
+    var conflict = document.getElementById('conflict-alert');
+    if (conflict) {
+        conflict.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    var errAlert = document.getElementById('error-alert');
+    if (errAlert) {
+        errAlert.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+});
+
 // Initialize Select2 on ALL equity price form dropdowns
 $(document).ready(function() {
     // List of ALL dropdown IDs in the equity price form
