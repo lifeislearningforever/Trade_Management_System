@@ -730,6 +730,16 @@ def trade_create(request, trade_type=None):
                 'charges_auto_calculated': request.POST.get('charges_auto_calculated', 'false') == 'true',
             }
 
+            # --- UOB* + SGX price rounding rule (server-side guard) ---
+            # SGX trades via any UOB broker must have price rounded to 2dp.
+            _broker   = str(trade_data.get('brokers', '') or '').upper()
+            _exchange = str(trade_data.get('charge_exchange', '') or '').upper()
+            if _broker.startswith('UOB') and _exchange == 'SGX':
+                try:
+                    trade_data['price'] = str(round(Decimal(str(trade_data['price'])), 2))
+                except Exception:
+                    pass
+
             # --- Double-submit guard (in-memory, zero DB cost) ---
             # Build a fingerprint from the fields that uniquely identify a trade intent.
             # If the same user submits the same trade within 10s, reject as duplicate.
