@@ -1404,10 +1404,8 @@ function calculateBrokerCharges() {
             if (noBrokerMsg) noBrokerMsg.style.display = 'none';
             if (chargesContainer) chargesContainer.style.display = 'block';
 
-            // Determine rounding precision for display and fields
-            var _dispBroker   = (document.getElementById('brokers')        || {}).value || '';
-            var _dispExchange = (document.getElementById('charge_exchange') || {}).value || '';
-            var _dispIsUobSgx = _dispBroker.toUpperCase().indexOf('UOB KAY HIAN') !== -1 && _dispExchange.toUpperCase() === 'SGX';
+            // Rounding precision: use broker/exchange already captured for the API call
+            var _dispIsUobSgx = broker.toUpperCase().indexOf('UOB KAY HIAN') !== -1 && exchange.toUpperCase() === 'SGX';
             var _dispDp = _dispIsUobSgx ? 2 : 6;
 
             // Clear and populate charges table
