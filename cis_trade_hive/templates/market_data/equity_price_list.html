@@ -130,8 +130,8 @@
                                 <th style="min-width: 150px;">Closing Price</th>
                                 <th style="min-width: 180px;">Timestamp</th>
                                 <th style="min-width: 120px;">Source</th>
-                                <th style="min-width: 120px;">Created By</th>
-                                <th style="min-width: 140px;">Created At</th>
+                                <th style="min-width: 120px;">Last Updated By</th>
+                                <th style="min-width: 140px;">Last Updated At</th>
                                 <th style="min-width: 160px; position: sticky; right: 0; background-color: #f8f9fa; z-index: 5;">Actions</th>
                             </tr>
                         </thead>
@@ -158,8 +158,18 @@
                                         <span class="badge badge-secondary">{{ price.src_system|upper|default:"GMP" }}</span>
                                     {% endif %}
                                 </td>
-                                <td>{{ price.created_by|default:"-" }}</td>
-                                <td style="font-size: 0.85rem;">{{ price.created_at_display|default:"-" }}</td>
+                                <td>
+                                    {{ price.updated_by|default:price.created_by|default:"-" }}
+                                    {% if price.updated_by and price.created_by and price.updated_by != price.created_by %}
+                                    <br><small class="text-muted">Created: {{ price.created_by }}</small>
+                                    {% endif %}
+                                </td>
+                                <td style="font-size: 0.85rem;">
+                                    {{ price.updated_at_display|default:price.created_at_display|default:"-" }}
+                                    {% if price.updated_at_display and price.created_at_display and price.updated_at_display != price.created_at_display %}
+                                    <br><small class="text-muted">Created: {{ price.created_at_display }}</small>
+                                    {% endif %}
+                                </td>
                                 <td style="position: sticky; right: 0; background-color: {% if not price.is_active %}#f8f9fa{% else %}white{% endif %}; z-index: 4;">
                                     <div class="btn-group btn-group-sm" role="group">
                                         <a href="{% url 'market_data:equity_price_detail' price.currency_code price.price_date %}?security_label={{ price.security_label|urlencode:'' }}"

@@ -399,6 +399,9 @@ class EquityPriceHiveRepository:
             merged_data['security_label'] = security_label
             merged_data['updated_by'] = username
             merged_data['updated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            # Refresh price_timestamp to now so the on-screen "Timestamp" column
+            # reflects the actual time of this edit (PORTIARP-7489)
+            merged_data['price_timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             # Use upsert; skip its own audit — update_equity_price's finally block handles it
             success = EquityPriceHiveRepository.upsert_equity_price(merged_data, username, is_update=True, _skip_audit=True)
