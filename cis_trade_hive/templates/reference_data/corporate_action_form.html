@@ -304,7 +304,7 @@
         <ul class="mb-0 mt-2">
             <li>CA Number is auto-generated when you create a new corporate action</li>
             <li>Ex Date, Record Date and Payment Date are required; Announce Date and Effective Date are optional</li>
-            <li><strong>Subscription Period</strong> is only required for: Bonus Issue, Rights Entitlement, Warrant Entitlement</li>
+            <li><strong>Subscription Period</strong> is only required for: Rights Entitlement, Warrant Entitlement</li>
             <li>New corporate actions are created with <strong>INITIAL</strong> status</li>
             <li>A different user must validate the record (Four-Eyes Principle)</li>
             <li>Currency is auto-populated based on the selected security</li>
@@ -323,7 +323,7 @@
 
 <script>
 // CA types that require subscription period
-var SUBSCRIPTION_CA_TYPES = ['BONUS_ISSUE', 'RIGHTS_ENTITLEMENT', 'WARRANT_ENTITLEMENT'];
+var SUBSCRIPTION_CA_TYPES = ['RIGHTS_ENTITLEMENT', 'WARRANT_ENTITLEMENT'];
 
 // Function to toggle subscription period visibility and required status
 function toggleSubscriptionPeriod(caType) {
