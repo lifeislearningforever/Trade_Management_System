@@ -686,6 +686,7 @@ class SecurityHiveRepository:
         """
         try:
             import random
+            security_id = int(security_id)
             timestamp_ms = int(datetime.now().timestamp() * 1000)
             history_id = (security_id % 10**6) * 10**10 + timestamp_ms * 10**3 + random.randint(0, 999)
 
