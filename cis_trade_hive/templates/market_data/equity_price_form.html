@@ -102,7 +102,7 @@
                     <!-- Main Closing Price -->
                     <div class="col-md-4 mb-3">
                         <label for="main_closing_price" class="form-label">Closing Price <span class="text-danger">*</span></label>
-                        <input type="number" step="0.0001" class="form-control" id="main_closing_price" name="main_closing_price"
+                        <input type="number" step="any" min="0" class="form-control" id="main_closing_price" name="main_closing_price"
                                value="{% if equity_price %}{{ equity_price.main_closing_price }}{% elif form_data %}{{ form_data.main_closing_price }}{% endif %}"
                                placeholder="0.0000" required>
                     </div>
