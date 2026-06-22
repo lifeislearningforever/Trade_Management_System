@@ -50,6 +50,7 @@
                 {% csrf_token %}
                 {% if is_edit %}
                 <input type="hidden" name="security_label" value="{{ equity_price.security_label }}">
+                <input type="hidden" name="price_timestamp_token" value="{{ equity_price.price_timestamp }}">
                 {% endif %}
 
                 <div class="row">
