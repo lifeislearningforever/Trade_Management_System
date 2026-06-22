@@ -294,9 +294,9 @@
     document.getElementById('equityPriceForm').addEventListener('submit', function(e) {
         const closingPrice = document.getElementById('main_closing_price').value;
 
-        if (parseFloat(closingPrice) <= 0) {
+        if (closingPrice !== '' && parseFloat(closingPrice) < 0) {
             e.preventDefault();
-            alert('Closing price must be greater than zero.');
+            alert('Closing price cannot be negative.');
             return false;
         }
     });
