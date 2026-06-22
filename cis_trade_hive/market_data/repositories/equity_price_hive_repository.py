@@ -511,6 +511,7 @@ class EquityPriceHiveRepository:
         """
         try:
             escaped_security = security_label.replace("'", "\\'")
+            from_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
 
             query = f"""
             SELECT
@@ -526,11 +527,12 @@ class EquityPriceHiveRepository:
             FROM {EquityPriceHiveRepository.TABLE_NAME}
             WHERE security_label = '{escaped_security}'
               AND (is_active = true OR is_active IS NULL)
-            ORDER BY price_date DESC
-            LIMIT {days}
+              AND price_date >= '{from_date}'
+            ORDER BY price_date ASC
+            LIMIT 365
             """
 
-            logger.info(f"Retrieving price history for {security_label} ({days} days)")
+            logger.info(f"Retrieving price history for {security_label} ({days} days from {from_date})")
             results = impala_manager.execute_query(query, database=EquityPriceHiveRepository.DATABASE)
 
             # Add formatted timestamps

@@ -482,8 +482,8 @@ class EquityPriceService:
         if not price_values:
             return {'error': 'No price data available'}
 
-        first_price = price_values[-1]  # Oldest (prices sorted DESC)
-        last_price = price_values[0]    # Newest
+        first_price = price_values[0]   # Oldest (prices sorted ASC by price_date)
+        last_price = price_values[-1]   # Newest
         change = last_price - first_price
         change_pct = (change / first_price * 100) if first_price > 0 else 0
 
