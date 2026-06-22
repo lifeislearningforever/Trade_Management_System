@@ -1249,61 +1249,38 @@ console.log('Broker element found:', !!brokersEl);
 const chargeExchangeEl = document.getElementById('charge_exchange');
 if (chargeExchangeEl) {
     chargeExchangeEl.addEventListener('change', function() {
-        applyPriceRoundingRule();
+        applyChargeRoundingRule();
         calculateBrokerCharges();
     });
 }
 
-// UOB* + SGX price rounding rule
-// When broker starts with "UOB" and exchange is "SGX", price must be rounded to 2dp.
-function applyPriceRoundingRule() {
+// UOB KAY HIAN* + SGX broker charge rounding rule
+// When broker contains "UOB KAY HIAN" and exchange is "SGX", broker charges are rounded to 2dp.
+// Price itself is NOT rounded — it can have up to 6dp regardless of broker/exchange.
+function applyChargeRoundingRule() {
     var broker   = (document.getElementById('brokers')        || {}).value || '';
     var exchange = (document.getElementById('charge_exchange') || {}).value || '';
-    var priceEl  = document.getElementById('price');
-    var hintEl   = document.getElementById('price_hint');
-    if (!priceEl) return;
 
-    var isUobSgx = broker.toUpperCase().startsWith('UOB') && exchange.toUpperCase() === 'SGX';
+    var isUobSgx = broker.toUpperCase().indexOf('UOB KAY HIAN') !== -1 && exchange.toUpperCase() === 'SGX';
 
-    if (isUobSgx) {
-        // Round current value to 2dp
-        var val = parseFloat(priceEl.value);
-        if (!isNaN(val)) {
-            priceEl.value = val.toFixed(2);
+    var chargeFields = ['commission', 'calculated_commission', 'other_charges', 'total_calculated_charges'];
+    chargeFields.forEach(function(fieldId) {
+        var el = document.getElementById(fieldId);
+        if (!el) return;
+        if (isUobSgx) {
+            var val = parseFloat(el.value);
+            if (!isNaN(val) && val !== 0) el.value = val.toFixed(2);
+            el.step = '0.01';
+        } else {
+            el.step = '0.000001';
         }
-        priceEl.step = '0.01';
-        if (hintEl) {
-            hintEl.textContent = 'SGX (UOB*): price rounded to 2 decimal places';
-            hintEl.classList.remove('text-muted');
-            hintEl.classList.add('text-warning', 'fw-semibold');
-        }
-    } else {
-        priceEl.step = 'any';
-        if (hintEl) {
-            hintEl.textContent = 'Up to 6 decimal places';
-            hintEl.classList.remove('text-warning', 'fw-semibold');
-            hintEl.classList.add('text-muted');
-        }
-    }
-}
-
-// Apply rounding when broker changes
-if (brokersEl) {
-    brokersEl.addEventListener('change', function() {
-        applyPriceRoundingRule();
     });
 }
 
-// Apply rounding when price loses focus (user finished typing)
-var priceInputEl = document.getElementById('price');
-if (priceInputEl) {
-    priceInputEl.addEventListener('blur', function() {
-        var broker   = (document.getElementById('brokers')        || {}).value || '';
-        var exchange = (document.getElementById('charge_exchange') || {}).value || '';
-        if (broker.toUpperCase().startsWith('UOB') && exchange.toUpperCase() === 'SGX') {
-            var val = parseFloat(this.value);
-            if (!isNaN(val)) this.value = val.toFixed(2);
-        }
+// Apply charge rounding when broker or exchange changes
+if (brokersEl) {
+    brokersEl.addEventListener('change', function() {
+        applyChargeRoundingRule();
     });
 }
 

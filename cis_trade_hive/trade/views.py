@@ -730,15 +730,18 @@ def trade_create(request, trade_type=None):
                 'charges_auto_calculated': request.POST.get('charges_auto_calculated', 'false') == 'true',
             }
 
-            # --- UOB KAY HIAN* + SGX price rounding rule (server-side guard) ---
-            # SGX trades via UOB Kay Hian (any suffix) must have price rounded to 2dp.
+            # --- UOB KAY HIAN* + SGX broker charge rounding rule (server-side guard) ---
+            # SGX trades via UOB Kay Hian (any suffix): broker charges rounded to 2dp.
             _broker   = str(trade_data.get('brokers', '') or '').upper()
             _exchange = str(trade_data.get('charge_exchange', '') or '').upper()
             if 'UOB KAY HIAN' in _broker and _exchange == 'SGX':
-                try:
-                    trade_data['price'] = str(round(Decimal(str(trade_data['price'])), 2))
-                except Exception:
-                    pass
+                for _charge_field in ('commission', 'calculated_commission', 'other_charges', 'total_calculated_charges'):
+                    try:
+                        _val = trade_data.get(_charge_field)
+                        if _val not in (None, '', 0):
+                            trade_data[_charge_field] = str(round(Decimal(str(_val)), 2))
+                    except Exception:
+                        pass
 
             # --- Double-submit guard (in-memory, zero DB cost) ---
             # Build a fingerprint from the fields that uniquely identify a trade intent.
@@ -927,6 +930,18 @@ def trade_edit(request, trade_id):
                 'total_calculated_charges': request.POST.get('total_calculated_charges', 0),
                 'charges_auto_calculated': request.POST.get('charges_auto_calculated', 'false') == 'true',
             }
+
+            # --- UOB KAY HIAN* + SGX broker charge rounding rule (server-side guard) ---
+            _broker   = str(updated_data.get('brokers', '') or '').upper()
+            _exchange = str(updated_data.get('charge_exchange', '') or '').upper()
+            if 'UOB KAY HIAN' in _broker and _exchange == 'SGX':
+                for _charge_field in ('commission', 'calculated_commission', 'other_charges', 'total_calculated_charges'):
+                    try:
+                        _val = updated_data.get(_charge_field)
+                        if _val not in (None, '', 0):
+                            updated_data[_charge_field] = str(round(Decimal(str(_val)), 2))
+                    except Exception:
+                        pass
 
             # Keep portfolio and security from original (can't change)
             updated_data['portfolio_short_name'] = trade_data.get('portfolio_short_name', '')
