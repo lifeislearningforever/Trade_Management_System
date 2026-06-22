@@ -1404,6 +1404,12 @@ function calculateBrokerCharges() {
             if (noBrokerMsg) noBrokerMsg.style.display = 'none';
             if (chargesContainer) chargesContainer.style.display = 'block';
 
+            // Determine rounding precision for display and fields
+            var _dispBroker   = (document.getElementById('brokers')        || {}).value || '';
+            var _dispExchange = (document.getElementById('charge_exchange') || {}).value || '';
+            var _dispIsUobSgx = _dispBroker.toUpperCase().indexOf('UOB KAY HIAN') !== -1 && _dispExchange.toUpperCase() === 'SGX';
+            var _dispDp = _dispIsUobSgx ? 2 : 6;
+
             // Clear and populate charges table
             if (chargesTbody) chargesTbody.innerHTML = '';
             let calculatedCommission = 0;  // Brokerage Fee
@@ -1431,7 +1437,7 @@ function calculateBrokerCharges() {
                     <td>${charge.country_of_exchange || '-'}</td>
                     <td>${charge.fee_rule}</td>
                     <td>${feeDisplay}</td>
-                    <td class="text-end fw-bold">${charge.calculated_fee.toFixed(6)}</td>
+                    <td class="text-end fw-bold">${charge.calculated_fee.toFixed(_dispDp)}</td>
                 `;
                 if (chargesTbody) chargesTbody.appendChild(row);
 
@@ -1451,24 +1457,14 @@ function calculateBrokerCharges() {
                 }
             });
 
-            console.log('=== UPDATING CHARGE FIELDS ===');
-            console.log('  calculatedCommission:', calculatedCommission);
-            console.log('  calculatedClearingFee:', calculatedClearingFee);
-            console.log('  calculatedTradingFee:', calculatedTradingFee);
-            console.log('  calculatedGst:', calculatedGst);
-            console.log('  calculatedOtherFees:', calculatedOtherFees);
-            console.log('  total_charges:', data.total_charges);
-
-            // Update hidden fields (matches cis_trade columns)
-            document.getElementById('calculated_commission').value = calculatedCommission.toFixed(6);
-            document.getElementById('calculated_clearing_fee').value = calculatedClearingFee.toFixed(6);
-            document.getElementById('calculated_trading_fee').value = calculatedTradingFee.toFixed(6);
-            document.getElementById('calculated_gst').value = calculatedGst.toFixed(6);
-            document.getElementById('calculated_other_fees').value = calculatedOtherFees.toFixed(6);
-            document.getElementById('total_calculated_charges').value = data.total_charges.toFixed(6);
+            // Update hidden fields (matches cis_trade columns) — use same _dispDp from above
+            document.getElementById('calculated_commission').value = calculatedCommission.toFixed(_dispDp);
+            document.getElementById('calculated_clearing_fee').value = calculatedClearingFee.toFixed(_dispDp);
+            document.getElementById('calculated_trading_fee').value = calculatedTradingFee.toFixed(_dispDp);
+            document.getElementById('calculated_gst').value = calculatedGst.toFixed(_dispDp);
+            document.getElementById('calculated_other_fees').value = calculatedOtherFees.toFixed(_dispDp);
+            document.getElementById('total_calculated_charges').value = data.total_charges.toFixed(_dispDp);
             document.getElementById('charges_auto_calculated').value = 'true';
-
-            console.log('Hidden fields updated successfully');
 
             // Set first charge details to hidden fields
             if (charges.length > 0) {
@@ -1480,18 +1476,15 @@ function calculateBrokerCharges() {
                 document.getElementById('charge_fee_value').value = firstCharge.fee_value;
             }
 
-            // Update broker charge info
-            brokerChargeInfo.textContent = `${charges.length} charge(s) - Total: ${data.total_charges.toFixed(6)}`;
+            // Update broker charge info display
+            brokerChargeInfo.textContent = `${charges.length} charge(s) - Total: ${data.total_charges.toFixed(_dispDp)}`;
             brokerChargeInfo.className = 'text-success small';
 
             // Auto-fill commission field with total calculated charges
             const commissionField = document.getElementById('commission');
             if (commissionField) {
-                commissionField.value = data.total_charges.toFixed(6);
+                commissionField.value = data.total_charges.toFixed(_dispDp);
             }
-
-            // Apply UOB Kay Hian + SGX charge rounding after API population
-            applyChargeRoundingRule();
 
             // Recalculate total
             calculateTotal();
