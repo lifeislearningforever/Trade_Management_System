@@ -369,6 +369,7 @@ def cash_flow_create(request):
                 'foreign_ccy_amt': request.POST.get('foreign_ccy_amount', '').strip() or None,
                 'tax_deducted_fc': request.POST.get('withholding_tax_fc', '').strip() or None,  # item 9
                 'tax_deducted_lc': request.POST.get('withholding_tax_lc', '').strip() or None,  # item 9
+                'remarks': request.POST.get('remarks', '').strip() or None,
             }
 
             # Convert numeric fields
@@ -449,6 +450,7 @@ def cash_flow_edit(request, cash_flow_id):
                 'cash_flow_status': request.POST.get('cash_flow_status', '').strip(),
                 'tax_deducted_fc': request.POST.get('withholding_tax_fc', '').strip() or None,  # item 9
                 'tax_deducted_lc': request.POST.get('withholding_tax_lc', '').strip() or None,  # item 9
+                'remarks': request.POST.get('remarks', '').strip() or None,
             }
 
             # Convert numeric fields

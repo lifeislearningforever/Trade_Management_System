@@ -297,6 +297,8 @@ class CashFlowRepository:
                 # CA reference fields
                 'ca_id': int,
                 'ca_number': str,
+                # Optional notes
+                'remarks': str,
             }
 
             for field, field_type in field_mapping.items():
@@ -419,6 +421,7 @@ class CashFlowRepository:
                 'payment_date', 'trade_date', 'value_date', 'dividend_date',
                 'ex_date', 'record_date', 'status',
                 'tax_deducted_fc', 'tax_deducted_lc',
+                'remarks',
             ]
 
             decimal_fields = ['local_ccy_amt', 'foreign_ccy_amt', 'flow_amount_local', 'dividend_price',
