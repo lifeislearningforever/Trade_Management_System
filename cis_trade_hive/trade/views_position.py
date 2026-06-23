@@ -121,6 +121,14 @@ def _export_csv(positions):
         f'attachment; filename="positions_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv"'
     )
 
+    def fmt_num(val, dp=2):
+        if val is None or val == '':
+            return ''
+        try:
+            return f'{float(val):,.{dp}f}'
+        except (ValueError, TypeError):
+            return val
+
     writer = csv.writer(response)
     writer.writerow([
         'Portfolio', 'Security', 'ISIN', 'Position Basis', 'Position Date',
@@ -147,27 +155,27 @@ def _export_csv(positions):
             p.get('position_date'),
             p.get('src_system'),
             p.get('position_type'),
-            p.get('quantity'),
-            p.get('average_cost_fc'),
-            p.get('average_cost_lc'),
-            p.get('cost_fc'),
-            p.get('cost_lc'),
-            p.get('market_value_fc'),
-            p.get('market_value_lc'),
-            p.get('net_book_value_fc'),
-            p.get('net_book_value_lc'),
-            p.get('unrealized_pnl_fc'),
-            p.get('unrealized_pnl_lc'),
-            p.get('realized_pnl_fc'),
-            p.get('realized_pnl_lc'),
-            p.get('provision_fc'),
-            p.get('provision_lc'),
-            p.get('dividend_fc'),
-            p.get('dividend_lc'),
-            p.get('uncall_fc'),
-            p.get('uncall_lc'),
-            p.get('pipeline_fc'),
-            p.get('pipeline_lc'),
+            fmt_num(p.get('quantity'), dp=4),
+            fmt_num(p.get('average_cost_fc'), dp=6),
+            fmt_num(p.get('average_cost_lc'), dp=6),
+            fmt_num(p.get('cost_fc')),
+            fmt_num(p.get('cost_lc')),
+            fmt_num(p.get('market_value_fc')),
+            fmt_num(p.get('market_value_lc')),
+            fmt_num(p.get('net_book_value_fc')),
+            fmt_num(p.get('net_book_value_lc')),
+            fmt_num(p.get('unrealized_pnl_fc')),
+            fmt_num(p.get('unrealized_pnl_lc')),
+            fmt_num(p.get('realized_pnl_fc')),
+            fmt_num(p.get('realized_pnl_lc')),
+            fmt_num(p.get('provision_fc')),
+            fmt_num(p.get('provision_lc')),
+            fmt_num(p.get('dividend_fc')),
+            fmt_num(p.get('dividend_lc')),
+            fmt_num(p.get('uncall_fc')),
+            fmt_num(p.get('uncall_lc')),
+            fmt_num(p.get('pipeline_fc')),
+            fmt_num(p.get('pipeline_lc')),
             p.get('revaluation_status', ''),
             p.get('processing_date'),
         ])
