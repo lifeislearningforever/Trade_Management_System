@@ -32,6 +32,9 @@ urlpatterns = [
     path('<int:trade_id>/settle/', views.trade_settle, name='settle'),
     path('<int:trade_id>/cancel/', views.trade_cancel, name='cancel'),
     path('<int:trade_id>/reactivate/', views.trade_reactivate, name='reactivate'),
+    # PORTIARP-7610: cancellation approval flow
+    path('<int:trade_id>/approve-cancellation/', views.trade_approve_cancellation, name='approve_cancellation'),
+    path('<int:trade_id>/reject-cancellation/', views.trade_reject_cancellation, name='reject_cancellation'),
 
     # Approval Queues
     path('pending-validation/', views.pending_validation, name='pending_validation'),

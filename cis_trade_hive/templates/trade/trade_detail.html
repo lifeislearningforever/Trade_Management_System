@@ -32,6 +32,8 @@
                 <span class="badge badge-success fs-6">Settled</span>
             {% elif trade.status == 'CANCELLED' %}
                 <span class="badge badge-dark fs-6">Cancelled</span>
+            {% elif trade.status == 'PENDING_CANCELLATION' %}
+                <span class="badge badge-danger fs-6">Pending Cancellation</span>
             {% endif %}
         </div>
     </div>
@@ -76,6 +78,15 @@
         {% if ta.can_cancel %}
         <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#cancelModal">
             <i class="bi bi-trash"></i> Cancel
+        </button>
+        {% endif %}
+
+        {% if ta.can_approve_cancellation %}
+        <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#approveCancellationModal">
+            <i class="bi bi-check-circle"></i> Approve Cancellation
+        </button>
+        <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#rejectCancellationModal">
+            <i class="bi bi-x-circle"></i> Reject Cancellation
         </button>
         {% endif %}
 
@@ -652,7 +663,11 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
+                    {% if trade.status == 'SETTLED' or trade.status == 'VALIDATED' %}
+                    <p class="text-warning"><i class="bi bi-exclamation-triangle-fill"></i> This trade has a settled position. Cancellation will be submitted for checker approval before the position is reversed.</p>
+                    {% else %}
                     <p class="text-danger">Are you sure you want to cancel this trade?</p>
+                    {% endif %}
                     <div class="mb-3">
                         <label class="form-label">Cancellation Reason <span class="text-danger">*</span></label>
                         <textarea class="form-control" name="reason" rows="3" placeholder="Enter cancellation reason..." required></textarea>
@@ -661,6 +676,63 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                     <button type="submit" class="btn btn-danger">Cancel Trade</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- PORTIARP-7610: Approve Cancellation Modal -->
+<div class="modal fade" id="approveCancellationModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="{% url 'trade:approve_cancellation' trade.trade_id %}">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-check-circle text-success"></i> Approve Cancellation</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Approving will permanently cancel this trade and reverse its AVP position.</p>
+                    {% if trade.cancel_reason %}
+                    <div class="alert alert-warning py-2">
+                        <strong>Cancellation reason:</strong> {{ trade.cancel_reason }}
+                    </div>
+                    {% endif %}
+                    <div class="mb-3">
+                        <label class="form-label">Comments (optional)</label>
+                        <textarea class="form-control" name="comments" rows="2" placeholder="Approval comments..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-success">Approve Cancellation</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- PORTIARP-7610: Reject Cancellation Modal -->
+<div class="modal fade" id="rejectCancellationModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="{% url 'trade:reject_cancellation' trade.trade_id %}">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-x-circle text-danger"></i> Reject Cancellation</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Rejecting will revert the trade to its previous status. The position will be unchanged.</p>
+                    <div class="mb-3">
+                        <label class="form-label">Comments (optional)</label>
+                        <textarea class="form-control" name="comments" rows="2" placeholder="Rejection comments..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-danger">Reject Cancellation</button>
                 </div>
             </form>
         </div>

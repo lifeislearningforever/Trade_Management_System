@@ -281,6 +281,8 @@
                                         <span class="status-pill status-cancelled"><i class="bi bi-x-circle"></i> Cancelled</span>
                                     {% elif trade.status == 'REJECTED' %}
                                         <span class="status-pill status-rejected"><i class="bi bi-x-octagon"></i> Rejected</span>
+                                    {% elif trade.status == 'PENDING_CANCELLATION' %}
+                                        <span class="status-pill status-pending"><i class="bi bi-hourglass-split"></i> Pending Cancellation</span>
                                     {% else %}
                                         <span class="status-pill status-initial">{{ trade.status|default:"-" }}</span>
                                     {% endif %}
@@ -686,7 +688,7 @@ document.getElementById('securityModalSearch').addEventListener('input', functio
 function getStatusBadgeClass(status) {
     const m = { INITIAL:'badge-secondary', MODIFIED:'badge-info', PENDING_VALIDATION:'badge-warning',
                 VALIDATED:'badge-primary', SETTLED:'badge-success', ACTIVE:'badge-success',
-                APPROVED:'badge-success', CANCELLED:'badge-dark' };
+                APPROVED:'badge-success', CANCELLED:'badge-dark', PENDING_CANCELLATION:'badge-danger' };
     return m[status] || 'badge-secondary';
 }
 function removePortfolioFilter(name) {

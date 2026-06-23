@@ -58,10 +58,12 @@ class TradeKuduRepository:
     STATUS_VALIDATED = 'VALIDATED'
     STATUS_CANCELLED = 'CANCELLED'
     STATUS_SETTLED = 'SETTLED'
+    # PORTIARP-7610: cancellation of settled trades requires checker approval
+    STATUS_PENDING_CANCELLATION = 'PENDING_CANCELLATION'
 
     # Status groups
     MAKER_EDITABLE_STATUSES = [STATUS_INITIAL, STATUS_MODIFIED, STATUS_CANCELLED]
-    CHECKER_ACTIONABLE_STATUSES = [STATUS_PENDING_VALIDATION, STATUS_VALIDATED]
+    CHECKER_ACTIONABLE_STATUSES = [STATUS_PENDING_VALIDATION, STATUS_VALIDATED, STATUS_PENDING_CANCELLATION]
 
     @staticmethod
     def escape_value(val: Any) -> str:
@@ -1469,6 +1471,148 @@ class TradeKuduRepository:
             logger.error(f"Error cancelling trade: {str(e)}")
             raise
 
+    def submit_for_cancellation(self, trade_id: int, submitted_by: str, reason: str = '') -> bool:
+        """PORTIARP-7610: Submit a settled/validated trade for cancellation approval.
+        Sets status to PENDING_CANCELLATION; position is NOT reversed yet."""
+        try:
+            current_trade = self.get_trade_by_id(trade_id)
+            if not current_trade:
+                raise ValueError(f"Trade {trade_id} not found")
+
+            current_status = current_trade.get('status', '')
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            query = f"""
+            UPDATE {self.DATABASE}.{self.TABLE_NAME}
+            SET status = '{self.STATUS_PENDING_CANCELLATION}',
+                cancel_reason = {self.escape_value(reason)},
+                cancelled_by = {self.escape_value(submitted_by)},
+                updated_by = {self.escape_value(submitted_by)},
+                updated_at = '{timestamp}'
+            WHERE trade_id = {trade_id}
+            """
+
+            success = impala_manager.execute_write(query, database=self.DATABASE)
+
+            if success:
+                self.insert_trade_history(
+                    trade_id=trade_id,
+                    deal_number=current_trade.get('deal_number', ''),
+                    action='CANCEL_REQUEST',
+                    old_status=current_status,
+                    new_status=self.STATUS_PENDING_CANCELLATION,
+                    changes={},
+                    comments=f'Cancellation requested. Reason: {reason}',
+                    performed_by=submitted_by,
+                    async_write=True
+                )
+                logger.info(f"Trade {trade_id} submitted for cancellation approval")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Error submitting trade for cancellation: {str(e)}")
+            raise
+
+    def approve_cancellation(self, trade_id: int, approved_by: str, comments: str = '') -> bool:
+        """PORTIARP-7610: Checker approves cancellation — sets CANCELLED, then caller reverses position."""
+        try:
+            current_trade = self.get_trade_by_id(trade_id)
+            if not current_trade:
+                raise ValueError(f"Trade {trade_id} not found")
+
+            if current_trade.get('status') != self.STATUS_PENDING_CANCELLATION:
+                raise ValueError(f"Trade {trade_id} is not pending cancellation")
+
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            query = f"""
+            UPDATE {self.DATABASE}.{self.TABLE_NAME}
+            SET status = '{self.STATUS_CANCELLED}',
+                is_active = false,
+                cancelled_at = '{timestamp}',
+                updated_by = {self.escape_value(approved_by)},
+                updated_at = '{timestamp}'
+            WHERE trade_id = {trade_id}
+            """
+
+            success = impala_manager.execute_write(query, database=self.DATABASE)
+
+            if success:
+                self.insert_trade_history(
+                    trade_id=trade_id,
+                    deal_number=current_trade.get('deal_number', ''),
+                    action='CANCEL_APPROVE',
+                    old_status=self.STATUS_PENDING_CANCELLATION,
+                    new_status=self.STATUS_CANCELLED,
+                    changes={},
+                    comments=f'Cancellation approved. {comments}' if comments else 'Cancellation approved.',
+                    performed_by=approved_by,
+                    async_write=True
+                )
+                logger.info(f"Trade {trade_id} cancellation approved by {approved_by}")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Error approving trade cancellation: {str(e)}")
+            raise
+
+    def reject_cancellation(self, trade_id: int, rejected_by: str, comments: str = '') -> str:
+        """PORTIARP-7610: Checker rejects cancellation — reverts to previous status (SETTLED or MODIFIED).
+        Returns the status the trade was reverted to."""
+        try:
+            current_trade = self.get_trade_by_id(trade_id)
+            if not current_trade:
+                raise ValueError(f"Trade {trade_id} not found")
+
+            if current_trade.get('status') != self.STATUS_PENDING_CANCELLATION:
+                raise ValueError(f"Trade {trade_id} is not pending cancellation")
+
+            # Revert: if cancel_reason was set from a SETTLED trade, go back to SETTLED;
+            # otherwise MODIFIED. We check trade history for the pre-cancel status.
+            history = self.get_trade_history(trade_id)
+            prev_status = self.STATUS_MODIFIED
+            for h in history:
+                action = str(h.get('action', '')).upper()
+                if action == 'CANCEL_REQUEST':
+                    prev_status = str(h.get('old_status', self.STATUS_MODIFIED))
+                    break
+
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            query = f"""
+            UPDATE {self.DATABASE}.{self.TABLE_NAME}
+            SET status = {self.escape_value(prev_status)},
+                cancel_reason = NULL,
+                cancelled_by = NULL,
+                updated_by = {self.escape_value(rejected_by)},
+                updated_at = '{timestamp}'
+            WHERE trade_id = {trade_id}
+            """
+
+            success = impala_manager.execute_write(query, database=self.DATABASE)
+
+            if success:
+                self.insert_trade_history(
+                    trade_id=trade_id,
+                    deal_number=current_trade.get('deal_number', ''),
+                    action='CANCEL_REJECT',
+                    old_status=self.STATUS_PENDING_CANCELLATION,
+                    new_status=prev_status,
+                    changes={},
+                    comments=f'Cancellation rejected. {comments}' if comments else 'Cancellation rejected.',
+                    performed_by=rejected_by,
+                    async_write=True
+                )
+                logger.info(f"Trade {trade_id} cancellation rejected, reverted to {prev_status}")
+
+            return prev_status
+
+        except Exception as e:
+            logger.error(f"Error rejecting trade cancellation: {str(e)}")
+            raise
+
     def settle_trade(self, trade_id: int, settled_by: str, comments: str = '') -> bool:
         """Settle trade (VALIDATED -> SETTLED). Updates position."""
         try:
@@ -2395,8 +2539,8 @@ class TradeKuduRepository:
             List of trades pending validation
         """
         try:
-            # Only PENDING_VALIDATION — maker must explicitly submit before checker sees it
-            pending_statuses = [self.STATUS_PENDING_VALIDATION]
+            # PORTIARP-7610: also include PENDING_CANCELLATION so checker can approve/reject
+            pending_statuses = [self.STATUS_PENDING_VALIDATION, self.STATUS_PENDING_CANCELLATION]
             status_list = ", ".join([f"'{s}'" for s in pending_statuses])
 
             where_clauses = [
@@ -2425,8 +2569,12 @@ class TradeKuduRepository:
             return []
 
     def get_pending_settlement_trades(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """Get validated trades pending settlement."""
-        return self.get_all_trades(limit=limit, status=self.STATUS_VALIDATED)
+        """Get validated trades pending settlement, plus PENDING_CANCELLATION (PORTIARP-7610)."""
+        validated = self.get_all_trades(limit=limit, status=self.STATUS_VALIDATED)
+        pending_cancel = self.get_all_trades(limit=limit, status=self.STATUS_PENDING_CANCELLATION)
+        combined = validated + pending_cancel
+        combined.sort(key=lambda t: str(t.get('created_at', '')), reverse=True)
+        return combined[:limit]
 
 
 # Singleton instance
