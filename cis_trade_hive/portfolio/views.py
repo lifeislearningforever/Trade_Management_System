@@ -407,12 +407,9 @@ def portfolio_create(request):
                 'cash_balance_list': request.POST.get('cash_balance_list', ''),
             }
 
-            if not data.get('description'):
-                raise ValidationError("Description is required")
+            # PORTIARP-7597: description and manager are optional
             if not data.get('currency'):
                 raise ValidationError("Currency is required")
-            if not data.get('manager'):
-                raise ValidationError("Manager is required")
 
             success = portfolio_hive_repository.insert_portfolio(data, created_by=user_info['username'])
 
