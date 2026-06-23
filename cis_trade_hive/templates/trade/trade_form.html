@@ -364,7 +364,7 @@
                             <div class="col-md-2">
                                 <label class="form-label">Quantity <span class="text-danger">*</span></label>
                                 <input type="number" class="form-control" name="quantity" id="quantity"
-                                       step="0.01" min="0.01" value="{{ trade.quantity|default:'' }}" required>
+                                       step="0.0001" min="0.0001" value="{{ trade.quantity|default:'' }}" required>
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label">Face Value</label>
@@ -1311,6 +1311,9 @@ function enforceMaxDecimals(el, maxDp) {
         }
     });
 }
+
+// Quantity: max 4 decimal places
+enforceMaxDecimals(document.getElementById('quantity'), 4);
 
 // Price: max 6 decimal places
 (function() {
