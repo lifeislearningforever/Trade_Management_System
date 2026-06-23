@@ -376,7 +376,8 @@ class TradeDropdownService:
                 'isin': s.get('isin', ''),
                 'security_type': s.get('security_type', ''),
                 'currency': s.get('currency_code', ''),
-                'price': s.get('current_price', 0)
+                'price': s.get('current_price', 0),
+                'issuer': s.get('issuer', '') or '',
             }
             for s in securities
         ]

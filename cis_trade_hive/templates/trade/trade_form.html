@@ -236,6 +236,7 @@
                                             data-price="{{ s.price|default:0 }}"
                                             data-fullname="{{ s.full_name }}"
                                             data-isin="{{ s.isin }}"
+                                            data-issuer="{{ s.issuer }}"
                                             {% if trade.security_label == s.value %}selected{% endif %}>
                                             {{ s.label }}
                                         </option>
@@ -273,7 +274,8 @@
                                         {% for c in dropdown_options.counterparties %}
                                         <option value="{{ c.value }}"
                                             {% if trade.counterparty == c.value %}selected{% endif %}
-                                            data-country="{{ c.country }}">
+                                            data-country="{{ c.country }}"
+                                            data-shortname="{{ c.value }}">
                                             {{ c.label }}
                                         </option>
                                         {% endfor %}
@@ -1292,49 +1294,52 @@ if (brokersEl) {
     });
 }
 
-// Price: truncate to 6dp on blur and show hint
-(function() {
-    var priceEl = document.getElementById('price');
-    var priceHint = document.getElementById('price_hint');
-    if (!priceEl) return;
-    priceEl.addEventListener('blur', function() {
-        var val = parseFloat(this.value);
-        if (!isNaN(val)) {
-            // Truncate to 6dp — strip trailing zeros but keep up to 6
-            var rounded = parseFloat(val.toFixed(6));
-            this.value = rounded;
+// Enforce max decimal places on a number input — truncates extra digits as user types
+function enforceMaxDecimals(el, maxDp) {
+    if (!el) return;
+    el.addEventListener('input', function() {
+        var val = this.value;
+        var dotPos = val.indexOf('.');
+        if (dotPos !== -1 && val.length - dotPos - 1 > maxDp) {
+            this.value = parseFloat(val).toFixed(maxDp);
         }
     });
-    priceEl.addEventListener('focus', function() {
-        if (priceHint) {
+    el.addEventListener('blur', function() {
+        var val = parseFloat(this.value);
+        if (!isNaN(val)) {
+            this.value = parseFloat(val.toFixed(maxDp));
+        }
+    });
+}
+
+// Price: max 6 decimal places
+(function() {
+    var priceEl  = document.getElementById('price');
+    var priceHint = document.getElementById('price_hint');
+    enforceMaxDecimals(priceEl, 6);
+    if (priceEl && priceHint) {
+        priceEl.addEventListener('focus', function() {
             priceHint.textContent = 'Up to 6 decimal places';
             priceHint.className = 'text-muted';
-        }
-    });
+        });
+    }
 })();
 
-// FX Rate: truncate to 10dp on blur and show hint
+// FX Rate: max 10 decimal places
 (function() {
-    var fxEl = document.getElementById('open_fx_rate');
+    var fxEl   = document.getElementById('open_fx_rate');
     var fxHint = document.getElementById('fx_rate_hint');
-    if (!fxEl) return;
-    fxEl.addEventListener('blur', function() {
-        var val = parseFloat(this.value);
-        if (!isNaN(val)) {
-            var rounded = parseFloat(val.toFixed(10));
-            this.value = rounded;
-        }
-        if (fxHint) {
+    enforceMaxDecimals(fxEl, 10);
+    if (fxEl && fxHint) {
+        fxEl.addEventListener('focus', function() {
             fxHint.textContent = 'Up to 10 decimal places';
             fxHint.className = 'text-muted';
-        }
-    });
-    fxEl.addEventListener('focus', function() {
-        if (fxHint) {
+        });
+        fxEl.addEventListener('blur', function() {
             fxHint.textContent = 'Up to 10 decimal places';
             fxHint.className = 'text-muted';
-        }
-    });
+        });
+    }
 })();
 
 // Recalculate charges when quantity or price changes
@@ -1589,6 +1594,42 @@ document.getElementById('security_label').addEventListener('change', function() 
 
     // Auto-populate currency from selected security's data-currency attribute
     autoPopulateCurrencyFromSecurity();
+
+    // Auto-select counterparty from security issuer
+    (function() {
+        const secEl = document.getElementById('security_label');
+        const cpEl  = document.getElementById('counterparty');
+        const cpStatus = document.getElementById('counterparty_status');
+        if (!secEl || !cpEl) return;
+
+        const selectedOpt = secEl.options[secEl.selectedIndex];
+        const issuer = (selectedOpt && selectedOpt.dataset.issuer) ? selectedOpt.dataset.issuer.trim() : '';
+
+        if (!issuer) return;
+
+        // Find counterparty option whose value (party_short_name) matches issuer
+        var matched = false;
+        for (var i = 0; i < cpEl.options.length; i++) {
+            var opt = cpEl.options[i];
+            if (opt.value.trim().toLowerCase() === issuer.toLowerCase()) {
+                cpEl.value = opt.value;
+                // Refresh Select2 display
+                if (typeof $ !== 'undefined' && $.fn.select2) {
+                    $('#counterparty').val(opt.value).trigger('change.select2');
+                }
+                if (cpStatus) {
+                    cpStatus.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
+                    cpStatus.title = 'Auto-set from security issuer: ' + issuer;
+                }
+                matched = true;
+                break;
+            }
+        }
+        if (!matched && cpStatus) {
+            cpStatus.innerHTML = '<i class="bi bi-question-circle text-muted"></i>';
+            cpStatus.title = 'Issuer "' + issuer + '" not found in counterparty list';
+        }
+    })();
 
     // Fetch price from equity price table via API
     const currencyCode = currencyHidden.value;
