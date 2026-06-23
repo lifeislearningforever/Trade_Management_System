@@ -324,6 +324,15 @@ def trade_list(request):
         response = HttpResponse(content_type='text/csv')
         response['Content-Disposition'] = 'attachment; filename="trades.csv"'
 
+        def fmt_num(val, dp=2):
+            """Format a number with thousand separators for CSV export."""
+            if val is None or val == '':
+                return ''
+            try:
+                return f'{float(val):,.{dp}f}'
+            except (ValueError, TypeError):
+                return val
+
         writer = csv.writer(response)
         writer.writerow([
             # Identity
@@ -399,30 +408,30 @@ def trade_list(request):
                 trade.get('trade_date', ''),
                 trade.get('settle_date', ''),
                 trade.get('org_pur_date', ''),
-                trade.get('quantity', ''),
-                trade.get('face_value', ''),
-                trade.get('lot', ''),
-                trade.get('price', ''),
+                fmt_num(trade.get('quantity'), dp=4),
+                fmt_num(trade.get('face_value')),
+                fmt_num(trade.get('lot'), dp=4),
+                fmt_num(trade.get('price'), dp=6),
                 trade.get('portfolio_currency', ''),
                 # PORTIARP-7384: standardized CCY pair e.g. USDSGD (Security CCY already beside Security Full Name)
                 (
                     (trade.get('currency_code') or '').upper() +
                     (trade.get('portfolio_currency') or '').upper()
                 ) if trade.get('currency_code') and trade.get('portfolio_currency') else '',
-                trade.get('open_fx_rate', ''),
-                trade.get('total_amount', ''),
-                trade.get('total_amount_fc', ''),
-                trade.get('total_amount_lc', ''),
-                trade.get('commission', ''),
-                trade.get('accrued_interest', ''),
-                trade.get('sec_fee', ''),
-                trade.get('other_charges', ''),
-                trade.get('calculated_commission', ''),
-                trade.get('calculated_clearing_fee', ''),
-                trade.get('calculated_trading_fee', ''),
-                trade.get('calculated_gst', ''),
-                trade.get('calculated_other_fees', ''),
-                trade.get('total_calculated_charges', ''),
+                fmt_num(trade.get('open_fx_rate'), dp=6),
+                fmt_num(trade.get('total_amount')),
+                fmt_num(trade.get('total_amount_fc')),
+                fmt_num(trade.get('total_amount_lc')),
+                fmt_num(trade.get('commission')),
+                fmt_num(trade.get('accrued_interest')),
+                fmt_num(trade.get('sec_fee')),
+                fmt_num(trade.get('other_charges')),
+                fmt_num(trade.get('calculated_commission')),
+                fmt_num(trade.get('calculated_clearing_fee')),
+                fmt_num(trade.get('calculated_trading_fee')),
+                fmt_num(trade.get('calculated_gst')),
+                fmt_num(trade.get('calculated_other_fees')),
+                fmt_num(trade.get('total_calculated_charges')),
                 trade.get('counterparty', ''),
                 trade.get('brokers', ''),
                 trade.get('broker_name', ''),
@@ -430,11 +439,11 @@ def trade_list(request):
                 trade.get('open_close_position', ''),
                 trade.get('extension', ''),
                 trade.get('selling_rule', ''),
-                trade.get('cash_balance', ''),
-                trade.get('curr_dealing', ''),
-                trade.get('open_dealing', ''),
-                trade.get('qty_entitled', ''),
-                trade.get('input_tax_oth', ''),
+                fmt_num(trade.get('cash_balance')),
+                fmt_num(trade.get('curr_dealing')),
+                fmt_num(trade.get('open_dealing')),
+                fmt_num(trade.get('qty_entitled'), dp=4),
+                fmt_num(trade.get('input_tax_oth')),
                 trade.get('gl_fund_type', ''),
                 trade.get('gl_cost_centre', ''),
                 trade.get('gl_account_code', ''),

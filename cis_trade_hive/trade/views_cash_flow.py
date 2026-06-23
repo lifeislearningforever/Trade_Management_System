@@ -139,6 +139,15 @@ def cash_flow_list(request):
             response = HttpResponse(content_type='text/csv')
             response['Content-Disposition'] = f'attachment; filename="cash_flows_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv"'
 
+            def fmt_num(val, dp=2):
+                """Format a number with thousand separators for CSV export."""
+                if val is None or val == '':
+                    return ''
+                try:
+                    return f'{float(val):,.{dp}f}'
+                except (ValueError, TypeError):
+                    return val
+
             writer = csv.writer(response)
             writer.writerow([
                 'CF Number', 'Portfolio', 'Security', 'Security Full Name', 'Cash Flow Type', 'Increase/Decrease',
@@ -174,12 +183,12 @@ def cash_flow_list(request):
                     cf.get('ex_date', ''),
                     cf.get('record_date', ''),
                     cf.get('local_ccy', ''),
-                    local_amt,
+                    fmt_num(local_amt),
                     cf.get('foreign_ccy', ''),
-                    foreign_amt,
-                    fx_rate_csv,
-                    cf.get('tax_deducted_fc', ''),
-                    cf.get('tax_deducted_lc', ''),
+                    fmt_num(foreign_amt),
+                    fmt_num(fx_rate_csv, dp=6),
+                    fmt_num(cf.get('tax_deducted_fc')),
+                    fmt_num(cf.get('tax_deducted_lc')),
                     cf.get('cash_flow_status', ''),
                     cf.get('status', ''),
                     cf.get('created_by', ''),
