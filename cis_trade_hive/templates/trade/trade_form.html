@@ -415,7 +415,13 @@
                                 <small class="text-muted">Gross + Fees (Security CCY)</small>
                             </div>
                             <div class="col-md-3">
-                                <label class="form-label">Total Amount LC</label>
+                                <label class="form-label">
+                                    Total Amount LC
+                                    <button type="button" class="btn btn-link btn-sm p-0 ms-1 text-primary"
+                                            onclick="calculateTotal()" title="Recalculate LC using current FX rate">
+                                        <i class="bi bi-arrow-repeat"></i>
+                                    </button>
+                                </label>
                                 <input type="number" class="form-control fw-bold bg-light" name="total_amount_lc" id="total_amount_lc"
                                        step="0.01" value="{% if trade.total_amount_lc %}{{ trade.total_amount_lc }}{% endif %}" readonly>
                                 <small class="text-muted">FC × FX Rate (Portfolio CCY)</small>
@@ -1051,6 +1057,7 @@ document.getElementById('trade_type').addEventListener('change', function() {
     const el = document.getElementById(fieldId);
     if (el) {
         el.addEventListener('input', calculateTotal);
+        el.addEventListener('change', calculateTotal);  // catches paste, spinner, blur
     }
 });
 
@@ -1296,7 +1303,8 @@ if (brokersEl) {
 
 // Calculate broker charges based on broker, quantity, price
 function calculateBrokerCharges() {
-    console.log('=== calculateBrokerCharges() CALLED ===');
+    // Immediately recalculate FC/LC totals using current FX rate before async charge API
+    calculateTotal();
 
     const brokersField = document.getElementById('brokers');
     const quantityField = document.getElementById('quantity');
