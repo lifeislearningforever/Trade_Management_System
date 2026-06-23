@@ -1111,16 +1111,25 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // If editing and portfolio is already set, auto-populate portfolio currency
+    // If editing and portfolio is already set, auto-populate portfolio currency display
+    // but do NOT call fetchFxRate() — the saved trade.open_fx_rate is already correct
     const portfolioEl = document.getElementById('portfolio_short_name');
     if (portfolioEl && portfolioEl.value) {
-        autoPopulateCurrencyFromPortfolio();
+        if (isEditMode) {
+            autoPopulateCurrencyFromPortfolioNoFx();
+        } else {
+            autoPopulateCurrencyFromPortfolio();
+        }
     }
 
-    // If editing and security is already set, auto-populate currency
+    // If editing and security is already set, auto-populate currency display only
     const securityEl = document.getElementById('security_label');
     if (securityEl && securityEl.value) {
-        autoPopulateCurrencyFromSecurity();
+        if (isEditMode) {
+            autoPopulateCurrencyFromSecurityNoFx();
+        } else {
+            autoPopulateCurrencyFromSecurity();
+        }
     }
 
     // Load exchanges dropdown
@@ -1702,6 +1711,34 @@ function autoPopulateCurrencyFromPortfolio() {
 
     // Trigger FX rate lookup after portfolio currency is set
     fetchFxRate();
+}
+
+// Edit-mode variants: set currency display only, preserve saved trade FX rate
+function autoPopulateCurrencyFromSecurityNoFx() {
+    const securityEl = document.getElementById('security_label');
+    const currencyHidden = document.getElementById('currency_code');
+    const currencyDisplay = document.getElementById('currency_code_display');
+    if (!securityEl) return;
+    const selectedOption = securityEl.options[securityEl.selectedIndex];
+    if (selectedOption && selectedOption.dataset.currency) {
+        currencyHidden.value = selectedOption.dataset.currency;
+        currencyDisplay.value = selectedOption.dataset.currency;
+    }
+    // No fetchFxRate() — keep trade.open_fx_rate as stored
+    calculateTotal();
+}
+function autoPopulateCurrencyFromPortfolioNoFx() {
+    const portfolioEl = document.getElementById('portfolio_short_name');
+    const currencyHidden = document.getElementById('portfolio_currency');
+    const currencyDisplay = document.getElementById('portfolio_currency_display');
+    if (!portfolioEl) return;
+    const selectedOption = portfolioEl.options[portfolioEl.selectedIndex];
+    if (selectedOption && selectedOption.dataset.currency) {
+        currencyHidden.value = selectedOption.dataset.currency;
+        currencyDisplay.value = selectedOption.dataset.currency;
+    }
+    // No fetchFxRate() — keep trade.open_fx_rate as stored
+    calculateTotal();
 }
 
 // Fetch FX rate from API based on security currency (FC) and portfolio currency (LC)
