@@ -334,8 +334,8 @@ def trade_list(request):
             'Trade Date', 'Settle Date', 'Org. Purchase Date',
             # Quantities & Prices
             'Quantity', 'Face Value', 'Lot', 'Price',
-            # Currency (PORTIARP-7384: added Security CCY and standardized CCY Exchange Rate)
-            'Currency (FC)', 'Portfolio Currency (LC)', 'CCY Exchange Rate', 'Open FX Rate',
+            # Currency (PORTIARP-7384: Security CCY beside security, exchange rate standardized)
+            'Portfolio Currency (LC)', 'CCY Exchange Rate', 'Open FX Rate',
             # Amounts
             'Total Amount', 'Total Amount (FC)', 'Total Amount (LC)',
             # Charges (manual)
@@ -403,9 +403,8 @@ def trade_list(request):
                 trade.get('face_value', ''),
                 trade.get('lot', ''),
                 trade.get('price', ''),
-                trade.get('currency_code', ''),
                 trade.get('portfolio_currency', ''),
-                # PORTIARP-7384: standardized CCY pair (e.g. USDSGD)
+                # PORTIARP-7384: standardized CCY pair e.g. USDSGD (Security CCY already beside Security Full Name)
                 (
                     (trade.get('currency_code') or '').upper() +
                     (trade.get('portfolio_currency') or '').upper()
