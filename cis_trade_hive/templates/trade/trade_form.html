@@ -288,8 +288,9 @@
                             <div class="col-md-2">
                                 <label class="form-label">FX Rate</label>
                                 <input type="number" class="form-control" name="open_fx_rate" id="open_fx_rate"
-                                       step="any" value="{{ trade.open_fx_rate|default:'' }}" placeholder="Auto-set or override">
-                                <small class="text-muted" id="fx_rate_info">Auto-set from currencies</small>
+                                       step="0.0000000001" value="{{ trade.open_fx_rate|default:'' }}" placeholder="Auto-set or override">
+                                <small class="text-muted" id="fx_rate_hint">Up to 10 decimal places</small>
+                                <small class="text-muted d-block" id="fx_rate_info">Auto-set from currencies</small>
                             </div>
                         </div>
 
@@ -376,7 +377,7 @@
                             <div class="col-md-2">
                                 <label class="form-label">Price <span class="text-danger">*</span></label>
                                 <input type="number" class="form-control" name="price" id="price"
-                                       step="any" min="0.000001" value="{{ trade.price|default:'' }}" required>
+                                       step="0.000001" min="0.000001" value="{{ trade.price|default:'' }}" required>
                                 <small class="text-muted" id="price_hint">Up to 6 decimal places</small>
                             </div>
                             <div class="col-md-2">
@@ -415,16 +416,10 @@
                                 <small class="text-muted">Gross + Fees (Security CCY)</small>
                             </div>
                             <div class="col-md-3">
-                                <label class="form-label">
-                                    Total Amount LC
-                                    <button type="button" class="btn btn-link btn-sm p-0 ms-1 text-primary"
-                                            onclick="calculateTotal()" title="Recalculate LC using current FX rate">
-                                        <i class="bi bi-arrow-repeat"></i>
-                                    </button>
-                                </label>
-                                <input type="number" class="form-control fw-bold bg-light" name="total_amount_lc" id="total_amount_lc"
-                                       step="0.01" value="{% if trade.total_amount_lc %}{{ trade.total_amount_lc }}{% endif %}" readonly>
-                                <small class="text-muted">FC × FX Rate (Portfolio CCY)</small>
+                                <label class="form-label">Total Amount LC</label>
+                                <input type="number" class="form-control fw-bold" name="total_amount_lc" id="total_amount_lc"
+                                       step="0.01" value="{% if trade.total_amount_lc %}{{ trade.total_amount_lc }}{% endif %}">
+                                <small class="text-muted">FC × FX Rate (Portfolio CCY) — editable</small>
                             </div>
                         </div>
                     </div>
@@ -1296,6 +1291,51 @@ if (brokersEl) {
         applyChargeRoundingRule();
     });
 }
+
+// Price: truncate to 6dp on blur and show hint
+(function() {
+    var priceEl = document.getElementById('price');
+    var priceHint = document.getElementById('price_hint');
+    if (!priceEl) return;
+    priceEl.addEventListener('blur', function() {
+        var val = parseFloat(this.value);
+        if (!isNaN(val)) {
+            // Truncate to 6dp — strip trailing zeros but keep up to 6
+            var rounded = parseFloat(val.toFixed(6));
+            this.value = rounded;
+        }
+    });
+    priceEl.addEventListener('focus', function() {
+        if (priceHint) {
+            priceHint.textContent = 'Up to 6 decimal places';
+            priceHint.className = 'text-muted';
+        }
+    });
+})();
+
+// FX Rate: truncate to 10dp on blur and show hint
+(function() {
+    var fxEl = document.getElementById('open_fx_rate');
+    var fxHint = document.getElementById('fx_rate_hint');
+    if (!fxEl) return;
+    fxEl.addEventListener('blur', function() {
+        var val = parseFloat(this.value);
+        if (!isNaN(val)) {
+            var rounded = parseFloat(val.toFixed(10));
+            this.value = rounded;
+        }
+        if (fxHint) {
+            fxHint.textContent = 'Up to 10 decimal places';
+            fxHint.className = 'text-muted';
+        }
+    });
+    fxEl.addEventListener('focus', function() {
+        if (fxHint) {
+            fxHint.textContent = 'Up to 10 decimal places';
+            fxHint.className = 'text-muted';
+        }
+    });
+})();
 
 // Recalculate charges when quantity or price changes
 ['quantity', 'price'].forEach(function(fieldId) {
