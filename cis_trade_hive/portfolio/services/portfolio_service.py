@@ -47,8 +47,8 @@ class PortfolioService:
         Raises:
             ValidationError: If data is invalid
         """
-        # Validate required fields
-        required_fields = ['code', 'name', 'currency', 'manager']
+        # Validate required fields (PORTIARP-7597: description and manager are optional)
+        required_fields = ['code', 'name', 'currency']
         for field in required_fields:
             if field not in data or not data[field]:
                 raise ValidationError(f"{field} is required")

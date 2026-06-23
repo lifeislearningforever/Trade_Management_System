@@ -61,9 +61,10 @@
                         </div>
                     </div>
                     <div class="col-12 mb-4">
-                        <label for="description" class="form-label required">Description <span class="text-danger">*</span></label>
+                        <!-- PORTIARP-7597: description is optional -->
+                        <label for="description" class="form-label">Description</label>
                         <textarea class="form-control" id="description" name="description" rows="4"
-                                  required placeholder="Enter a detailed description of the portfolio">{{ portfolio.description|default:'' }}</textarea>
+                                  placeholder="Enter a detailed description of the portfolio">{{ portfolio.description|default:'' }}</textarea>
                     </div>
                 </div>
 
@@ -131,8 +132,9 @@
                         </h5>
                     </div>
                     <div class="col-md-4 mb-4">
-                        <label for="manager" class="form-label required">Portfolio Manager</label>
-                        <select class="form-select" id="manager" name="manager" required>
+                        <!-- PORTIARP-7597: portfolio manager is optional -->
+                        <label for="manager" class="form-label">Portfolio Manager</label>
+                        <select class="form-select" id="manager" name="manager">
                             <option value="">Select Manager</option>
                             {% for mgr in dropdown_options.managers %}
                                 <option value="{{ mgr }}" {% if portfolio.manager == mgr %}selected{% endif %}>
