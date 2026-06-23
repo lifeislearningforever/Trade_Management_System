@@ -2443,8 +2443,8 @@ class TradeKuduRepository:
 
             if results:
                 for row in results:
-                    status = row.get('status') or 'Unknown'
-                    trade_type = row.get('trade_type') or 'Unknown'
+                    status = (row.get('status') or 'Unknown').upper()
+                    trade_type = (row.get('trade_type') or 'Unknown').upper()
                     count = int(row.get('cnt') or 0)
                     today_cnt = int(row.get('today_cnt') or 0)
                     notional = float(row.get('total_notional') or 0)
@@ -2463,9 +2463,9 @@ class TradeKuduRepository:
                     tb['notional'] += notional
                     stats['type_breakdown'][trade_type] = tb
 
-                    if status == self.STATUS_PENDING_VALIDATION:
+                    if status in (self.STATUS_PENDING_VALIDATION, self.STATUS_PENDING_CANCELLATION):
                         stats['pending_validation'] += count
-                    elif status == self.STATUS_VALIDATED:
+                    if status in (self.STATUS_VALIDATED, self.STATUS_PENDING_CANCELLATION):
                         stats['pending_settlement'] += count
                     elif status == self.STATUS_SETTLED:
                         stats['settled'] += count
