@@ -329,13 +329,13 @@ def trade_list(request):
             # Identity
             'Deal Number', 'Trade Type', 'Trade Status',
             # Portfolio & Security
-            'Portfolio', 'Portfolio Full Name', 'Security', 'Security Full Name', 'Security Type',
+            'Portfolio', 'Portfolio Full Name', 'Security', 'Security Full Name', 'Security CCY', 'Security Type',
             # Dates
             'Trade Date', 'Settle Date', 'Org. Purchase Date',
             # Quantities & Prices
             'Quantity', 'Face Value', 'Lot', 'Price',
-            # Currency
-            'Currency (FC)', 'Portfolio Currency (LC)', 'Open FX Rate',
+            # Currency (PORTIARP-7384: added Security CCY and standardized CCY Exchange Rate)
+            'Currency (FC)', 'Portfolio Currency (LC)', 'CCY Exchange Rate', 'Open FX Rate',
             # Amounts
             'Total Amount', 'Total Amount (FC)', 'Total Amount (LC)',
             # Charges (manual)
@@ -394,6 +394,7 @@ def trade_list(request):
                 _csv_portfolio_full_name(trade),
                 trade.get('security_label', ''),
                 _csv_security_full_name(trade),
+                (trade.get('currency_code') or '').upper(),   # Security CCY
                 trade.get('security_type', ''),
                 trade.get('trade_date', ''),
                 trade.get('settle_date', ''),
@@ -404,6 +405,11 @@ def trade_list(request):
                 trade.get('price', ''),
                 trade.get('currency_code', ''),
                 trade.get('portfolio_currency', ''),
+                # PORTIARP-7384: standardized CCY pair (e.g. USDSGD)
+                (
+                    (trade.get('currency_code') or '').upper() +
+                    (trade.get('portfolio_currency') or '').upper()
+                ) if trade.get('currency_code') and trade.get('portfolio_currency') else '',
                 trade.get('open_fx_rate', ''),
                 trade.get('total_amount', ''),
                 trade.get('total_amount_fc', ''),
