@@ -184,8 +184,8 @@ class TradeKuduRepository:
             else:
                 try:
                     price = float(trade_data.get('price'))
-                    if price <= 0:
-                        errors.append("Price must be greater than zero")
+                    if price < 0:
+                        errors.append("Price must not be negative")
                 except (ValueError, TypeError):
                     errors.append("Price must be a valid number")
 

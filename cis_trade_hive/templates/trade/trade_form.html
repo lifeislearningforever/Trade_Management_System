@@ -379,7 +379,7 @@
                             <div class="col-md-2">
                                 <label class="form-label">Price <span class="text-danger">*</span></label>
                                 <input type="number" class="form-control" name="price" id="price"
-                                       step="0.000001" min="0.000001" value="{{ trade.price|default:'' }}" required>
+                                       step="0.000001" min="0" value="{{ trade.price|default:'' }}" required>
                                 <small class="text-muted" id="price_hint">Up to 6 decimal places</small>
                             </div>
                             <div class="col-md-2">
