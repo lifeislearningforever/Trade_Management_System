@@ -388,7 +388,8 @@ class TradeDropdownService:
         return [
             {
                 'value': c.get('party_short_name', ''),
-                'label': f"{c.get('party_full_name', '')} ({c.get('party_short_name', '')})",
+                'label': c.get('party_short_name', ''),
+                'full_name': c.get('party_full_name', ''),
                 'country': c.get('country', ''),
                 'is_broker': c.get('is_broker', False)
             }

@@ -275,7 +275,7 @@
                                         <option value="{{ c.value }}"
                                             {% if trade.counterparty == c.value %}selected{% endif %}
                                             data-country="{{ c.country }}"
-                                            data-shortname="{{ c.value }}">
+                                            data-fullname="{{ c.full_name }}">
                                             {{ c.label }}
                                         </option>
                                         {% endfor %}
@@ -1829,6 +1829,10 @@ $(document).ready(function() {
     });
     $('#security_label').select2('destroy').select2({
         theme: 'bootstrap-5', placeholder: 'Select Security', allowClear: true, width: '100%',
+        templateResult: twoLineResult, templateSelection: shortNameSelection,
+    });
+    $('#counterparty').select2('destroy').select2({
+        theme: 'bootstrap-5', placeholder: 'Select Counterparty', allowClear: true, width: '100%',
         templateResult: twoLineResult, templateSelection: shortNameSelection,
     });
 
