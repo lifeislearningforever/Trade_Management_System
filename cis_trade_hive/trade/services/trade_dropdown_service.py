@@ -318,11 +318,12 @@ class TradeDropdownService:
     def get_trade_types(self) -> List[Dict[str, Any]]:
         """
         Get trade type options.
-        Per SA feedback (2026-03-04): Only BUY and SELL
+        Per SA feedback (2026-03-04): BUY, SELL, MEMO
         """
         return [
             {'value': 'BUY', 'label': 'Buy'},
             {'value': 'SELL', 'label': 'Sell'},
+            {'value': 'MEMO', 'label': 'Memo'},
         ]
 
     def get_trade_statuses(self) -> List[Dict[str, Any]]:

@@ -531,6 +531,17 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Remarks (visible on main tab) -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="bi bi-chat-left-text"></i> Remarks</h5>
+                    </div>
+                    <div class="card-body">
+                        <textarea class="form-control" name="remarks" id="remarks" rows="2"
+                                  placeholder="Optional notes or remarks for this trade">{{ trade.remarks|default:'' }}</textarea>
+                    </div>
+                </div>
             </div>
 
             <!-- GL & Broker Tab -->
@@ -1047,7 +1058,25 @@ function updateTotalCharges() {
 // Trade type change handler
 document.getElementById('trade_type').addEventListener('change', function() {
     checkPosition();
+    applyMemoTradeRules(this.value);
 });
+
+// MEMO trade type: counterparty is optional; quantity/price not required
+function applyMemoTradeRules(tradeType) {
+    var cpEl  = document.getElementById('counterparty');
+    var qtyEl = document.getElementById('quantity');
+    var priceEl = document.getElementById('price');
+    var isMemo = (tradeType || '').toUpperCase() === 'MEMO';
+    if (cpEl)    { cpEl.required    = !isMemo; }
+    if (qtyEl)   { qtyEl.required   = !isMemo; }
+    if (priceEl) { priceEl.required = !isMemo; }
+}
+
+// Apply on page load (handles edit mode where trade_type is pre-set)
+(function() {
+    var ttEl = document.getElementById('trade_type');
+    if (ttEl) applyMemoTradeRules(ttEl.value);
+})();
 
 // Auto-calculate on input change
 ['quantity', 'price', 'commission', 'sec_fee', 'other_charges'].forEach(function(fieldId) {
