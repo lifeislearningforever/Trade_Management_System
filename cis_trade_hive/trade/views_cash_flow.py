@@ -151,12 +151,17 @@ def cash_flow_list(request):
             for cf in cash_flows:
                 local_amt = cf.get('local_ccy_amt') or 0
                 foreign_amt = cf.get('foreign_ccy_amt') or 0
-                fx_rate = cf.get('fx_rate')
-                if not fx_rate and local_amt and foreign_amt:
+                # FX Rate in FC→LC direction (how many local CCY per 1 foreign CCY,
+                # e.g. USD→SGD: 1.26481). Always derive from amounts when available
+                # so the direction is consistent regardless of how it was stored.
+                fx_rate_csv = ''
+                if local_amt and foreign_amt:
                     try:
-                        fx_rate = round(float(foreign_amt) / float(local_amt), 6)
+                        fx_rate_csv = round(float(local_amt) / float(foreign_amt), 6)
                     except (ZeroDivisionError, TypeError, ValueError):
-                        fx_rate = ''
+                        fx_rate_csv = cf.get('fx_rate', '')
+                else:
+                    fx_rate_csv = cf.get('fx_rate', '')
                 writer.writerow([
                     cf.get('cash_flow_number', ''),
                     cf.get('portfolio_short_name', ''),
@@ -171,7 +176,7 @@ def cash_flow_list(request):
                     local_amt,
                     cf.get('foreign_ccy', ''),
                     foreign_amt,
-                    fx_rate,
+                    fx_rate_csv,
                     cf.get('tax_deducted_fc', ''),
                     cf.get('tax_deducted_lc', ''),
                     cf.get('cash_flow_status', ''),
