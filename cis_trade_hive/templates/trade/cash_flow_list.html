@@ -130,7 +130,7 @@
                             <tr>
                                 <th style="width: 120px;">CF Number</th>
                                 <th style="width: 110px;">Portfolio</th>
-                                <th style="width: 140px;">Security</th>
+                                <th style="min-width: 200px;">Security</th>
                                 <th style="width: 90px;">Type</th>
                                 <th style="width: 80px;">Inc/Dec</th>
                                 <th style="width: 95px;">Value Date</th>
@@ -153,12 +153,10 @@
                                     </a>
                                 </td>
                                 <td>{{ cf.portfolio_short_name|default:"-" }}</td>
-                                <td>
-                                    <span title="{{ cf.security_full_name|default:cf.security_label|default:'-' }}">
-                                        {{ cf.security_label|default:"-"|truncatechars:15 }}
-                                    </span>
+                                <td style="white-space: normal; min-width: 200px;">
+                                    <span class="fw-semibold">{{ cf.security_label|default:"-" }}</span>
                                     {% if cf.security_full_name and cf.security_full_name != cf.security_label %}
-                                    <br><small class="text-muted">{{ cf.security_full_name|truncatechars:25 }}</small>
+                                    <br><small class="text-muted">{{ cf.security_full_name }}</small>
                                     {% endif %}
                                 </td>
                                 <td>{{ cf.cash_flow_type|default:"-" }}</td>

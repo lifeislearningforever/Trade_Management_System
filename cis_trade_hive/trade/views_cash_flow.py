@@ -141,7 +141,7 @@ def cash_flow_list(request):
 
             writer = csv.writer(response)
             writer.writerow([
-                'CF Number', 'Portfolio', 'Security', 'Cash Flow Type', 'Increase/Decrease',
+                'CF Number', 'Portfolio', 'Security', 'Security Full Name', 'Cash Flow Type', 'Increase/Decrease',
                 'Value Date', 'Payment Date', 'Ex Date', 'Record Date',
                 'Local CCY', 'Local Amount', 'Foreign CCY', 'Foreign Amount',
                 'FX Rate', 'Withholding Tax (FC)', 'Withholding Tax (LC)',
@@ -166,6 +166,7 @@ def cash_flow_list(request):
                     cf.get('cash_flow_number', ''),
                     cf.get('portfolio_short_name', ''),
                     cf.get('security_label', ''),
+                    cf.get('security_full_name', '') or cf.get('security_label', ''),
                     cf.get('cash_flow_type', ''),
                     cf.get('send_receive', ''),
                     cf.get('value_date', ''),
