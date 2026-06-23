@@ -9,86 +9,104 @@
     <li class="breadcrumb-item active">Dashboard</li>
 {% endblock %}
 
-{% block extra_css %}
-<style>
-/* ── Skeleton shimmer ─────────────────────────────────────── */
-@keyframes shimmer {
-    0%   { background-position: -600px 0; }
-    100% { background-position:  600px 0; }
-}
-.skeleton {
-    background: linear-gradient(90deg, #e9ecef 25%, #f8f9fa 50%, #e9ecef 75%);
-    background-size: 600px 100%;
-    animation: shimmer 1.4s infinite linear;
-    border-radius: 4px;
-    display: inline-block;
-}
-.skeleton-num  { width: 80px; height: 2.2rem; }
-.skeleton-sub  { width: 110px; height: 0.85rem; margin-top: 4px; }
-.skeleton-row  { width: 100%; height: 1.1rem; margin-bottom: 8px; }
-.skeleton-bar  { width: 60%; height: 1.1rem; }
-
-/* ── Stat cards ───────────────────────────────────────────── */
-.stat-card {
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
-    border: none;
-}
-.stat-card:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(0,0,0,.18); }
-
-/* ── Section cards ───────────────────────────────────────── */
-.dash-card { border: none; box-shadow: 0 1px 6px rgba(0,0,0,.08); }
-
-/* ── Clickable rows ──────────────────────────────────────── */
-.clickable-row { cursor: pointer; transition: background .1s; }
-.clickable-row:hover { background: rgba(0,0,0,.04) !important; }
-
-/* ── Mini donut (CSS only, no Chart.js) ─────────────────── */
-.donut-wrap { position: relative; width: 120px; height: 120px; }
-.donut-svg  { width: 120px; height: 120px; transform: rotate(-90deg); }
-.donut-svg circle { fill: none; stroke-width: 22; }
-.donut-center {
-    position: absolute; inset: 0;
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    font-size: 0.7rem; line-height: 1.2;
-}
-.donut-center .donut-total { font-size: 1.3rem; font-weight: 700; }
-
-/* ── Notional badge ─────────────────────────────────────── */
-.notional-badge { font-size: 0.72rem; letter-spacing: .02em; }
-
-/* ── Refresh spin ───────────────────────────────────────── */
-@keyframes spin { to { transform: rotate(360deg); } }
-.spinning { animation: spin .7s linear infinite; }
-
-/* ── Last-updated label ─────────────────────────────────── */
-#last-updated { font-size: 0.78rem; color: #6c757d; }
-</style>
-{% endblock %}
-
 {% block content %}
 <div class="container-fluid px-0">
 
-    <!-- ── Page header ──────────────────────────────────────── -->
-    <div class="d-flex align-items-center justify-content-between mb-3">
+    <!-- Page header -->
+    <div class="d-flex align-items-center justify-content-between mb-4">
         <div>
             <h1 class="h4 mb-0 fw-semibold">
                 <i class="bi bi-graph-up text-primary me-2"></i>Trade Dashboard
             </h1>
-            <p class="text-muted small mb-0">Overview of trades and workflow statistics</p>
+            <p class="text-muted small mb-0">Overview of trade workflow</p>
         </div>
-        <div class="d-flex align-items-center gap-2">
-            <span id="last-updated"></span>
-            <button id="btn-refresh" class="btn btn-sm btn-outline-secondary" title="Force refresh stats">
-                <i id="refresh-icon" class="bi bi-arrow-clockwise"></i>
-            </button>
-            <a href="{% url 'trade:create' %}" class="btn btn-sm btn-primary">
-                <i class="bi bi-plus-lg"></i> New Trade
-            </a>
-        </div>
+        <a href="{% url 'trade:create' %}" class="btn btn-sm btn-primary">
+            <i class="bi bi-plus-lg"></i> New Trade
+        </a>
     </div>
 
-    <!-- ── Quick action buttons ─────────────────────────────── -->
+    <!-- KPI stat cards -->
+    <div class="row g-3 mb-4">
+
+        <!-- Total Trades -->
+        <div class="col-6 col-md-3">
+            <a href="{% url 'trade:list' %}" class="text-decoration-none">
+                <div class="card stats-card h-100" style="cursor:pointer;">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div class="stats-icon bg-primary">
+                                <i class="bi bi-receipt"></i>
+                            </div>
+                            <div class="ms-3">
+                                <h6 class="text-muted mb-1">Total Trades</h6>
+                                <h3 class="mb-0" id="kpi-total">—</h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </a>
+        </div>
+
+        <!-- Pending Validation -->
+        <div class="col-6 col-md-3">
+            <a href="{% url 'trade:pending_validation' %}" class="text-decoration-none">
+                <div class="card stats-card h-100" style="cursor:pointer;">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div class="stats-icon bg-warning">
+                                <i class="bi bi-hourglass-split"></i>
+                            </div>
+                            <div class="ms-3">
+                                <h6 class="text-muted mb-1">Pending Validation</h6>
+                                <h3 class="mb-0" id="kpi-pending-val">—</h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </a>
+        </div>
+
+        <!-- Pending Settlement -->
+        <div class="col-6 col-md-3">
+            <a href="{% url 'trade:pending_settlement' %}" class="text-decoration-none">
+                <div class="card stats-card h-100" style="cursor:pointer;">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div class="stats-icon bg-info">
+                                <i class="bi bi-check2-circle"></i>
+                            </div>
+                            <div class="ms-3">
+                                <h6 class="text-muted mb-1">Pending Settlement</h6>
+                                <h3 class="mb-0" id="kpi-pending-settle">—</h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </a>
+        </div>
+
+        <!-- Settled -->
+        <div class="col-6 col-md-3">
+            <a href="{% url 'trade:list' %}?status=SETTLED" class="text-decoration-none">
+                <div class="card stats-card h-100" style="cursor:pointer;">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div class="stats-icon bg-success">
+                                <i class="bi bi-check-circle-fill"></i>
+                            </div>
+                            <div class="ms-3">
+                                <h6 class="text-muted mb-1">Settled</h6>
+                                <h3 class="mb-0" id="kpi-settled">—</h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </a>
+        </div>
+
+    </div>
+
+    <!-- Quick action buttons -->
     <div class="mb-4">
         <a href="{% url 'trade:list' %}" class="btn btn-outline-primary btn-sm me-1">
             <i class="bi bi-list"></i> All Trades
@@ -101,228 +119,7 @@
         </a>
     </div>
 
-    <!-- ── KPI stat cards (row 1) ───────────────────────────── -->
-    <div class="row g-3 mb-4">
-
-        <!-- Total -->
-        <div class="col-6 col-md-3">
-            <a href="{% url 'trade:list' %}" class="text-decoration-none">
-                <div class="card stat-card text-white bg-primary h-100">
-                    <div class="card-body py-3">
-                        <div class="d-flex align-items-start justify-content-between">
-                            <div>
-                                <div class="small text-white-50 mb-1">Total Trades</div>
-                                <div id="kpi-total" class="h3 mb-0 fw-bold">
-                                    <span class="skeleton skeleton-num"></span>
-                                </div>
-                                <div class="small text-white-50 mt-1">View all →</div>
-                            </div>
-                            <i class="bi bi-bar-chart-line" style="font-size:2.4rem;opacity:.25;"></i>
-                        </div>
-                    </div>
-                </div>
-            </a>
-        </div>
-
-        <!-- Today -->
-        <div class="col-6 col-md-3">
-            <a href="{% url 'trade:list' %}" class="text-decoration-none" id="kpi-today-link">
-                <div class="card stat-card text-white h-100" style="background:#5c6bc0;">
-                    <div class="card-body py-3">
-                        <div class="d-flex align-items-start justify-content-between">
-                            <div>
-                                <div class="small text-white-50 mb-1">Today</div>
-                                <div id="kpi-today" class="h3 mb-0 fw-bold">
-                                    <span class="skeleton skeleton-num"></span>
-                                </div>
-                                <div class="small text-white-50 mt-1">New today</div>
-                            </div>
-                            <i class="bi bi-calendar-check" style="font-size:2.4rem;opacity:.25;"></i>
-                        </div>
-                    </div>
-                </div>
-            </a>
-        </div>
-
-        <!-- Pending Validation -->
-        <div class="col-6 col-md-3">
-            <a href="{% url 'trade:list' %}?status=PENDING_VALIDATION" class="text-decoration-none">
-                <div class="card stat-card text-white bg-warning h-100">
-                    <div class="card-body py-3">
-                        <div class="d-flex align-items-start justify-content-between">
-                            <div>
-                                <div class="small text-white-50 mb-1">Pending Validation</div>
-                                <div id="kpi-pending-val" class="h3 mb-0 fw-bold">
-                                    <span class="skeleton skeleton-num"></span>
-                                </div>
-                                <div class="small text-white-50 mt-1">Awaiting checker →</div>
-                            </div>
-                            <i class="bi bi-clock-history" style="font-size:2.4rem;opacity:.25;"></i>
-                        </div>
-                    </div>
-                </div>
-            </a>
-        </div>
-
-        <!-- Pending Settlement -->
-        <div class="col-6 col-md-3">
-            <a href="{% url 'trade:list' %}?status=VALIDATED" class="text-decoration-none">
-                <div class="card stat-card text-white bg-info h-100">
-                    <div class="card-body py-3">
-                        <div class="d-flex align-items-start justify-content-between">
-                            <div>
-                                <div class="small text-white-50 mb-1">Pending Settlement</div>
-                                <div id="kpi-pending-settle" class="h3 mb-0 fw-bold">
-                                    <span class="skeleton skeleton-num"></span>
-                                </div>
-                                <div class="small text-white-50 mt-1">Validated, not settled →</div>
-                            </div>
-                            <i class="bi bi-hourglass-split" style="font-size:2.4rem;opacity:.25;"></i>
-                        </div>
-                    </div>
-                </div>
-            </a>
-        </div>
-
-    </div>
-
-    <!-- ── KPI stat cards (row 2) ───────────────────────────── -->
-    <div class="row g-3 mb-4">
-
-        <!-- Settled -->
-        <div class="col-6 col-md-3">
-            <a href="{% url 'trade:list' %}?status=SETTLED" class="text-decoration-none">
-                <div class="card stat-card text-white bg-success h-100">
-                    <div class="card-body py-3">
-                        <div class="d-flex align-items-start justify-content-between">
-                            <div>
-                                <div class="small text-white-50 mb-1">Settled</div>
-                                <div id="kpi-settled" class="h3 mb-0 fw-bold">
-                                    <span class="skeleton skeleton-num"></span>
-                                </div>
-                                <div class="small text-white-50 mt-1">Final state →</div>
-                            </div>
-                            <i class="bi bi-check-circle" style="font-size:2.4rem;opacity:.25;"></i>
-                        </div>
-                    </div>
-                </div>
-            </a>
-        </div>
-
-        <!-- Drafts -->
-        <div class="col-6 col-md-3">
-            <a href="{% url 'trade:list' %}?status=INITIAL" class="text-decoration-none">
-                <div class="card stat-card text-white h-100" style="background:#78909c;">
-                    <div class="card-body py-3">
-                        <div class="d-flex align-items-start justify-content-between">
-                            <div>
-                                <div class="small text-white-50 mb-1">Drafts</div>
-                                <div id="kpi-drafts" class="h3 mb-0 fw-bold">
-                                    <span class="skeleton skeleton-num"></span>
-                                </div>
-                                <div class="small text-white-50 mt-1">Initial + Modified →</div>
-                            </div>
-                            <i class="bi bi-pencil-square" style="font-size:2.4rem;opacity:.25;"></i>
-                        </div>
-                    </div>
-                </div>
-            </a>
-        </div>
-
-        <!-- BUY notional -->
-        <div class="col-6 col-md-3">
-            <a href="{% url 'trade:list' %}?trade_type=BUY" class="text-decoration-none">
-                <div class="card stat-card text-white h-100" style="background:#2e7d32;">
-                    <div class="card-body py-3">
-                        <div class="d-flex align-items-start justify-content-between">
-                            <div>
-                                <div class="small text-white-50 mb-1">BUY Notional</div>
-                                <div id="kpi-buy-notional" class="h5 mb-0 fw-bold" style="font-size:1.1rem;">
-                                    <span class="skeleton skeleton-num"></span>
-                                </div>
-                                <div class="small text-white-50 mt-1">Gross amount →</div>
-                            </div>
-                            <i class="bi bi-arrow-up-circle" style="font-size:2.4rem;opacity:.25;"></i>
-                        </div>
-                    </div>
-                </div>
-            </a>
-        </div>
-
-        <!-- SELL notional -->
-        <div class="col-6 col-md-3">
-            <a href="{% url 'trade:list' %}?trade_type=SELL" class="text-decoration-none">
-                <div class="card stat-card text-white h-100" style="background:#c62828;">
-                    <div class="card-body py-3">
-                        <div class="d-flex align-items-start justify-content-between">
-                            <div>
-                                <div class="small text-white-50 mb-1">SELL Notional</div>
-                                <div id="kpi-sell-notional" class="h5 mb-0 fw-bold" style="font-size:1.1rem;">
-                                    <span class="skeleton skeleton-num"></span>
-                                </div>
-                                <div class="small text-white-50 mt-1">Gross amount →</div>
-                            </div>
-                            <i class="bi bi-arrow-down-circle" style="font-size:2.4rem;opacity:.25;"></i>
-                        </div>
-                    </div>
-                </div>
-            </a>
-        </div>
-
-    </div>
-
-    <!-- ── Charts row ────────────────────────────────────────── -->
-    <div class="row g-3 mb-4">
-
-        <!-- Workflow status breakdown -->
-        <div class="col-md-7">
-            <div class="card dash-card h-100">
-                <div class="card-header bg-white border-bottom-0 pt-3 pb-0">
-                    <h6 class="mb-0 fw-semibold">
-                        <i class="bi bi-diagram-3 text-primary me-1"></i> Workflow Status Distribution
-                    </h6>
-                    <p class="text-muted small mb-2">Click any row to view filtered list</p>
-                </div>
-                <div class="card-body pt-2" id="status-breakdown-body">
-                    <!-- skeleton -->
-                    <div class="skeleton-row skeleton mt-2"></div>
-                    <div class="skeleton-row skeleton" style="width:80%;"></div>
-                    <div class="skeleton-row skeleton" style="width:65%;"></div>
-                    <div class="skeleton-row skeleton" style="width:50%;"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Trade type donut + breakdown -->
-        <div class="col-md-5">
-            <div class="card dash-card h-100">
-                <div class="card-header bg-white border-bottom-0 pt-3 pb-0">
-                    <h6 class="mb-0 fw-semibold">
-                        <i class="bi bi-pie-chart text-success me-1"></i> Trades by Type
-                    </h6>
-                    <p class="text-muted small mb-2">Click a row to filter</p>
-                </div>
-                <div class="card-body pt-2 d-flex align-items-center gap-4" id="type-breakdown-body">
-                    <!-- skeleton donut -->
-                    <div class="donut-wrap flex-shrink-0">
-                        <svg class="donut-svg" viewBox="0 0 36 36">
-                            <circle cx="18" cy="18" r="15.9" stroke="#e9ecef" stroke-width="5" fill="none"/>
-                        </svg>
-                        <div class="donut-center">
-                            <span class="skeleton skeleton-num" style="width:40px;height:1.4rem;"></span>
-                        </div>
-                    </div>
-                    <div class="flex-grow-1">
-                        <div class="skeleton-row skeleton"></div>
-                        <div class="skeleton-row skeleton" style="width:70%;"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-    </div>
-
-    <!-- ── Four-Eyes info ────────────────────────────────────── -->
+    <!-- Four-Eyes info -->
     <div class="alert alert-info small mb-0">
         <i class="bi bi-info-circle me-1"></i>
         <strong>Four-Eyes Workflow:</strong>
@@ -343,170 +140,16 @@
 {% block extra_js %}
 <script>
 (function () {
-    'use strict';
-
-    const API_URL = '{% url "trade:api_statistics" %}';
-    const LIST_URL = '{% url "trade:list" %}';
-
-    /* ── helpers ────────────────────────────────────────── */
-    function fmt(n) { return Number(n).toLocaleString(); }
-    function fmtMoney(n) {
-        if (Math.abs(n) >= 1e9) return (n / 1e9).toFixed(2) + 'B';
-        if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(2) + 'M';
-        if (Math.abs(n) >= 1e3) return (n / 1e3).toFixed(1) + 'K';
-        return Number(n).toFixed(2);
-    }
-    function go(url) { window.location = url; }
-
-    /* ── status meta ────────────────────────────────────── */
-    const STATUS_META = {
-        INITIAL:            { label: 'Initial',            bg: 'secondary', cls: 'bg-secondary' },
-        MODIFIED:           { label: 'Modified',           bg: 'info',      cls: 'bg-info text-dark' },
-        PENDING_VALIDATION: { label: 'Pending Validation', bg: 'warning',   cls: 'bg-warning text-dark' },
-        VALIDATED:          { label: 'Validated',          bg: 'primary',   cls: 'bg-primary' },
-        SETTLED:            { label: 'Settled',            bg: 'success',   cls: 'bg-success' },
-        CANCELLED:          { label: 'Cancelled',          bg: 'dark',      cls: 'bg-dark' },
-    };
-
-    /* ── render status table ────────────────────────────── */
-    function renderStatusBreakdown(data, total) {
-        const rows = data.status_breakdown;
-        if (!rows || rows.length === 0) {
-            document.getElementById('status-breakdown-body').innerHTML =
-                '<p class="text-muted text-center py-3 small">No data</p>';
-            return;
-        }
-        let html = '<table class="table table-sm mb-0">'
-            + '<thead class="table-light"><tr>'
-            + '<th>Status</th><th class="text-end" style="width:70px">Count</th>'
-            + '<th style="width:45%">Share</th></tr></thead><tbody>';
-
-        rows.forEach(function (item) {
-            const meta = STATUS_META[item.status] || { label: item.status, cls: 'bg-secondary' };
-            const pct  = total > 0 ? Math.round(item.count / total * 100) : 0;
-            const url  = LIST_URL + '?status=' + encodeURIComponent(item.status);
-            html += '<tr class="clickable-row" onclick="window.location=\'' + url + '\'">'
-                + '<td><span class="badge ' + meta.cls + '">' + meta.label + '</span></td>'
-                + '<td class="text-end fw-semibold">' + fmt(item.count) + '</td>'
-                + '<td>'
-                +   '<div class="d-flex align-items-center gap-1">'
-                +     '<div class="progress flex-grow-1" style="height:16px;">'
-                +       '<div class="progress-bar ' + meta.cls + '" style="width:' + pct + '%"></div>'
-                +     '</div>'
-                +     '<span class="small text-muted" style="width:36px;text-align:right">' + pct + '%</span>'
-                +   '</div>'
-                + '</td></tr>';
-        });
-        html += '</tbody></table>';
-        document.getElementById('status-breakdown-body').innerHTML = html;
-    }
-
-    /* ── render type donut + table ──────────────────────── */
-    const TYPE_COLORS = { BUY: '#2e7d32', SELL: '#c62828' };
-
-    function renderTypeBreakdown(data, total) {
-        const rows = data.type_breakdown;
-        if (!rows || rows.length === 0) {
-            document.getElementById('type-breakdown-body').innerHTML =
-                '<p class="text-muted text-center py-3 small">No data</p>';
-            return;
-        }
-
-        /* SVG donut math (r=15.9, circumference≈99.9) */
-        const R = 15.9, C = 2 * Math.PI * R;
-        let offset = 0;
-        let segments = '';
-        rows.forEach(function (item) {
-            const pct = total > 0 ? item.count / total : 0;
-            const dash = pct * C;
-            const gap  = C - dash;
-            const color = TYPE_COLORS[item.trade_type] || '#607d8b';
-            segments += '<circle cx="18" cy="18" r="' + R + '" stroke="' + color + '" '
-                + 'stroke-dasharray="' + dash.toFixed(2) + ' ' + gap.toFixed(2) + '" '
-                + 'stroke-dashoffset="-' + offset.toFixed(2) + '" stroke-width="5" fill="none"/>';
-            offset += dash;
-        });
-        const donut = '<svg class="donut-svg" viewBox="0 0 36 36">'
-            + '<circle cx="18" cy="18" r="' + R + '" stroke="#e9ecef" stroke-width="5" fill="none"/>'
-            + segments + '</svg>'
-            + '<div class="donut-center">'
-            + '<span class="donut-total">' + fmt(total) + '</span>'
-            + '<span class="text-muted" style="font-size:.65rem;">trades</span></div>';
-
-        let tableHtml = '<table class="table table-sm mb-0"><tbody>';
-        rows.forEach(function (item) {
-            const color = TYPE_COLORS[item.trade_type] || '#607d8b';
-            const pct   = total > 0 ? Math.round(item.count / total * 100) : 0;
-            const url   = LIST_URL + '?trade_type=' + encodeURIComponent(item.trade_type);
-            tableHtml += '<tr class="clickable-row" onclick="window.location=\'' + url + '\'">'
-                + '<td><span class="badge" style="background:' + color + '">' + item.trade_type + '</span></td>'
-                + '<td class="fw-semibold">' + fmt(item.count) + ' <span class="text-muted small">(' + pct + '%)</span></td>'
-                + '</tr>';
-            if (item.notional) {
-                tableHtml += '<tr class="clickable-row" onclick="window.location=\'' + url + '\'">'
-                    + '<td colspan="2" class="text-muted small ps-3 pb-2">Notional: '
-                    + '<span class="notional-badge badge bg-light text-dark border">' + fmtMoney(item.notional) + '</span>'
-                    + '</td></tr>';
-            }
-        });
-        tableHtml += '</tbody></table>';
-
-        document.getElementById('type-breakdown-body').innerHTML =
-            '<div class="donut-wrap flex-shrink-0">' + donut + '</div>'
-            + '<div class="flex-grow-1">' + tableHtml + '</div>';
-    }
-
-    /* ── update KPI cards ───────────────────────────────── */
-    function updateKPIs(data) {
-        document.getElementById('kpi-total').textContent      = fmt(data.total_trades || 0);
-        document.getElementById('kpi-today').textContent      = fmt(data.today_trades || 0);
-        document.getElementById('kpi-pending-val').textContent    = fmt(data.pending_validation || 0);
-        document.getElementById('kpi-pending-settle').textContent = fmt(data.pending_settlement || 0);
-        document.getElementById('kpi-settled').textContent    = fmt(data.settled || 0);
-        document.getElementById('kpi-drafts').textContent     = fmt(data.drafts || 0);
-        document.getElementById('kpi-buy-notional').textContent  = fmtMoney(data.buy_notional || 0);
-        document.getElementById('kpi-sell-notional').textContent = fmtMoney(data.sell_notional || 0);
-    }
-
-    /* ── last updated label ─────────────────────────────── */
-    function setLastUpdated() {
-        const t = new Date();
-        const h = t.getHours().toString().padStart(2,'0');
-        const m = t.getMinutes().toString().padStart(2,'0');
-        const s = t.getSeconds().toString().padStart(2,'0');
-        document.getElementById('last-updated').textContent = 'Updated ' + h + ':' + m + ':' + s;
-    }
-
-    /* ── fetch stats ────────────────────────────────────── */
-    function loadStats(forceRefresh) {
-        const icon = document.getElementById('refresh-icon');
-        icon.classList.add('spinning');
-
-        const url = API_URL + (forceRefresh ? '?refresh=1' : '');
-        fetch(url)
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                updateKPIs(data);
-                renderStatusBreakdown(data, data.total_trades || 0);
-                renderTypeBreakdown(data, data.total_trades || 0);
-                setLastUpdated();
-            })
-            .catch(function (err) {
-                console.error('Stats fetch error:', err);
-                document.getElementById('status-breakdown-body').innerHTML =
-                    '<p class="text-danger small py-2">Failed to load. <a href="#" onclick="loadStats(true);return false;">Retry</a></p>';
-            })
-            .finally(function () {
-                icon.classList.remove('spinning');
-            });
-    }
-
-    /* ── init ───────────────────────────────────────────── */
-    document.getElementById('btn-refresh').addEventListener('click', function () {
-        loadStats(true);
-    });
-
-    loadStats(false);
+    fetch('{% url "trade:api_statistics" %}')
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            function fmt(n) { return Number(n || 0).toLocaleString(); }
+            document.getElementById('kpi-total').textContent         = fmt(d.total_trades);
+            document.getElementById('kpi-pending-val').textContent   = fmt(d.pending_validation);
+            document.getElementById('kpi-pending-settle').textContent = fmt(d.pending_settlement);
+            document.getElementById('kpi-settled').textContent       = fmt(d.settled);
+        })
+        .catch(function () {});
 })();
 </script>
 {% endblock %}
