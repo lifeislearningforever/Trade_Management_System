@@ -436,7 +436,7 @@
                         <h5 class="card-title mb-0"><i class="bi bi-receipt"></i> Broker Charges</h5>
                         <div>
                             <span id="broker_charge_info" class="text-muted small me-2"></span>
-                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="calculateBrokerCharges()">
+                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="calculateTotal(); calculateBrokerCharges();">
                                 <i class="bi bi-arrow-repeat"></i> Recalculate
                             </button>
                         </div>
@@ -1053,13 +1053,19 @@ document.getElementById('trade_type').addEventListener('change', function() {
 });
 
 // Auto-calculate on input change
-['quantity', 'price', 'commission', 'sec_fee', 'other_charges', 'open_fx_rate'].forEach(function(fieldId) {
+['quantity', 'price', 'commission', 'sec_fee', 'other_charges'].forEach(function(fieldId) {
     const el = document.getElementById(fieldId);
     if (el) {
         el.addEventListener('input', calculateTotal);
-        el.addEventListener('change', calculateTotal);  // catches paste, spinner, blur
     }
 });
+
+// FX rate: recalculate totals on both input (keystrokes) and change (paste, blur, spinner)
+var fxRateEl = document.getElementById('open_fx_rate');
+if (fxRateEl) {
+    fxRateEl.addEventListener('input', calculateTotal);
+    fxRateEl.addEventListener('change', calculateTotal);
+}
 
 // Auto-calculate gross amount on quantity/price change
 ['quantity', 'price'].forEach(function(fieldId) {
@@ -1303,9 +1309,6 @@ if (brokersEl) {
 
 // Calculate broker charges based on broker, quantity, price
 function calculateBrokerCharges() {
-    // Immediately recalculate FC/LC totals using current FX rate before async charge API
-    calculateTotal();
-
     const brokersField = document.getElementById('brokers');
     const quantityField = document.getElementById('quantity');
     const priceField = document.getElementById('price');
