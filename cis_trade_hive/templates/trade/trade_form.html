@@ -533,11 +533,11 @@
                 </div>
 
                 <!-- Remarks (visible on main tab) -->
-                <div class="card mb-4">
-                    <div class="card-header">
+                <div class="card mb-0">
+                    <div class="card-header py-2">
                         <h5 class="card-title mb-0"><i class="bi bi-chat-left-text"></i> Remarks</h5>
                     </div>
-                    <div class="card-body">
+                    <div class="card-body py-2">
                         <textarea class="form-control" name="remarks" id="remarks" rows="2"
                                   placeholder="Optional notes or remarks for this trade">{{ trade.remarks|default:'' }}</textarea>
                     </div>
@@ -792,8 +792,8 @@
         </div>
 
         <!-- Form Actions -->
-        <div class="card">
-            <div class="card-body d-flex justify-content-between">
+        <div class="card mt-2">
+            <div class="card-body py-2 d-flex justify-content-between">
                 <a href="{% url 'trade:list' %}" class="btn btn-outline-secondary">
                     <i class="bi bi-x-circle"></i> Cancel
                 </a>
