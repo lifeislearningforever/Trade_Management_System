@@ -5,8 +5,9 @@
 | Field | Value |
 |-------|-------|
 | **Document Type** | Design & Implementation Plan |
-| **Module** | Core — RBAC / ACL |
+| **Module** | Core — RBAC / ACL (All Modules) |
 | **Created Date** | 2026-06-24 |
+| **Last Updated** | 2026-06-24 |
 | **Status** | Pending SA / User Approval |
 | **Author** | CIS Trade Hive Dev Team |
 | **Reviewers** | SA Team, Operations Lead |
@@ -15,9 +16,17 @@
 
 ## 1. Executive Summary
 
-The current RBAC system controls access at the **module level** (e.g., a user can see the entire Lookup module or not at all). This plan introduces **resource-level (row-level) access control** so that specific groups can be restricted to individual resources within a module — for example, Team A sees only `lut_broker` and `lut_settlement_type`, while Team B sees only `lut_charge_type`.
+The current RBAC system controls access at the **module level** (e.g., a user can see the entire Trade module or not at all). This plan introduces **resource-level (granular) access control** across all 10 modules so that specific groups can be restricted to individual resources within a module.
 
-The design is **backward compatible** — existing group/permission assignments require no changes. Restriction is opt-in: if no scope is configured for a group, it retains full access to the module.
+Examples:
+- **Lookup** — Team A sees only `lut_broker`; Team B sees only `lut_charge_type`
+- **Trade / Position / Cash Flow** — Operations team sees only their entity's portfolios
+- **Security** — Fixed Income team sees only BOND securities; Equity team sees only EQUITY
+- **Market Data** — FX team can upload FX rates but not equity prices
+- **Query Builder** — Analysts can query only approved tables; no raw SQL access
+- **Reference Data** — SG team sees only SG counterparties and parties
+
+The design uses a **single new Kudu table** (`cis_group_resource_scope`) shared across all modules. It is **backward compatible** — existing group/permission assignments require no changes. Restriction is opt-in: if no scope is configured for a group, it retains full access to the module.
 
 ---
 
@@ -377,51 +386,376 @@ scope_id | group_name    | permission_name     | resource_type | resource_name
 
 ---
 
-## 10. Open Questions (For SA / User Review)
+## 10. Granular Access — All Modules
+
+This section maps every module in the system to its granular access dimensions, the `resource_type` value used in `cis_group_resource_scope`, and real-world team scenarios.
+
+The **single scope table** covers all modules — no additional DDL per module is needed.
+
+---
+
+### 10.1 Module Coverage Summary
+
+| Module | Granular Dimension | `resource_type` | Phase |
+|--------|--------------------|-----------------|-------|
+| Lookup Tables | Specific `lut_*` tables | `LOOKUP_TABLE` | 1 |
+| Trade / Position / Cash Flow | Portfolio name | `PORTFOLIO` | 2 |
+| Security Master | Security type (`EQUITY`, `BOND`, etc.) | `SECURITY_TYPE` | 2 |
+| Market Data | Sub-module (`FX_RATE`, `EQUITY_PRICE`) | `MARKET_DATA_TYPE` | 3 |
+| Reference Data — Counterparty / Party | Entity / country | `PARTY_ENTITY` | 3 |
+| Reference Data — Corporate Actions | Entity | `CORP_ACTION_ENTITY` | 3 |
+| Upload | Upload type / template category | `UPLOAD_TYPE` | 3 |
+| Query Builder | Allowed DB tables | `QUERY_TABLE` | 2 |
+| UDF | Object type (`TRADE`, `PORTFOLIO`, etc.) | `UDF_OBJECT_TYPE` | 4 |
+| Portfolio Module | Portfolio name or entity | `PORTFOLIO` | 2 |
+| Audit Log | Entity / module filter | `AUDIT_MODULE` | 4 |
+
+---
+
+### 10.2 Trade / Position / Cash Flow — Portfolio Scope
+
+**Dimension:** `portfolio_short_name`
+**resource_type:** `PORTFOLIO`
+
+**Business scenario:**
+- SG Operations team should only see trades for SG portfolios (`SG-PORT-01`, `SG-PORT-02`)
+- HK Operations team should only see trades for HK portfolios (`HK-PORT-01`)
+- Fund managers see only their own portfolios
+
+**What gets restricted:**
+| View | Restriction |
+|------|------------|
+| Trade List | Only trades where `portfolio_short_name IN (allowed set)` |
+| Trade Detail | 403 if portfolio not in allowed set |
+| Position List | Only positions for allowed portfolios |
+| Cash Flow List | Only cash flows for allowed portfolios |
+| Trade Create | Portfolio picker only shows allowed portfolios |
+| Cash Flow Create | Portfolio picker only shows allowed portfolios |
+
+**Scope example data:**
+
+```
+group_name   | permission_name | resource_type | resource_name
+-------------|-----------------|---------------|---------------
+SG-OPS       | trade-list      | PORTFOLIO     | SG-PORT-01
+SG-OPS       | trade-list      | PORTFOLIO     | SG-PORT-02
+HK-OPS       | trade-list      | PORTFOLIO     | HK-PORT-01
+FUND-MGR-A   | trade-list      | PORTFOLIO     | FUND-A-GROWTH
+FUND-MGR-A   | trade-list      | PORTFOLIO     | FUND-A-INCOME
+```
+
+**Implementation note:** The Trade, Position, and Cash Flow repositories already accept `portfolios: List[str]` as a filter parameter. The scope check plugs directly into the existing filter — minimal code change.
+
+---
+
+### 10.3 Security Master — Security Type Scope
+
+**Dimension:** `security_type`
+**resource_type:** `SECURITY_TYPE`
+
+**Business scenario:**
+- Fixed Income team sees only `BOND`, `T-BILL`, `SUKUK`
+- Equity team sees only `EQUITY`, `ETF`, `REIT`
+- Fund Admin sees all security types
+
+**What gets restricted:**
+| View | Restriction |
+|------|------------|
+| Security List | Only securities where `security_type IN (allowed set)` |
+| Security Detail | 403 if security type not allowed |
+| Security Create | Security type dropdown limited to allowed types |
+| Trade Create — Security picker | Only shows securities of allowed types |
+
+**Scope example data:**
+
+```
+group_name   | permission_name  | resource_type | resource_name
+-------------|------------------|---------------|---------------
+FI-TEAM      | securities-list  | SECURITY_TYPE | BOND
+FI-TEAM      | securities-list  | SECURITY_TYPE | T-BILL
+FI-TEAM      | securities-list  | SECURITY_TYPE | SUKUK
+EQ-TEAM      | securities-list  | SECURITY_TYPE | EQUITY
+EQ-TEAM      | securities-list  | SECURITY_TYPE | ETF
+EQ-TEAM      | securities-list  | SECURITY_TYPE | REIT
+```
+
+**Additional dimension (optional):** Scope by `exchange_code` or `currency_code` for more granularity (e.g., SGX-listed securities only).
+
+---
+
+### 10.4 Market Data — Sub-Module Scope
+
+**Dimension:** Market data type
+**resource_type:** `MARKET_DATA_TYPE`
+
+**Business scenario:**
+- FX Team can view and upload FX rates only
+- Equity Pricing Team can view and upload equity prices only
+- Market Data Admin has access to both
+
+**Current permission map:**
+```
+market_data:fx_rate_list      → fx-rates-list
+market_data:equity_price_list → equity-prices-list
+market_data:equity_price_create → equity-prices-create
+```
+
+Market Data already has **separate permissions per sub-module** (`fx-rates-list` vs `equity-prices-list`), so this is handled by assigning the right permission to each group — **no scope table needed** for this module today.
+
+> **Note to SA:** If a team needs access to both FX and equity pages but should only *upload* one type, the current split permissions already cover this. Scope table becomes relevant only if you need further restriction within a sub-module (e.g., FX rates for specific currency pairs only — `resource_type = FX_CURRENCY_PAIR`).
+
+---
+
+### 10.5 Reference Data — Counterparty / Party Scope
+
+**Dimension:** `entity` or `country_code`
+**resource_type:** `PARTY_ENTITY`
+
+**Business scenario:**
+- SG team sees only SG-entity counterparties and parties
+- HK team sees only HK-entity records
+- Global Ops sees all counterparties
+
+**What gets restricted:**
+| View | Restriction |
+|------|------------|
+| Counterparty List | Filter by `entity IN (allowed set)` |
+| Party List | Filter by `entity IN (allowed set)` |
+| Counterparty / Party Detail | 403 if entity not in allowed set |
+| Counterparty Create | Entity field pre-filled/locked to allowed entities |
+
+**Scope example data:**
+
+```
+group_name   | permission_name | resource_type | resource_name
+-------------|-----------------|---------------|---------------
+SG-REF-TEAM  | parties-list    | PARTY_ENTITY  | SG
+SG-REF-TEAM  | parties-list    | PARTY_ENTITY  | SGP
+HK-REF-TEAM  | parties-list    | PARTY_ENTITY  | HK
+HK-REF-TEAM  | parties-list    | PARTY_ENTITY  | HKG
+```
+
+---
+
+### 10.6 Reference Data — Corporate Actions Scope
+
+**Dimension:** `entity` or `security_type`
+**resource_type:** `CORP_ACTION_ENTITY`
+
+**Business scenario:**
+- FI team sees corporate actions for bond securities only
+- Equity team sees corporate actions for equity securities only
+
+Scope example mirrors §10.3 and §10.5 — uses same `cis_group_resource_scope` table with `resource_type = CORP_ACTION_ENTITY`.
+
+---
+
+### 10.7 Upload Module — Upload Type Scope
+
+**Dimension:** Upload template category
+**resource_type:** `UPLOAD_TYPE`
+
+**Business scenario:**
+- FX team can only upload `FX_RATE` templates
+- Equity team can only upload `EQUITY_PRICE` templates
+- Data Ops can upload any template type
+
+**Scope example data:**
+
+```
+group_name   | permission_name | resource_type | resource_name
+-------------|-----------------|---------------|---------------
+FX-TEAM      | upload-list     | UPLOAD_TYPE   | FX_RATE
+EQ-TEAM      | upload-list     | UPLOAD_TYPE   | EQUITY_PRICE
+```
+
+**Implementation note:** The upload `template_type` or `category` column in the upload records table is used as the resource name.
+
+---
+
+### 10.8 Query Builder — Table-Level Scope
+
+**Dimension:** DB table name
+**resource_type:** `QUERY_TABLE`
+
+**Business scenario:**
+- Analysts can query only approved tables (`cis_trade`, `cis_portfolio`, `lut_*`)
+- FI team can also query `cis_security` filtered to bonds
+- No group except `ADMIN` can see `cis_audit_log` or `cis_user_info` via Query Builder
+
+**What gets restricted:**
+| Feature | Restriction |
+|---------|------------|
+| Table picker in Query Builder | Only shows allowed tables |
+| Query execution | Rejects queries referencing tables outside allowed set |
+| SQL Editor (admin mode) | Separate `query-builder-admin` permission — not scope-controlled |
+| Saved report templates | User can only load templates that reference allowed tables |
+
+**Scope example data:**
+
+```
+group_name   | permission_name    | resource_type | resource_name
+-------------|--------------------|---------------|---------------
+ANALYST      | query-builder-run  | QUERY_TABLE   | cis_trade
+ANALYST      | query-builder-run  | QUERY_TABLE   | cis_portfolio
+ANALYST      | query-builder-run  | QUERY_TABLE   | cis_security
+FI-ANALYST   | query-builder-run  | QUERY_TABLE   | cis_trade
+FI-ANALYST   | query-builder-run  | QUERY_TABLE   | cis_security
+FI-ANALYST   | query-builder-run  | QUERY_TABLE   | cis_cash_flow
+```
+
+**Security note:** SQL injection risk is already mitigated by the Query Builder's parameterised query pattern. The scope check adds a whitelist validation on top — if a table name is not in the allowed set, the query is rejected before it reaches Impala.
+
+---
+
+### 10.9 UDF — Object Type Scope
+
+**Dimension:** `object_type` (`TRADE`, `PORTFOLIO`, `CASH_FLOW`, `SECURITY`, etc.)
+**resource_type:** `UDF_OBJECT_TYPE`
+
+**Business scenario:**
+- Trade Ops team can only manage UDFs for `TRADE` and `CASH_FLOW` object types
+- Portfolio Admin manages UDFs for `PORTFOLIO` only
+- UDF Admin manages all object types
+
+**Scope example data:**
+
+```
+group_name     | permission_name | resource_type    | resource_name
+---------------|-----------------|------------------|---------------
+TRADE-OPS      | udf-list        | UDF_OBJECT_TYPE  | TRADE
+TRADE-OPS      | udf-list        | UDF_OBJECT_TYPE  | CASH_FLOW
+PORTFOLIO-ADMIN| udf-list        | UDF_OBJECT_TYPE  | PORTFOLIO
+```
+
+---
+
+### 10.10 Portfolio Module — Portfolio Scope
+
+**Dimension:** `portfolio_short_name`
+**resource_type:** `PORTFOLIO`
+
+Same `PORTFOLIO` resource_type as Trade (§10.2). Shared scope rows apply to both modules automatically — a group's portfolio scope applies consistently across Trade, Position, Cash Flow, and the Portfolio module itself.
+
+**What gets restricted:**
+| View | Restriction |
+|------|------------|
+| Portfolio List | Only allowed portfolios shown |
+| Portfolio Detail | 403 if not in allowed set |
+| Portfolio Create | N/A — creator's entity pre-scoped |
+| Pending Approvals | Only pending items for allowed portfolios |
+
+---
+
+### 10.11 Audit Log — Module / Entity Filter
+
+**Dimension:** Module name or entity
+**resource_type:** `AUDIT_MODULE`
+
+**Business scenario:**
+- Compliance team can read audit logs for Trade and Portfolio modules only
+- Full audit access remains `rbac-admin` territory
+
+**Scope example data:**
+
+```
+group_name   | permission_name  | resource_type | resource_name
+-------------|------------------|---------------|---------------
+COMPLIANCE   | audit-logs-read  | AUDIT_MODULE  | trade
+COMPLIANCE   | audit-logs-read  | AUDIT_MODULE  | portfolio
+COMPLIANCE   | audit-logs-read  | AUDIT_MODULE  | cash_flow
+```
+
+---
+
+### 10.12 Complete `resource_type` Reference
+
+| `resource_type` | Modules Using It | Scopes What |
+|-----------------|-----------------|-------------|
+| `LOOKUP_TABLE` | Lookup | Specific `lut_*` table names |
+| `PORTFOLIO` | Trade, Position, Cash Flow, Portfolio | `portfolio_short_name` |
+| `SECURITY_TYPE` | Security, Trade (picker) | `security_type` value |
+| `PARTY_ENTITY` | Counterparty, Party | `entity` value |
+| `CORP_ACTION_ENTITY` | Corporate Actions | `entity` value |
+| `UPLOAD_TYPE` | Upload | Template category/type |
+| `QUERY_TABLE` | Query Builder | DB table name |
+| `UDF_OBJECT_TYPE` | UDF | `object_type` value |
+| `AUDIT_MODULE` | Audit Log | Module/app name |
+| `FX_CURRENCY_PAIR` | Market Data (future) | Currency pair e.g. `USDSGD` |
+
+---
+
+## 11. Open Questions (For SA / User Review)
 
 The following decisions require stakeholder input before implementation begins:
 
 | # | Question | Options | Recommendation |
 |---|----------|---------|----------------|
-| Q1 | Should `lookup-tables-edit` (row write) also be scope-controlled? | (a) Yes — same scope table, (b) No — edit access follows list access | **(a)** — edit and list should be consistent |
-| Q2 | When a user has both OPS-TEAM and FINANCE-TEAM, should they see the **union** of scoped tables, or only the intersection? | (a) Union (more permissive), (b) Intersection (more restrictive) | **(a) Union** — standard RBAC principle; if you belong to both groups you get combined access |
-| Q3 | Should restricted tables be **hidden** from the list, or **shown greyed-out with a lock icon**? | (a) Hidden — simpler UX, (b) Shown greyed-out — users know they exist but lack access | **(a) Hidden** — less confusing for end users |
-| Q4 | Who can manage scopes in production — only RBAC Admins, or also a designated Ops Lead role? | (a) Only `rbac-admin` WRITE, (b) New `scope-admin` permission | **(a) rbac-admin** — avoids permission sprawl at this stage |
-| Q5 | Should scope records be **audited** in `cis_audit_log`? | (a) Yes — full audit trail, (b) No — RBAC admin changes are not audited today | **(a) Yes** — scope changes are security-relevant |
-| Q6 | Phase 2 — Query Builder: should table restrictions be by **exact table name** or by **table name prefix** (e.g., `lut_*`)? | (a) Exact name only, (b) Prefix/wildcard support | **(a) Exact** for Phase 1; wildcard can be added if operationally needed |
+| Q1 | Should write permissions (edit/create/delete) also be scope-controlled, or only read (list/view)? | (a) Scope applies to both read and write, (b) Scope applies to read only — write follows existing group permission | **(a)** — a user scoped to SG portfolios should not be able to create a trade for an HK portfolio |
+| Q2 | When a user belongs to multiple groups with different scopes, should they see the **union** or **intersection**? | (a) Union — more permissive, (b) Intersection — more restrictive | **(a) Union** — standard RBAC principle |
+| Q3 | Should restricted resources be **hidden** or **shown greyed-out with a lock icon**? | (a) Hidden — cleaner UX, (b) Shown greyed-out — users aware they exist | **(a) Hidden** — less confusing; greyed-out can be added in a later pass |
+| Q4 | Who manages scopes in production? | (a) Only `rbac-admin` WRITE (current admin team), (b) New `scope-admin` permission for a wider Ops Lead group | **(a) rbac-admin** — avoids permission sprawl at this stage |
+| Q5 | Should scope changes be audited in `cis_audit_log`? | (a) Yes — full audit trail, (b) No | **(a) Yes** — scope changes are security-relevant |
+| Q6 | Query Builder — should table restrictions use exact table names or support wildcards (e.g. `lut_*`)? | (a) Exact names only, (b) Prefix/wildcard | **(a) Exact** for Phase 1; wildcard can follow |
+| Q7 | For the Portfolio scope — should it apply across **all modules simultaneously** (Trade + Position + Cash Flow + Portfolio list) from a single scope row, or be configured per module? | (a) Single `PORTFOLIO` scope applies everywhere, (b) Separate scope per module | **(a) Single scope** — `resource_type = PORTFOLIO` is checked by every module that uses portfolio as a dimension; avoids duplication |
+| Q8 | Which modules should be in **Phase 1** of implementation? | Prioritise based on operational urgency | Suggested order: Lookup → Portfolio/Trade → Security → Query Builder → Others |
 
 ---
 
-## 11. Acceptance Criteria
+## 12. Acceptance Criteria
 
-### Functional
+### Functional (Phase 1 — Lookup)
 - [ ] A user in a scoped group sees **only** their allowed lookup tables on the list page
-- [ ] Direct URL access to a restricted table returns **403 Forbidden** (not a blank page or empty result)
-- [ ] A user in a non-scoped group (ADMIN) continues to see **all** lookup tables unchanged
-- [ ] A user in **two groups** with different scopes sees the **union** of both scopes
+- [ ] Direct URL access to a restricted table returns **403 Forbidden**
+- [ ] A user with no scope configured continues to see **all** lookup tables
+- [ ] A user in two groups with different scopes sees the **union** of both scopes
 - [ ] An RBAC Admin can add/remove scope entries via the UI without writing SQL
-- [ ] Removing all scope entries for a group restores full access (no scope = no restriction)
+- [ ] Removing all scope entries for a group restores full access
+
+### Functional (Phase 2 — Trade / Portfolio / Security)
+- [ ] Trade list shows only portfolios the user's group is scoped to
+- [ ] Direct URL to a trade outside allowed portfolio returns **403**
+- [ ] Security list filters by allowed security types
+- [ ] Trade create — portfolio picker and security picker honour scope
+- [ ] Cash Flow list and Position list honour the same `PORTFOLIO` scope as Trade
 
 ### Non-Functional
-- [ ] Scope check adds **< 50ms** to page load (cached after first call within session)
+- [ ] Scope check adds **< 50ms** to page load (cached, 300s TTL)
 - [ ] No regression in existing module-level permission checks
-- [ ] All scope management actions are written to `cis_audit_log`
-- [ ] Unit tests cover: no-scope (full access), scoped (restricted), multi-group union, 403 on direct access
+- [ ] All scope management actions written to `cis_audit_log`
+- [ ] Unit tests cover: no-scope (full access), scoped (restricted), multi-group union, 403 on direct access, cache invalidation on scope change
 
 ---
 
-## 12. Risks & Mitigations
+## 13. Phased Rollout (Updated)
+
+| Phase | Modules | `resource_type(s)` | Estimate |
+|-------|---------|-------------------|----------|
+| **Phase 1** | Lookup Tables | `LOOKUP_TABLE` | 4.5 days |
+| **Phase 2** | Trade, Position, Cash Flow, Portfolio, Security | `PORTFOLIO`, `SECURITY_TYPE` | 5 days |
+| **Phase 3** | Reference Data, Corporate Actions, Upload, Query Builder | `PARTY_ENTITY`, `CORP_ACTION_ENTITY`, `UPLOAD_TYPE`, `QUERY_TABLE` | 4 days |
+| **Phase 4** | UDF, Audit Log | `UDF_OBJECT_TYPE`, `AUDIT_MODULE` | 2 days |
+| **RBAC Admin UI** | Scope management UI (covers all phases) | — | 2 days |
+| **Total** | All 10 modules | — | **~17.5 days** |
+
+Phase 1 and RBAC Admin UI can run in parallel. Phases 2–4 are independent and can be prioritised by operational urgency.
+
+---
+
+## 14. Risks & Mitigations
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|-----------|
-| Ops team accidentally locks themselves out of all lookup tables | Low | Medium | Superuser flag bypasses all scope checks; also show warning in UI when removing last active scope entry for a group |
-| Cache staleness after scope change | Low | Low | RBAC admin UI triggers `acl_service.clear_user_cache()` on any scope change |
-| Performance impact of additional Kudu query | Low | Low | Scope result is cached per user per permission; adds one query only on first page load or cache miss |
-| Scope table grows very large | Very Low | Very Low | Kudu handles millions of rows; partition by `scope_id` hash keeps queries fast |
+| Ops team accidentally loses access to their own portfolios | Low | Medium | Superuser bypasses all scope checks; UI warns when removing last active scope for a group |
+| Cache staleness after scope change | Low | Low | RBAC admin triggers `acl_service.clear_user_cache()` on any scope change |
+| Performance — additional Kudu query per page | Low | Low | Scope cached per `user_id + permission + resource_type`; single query on first load only |
+| Scope table grows large (many groups × many resources) | Very Low | Very Low | Kudu handles millions of rows efficiently; hash-partitioned on `scope_id` |
+| Inconsistency between modules for same `PORTFOLIO` scope | Low | Medium | Resolved by Q7 decision: single `PORTFOLIO` type applies across all modules via shared ACL service method |
+| Query Builder bypass via SQL editor | Low | High | SQL editor is behind separate `query-builder-admin` permission (admin-only); scope only applies to the visual query builder |
 
 ---
 
-## 13. Sign-Off
+## 15. Sign-Off
 
 | Role | Name | Decision | Date |
 |------|------|----------|------|
@@ -436,12 +770,47 @@ The following decisions require stakeholder input before implementation begins:
 
 ---
 
-## Appendix A — Current Permission Catalogue (Lookup-Related)
+## Appendix A — Current Permission Catalogue (All Modules)
 
-| permission_name | Description | Current Assignees |
-|----------------|-------------|-------------------|
-| `lookup-tables-list` | View lookup tables and browse rows | All teams |
-| `lookup-tables-edit` | Add, edit, delete rows in lookup tables | Ops, Admin |
+| permission_name | Module | Description |
+|----------------|--------|-------------|
+| `lookup-tables-list` | Lookup | View and browse lookup tables |
+| `lookup-tables-edit` | Lookup | Add, edit, delete rows in lookup tables |
+| `trade-list` | Trade | View trade list and dashboard |
+| `trade-view` | Trade | View trade detail |
+| `trade-create` | Trade | Create new trades |
+| `trade-edit` | Trade | Edit and delete trades |
+| `trade-approval` | Trade | Validate, settle, cancel trades (checker) |
+| `position-list` | Trade | View position list |
+| `cash-flow-list` | Trade | View cash flow list and detail |
+| `cash-flow-create` | Trade | Create and edit cash flows |
+| `cash-flow-approval` | Trade | Approve cash flows (checker) |
+| `portfolio-list` | Portfolio | View portfolio list |
+| `portfolio-view` | Portfolio | View portfolio detail |
+| `portfolio-create` | Portfolio | Create portfolios |
+| `portfolio-edit` | Portfolio | Edit portfolios |
+| `portfolio-approval` | Portfolio | Approve portfolios (checker) |
+| `securities-list` | Security | View security list and detail |
+| `securities-create` | Security | Create and edit securities |
+| `fx-rates-list` | Market Data | View FX rates |
+| `equity-prices-list` | Market Data | View equity prices |
+| `equity-prices-create` | Market Data | Upload equity prices |
+| `market-data-dashboard` | Market Data | View market data dashboard |
+| `parties-list` | Reference Data | View counterparties and parties |
+| `parties-create` | Reference Data | Create and edit counterparties/parties |
+| `corp-action-list` | Reference Data | View corporate actions |
+| `corp-action-create` | Reference Data | Create and edit corporate actions |
+| `currencies-list` | Reference Data | View currencies |
+| `countries-list` | Reference Data | View countries |
+| `calendars-list` | Reference Data | View calendars |
+| `upload-list` | Upload | View, create, and manage file uploads |
+| `query-builder-run` | Query Builder | Run saved query templates |
+| `query-builder-manage` | Query Builder | Save and delete query templates |
+| `query-builder-admin` | Query Builder | Raw SQL editor (admin only) |
+| `udf-list` | UDF | View UDF definitions |
+| `udf-create` | UDF | Create and edit UDF definitions |
+| `audit-logs-read` | Core | View audit log |
+| `rbac-admin` | Core | Manage users, groups, permissions, and scopes |
 
 ---
 
@@ -450,8 +819,10 @@ The following decisions require stakeholder input before implementation begins:
 | Term | Definition |
 |------|-----------|
 | **RBAC** | Role-Based Access Control — permissions assigned to groups, groups assigned to users |
-| **Resource-level scope** | An additional restriction within a permission that limits access to named resources (specific tables, portfolios, etc.) |
-| **Scope** | One row in `cis_group_resource_scope` binding a group, permission, and resource name |
-| **Backward compatible** | Existing behaviour unchanged; new feature is opt-in via scope table data |
+| **Resource-level scope** | An additional restriction within a permission that limits access to named resources |
+| **Scope** | One row in `cis_group_resource_scope` binding a group, permission, resource_type, and resource_name |
+| **resource_type** | Category of the resource being scoped (e.g., `PORTFOLIO`, `SECURITY_TYPE`, `LOOKUP_TABLE`) |
+| **Backward compatible** | Existing behaviour unchanged; new feature is opt-in — no scope rows = no restriction |
 | **Union rule** | When a user belongs to multiple groups, they get access to resources allowed by **any** of their groups |
 | **Wildcard (`*`)** | A scope entry with `resource_name = '*'` means the group is explicitly unrestricted for that permission |
+| **Phase** | A delivery increment; each phase targets specific modules using the same underlying DDL |
