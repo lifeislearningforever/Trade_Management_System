@@ -58,7 +58,7 @@ class CashFlowDropdownService:
         Returns:
             List of portfolio options
         """
-        cache_key = f"{CACHE_PREFIX}portfolios_v3"  # v3: subtitle = manager + currency
+        cache_key = f"{CACHE_PREFIX}portfolios_v4"  # v4: subtitle always includes currency
 
         # Try cache first (only for non-search requests)
         if not search:
@@ -78,15 +78,11 @@ class CashFlowDropdownService:
                 short_name = p.get('portfolio_short_name', '')
                 manager = p.get('manager', '') or ''
                 currency = p.get('currency', '') or ''
-                # Build a meaningful subtitle: manager + currency, or just currency, or short_name
-                if manager and currency:
-                    full_name = f"{manager} ({currency})"
-                elif manager:
-                    full_name = manager
-                elif currency:
-                    full_name = currency
+                # Always include currency so subtitle is always different from shortname
+                if manager:
+                    full_name = f"{manager} ({currency})" if currency else manager
                 else:
-                    full_name = short_name
+                    full_name = currency  # just "SGD" or "USD" — always different from shortname
                 options.append({
                     'value': short_name,
                     'label': short_name,
@@ -437,7 +433,7 @@ class CashFlowDropdownService:
                 logger.info(f"Invalidated cache for: {field_name}")
             else:
                 # Invalidate all
-                for key in ['portfolios_v3', 'securities', 'cash_flow_types', 'send_receive', 'cash_flow_status', 'currencies']:
+                for key in ['portfolios_v4', 'securities', 'cash_flow_types', 'send_receive', 'cash_flow_status', 'currencies']:
                     cache.delete(f"{CACHE_PREFIX}{key}")
                 logger.info("Invalidated all cash flow dropdown caches")
 
