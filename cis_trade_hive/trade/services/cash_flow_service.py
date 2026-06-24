@@ -41,6 +41,7 @@ class CashFlowService:
         status: Optional[str] = None,
         search: Optional[str] = None,
         portfolio_short_name: Optional[str] = None,
+        portfolios: Optional[List[str]] = None,
         cash_flow_type: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
@@ -63,6 +64,7 @@ class CashFlowService:
             status=status,
             search=search,
             portfolio_short_name=portfolio_short_name,
+            portfolios=portfolios,
             cash_flow_type=cash_flow_type
         )
 

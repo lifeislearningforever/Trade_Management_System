@@ -109,7 +109,7 @@ def cash_flow_list(request):
     search = request.GET.get('search', '').strip()
     status_filter = request.GET.get('status', '').strip()
     cf_type_filter = request.GET.get('cash_flow_type', '').strip()
-    portfolio_filter = request.GET.get('portfolio', '').strip()
+    portfolio_filter = [p for p in request.GET.getlist('portfolios') if p.strip()]
     export = request.GET.get('export') == 'csv'
     page_number = request.GET.get('page', 1)
 
@@ -124,7 +124,7 @@ def cash_flow_list(request):
             search=search if search else None,
             status=status_filter if status_filter else None,
             cash_flow_type=cf_type_filter if cf_type_filter else None,
-            portfolio_short_name=portfolio_filter if portfolio_filter else None
+            portfolios=portfolio_filter if portfolio_filter else None
         )
 
         # Enrich with security full name and add workflow flags
@@ -229,7 +229,7 @@ def cash_flow_list(request):
             'search': search,
             'selected_status': status_filter,
             'selected_cash_flow_type': cf_type_filter,
-            'selected_portfolio': portfolio_filter,
+            'selected_portfolios': portfolio_filter,
             'cash_flow_types': dropdown_options.get('cash_flow_types', []),
             'portfolios': dropdown_options.get('portfolios', []),
             'total_count': len(cash_flows),

@@ -73,6 +73,7 @@ class CashFlowRepository:
         status: Optional[str] = None,
         search: Optional[str] = None,
         portfolio_short_name: Optional[str] = None,
+        portfolios: Optional[List[str]] = None,
         cash_flow_type: Optional[str] = None,
         include_deleted: bool = False
     ) -> List[Dict[str, Any]]:
@@ -114,6 +115,10 @@ class CashFlowRepository:
 
             if portfolio_short_name:
                 query += f" AND portfolio_short_name = {CashFlowRepository.escape_value(portfolio_short_name)}"
+
+            if portfolios:
+                escaped = ', '.join(CashFlowRepository.escape_value(p) for p in portfolios)
+                query += f" AND portfolio_short_name IN ({escaped})"
 
             if cash_flow_type:
                 # Case-insensitive match to handle 'Cash Dividend' vs 'CASH_DIVIDEND' etc. (item 10)

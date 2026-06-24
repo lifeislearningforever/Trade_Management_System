@@ -60,14 +60,14 @@
                     <button type="button" class="btn btn-outline-secondary btn-sm w-100 d-flex justify-content-between align-items-center"
                             data-bs-toggle="modal" data-bs-target="#portfolioModal">
                         <span id="selectedPortfolioLabel">
-                            {% if selected_portfolio %}{{ selected_portfolio }}{% else %}All Portfolios{% endif %}
+                            {% if selected_portfolios %}{{ selected_portfolios|length }} selected{% else %}All Portfolios{% endif %}
                         </span>
                         <i class="bi bi-chevron-down"></i>
                     </button>
                     <div id="selectedPortfolioInputs">
-                        {% if selected_portfolio %}
-                        <input type="hidden" name="portfolio" value="{{ selected_portfolio }}">
-                        {% endif %}
+                        {% for p in selected_portfolios %}
+                        <input type="hidden" name="portfolios" value="{{ p }}">
+                        {% endfor %}
                     </div>
                 </div>
 
@@ -116,7 +116,7 @@
                 Cash Flow List
                 <span class="badge badge-primary ms-2">{{ total_count }} records</span>
             </h5>
-            <a href="?export=csv{% if search %}&search={{ search }}{% endif %}{% if selected_cash_flow_type %}&cash_flow_type={{ selected_cash_flow_type }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_portfolio %}&portfolio={{ selected_portfolio }}{% endif %}" class="btn btn-sm btn-success">
+            <a href="?export=csv{% if search %}&search={{ search }}{% endif %}{% if selected_cash_flow_type %}&cash_flow_type={{ selected_cash_flow_type }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% for p in selected_portfolios %}&portfolios={{ p }}{% endfor %}" class="btn btn-sm btn-success">
                 <i class="bi bi-download"></i> Export CSV
             </a>
         </div>
@@ -219,12 +219,12 @@
                         <ul class="pagination justify-content-center mb-0">
                             {% if cash_flows.has_previous %}
                                 <li class="page-item">
-                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if selected_cash_flow_type %}&cash_flow_type={{ selected_cash_flow_type }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_portfolio %}&portfolio={{ selected_portfolio }}{% endif %}" aria-label="First">
+                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if selected_cash_flow_type %}&cash_flow_type={{ selected_cash_flow_type }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% for p in selected_portfolios %}&portfolios={{ p }}{% endfor %}" aria-label="First">
                                         <span aria-hidden="true">&laquo;&laquo;</span>
                                     </a>
                                 </li>
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ cash_flows.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if selected_cash_flow_type %}&cash_flow_type={{ selected_cash_flow_type }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_portfolio %}&portfolio={{ selected_portfolio }}{% endif %}" aria-label="Previous">
+                                    <a class="page-link" href="?page={{ cash_flows.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if selected_cash_flow_type %}&cash_flow_type={{ selected_cash_flow_type }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% for p in selected_portfolios %}&portfolios={{ p }}{% endfor %}" aria-label="Previous">
                                         <span aria-hidden="true">&laquo;</span>
                                     </a>
                                 </li>
@@ -238,19 +238,19 @@
                                     <li class="page-item active"><span class="page-link">{{ num }}</span></li>
                                 {% elif num > cash_flows.number|add:'-3' and num < cash_flows.number|add:'3' %}
                                     <li class="page-item">
-                                        <a class="page-link" href="?page={{ num }}{% if search %}&search={{ search }}{% endif %}{% if selected_cash_flow_type %}&cash_flow_type={{ selected_cash_flow_type }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_portfolio %}&portfolio={{ selected_portfolio }}{% endif %}">{{ num }}</a>
+                                        <a class="page-link" href="?page={{ num }}{% if search %}&search={{ search }}{% endif %}{% if selected_cash_flow_type %}&cash_flow_type={{ selected_cash_flow_type }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% for p in selected_portfolios %}&portfolios={{ p }}{% endfor %}">{{ num }}</a>
                                     </li>
                                 {% endif %}
                             {% endfor %}
 
                             {% if cash_flows.has_next %}
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ cash_flows.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if selected_cash_flow_type %}&cash_flow_type={{ selected_cash_flow_type }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_portfolio %}&portfolio={{ selected_portfolio }}{% endif %}" aria-label="Next">
+                                    <a class="page-link" href="?page={{ cash_flows.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if selected_cash_flow_type %}&cash_flow_type={{ selected_cash_flow_type }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% for p in selected_portfolios %}&portfolios={{ p }}{% endfor %}" aria-label="Next">
                                         <span aria-hidden="true">&raquo;</span>
                                     </a>
                                 </li>
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ cash_flows.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if selected_cash_flow_type %}&cash_flow_type={{ selected_cash_flow_type }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_portfolio %}&portfolio={{ selected_portfolio }}{% endif %}" aria-label="Last">
+                                    <a class="page-link" href="?page={{ cash_flows.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if selected_cash_flow_type %}&cash_flow_type={{ selected_cash_flow_type }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}{% for p in selected_portfolios %}&portfolios={{ p }}{% endfor %}" aria-label="Last">
                                         <span aria-hidden="true">&raquo;&raquo;</span>
                                     </a>
                                 </li>
@@ -269,7 +269,7 @@
                 <div class="text-center py-5" style="color: var(--gray-500);">
                     <i class="bi bi-cash-stack" style="font-size: 3rem; opacity: 0.3;"></i>
                     <p class="mt-3 mb-0">No cash flows found</p>
-                    {% if search or selected_cash_flow_type or selected_status or selected_portfolio %}
+                    {% if search or selected_cash_flow_type or selected_status or selected_portfolios %}
                         <p class="text-muted">Try adjusting your filters</p>
                         <a href="{% url 'trade:cash_flow_list' %}" class="btn btn-sm btn-primary mt-2">Clear Filters</a>
                     {% else %}
@@ -296,7 +296,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="portfolioModalLabel">
-                    <i class="bi bi-briefcase text-primary"></i> Select Portfolio
+                    <i class="bi bi-briefcase text-primary"></i> Select Portfolios
                 </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
@@ -305,22 +305,26 @@
                     <div class="input-group">
                         <span class="input-group-text"><i class="bi bi-search"></i></span>
                         <input type="text" class="form-control" id="portfolioModalSearch"
-                               placeholder="Search portfolios...">
+                               placeholder="Search portfolios by name, currency, manager...">
                     </div>
                 </div>
                 <div class="mb-3 d-flex gap-2">
-                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearPortfolioSelection()">
-                        <i class="bi bi-x-circle"></i> Clear
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="selectAllPortfolios()">
+                        <i class="bi bi-check-all"></i> Select All
                     </button>
-                    <span class="ms-auto text-muted" id="portfolioSelectedCount">
-                        {% if selected_portfolio %}1 selected{% else %}0 selected{% endif %}
-                    </span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearAllPortfolios()">
+                        <i class="bi bi-x-circle"></i> Clear All
+                    </button>
+                    <span class="ms-auto text-muted" id="portfolioSelectedCount">0 selected</span>
                 </div>
                 <div class="table-responsive" style="max-height: 400px;">
-                    <table class="table table-hover table-sm" id="portfolioModalTable">
+                    <table class="table table-hover table-sm">
                         <thead class="table-light" style="position: sticky; top: 0;">
                             <tr>
-                                <th style="width: 40px;"></th>
+                                <th style="width: 40px;">
+                                    <input type="checkbox" class="form-check-input" id="portfolioSelectAllCheckbox"
+                                           onchange="toggleAllPortfolioCheckboxes(this)">
+                                </th>
                                 <th>Portfolio Name</th>
                                 <th>Full Name</th>
                                 <th>Currency</th>
@@ -353,7 +357,7 @@
 {% block extra_js %}
 <script>
 let portfolioData = [];
-let selectedPortfolio = '{{ selected_portfolio|escapejs }}';
+let selectedPortfolios = new Set([{% for p in selected_portfolios %}'{{ p }}',{% endfor %}]);
 
 // ── Portfolio Modal ───────────────────────────────────
 document.getElementById('portfolioModal').addEventListener('show.bs.modal', loadPortfolios);
@@ -383,11 +387,10 @@ function renderPortfolioTable() {
         updatePortfolioCount(); return;
     }
     tbody.innerHTML = filtered.map(p => `
-        <tr onclick="togglePortfolio('${p.portfolio_short_name}')" style="cursor:pointer;"
-            class="${selectedPortfolio === p.portfolio_short_name ? 'table-primary' : ''}">
-            <td><input type="radio" class="form-check-input portfolio-radio"
-                ${selectedPortfolio === p.portfolio_short_name ? 'checked' : ''}
-                onclick="event.stopPropagation(); togglePortfolio('${p.portfolio_short_name}')"></td>
+        <tr onclick="togglePortfolioCheckbox('${p.portfolio_short_name}')" style="cursor:pointer;">
+            <td><input type="checkbox" class="form-check-input portfolio-checkbox" data-name="${p.portfolio_short_name}"
+                ${selectedPortfolios.has(p.portfolio_short_name) ? 'checked' : ''}
+                onclick="event.stopPropagation(); togglePortfolioSelection('${p.portfolio_short_name}')"></td>
             <td><strong>${p.portfolio_short_name || '-'}</strong></td>
             <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p.portfolio_full_name || '-'}</td>
             <td><span class="badge bg-info">${p.currency || '-'}</span></td>
@@ -397,31 +400,41 @@ function renderPortfolioTable() {
     updatePortfolioCount();
 }
 
-function togglePortfolio(name) {
-    selectedPortfolio = (selectedPortfolio === name) ? '' : name;
-    renderPortfolioTable();
+function togglePortfolioCheckbox(name) {
+    const cb = document.querySelector(`.portfolio-checkbox[data-name="${name}"]`);
+    if (cb) { cb.checked = !cb.checked; togglePortfolioSelection(name); }
 }
-
-function clearPortfolioSelection() {
-    selectedPortfolio = '';
-    renderPortfolioTable();
+function togglePortfolioSelection(name) {
+    if (selectedPortfolios.has(name)) selectedPortfolios.delete(name); else selectedPortfolios.add(name);
+    updatePortfolioCount();
 }
-
 function updatePortfolioCount() {
-    document.getElementById('portfolioSelectedCount').textContent =
-        selectedPortfolio ? '1 selected' : '0 selected';
+    document.getElementById('portfolioSelectedCount').textContent = `${selectedPortfolios.size} selected`;
 }
-
+function selectAllPortfolios() {
+    const term = document.getElementById('portfolioModalSearch').value.toLowerCase();
+    portfolioData.filter(p =>
+        `${p.portfolio_short_name} ${p.portfolio_full_name} ${p.currency} ${p.manager}`.toLowerCase().includes(term)
+    ).forEach(p => selectedPortfolios.add(p.portfolio_short_name));
+    renderPortfolioTable();
+}
+function clearAllPortfolios() {
+    const term = document.getElementById('portfolioModalSearch').value.toLowerCase();
+    portfolioData.filter(p =>
+        `${p.portfolio_short_name} ${p.portfolio_full_name} ${p.currency} ${p.manager}`.toLowerCase().includes(term)
+    ).forEach(p => selectedPortfolios.delete(p.portfolio_short_name));
+    renderPortfolioTable();
+}
+function toggleAllPortfolioCheckboxes(cb) { if (cb.checked) selectAllPortfolios(); else clearAllPortfolios(); }
 function applyPortfolioSelection() {
     const c = document.getElementById('selectedPortfolioInputs');
     c.innerHTML = '';
-    if (selectedPortfolio) {
+    selectedPortfolios.forEach(name => {
         const i = document.createElement('input');
-        i.type = 'hidden'; i.name = 'portfolio'; i.value = selectedPortfolio;
-        c.appendChild(i);
-    }
+        i.type = 'hidden'; i.name = 'portfolios'; i.value = name; c.appendChild(i);
+    });
     document.getElementById('selectedPortfolioLabel').textContent =
-        selectedPortfolio || 'All Portfolios';
+        selectedPortfolios.size > 0 ? `${selectedPortfolios.size} selected` : 'All Portfolios';
     bootstrap.Modal.getInstance(document.getElementById('portfolioModal')).hide();
 }
 
