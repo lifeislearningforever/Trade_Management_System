@@ -43,7 +43,7 @@
             </h5>
         </div>
         <div class="card-body">
-            <form method="get" action="{% url 'trade:cash_flow_list' %}" class="row g-3">
+            <form method="get" action="{% url 'trade:cash_flow_list' %}" id="cfFilterForm" class="row g-3">
                 <!-- Search -->
                 <div class="col-md-3">
                     <label class="form-label">Search</label>
@@ -57,12 +57,18 @@
                 <!-- Portfolio Filter -->
                 <div class="col-md-3">
                     <label class="form-label">Portfolio</label>
-                    <input type="hidden" name="portfolio" id="selectedPortfolioInput" value="{{ selected_portfolio }}">
-                    <button type="button" class="btn btn-outline-secondary w-100 text-start"
+                    <button type="button" class="btn btn-outline-secondary btn-sm w-100 d-flex justify-content-between align-items-center"
                             data-bs-toggle="modal" data-bs-target="#portfolioModal">
-                        <i class="bi bi-briefcase me-1"></i>
-                        <span id="selectedPortfolioLabel">{% if selected_portfolio %}{{ selected_portfolio }}{% else %}All Portfolios{% endif %}</span>
+                        <span id="selectedPortfolioLabel">
+                            {% if selected_portfolio %}{{ selected_portfolio }}{% else %}All Portfolios{% endif %}
+                        </span>
+                        <i class="bi bi-chevron-down"></i>
                     </button>
+                    <div id="selectedPortfolioInputs">
+                        {% if selected_portfolio %}
+                        <input type="hidden" name="portfolio" value="{{ selected_portfolio }}">
+                        {% endif %}
+                    </div>
                 </div>
 
                 <!-- Cash Flow Type Filter -->
@@ -299,20 +305,23 @@
                     <div class="input-group">
                         <span class="input-group-text"><i class="bi bi-search"></i></span>
                         <input type="text" class="form-control" id="portfolioModalSearch"
-                               placeholder="Search by name, currency, manager...">
+                               placeholder="Search portfolios...">
                     </div>
                 </div>
-                <div class="mb-2 d-flex gap-2 align-items-center">
+                <div class="mb-3 d-flex gap-2">
                     <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearPortfolioSelection()">
                         <i class="bi bi-x-circle"></i> Clear
                     </button>
-                    <span class="ms-auto text-muted small" id="portfolioSelectedLabel"></span>
+                    <span class="ms-auto text-muted" id="portfolioSelectedCount">
+                        {% if selected_portfolio %}1 selected{% else %}0 selected{% endif %}
+                    </span>
                 </div>
                 <div class="table-responsive" style="max-height: 400px;">
-                    <table class="table table-hover table-sm">
+                    <table class="table table-hover table-sm" id="portfolioModalTable">
                         <thead class="table-light" style="position: sticky; top: 0;">
                             <tr>
-                                <th>Portfolio</th>
+                                <th style="width: 40px;"></th>
+                                <th>Portfolio Name</th>
                                 <th>Full Name</th>
                                 <th>Currency</th>
                                 <th>Manager</th>
@@ -321,7 +330,7 @@
                         </thead>
                         <tbody id="portfolioModalTableBody">
                             <tr>
-                                <td colspan="5" class="text-center py-4">
+                                <td colspan="6" class="text-center py-4">
                                     <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
                                     <span class="ms-2">Loading portfolios...</span>
                                 </td>
@@ -333,7 +342,7 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-primary" onclick="applyPortfolioSelection()">
-                    <i class="bi bi-check"></i> Apply
+                    <i class="bi bi-check"></i> Apply Selection
                 </button>
             </div>
         </div>
@@ -346,18 +355,19 @@
 let portfolioData = [];
 let selectedPortfolio = '{{ selected_portfolio|escapejs }}';
 
+// ── Portfolio Modal ───────────────────────────────────
 document.getElementById('portfolioModal').addEventListener('show.bs.modal', loadPortfolios);
 
 function loadPortfolios() {
     const tbody = document.getElementById('portfolioModalTableBody');
-    tbody.innerHTML = `<tr><td colspan="5" class="text-center py-4">
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4">
         <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
         <span class="ms-2">Loading...</span></td></tr>`;
     fetch(`{% url 'trade:api_portfolios_detailed' %}`)
         .then(r => r.json())
         .then(data => { portfolioData = data.results || []; renderPortfolioTable(); })
         .catch(() => {
-            tbody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-danger">
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-danger">
                 <i class="bi bi-exclamation-triangle"></i> Error loading portfolios</td></tr>`;
         });
 }
@@ -369,23 +379,25 @@ function renderPortfolioTable() {
         `${p.portfolio_short_name} ${p.portfolio_full_name} ${p.currency} ${p.manager}`.toLowerCase().includes(term)
     );
     if (!filtered.length) {
-        tbody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-muted">
-            <i class="bi bi-inbox"></i> No portfolios found</td></tr>`;
-        return;
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-muted"><i class="bi bi-inbox"></i> No portfolios found</td></tr>`;
+        updatePortfolioCount(); return;
     }
     tbody.innerHTML = filtered.map(p => `
-        <tr onclick="selectPortfolio('${p.portfolio_short_name}')" style="cursor:pointer;"
+        <tr onclick="togglePortfolio('${p.portfolio_short_name}')" style="cursor:pointer;"
             class="${selectedPortfolio === p.portfolio_short_name ? 'table-primary' : ''}">
+            <td><input type="radio" class="form-check-input portfolio-radio"
+                ${selectedPortfolio === p.portfolio_short_name ? 'checked' : ''}
+                onclick="event.stopPropagation(); togglePortfolio('${p.portfolio_short_name}')"></td>
             <td><strong>${p.portfolio_short_name || '-'}</strong></td>
-            <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p.portfolio_full_name || '-'}</td>
+            <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p.portfolio_full_name || '-'}</td>
             <td><span class="badge bg-info">${p.currency || '-'}</span></td>
             <td>${p.manager || '-'}</td>
             <td><span class="badge bg-secondary">${p.status || '-'}</span></td>
         </tr>`).join('');
-    updateSelectedLabel();
+    updatePortfolioCount();
 }
 
-function selectPortfolio(name) {
+function togglePortfolio(name) {
     selectedPortfolio = (selectedPortfolio === name) ? '' : name;
     renderPortfolioTable();
 }
@@ -395,17 +407,22 @@ function clearPortfolioSelection() {
     renderPortfolioTable();
 }
 
-function updateSelectedLabel() {
-    document.getElementById('portfolioSelectedLabel').textContent =
-        selectedPortfolio ? `Selected: ${selectedPortfolio}` : 'None selected';
+function updatePortfolioCount() {
+    document.getElementById('portfolioSelectedCount').textContent =
+        selectedPortfolio ? '1 selected' : '0 selected';
 }
 
 function applyPortfolioSelection() {
-    document.getElementById('selectedPortfolioInput').value = selectedPortfolio;
+    const c = document.getElementById('selectedPortfolioInputs');
+    c.innerHTML = '';
+    if (selectedPortfolio) {
+        const i = document.createElement('input');
+        i.type = 'hidden'; i.name = 'portfolio'; i.value = selectedPortfolio;
+        c.appendChild(i);
+    }
     document.getElementById('selectedPortfolioLabel').textContent =
         selectedPortfolio || 'All Portfolios';
     bootstrap.Modal.getInstance(document.getElementById('portfolioModal')).hide();
-    document.querySelector('form[action]').submit();
 }
 
 document.getElementById('portfolioModalSearch').addEventListener('input', renderPortfolioTable);
