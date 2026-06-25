@@ -91,8 +91,21 @@
                     </div>
                     <!-- Hidden: Cash Balance List removed per PORTIARP-599 -->
                     <input type="hidden" id="cash_balance_list" name="cash_balance_list" value="{{ portfolio.cash_balance_list|default:'' }}">
-                    <!-- Hidden: Cash Balance removed per PORTIARP-599 -->
-                    <input type="hidden" id="cash_balance" name="cash_balance" value="{{ portfolio.cash_balance|default:'0' }}">
+                    <div class="col-md-4 mb-4">
+                        <label for="cash_balance" class="form-label">Settlement CCY</label>
+                        <select class="form-select" id="cash_balance" name="cash_balance">
+                            <option value="">— Select Currency —</option>
+                            {% for curr in dropdown_options.currencies %}
+                            <option value="{{ curr.code }}"
+                                {% if portfolio.cash_balance == curr.code %}selected{% endif %}>
+                                {{ curr.code }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text text-muted">
+                            <i class="bi bi-info-circle"></i> May differ from portfolio base currency
+                        </div>
+                    </div>
                     <div class="col-md-4 mb-4">
                         <label for="branch_code" class="form-label">Branch Code</label>
                         <input type="text" class="form-control" id="branch_code" name="branch_code"

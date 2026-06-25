@@ -140,8 +140,8 @@
                             <td>{{ portfolio.portfolio_client|default:"-" }}</td>
                         </tr>
                         <tr>
-                            <th>Cash Balance:</th>
-                            <td><strong>{{ portfolio.currency }} {{ portfolio.cash_balance|floatformat:2 }}</strong></td>
+                            <th>Settlement CCY:</th>
+                            <td><strong>{{ portfolio.cash_balance|default:"-" }}</strong></td>
                         </tr>
                         <tr>
                             <th>Corp Code:</th>

@@ -101,7 +101,7 @@
                                         <th>Code</th>
                                         <th>Name</th>
                                         <th>Currency</th>
-                                        <th>Cash Balance</th>
+                                        <th>Settlement CCY</th>
                                         <th>Status</th>
                                         <th>Manager</th>
                                     </tr>
@@ -112,7 +112,7 @@
                                         <td><strong>{{ portfolio.code }}</strong></td>
                                         <td>{{ portfolio.name }}</td>
                                         <td><span class="badge badge-secondary">{{ portfolio.currency }}</span></td>
-                                        <td>${{ portfolio.cash_balance|floatformat:2 }}</td>
+                                        <td>{{ portfolio.cash_balance|default:"-" }}</td>
                                         <td>
                                             {% if portfolio.status == 'ACTIVE' %}
                                                 <span class="badge badge-success">Active</span>

@@ -635,25 +635,11 @@
                         <hr class="my-4">
                         <div class="section-header"><i class="bi bi-bank2"></i> Settlement</div>
 
-                        <!-- Amor/Accr Method removed per SA feedback #13; cash_balance kept hidden (legacy) -->
+                        <!-- Cash Balance and Amor/Accr Method removed per SA feedback #13 -->
                         <input type="hidden" name="amor_accr_method" value="">
                         <input type="hidden" name="cash_balance" value="0">
 
                         <div class="row g-3">
-                            <div class="col-md-4">
-                                <label class="form-label">Settlement CCY</label>
-                                <select class="form-select" name="settlement_ccy" id="settlement_ccy">
-                                    <option value="">— Select Currency —</option>
-                                    {% for c in dropdown_options.currencies %}
-                                    <option value="{{ c.value }}"
-                                        {% if trade.settlement_ccy == c.value %}selected{% endif %}>
-                                        {{ c.label }}
-                                    </option>
-                                    {% endfor %}
-                                </select>
-                                <div class="form-text text-muted">May differ from portfolio base currency</div>
-                            </div>
-                        </div>
 
                         <div class="row g-3 mt-2">
                             <div class="col-md-4">
