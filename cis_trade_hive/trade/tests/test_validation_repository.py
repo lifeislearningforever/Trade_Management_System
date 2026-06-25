@@ -83,7 +83,7 @@ class TradeValidationRepositoryTestCase(TestCase):
             'name': 'PORT001',
             'currency': 'USD',
             'manager': 'John Doe',
-            'cash_balance': 1000000,
+            'cash_balance': 'USD',
             'status': 'SETTLED',
             'is_active': True
         }

@@ -50,13 +50,9 @@ class Portfolio(BaseModel):
     manager = models.CharField(max_length=200, blank=True, help_text="Portfolio manager")
     portfolio_client = models.CharField(max_length=200, blank=True)
 
-    # Financial
-    cash_balance = models.DecimalField(
-        max_digits=20,
-        decimal_places=2,
-        default=0,
-        help_text="Current cash balance"
-    )
+    # Financial — renamed to Settlement CCY in UI; stores currency code string
+    cash_balance = models.CharField(max_length=10, blank=True, default='',
+                                    help_text="Settlement currency (may differ from portfolio base currency)")
     cash_balance_list = models.CharField(max_length=200, blank=True)
 
     # Classification

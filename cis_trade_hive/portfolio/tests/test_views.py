@@ -42,7 +42,7 @@ class PortfolioListViewTestCase(TestCase):
                 'currency': 'USD',
                 'status': 'APPROVED',
                 'is_active': True,
-                'cash_balance': 1000000.00,
+                'cash_balance': 'USD',
                 'created_at': '2025-12-27 10:00:00',
                 'updated_at': '2025-12-27 10:00:00',
                 'updated_by': 'testuser'
@@ -55,7 +55,7 @@ class PortfolioListViewTestCase(TestCase):
                 'currency': 'EUR',
                 'status': 'PENDING_APPROVAL',
                 'is_active': True,
-                'cash_balance': 500000.00,
+                'cash_balance': 'EUR',
                 'created_at': '2025-12-27 10:00:00',
                 'updated_at': '2025-12-27 10:00:00',
                 'updated_by': 'testuser'
@@ -144,7 +144,7 @@ class PortfolioDetailViewTestCase(TestCase):
             'currency': 'USD',
             'status': 'APPROVED',
             'is_active': True,
-            'cash_balance': 1000000.00,
+            'cash_balance': 'USD',
             'created_at': '2025-12-27 10:00:00',
             'updated_at': '2025-12-27 10:00:00',
             'updated_by': 'testuser'
@@ -197,7 +197,7 @@ class PortfolioCreateViewTestCase(TestCase):
             'description': 'New Test Portfolio',
             'manager': 'John Doe',
             'currency': 'USD',
-            'cash_balance': 1000000.00
+            'cash_balance': 'USD'
         }
 
     @patch('portfolio.services.portfolio_dropdown_service.portfolio_dropdown_service')
@@ -253,7 +253,7 @@ class PortfolioEditViewTestCase(TestCase):
             'status': 'INITIAL',
             'src_system': 'CIS',
             'is_active': True,
-            'cash_balance': 1000000.00
+            'cash_balance': 'USD'
         }
 
     @patch('portfolio.services.portfolio_dropdown_service.portfolio_dropdown_service')
@@ -286,7 +286,7 @@ class PortfolioEditViewTestCase(TestCase):
             'description': 'Updated Description',
             'manager': 'John Doe',
             'currency': 'USD',
-            'cash_balance': 2000000.00
+            'cash_balance': 'SGD'
         })
 
         self.assertEqual(response.status_code, 302)
@@ -427,7 +427,7 @@ class PortfolioWrapperTestCase(TestCase):
             'currency': 'USD',
             'status': 'APPROVED',
             'is_active': True,
-            'cash_balance': 1000000.00,
+            'cash_balance': 'USD',
             'created_at': '2025-12-27 10:00:00',
             'updated_at': '2025-12-27 10:00:00',
             'updated_by': 'testuser'
@@ -456,7 +456,7 @@ class PortfolioWrapperTestCase(TestCase):
         self.assertEqual(wrapper.code, 'TEST_PORT_001')  # code is derived from name[:20]
         # Missing fields should default to empty strings or defaults
         self.assertEqual(wrapper.description, '')
-        self.assertEqual(wrapper.cash_balance, 0)
+        self.assertEqual(wrapper.cash_balance, '')
 
 
 class PortfolioURLTestCase(TestCase):
