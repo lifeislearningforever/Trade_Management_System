@@ -756,119 +756,121 @@ def equity_price_edit(request, currency_code: str, price_date: str):
 
         # Get user info
         username = request.session.get('user_login', 'SYSTEM')
+        lock_price = existing_price  # will be overwritten inside the lock block
 
-        # Optimistic lock check: REFRESH the table so Impala sees the very
-        # latest Kudu commit (prevents eventual-consistency false negatives where
-        # a concurrent save by another user hasn't propagated yet), then re-read
-        # the record fresh before comparing the timestamp token.
-        equity_price_service.refresh_table()
-        fresh_price = equity_price_service.get_equity_price_by_key(currency_code, security_label, price_date)
-        lock_price = fresh_price or existing_price  # fall back if re-read fails
+        # Acquire a per-key process lock so two simultaneous POSTs for the
+        # same equity price row are serialised within this Gunicorn worker.
+        # The second request will then see the first request's updated
+        # price_timestamp and updated_by, making the conflict check fire.
+        _write_lock = equity_price_service.get_write_lock(currency_code, security_label, price_date)
+        with _write_lock:
+            # REFRESH the Impala metadata so we see the very latest Kudu commit,
+            # then re-read the row fresh for the conflict check.
+            equity_price_service.refresh_table()
+            fresh_price = equity_price_service.get_equity_price_by_key(currency_code, security_label, price_date)
+            lock_price = fresh_price or existing_price
 
-        token = request.POST.get('price_timestamp_token', '').strip()
-        current_ts = str(lock_price.get('price_timestamp') or '').strip()
+            token = request.POST.get('price_timestamp_token', '').strip()
+            current_ts = str(lock_price.get('price_timestamp') or '').strip()
 
-        # Second guard: if price_timestamp didn't change (Kudu read lag), check
-        # updated_by — if a different user saved while this form was open, their
-        # username will now be in the record even if the timestamp hasn't propagated.
-        token_updated_by = request.POST.get('updated_by_token', '').strip()
-        current_updated_by = str(lock_price.get('updated_by') or lock_price.get('created_by') or '').strip()
+            # Second guard: updated_by changes even if Kudu read lag hides the
+            # new price_timestamp — a different editor's username will be present.
+            token_updated_by = request.POST.get('updated_by_token', '').strip()
+            current_updated_by = str(lock_price.get('updated_by') or lock_price.get('created_by') or '').strip()
 
-        ts_conflict = token and current_ts and token != current_ts
-        user_conflict = (
-            token_updated_by
-            and current_updated_by
-            and token_updated_by != current_updated_by
-            and current_updated_by != username  # ignore if WE are the last editor
-        )
-
-        if ts_conflict or user_conflict:
-            error_message = (
-                f"This price was updated by another user while you were editing "
-                f"(last saved by {lock_price.get('updated_by') or lock_price.get('created_by', 'unknown')} "
-                f"at {lock_price.get('price_datetime') or current_ts}). "
-                f"Please reload the page to get the latest values before saving."
-            )
-            dropdown_options = equity_price_dropdown_service.get_all_dropdown_options(username)
-            context = {
-                'error': error_message,
-                'equity_price': lock_price,
-                'form_data': equity_price_data,
-                'currencies': dropdown_options.get('currencies', []),
-                'securities': dropdown_options.get('securities', []),
-                'is_edit': True,
-            }
-            return render(request, 'market_data/equity_price_form.html', context)
-
-        try:
-            # Update equity price using composite key (including price_date)
-            success = equity_price_service.update_equity_price(
-                currency_code,
-                security_label,
-                equity_price_data,
-                user=username,
-                price_date=price_date
+            ts_conflict = token and current_ts and token != current_ts
+            user_conflict = (
+                token_updated_by
+                and current_updated_by
+                and token_updated_by != current_updated_by
+                and current_updated_by != username
             )
 
-            if success:
-                # Track changes for audit
-                old_values = {}
-                new_values = {}
-                changed_fields = []
+            if ts_conflict or user_conflict:
+                error_message = (
+                    f"This price was updated by another user while you were editing "
+                    f"(last saved by {lock_price.get('updated_by') or lock_price.get('created_by', 'unknown')} "
+                    f"at {lock_price.get('price_datetime') or current_ts}). "
+                    f"Please reload the page to get the latest values before saving."
+                )
+                dropdown_options = equity_price_dropdown_service.get_all_dropdown_options(username)
+                context = {
+                    'error': error_message,
+                    'equity_price': lock_price,
+                    'form_data': equity_price_data,
+                    'currencies': dropdown_options.get('currencies', []),
+                    'securities': dropdown_options.get('securities', []),
+                    'is_edit': True,
+                }
+                return render(request, 'market_data/equity_price_form.html', context)
 
-                trackable_fields = ['isin', 'price_date', 'main_closing_price', 'src_system']
-
-                for field in trackable_fields:
-                    old_val = existing_price.get(field, '')
-                    new_val = equity_price_data.get(field, '')
-                    if str(old_val) != str(new_val):
-                        old_values[field] = old_val
-                        new_values[field] = new_val
-                        changed_fields.append(field)
-
-                # Log to audit with old_value and new_value
-                user_id = str(request.session.get('user_id', ''))
-                user_email = request.session.get('user_email', '')
-
-                audit_log_kudu_repository.log_action(
-                    user_id=user_id,
-                    username=username,
-                    user_email=user_email,
-                    action_type='UPDATE',
-                    entity_type='EQUITY_PRICE',
-                    entity_id=f"{currency_code}/{security_label}/{price_date}",
-                    entity_name=security_label,
-                    action_description=f"Updated equity price for {security_label} on {price_date} - Changed fields: {', '.join(changed_fields) if changed_fields else 'No changes'}",
-                    old_value=json.dumps(old_values, default=str) if old_values else None,
-                    new_value=json.dumps(new_values, default=str) if new_values else None,
-                    field_name=', '.join(changed_fields) if changed_fields else None,
-                    status='SUCCESS',
-                    request_method=request.method,
-                    request_path=request.path,
-                    ip_address=request.META.get('REMOTE_ADDR'),
-                    user_agent=request.META.get('HTTP_USER_AGENT', '')
+            # No conflict — perform the write while still holding the lock so a
+            # concurrent request that passes the check above will see the new
+            # price_timestamp when it re-reads after we release.
+            try:
+                success = equity_price_service.update_equity_price(
+                    currency_code,
+                    security_label,
+                    equity_price_data,
+                    user=username,
+                    price_date=price_date
                 )
 
-                # Auto-refresh position market values
-                try:
-                    trade_kudu_repository.refresh_market_values()
-                except Exception:
-                    pass  # Non-blocking: don't fail price edit if refresh fails
+                if success:
+                    # Track changes for audit
+                    old_values = {}
+                    new_values = {}
+                    changed_fields = []
 
-                # Redirect to list
-                return redirect('market_data:equity_price_list')
-            else:
-                error_message = "Failed to update equity price"
-        except ValidationError as e:
-            error_message = str(e)
+                    trackable_fields = ['isin', 'price_date', 'main_closing_price', 'src_system']
 
-        # Re-render form with error
-        username = request.session.get('user_login', 'SYSTEM')
+                    for field in trackable_fields:
+                        old_val = lock_price.get(field, '')
+                        new_val = equity_price_data.get(field, '')
+                        if str(old_val) != str(new_val):
+                            old_values[field] = old_val
+                            new_values[field] = new_val
+                            changed_fields.append(field)
+
+                    user_id = str(request.session.get('user_id', ''))
+                    user_email = request.session.get('user_email', '')
+
+                    audit_log_kudu_repository.log_action(
+                        user_id=user_id,
+                        username=username,
+                        user_email=user_email,
+                        action_type='UPDATE',
+                        entity_type='EQUITY_PRICE',
+                        entity_id=f"{currency_code}/{security_label}/{price_date}",
+                        entity_name=security_label,
+                        action_description=f"Updated equity price for {security_label} on {price_date} - Changed fields: {', '.join(changed_fields) if changed_fields else 'No changes'}",
+                        old_value=json.dumps(old_values, default=str) if old_values else None,
+                        new_value=json.dumps(new_values, default=str) if new_values else None,
+                        field_name=', '.join(changed_fields) if changed_fields else None,
+                        status='SUCCESS',
+                        request_method=request.method,
+                        request_path=request.path,
+                        ip_address=request.META.get('REMOTE_ADDR'),
+                        user_agent=request.META.get('HTTP_USER_AGENT', '')
+                    )
+
+                    try:
+                        trade_kudu_repository.refresh_market_values()
+                    except Exception:
+                        pass
+
+                    return redirect('market_data:equity_price_list')
+                else:
+                    error_message = "Failed to update equity price"
+            except ValidationError as e:
+                error_message = str(e)
+
+        # Re-render form with error (outside the lock — safe to take time here)
         dropdown_options = equity_price_dropdown_service.get_all_dropdown_options(username)
 
         context = {
             'error': error_message,
-            'equity_price': existing_price,
+            'equity_price': lock_price,
             'form_data': equity_price_data,
             'currencies': dropdown_options.get('currencies', []),
             'securities': dropdown_options.get('securities', []),

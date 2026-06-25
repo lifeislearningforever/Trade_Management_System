@@ -22,6 +22,7 @@ from decimal import Decimal, InvalidOperation
 import csv
 import io
 import logging
+import threading
 import time
 from django.core.exceptions import ValidationError
 from django.core.cache import cache
@@ -29,6 +30,19 @@ from django.core.cache import cache
 from market_data.repositories.equity_price_hive_repository import equity_price_hive_repository
 
 logger = logging.getLogger(__name__)
+
+# Per-key write locks: serialise concurrent edits to the same equity price row
+# within a single Gunicorn worker process.  Combined with the REFRESH+token
+# check this catches same-second simultaneous saves.
+_write_locks: Dict[str, threading.Lock] = {}
+_write_locks_meta = threading.Lock()  # protects the dict itself
+
+
+def _get_write_lock(key: str) -> threading.Lock:
+    with _write_locks_meta:
+        if key not in _write_locks:
+            _write_locks[key] = threading.Lock()
+        return _write_locks[key]
 
 
 class EquityPriceService:
@@ -103,6 +117,12 @@ class EquityPriceService:
         except Exception as e:
             logger.error(f"Error in get_equity_prices: {str(e)}")
             raise
+
+    @staticmethod
+    def get_write_lock(currency_code: str, security_label: str, price_date: str) -> threading.Lock:
+        """Return the per-key threading.Lock for serialising concurrent writes."""
+        key = f"{currency_code}|{security_label}|{price_date}"
+        return _get_write_lock(key)
 
     @staticmethod
     def refresh_table():
