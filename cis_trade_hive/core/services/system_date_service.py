@@ -2,12 +2,14 @@
 System Date Service
 
 Core service for managing system date across the CIS application.
-Provides unified access to system date from GMP file (MRC_PC_DATE.txt).
+Provides unified access to system date from gmp_cis_sta_dly_alldatesinfo.
 
 Date Logic:
-- report_date: Date from GMP file (T-1)
-- processing_date: Same as report_date
-- system_date: report_date + 1 (business date T)
+- system_date    : contextual_today from alldatesinfo (business date T)
+- report_date    : prev_day from alldatesinfo (T-1)
+- processing_date: processing_date from alldatesinfo
+- settlement_t1  : T+1 settle date (calendar)
+- settlement_t2  : T+2 settle date — default for new trades
 
 Author: CIS Trade Hive Team
 Created: 2026-04-08
@@ -27,19 +29,22 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SystemDateInfo:
-    """System date information from GMP file."""
-    system_date: date                    # Business date (T)
+    """System date information from gmp_cis_sta_dly_alldatesinfo."""
+    system_date: date                    # Business date (T) — contextual_today
     system_date_str: str                 # YYYYMMDD format
     system_date_display: str             # YYYY-MM-DD format
-    report_date: Optional[date]          # Report date (T-1)
+    report_date: Optional[date]          # T-1 — prev_day
     report_date_str: Optional[str]
     report_date_display: Optional[str]
-    processing_date: Optional[date]      # Processing date
+    processing_date: Optional[date]      # processing_date column
     processing_date_str: Optional[str]
+    settlement_t1: Optional[str]         # T+1 settle date (YYYYMMDD)
+    settlement_t2: Optional[str]         # T+2 settle date (YYYYMMDD) — trade default
+    settlement_t2_display: Optional[str] # T+2 in YYYY-MM-DD for HTML date inputs
     source: str                          # 'GMP_FILE' or 'FALLBACK'
     is_business_day: bool
-    source_file: Optional[str]           # Source file name
-    loaded_at: Optional[datetime]        # When data was loaded
+    source_file: Optional[str]
+    loaded_at: Optional[datetime]
 
 
 # Cache settings
@@ -122,13 +127,22 @@ class SystemDateService:
             system_date_str = gmp_date_info.get('system_date')
             report_date_str = gmp_date_info.get('report_date')
             processing_date_str = gmp_date_info.get('processing_date')
+            settlement_t1_raw = gmp_date_info.get('settlement_t1')
+            settlement_t2_raw = gmp_date_info.get('settlement_t2')
 
             try:
                 system_date = self._parse_date(system_date_str)
                 report_date = self._parse_date(report_date_str) if report_date_str else None
                 processing_date = self._parse_date(processing_date_str) if processing_date_str else None
 
-                # loaded_at is now STRING 'YYYY-MM-DD HH:MM:SS' after migration
+                # settlement_t2 display for HTML date inputs (YYYY-MM-DD)
+                settlement_t2_display = None
+                if settlement_t2_raw:
+                    try:
+                        settlement_t2_display = self._parse_date(str(settlement_t2_raw)).strftime(self.DATE_FORMAT_DISPLAY)
+                    except ValueError:
+                        pass
+
                 loaded_at_raw = gmp_date_info.get('loaded_at')
                 if loaded_at_raw and isinstance(loaded_at_raw, str):
                     try:
@@ -136,7 +150,6 @@ class SystemDateService:
                     except ValueError:
                         loaded_at = None
                 elif loaded_at_raw:
-                    # fallback: still BIGINT ms before migration
                     loaded_at = datetime.fromtimestamp(int(loaded_at_raw) / 1000)
                 else:
                     loaded_at = None
@@ -150,6 +163,9 @@ class SystemDateService:
                     report_date_display=report_date.strftime(self.DATE_FORMAT_DISPLAY) if report_date else None,
                     processing_date=processing_date,
                     processing_date_str=processing_date_str,
+                    settlement_t1=str(settlement_t1_raw) if settlement_t1_raw else None,
+                    settlement_t2=str(settlement_t2_raw) if settlement_t2_raw else None,
+                    settlement_t2_display=settlement_t2_display,
                     source='GMP_FILE',
                     is_business_day=gmp_date_info.get('is_business_day', True),
                     source_file=gmp_date_info.get('source_file'),
@@ -167,6 +183,7 @@ class SystemDateService:
         logger.warning("No GMP file date available, using current date as fallback")
         today = date.today()
         yesterday = today - timedelta(days=1)
+        t2 = today + timedelta(days=2)
 
         return SystemDateInfo(
             system_date=today,
@@ -177,6 +194,9 @@ class SystemDateService:
             report_date_display=yesterday.strftime(self.DATE_FORMAT_DISPLAY),
             processing_date=yesterday,
             processing_date_str=yesterday.strftime(self.DATE_FORMAT_DB),
+            settlement_t1=None,
+            settlement_t2=t2.strftime(self.DATE_FORMAT_DB),
+            settlement_t2_display=t2.strftime(self.DATE_FORMAT_DISPLAY),
             source='FALLBACK',
             is_business_day=today.weekday() < 5,
             source_file=None,

@@ -121,6 +121,14 @@ class Command(BaseCommand):
                   AND sub_system   = 'cis'
                   AND data_frq     = 'dly'
                   AND record_type  = 'D'
+                  AND processing_date = (
+                      SELECT MAX(processing_date)
+                      FROM {DATABASE}.gmp_cis_sta_dly_alldatesinfo
+                      WHERE src_system = 'gmp'
+                        AND sub_system = 'cis'
+                        AND data_frq   = 'dly'
+                        AND record_type = 'D'
+                  )
                 LIMIT 1
                 """,
                 database=DATABASE

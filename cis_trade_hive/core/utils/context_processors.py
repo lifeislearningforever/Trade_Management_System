@@ -39,6 +39,8 @@ def system_date_context(request):
             'report_date_str': date_info.report_date_str,
             'report_date_display': date_info.report_date_display,
             'processing_date': date_info.processing_date,
+            'settlement_t2': date_info.settlement_t2,
+            'settlement_t2_display': date_info.settlement_t2_display,
             'system_date_source': date_info.source,
             'system_date_is_business_day': date_info.is_business_day,
         }
@@ -46,8 +48,9 @@ def system_date_context(request):
     except Exception as e:
         logger.error(f"Error getting system date context: {str(e)}")
         # Return fallback values
-        from datetime import date
+        from datetime import date, timedelta
         today = date.today()
+        t2 = today + timedelta(days=2)
         return {
             'system_date': today,
             'system_date_str': today.strftime('%Y%m%d'),
@@ -56,6 +59,8 @@ def system_date_context(request):
             'report_date_str': None,
             'report_date_display': None,
             'processing_date': None,
+            'settlement_t2': t2.strftime('%Y%m%d'),
+            'settlement_t2_display': t2.strftime('%Y-%m-%d'),
             'system_date_source': 'ERROR',
             'system_date_is_business_day': today.weekday() < 5,
         }

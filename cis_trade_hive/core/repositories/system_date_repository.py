@@ -1,128 +1,87 @@
 """
 System Date Repository
 
-Data access layer for system date operations.
-Reads system date from GMP file date table (cis_system_date).
+Reads system/settlement dates from the GMP reference table
+gmp_cis_sta_dly_alldatesinfo, using the row with the latest
+processing_date (src_system='gmp', sub_system='cis', data_frq='dly',
+record_type='D').
 
-Tables:
-- cis_system_date: GMP file date (MRC_PC_DATE.txt)
-
-Author: CIS Trade Hive Team
-Created: 2026-04-08
+Column mapping to service-layer dict keys:
+  contextual_today  → system_date   (business date T, YYYYMMDD)
+  prev_day          → report_date   (T-1, YYYYMMDD)
+  processing_date   → processing_date
+  settlement_t1     → settlement_t1
+  settlement_t2     → settlement_t2 (default settle date for trades)
+  reporting_date    → reporting_date
 """
 
 import logging
 from typing import Optional, Dict, Any
-from datetime import datetime
 
 from core.repositories.impala_connection import impala_manager
 
 logger = logging.getLogger(__name__)
 
+DATABASE = 'gmp_cis'
+ALLDATES_TABLE = 'gmp_cis_sta_dly_alldatesinfo'
+
+_FILTER = (
+    "src_system = 'gmp' "
+    "AND sub_system = 'cis' "
+    "AND data_frq = 'dly' "
+    "AND record_type = 'D'"
+)
+
 
 class SystemDateRepository:
-    """Repository for system date database operations."""
-
-    DATABASE = 'gmp_cis'
-    SYSTEM_DATE_TABLE = 'cis_system_date'
+    """Read-only repository for system date from gmp_cis_sta_dly_alldatesinfo."""
 
     @staticmethod
     def get_current_system_date() -> Optional[Dict[str, Any]]:
         """
-        Get current active system date from GMP file.
+        Return the most recent date row from gmp_cis_sta_dly_alldatesinfo.
 
-        Returns:
-            Dict with system_date, report_date, processing_date, etc.
-            None if no active date found.
+        Uses MAX(processing_date) to pick the latest loaded row.
+
+        Returns dict with keys:
+            system_date, report_date, processing_date,
+            settlement_t1, settlement_t2, reporting_date,
+            is_business_day, loaded_at
         """
         try:
             query = f"""
-            SELECT date_id, system_date, report_date, processing_date,
-                   source_file, file_date_raw, is_active, is_business_day,
-                   loaded_by, loaded_at, created_at, updated_at
-            FROM {SystemDateRepository.DATABASE}.{SystemDateRepository.SYSTEM_DATE_TABLE}
-            WHERE is_active = true
-            ORDER BY loaded_at DESC
-            LIMIT 1
+                SELECT
+                    contextual_today  AS system_date,
+                    prev_day          AS report_date,
+                    processing_date,
+                    settlement_t1,
+                    settlement_t2,
+                    reporting_date,
+                    processing_date   AS loaded_at
+                FROM {DATABASE}.{ALLDATES_TABLE}
+                WHERE {_FILTER}
+                  AND processing_date = (
+                      SELECT MAX(processing_date)
+                      FROM {DATABASE}.{ALLDATES_TABLE}
+                      WHERE {_FILTER}
+                  )
+                LIMIT 1
             """
 
-            results = impala_manager.execute_query(query, database=SystemDateRepository.DATABASE)
+            results = impala_manager.execute_query(query, database=DATABASE)
 
-            if results and len(results) > 0:
-                return results[0]
+            if results:
+                row = results[0]
+                row['is_business_day'] = True   # alldatesinfo only has business days
+                row['source_file'] = ALLDATES_TABLE
+                return row
 
-            logger.warning("No active system date found in cis_system_date table")
+            logger.warning("No date row found in %s.%s", DATABASE, ALLDATES_TABLE)
             return None
 
         except Exception as e:
-            logger.error(f"Error getting current system date: {str(e)}")
+            logger.error("Error reading system date from alldatesinfo: %s", e)
             return None
-
-    @staticmethod
-    def update_system_date(
-        system_date: str,
-        report_date: str,
-        processing_date: str,
-        source_file: str,
-        file_date_raw: str,
-        loaded_by: str,
-        is_business_day: bool = True
-    ) -> bool:
-        """
-        Update system date (called by ETL after loading MRC_PC_DATE.txt).
-
-        First deactivates all existing records, then inserts new active record.
-
-        Args:
-            system_date: Business date T (YYYYMMDD)
-            report_date: Report date T-1 (YYYYMMDD)
-            processing_date: Processing date (YYYYMMDD)
-            source_file: Source file name
-            file_date_raw: Raw date from file
-            loaded_by: ETL job or user
-            is_business_day: Whether system_date is a business day
-
-        Returns:
-            True if successful
-        """
-        try:
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
-            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-            # Deactivate all existing records
-            deactivate_sql = f"""
-            UPDATE {SystemDateRepository.DATABASE}.{SystemDateRepository.SYSTEM_DATE_TABLE}
-            SET is_active = false, updated_at = '{timestamp_str}'
-            WHERE is_active = true
-            """
-            impala_manager.execute_write(deactivate_sql, database=SystemDateRepository.DATABASE)
-
-            # Generate new date_id (BIGINT ms PK — intentional)
-            date_id = timestamp_ms
-
-            # Insert new active record
-            insert_sql = f"""
-            UPSERT INTO {SystemDateRepository.DATABASE}.{SystemDateRepository.SYSTEM_DATE_TABLE} (
-                date_id, system_date, report_date, processing_date,
-                source_file, file_date_raw, is_active, is_business_day,
-                loaded_by, loaded_at, created_at, updated_at
-            ) VALUES (
-                {date_id}, '{system_date}', '{report_date}', '{processing_date}',
-                '{source_file}', '{file_date_raw}', true, {str(is_business_day).lower()},
-                '{loaded_by}', '{timestamp_str}', '{timestamp_str}', '{timestamp_str}'
-            )
-            """
-
-            success = impala_manager.execute_write(insert_sql, database=SystemDateRepository.DATABASE)
-
-            if success:
-                logger.info(f"System date updated: system_date={system_date}, report_date={report_date}")
-
-            return success
-
-        except Exception as e:
-            logger.error(f"Error updating system date: {str(e)}")
-            return False
 
 
 # Singleton instance
