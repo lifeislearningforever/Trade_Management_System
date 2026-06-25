@@ -599,8 +599,9 @@ def equity_price_detail(request, currency_code: str, price_date: str):
     except Exception as e:
         return HttpResponse(f"Error: {str(e)}", status=500)
 
-    # Get price history for this security (all dates from main table)
-    price_history = equity_price_service.get_price_history(security_label, days=90)
+    # Get price history for this security — anchor the 90-day window on the
+    # record's own price_date so older records still show surrounding history.
+    price_history = equity_price_service.get_price_history(security_label, days=90, reference_date=price_date)
 
     # Get version history (edit history from history table)
     version_history = equity_price_service.get_version_history(currency_code, security_label, price_date)

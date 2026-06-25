@@ -516,7 +516,8 @@ class EquityPriceHiveRepository:
     @staticmethod
     def get_price_history(
         security_label: str,
-        days: int = 30
+        days: int = 30,
+        reference_date: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get price history for a specific security.
@@ -524,13 +525,18 @@ class EquityPriceHiveRepository:
         Args:
             security_label: Security name
             days: Number of days of history
+            reference_date: Anchor date for the window (YYYY-MM-DD).
+                            Defaults to today so current callers are unaffected.
+                            On the detail page we pass the record's own price_date
+                            so older records always show their surrounding history.
 
         Returns:
             List of historical prices sorted by date descending
         """
         try:
             escaped_security = security_label.replace("'", "\\'")
-            from_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+            anchor = datetime.strptime(reference_date, '%Y-%m-%d') if reference_date else datetime.now()
+            from_date = (anchor - timedelta(days=days)).strftime('%Y-%m-%d')
 
             query = f"""
             SELECT

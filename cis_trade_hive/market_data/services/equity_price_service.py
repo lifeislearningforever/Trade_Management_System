@@ -357,7 +357,8 @@ class EquityPriceService:
     @staticmethod
     def get_price_history(
         security_label: str,
-        days: int = 30
+        days: int = 30,
+        reference_date: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get historical prices for a security.
@@ -365,6 +366,7 @@ class EquityPriceService:
         Args:
             security_label: Security name
             days: Number of days of history (default 30, max 365)
+            reference_date: Anchor date (YYYY-MM-DD) for the window; defaults to today.
 
         Returns:
             List of historical prices sorted by date descending
@@ -381,7 +383,8 @@ class EquityPriceService:
         try:
             prices = equity_price_hive_repository.get_price_history(
                 security_label=security_label,
-                days=days
+                days=days,
+                reference_date=reference_date,
             )
 
             logger.info(f"Retrieved {len(prices)} historical prices for {security_label} ({days} days)")
