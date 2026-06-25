@@ -53,7 +53,7 @@ class PortfolioWrapper:
         self.currency = data.get('currency', '')
         self.manager = data.get('manager', '')
         self.portfolio_client = data.get('portfolio_client', '')
-        self.cash_balance = data.get('settlement_ccy', '')
+        self.settlement_ccy = data.get('settlement_ccy', '')
         self.status = data.get('status', 'INITIAL')
         self.src_system = data.get('src_system', 'GMP')
 
@@ -386,7 +386,7 @@ def portfolio_create(request):
                 'currency': request.POST.get('currency'),
                 'manager': request.POST.get('manager'),
                 'portfolio_client': request.POST.get('portfolio_client', ''),
-                'settlement_ccy': request.POST.get('cash_balance', ''),
+                'settlement_ccy': request.POST.get('settlement_ccy', ''),
                 'cost_centre_code': cost_centre_code,
                 'corp_code': corp_code,
                 'account_group': request.POST.get('account_group', ''),
@@ -508,7 +508,7 @@ def portfolio_edit(request, portfolio_name):
                 'currency': request.POST.get('currency'),
                 'manager': request.POST.get('manager'),
                 'portfolio_client': request.POST.get('portfolio_client', ''),
-                'settlement_ccy': request.POST.get('cash_balance', ''),
+                'settlement_ccy': request.POST.get('settlement_ccy', ''),
                 'cost_centre_code': cost_centre_code,
                 'corp_code': corp_code,
                 'account_group': request.POST.get('account_group', ''),
