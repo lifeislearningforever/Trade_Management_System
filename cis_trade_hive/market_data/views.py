@@ -757,23 +757,27 @@ def equity_price_edit(request, currency_code: str, price_date: str):
         # Get user info
         username = request.session.get('user_login', 'SYSTEM')
 
-        # Optimistic lock check: compare the price_timestamp the user loaded the
-        # form with against the current value in Kudu. If they differ, another
-        # user saved while this form was open — reject to prevent silent overwrites.
-        # Only CIS records reach here so price_timestamp is always set.
+        # Optimistic lock check: REFRESH the table so Impala sees the very
+        # latest Kudu commit (prevents eventual-consistency false negatives where
+        # a concurrent save by another user hasn't propagated yet), then re-read
+        # the record fresh before comparing the timestamp token.
+        equity_price_service.refresh_table()
+        fresh_price = equity_price_service.get_equity_price_by_key(currency_code, security_label, price_date)
+        lock_price = fresh_price or existing_price  # fall back if re-read fails
+
         token = request.POST.get('price_timestamp_token', '').strip()
-        current_ts = str(existing_price.get('price_timestamp') or '').strip()
+        current_ts = str(lock_price.get('price_timestamp') or '').strip()
         if token and current_ts and token != current_ts:
             error_message = (
                 f"This price was updated by another user while you were editing "
-                f"(last saved by {existing_price.get('updated_by') or existing_price.get('created_by', 'unknown')} "
-                f"at {existing_price.get('price_datetime') or current_ts}). "
+                f"(last saved by {lock_price.get('updated_by') or lock_price.get('created_by', 'unknown')} "
+                f"at {lock_price.get('price_datetime') or current_ts}). "
                 f"Please reload the page to get the latest values before saving."
             )
             dropdown_options = equity_price_dropdown_service.get_all_dropdown_options(username)
             context = {
                 'error': error_message,
-                'equity_price': existing_price,
+                'equity_price': lock_price,
                 'form_data': equity_price_data,
                 'currencies': dropdown_options.get('currencies', []),
                 'securities': dropdown_options.get('securities', []),

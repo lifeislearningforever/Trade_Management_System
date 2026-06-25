@@ -56,6 +56,21 @@ class EquityPriceHiveRepository:
     HISTORY_TABLE_NAME = "gmp_cis.cis_equity_price_history"
 
     @staticmethod
+    def refresh_table():
+        """
+        Issue REFRESH on the equity price table so the next read sees the
+        latest Kudu commits.  Called before the optimistic-lock re-read on
+        POST to avoid Kudu eventual-consistency false negatives.
+        """
+        try:
+            impala_manager.execute_write(
+                f"REFRESH {EquityPriceHiveRepository.TABLE_NAME}",
+                database=EquityPriceHiveRepository.DATABASE,
+            )
+        except Exception as e:
+            logger.warning(f"REFRESH equity price table failed (non-fatal): {e}")
+
+    @staticmethod
     def get_all_equity_prices(
         limit: int = 1000,
         currency_code: Optional[str] = None,
@@ -398,10 +413,11 @@ class EquityPriceHiveRepository:
             merged_data['currency_code'] = currency_code
             merged_data['security_label'] = security_label
             merged_data['updated_by'] = username
-            merged_data['updated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            # Refresh price_timestamp to now so the on-screen "Timestamp" column
-            # reflects the actual time of this edit (PORTIARP-7489)
-            merged_data['price_timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            _now = datetime.now()
+            merged_data['updated_at'] = _now.strftime('%Y-%m-%d %H:%M:%S')
+            # Include milliseconds so two saves within the same second produce
+            # distinct tokens — essential for the optimistic-lock check.
+            merged_data['price_timestamp'] = _now.strftime('%Y-%m-%d %H:%M:%S.%f')[:23]
 
             # Use upsert; skip its own audit — update_equity_price's finally block handles it
             success = EquityPriceHiveRepository.upsert_equity_price(merged_data, username, is_update=True, _skip_audit=True)

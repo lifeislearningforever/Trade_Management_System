@@ -105,6 +105,11 @@ class EquityPriceService:
             raise
 
     @staticmethod
+    def refresh_table():
+        """Force Impala to see the latest Kudu commits before a lock check re-read."""
+        equity_price_hive_repository.refresh_table()
+
+    @staticmethod
     def get_equity_price_by_key(currency_code: str, security_label: str, price_date: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Get equity price by composite key.
