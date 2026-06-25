@@ -751,11 +751,13 @@ def equity_price_edit(request, currency_code: str, price_date: str):
         # Get user info
         username = request.session.get('user_login', 'SYSTEM')
 
-        # Optimistic lock check: compare the price_timestamp the user loaded the
-        # form with against the current value in Kudu. If they differ, another
-        # user saved while this form was open — reject to prevent silent overwrites.
-        token = request.POST.get('price_timestamp_token', '')
-        current_ts = str(existing_price.get('price_timestamp', ''))
+        # Optimistic lock check: compare the snapshot token the user loaded with
+        # the current value in Kudu. Uses price_timestamp when available, falls
+        # back to updated_at so GMP records (which have no price_timestamp) are
+        # also protected. Skips only when BOTH sides are genuinely empty.
+        token = request.POST.get('price_timestamp_token', '').strip()
+        current_ts = str(existing_price.get('price_timestamp') or
+                         existing_price.get('updated_at') or '').strip()
         if token and current_ts and token != current_ts:
             error_message = (
                 f"This price was updated by another user while you were editing "
