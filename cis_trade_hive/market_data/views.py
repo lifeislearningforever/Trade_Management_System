@@ -739,25 +739,30 @@ def equity_price_edit(request, currency_code: str, price_date: str):
     except Exception as e:
         return HttpResponse(f"Error: {str(e)}", status=500)
 
+    # GMP records are read-only — block edit at the view level regardless of
+    # how the URL was reached (direct link bypass, etc.)
+    if (existing_price.get('src_system') or '').upper() != 'CIS':
+        messages.error(request, 'GMP source records are read-only and cannot be edited.')
+        return redirect('market_data:equity_price_list')
+
     if request.method == 'POST':
-        # Get form data - removed market and group_name
+        # Get form data
         equity_price_data = {
             'isin': request.POST.get('isin', '').strip(),
             'price_date': request.POST.get('price_date', '').strip(),
             'main_closing_price': request.POST.get('main_closing_price', '').strip(),
-            'src_system': existing_price.get('src_system', 'CIS'),
+            'src_system': 'CIS',
         }
 
         # Get user info
         username = request.session.get('user_login', 'SYSTEM')
 
-        # Optimistic lock check: compare the snapshot token the user loaded with
-        # the current value in Kudu. Uses price_timestamp when available, falls
-        # back to updated_at so GMP records (which have no price_timestamp) are
-        # also protected. Skips only when BOTH sides are genuinely empty.
+        # Optimistic lock check: compare the price_timestamp the user loaded the
+        # form with against the current value in Kudu. If they differ, another
+        # user saved while this form was open — reject to prevent silent overwrites.
+        # Only CIS records reach here so price_timestamp is always set.
         token = request.POST.get('price_timestamp_token', '').strip()
-        current_ts = str(existing_price.get('price_timestamp') or
-                         existing_price.get('updated_at') or '').strip()
+        current_ts = str(existing_price.get('price_timestamp') or '').strip()
         if token and current_ts and token != current_ts:
             error_message = (
                 f"This price was updated by another user while you were editing "
