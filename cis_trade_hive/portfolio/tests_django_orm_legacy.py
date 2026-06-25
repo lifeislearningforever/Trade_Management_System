@@ -37,7 +37,7 @@ class PortfolioModelTest(TestCase):
             name='Test Portfolio',
             currency='USD',
             manager='Test Manager',
-            cash_balance='USD',
+            settlement_ccy='USD',
             status='DRAFT',
             created_by=self.maker
         )
@@ -143,7 +143,7 @@ class PortfolioServiceTest(TestCase):
             'name': 'Service Test Portfolio',
             'currency': 'USD',
             'manager': 'Test Manager',
-            'cash_balance': 'USD'
+            'settlement_ccy': 'USD'
         }
 
         portfolio = PortfolioService.create_portfolio(self.maker, data)

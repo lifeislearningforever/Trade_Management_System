@@ -112,7 +112,7 @@
                                         <td><strong>{{ portfolio.code }}</strong></td>
                                         <td>{{ portfolio.name }}</td>
                                         <td><span class="badge badge-secondary">{{ portfolio.currency }}</span></td>
-                                        <td>{{ portfolio.cash_balance|default:"-" }}</td>
+                                        <td>{{ portfolio.settlement_ccy|default:"-" }}</td>
                                         <td>
                                             {% if portfolio.status == 'ACTIVE' %}
                                                 <span class="badge badge-success">Active</span>

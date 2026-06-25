@@ -65,7 +65,7 @@ class PortfolioService:
             currency=data['currency'],
             manager=data['manager'],
             portfolio_client=data.get('portfolio_client', ''),
-            cash_balance=data.get('cash_balance', 0),
+            cash_balance=data.get('settlement_ccy', ''),
             cost_centre_code=data.get('cost_centre_code', ''),
             corp_code=data.get('corp_code', ''),
             account_group=data.get('account_group', ''),
@@ -126,7 +126,7 @@ class PortfolioService:
         # Update fields
         editable_fields = [
             'name', 'description', 'currency', 'manager', 'portfolio_client',
-            'cash_balance', 'cost_centre_code', 'corp_code', 'account_group',
+            'settlement_ccy', 'cost_centre_code', 'corp_code', 'account_group',
             'portfolio_group', 'report_group', 'entity_group'
         ]
 

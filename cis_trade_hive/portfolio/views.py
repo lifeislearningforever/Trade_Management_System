@@ -53,7 +53,7 @@ class PortfolioWrapper:
         self.currency = data.get('currency', '')
         self.manager = data.get('manager', '')
         self.portfolio_client = data.get('portfolio_client', '')
-        self.cash_balance = data.get('cash_balance', 0)
+        self.cash_balance = data.get('settlement_ccy', '')
         self.status = data.get('status', 'INITIAL')
         self.src_system = data.get('src_system', 'GMP')
 
@@ -178,7 +178,7 @@ def portfolio_list(request):
                 portfolio.get('description', ''),
                 portfolio.get('currency', ''),
                 portfolio.get('manager', ''),
-                portfolio.get('cash_balance', ''),
+                portfolio.get('settlement_ccy', ''),
                 portfolio.get('status', ''),
                 portfolio.get('src_system', ''),
                 portfolio.get('account_group', ''),
@@ -386,7 +386,7 @@ def portfolio_create(request):
                 'currency': request.POST.get('currency'),
                 'manager': request.POST.get('manager'),
                 'portfolio_client': request.POST.get('portfolio_client', ''),
-                'cash_balance': float(request.POST.get('cash_balance', 0)) if request.POST.get('cash_balance') else 0,
+                'settlement_ccy': request.POST.get('cash_balance', ''),
                 'cost_centre_code': cost_centre_code,
                 'corp_code': corp_code,
                 'account_group': request.POST.get('account_group', ''),
@@ -508,7 +508,7 @@ def portfolio_edit(request, portfolio_name):
                 'currency': request.POST.get('currency'),
                 'manager': request.POST.get('manager'),
                 'portfolio_client': request.POST.get('portfolio_client', ''),
-                'cash_balance': request.POST.get('cash_balance', '0'),
+                'settlement_ccy': request.POST.get('cash_balance', ''),
                 'cost_centre_code': cost_centre_code,
                 'corp_code': corp_code,
                 'account_group': request.POST.get('account_group', ''),

@@ -97,7 +97,7 @@
                             <option value="">— Select Currency —</option>
                             {% for curr in dropdown_options.currencies %}
                             <option value="{{ curr.code }}"
-                                {% if portfolio.cash_balance == curr.code %}selected{% endif %}>
+                                {% if portfolio.settlement_ccy == curr.code %}selected{% endif %}>
                                 {{ curr.code }}
                             </option>
                             {% endfor %}

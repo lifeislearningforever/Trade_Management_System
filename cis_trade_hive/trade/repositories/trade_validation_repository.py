@@ -103,7 +103,7 @@ class TradeValidationRepository:
             status_list = ", ".join([f"'{s}'" for s in self.PORTFOLIO_VALID_STATUSES])
 
             query = f"""
-            SELECT name, currency, manager, cash_balance, status, is_active, revaluation_status
+            SELECT name, currency, manager, settlement_ccy, status, is_active, revaluation_status
             FROM {self.DATABASE}.{self.PORTFOLIO_TABLE}
             WHERE name = '{portfolio_name_escaped}'
             LIMIT 1
@@ -198,7 +198,7 @@ class TradeValidationRepository:
                    COALESCE(description, name) AS portfolio_full_name,
                    currency,
                    manager,
-                   cash_balance,
+                   settlement_ccy,
                    status
             FROM {self.DATABASE}.{self.PORTFOLIO_TABLE}
             WHERE UPPER(status) IN ('VALIDATED', 'SETTLED')

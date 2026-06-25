@@ -85,7 +85,7 @@ class PortfolioHiveRepository:
 
             query = f"""
             SELECT `name`, `description`, `currency`, `manager`, `portfolio_client`,
-                   `cash_balance`, `cash_balance_list`, `status`, `cost_centre_code`, `corp_code`,
+                   `settlement_ccy`, `cash_balance_list`, `status`, `cost_centre_code`, `corp_code`,
                    `account_group`, `portfolio_group`, `report_group`, `entity_group`,
                    `revaluation_status`, `is_active`, `created_at`, `updated_at`, `updated_by`,
                    `src_system`, `submitted_by`, `submitted_at`, `validated_by`, `validated_at`,
@@ -266,12 +266,12 @@ class PortfolioHiveRepository:
         try:
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             escape = PortfolioHiveRepository.escape_value
-            cash_balance_str = str(portfolio_data.get('cash_balance', '0'))
+            cash_balance_str = str(portfolio_data.get('settlement_ccy', ''))
 
             query = f"""
             INSERT INTO {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
             (`name`, `description`, `currency`, `manager`, `portfolio_client`,
-             `cash_balance`, `cash_balance_list`, `cost_centre_code`, `corp_code`, `account_group`,
+             `settlement_ccy`, `cash_balance_list`, `cost_centre_code`, `corp_code`, `account_group`,
              `portfolio_group`, `report_group`, `entity_group`, `status`,
              `is_active`, `revaluation_status`, `accounting_section`, `src_system`,
              `created_by`, `created_at`, `updated_by`, `updated_at`,
@@ -329,7 +329,7 @@ class PortfolioHiveRepository:
         try:
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             escape = PortfolioHiveRepository.escape_value
-            cash_balance_str = str(portfolio_data.get('cash_balance', '0'))
+            cash_balance_str = str(portfolio_data.get('settlement_ccy', ''))
 
             query = f"""
             UPDATE {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
@@ -337,7 +337,7 @@ class PortfolioHiveRepository:
                 `currency` = {escape(portfolio_data.get('currency'))},
                 `manager` = {escape(portfolio_data.get('manager'))},
                 `portfolio_client` = {escape(portfolio_data.get('portfolio_client', ''))},
-                `cash_balance` = {escape(cash_balance_str)},
+                `settlement_ccy` = {escape(cash_balance_str)},
                 `cash_balance_list` = {escape(portfolio_data.get('cash_balance_list', ''))},
                 `cost_centre_code` = {escape(portfolio_data.get('cost_centre_code', ''))},
                 `corp_code` = {escape(portfolio_data.get('corp_code', ''))},
