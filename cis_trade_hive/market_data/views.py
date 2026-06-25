@@ -767,7 +767,22 @@ def equity_price_edit(request, currency_code: str, price_date: str):
 
         token = request.POST.get('price_timestamp_token', '').strip()
         current_ts = str(lock_price.get('price_timestamp') or '').strip()
-        if token and current_ts and token != current_ts:
+
+        # Second guard: if price_timestamp didn't change (Kudu read lag), check
+        # updated_by — if a different user saved while this form was open, their
+        # username will now be in the record even if the timestamp hasn't propagated.
+        token_updated_by = request.POST.get('updated_by_token', '').strip()
+        current_updated_by = str(lock_price.get('updated_by') or lock_price.get('created_by') or '').strip()
+
+        ts_conflict = token and current_ts and token != current_ts
+        user_conflict = (
+            token_updated_by
+            and current_updated_by
+            and token_updated_by != current_updated_by
+            and current_updated_by != username  # ignore if WE are the last editor
+        )
+
+        if ts_conflict or user_conflict:
             error_message = (
                 f"This price was updated by another user while you were editing "
                 f"(last saved by {lock_price.get('updated_by') or lock_price.get('created_by', 'unknown')} "

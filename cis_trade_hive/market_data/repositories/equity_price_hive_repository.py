@@ -415,9 +415,12 @@ class EquityPriceHiveRepository:
             merged_data['updated_by'] = username
             _now = datetime.now()
             merged_data['updated_at'] = _now.strftime('%Y-%m-%d %H:%M:%S')
-            # Include milliseconds so two saves within the same second produce
-            # distinct tokens — essential for the optimistic-lock check.
-            merged_data['price_timestamp'] = _now.strftime('%Y-%m-%d %H:%M:%S.%f')[:23]
+            # Store as Unix milliseconds (string) so every save produces a
+            # strictly unique token. Two saves in the same millisecond are
+            # impossible from separate HTTP requests; _ts_to_display() already
+            # handles this numeric-string format for display.
+            import time as _time
+            merged_data['price_timestamp'] = str(int(_time.time() * 1000))
 
             # Use upsert; skip its own audit — update_equity_price's finally block handles it
             success = EquityPriceHiveRepository.upsert_equity_price(merged_data, username, is_update=True, _skip_audit=True)

@@ -67,6 +67,7 @@
                 {% if is_edit %}
                 <input type="hidden" name="security_label" value="{{ equity_price.security_label }}">
                 <input type="hidden" name="price_timestamp_token" value="{{ equity_price.price_timestamp }}">
+                <input type="hidden" name="updated_by_token" value="{{ equity_price.updated_by|default:equity_price.created_by }}">
                 {% endif %}
 
                 <div class="row">
