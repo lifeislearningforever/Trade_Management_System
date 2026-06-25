@@ -61,6 +61,13 @@ class Command(BaseCommand):
             help='Also update security_label in cis_trade (in addition to cis_position).',
         )
         parser.add_argument(
+            '--dry-run',
+            action='store_true',
+            default=False,
+            dest='dry_run',
+            help='Explicit dry-run flag (same as omitting --execute). Shows counts only.',
+        )
+        parser.add_argument(
             '--delimiter',
             default=',',
             help='CSV delimiter (default: comma).',
@@ -68,7 +75,8 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         csv_path = options['csv']
-        execute = options['execute']
+        # --dry-run overrides --execute if both are passed
+        execute = options['execute'] and not options['dry_run']
         update_trades = options['update_trades']
         delimiter = options['delimiter']
 
