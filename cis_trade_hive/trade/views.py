@@ -355,7 +355,7 @@ def trade_list(request):
             # Counterparty & Broker
             'Counterparty', 'Broker', 'Broker Name', 'Custodian',
             # Position & Settlement
-            'Open/Close', 'Extension', 'Selling Rule', 'Cash Balance',
+            'Open/Close', 'Extension', 'Selling Rule', 'Settlement CCY',
             'Curr. Dealing', 'Open Dealing', 'Qty Entitled', 'Input Tax (Oth)',
             # GL / Reference
             'GL Fund Type', 'GL Cost Centre', 'GL Account Code',
@@ -439,7 +439,7 @@ def trade_list(request):
                 trade.get('open_close_position', ''),
                 trade.get('extension', ''),
                 trade.get('selling_rule', ''),
-                fmt_num(trade.get('cash_balance')),
+                trade.get('settlement_ccy', ''),
                 fmt_num(trade.get('curr_dealing')),
                 fmt_num(trade.get('open_dealing')),
                 fmt_num(trade.get('qty_entitled'), dp=4),
@@ -724,6 +724,7 @@ def trade_create(request, trade_type=None):
                 'cash_balance': request.POST.get('cash_balance', 0),
                 'custodian': request.POST.get('custodian', ''),
                 'amor_accr_method': request.POST.get('amor_accr_method', ''),
+                'settlement_ccy': request.POST.get('settlement_ccy', ''),
                 'remarks': request.POST.get('remarks', ''),
                 'counterparty': request.POST.get('counterparty', ''),
                 # UDF fields
@@ -925,6 +926,7 @@ def trade_edit(request, trade_id):
                 'cash_balance': request.POST.get('cash_balance', 0),
                 'custodian': request.POST.get('custodian', ''),
                 'amor_accr_method': request.POST.get('amor_accr_method', ''),
+                'settlement_ccy': request.POST.get('settlement_ccy', ''),
                 'remarks': request.POST.get('remarks', ''),
                 'counterparty': request.POST.get('counterparty', ''),
                 # UDF fields

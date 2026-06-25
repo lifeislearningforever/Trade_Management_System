@@ -369,7 +369,8 @@
                             <div>{{ trade.selling_rule|default:"-" }}</div>
                         </div>
                         <div class="col-md-4 mb-3">
-                            <!-- Empty for alignment -->
+                            <label class="form-label text-muted">Settlement CCY</label>
+                            <div>{{ trade.settlement_ccy|default:"-" }}</div>
                         </div>
                     </div>
                 </div>
