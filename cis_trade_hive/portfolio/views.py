@@ -168,7 +168,7 @@ def portfolio_list(request):
 
         writer = csv.writer(response)
         writer.writerow([
-            'Name', 'Description', 'Currency', 'Manager', 'Cash Balance',
+            'Name', 'Description', 'Currency', 'Settlement CCY', 'Manager',
             'Status', 'Source', 'Account Group', 'Created At'
         ])
 
@@ -177,8 +177,8 @@ def portfolio_list(request):
                 portfolio.get('name', ''),
                 portfolio.get('description', ''),
                 portfolio.get('currency', ''),
-                portfolio.get('manager', ''),
                 portfolio.get('settlement_ccy', ''),
+                portfolio.get('manager', ''),
                 portfolio.get('status', ''),
                 portfolio.get('src_system', ''),
                 portfolio.get('account_group', ''),

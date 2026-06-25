@@ -93,7 +93,7 @@
                     <input type="hidden" id="cash_balance_list" name="cash_balance_list" value="{{ portfolio.cash_balance_list|default:'' }}">
                     <div class="col-md-4 mb-4">
                         <label for="settlement_ccy" class="form-label">Settlement CCY</label>
-                        <select class="form-select" id="settlement_ccy" name="settlement_ccy">
+                        <select class="form-select select2-searchable" id="settlement_ccy" name="settlement_ccy">
                             <option value="">— Select Currency —</option>
                             {% for curr in dropdown_options.currencies %}
                             <option value="{{ curr.code }}"

@@ -105,6 +105,7 @@
                                 <th class="sortable" data-sort-type="text" style="min-width: 180px;">Portfolio Name</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 200px;">Portfolio Description</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 100px;">Currency</th>
+                                <th class="sortable" data-sort-type="text" style="min-width: 120px;">Settlement CCY</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 100px;">Entity</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 120px;">Business Unit</th>
                                 <th class="sortable" data-sort-type="text" style="min-width: 130px;">Investment Type</th>
@@ -145,6 +146,11 @@
                                 </td>
                                 <td>
                                     <span class="badge badge-info">{{ portfolio.currency }}</span>
+                                </td>
+                                <td>
+                                    {% if portfolio.settlement_ccy %}
+                                        <span class="badge badge-secondary">{{ portfolio.settlement_ccy }}</span>
+                                    {% else %}-{% endif %}
                                 </td>
                                 <td>{{ portfolio.entity|default:"-" }}</td>
                                 <td>{{ portfolio.business_line|default:"-" }}</td>
