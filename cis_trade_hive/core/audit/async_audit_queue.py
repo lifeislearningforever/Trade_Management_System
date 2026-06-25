@@ -147,6 +147,10 @@ class AsyncAuditQueue:
             self.start()
 
         try:
+            # Normalise to dict before queuing so workers always receive dicts,
+            # regardless of whether caller passed a plain dict or an AuditEntry object.
+            if not isinstance(audit_data, dict):
+                audit_data = self._to_dict(audit_data)
             # Non-blocking put
             self.queue.put(audit_data, block=False)
             return True
