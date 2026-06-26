@@ -45,25 +45,72 @@ class DatasourceRepository:
             return str(val).lower()
         return str(val)
 
+    # Position upload prefix pattern: CIS_External_upload_format_{N}_
+    # Valid:   CIS_External_upload_format_5_US.csv
+    #          CIS_External_upload_format_1_20260227.csv
+    # Invalid: 20260227_CIS_External_upload_format_5.csv  (prefix not at start)
+    #          Temp_CIS_External_upload_format_5.csv      (prefix not at start)
+    _POSITION_PREFIXES = [
+        f'CIS_External_upload_format_{n}_' for n in range(1, 6)
+    ]
+
+    @classmethod
+    def _resolve_position_source_name(cls, file_name: str) -> Optional[str]:
+        """
+        If file_name matches CIS_External_upload_format_{1-5}_*.csv,
+        return the canonical source_name stored in cis_datasource_mng
+        (e.g. 'CIS_External_upload_format_1.csv').
+
+        Rules:
+        - Must start with the prefix (case-sensitive)
+        - Must end with .csv
+        - Anything between the prefix and .csv is allowed
+        Returns None if no prefix matches.
+        """
+        if not file_name.lower().endswith('.csv'):
+            return None
+        for prefix in cls._POSITION_PREFIXES:
+            if file_name.startswith(prefix):
+                # Extract the format number from the prefix, e.g. '5'
+                n = prefix.split('_')[4]  # 'CIS_External_upload_format_{N}_'
+                return f'CIS_External_upload_format_{n}.csv'
+        return None
+
     def get_datasource_by_name(self, source_name: str) -> Optional[Dict[str, Any]]:
         """
         Get datasource configuration by source_name.
 
+        Supports two lookup modes:
+        1. Exact match — filename stored verbatim in cis_datasource_mng.
+        2. Prefix match — filename starts with CIS_External_upload_format_{1-5}_
+           and ends with .csv.  Resolved to the canonical source_name before lookup.
+           e.g. 'CIS_External_upload_format_5_US.csv' → looks up
+                'CIS_External_upload_format_5.csv'
+
         Args:
-            source_name: Name of the source file (e.g., 'CIS_External_upload_format_1.csv')
+            source_name: Uploaded file name
 
         Returns:
             Datasource configuration dict or None if not found
         """
         try:
-            source_name_escaped = source_name.replace("'", "''")
+            # Try prefix resolution first (position upload files)
+            canonical = self._resolve_position_source_name(source_name)
+            lookup_name = canonical if canonical else source_name
+
+            lookup_escaped = lookup_name.replace("'", "''")
             query = f"""
             SELECT *
             FROM {self.DATABASE}.{self.TABLE_NAME}
-            WHERE source_name = '{source_name_escaped}'
+            WHERE source_name = '{lookup_escaped}'
             LIMIT 1
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
+            if results:
+                logger.info(
+                    f"Datasource matched: '{source_name}' → '{lookup_name}' "
+                    f"(target={results[0].get('target_table')})"
+                )
             return results[0] if results else None
         except Exception as e:
             logger.error(f"Error getting datasource by name: {str(e)}")
