@@ -367,7 +367,7 @@ class PositionService:
             'uncall_lc': float(uncall_lc) if uncall_lc is not None else 0,
             'pipeline_fc': float(pipeline_fc) if pipeline_fc is not None else 0,
             'pipeline_lc': float(pipeline_lc) if pipeline_lc is not None else 0,
-            'position_type': position_type or 'LONG',
+            'position_type': position_type or 'INT',
             'position_basis': position_basis
         }
 
@@ -504,7 +504,7 @@ class PositionService:
                 'uncall_lc': 0,
                 'pipeline_fc': 0,
                 'pipeline_lc': 0,
-                'position_type': position_type or 'LONG',
+                'position_type': position_type or 'INT',
                 'position_basis': position_basis
             }
             logger.info(f"Position {position_id} fully closed. Total realized P&L: {new_realized_pnl}, LC: {new_realized_pnl_lc}")
@@ -564,7 +564,7 @@ class PositionService:
                 'uncall_lc': float(uncall_lc) if uncall_lc is not None else float(current.get('uncall_lc', 0) or 0),
                 'pipeline_fc': float(pipeline_fc) if pipeline_fc is not None else float(current.get('pipeline_fc', 0) or 0),
                 'pipeline_lc': float(pipeline_lc) if pipeline_lc is not None else float(current.get('pipeline_lc', 0) or 0),
-                'position_type': position_type or current.get('position_type') or 'LONG',
+                'position_type': position_type or current.get('position_type') or 'INT',
                 'position_basis': position_basis
             }
 
@@ -915,7 +915,7 @@ class PositionService:
                 cast_decimal(position_data.get('pipeline_fc', 0) or 0),
                 cast_decimal(position_data.get('pipeline_lc', 0) or 0),
                 # Position classification
-                f"'{position_data.get('position_type', 'LONG')}'" if position_data.get('position_type') else "'LONG'",
+                f"'{position_data.get('position_type', 'INT')}'" if position_data.get('position_type') else "'INT'",
                 f"'{self._escape(updated_by)}'",
                 f"'{timestamp}'",
                 f"'{self._escape(updated_by)}'",
@@ -1068,7 +1068,7 @@ class PositionService:
                 cast_decimal(position_data.get('uncall_lc', 0)),
                 cast_decimal(position_data.get('pipeline_fc', 0)),
                 cast_decimal(position_data.get('pipeline_lc', 0)),
-                f"'{position_data.get('position_type', 'LONG')}'" if position_data.get('position_type') else "'LONG'"
+                f"'{position_data.get('position_type', 'INT')}'" if position_data.get('position_type') else "'INT'"
             ]
 
             query = f"""
