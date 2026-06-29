@@ -781,14 +781,15 @@ class PositionQueueService:
             return {'pending': 0, 'processing': 0, 'completed': 0, 'failed': 0, 'dead_letter': 0, 'total': 0}
 
     def retry_failed_items(self) -> Dict[str, int]:
-        """Retry all failed items (not dead letter)."""
+        """Retry all failed items including those that hit max retries."""
         try:
             query = f"""
             UPDATE {self.DATABASE}.{self.QUEUE_TABLE}
             SET status = '{self.STATUS_PENDING}',
+                retry_count = 0,
+                error_message = NULL,
                 updated_at = '{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}'
             WHERE status = '{self.STATUS_FAILED}'
-              AND retry_count < {self.MAX_RETRIES}
             """
 
             success = impala_manager.execute_write(query, database=self.DATABASE)
