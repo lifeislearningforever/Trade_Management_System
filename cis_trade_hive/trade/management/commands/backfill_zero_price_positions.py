@@ -171,13 +171,16 @@ class Command(BaseCommand):
                 t.sec_fee,
                 t.other_charges,
                 t.currency_code,
-                t.isin,
+                t.custodian,
                 t.udf_sub_custodian,
+                s.isin,
                 COALESCE(p.currency, t.currency_code) AS portfolio_currency
             FROM {TRADE_TABLE} t
             LEFT JOIN {PORTFOLIO_TABLE} p
                 ON t.portfolio_short_name = p.name
                AND (p.is_active = true OR p.is_active IS NULL)
+            LEFT JOIN {DATABASE}.cis_security s
+                ON t.security_label = s.security_name
             WHERE t.trade_type IN ('BUY', 'SELL')
               AND (t.price = 0 OR t.price IS NULL)
               AND t.is_deleted = false
@@ -241,7 +244,8 @@ class Command(BaseCommand):
                     portfolio_currency=t.get('portfolio_currency'),
                     isin=t.get('isin'),
                     security_name=t.get('security_full_name'),
-                    custodian=t.get('udf_sub_custodian'),
+                    custodian=t.get('custodian'),
+                    sub_custodian=t.get('udf_sub_custodian'),
                     async_mode=True,
                     position_basis=None,  # dual: TRADE_DATE + SETTLE_DATE
                 )
