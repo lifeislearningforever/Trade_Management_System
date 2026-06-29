@@ -134,8 +134,8 @@ class PositionService:
             # Validate inputs
             if qty <= 0:
                 return False, "Quantity must be positive", None
-            if prc <= 0:
-                return False, "Price must be positive", None
+            if prc < 0:
+                return False, "Price must not be negative", None
 
             # Get the appropriate base position for calculation
             # For chain recalculation (backdated trades), we need position BEFORE this date
@@ -1422,9 +1422,9 @@ class PositionService:
         if quantity <= 0:
             errors.append("Trade quantity must be positive")
 
-        # Rule 3: Price must be positive
-        if price <= 0:
-            errors.append("Trade price must be positive")
+        # Rule 3: Price must not be negative (zero is allowed)
+        if price < 0:
+            errors.append("Trade price must not be negative")
 
         # Rule 4: No short selling (SELL qty <= position qty)
         if trade_type == 'SELL':
