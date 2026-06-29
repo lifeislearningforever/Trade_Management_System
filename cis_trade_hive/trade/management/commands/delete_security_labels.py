@@ -1,8 +1,7 @@
 """
 Management command: delete_security_labels
 
-Bulk-delete all cis_position rows (and optionally cis_trade rows) for a list of
-security labels supplied as a single-column CSV file.
+Bulk-delete rows from cis_security by security_name, using a single-column CSV.
 
 Usage:
     # Dry run — shows row counts, writes nothing
@@ -12,10 +11,10 @@ Usage:
     python manage.py delete_security_labels --csv securities.csv --dry-run --output dry_run.txt
 
     # Live run
-    python manage.py delete_security_labels --csv securities.csv --execute --output result.txt
+    python manage.py delete_security_labels --csv securities.csv --execute
 
-    # Also delete from cis_trade
-    python manage.py delete_security_labels --csv securities.csv --execute --delete-trades
+    # Live run + save log
+    python manage.py delete_security_labels --csv securities.csv --execute --output result.txt
 
 CSV format (single column, header row optional — detected automatically):
     security_name
@@ -32,10 +31,8 @@ from core.repositories.impala_connection import impala_manager
 logger = logging.getLogger(__name__)
 
 DATABASE = 'gmp_cis'
-POSITION_TABLE = f'{DATABASE}.cis_position'
-TRADE_TABLE = f'{DATABASE}.cis_trade'
+SECURITY_TABLE = f'{DATABASE}.cis_security'
 
-# Header values that indicate the first row is a header, not a security name
 _HEADER_VALUES = {
     'security_name', 'security_label', 'name', 'security', 'label',
     'security name', 'security label',
@@ -68,8 +65,8 @@ class TeeWriter:
 
 class Command(BaseCommand):
     help = (
-        'Bulk-delete security_label rows from cis_position (and optionally cis_trade) '
-        'using a single-column CSV of security names. Dry-run unless --execute is passed.'
+        'Bulk-delete rows from cis_security by security_name using a single-column CSV. '
+        'Dry-run unless --execute is passed.'
     )
 
     def add_arguments(self, parser):
@@ -93,12 +90,6 @@ class Command(BaseCommand):
             help='Explicit dry-run flag (same as omitting --execute). Overrides --execute.',
         )
         parser.add_argument(
-            '--delete-trades',
-            action='store_true',
-            default=False,
-            help='Also delete matching rows from cis_trade (in addition to cis_position).',
-        )
-        parser.add_argument(
             '--delimiter',
             default=',',
             help='CSV column delimiter (default: comma).',
@@ -113,7 +104,6 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         csv_path = options['csv']
         execute = options['execute'] and not options['dry_run']
-        delete_trades = options['delete_trades']
         delimiter = options['delimiter']
         output_path = options['output']
 
@@ -138,9 +128,9 @@ class Command(BaseCommand):
             self._tee.write(self.style.WARNING(
                 'DRY-RUN — no rows deleted. Re-run with --execute to apply.\n'
             ))
-            self._show_counts(names, delete_trades)
+            self._show_counts(names)
         else:
-            self._apply(names, delete_trades)
+            self._apply(names)
 
         self._tee.close()
 
@@ -157,7 +147,6 @@ class Command(BaseCommand):
                     name = row[0].strip()
                     if not name:
                         continue
-                    # Skip header row
                     if i == 0 and name.lower() in _HEADER_VALUES:
                         continue
                     names.append(name)
@@ -167,97 +156,65 @@ class Command(BaseCommand):
             raise CommandError(f'Error reading CSV: {e}')
         return names
 
-    def _count(self, table: str, name: str) -> int:
+    def _count(self, name: str) -> int:
         try:
-            q = f"SELECT COUNT(*) AS cnt FROM {table} WHERE security_label = '{_esc(name)}'"
+            q = f"SELECT COUNT(*) AS cnt FROM {SECURITY_TABLE} WHERE security_name = '{_esc(name)}'"
             rows = impala_manager.execute_query(q, database=DATABASE)
             return int(rows[0]['cnt']) if rows else 0
         except Exception as e:
-            logger.warning(f'Count query failed for table={table} name={name!r}: {e}')
+            logger.warning(f'Count query failed for name={name!r}: {e}')
             return -1
 
-    def _show_counts(self, names, delete_trades: bool):
+    def _show_counts(self, names):
         self._tee.write(self.style.HTTP_INFO('\nRow counts per security:\n'))
-        total_pos = 0
-        total_trade = 0
+        total = 0
         no_match = []
 
         for name in names:
-            pos_cnt = self._count(POSITION_TABLE, name)
-            trade_cnt = self._count(TRADE_TABLE, name) if delete_trades else None
-
-            total_pos += pos_cnt if pos_cnt > 0 else 0
-            if trade_cnt is not None and trade_cnt > 0:
-                total_trade += trade_cnt
-
-            trade_col = f'  trades={trade_cnt}' if delete_trades else ''
-            if pos_cnt == 0:
+            cnt = self._count(name)
+            total += cnt if cnt > 0 else 0
+            if cnt == 0:
                 no_match.append(name)
                 self._tee.write(self.style.WARNING(
-                    f'  {name!r:<60}  positions={pos_cnt}{trade_col}  *** NO MATCH ***'
+                    f'  {name!r:<60}  rows={cnt}  *** NO MATCH ***'
                 ))
             else:
-                self._tee.write(f'  {name!r:<60}  positions={pos_cnt}{trade_col}')
+                self._tee.write(f'  {name!r:<60}  rows={cnt}')
 
-        self._tee.write(f'\nTOTAL position rows to delete : {total_pos}')
-        if delete_trades:
-            self._tee.write(f'TOTAL trade rows to delete    : {total_trade}')
+        self._tee.write(f'\nTOTAL cis_security rows to delete: {total}')
         if no_match:
             self._tee.write(self.style.WARNING(
-                f'\n{len(no_match)} security name(s) had NO MATCH in cis_position — check spelling:'
+                f'\n{len(no_match)} name(s) had NO MATCH in cis_security — check spelling:'
             ))
             for n in no_match:
                 self._tee.write(self.style.WARNING(f'  • {n!r}'))
 
-    def _apply(self, names, delete_trades: bool):
-        total_pos = 0
-        total_trade = 0
+    def _apply(self, names):
+        total = 0
         errors = []
 
         for name in names:
-            pos_before = self._count(POSITION_TABLE, name)
-            if pos_before == 0:
-                self._tee.write(self.style.WARNING(f'  SKIP (0 rows in position): {name!r}'))
-            else:
-                try:
-                    q = f"DELETE FROM {POSITION_TABLE} WHERE security_label = '{_esc(name)}'"
-                    ok = impala_manager.execute_write(q, database=DATABASE)
-                    if ok:
-                        total_pos += pos_before
-                        self._tee.write(
-                            self.style.SUCCESS(f'  OK position ({pos_before:>4} rows deleted): {name!r}')
-                        )
-                    else:
-                        errors.append(f'position DELETE returned False: {name!r}')
-                        self._tee.write(self.style.ERROR(f'  FAIL position: {name!r}'))
-                except Exception as e:
-                    errors.append(f'position DELETE error for {name!r}: {e}')
-                    self._tee.write(self.style.ERROR(f'  ERROR position {name!r}: {e}'))
-
-            if delete_trades:
-                trade_before = self._count(TRADE_TABLE, name)
-                if trade_before == 0:
-                    self._tee.write(self.style.WARNING(f'  SKIP (0 rows in trade): {name!r}'))
+            before = self._count(name)
+            if before == 0:
+                self._tee.write(self.style.WARNING(f'  SKIP (0 rows): {name!r}'))
+                continue
+            try:
+                q = f"DELETE FROM {SECURITY_TABLE} WHERE security_name = '{_esc(name)}'"
+                ok = impala_manager.execute_write(q, database=DATABASE)
+                if ok:
+                    total += before
+                    self._tee.write(
+                        self.style.SUCCESS(f'  OK ({before:>4} rows deleted): {name!r}')
+                    )
                 else:
-                    try:
-                        q = f"DELETE FROM {TRADE_TABLE} WHERE security_label = '{_esc(name)}'"
-                        ok = impala_manager.execute_write(q, database=DATABASE)
-                        if ok:
-                            total_trade += trade_before
-                            self._tee.write(
-                                self.style.SUCCESS(f'  OK trade    ({trade_before:>4} rows deleted): {name!r}')
-                            )
-                        else:
-                            errors.append(f'trade DELETE returned False: {name!r}')
-                            self._tee.write(self.style.ERROR(f'  FAIL trade: {name!r}'))
-                    except Exception as e:
-                        errors.append(f'trade DELETE error for {name!r}: {e}')
-                        self._tee.write(self.style.ERROR(f'  ERROR trade {name!r}: {e}'))
+                    errors.append(f'DELETE returned False: {name!r}')
+                    self._tee.write(self.style.ERROR(f'  FAIL: {name!r}'))
+            except Exception as e:
+                errors.append(f'DELETE error for {name!r}: {e}')
+                self._tee.write(self.style.ERROR(f'  ERROR {name!r}: {e}'))
 
         self._tee.write('\n' + '=' * 60)
-        self._tee.write(self.style.SUCCESS(f'Done. Deleted {total_pos} position row(s).'))
-        if delete_trades:
-            self._tee.write(self.style.SUCCESS(f'      Deleted {total_trade} trade row(s).'))
+        self._tee.write(self.style.SUCCESS(f'Done. Deleted {total} cis_security row(s).'))
 
         if errors:
             self._tee.write(self.style.ERROR(f'\n{len(errors)} error(s):'))
