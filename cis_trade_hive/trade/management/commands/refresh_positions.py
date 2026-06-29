@@ -439,14 +439,15 @@ class Command(BaseCommand):
 
         for i in range(0, len(tuples), BATCH):
             chunk = tuples[i: i + BATCH]
-            in_clause = ', '.join(
-                f"('{p}', '{s}', '{b}', '{d}')" for p, s, b, d in chunk
+            # Impala does not support tuple/row IN syntax — use OR-chained conditions instead
+            or_clause = ' OR '.join(
+                f"(portfolio = '{p}' AND security_label = '{s}' AND position_basis = '{b}' AND position_date = '{d}')"
+                for p, s, b, d in chunk
             )
             impala_manager.execute_write(
                 f"""DELETE FROM {DATABASE}.cis_position
                     WHERE position_type = 'EOD'
-                      AND (portfolio, security_label, position_basis, position_date)
-                          IN ({in_clause})""",
+                      AND ({or_clause})""",
                 database=DATABASE
             )
 
