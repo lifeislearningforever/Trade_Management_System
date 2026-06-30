@@ -674,11 +674,16 @@ class CashFlowRepository:
 
             if success:
                 logger.info(f"Successfully inserted history for cash flow {cash_flow_id}, action {action}")
+            else:
+                logger.error(
+                    f"insert_history returned False for cash_flow_id={cash_flow_id} action={action}. "
+                    f"SQL: {insert_sql.strip()}"
+                )
 
             return success
 
         except Exception as e:
-            logger.error(f"Error inserting cash flow history: {str(e)}")
+            logger.error(f"Error inserting cash flow history: {str(e)}", exc_info=True)
             return False
 
     @staticmethod
