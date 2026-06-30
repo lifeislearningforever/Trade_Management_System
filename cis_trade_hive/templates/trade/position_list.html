@@ -26,7 +26,7 @@
         </h1>
         <p class="content-subtitle mb-0">Read-only view of cis_position &mdash; <strong>{{ total }}</strong> record{{ total|pluralize }} found</p>
     </div>
-    <a href="?{{ request.GET.urlencode }}&export=csv" class="btn btn-success btn-sm">
+    <a href="?{{ base_qs }}&export=csv" class="btn btn-success btn-sm">
         <i class="bi bi-download"></i> Export CSV
     </a>
 </div>
@@ -323,25 +323,19 @@
                 <ul class="pagination pagination-sm mb-0">
                     {% if page > 1 %}
                     <li class="page-item">
-                        <a class="page-link" href="?{% for k,v in request.GET.items %}{% if k != 'page' %}{{ k }}={{ v }}&{% endif %}{% endfor %}page={{ page|add:"-1" }}">
-                            &laquo;
-                        </a>
+                        <a class="page-link" href="?{{ base_qs }}&page={{ page|add:"-1" }}">&laquo;</a>
                     </li>
                     {% endif %}
 
                     {% for p in page_range %}
                     <li class="page-item {% if p == page %}active{% endif %}">
-                        <a class="page-link" href="?{% for k,v in request.GET.items %}{% if k != 'page' %}{{ k }}={{ v }}&{% endif %}{% endfor %}page={{ p }}">
-                            {{ p }}
-                        </a>
+                        <a class="page-link" href="?{{ base_qs }}&page={{ p }}">{{ p }}</a>
                     </li>
                     {% endfor %}
 
                     {% if page < total_pages %}
                     <li class="page-item">
-                        <a class="page-link" href="?{% for k,v in request.GET.items %}{% if k != 'page' %}{{ k }}={{ v }}&{% endif %}{% endfor %}page={{ page|add:"1" }}">
-                            &raquo;
-                        </a>
+                        <a class="page-link" href="?{{ base_qs }}&page={{ page|add:"1" }}">&raquo;</a>
                     </li>
                     {% endif %}
                 </ul>

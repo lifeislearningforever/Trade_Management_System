@@ -83,6 +83,12 @@ def position_list(request):
     src_systems = position_repository.get_distinct_src_systems()
     portfolios  = position_repository.get_distinct_portfolios()
 
+    # Build a base query string that preserves ALL multi-value params (portfolios,
+    # securities, src_system) correctly.  Pagination links append &page=N to this.
+    _qs = request.GET.copy()
+    _qs.pop('page', None)   # strip page so pagination links add their own
+    base_qs = _qs.urlencode()  # handles repeated keys: portfolios=A&portfolios=B&...
+
     context = {
         # Data
         'positions':       positions,
@@ -91,6 +97,7 @@ def position_list(request):
         'page':            page,
         'total_pages':     total_pages,
         'page_range':      _page_range(page, total_pages),
+        'base_qs':         base_qs,   # used by pagination links in template
 
         # Active filters (echo back)
         'selected_portfolios':  selected_portfolios,
