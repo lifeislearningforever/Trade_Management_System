@@ -650,8 +650,13 @@ class CashFlowRepository:
             # when two history rows are written within the same millisecond.
             history_id = (cash_flow_id % 10**6) * 10**10 + timestamp_ms * 10**3 + random.randint(0, 999)
 
-            # Convert changes dict to JSON string
-            changes_json = json.dumps(changes) if changes else '{}'
+            # Convert changes dict to JSON string; Decimal/date values from Kudu must be cast to str
+            import decimal
+            def _safe_default(obj):
+                if isinstance(obj, decimal.Decimal):
+                    return float(obj)
+                return str(obj)
+            changes_json = json.dumps(changes, default=_safe_default) if changes else '{}'
 
             insert_sql = f"""
             UPSERT INTO {CashFlowRepository.DATABASE}.{CashFlowRepository.HISTORY_TABLE}
