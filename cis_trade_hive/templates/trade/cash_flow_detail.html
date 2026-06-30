@@ -75,19 +75,19 @@
                             <label class="text-muted small">Cash Flow Status</label>
                             <p class="mb-2">
                                 {% if cash_flow.status == 'INITIAL' %}
-                                    <span class="badge badge-secondary">Initial</span>
+                                    <span class="badge bg-secondary">Initial</span>
                                 {% elif cash_flow.status == 'MODIFIED' %}
-                                    <span class="badge badge-info">Modified</span>
+                                    <span class="badge bg-info text-dark">Modified</span>
                                 {% elif cash_flow.status == 'VALIDATED' %}
-                                    <span class="badge badge-primary">Validated</span>
+                                    <span class="badge bg-primary">Validated</span>
                                 {% elif cash_flow.status == 'SETTLED' %}
-                                    <span class="badge badge-success">Settled</span>
+                                    <span class="badge bg-success">Settled</span>
                                 {% elif cash_flow.status == 'CANCELLED' %}
-                                    <span class="badge badge-dark">Cancelled</span>
+                                    <span class="badge bg-dark">Cancelled</span>
                                 {% elif cash_flow.status == 'REJECTED' %}
-                                    <span class="badge badge-danger">Rejected</span>
+                                    <span class="badge bg-danger">Rejected</span>
                                 {% else %}
-                                    <span class="badge badge-secondary">{{ cash_flow.status|default:"INITIAL" }}</span>
+                                    <span class="badge bg-secondary">{{ cash_flow.status|default:"INITIAL" }}</span>
                                 {% endif %}
                             </p>
                         </div>
@@ -95,9 +95,9 @@
                             <label class="text-muted small">Source System</label>
                             <p class="mb-2">
                                 {% if cash_flow.src_system|upper == 'CIS' %}
-                                    <span class="badge badge-success">CIS</span>
+                                    <span class="badge bg-success">CIS</span>
                                 {% else %}
-                                    <span class="badge badge-secondary">{{ cash_flow.src_system|upper|default:"External" }}</span>
+                                    <span class="badge bg-secondary">{{ cash_flow.src_system|upper|default:"External" }}</span>
                                 {% endif %}
                             </p>
                         </div>
@@ -220,7 +220,6 @@
             {% endif %}
 
             <!-- History Card -->
-            {% if history %}
             <div class="card mb-4">
                 <div class="card-header">
                     <h5 class="card-title mb-0">
@@ -241,6 +240,7 @@
                                 </tr>
                             </thead>
                             <tbody>
+                                {% if history %}
                                 {% for h in history %}
                                 <tr>
                                     <td>
@@ -270,12 +270,18 @@
                                     </td>
                                 </tr>
                                 {% endfor %}
+                                {% else %}
+                                <tr>
+                                    <td colspan="6" class="text-center py-3 text-muted">
+                                        <i class="bi bi-clock-history"></i> No history records yet
+                                    </td>
+                                </tr>
+                                {% endif %}
                             </tbody>
                         </table>
                     </div>
                 </div>
             </div>
-            {% endif %}
         </div>
 
         <!-- Sidebar -->
@@ -288,7 +294,7 @@
                     </h5>
                 </div>
                 <div class="card-body text-center">
-                    <span class="badge badge-{{ status_color }} fs-4 px-4 py-2">
+                    <span class="badge bg-{{ status_color }} fs-4 px-4 py-2">
                         {{ cash_flow.status|default:"INITIAL" }}
                     </span>
 
