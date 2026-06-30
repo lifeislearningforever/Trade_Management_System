@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime, date
 
 from core.repositories.impala_connection import impala_manager, query_cache
+from core.services.system_date_service import system_date_service
 
 logger = logging.getLogger(__name__)
 
@@ -596,6 +597,17 @@ class TradeValidationRepository:
                     entity_type='DATE',
                     entity_name='settle_date',
                     message=f"Invalid settlement date format: {settle_date}"
+                )
+
+            # Business rule: trade_date must not be in the future
+            contextual_today = system_date_service.get_system_date()
+            if trade_dt > contextual_today:
+                return ValidationResult(
+                    is_valid=False,
+                    entity_type='DATE',
+                    entity_name='trade_date',
+                    message=f"Trade date ({trade_date}) cannot be in the future. Today is {contextual_today.isoformat()}.",
+                    details={'trade_date': trade_date, 'contextual_today': contextual_today.isoformat()}
                 )
 
             # Business rule: settle_date >= trade_date
