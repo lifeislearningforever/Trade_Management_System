@@ -3,8 +3,8 @@
 --
 -- For each (portfolio, security_label, position_basis, position_date)
 -- with multiple EOD rows:
---   - MAX(position_id)   → position_type = 'EOD'  (latest — keep as EOD)
---   - All others         → position_type = 'INT'   (older rows relabelled)
+--   - MAX(position_id)   → position_type = 'INT'   (latest/live row)
+--   - All others         → position_type = 'EOD'   (older rows stay as EOD)
 --   - Nothing is deleted
 --
 -- Handles 2, 3, or N duplicate EOD rows correctly.
@@ -49,25 +49,25 @@ ORDER BY total_eod_rows DESC, p.portfolio, p.security_label, p.position_date;
 
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- STEP 2 — Relabel all non-MAX(position_id) EOD rows → INT
---          MAX(position_id) per (portfolio, security_label, position_basis,
---          position_date) stays as EOD. Everything else becomes INT.
+-- STEP 2 — Relabel MAX(position_id) EOD rows → INT (latest/live)
+--          All other EOD rows (older position_ids) stay as EOD.
 --          Nothing is deleted.
 -- ─────────────────────────────────────────────────────────────────────────────
 UPDATE gmp_cis.cis_position
 SET position_type = 'INT'
 WHERE position_type = 'EOD'
-  AND position_id NOT IN (
+  AND position_id IN (
       SELECT MAX(position_id)
       FROM gmp_cis.cis_position
       WHERE position_type = 'EOD'
       GROUP BY portfolio, security_label, position_basis, position_date
+      HAVING COUNT(*) > 1
   );
 
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- STEP 3 — Verify: each (portfolio, security_label, position_basis, position_date)
---          should have exactly 1 EOD row. INT rows can be many.
+--          should have exactly 1 INT row (latest). EOD rows can be many (older).
 -- ─────────────────────────────────────────────────────────────────────────────
 SELECT
     p.portfolio,
