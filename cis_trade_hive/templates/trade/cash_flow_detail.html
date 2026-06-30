@@ -237,20 +237,37 @@
                                     <th>By</th>
                                     <th>Date</th>
                                     <th>Comments</th>
+                                    <th>Changes</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for h in history %}
                                 <tr>
                                     <td>
-                                        <span class="badge badge-{% if h.action == 'CREATE' %}primary{% elif h.action == 'UPDATE' %}info{% elif h.action == 'APPROVE' %}success{% elif h.action == 'REJECT' %}danger{% else %}secondary{% endif %}">
+                                        <span class="badge {% if h.action == 'CREATE' %}bg-primary{% elif h.action == 'UPDATE' %}bg-info text-dark{% elif h.action == 'APPROVE' %}bg-success{% elif h.action == 'REJECT' %}bg-danger{% elif h.action == 'DELETE' %}bg-dark{% elif h.action == 'RESTORE' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">
                                             {{ h.action }}
                                         </span>
                                     </td>
-                                    <td>{{ h.status|default:"-" }}</td>
+                                    <td><span class="badge bg-light text-dark border">{{ h.status|default:"-" }}</span></td>
                                     <td>{{ h.performed_by|default:"-" }}</td>
-                                    <td>{{ h.performed_at|default:"-" }}</td>
-                                    <td>{{ h.comments|default:"-"|truncatechars:50 }}</td>
+                                    <td class="text-nowrap">{{ h.performed_at|default:"-" }}</td>
+                                    <td>{{ h.comments|default:"-"|truncatechars:60 }}</td>
+                                    <td>
+                                        {% if h.changes and h.changes != '{}' %}
+                                        <button class="btn btn-outline-secondary btn-sm py-0 px-1"
+                                                type="button"
+                                                data-bs-toggle="collapse"
+                                                data-bs-target="#changes-{{ forloop.counter }}"
+                                                title="View changes">
+                                            <i class="bi bi-code-slash" style="font-size:0.75rem;"></i>
+                                        </button>
+                                        <div class="collapse mt-1" id="changes-{{ forloop.counter }}">
+                                            <pre class="small bg-light border rounded p-2 mb-0" style="max-width:300px;max-height:150px;overflow:auto;font-size:0.72rem;white-space:pre-wrap;word-break:break-all;">{{ h.changes }}</pre>
+                                        </div>
+                                        {% else %}
+                                        <span class="text-muted small">—</span>
+                                        {% endif %}
+                                    </td>
                                 </tr>
                                 {% endfor %}
                             </tbody>
