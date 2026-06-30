@@ -254,12 +254,13 @@
                                     <td>{{ h.comments|default:"-"|truncatechars:60 }}</td>
                                     <td>
                                         {% if h.changes and h.changes != '{}' %}
+                                        <script>window._cfChanges = window._cfChanges||{}; window._cfChanges[{{ forloop.counter }}] = {{ h.changes|safe }};</script>
                                         <button class="btn btn-outline-secondary btn-sm py-0 px-1"
                                                 type="button"
                                                 data-bs-toggle="collapse"
                                                 data-bs-target="#changes-{{ forloop.counter }}"
-                                                title="View changes"
-                                                data-changes="{{ h.changes|escapejs }}">
+                                                data-idx="{{ forloop.counter }}"
+                                                title="View changes">
                                             <i class="bi bi-list-columns-reverse" style="font-size:0.75rem;"></i> Diff
                                         </button>
                                         <div class="collapse mt-1" id="changes-{{ forloop.counter }}">
@@ -400,46 +401,42 @@
 {% block extra_js %}
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    document.querySelectorAll('[data-bs-toggle="collapse"][data-changes]').forEach(function (btn) {
+    document.querySelectorAll('[data-bs-toggle="collapse"][data-idx]').forEach(function (btn) {
         btn.addEventListener('click', function () {
             var target = document.querySelector(btn.getAttribute('data-bs-target'));
             var diffContainer = target.querySelector('.changes-diff-table');
             if (diffContainer.innerHTML) return;
-            var raw = btn.getAttribute('data-changes');
-            try {
-                var changes = JSON.parse(raw);
-                var keys = Object.keys(changes);
-                if (keys.length === 0) {
-                    diffContainer.innerHTML = '<span class="text-muted small">No field changes</span>';
-                    return;
-                }
-                var rows = keys.map(function (field) {
-                    var val = changes[field];
-                    var oldVal = (val && typeof val === 'object' && 'old' in val)
-                        ? (val.old === null || val.old === '' ? '<em class="text-muted">—</em>' : String(val.old))
-                        : '';
-                    var newVal = (val && typeof val === 'object' && 'new' in val)
-                        ? (val.new === null || val.new === '' ? '<em class="text-muted">—</em>' : String(val.new))
-                        : (typeof val === 'object' ? JSON.stringify(val) : String(val));
-                    var label = field.replace(/_/g, ' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); });
-                    return '<tr>'
-                        + '<td class="fw-semibold text-nowrap pe-2" style="color:#555;">' + label + '</td>'
-                        + '<td class="pe-2" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#c0392b;" title="' + val.old + '">' + oldVal + '</td>'
-                        + '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#27ae60;" title="' + val.new + '">' + newVal + '</td>'
-                        + '</tr>';
-                });
-                diffContainer.innerHTML =
-                    '<table class="table table-sm table-borderless mb-0" style="font-size:0.78rem;">'
-                    + '<thead class="table-light"><tr>'
-                    + '<th class="py-1">Field</th>'
-                    + '<th class="py-1 text-danger">Old</th>'
-                    + '<th class="py-1 text-success">New</th>'
-                    + '</tr></thead>'
-                    + '<tbody>' + rows.join('') + '</tbody>'
-                    + '</table>';
-            } catch (e) {
-                diffContainer.innerHTML = '<pre class="small mb-0" style="white-space:pre-wrap;word-break:break-all;">' + raw + '</pre>';
-            }
+            var idx = btn.getAttribute('data-idx');
+            var changes = (window._cfChanges || {})[idx];
+            if (!changes) { diffContainer.innerHTML = '<span class="text-muted small">No data</span>'; return; }
+            var keys = Object.keys(changes);
+            if (keys.length === 0) { diffContainer.innerHTML = '<span class="text-muted small">No field changes</span>'; return; }
+            var rows = keys.map(function (field) {
+                var val = changes[field];
+                var oldVal = (val && typeof val === 'object' && 'old' in val)
+                    ? (val.old === null || val.old === '' ? '<em class="text-muted">—</em>' : String(val.old))
+                    : '';
+                var newVal = (val && typeof val === 'object' && 'new' in val)
+                    ? (val.new === null || val.new === '' ? '<em class="text-muted">—</em>' : String(val.new))
+                    : (typeof val === 'object' ? JSON.stringify(val) : String(val));
+                var oldTitle = (val && val.old != null) ? String(val.old) : '';
+                var newTitle = (val && val.new != null) ? String(val.new) : '';
+                var label = field.replace(/_/g, ' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+                return '<tr>'
+                    + '<td class="fw-semibold text-nowrap pe-2" style="color:#555;">' + label + '</td>'
+                    + '<td class="pe-2" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#c0392b;" title="' + oldTitle + '">' + oldVal + '</td>'
+                    + '<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#27ae60;" title="' + newTitle + '">' + newVal + '</td>'
+                    + '</tr>';
+            });
+            diffContainer.innerHTML =
+                '<table class="table table-sm table-borderless mb-0" style="font-size:0.78rem;">'
+                + '<thead class="table-light"><tr>'
+                + '<th class="py-1">Field</th>'
+                + '<th class="py-1 text-danger">Old</th>'
+                + '<th class="py-1 text-success">New</th>'
+                + '</tr></thead>'
+                + '<tbody>' + rows.join('') + '</tbody>'
+                + '</table>';
         });
     });
 });
