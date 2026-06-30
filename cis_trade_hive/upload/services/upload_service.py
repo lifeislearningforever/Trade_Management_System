@@ -3662,6 +3662,30 @@ class UploadService:
             _t = _step_time("Step 6B", _t)
 
             # ------------------------------------------------------------------
+            # Step 6C: Reject rows with reporting_date > contextual_today.
+            #          Future-dated positions are not allowed.
+            # ------------------------------------------------------------------
+            from core.services.system_date_service import system_date_service as _sds_check
+            _today_iso_check = _sds_check.get_system_date().isoformat()
+            future_rows = impala_manager.execute_query(
+                f"""
+                SELECT COUNT(*) AS cnt
+                FROM position_upload_staging
+                WHERE overall_status LIKE 'VALID%'
+                  AND CAST(reporting_date AS STRING) > '{_today_iso_check}'
+                """,
+                database=db
+            )
+            _future_count = int((future_rows or [{}])[0].get('cnt', 0))
+            if _future_count > 0:
+                logger.warning(
+                    f"[position_etl] Step 6C: {_future_count} row(s) have future reporting_date "
+                    f"(> contextual_today={_today_iso_check}). These rows will not be upserted."
+                )
+                result['future_date_rows_blocked'] = _future_count
+            _t = _step_time("Step 6C", _t)
+
+            # ------------------------------------------------------------------
             # Step 7A: UPSERT valid records into cis_position (Kudu).
             #
             # position_id is a deterministic hash of the natural key:
@@ -3669,7 +3693,15 @@ class UploadService:
             # Using FNV-style: abs(hash(concat(...))) cast to BIGINT.
             # This guarantees that re-running ETL for the same batch replaces
             # existing rows rather than inserting duplicates.
+            #
+            # position_type is derived by comparing reporting_date to contextual_today:
+            #   == today  → 'INT'   (intraday / live)
+            #   <  today  → 'CORR'  (correction to a past snapshot)
+            #   >  today  → blocked in pre-validation (Step 6 rejects these rows)
             # ------------------------------------------------------------------
+            from core.services.system_date_service import system_date_service as _sds
+            _contextual_today_iso = _sds.get_system_date().isoformat()  # 'YYYY-MM-DD'
+
             ok = impala_manager.execute_write(
                 f"""
                 UPSERT INTO {db}.cis_position (
@@ -3746,9 +3778,14 @@ class UploadService:
                     CAST(0                       AS DECIMAL(30,8)) AS uncall_lc,
                     CAST(0                       AS DECIMAL(30,8)) AS pipeline_fc,
                     CAST(0                       AS DECIMAL(30,8)) AS pipeline_lc,
-                    'EOD'                                          AS position_type
+                    CASE
+                        WHEN CAST(reporting_date AS STRING) = '{_contextual_today_iso}' THEN 'INT'
+                        WHEN CAST(reporting_date AS STRING) < '{_contextual_today_iso}' THEN 'CORR'
+                        ELSE 'INT'
+                    END                                            AS position_type
                 FROM position_upload_staging
                 WHERE overall_status LIKE 'VALID%'
+                  AND CAST(reporting_date AS STRING) <= '{_contextual_today_iso}'
                 """,
                 database=db
             )

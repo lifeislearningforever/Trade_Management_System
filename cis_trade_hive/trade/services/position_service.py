@@ -16,10 +16,11 @@ Based on SA Team Questionnaire Feedback (2026-03-04).
 import logging
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, List, Optional, Tuple, Any
-from datetime import datetime
+from datetime import datetime, date
 import uuid
 
 from core.repositories.impala_connection import impala_manager
+from core.services.system_date_service import system_date_service
 from trade.services.multicurrency_service import multicurrency_service
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,34 @@ class PositionService:
     # =========================================================================
     # AVP CALCULATION
     # =========================================================================
+
+    def _derive_position_type(self, position_date: str) -> Tuple[bool, str, Optional[str]]:
+        """
+        Derive position_type by comparing position_date to contextual_today.
+
+        Returns (ok, message, position_type):
+          - position_date == today  → ok=True,  position_type='INT'
+          - position_date <  today  → ok=True,  position_type='CORR'
+          - position_date >  today  → ok=False, message=error, position_type=None
+        """
+        try:
+            pos_dt = datetime.strptime(position_date, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            return False, f"Invalid position_date format: {position_date!r} (expected YYYY-MM-DD)", None
+
+        today = system_date_service.get_system_date()
+        if not isinstance(today, date):
+            today = datetime.strptime(str(today), '%Y-%m-%d').date()
+
+        if pos_dt == today:
+            return True, '', 'INT'
+        elif pos_dt < today:
+            return True, '', 'CORR'
+        else:
+            return False, (
+                f"Future position date {position_date} not allowed "
+                f"(contextual_today={today.isoformat()})"
+            ), None
 
     def calculate_position(
         self,
@@ -136,6 +165,12 @@ class PositionService:
                 return False, "Quantity must be positive", None
             if prc < 0:
                 return False, "Price must not be negative", None
+
+            # Derive position_type from position_date vs contextual_today
+            ok, err_msg, derived_type = self._derive_position_type(position_date)
+            if not ok:
+                return False, err_msg, None
+            position_type = derived_type
 
             # Get the appropriate base position for calculation
             # For chain recalculation (backdated trades), we need position BEFORE this date
