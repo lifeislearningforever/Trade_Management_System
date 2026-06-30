@@ -258,11 +258,12 @@
                                                 type="button"
                                                 data-bs-toggle="collapse"
                                                 data-bs-target="#changes-{{ forloop.counter }}"
-                                                title="View changes">
-                                            <i class="bi bi-code-slash" style="font-size:0.75rem;"></i>
+                                                title="View changes"
+                                                data-changes="{{ h.changes|escapejs }}">
+                                            <i class="bi bi-list-columns-reverse" style="font-size:0.75rem;"></i> Diff
                                         </button>
                                         <div class="collapse mt-1" id="changes-{{ forloop.counter }}">
-                                            <pre class="small bg-light border rounded p-2 mb-0" style="max-width:300px;max-height:150px;overflow:auto;font-size:0.72rem;white-space:pre-wrap;word-break:break-all;">{{ h.changes }}</pre>
+                                            <div class="changes-diff-table" style="min-width:320px;max-width:480px;max-height:220px;overflow-y:auto;font-size:0.78rem;"></div>
                                         </div>
                                         {% else %}
                                         <span class="text-muted small">—</span>
@@ -394,4 +395,53 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('[data-bs-toggle="collapse"][data-changes]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var target = document.querySelector(btn.getAttribute('data-bs-target'));
+            var diffContainer = target.querySelector('.changes-diff-table');
+            if (diffContainer.innerHTML) return;
+            var raw = btn.getAttribute('data-changes');
+            try {
+                var changes = JSON.parse(raw);
+                var keys = Object.keys(changes);
+                if (keys.length === 0) {
+                    diffContainer.innerHTML = '<span class="text-muted small">No field changes</span>';
+                    return;
+                }
+                var rows = keys.map(function (field) {
+                    var val = changes[field];
+                    var oldVal = (val && typeof val === 'object' && 'old' in val)
+                        ? (val.old === null || val.old === '' ? '<em class="text-muted">—</em>' : String(val.old))
+                        : '';
+                    var newVal = (val && typeof val === 'object' && 'new' in val)
+                        ? (val.new === null || val.new === '' ? '<em class="text-muted">—</em>' : String(val.new))
+                        : (typeof val === 'object' ? JSON.stringify(val) : String(val));
+                    var label = field.replace(/_/g, ' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+                    return '<tr>'
+                        + '<td class="fw-semibold text-nowrap pe-2" style="color:#555;">' + label + '</td>'
+                        + '<td class="pe-2" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#c0392b;" title="' + val.old + '">' + oldVal + '</td>'
+                        + '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#27ae60;" title="' + val.new + '">' + newVal + '</td>'
+                        + '</tr>';
+                });
+                diffContainer.innerHTML =
+                    '<table class="table table-sm table-borderless mb-0" style="font-size:0.78rem;">'
+                    + '<thead class="table-light"><tr>'
+                    + '<th class="py-1">Field</th>'
+                    + '<th class="py-1 text-danger">Old</th>'
+                    + '<th class="py-1 text-success">New</th>'
+                    + '</tr></thead>'
+                    + '<tbody>' + rows.join('') + '</tbody>'
+                    + '</table>';
+            } catch (e) {
+                diffContainer.innerHTML = '<pre class="small mb-0" style="white-space:pre-wrap;word-break:break-all;">' + raw + '</pre>';
+            }
+        });
+    });
+});
+</script>
 {% endblock %}
