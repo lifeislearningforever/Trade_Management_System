@@ -423,26 +423,26 @@ class Command(BaseCommand):
 
     def _batch_delete_eod(self, insert_rows, run_date):
         """
-        Delete all existing EOD rows for the (portfolio, security_label, position_basis, position_date)
-        combinations we are about to insert.  Uses a single DELETE per batch of 500 4-tuples.
+        Delete ALL existing EOD rows for each (portfolio, security_label, position_basis)
+        combination we are about to insert — regardless of position_date.
+        This prevents duplicate EOD rows when a prior run left stale rows with
+        a different position_date than the new insert.
         """
         BATCH = 500
-        tuples = [
+        tuples = list({
             (
                 self._escape(r['position'].get('portfolio', '')),
                 self._escape(r['position'].get('security_label', '')),
                 self._escape(r['position'].get('position_basis', 'TRADE_DATE')),
-                str(r['position'].get('position_date') or run_date)[:10],
             )
             for r in insert_rows
-        ]
+        })
 
         for i in range(0, len(tuples), BATCH):
             chunk = tuples[i: i + BATCH]
-            # Impala does not support tuple/row IN syntax — use OR-chained conditions instead
             or_clause = ' OR '.join(
-                f"(portfolio = '{p}' AND security_label = '{s}' AND position_basis = '{b}' AND position_date = '{d}')"
-                for p, s, b, d in chunk
+                f"(portfolio = '{p}' AND security_label = '{s}' AND position_basis = '{b}')"
+                for p, s, b in chunk
             )
             impala_manager.execute_write(
                 f"""DELETE FROM {DATABASE}.cis_position
