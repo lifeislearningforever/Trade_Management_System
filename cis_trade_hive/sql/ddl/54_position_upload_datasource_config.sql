@@ -12,7 +12,7 @@
 --     server-injected at ingest time via POSITION_TABLE_BASIS dict)
 --   - reporting_date IS a file column for tables 1, 2, 3 — included here
 --   - position_basis is NOT listed — excluded from validation, defaulted at
---     ingest: TRADE_DATE (tables 1-3), SETTLE_DATE (tables 4-5)
+--     ingest: TRADED (tables 1-3), SETTLED (tables 4-5)
 --
 -- Run:
 --   impala-shell -i localhost:21050 -f sql/ddl/54_position_upload_datasource_config.sql
@@ -28,7 +28,7 @@ USE gmp_cis;
 --   REPORTING_DATE, Portfolio, Client_Num, Exchange_Quoted, ISIN_Code,
 --   Counter, Quantity_Yesterday, Movement, Quantity_Today
 -- NOTE: File header is REPORTING_DATE; Hive table column is reporting_date.
---       position_basis is server-injected as TRADE_DATE (not in file).
+--       position_basis is server-injected as TRADED (not in file).
 -- NOTE: UPSERT keyed on source_id — updates existing row in DB
 -- ----------------------------------------------------------------------------
 UPSERT INTO gmp_cis.cis_datasource_mng (
@@ -62,7 +62,7 @@ UPSERT INTO gmp_cis.cis_datasource_mng (
 -- CSV columns: Portfolio_Name, Stock_Name, Security_Description, ISIN_Code,
 --              Qty_Held, Shares_Issued, Pct_Holding, Country, Country_ID,
 --              Reporting_Date
--- position_basis defaulted to: TRADE_DATE
+-- position_basis defaulted to: TRADED
 -- ----------------------------------------------------------------------------
 UPSERT INTO gmp_cis.cis_datasource_mng (
     source_id,
@@ -94,7 +94,7 @@ UPSERT INTO gmp_cis.cis_datasource_mng (
 -- Position Upload 3: Account Position Data
 -- CSV columns: Account_name, Asset_description_short, ISIN, Shares_Par_value,
 --              Shares_outstanding_total, Country_of_listing_code, Reporting_Date
--- position_basis defaulted to: TRADE_DATE
+-- position_basis defaulted to: TRADED
 -- ----------------------------------------------------------------------------
 UPSERT INTO gmp_cis.cis_datasource_mng (
     source_id,
@@ -131,7 +131,7 @@ UPSERT INTO gmp_cis.cis_datasource_mng (
 --              No_of_Shares_Issues_by_the_Company, Country_of_Incorporation,
 --              Country_of_Exchange, ISIN_Code, Ticker_Code, Industry,
 --              Financial_Non_Financial_Co
--- position_basis defaulted to: SETTLE_DATE
+-- position_basis defaulted to: SETTLED
 -- Note: No reporting_date column in table 4 file format
 -- ----------------------------------------------------------------------------
 UPSERT INTO gmp_cis.cis_datasource_mng (
@@ -176,7 +176,7 @@ UPSERT INTO gmp_cis.cis_datasource_mng (
 --              Pct_Holdings, CELS_Code, BWCIF_Number_SG, MAS_6D_Code_SG,
 --              BWCIF_Number_Overseas, MAS_6D_Code_Overseas, Maturity_Date,
 --              PORTIA_Fund_Type_CIS_Investment_Type
--- position_basis defaulted to: SETTLE_DATE
+-- position_basis defaulted to: SETTLED
 -- ----------------------------------------------------------------------------
 UPSERT INTO gmp_cis.cis_datasource_mng (
     source_id,

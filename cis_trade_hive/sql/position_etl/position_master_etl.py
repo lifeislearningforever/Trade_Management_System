@@ -145,7 +145,7 @@ SOURCE_TABLES = {
     # AMS_STREET tables (src_system='AMS_STREET')
     'gmp_cis_sta_dly_ams_multi_dis_cif': {
         'src_system': 'AMS_STREET',
-        'position_basis_field': None,  # TRADE_DATE is hardcoded, no trade_date column
+        'position_basis_field': None,  # TRADED is hardcoded, no trade_date column
         'mapping': {
             'portfolio_code': 'portfolio',
             'security_name': 'security_full_name',
@@ -157,7 +157,7 @@ SOURCE_TABLES = {
     },
     'gmp_cis_sta_dly_ams_multi_hold': {
         'src_system': 'AMS_STREET',
-        'position_basis_field': None,  # TRADE_DATE is hardcoded, no trade_date column
+        'position_basis_field': None,  # TRADED is hardcoded, no trade_date column
         'mapping': {
             'portfolio_code': 'portfolio',
             'security_name': 'security_full_name',

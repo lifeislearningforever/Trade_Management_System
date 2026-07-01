@@ -82,27 +82,27 @@ DB = 'gmp_cis'
 # position_basis=None means it is read from the source row (e.g. GMP's `line` column).
 ALL_SOURCES = {
     'gmp_cis_sta_dly_ams_multi_dis_cif': {
-        'position_basis': 'TRADE_DATE',
+        'position_basis': 'TRADED',
         'src_system':     'AMS_STREET',
         'description':    'AMS Multi Discretionary Fund',
     },
     'gmp_cis_sta_dly_ams_multi_hold': {
-        'position_basis': 'TRADE_DATE',
+        'position_basis': 'TRADED',
         'src_system':     'AMS_STREET',
         'description':    'AMS Multiple Holdings Daily',
     },
     'gmp_cis_sta_dly_stat_street_ams_iceq': {
-        'position_basis': 'TRADE_DATE',
+        'position_basis': 'TRADED',
         'src_system':     'AMS_STREET',
         'description':    'AMS ICEQ Daily',
     },
     'gmp_cis_sta_mthly_stat_street_ams_iceq_end': {
-        'position_basis': 'SETTLE_DATE',
+        'position_basis': 'SETTLED',
         'src_system':     'AMS_STREET',
         'description':    'AMS ICEQ Month End',
     },
     'gmp_cis_sta_dly_stat_street_ams_daily_limit': {
-        'position_basis': 'TRADE_DATE',
+        'position_basis': 'TRADED',
         'src_system':     'AMS_STREET',
         'description':    'AMS S31 UOI Daily Limit',
     },
@@ -493,7 +493,7 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
 
     if table == 'gmp_cis_sta_dly_position':
         # GMP daily position — columns have m_* prefix.
-        # position_basis is read from the `line` column (TRADE_DATE / SETTLE_DATE).
+        # position_basis is read from the `line` column (TRADED / SETTLED).
         # m_security_code maps to isin (GMP uses security code as the ISIN identifier).
         return f"""
             SELECT

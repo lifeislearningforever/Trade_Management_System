@@ -900,7 +900,7 @@ class CACashFlowService:
                 {new_version_id},
                 {position_id},
                 '{ex_date}',
-                'SETTLE_DATE',
+                'SETTLED',
                 '{self._escape(portfolio_short_name)}',
                 '{self._escape(security_name)}',
                 {float(quantity)},
@@ -991,12 +991,12 @@ class CACashFlowService:
         self,
         portfolio_short_name: str,
         security_name: str,
-        position_basis: str = 'SETTLE_DATE'
+        position_basis: str = 'SETTLED'
     ) -> Optional[Dict[str, Any]]:
         """Get the current open position for a portfolio/security combination.
 
         Args:
-            position_basis: 'SETTLE_DATE' (default) or 'TRADE_DATE'
+            position_basis: 'SETTLED' (default) or 'TRADED'
         """
         try:
             query = f"""
@@ -1504,7 +1504,7 @@ class CACashFlowService:
                 {new_version_id},
                 {position_id},
                 '{ex_date}',
-                'SETTLE_DATE',
+                'SETTLED',
                 '{self._escape(portfolio_short_name)}',
                 '{self._escape(security_name)}',
                 {float(new_quantity)},
@@ -1551,9 +1551,9 @@ class CACashFlowService:
             success = impala_manager.execute_write(insert_sql, database=self.DATABASE)
 
             if success:
-                logger.info(f"[POS_ADJ] SUCCESS - Created new SETTLE_DATE position version {new_version_id} "
+                logger.info(f"[POS_ADJ] SUCCESS - Created new SETTLED position version {new_version_id} "
                            f"for {ca_type}. New qty={new_quantity}, avg_cost={new_avg_cost}")
-                # Update TRADE_DATE position so committed-exposure view stays consistent
+                # Update TRADED position so committed-exposure view stays consistent
                 self._apply_ca_to_trade_date_position(
                     portfolio_short_name=portfolio_short_name,
                     security_name=security_name,
@@ -1661,7 +1661,7 @@ class CACashFlowService:
             isin = row.get('isin')
             source_table = row.get('source_table')
             src_system = row.get('src_system') or 'CIS'
-            position_basis = row.get('position_basis') or 'SETTLE_DATE'
+            position_basis = row.get('position_basis') or 'SETTLED'
 
             upsert_sql = f"""
             UPSERT INTO {self.DATABASE}.{self.POSITION_TABLE} (
@@ -1740,19 +1740,19 @@ class CACashFlowService:
         fx_rate: Decimal,
         updated_by: str
     ) -> bool:
-        """Update the TRADE_DATE position after a CA split/bonus/reverse-split.
+        """Update the TRADED position after a CA split/bonus/reverse-split.
 
-        Keeps committed-exposure (TRADE_DATE) view consistent with the settled
+        Keeps committed-exposure (TRADED) view consistent with the settled
         position after a corporate action adjusts qty and AVP.
         """
         try:
             td_position = self._get_current_position(
-                portfolio_short_name, security_name, position_basis='TRADE_DATE'
+                portfolio_short_name, security_name, position_basis='TRADED'
             )
             if not td_position:
                 logger.warning(
-                    f"[POS_ADJ] No TRADE_DATE position found for {portfolio_short_name}/{security_name} "
-                    f"— skipping TRADE_DATE update (may be AMS/upload-only position)"
+                    f"[POS_ADJ] No TRADED position found for {portfolio_short_name}/{security_name} "
+                    f"— skipping TRADED update (may be AMS/upload-only position)"
                 )
                 return True  # Not a hard failure
 
@@ -1782,7 +1782,7 @@ class CACashFlowService:
 
             timestamp = datetime.now()
             timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
-            new_version_id = int(timestamp.timestamp() * 1000) + 1  # +1 to avoid collision with SETTLE_DATE version
+            new_version_id = int(timestamp.timestamp() * 1000) + 1  # +1 to avoid collision with SETTLED version
 
             insert_sql = f"""
             UPSERT INTO {self.DATABASE}.{self.WRITE_POSITION_TABLE} (
@@ -1809,7 +1809,7 @@ class CACashFlowService:
                 {new_version_id},
                 {td_position_id},
                 '{ex_date}',
-                'TRADE_DATE',
+                'TRADED',
                 '{self._escape(portfolio_short_name)}',
                 '{self._escape(security_name)}',
                 {float(new_quantity)},
@@ -1856,18 +1856,18 @@ class CACashFlowService:
             td_success = impala_manager.execute_write(insert_sql, database=self.DATABASE)
             if td_success:
                 logger.info(
-                    f"[POS_ADJ] SUCCESS - Created new TRADE_DATE position version {new_version_id} "
+                    f"[POS_ADJ] SUCCESS - Created new TRADED position version {new_version_id} "
                     f"for {ca_type}. New qty={new_quantity}, avg_cost={new_avg_cost}"
                 )
             else:
                 logger.error(
-                    f"[POS_ADJ] FAILED - Could not update TRADE_DATE position for "
+                    f"[POS_ADJ] FAILED - Could not update TRADED position for "
                     f"{portfolio_short_name}/{security_name} after {ca_type}"
                 )
             return td_success
 
         except Exception as e:
-            logger.error(f"[POS_ADJ] Error updating TRADE_DATE position after {ca_type}: {str(e)}")
+            logger.error(f"[POS_ADJ] Error updating TRADED position after {ca_type}: {str(e)}")
             return False
 
     def _create_rights_warrant_position(
@@ -1930,7 +1930,7 @@ class CACashFlowService:
                 {new_version_id},
                 {new_position_id},
                 '{ex_date}',
-                'SETTLE_DATE',
+                'SETTLED',
                 '{self._escape(portfolio_short_name)}',
                 '{self._escape(new_security_name)}',
                 {float(entitlement_qty)},
@@ -2109,7 +2109,7 @@ class CACashFlowService:
         try:
             current_position = self._get_current_position(portfolio_short_name, security_name)
             if not current_position:
-                logger.warning(f"[CF_OVERWRITE] No open SETTLE_DATE position for "
+                logger.warning(f"[CF_OVERWRITE] No open SETTLED position for "
                                f"{portfolio_short_name}/{security_name}")
                 return False
 
@@ -2197,7 +2197,7 @@ class CACashFlowService:
                 {new_version_id},
                 {position_id},
                 '{ex_date}',
-                'SETTLE_DATE',
+                'SETTLED',
                 '{self._escape(portfolio_short_name)}',
                 '{self._escape(security_name)}',
                 {float(quantity)},

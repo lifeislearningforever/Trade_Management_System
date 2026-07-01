@@ -6,7 +6,7 @@
 -- Tables 4 and 5 do NOT need changes.
 --
 -- Table 1: file header is REPORTING_DATE (pipe-separated), maps to reporting_date
---          position_basis is server-injected as TRADE_DATE (not in file)
+--          position_basis is server-injected as TRADED (not in file)
 -- Tables 2, 3: reporting_date column from file
 --
 -- Run:

@@ -390,9 +390,9 @@ CREATE TABLE cis_trade_position (
     -- Position Identity (same across all versions for a portfolio+security+basis)
     position_id BIGINT NOT NULL,
 
-    -- POSITION BASIS: 'TRADE_DATE' or 'SETTLE_DATE'
+    -- POSITION BASIS: 'TRADED' or 'SETTLED'
     -- Determines when this position record takes effect
-    position_basis STRING NOT NULL DEFAULT 'TRADE_DATE',
+    position_basis STRING NOT NULL DEFAULT 'TRADED',
 
     -- Snapshot date (trade_date or settle_date depending on position_basis)
     position_date STRING NOT NULL,

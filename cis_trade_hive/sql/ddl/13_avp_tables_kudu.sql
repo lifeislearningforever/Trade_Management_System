@@ -20,12 +20,12 @@
 -- Each trade creates a new version (snapshot) of the position.
 --
 -- POSITION BASIS:
---   - TRADE_DATE: Position calculated based on trade date (T+0 accounting)
---   - SETTLE_DATE: Position calculated based on settlement date (T+1/T+2 accounting)
+--   - TRADED: Position calculated based on trade date (T+0 accounting)
+--   - SETTLED: Position calculated based on settlement date (T+1/T+2 accounting)
 --
 -- A single trade creates TWO position records:
---   1. One with position_basis='TRADE_DATE' (reflects on trade_date)
---   2. One with position_basis='SETTLE_DATE' (reflects on settle_date)
+--   1. One with position_basis='TRADED' (reflects on trade_date)
+--   2. One with position_basis='SETTLED' (reflects on settle_date)
 --
 -- This allows dual reporting: "What do I own?" vs "What has settled?"
 -- ============================================================================
@@ -39,9 +39,9 @@ CREATE TABLE cis_trade_position (
     -- Position Identity (same across all versions for a portfolio+security+basis)
     position_id BIGINT NOT NULL,
 
-    -- POSITION BASIS: 'TRADE_DATE' or 'SETTLE_DATE'
+    -- POSITION BASIS: 'TRADED' or 'SETTLED'
     -- Determines when this position record takes effect
-    position_basis STRING NOT NULL DEFAULT 'TRADE_DATE',
+    position_basis STRING NOT NULL DEFAULT 'TRADED',
 
     -- Snapshot date (trade_date or settle_date depending on position_basis)
     position_date STRING NOT NULL,
@@ -151,7 +151,7 @@ TBLPROPERTIES (
 --
 -- Record 1 (Trade-Date Basis):
 --   version_id: 1001
---   position_basis: 'TRADE_DATE'
+--   position_basis: 'TRADED'
 --   position_date: '2026-03-25'    <-- Reflects on TRADE date
 --   trade_date: '2026-03-25'
 --   settle_date: '2026-03-27'
@@ -160,7 +160,7 @@ TBLPROPERTIES (
 --
 -- Record 2 (Settle-Date Basis):
 --   version_id: 1002
---   position_basis: 'SETTLE_DATE'
+--   position_basis: 'SETTLED'
 --   position_date: '2026-03-27'    <-- Reflects on SETTLE date
 --   trade_date: '2026-03-25'
 --   settle_date: '2026-03-27'
@@ -175,14 +175,14 @@ TBLPROPERTIES (
 --   SELECT * FROM cis_trade_position
 --   WHERE portfolio_short_name = 'FUND-001'
 --     AND security_label = 'AAPL'
---     AND position_basis = 'TRADE_DATE'
+--     AND position_basis = 'TRADED'
 --     AND is_latest = true;
 --
 -- Get SETTLE DATE position (what has actually settled?):
 --   SELECT * FROM cis_trade_position
 --   WHERE portfolio_short_name = 'FUND-001'
 --     AND security_label = 'AAPL'
---     AND position_basis = 'SETTLE_DATE'
+--     AND position_basis = 'SETTLED'
 --     AND is_latest = true;
 --
 -- ============================================================================
@@ -201,13 +201,13 @@ TBLPROPERTIES (
 --
 -- Example 4: Reporting Use Cases
 --
--- Use TRADE_DATE for:
+-- Use TRADED for:
 --   - "What positions did I take today?"
 --   - Trade blotters and daily trading reports
 --   - NAV calculation using trade date accounting
 --   - Compliance: exposure limits at trade time
 --
--- Use SETTLE_DATE for:
+-- Use SETTLED for:
 --   - "What do I actually own (settled)?"
 --   - Custodian reconciliation
 --   - Cash settlement and funding
@@ -363,7 +363,7 @@ TBLPROPERTIES (
 -- SELECT * FROM cis_trade_position
 -- WHERE portfolio_short_name = 'FUND-001'
 --   AND security_label = 'AAPL'
---   AND position_basis = 'TRADE_DATE'
+--   AND position_basis = 'TRADED'
 --   AND is_latest = true
 --   AND status = 'OPEN';
 
@@ -372,7 +372,7 @@ TBLPROPERTIES (
 --        dividend_fc, dividend_lc
 -- FROM cis_trade_position
 -- WHERE portfolio_short_name = 'FUND-001'
---   AND position_basis = 'TRADE_DATE'
+--   AND position_basis = 'TRADED'
 --   AND is_latest = true
 --   AND status = 'OPEN'
 -- ORDER BY security_label;
@@ -385,7 +385,7 @@ TBLPROPERTIES (
 -- SELECT * FROM cis_trade_position
 -- WHERE portfolio_short_name = 'FUND-001'
 --   AND security_label = 'AAPL'
---   AND position_basis = 'SETTLE_DATE'
+--   AND position_basis = 'SETTLED'
 --   AND is_latest = true
 --   AND status = 'OPEN';
 
@@ -393,7 +393,7 @@ TBLPROPERTIES (
 -- SELECT security_label, quantity, average_cost, total_cost, position_date
 -- FROM cis_trade_position
 -- WHERE portfolio_short_name = 'FUND-001'
---   AND position_basis = 'SETTLE_DATE'
+--   AND position_basis = 'SETTLED'
 --   AND is_latest = true
 --   AND status = 'OPEN'
 -- ORDER BY security_label;
@@ -412,10 +412,10 @@ TBLPROPERTIES (
 -- LEFT JOIN cis_trade_position s
 --     ON t.portfolio_short_name = s.portfolio_short_name
 --     AND t.security_label = s.security_label
---     AND s.position_basis = 'SETTLE_DATE'
+--     AND s.position_basis = 'SETTLED'
 --     AND s.is_latest = true
 -- WHERE t.portfolio_short_name = 'FUND-001'
---   AND t.position_basis = 'TRADE_DATE'
+--   AND t.position_basis = 'TRADED'
 --   AND t.is_latest = true
 --   AND t.quantity != COALESCE(s.quantity, 0);
 
@@ -428,7 +428,7 @@ TBLPROPERTIES (
 --     trade_date,
 --     settle_date
 -- FROM cis_trade_position
--- WHERE position_basis = 'SETTLE_DATE'
+-- WHERE position_basis = 'SETTLED'
 --   AND position_date > CAST(CURRENT_DATE() AS STRING)
 --   AND is_latest = true;
 

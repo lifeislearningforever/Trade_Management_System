@@ -50,7 +50,7 @@ class TestSettlementDateRules:
         assert mock_position_service.calculate_position.call_count >= 1
 
     def test_future_date_settlement_queued(self):
-        """Test future SETTLE_DATE is queued; TRADE_DATE processed immediately (sync mode)."""
+        """Test future SETTLED is queued; TRADED processed immediately (sync mode)."""
         today = datetime.now()
         future_date = (today + timedelta(days=2)).strftime('%Y-%m-%d')
         trade_date = today.strftime('%Y-%m-%d')
@@ -64,7 +64,7 @@ class TestSettlementDateRules:
         with patch.object(self.service, '_queue_for_settlement') as mock_queue:
             mock_queue.return_value = (True, f"Queued for {future_date}", {'queue_id': 123})
 
-            # async_mode=False: TRADE_DATE → immediate, SETTLE_DATE future → queue
+            # async_mode=False: TRADED → immediate, SETTLED future → queue
             success, message, result = self.service.process_trade_settlement(
                 trade_id=12345,
                 portfolio_id='FUND-001',
@@ -80,7 +80,7 @@ class TestSettlementDateRules:
             )
 
             assert success is True
-            # SETTLE_DATE queue was called once for the future basis
+            # SETTLED queue was called once for the future basis
             mock_queue.assert_called_once()
 
     def test_backdated_within_limit_allowed(self):
@@ -421,7 +421,7 @@ class TestIntegration:
         with patch('trade.services.settlement_service.impala_manager') as mock_impala:
             mock_impala.execute_write.return_value = True
 
-            # async_mode=False: TRADE_DATE processes immediately, SETTLE_DATE queues
+            # async_mode=False: TRADED processes immediately, SETTLED queues
             success, message, result = self.service.process_trade_settlement(
                 trade_id=12345,
                 portfolio_id='FUND-001',

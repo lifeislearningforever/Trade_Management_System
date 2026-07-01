@@ -368,7 +368,7 @@ def step2_generate_cash_flows(spark: SparkSession, kudu_master: str,
             (F.col("quantity") > 0) &
             (F.col("status") == "OPEN") &
             (F.col("is_active") == True) &
-            (F.col("position_basis") == "TRADE_DATE")    # use trade-date basis for CA holdings
+            (F.col("position_basis") == "TRADED")    # use trade-date basis for CA holdings
         )
     )
 

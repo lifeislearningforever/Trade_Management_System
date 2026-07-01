@@ -108,7 +108,7 @@ INNER JOIN (
         WHERE quantity > 0
           AND status = 'OPEN'
           AND is_active = true
-          AND position_basis = 'TRADE_DATE'
+          AND position_basis = 'TRADED'
         GROUP BY portfolio_short_name, security_label
     ) latest
       ON p.portfolio_short_name = latest.portfolio_short_name
@@ -281,7 +281,7 @@ INNER JOIN (
         WHERE quantity > 0
           AND status = 'OPEN'
           AND is_active = true
-          AND position_basis = 'TRADE_DATE'
+          AND position_basis = 'TRADED'
         GROUP BY portfolio_short_name, security_label
     ) latest
       ON p.portfolio_short_name = latest.portfolio_short_name

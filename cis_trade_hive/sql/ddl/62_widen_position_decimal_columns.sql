@@ -33,7 +33,7 @@ DROP TABLE IF EXISTS cis_trade_position;
 CREATE TABLE cis_trade_position (
     version_id                  BIGINT NOT NULL,
     position_id                 BIGINT NOT NULL,
-    position_basis              STRING NOT NULL DEFAULT 'TRADE_DATE',
+    position_basis              STRING NOT NULL DEFAULT 'TRADED',
     position_date               STRING NOT NULL,
     trade_date                  STRING,
     settle_date                 STRING,

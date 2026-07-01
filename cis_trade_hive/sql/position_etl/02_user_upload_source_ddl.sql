@@ -3,7 +3,7 @@
 -- Source System: USER_UPLOAD
 -- Format: Parquet external tables
 -- Note: position_basis is NOT in the uploaded file — it is defaulted at
---       ingest time (TRADE_DATE for tables 1-3, SETTLE_DATE for tables 4-5)
+--       ingest time (TRADED for tables 1-3, SETTLED for tables 4-5)
 -- ============================================================================
 
 -- ============================================================================
@@ -11,7 +11,7 @@
 -- Separator: | (pipe)
 -- File headers: REPORTING_DATE, Portfolio, Client_Num, Exchange_Quoted,
 --               ISIN_Code, Counter, Quantity_Yesterday, Movement, Quantity_Today
--- position_basis default: TRADE_DATE (server-injected, not in file)
+-- position_basis default: TRADED (server-injected, not in file)
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_1 (
     src_id              STRING,
@@ -30,7 +30,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_1 (
     quantity_today          STRING,
     position_basis          STRING
 )
-COMMENT 'User Upload Source 1 - Basic Position Data (position_basis defaulted to TRADE_DATE at ingest)'
+COMMENT 'User Upload Source 1 - Basic Position Data (position_basis defaulted to TRADED at ingest)'
 PARTITIONED BY (
     processing_date     STRING
 )
@@ -42,7 +42,7 @@ STORED AS PARQUET
 -- Fields: Portfolio_Name, Stock_Name, Security_Description, ISIN_Code,
 --         Qty_Held, Shares_Issued, Pct_Holding, Country, Country_ID,
 --         Reporting_Date
--- position_basis default: TRADE_DATE
+-- position_basis default: TRADED
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_2 (
     src_id              STRING,
@@ -62,7 +62,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_2 (
     reporting_date          STRING,
     position_basis          STRING
 )
-COMMENT 'User Upload Source 2 - Portfolio Holdings with Country (position_basis defaulted to TRADE_DATE at ingest)'
+COMMENT 'User Upload Source 2 - Portfolio Holdings with Country (position_basis defaulted to TRADED at ingest)'
 PARTITIONED BY (
     processing_date     STRING
 )
@@ -73,7 +73,7 @@ STORED AS PARQUET
 -- USER_UPLOAD_3: Account Position Data
 -- Fields: Account_name, Asset_description_short, ISIN, Shares_Par_value,
 --         Shares_outstanding_total, Country_of_listing_code, Reporting_Date
--- position_basis default: TRADE_DATE
+-- position_basis default: TRADED
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_3 (
     src_id              STRING,
@@ -90,7 +90,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_3 (
     reporting_date              STRING,
     position_basis              STRING
 )
-COMMENT 'User Upload Source 3 - Account Position Data (position_basis defaulted to TRADE_DATE at ingest)'
+COMMENT 'User Upload Source 3 - Account Position Data (position_basis defaulted to TRADED at ingest)'
 PARTITIONED BY (
     processing_date     STRING
 )
@@ -105,7 +105,7 @@ STORED AS PARQUET
 --         COST_LC, Pct_HOLDINGS, NO_OF_SHARES_ISSUES_BY_THE_COMPANY,
 --         COUNTRY_OF_INCORPORATION, COUNTRY_OF_EXCHANGE, ISIN_CODE,
 --         TICKER_CODE, INDUSTRY, Financial_Non_Financial_Co
--- position_basis default: SETTLE_DATE
+-- position_basis default: SETTLED
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_4 (
     src_id              STRING,
@@ -137,7 +137,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_4 (
     reporting_date                      STRING,
     position_basis                      STRING
 )
-COMMENT 'User Upload Source 4 - Comprehensive Position with Valuation (position_basis defaulted to SETTLE_DATE at ingest)'
+COMMENT 'User Upload Source 4 - Comprehensive Position with Valuation (position_basis defaulted to SETTLED at ingest)'
 PARTITIONED BY (
     processing_date     STRING
 )
@@ -159,7 +159,7 @@ STORED AS PARQUET
 --         NO_OF_SHARES_ISSUES_BY_THE_COMPANY, Pct_HOLDINGS, CELS_Code,
 --         BWCIF_NUMBER_SG, MAS_6D_CODE_SG, BWCIF_NUMBER_Overseas,
 --         MAS_6D_CODE_Overseas, MATURITY_DATE, PORTIA_FUND_TYPE_CIS_INVESTMENT_TYPE
--- position_basis default: SETTLE_DATE
+-- position_basis default: SETTLED
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_5 (
     src_id              STRING,
@@ -216,7 +216,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.cis_user_sta_adhoc_position_5 (
     portia_fund_type_cis_investment_type STRING,
     position_basis                      STRING
 )
-COMMENT 'User Upload Source 5 - Full Position with P&L and MAS Codes (position_basis defaulted to SETTLE_DATE at ingest)'
+COMMENT 'User Upload Source 5 - Full Position with P&L and MAS Codes (position_basis defaulted to SETTLED at ingest)'
 PARTITIONED BY (
     processing_date     STRING
 )

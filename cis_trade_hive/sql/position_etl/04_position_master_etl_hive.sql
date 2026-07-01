@@ -340,7 +340,7 @@ FROM (
     UNION ALL
 
     -- ========================================================================
-    -- 6. gmp_cis_sta_dly_ams_multi_dis_cif (position_basis = TRADE_DATE)
+    -- 6. gmp_cis_sta_dly_ams_multi_dis_cif (position_basis = TRADED)
     -- ========================================================================
     SELECT
         portfolio_code                      AS portfolio,
@@ -385,7 +385,7 @@ FROM (
         NULL                                AS bwcif_ovs,
         NULL                                AS mas_6d_code_sg,
         NULL                                AS mas_6d_code_ovs,
-        'TRADE_DATE'                        AS position_basis,
+        'TRADED'                        AS position_basis,
         NULL                                AS reporting_date,
         NULL                                AS maturity_date,
         'AMS_STREET'                        AS src_system,
@@ -445,7 +445,7 @@ FROM (
         NULL                                AS bwcif_ovs,
         NULL                                AS mas_6d_code_sg,
         NULL                                AS mas_6d_code_ovs,
-        'TRADE_DATE'                        AS position_basis,
+        'TRADED'                        AS position_basis,
         NULL                                AS reporting_date,
         NULL                                AS maturity_date,
         'AMS_STREET'                        AS src_system,
@@ -505,7 +505,7 @@ FROM (
         NULL                                AS bwcif_ovs,
         mas_6digit_code                     AS mas_6d_code_sg,
         NULL                                AS mas_6d_code_ovs,
-        'TRADE_DATE'                        AS position_basis,
+        'TRADED'                        AS position_basis,
         NULL                                AS reporting_date,
         NULL                                AS maturity_date,
         'AMS_STREET'                        AS src_system,

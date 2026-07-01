@@ -1205,7 +1205,7 @@ def trade_settle(request, trade_id):
                 isin=trade_data.get('isin'),
                 security_name=trade_data.get('security_full_name'),
                 async_mode=True,
-                position_basis=None,  # dual: TRADE_DATE + SETTLE_DATE
+                position_basis=None,  # dual: TRADED + SETTLED
             )
             logger.info(f"Position calculation queued for settled trade {trade_id}")
         except Exception as settle_err:
