@@ -10,11 +10,12 @@
 
 | Type | Meaning |
 |------|---------|
-| `INT` | Intraday — current day activity |
+| `INT` | Intraday — current day activity AND backdated trade bookings |
 | `EOD` | End of Day — final state of a day |
 | `SOD` | Start of Day — carry forward from previous EOD |
-| `BACK` | Backdated entries (past adjustments) |
-| `CORR` | Corrections on historical data |
+| `CORR` | Corrections triggered from last-month-end date in alldatesinfo |
+
+> **Note:** `BACK` type is removed. Backdated trades always produce `INT`, not `BACK` or `CORR`.
 
 ---
 
@@ -52,13 +53,13 @@ For trades:
 **File:** `trade/services/position_service.py` — `_derive_position_type()`
 
 ```python
-if pos_dt == today:
+if pos_dt <= today:   # same-day OR backdated → always INT
     return True, '', 'INT'
-elif pos_dt < today:
-    return True, '', 'CORR'
 else:
     return False, "Future position date not allowed", None
 ```
+
+`CORR` is never derived here — it is only assigned externally for last-month-end corrections triggered from `gmp_cis_sta_dly_alldatesinfo`.
 
 ### EOD Generation
 **File:** `trade/management/commands/refresh_positions.py`

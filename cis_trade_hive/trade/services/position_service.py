@@ -56,9 +56,12 @@ class PositionService:
         Derive position_type by comparing position_date to contextual_today.
 
         Returns (ok, message, position_type):
-          - position_date == today  → ok=True,  position_type='INT'
-          - position_date <  today  → ok=True,  position_type='CORR'
-          - position_date >  today  → ok=False, message=error, position_type=None
+          - position_date == today  → INT  (same-day intraday)
+          - position_date <  today  → INT  (backdated trade — still INT, not BACK/CORR)
+          - position_date >  today  → blocked (future dates not allowed)
+
+        CORR is only assigned externally for last-month-end corrections
+        triggered from gmp_cis_sta_dly_alldatesinfo — never derived here.
         """
         try:
             pos_dt = datetime.strptime(position_date, '%Y-%m-%d').date()
@@ -69,10 +72,8 @@ class PositionService:
         if not isinstance(today, date):
             today = datetime.strptime(str(today), '%Y-%m-%d').date()
 
-        if pos_dt == today:
+        if pos_dt <= today:
             return True, '', 'INT'
-        elif pos_dt < today:
-            return True, '', 'CORR'
         else:
             return False, (
                 f"Future position date {position_date} not allowed "

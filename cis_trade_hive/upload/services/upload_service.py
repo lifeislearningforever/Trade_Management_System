@@ -3778,11 +3778,7 @@ class UploadService:
                     CAST(0                       AS DECIMAL(30,8)) AS uncall_lc,
                     CAST(0                       AS DECIMAL(30,8)) AS pipeline_fc,
                     CAST(0                       AS DECIMAL(30,8)) AS pipeline_lc,
-                    CASE
-                        WHEN CAST(reporting_date AS STRING) = '{_contextual_today_iso}' THEN 'INT'
-                        WHEN CAST(reporting_date AS STRING) < '{_contextual_today_iso}' THEN 'CORR'
-                        ELSE 'INT'
-                    END                                            AS position_type
+                    'INT'                                          AS position_type
                 FROM position_upload_staging
                 WHERE overall_status LIKE 'VALID%'
                   AND CAST(reporting_date AS STRING) <= '{_contextual_today_iso}'
