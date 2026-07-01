@@ -383,7 +383,7 @@ UPSERT INTO cis_position (
     isin,
     average_cost_lc,       -- Renamed from placeholder_2 (LC = Local/Portfolio Currency)
     source_table,
-    placeholder_4
+    processing_timestamp
 )
 SELECT
     -- Position ID: microsecond-scale to reduce collision
@@ -439,7 +439,7 @@ SELECT
     -- Calculate from average_cost * FX rate if portfolio_currency != security_currency
     CAST(0 AS DECIMAL(30,8)) AS average_cost_lc,  -- To be calculated via FX rate
     source_table AS source_table,
-    '' AS placeholder_4
+    from_unixtime(unix_timestamp(), 'yyyy-MM-dd HH:mm:ss') AS processing_timestamp
 
 FROM position_upload_staging
 WHERE overall_status = 'VALID'

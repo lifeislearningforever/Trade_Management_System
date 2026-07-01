@@ -111,7 +111,7 @@ CREATE TABLE cis_position_new (
     isin STRING,
 
     source_table STRING,
-    placeholder_4 STRING,
+    processing_timestamp STRING,
 
     PRIMARY KEY (position_id)
 )
@@ -151,7 +151,7 @@ SELECT
     realized_pnl_lc,
     isin,
     placeholder_3,  -- maps to source_table in new schema
-    placeholder_4
+    placeholder_4   -- maps to processing_timestamp in new schema
 FROM cis_position;
 
 -- Step 3: Verify data copied correctly

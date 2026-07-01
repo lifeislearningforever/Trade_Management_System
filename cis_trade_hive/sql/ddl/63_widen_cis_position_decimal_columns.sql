@@ -79,7 +79,7 @@ CREATE TABLE cis_position (
     -- Reference
     isin                STRING,
     source_table        STRING,
-    placeholder_4       STRING,
+    processing_timestamp STRING,
 
     -- Uncalled Capital (PE/VC)
     uncall_fc           DECIMAL(30,8),
