@@ -1,5 +1,5 @@
 """
-EOD Position Revaluation
+EOD / CORR Position Revaluation
 
 Refreshes market values for all open positions in cis_position (the golden copy),
 covering all source systems: CIS, GMP, AMS/AMSICEQ, USER_UPLOAD.
@@ -10,18 +10,33 @@ For each position:
   3. unrealized_pnl = 0 if security_investment IN (ASSOC, SUBSI), else market_value_fc - cost_fc
   4. NON-REVALUED: LC columns recalculated from FC × latest FX rate (no MTM override)
   5. net_book_value = cost + unrealized_pnl - provision
-  6. UPSERT EOD row back into cis_position, reusing the source row's position_id (same
-     position_date = same logical position) with a new version_id and is_latest=true.
-     The superseded source row (INT/SOD) is updated to is_latest=false first.
+  6. Marks source row is_latest=false, inserts new EOD/CORR row with is_latest=true.
+
+Run types
+---------
+  EOD  (default): Normal end-of-day run.
+        - Processes the latest open position for every portfolio/security/basis
+          regardless of position_date (picks up today's INT/SOD).
+        - Writes position_type = 'EOD'.
+        - processing_date = today.
+
+  CORR: Month-end correction run (scheduled D+1 … D+5 after month-end).
+        - Requires --position-date YYYY-MM-DD (the month-end date to correct).
+        - Restricts to positions whose position_date = <position-date>.
+        - Writes position_type = 'CORR'.
+        - processing_date = today (the actual run date, not the month-end date).
 
 Usage:
+    # Normal EOD (reporting date is implicit — uses latest position per security)
     python manage.py refresh_positions
     python manage.py refresh_positions --portfolio UOB-SG-TRADING
     python manage.py refresh_positions --source CIS
-    python manage.py refresh_positions --source AMS
-    python manage.py refresh_positions --source USER_UPLOAD
-    python manage.py refresh_positions --source GMP
     python manage.py refresh_positions --dry-run
+
+    # Month-end CORR run (position-date = last month-end, runs on D+1 … D+5)
+    python manage.py refresh_positions --run-type CORR --position-date 2026-06-30
+    python manage.py refresh_positions --run-type CORR --position-date 2026-06-30 --portfolio UOB-SG-TRADING
+    python manage.py refresh_positions --run-type CORR --position-date 2026-06-30 --dry-run
 """
 
 import logging
@@ -51,15 +66,43 @@ class Command(BaseCommand):
         )
         parser.add_argument('--dry-run', action='store_true',
                             help='Show what would be updated without writing to database')
+        parser.add_argument(
+            '--run-type', type=str, choices=['EOD', 'CORR'], default='EOD',
+            help='EOD (default): normal end-of-day run. CORR: month-end correction run.'
+        )
+        parser.add_argument(
+            '--position-date', type=str, default=None,
+            dest='position_date',
+            help='Required for --run-type CORR: the month-end position_date to revalue (YYYY-MM-DD).'
+        )
 
     def handle(self, *args, **options):
         portfolio_filter = options.get('portfolio')
-        source_filter = options.get('source')
-        dry_run = options.get('dry_run', False)
-        run_date = datetime.now().strftime('%Y-%m-%d')  # fallback only; position_date comes from each row
+        source_filter    = options.get('source')
+        dry_run          = options.get('dry_run', False)
+        run_type         = options.get('run_type', 'EOD')
+        position_date    = options.get('position_date')
+        today            = datetime.now().strftime('%Y-%m-%d')
+
+        if run_type == 'CORR' and not position_date:
+            self.stderr.write(self.style.ERROR(
+                'ERROR: --position-date YYYY-MM-DD is required for --run-type CORR'
+            ))
+            return
+
+        if run_type == 'EOD' and position_date:
+            self.stdout.write(self.style.WARNING(
+                f'WARNING: --position-date {position_date} is ignored for EOD run type '
+                f'(EOD always uses the latest position per security)'
+            ))
+            position_date = None
+
+        position_type = run_type  # 'EOD' or 'CORR'
 
         self.stdout.write(self.style.MIGRATE_HEADING('=' * 80))
-        self.stdout.write(self.style.MIGRATE_HEADING('EOD Position Revaluation — cis_position (golden copy)'))
+        self.stdout.write(self.style.MIGRATE_HEADING(
+            f'{run_type} Position Revaluation — cis_position (golden copy)'
+        ))
         self.stdout.write(self.style.MIGRATE_HEADING('=' * 80))
         self.stdout.write('')
 
@@ -68,6 +111,10 @@ class Command(BaseCommand):
             self.stdout.write('')
 
         sources = [source_filter] if source_filter else ALL_SOURCES
+        self.stdout.write(f"Run type   : {run_type}")
+        self.stdout.write(f"Run date   : {today}")
+        if position_date:
+            self.stdout.write(f"Pos date   : {position_date}  (CORR — positions on this date only)")
         self.stdout.write(f"Sources    : {', '.join(sources)}")
         if portfolio_filter:
             self.stdout.write(f"Portfolio  : {portfolio_filter}")
@@ -76,7 +123,7 @@ class Command(BaseCommand):
         processed = updated = skipped = errors = 0
 
         try:
-            positions = self._get_open_positions(portfolio_filter, sources)
+            positions = self._get_open_positions(portfolio_filter, sources, position_date)
 
             if not positions:
                 self.stdout.write(self.style.WARNING('No positions found'))
@@ -101,7 +148,7 @@ class Command(BaseCommand):
                     self.stdout.write(f"Processing {idx}/{total}...")
 
                 try:
-                    result = self._process_position(position, dry_run, run_date, ref, insert_rows)
+                    result = self._process_position(position, dry_run, today, ref, insert_rows)
                     if result == 'updated':
                         updated += 1
                     elif result == 'skipped':
@@ -118,11 +165,11 @@ class Command(BaseCommand):
                         f"({position.get('portfolio')}/{position.get('security_label')}): {str(e)}"
                     ))
 
-            # Mark source rows is_latest=false, then UPSERT EOD rows with is_latest=true
+            # Mark source rows is_latest=false, then insert EOD/CORR rows with is_latest=true
             if not dry_run and insert_rows:
-                self.stdout.write(f'Writing {len(insert_rows)} EOD rows...')
+                self.stdout.write(f'Writing {len(insert_rows)} {position_type} rows...')
                 self._batch_mark_source_not_latest(insert_rows)
-                self._batch_upsert_eod(insert_rows, run_date)
+                self._batch_upsert_eod(insert_rows, today, position_type)
 
             self.stdout.write('')
             self.stdout.write(self.style.MIGRATE_HEADING('=' * 80))
@@ -140,7 +187,7 @@ class Command(BaseCommand):
             if dry_run:
                 self.stdout.write(self.style.WARNING('DRY RUN — no changes written'))
             else:
-                self.stdout.write(self.style.SUCCESS('EOD revaluation completed'))
+                self.stdout.write(self.style.SUCCESS(f'{run_type} revaluation completed'))
 
         except Exception as e:
             self.stderr.write(self.style.ERROR(f"Fatal error: {str(e)}"))
@@ -151,18 +198,25 @@ class Command(BaseCommand):
     # Data fetching
     # -------------------------------------------------------------------------
 
-    def _get_open_positions(self, portfolio_filter, sources):
+    def _get_open_positions(self, portfolio_filter, sources, position_date=None):
         """
         Fetch the single latest row per portfolio/security/position_basis from cis_position.
         Latest = highest position_id (most recently inserted row of any type).
-        This ensures the EOD revaluation carries forward all accumulated CF/CA amounts
-        and only creates one EOD record per combination per run date.
+
+        EOD  (position_date=None): picks up the latest position across all dates —
+             the normal end-of-day path.
+        CORR (position_date=YYYY-MM-DD): restricts to rows whose position_date equals
+             the supplied month-end date, so only that date's positions are revalued.
         """
         try:
             src_list = "', '".join(self._escape(s) for s in sources)
             portfolio_clause = (
                 f"AND portfolio = '{self._escape(portfolio_filter)}'"
                 if portfolio_filter else ""
+            )
+            date_clause = (
+                f"AND position_date = '{self._escape(position_date)}'"
+                if position_date else ""
             )
 
             query = f"""
@@ -190,6 +244,7 @@ class Command(BaseCommand):
                     WHERE src_system IN ('{src_list}')
                       AND quantity > 0
                       {portfolio_clause}
+                      {date_clause}
                     GROUP BY portfolio, security_label, position_basis
                 ) latest
                   ON p.portfolio       = latest.portfolio
@@ -510,17 +565,17 @@ class Command(BaseCommand):
                     database=DATABASE
                 )
 
-    def _batch_upsert_eod(self, insert_rows, run_date):
+    def _batch_upsert_eod(self, insert_rows, run_date, position_type='EOD'):
         """
-        INSERT EOD rows into cis_position in batches of 500.
+        INSERT EOD or CORR rows into cis_position in batches of 500.
 
-        position_id: always NEW random — EOD coexists with INT and SOD on the
+        position_id: always NEW random — EOD/CORR coexists with INT and SOD on the
                      same position_date as separate rows (distinguished by
-                     position_type). The source INT row is left intact with
-                     is_latest=false; the new EOD row gets its own position_id.
-        version_id:  same as position_id (timestamp-based, records when EOD ran).
-        is_latest:   true — the EOD row is now the authoritative state for
-                     queries that want the repriced close.
+                     position_type). The source row is left intact with
+                     is_latest=false; the new row gets its own position_id.
+        version_id:  timestamp-based, records when this run executed.
+        is_latest:   true — this row is now the authoritative state.
+        position_type: 'EOD' for normal end-of-day; 'CORR' for month-end correction.
         """
         BATCH  = 500
         now_ms = int(datetime.now().timestamp() * 1000)
@@ -576,7 +631,7 @@ class Command(BaseCommand):
                 f"{fc(position.get('dividend_fc'))}, {lc(position.get('dividend_lc'))}, "
                 f"{fc(position.get('uncall_fc'))}, {lc(position.get('uncall_lc'))}, "
                 f"{fc(position.get('pipeline_fc'))}, {lc(position.get('pipeline_lc'))}, "
-                f"'EOD', {isin_val}, {src_tbl}, true)"
+                f"'{position_type}', {isin_val}, {src_tbl}, true)"
             )
 
         col_list = """(
@@ -604,7 +659,7 @@ class Command(BaseCommand):
                 f"INSERT INTO {DATABASE}.cis_position {col_list} VALUES {values}",
                 database=DATABASE
             )
-            self.stdout.write(f"  Inserted EOD rows {i + 1}–{i + len(chunk)}")
+            self.stdout.write(f"  Inserted {position_type} rows {i + 1}–{i + len(chunk)}")
 
     # -------------------------------------------------------------------------
     # INSERT new EOD row into cis_position (legacy single-row path, kept for reference)

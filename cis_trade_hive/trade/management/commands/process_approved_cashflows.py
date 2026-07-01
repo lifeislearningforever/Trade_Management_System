@@ -1,7 +1,7 @@
 """
 Django Management Command: Process Approved Cash Flows
 
-EOD job that applies APPROVED user-created cash flows (src_system='CIS')
+EOD / CORR job that applies APPROVED user-created cash flows (src_system='CIS')
 to cis_trade_position. Runs after process_corporate_actions and before
 position reval (refresh_positions).
 
@@ -29,12 +29,31 @@ Exception — DIVIDEND / CASH_DIVIDEND:
 Idempotency: once processed, position_updated=true is set on the cash flow
 record so re-runs on the same date skip already-processed records.
 
+Run types
+---------
+  EOD  (default): Normal end-of-day run.
+        - Processes cash flows with payment_date <= today (or --date).
+        - Looks up the latest open SETTLED position for each portfolio/security.
+        - Writes position_type = 'INT' into cis_trade_position / cis_position.
+
+  CORR: Month-end correction run (scheduled D+1 … D+5 after month-end).
+        - Requires --position-date YYYY-MM-DD (the month-end date being corrected).
+        - Processes cash flows with payment_date <= position-date that have not
+          yet been applied (or --reprocess to force re-application).
+        - Looks up the position as-of position-date for each portfolio/security.
+        - Writes position_type = 'CORR' into cis_position (golden copy).
+
 Usage:
+    # Normal EOD
     python manage.py process_approved_cashflows
     python manage.py process_approved_cashflows --date 2026-06-09
-    python manage.py process_approved_cashflows --date 2026-05-01  # backdated
     python manage.py process_approved_cashflows --dry-run
     python manage.py process_approved_cashflows --portfolio UOB-SG-TRADING
+
+    # Month-end CORR run (position-date = last month-end, runs on D+1 … D+5)
+    python manage.py process_approved_cashflows --run-type CORR --position-date 2026-06-30
+    python manage.py process_approved_cashflows --run-type CORR --position-date 2026-06-30 --dry-run
+    python manage.py process_approved_cashflows --run-type CORR --position-date 2026-06-30 --reprocess
 """
 
 import logging
@@ -91,7 +110,7 @@ class Command(BaseCommand):
             '-d', '--date',
             type=str,
             default=None,
-            help='Process cash flows up to and including this date (YYYY-MM-DD). Default: today'
+            help='EOD: process cash flows up to and including this date (YYYY-MM-DD). Default: today'
         )
         parser.add_argument(
             '--dry-run',
@@ -109,17 +128,49 @@ class Command(BaseCommand):
             action='store_true',
             help='Re-process already-processed records (position_updated=true). Use for corrections.'
         )
+        parser.add_argument(
+            '--run-type', type=str, choices=['EOD', 'CORR'], default='EOD',
+            help='EOD (default): normal end-of-day run. CORR: month-end correction run.'
+        )
+        parser.add_argument(
+            '--position-date', type=str, default=None,
+            dest='position_date',
+            help='Required for --run-type CORR: the month-end position_date to correct (YYYY-MM-DD). '
+                 'Cash flows with payment_date <= position-date are applied to positions on that date.'
+        )
 
     def handle(self, *args, **options):
-        run_date = options['date'] or date.today().strftime('%Y-%m-%d')
-        dry_run = options['dry_run']
+        run_type         = options['run_type']
+        position_date    = options['position_date']
+        dry_run          = options['dry_run']
         portfolio_filter = options['portfolio']
-        reprocess = options['reprocess']
+        reprocess        = options['reprocess']
+        today            = date.today().strftime('%Y-%m-%d')
+
+        if run_type == 'CORR' and not position_date:
+            raise CommandError('--position-date YYYY-MM-DD is required for --run-type CORR')
+
+        if run_type == 'EOD' and position_date:
+            self.stdout.write(self.style.WARNING(
+                f'WARNING: --position-date {position_date} is ignored for EOD run type'
+            ))
+            position_date = None
+
+        # For EOD: cutoff date = --date or today
+        # For CORR: cutoff date = position_date (apply all CFs up to month-end)
+        if run_type == 'CORR':
+            run_date = position_date
+        else:
+            run_date = options['date'] or today
 
         self.stdout.write(self.style.HTTP_INFO('=' * 70))
         self.stdout.write(self.style.HTTP_INFO('  CIS Trade Hive — Process Approved Cash Flows'))
         self.stdout.write(self.style.HTTP_INFO('=' * 70))
-        self.stdout.write(f'Run date  : {run_date}')
+        self.stdout.write(f'Run type  : {run_type}')
+        self.stdout.write(f'Run date  : {today}')
+        self.stdout.write(f'CF cutoff : {run_date}  (payment_date <= this date)')
+        if position_date:
+            self.stdout.write(f'Pos date  : {position_date}  (CORR — positions on this date only)')
         self.stdout.write(f'Started   : {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
         if portfolio_filter:
             self.stdout.write(f'Portfolio : {portfolio_filter}')
@@ -180,7 +231,9 @@ class Command(BaseCommand):
                     amount_lc=amount_lc,
                     send_receive=send_receive,
                     payment_date=payment_date,
-                    dry_run=dry_run
+                    dry_run=dry_run,
+                    run_type=run_type,
+                    position_date=position_date,
                 )
                 if success:
                     self.stdout.write(self.style.SUCCESS(f'    ✓ {message}'))
@@ -267,13 +320,16 @@ class Command(BaseCommand):
         amount_lc: Decimal,
         send_receive: str,
         payment_date: str,
-        dry_run: bool
+        dry_run: bool,
+        run_type: str = 'EOD',
+        position_date: Optional[str] = None,
     ) -> Tuple[bool, str]:
         """Route to the correct position update logic based on cash flow type.
-        Applies CF to the SETTLED position in cis_trade_position (CIS) or cis_position (non-CIS)."""
+        Applies CF to the SETTLED position in cis_trade_position (CIS) or cis_position (non-CIS).
+        For CORR runs, restricts position lookup to position_date and writes 'CORR' position_type."""
 
         # Fetch positions for both bases; apply to each independently
-        positions = self._get_current_positions(portfolio, security)
+        positions = self._get_current_positions(portfolio, security, position_date=position_date)
         if not positions:
             return False, f'No open position for {portfolio}/{security} in cis_trade_position or cis_position'
 
@@ -296,59 +352,46 @@ class Command(BaseCommand):
         for position, pos_src in positions:
             basis = position.get('position_basis') or position.get('pos_basis') or 'SETTLED'
 
+            common = dict(
+                cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
+                amount_fc=amount_fc, amount_lc=amount_lc,
+                fc_dp=fc_dp, lc_dp=lc_dp,
+                dry_run=dry_run, pos_src=pos_src, run_type=run_type,
+            )
+
             if cf_type in ('UNCALL_COMMITMENT',):
                 ok, msg = self._accumulate_field(
                     position, portfolio, security, payment_date,
                     fc_field='uncall_fc', lc_field='uncall_lc',
-                    delta_fc=signed_fc, delta_lc=signed_lc,
-                    cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
-                    amount_fc=amount_fc, amount_lc=amount_lc,
-                    fc_dp=fc_dp, lc_dp=lc_dp,
-                    dry_run=dry_run, pos_src=pos_src
+                    delta_fc=signed_fc, delta_lc=signed_lc, **common
                 )
 
             elif cf_type in ('PROVISION',):
                 ok, msg = self._accumulate_field(
                     position, portfolio, security, payment_date,
                     fc_field='provision_fc', lc_field='provision_lc',
-                    delta_fc=signed_fc, delta_lc=signed_lc,
-                    cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
-                    amount_fc=amount_fc, amount_lc=amount_lc,
-                    fc_dp=fc_dp, lc_dp=lc_dp,
-                    dry_run=dry_run, pos_src=pos_src
+                    delta_fc=signed_fc, delta_lc=signed_lc, **common
                 )
 
             elif cf_type in ('PIPELINE',):
                 ok, msg = self._accumulate_field(
                     position, portfolio, security, payment_date,
                     fc_field='pipeline_fc', lc_field='pipeline_lc',
-                    delta_fc=signed_fc, delta_lc=signed_lc,
-                    cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
-                    amount_fc=amount_fc, amount_lc=amount_lc,
-                    fc_dp=fc_dp, lc_dp=lc_dp,
-                    dry_run=dry_run, pos_src=pos_src
+                    delta_fc=signed_fc, delta_lc=signed_lc, **common
                 )
 
             elif cf_type in ('YTD_REALISE',):
                 ok, msg = self._accumulate_field(
                     position, portfolio, security, payment_date,
                     fc_field='realized_pnl_fc', lc_field='realized_pnl_lc',
-                    delta_fc=signed_fc, delta_lc=signed_lc,
-                    cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
-                    amount_fc=amount_fc, amount_lc=amount_lc,
-                    fc_dp=fc_dp, lc_dp=lc_dp,
-                    dry_run=dry_run, pos_src=pos_src
+                    delta_fc=signed_fc, delta_lc=signed_lc, **common
                 )
 
             elif cf_type in ('INCOME_DISTRIBUTION',):
                 ok, msg = self._accumulate_field(
                     position, portfolio, security, payment_date,
                     fc_field='realized_pnl_fc', lc_field='realized_pnl_lc',
-                    delta_fc=signed_fc, delta_lc=signed_lc,
-                    cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
-                    amount_fc=amount_fc, amount_lc=amount_lc,
-                    fc_dp=fc_dp, lc_dp=lc_dp,
-                    dry_run=dry_run, pos_src=pos_src
+                    delta_fc=signed_fc, delta_lc=signed_lc, **common
                 )
 
             elif cf_type in ('DIVIDEND', 'CASH_DIVIDEND'):
@@ -359,21 +402,15 @@ class Command(BaseCommand):
                 ok, msg = self._accumulate_field(
                     position, portfolio, security, payment_date,
                     fc_field='dividend_fc', lc_field='dividend_lc',
-                    delta_fc=div_fc, delta_lc=div_lc,
-                    cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
-                    amount_fc=amount_fc, amount_lc=amount_lc,
-                    fc_dp=fc_dp, lc_dp=lc_dp,
-                    dry_run=dry_run, pos_src=pos_src
+                    delta_fc=div_fc, delta_lc=div_lc, **common
                 )
 
             elif cf_type in ('RETURN_OF_CAPITAL', 'CAPITAL_DISTRIBUTION'):
                 ok, msg = self._reduce_avp(
                     position, portfolio, security, payment_date,
                     amount_fc=signed_fc, amount_lc=signed_lc,
-                    cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
                     raw_amount_fc=amount_fc, raw_amount_lc=amount_lc,
-                    fc_dp=fc_dp, lc_dp=lc_dp,
-                    dry_run=dry_run, pos_src=pos_src
+                    **common
                 )
 
             else:
@@ -413,6 +450,7 @@ class Command(BaseCommand):
         lc_dp: int = DEFAULT_DP,
         dry_run: bool = False,
         pos_src: str = 'CIS',
+        run_type: str = 'EOD',
     ) -> Tuple[bool, str]:
         """Add delta to existing FC/LC field (running total)."""
         old_fc = Decimal(str(position.get(fc_field, 0) or 0))
@@ -430,7 +468,7 @@ class Command(BaseCommand):
             position, portfolio, security, position_date, cf_type, overrides,
             cf_id=cf_id, cf_number=cf_number,
             cf_amount_fc=float(round(amount_fc, fc_dp)), cf_amount_lc=float(round(amount_lc, lc_dp)),
-            fc_dp=fc_dp, lc_dp=lc_dp, pos_src=pos_src
+            fc_dp=fc_dp, lc_dp=lc_dp, pos_src=pos_src, run_type=run_type,
         )
         if success:
             return True, f'{cf_type}: {fc_field} {old_fc} + {delta_fc} = {new_fc}'
@@ -453,6 +491,7 @@ class Command(BaseCommand):
         lc_dp: int = DEFAULT_DP,
         dry_run: bool = False,
         pos_src: str = 'CIS',
+        run_type: str = 'EOD',
     ) -> Tuple[bool, str]:
         """
         AVP reduction: avp_new = avp_old - (amount_fc / qty)
@@ -489,7 +528,7 @@ class Command(BaseCommand):
             position, portfolio, security, position_date, cf_type, overrides,
             cf_id=cf_id, cf_number=cf_number,
             cf_amount_fc=float(round(raw_amount_fc, fc_dp)), cf_amount_lc=float(round(raw_amount_lc, lc_dp)),
-            fc_dp=fc_dp, lc_dp=lc_dp, pos_src=pos_src
+            fc_dp=fc_dp, lc_dp=lc_dp, pos_src=pos_src, run_type=run_type,
         )
         if success:
             return True, f'{cf_type}: avp_fc {old_avp_fc} → {new_avp_fc}'
@@ -514,13 +553,18 @@ class Command(BaseCommand):
         fc_dp: int = DEFAULT_DP,
         lc_dp: int = DEFAULT_DP,
         pos_src: str = 'CIS',
+        run_type: str = 'EOD',
     ) -> bool:
         """
         For CIS positions: mark current version is_latest=false, insert new version,
         then sync to golden copy.
         For non-CIS positions (GMP, AMSICEQ, USER_UPLOAD): skip cis_trade_position
         entirely and write directly to cis_position (golden copy).
+        CORR runs write position_type='CORR' in the golden copy instead of 'INT'.
         """
+        # position_type written into cis_position: INT for EOD flow, CORR for month-end correction
+        golden_position_type = 'CORR' if run_type == 'CORR' else 'INT'
+
         try:
             # Non-CIS: golden copy only — no cis_trade_position ledger for these sources
             if pos_src != 'CIS':
@@ -538,6 +582,7 @@ class Command(BaseCommand):
                     fc_dp=fc_dp,
                     lc_dp=lc_dp,
                     src_system=pos_src,
+                    golden_position_type=golden_position_type,
                 )
                 return True
 
@@ -663,6 +708,7 @@ class Command(BaseCommand):
                     cf_amount_lc=cf_amount_lc,
                     fc_dp=fc_dp,
                     lc_dp=lc_dp,
+                    golden_position_type=golden_position_type,
                 )
             return success
 
@@ -685,6 +731,7 @@ class Command(BaseCommand):
         fc_dp: int = DEFAULT_DP,
         lc_dp: int = DEFAULT_DP,
         src_system: str = 'CIS',
+        golden_position_type: str = 'INT',
     ) -> None:
         """
         Mirror the cash-flow position update into cis_position (golden copy).
@@ -795,7 +842,7 @@ class Command(BaseCommand):
                 {provision_fc_val}, {provision_lc_val},
                 {_gfc('uncall_fc')}, {_glc('uncall_lc')},
                 {_gfc('pipeline_fc')}, {_glc('pipeline_lc')},
-                'INT',
+                '{golden_position_type}',
                 {f"'{_escape(isin)}'" if isin else 'NULL'},
                 {f"'{_escape(source_table)}'" if source_table else 'NULL'}
             )
@@ -886,14 +933,26 @@ class Command(BaseCommand):
     def _get_current_positions(
         self,
         portfolio: str,
-        security: str
+        security: str,
+        position_date: Optional[str] = None,
     ) -> List[Tuple[Dict[str, Any], str]]:
         """
         Get latest open SETTLED position for portfolio/security.
         Returns list of (position_dict, src_system) with one entry if found.
         First tries cis_trade_position (CIS versioned ledger).
         Falls back to cis_position (golden copy) for non-CIS sources.
+
+        position_date (CORR only): when supplied, restricts the lookup to rows
+        whose position_date equals this value (the month-end date being corrected).
+        For EOD (None): picks the most recent position across all dates.
         """
+        date_clause_tp = (
+            f"AND position_date = '{_escape(position_date)}'" if position_date else ""
+        )
+        date_clause_gp = (
+            f"AND position_date = '{_escape(position_date)}'" if position_date else ""
+        )
+
         try:
             query = f"""
             SELECT *
@@ -904,6 +963,7 @@ class Command(BaseCommand):
               AND status = 'OPEN'
               AND is_active = true
               AND (is_latest = true OR is_latest IS NULL)
+              {date_clause_tp}
             ORDER BY position_date DESC, version_id DESC
             LIMIT 1
             """
@@ -950,6 +1010,7 @@ class Command(BaseCommand):
               AND security_label = '{_escape(security)}'
               AND position_basis = 'SETTLED'
               AND quantity > 0
+              {date_clause_gp}
             ORDER BY position_date DESC
             LIMIT 1
             """
