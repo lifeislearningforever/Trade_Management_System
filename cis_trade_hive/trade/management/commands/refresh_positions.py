@@ -425,14 +425,14 @@ class Command(BaseCommand):
 
     def _batch_mark_source_not_latest(self, insert_rows):
         """
-        Mark each source row (INT or SOD) as is_latest=false before we UPSERT
-        the EOD row in its place.  EOD reuses the same position_id (same
-        position_date = same logical position), so the UPSERT by position_id
-        would overwrite the source row anyway — but marking it false first
-        keeps a clean audit trail if is_latest is ever indexed or queried.
+        Mark the source row (the latest INT or SOD for this natural key) as
+        is_latest=false before inserting the new EOD row.
 
-        Kudu does not support multi-row UPDATE, so we batch DELETE + re-INSERT
-        with is_latest=false for the affected position_ids.
+        EOD gets a brand-new position_id and coexists with INT/SOD on the same
+        position_date — they are separate rows distinguished by position_type.
+        The source row is re-UPSERTed in-place (by its own position_id, the
+        Kudu PK) with is_latest=false so it is no longer returned by
+        is_latest=true queries.
         """
         BATCH = 500
         # Collect (position_id, full row dict) pairs — we need all fields to re-insert
@@ -512,13 +512,15 @@ class Command(BaseCommand):
 
     def _batch_upsert_eod(self, insert_rows, run_date):
         """
-        UPSERT EOD rows into cis_position in batches of 500.
+        INSERT EOD rows into cis_position in batches of 500.
 
-        position_id: reused from the source row — EOD is on the SAME position_date,
-                     so it's the same logical position being repriced.  The UPSERT
-                     by position_id (Kudu PK) replaces the source row.
-        version_id:  new timestamp-based value to record when EOD ran.
-        is_latest:   true — this EOD row is now the authoritative state.
+        position_id: always NEW random — EOD coexists with INT and SOD on the
+                     same position_date as separate rows (distinguished by
+                     position_type). The source INT row is left intact with
+                     is_latest=false; the new EOD row gets its own position_id.
+        version_id:  same as position_id (timestamp-based, records when EOD ran).
+        is_latest:   true — the EOD row is now the authoritative state for
+                     queries that want the repriced close.
         """
         BATCH  = 500
         now_ms = int(datetime.now().timestamp() * 1000)
@@ -536,9 +538,9 @@ class Command(BaseCommand):
             nbv_fc        = row['nbv_fc']
             nbv_lc        = row['nbv_lc']
 
-            # Reuse the source position_id — same position_date, same logical position
-            src_position_id = position.get('position_id')
-            version_id      = now_ms + idx   # new: records when EOD ran
+            # New position_id — EOD coexists with INT/SOD as a separate row
+            src_position_id = now_ms + idx + 2_000_000   # offset avoids collision with version_id
+            version_id      = now_ms + idx                # records when EOD ran
 
             raw_pos_date = position.get('position_date')
             pos_date  = str(raw_pos_date)[:10] if raw_pos_date else run_date
@@ -599,10 +601,10 @@ class Command(BaseCommand):
             chunk  = insert_rows[i: i + BATCH]
             values = ',\n'.join(_build_value(i + j, r) for j, r in enumerate(chunk))
             impala_manager.execute_write(
-                f"UPSERT INTO {DATABASE}.cis_position {col_list} VALUES {values}",
+                f"INSERT INTO {DATABASE}.cis_position {col_list} VALUES {values}",
                 database=DATABASE
             )
-            self.stdout.write(f"  Upserted rows {i + 1}–{i + len(chunk)}")
+            self.stdout.write(f"  Inserted EOD rows {i + 1}–{i + len(chunk)}")
 
     # -------------------------------------------------------------------------
     # INSERT new EOD row into cis_position (legacy single-row path, kept for reference)

@@ -7,20 +7,22 @@
 --   + src_system) can be identified without scanning all rows.
 --
 --   is_latest semantics in cis_position:
---     true  — this is the authoritative row for that natural key
---     false — superseded by a later write (EOD re-run, upload re-run, etc.)
+--     true  — this is the authoritative row for this (natural_key + position_type)
+--     false — superseded by a later write of the same type
 --
---   The natural key (portfolio, security_label, position_basis, position_date,
---   src_system) determines logical identity.  position_id is the Kudu primary key
---   and must be stable within the same position_date for EOD rewrites (see below).
+--   SOD, INT, EOD, CORR COEXIST as separate rows on the same position_date.
+--   Each position_type has its own position_id (all new rows, never overwritten
+--   across types).  is_latest=true marks the current row per type.
 --
--- position_id stability rules after this change:
---   INT (trade / upload):  position_id assigned at first creation, never changes
---   EOD:  position_id = same as the source INT/SOD row being repriced
---           (EOD is on the SAME position_date, so the logical position is identical)
---   SOD:  position_id = new (new position_date = new logical position)
---           CIS / GMP / AMSICEQ src_system → random (timestamp + seq)
---           USER_UPLOAD src_system          → deterministic fnv_hash of natural key
+-- position_id rules:
+--   INT (trade):            new random per write (timestamp + uuid fragment)
+--   INT (upload):           fnv_hash(portfolio|security|basis|date|src|'INT')
+--                           → idempotent re-upload replaces same row
+--   EOD:                    new random per EOD run (coexists with INT/SOD)
+--   SOD (CIS/GMP/AMSICEQ):  new random per SOD run
+--   SOD (USER_UPLOAD):      fnv_hash(portfolio|security|basis|date|src|'SOD')
+--                           → idempotent re-run replaces same SOD row
+--   CORR:                   new random (different month-end date)
 --
 -- Initialise existing rows to is_latest = true (safe: no history exists yet).
 --

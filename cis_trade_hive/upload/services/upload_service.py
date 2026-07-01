@@ -3746,7 +3746,8 @@ class UploadService:
                         COALESCE(COALESCE(s.matched_security_name, s.security_full_name, s.security_short_name), ''),
                         COALESCE(s.position_basis, ''),
                         COALESCE(CAST(s.reporting_date AS STRING), ''),
-                        COALESCE(s.src_system, '')
+                        COALESCE(s.src_system, ''),
+                        'INT'
                     )) AS BIGINT))                          AS position_id,
                     CAST(UNIX_TIMESTAMP() * 1000 AS BIGINT) AS version_id,
                     s.portfolio,
@@ -3896,7 +3897,8 @@ class UploadService:
                                 COALESCE(security_label, ''),
                                 COALESCE(position_basis, ''),
                                 '{_contextual_today_iso}',
-                                COALESCE(src_system, '')
+                                COALESCE(src_system, ''),
+                                'INT'
                             )) AS BIGINT))                          AS position_id,
                             CAST(UNIX_TIMESTAMP() * 1000 AS BIGINT) AS version_id,
                             portfolio_short_name,

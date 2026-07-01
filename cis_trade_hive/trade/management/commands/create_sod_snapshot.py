@@ -667,7 +667,11 @@ class Command(BaseCommand):
             return float(v) if v is not None else float(default)
 
         def _fnv_hash_expr(portfolio, security, basis, date, src):
-            """Return the Impala fnv_hash expression for a USER_UPLOAD SOD row."""
+            """
+            Return the Impala fnv_hash expression for a USER_UPLOAD SOD row.
+            'SOD' is included in the hash so this position_id is distinct from
+            the INT position_id for the same natural key on the same date.
+            """
             p = portfolio.replace("'", "\\'")
             s = security.replace("'", "\\'")
             b = basis.replace("'", "\\'")
@@ -675,7 +679,7 @@ class Command(BaseCommand):
             sy = src.replace("'", "\\'")
             return (
                 f"ABS(CAST(fnv_hash(CONCAT_WS('|', "
-                f"'{p}', '{s}', '{b}', '{d}', '{sy}'"
+                f"'{p}', '{s}', '{b}', '{d}', '{sy}', 'SOD'"
                 f")) AS BIGINT))"
             )
 
