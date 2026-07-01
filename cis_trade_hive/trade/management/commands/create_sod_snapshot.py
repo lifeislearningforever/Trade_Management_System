@@ -1,8 +1,15 @@
 """
 Django Management Command: Create SOD Snapshot
 
-Creates Start-of-Day (SOD) position rows in cis_position by copying the
-previous business day's EOD rows and stamping them with today's business date.
+Creates Start-of-Day (SOD) position rows in cis_position by:
+  1. Copying the previous business day's EOD rows
+  2. Applying any settlement queue entries with settle_date == today BEFORE writing SOD
+     (so the SOD already reflects those settled trades, not a raw EOD copy followed
+     by separate INT positions created later)
+  3. Writing the merged result as position_type='SOD'
+
+Queue entries processed here are marked COMPLETED so the async settlement
+worker skips them.
 
 Date logic (from gmp_cis_sta_dly_alldatesinfo):
   - src_system='gmp', sub_system='cis', data_frq='dly', record_type='D'
@@ -20,6 +27,7 @@ Usage:
 """
 
 import logging
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime
 
 from django.core.management.base import BaseCommand, CommandError
@@ -30,10 +38,11 @@ logger = logging.getLogger(__name__)
 
 DATABASE = 'gmp_cis'
 ALL_SOURCES = ['CIS', 'GMP', 'AMSICEQ', 'USER_UPLOAD']
+AVP_PRECISION = Decimal('0.00000001')
 
 
 class Command(BaseCommand):
-    help = 'Create SOD snapshot: copy previous EOD rows as SOD rows for today'
+    help = 'Create SOD snapshot: copy previous EOD rows (+ apply today\'s settlements) as SOD'
 
     def add_arguments(self, parser):
         parser.add_argument('--dry-run', action='store_true',
@@ -46,9 +55,9 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        dry_run        = options.get('dry_run', False)
+        dry_run          = options.get('dry_run', False)
         portfolio_filter = options.get('portfolio')
-        source_filter  = options.get('source')
+        source_filter    = options.get('source')
 
         self.stdout.write(self.style.MIGRATE_HEADING('=' * 80))
         self.stdout.write(self.style.MIGRATE_HEADING('SOD Snapshot — cis_position'))
@@ -64,17 +73,21 @@ class Command(BaseCommand):
                 'Could not read business dates from gmp_cis_sta_dly_alldatesinfo'
             )
 
-        sod_date = self._to_iso(today_yyyymmdd)   # SOD position_date  e.g. 2026-03-02
-        eod_date = self._to_iso(prev_yyyymmdd)    # source EOD date    e.g. 2026-02-26
-        proc_date = today_yyyymmdd                 # processing_date stays YYYYMMDD
+        sod_date  = self._to_iso(today_yyyymmdd)   # SOD position_date  e.g. 2026-03-02
+        eod_date  = self._to_iso(prev_yyyymmdd)    # source EOD date    e.g. 2026-02-26
+        proc_date = today_yyyymmdd                  # processing_date stays YYYYMMDD
 
-        self.stdout.write(f"Business date (contextual_today) : {today_yyyymmdd}  →  SOD position_date = {sod_date}")
-        self.stdout.write(f"Previous day  (prev_day)         : {prev_yyyymmdd}  →  source EOD date   = {eod_date}")
+        self.stdout.write(
+            f"Business date (contextual_today) : {today_yyyymmdd}  →  SOD position_date = {sod_date}"
+        )
+        self.stdout.write(
+            f"Previous day  (prev_day)         : {prev_yyyymmdd}  →  source EOD date   = {eod_date}"
+        )
         self.stdout.write('')
 
         # ── 2. Fetch EOD rows for prev_day ───────────────────────────────────
-        sources = [source_filter] if source_filter else ALL_SOURCES
-        eod_rows = self._get_eod_rows(eod_date, sources, portfolio_filter)
+        sources   = [source_filter] if source_filter else ALL_SOURCES
+        eod_rows  = self._get_eod_rows(eod_date, sources, portfolio_filter)
 
         if not eod_rows:
             self.stdout.write(self.style.WARNING(
@@ -84,26 +97,142 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Found {len(eod_rows)} EOD row(s) to copy as SOD")
 
+        # ── 3. Apply today's pending settlements to EOD baseline ─────────────
+        #
+        # Fetch cis_settlement_queue entries where settle_date == sod_date and
+        # status = PENDING.  These are T+1/T+2 trades whose SETTLE_DATE position
+        # was deferred.  Apply each trade's effect to the matching EOD row so
+        # the resulting SOD row already reflects the settled quantity and cost.
+        #
+        # Trades that have no existing EOD position (new security settling today)
+        # are inserted as brand-new SOD rows with opening position.
+        #
+        # After applying, each queue entry is marked COMPLETED so the async
+        # worker does not double-process it.
+
+        pending_settlements = self._get_pending_settlements(sod_date)
+        self.stdout.write(
+            f"Found {len(pending_settlements)} pending settlement(s) "
+            f"with settle_date = {sod_date}"
+        )
+
+        # Index EOD rows by (portfolio, security_label, position_basis) for O(1) lookup
+        eod_index: dict = {}
+        for row in eod_rows:
+            key = (
+                row.get('portfolio', ''),
+                row.get('security_label', ''),
+                row.get('position_basis', 'SETTLE_DATE'),
+            )
+            eod_index[key] = row
+
+        settled_queue_ids = []
+        failed_queue_ids  = []
+        new_sod_rows      = []   # brand-new positions (no prior EOD)
+
+        for item in pending_settlements:
+            portfolio  = item.get('portfolio_id', '')
+            security   = item.get('security_id', '')
+            basis      = item.get('position_basis', 'SETTLE_DATE')
+            trade_type = item.get('trade_type', '')
+            qty        = Decimal(str(item.get('quantity', 0) or 0))
+            price      = Decimal(str(item.get('price', 0) or 0))
+            charges    = Decimal(str(item.get('charges', 0) or 0))
+            queue_id   = item.get('queue_id')
+            trade_id   = item.get('trade_id')
+
+            key = (portfolio, security, basis)
+            existing = eod_index.get(key)
+
+            try:
+                updated = self._apply_settlement_to_position(
+                    existing=existing,
+                    trade_type=trade_type,
+                    quantity=qty,
+                    price=price,
+                    charges=charges,
+                    settle_date=sod_date,
+                    trade_id=trade_id,
+                    item=item,
+                )
+                if updated is None:
+                    # e.g. SELL with no existing position — skip
+                    failed_queue_ids.append(queue_id)
+                    logger.error(
+                        f"[SOD settlement] queue_id={queue_id} trade_id={trade_id} "
+                        f"SELL {qty} {security} but no existing position — skipped"
+                    )
+                    continue
+
+                if existing:
+                    # Replace in eod_index so downstream insert uses the updated values
+                    eod_index[key] = updated
+                else:
+                    # New position — collect separately
+                    new_sod_rows.append(updated)
+                    eod_index[key] = updated   # prevent double-insert if same security queued twice
+
+                settled_queue_ids.append(queue_id)
+                self.stdout.write(
+                    f"  Applied {trade_type} {qty} {security} "
+                    f"({portfolio}/{basis}) → SOD position updated"
+                )
+
+            except Exception as exc:
+                failed_queue_ids.append(queue_id)
+                logger.error(
+                    f"[SOD settlement] Failed to apply queue_id={queue_id}: {exc}",
+                    exc_info=True
+                )
+
+        # Merge new_sod_rows into the main list so they get inserted as SOD
+        sod_rows = list(eod_index.values()) + [
+            r for r in new_sod_rows if r not in eod_index.values()
+        ]
+
+        self.stdout.write(
+            f"SOD rows to write: {len(sod_rows)} "
+            f"({len(pending_settlements)} settlement(s) applied, "
+            f"{len(failed_queue_ids)} failed)"
+        )
+
         if dry_run:
-            for r in eod_rows[:10]:
+            for r in sod_rows[:10]:
                 self.stdout.write(
                     f"  [DRY RUN] SOD  {r.get('portfolio')}/{r.get('security_label')}  "
                     f"basis={r.get('position_basis')}  qty={r.get('quantity')}"
                 )
-            if len(eod_rows) > 10:
-                self.stdout.write(f"  ... and {len(eod_rows) - 10} more")
+            if len(sod_rows) > 10:
+                self.stdout.write(f"  ... and {len(sod_rows) - 10} more")
             self.stdout.write(self.style.WARNING('\nDRY RUN — no changes written'))
             return
 
-        # ── 3. Delete any existing SOD rows for sod_date ────────────────────
+        # ── 4. Delete any existing SOD rows for sod_date ────────────────────
         self._delete_existing_sod(sod_date, sources, portfolio_filter)
 
-        # ── 4. Batch-insert SOD rows ─────────────────────────────────────────
-        inserted = self._batch_insert_sod(eod_rows, sod_date, proc_date)
+        # ── 5. Batch-insert SOD rows ─────────────────────────────────────────
+        inserted = self._batch_insert_sod(sod_rows, sod_date, proc_date)
+
+        # ── 6. Mark processed settlements as COMPLETED ───────────────────────
+        if settled_queue_ids:
+            self._mark_settlements_completed(settled_queue_ids)
+            self.stdout.write(
+                f"Marked {len(settled_queue_ids)} settlement queue item(s) as COMPLETED"
+            )
+
+        if failed_queue_ids:
+            self._mark_settlements_failed(failed_queue_ids)
+            self.stdout.write(self.style.WARNING(
+                f"Marked {len(failed_queue_ids)} settlement queue item(s) as FAILED "
+                f"(check logs for details)"
+            ))
 
         self.stdout.write('')
         self.stdout.write(self.style.MIGRATE_HEADING('=' * 80))
-        self.stdout.write(self.style.SUCCESS(f'SOD snapshot complete — {inserted} row(s) inserted'))
+        self.stdout.write(self.style.SUCCESS(
+            f'SOD snapshot complete — {inserted} row(s) inserted '
+            f'({len(settled_queue_ids)} settlement(s) applied)'
+        ))
 
     # ── Business date lookup ─────────────────────────────────────────────────
 
@@ -143,7 +272,7 @@ class Command(BaseCommand):
 
     def _get_eod_rows(self, eod_date, sources, portfolio_filter):
         """Fetch all EOD rows from cis_position for the given date."""
-        src_list = ', '.join(f"'{self._escape(s)}'" for s in sources)
+        src_list   = ', '.join(f"'{self._escape(s)}'" for s in sources)
         port_clause = (
             f"AND portfolio = '{self._escape(portfolio_filter)}'"
             if portfolio_filter else ''
@@ -180,11 +309,220 @@ class Command(BaseCommand):
             logger.error(f'Error fetching EOD rows for {eod_date}: {e}')
             raise
 
+    # ── Settlement queue fetch ────────────────────────────────────────────────
+
+    def _get_pending_settlements(self, settle_date: str):
+        """
+        Fetch PENDING settlement queue entries with settle_date == today.
+
+        Only entries settling today are folded into SOD.  Future entries
+        (settle_date > today) remain in the queue for a later SOD run.
+        """
+        try:
+            return impala_manager.execute_query(
+                f"""
+                SELECT
+                    queue_id, trade_id,
+                    portfolio_id, security_id,
+                    trade_type,
+                    quantity, price, charges,
+                    settle_date, position_basis,
+                    security_currency, portfolio_currency,
+                    isin, security_name,
+                    custodian, sub_custodian
+                FROM {DATABASE}.cis_settlement_queue
+                WHERE settle_date = '{settle_date}'
+                  AND status      = 'PENDING'
+                ORDER BY queued_at ASC
+                """,
+                database=DATABASE
+            ) or []
+        except Exception as e:
+            logger.error(f'Error fetching pending settlements for {settle_date}: {e}')
+            return []
+
+    # ── Apply one settlement trade to an EOD baseline row ────────────────────
+
+    def _apply_settlement_to_position(
+        self,
+        existing: dict,
+        trade_type: str,
+        quantity: Decimal,
+        price: Decimal,
+        charges: Decimal,
+        settle_date: str,
+        trade_id,
+        item: dict,
+    ) -> dict:
+        """
+        Apply a BUY or SELL trade to an EOD position dict and return
+        an updated dict suitable for SOD insertion.
+
+        Returns None if the trade cannot be applied (e.g. SELL with no position).
+
+        AVP formulas (same as position_service):
+          BUY:  new_total_cost = old_total_cost + (qty × price) + charges
+                new_avg_cost   = new_total_cost / new_qty
+          SELL: avg_cost unchanged; realized_pnl += (price − avg_cost) × qty
+                (full close: avg_cost → 0, qty → 0)
+        """
+        def _f(v, default=0.0):
+            try:
+                return float(v) if v is not None else float(default)
+            except (TypeError, ValueError):
+                return float(default)
+
+        def _d(v, default=0):
+            try:
+                return Decimal(str(v)) if v is not None else Decimal(str(default))
+            except Exception:
+                return Decimal(str(default))
+
+        if trade_type == 'BUY':
+            old_qty      = _d(existing.get('quantity') if existing else None)
+            old_avg_fc   = _d(existing.get('average_cost_fc') if existing else None)
+            old_cost_fc  = old_qty * old_avg_fc
+            old_avg_lc   = _d(existing.get('average_cost_lc') if existing else None)
+            old_cost_lc  = old_qty * old_avg_lc
+
+            trade_cost_fc = (quantity * price) + charges
+            new_qty       = old_qty + quantity
+            new_cost_fc   = old_cost_fc + trade_cost_fc
+
+            new_avg_fc = (new_cost_fc / new_qty).quantize(
+                AVP_PRECISION, rounding=ROUND_HALF_UP
+            ) if new_qty > 0 else Decimal('0')
+
+            # LC: carry the trade at same FX proportion (avg_cost_lc / avg_cost_fc ratio)
+            if old_avg_fc > 0 and old_avg_lc > 0:
+                fx_ratio   = old_avg_lc / old_avg_fc
+                trade_cost_lc = trade_cost_fc * fx_ratio
+            else:
+                trade_cost_lc = trade_cost_fc   # same-currency fallback
+            new_cost_lc   = old_cost_lc + trade_cost_lc
+            new_avg_lc    = (new_cost_lc / new_qty).quantize(
+                AVP_PRECISION, rounding=ROUND_HALF_UP
+            ) if new_qty > 0 else Decimal('0')
+
+            # Build result — market value/unrealized_pnl carried from EOD (not recalculated
+            # here; EOD job will price them correctly at day-end)
+            base = dict(existing) if existing else {}
+            base.update({
+                'portfolio':       item.get('portfolio_id', base.get('portfolio', '')),
+                'security_label':  item.get('security_id', base.get('security_label', '')),
+                'position_basis':  item.get('position_basis', 'SETTLE_DATE'),
+                'src_system':      base.get('src_system', 'CIS'),
+                'isin':            item.get('isin') or base.get('isin'),
+                'source_table':    base.get('source_table', 'cis_settlement_queue'),
+                'quantity':        float(new_qty),
+                'average_cost_fc': float(new_avg_fc),
+                'cost_fc':         float(new_cost_fc),
+                'average_cost_lc': float(new_avg_lc),
+                'cost_lc':         float(new_cost_lc),
+                # market_value / unrealized_pnl: keep EOD values (will be re-priced at EOD tonight)
+                'market_value_fc':    _f(base.get('market_value_fc')),
+                'market_value_lc':    _f(base.get('market_value_lc')),
+                'unrealized_pnl_fc':  _f(base.get('unrealized_pnl_fc')),
+                'unrealized_pnl_lc':  _f(base.get('unrealized_pnl_lc')),
+                'net_book_value_fc':  float(new_cost_fc) + _f(base.get('unrealized_pnl_fc')) - _f(base.get('provision_fc')),
+                'net_book_value_lc':  float(new_cost_lc) + _f(base.get('unrealized_pnl_lc')) - _f(base.get('provision_lc')),
+                # carry all CA/CF fields unchanged
+                'realized_pnl_fc':  _f(base.get('realized_pnl_fc')),
+                'realized_pnl_lc':  _f(base.get('realized_pnl_lc')),
+                'dividend_fc':      _f(base.get('dividend_fc')),
+                'dividend_lc':      _f(base.get('dividend_lc')),
+                'provision_fc':     _f(base.get('provision_fc')),
+                'provision_lc':     _f(base.get('provision_lc')),
+                'uncall_fc':        _f(base.get('uncall_fc')),
+                'uncall_lc':        _f(base.get('uncall_lc')),
+                'pipeline_fc':      _f(base.get('pipeline_fc')),
+                'pipeline_lc':      _f(base.get('pipeline_lc')),
+            })
+            return base
+
+        elif trade_type == 'SELL':
+            if not existing:
+                return None   # cannot sell without a position
+
+            old_qty     = _d(existing.get('quantity'))
+            old_avg_fc  = _d(existing.get('average_cost_fc'))
+            old_avg_lc  = _d(existing.get('average_cost_lc'))
+            old_rpnl_fc = _d(existing.get('realized_pnl_fc'))
+            old_rpnl_lc = _d(existing.get('realized_pnl_lc'))
+
+            if quantity > old_qty:
+                logger.error(
+                    f"[SOD settlement] SELL {quantity} > position {old_qty} "
+                    f"for {existing.get('security_label')} — capped to available qty"
+                )
+                quantity = old_qty   # treat as full close
+
+            rpnl_this_fc = (price - old_avg_fc) * quantity
+            new_qty      = old_qty - quantity
+
+            # LC realized P&L (use historical avg_cost_lc as cost basis)
+            rpnl_this_lc = (price * _d(1 if old_avg_fc == 0 else old_avg_lc / old_avg_fc) - old_avg_lc) * quantity
+
+            base = dict(existing)
+            if new_qty <= 0:
+                # Full close
+                base.update({
+                    'quantity':        0.0,
+                    'average_cost_fc': 0.0,
+                    'cost_fc':         0.0,
+                    'average_cost_lc': 0.0,
+                    'cost_lc':         0.0,
+                    'market_value_fc': 0.0,
+                    'market_value_lc': 0.0,
+                    'unrealized_pnl_fc': 0.0,
+                    'unrealized_pnl_lc': 0.0,
+                    'net_book_value_fc': 0.0,
+                    'net_book_value_lc': 0.0,
+                    'realized_pnl_fc': float(old_rpnl_fc + rpnl_this_fc),
+                    'realized_pnl_lc': float(old_rpnl_lc + rpnl_this_lc),
+                    # CA/CF fields carried (obligations survive full close)
+                    'uncall_fc':   float(_d(base.get('uncall_fc'))),
+                    'uncall_lc':   float(_d(base.get('uncall_lc'))),
+                    'pipeline_fc': float(_d(base.get('pipeline_fc'))),
+                    'pipeline_lc': float(_d(base.get('pipeline_lc'))),
+                    'provision_fc': float(_d(base.get('provision_fc'))),
+                    'provision_lc': float(_d(base.get('provision_lc'))),
+                })
+            else:
+                # Partial sell — AVP unchanged
+                new_cost_fc  = new_qty * old_avg_fc
+                new_cost_lc  = new_qty * old_avg_lc
+                prov_fc      = _d(base.get('provision_fc'))
+                prov_lc      = _d(base.get('provision_lc'))
+                upnl_fc      = _d(base.get('unrealized_pnl_fc')) * (new_qty / old_qty)
+                upnl_lc      = _d(base.get('unrealized_pnl_lc')) * (new_qty / old_qty)
+                base.update({
+                    'quantity':        float(new_qty),
+                    'cost_fc':         float(new_cost_fc),
+                    'cost_lc':         float(new_cost_lc),
+                    'market_value_fc': float(_d(base.get('market_value_fc')) * (new_qty / old_qty)),
+                    'market_value_lc': float(_d(base.get('market_value_lc')) * (new_qty / old_qty)),
+                    'unrealized_pnl_fc': float(upnl_fc),
+                    'unrealized_pnl_lc': float(upnl_lc),
+                    'net_book_value_fc': float(new_cost_fc) + float(upnl_fc) - float(prov_fc),
+                    'net_book_value_lc': float(new_cost_lc) + float(upnl_lc) - float(prov_lc),
+                    'realized_pnl_fc': float(old_rpnl_fc + rpnl_this_fc),
+                    'realized_pnl_lc': float(old_rpnl_lc + rpnl_this_lc),
+                })
+            return base
+
+        else:
+            logger.warning(
+                f"[SOD settlement] Unsupported trade_type '{trade_type}' "
+                f"for queue_id — skipped"
+            )
+            return None
+
     # ── Delete existing SOD rows ─────────────────────────────────────────────
 
     def _delete_existing_sod(self, sod_date, sources, portfolio_filter):
         """Remove any SOD rows already written for sod_date (idempotent re-run)."""
-        src_list = ', '.join(f"'{self._escape(s)}'" for s in sources)
+        src_list   = ', '.join(f"'{self._escape(s)}'" for s in sources)
         port_clause = (
             f"AND portfolio = '{self._escape(portfolio_filter)}'"
             if portfolio_filter else ''
@@ -207,9 +545,9 @@ class Command(BaseCommand):
 
     # ── Batch INSERT ─────────────────────────────────────────────────────────
 
-    def _batch_insert_sod(self, eod_rows, sod_date, proc_date):
+    def _batch_insert_sod(self, sod_rows, sod_date, proc_date):
         """Insert SOD rows in batches of 500. Returns total rows inserted."""
-        BATCH = 500
+        BATCH  = 500
         now_ms = int(datetime.now().timestamp() * 1000)
 
         col_list = """(
@@ -234,7 +572,7 @@ class Command(BaseCommand):
             return float(v) if v is not None else float(default)
 
         def _build_row(idx, row):
-            new_id   = now_ms + idx
+            new_id    = now_ms + idx
             portfolio = self._escape(row.get('portfolio', ''))
             security  = self._escape(row.get('security_label', ''))
             pos_basis = self._escape(row.get('position_basis', 'TRADE_DATE'))
@@ -261,8 +599,8 @@ class Command(BaseCommand):
             )
 
         total = 0
-        for i in range(0, len(eod_rows), BATCH):
-            chunk = eod_rows[i: i + BATCH]
+        for i in range(0, len(sod_rows), BATCH):
+            chunk  = sod_rows[i: i + BATCH]
             values = ',\n'.join(_build_row(i + j, r) for j, r in enumerate(chunk))
             impala_manager.execute_write(
                 f"INSERT INTO {DATABASE}.cis_position {col_list} VALUES {values}",
@@ -272,6 +610,48 @@ class Command(BaseCommand):
             self.stdout.write(f'  Inserted rows {i + 1}–{i + len(chunk)}')
 
         return total
+
+    # ── Mark settlement queue entries ────────────────────────────────────────
+
+    def _mark_settlements_completed(self, queue_ids: list):
+        """Mark processed settlement queue entries as COMPLETED."""
+        if not queue_ids:
+            return
+        ids_csv   = ', '.join(str(qid) for qid in queue_ids)
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            impala_manager.execute_write(
+                f"""
+                UPDATE {DATABASE}.cis_settlement_queue
+                SET status       = 'COMPLETED',
+                    processed_at = '{timestamp}',
+                    updated_at   = '{timestamp}'
+                WHERE queue_id IN ({ids_csv})
+                """,
+                database=DATABASE
+            )
+        except Exception as e:
+            logger.error(f'Error marking settlements completed: {e}')
+
+    def _mark_settlements_failed(self, queue_ids: list):
+        """Mark failed settlement queue entries as FAILED."""
+        if not queue_ids:
+            return
+        ids_csv   = ', '.join(str(qid) for qid in queue_ids)
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            impala_manager.execute_write(
+                f"""
+                UPDATE {DATABASE}.cis_settlement_queue
+                SET status     = 'FAILED',
+                    updated_at = '{timestamp}',
+                    error_message = 'Failed during SOD settlement application — see logs'
+                WHERE queue_id IN ({ids_csv})
+                """,
+                database=DATABASE
+            )
+        except Exception as e:
+            logger.error(f'Error marking settlements failed: {e}')
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

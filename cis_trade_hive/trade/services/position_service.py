@@ -361,6 +361,29 @@ class PositionService:
         # Calculate market_value_lc using FX rate
         market_value_lc = market_value * fx_rate
 
+        # Carry forward CA/CF fields from current position (never wiped on BUY)
+        carried_dividend_fc = float(current.get('dividend_fc', 0) or 0) if current else 0
+        carried_dividend_lc = float(current.get('dividend_lc', 0) or 0) if current else 0
+        # uncall/pipeline: use explicitly passed value; else carry from current; else 0
+        carried_uncall_fc = float(uncall_fc) if uncall_fc is not None else (
+            float(current.get('uncall_fc', 0) or 0) if current else 0
+        )
+        carried_uncall_lc = float(uncall_lc) if uncall_lc is not None else (
+            float(current.get('uncall_lc', 0) or 0) if current else 0
+        )
+        carried_pipeline_fc = float(pipeline_fc) if pipeline_fc is not None else (
+            float(current.get('pipeline_fc', 0) or 0) if current else 0
+        )
+        carried_pipeline_lc = float(pipeline_lc) if pipeline_lc is not None else (
+            float(current.get('pipeline_lc', 0) or 0) if current else 0
+        )
+        carried_provision_fc = float(current.get('provision_fc', 0) or 0) if current else 0
+        carried_provision_lc = float(current.get('provision_lc', 0) or 0) if current else 0
+
+        # net_book_value = cost + unrealized_pnl - provision
+        net_book_value_fc = float(new_total_cost) + float(unrealized_pnl) - carried_provision_fc
+        net_book_value_lc = float(new_total_cost_lc) + float(market_value_lc - new_total_cost_lc) - carried_provision_lc
+
         # Build position data
         # FC = Foreign Currency (Security Currency)
         # LC = Local Currency (Portfolio Currency)
@@ -383,9 +406,15 @@ class PositionService:
             'unrealized_pnl_fc': float(unrealized_pnl),
             'realized_pnl_fc': float(old_realized_pnl),
             'realized_pnl_lc': float(old_realized_pnl_lc),
-            # Dividend tracking (initialized to 0 or carry forward)
-            'dividend_fc': float(current.get('dividend_fc', 0) or 0) if current else 0,
-            'dividend_lc': float(current.get('dividend_lc', 0) or 0) if current else 0,
+            # Dividend tracking (carry forward from current)
+            'dividend_fc': carried_dividend_fc,
+            'dividend_lc': carried_dividend_lc,
+            # Net book value (cost + unrealized_pnl - provision)
+            'net_book_value_fc': net_book_value_fc,
+            'net_book_value_lc': net_book_value_lc,
+            # Provision (carry forward from current)
+            'provision_fc': carried_provision_fc,
+            'provision_lc': carried_provision_lc,
             # Trade reference
             'trade_id': trade_id,
             'trade_type': 'BUY',
@@ -399,10 +428,10 @@ class PositionService:
             'security_name': security_name,
             'custodian': custodian,
             'sub_custodian': sub_custodian,
-            'uncall_fc': float(uncall_fc) if uncall_fc is not None else 0,
-            'uncall_lc': float(uncall_lc) if uncall_lc is not None else 0,
-            'pipeline_fc': float(pipeline_fc) if pipeline_fc is not None else 0,
-            'pipeline_lc': float(pipeline_lc) if pipeline_lc is not None else 0,
+            'uncall_fc': carried_uncall_fc,
+            'uncall_lc': carried_uncall_lc,
+            'pipeline_fc': carried_pipeline_fc,
+            'pipeline_lc': carried_pipeline_lc,
             'position_type': position_type or 'INT',
             'position_basis': position_basis
         }
@@ -520,9 +549,15 @@ class PositionService:
                 'unrealized_pnl_fc': 0,
                 'realized_pnl_fc': float(new_realized_pnl),
                 'realized_pnl_lc': float(new_realized_pnl_lc),
+                # Net book value (zero on full close)
+                'net_book_value_fc': 0,
+                'net_book_value_lc': 0,
                 # Dividend tracking - carry forward from current position
                 'dividend_fc': float(current.get('dividend_fc', 0) or 0),
                 'dividend_lc': float(current.get('dividend_lc', 0) or 0),
+                # Provision - carry forward from current (recorded for audit, position still closed)
+                'provision_fc': float(current.get('provision_fc', 0) or 0),
+                'provision_lc': float(current.get('provision_lc', 0) or 0),
                 # Trade reference
                 'trade_id': trade_id,
                 'trade_type': 'SELL',
@@ -536,10 +571,11 @@ class PositionService:
                 'security_name': security_name,
                 'custodian': custodian,
                 'sub_custodian': sub_custodian,
-                'uncall_fc': 0,
-                'uncall_lc': 0,
-                'pipeline_fc': 0,
-                'pipeline_lc': 0,
+                # uncall/pipeline: carry from current (obligations survive position close)
+                'uncall_fc': float(uncall_fc) if uncall_fc is not None else float(current.get('uncall_fc', 0) or 0),
+                'uncall_lc': float(uncall_lc) if uncall_lc is not None else float(current.get('uncall_lc', 0) or 0),
+                'pipeline_fc': float(pipeline_fc) if pipeline_fc is not None else float(current.get('pipeline_fc', 0) or 0),
+                'pipeline_lc': float(pipeline_lc) if pipeline_lc is not None else float(current.get('pipeline_lc', 0) or 0),
                 'position_type': position_type or 'INT',
                 'position_basis': position_basis
             }
@@ -580,9 +616,14 @@ class PositionService:
                 'unrealized_pnl_fc': float(unrealized_pnl),
                 'realized_pnl_fc': float(new_realized_pnl),
                 'realized_pnl_lc': float(new_realized_pnl_lc),
-                # Dividend tracking - carry forward from current position
+                # Dividend / provision / uncall / pipeline — carry forward from current
                 'dividend_fc': float(current.get('dividend_fc', 0) or 0),
                 'dividend_lc': float(current.get('dividend_lc', 0) or 0),
+                'provision_fc': float(current.get('provision_fc', 0) or 0),
+                'provision_lc': float(current.get('provision_lc', 0) or 0),
+                # Net book value (remaining cost + unrealized_pnl - provision)
+                'net_book_value_fc': float(new_total_cost) + float(unrealized_pnl) - float(current.get('provision_fc', 0) or 0),
+                'net_book_value_lc': float(new_total_cost_lc) + float(market_value_lc - new_total_cost_lc) - float(current.get('provision_lc', 0) or 0),
                 # Trade reference
                 'trade_id': trade_id,
                 'trade_type': 'SELL',
@@ -872,6 +913,8 @@ class PositionService:
                 'uncall_fc', 'uncall_lc',
                 # Pipeline (pending trades/commitments)
                 'pipeline_fc', 'pipeline_lc',
+                # Provision (carried forward from CA events)
+                'provision_fc', 'provision_lc',
                 # Position classification
                 'position_type',
                 'created_by', 'created_at', 'updated_by', 'updated_at'
@@ -950,6 +993,9 @@ class PositionService:
                 # Pipeline (pending trades/commitments)
                 cast_decimal(position_data.get('pipeline_fc', 0) or 0),
                 cast_decimal(position_data.get('pipeline_lc', 0) or 0),
+                # Provision (carried from CA events)
+                cast_decimal(position_data.get('provision_fc', 0) or 0),
+                cast_decimal(position_data.get('provision_lc', 0) or 0),
                 # Position classification
                 f"'{position_data.get('position_type', 'INT')}'" if position_data.get('position_type') else "'INT'",
                 f"'{self._escape(updated_by)}'",
@@ -976,6 +1022,16 @@ class PositionService:
                 # Once dual position logic is implemented, position_basis must come from
                 # position_data (set by caller via calculate_position's position_basis param).
                 # See trade_kudu_repository.py TODO for full implementation plan.
+                provision_fc_val = float(position_data.get('provision_fc', 0) or 0)
+                provision_lc_val = float(position_data.get('provision_lc', 0) or 0)
+                net_book_value_fc_val = float(position_data.get(
+                    'net_book_value_fc',
+                    total_cost + unrealized_pnl - provision_fc_val
+                ) or 0)
+                net_book_value_lc_val = float(position_data.get(
+                    'net_book_value_lc',
+                    total_cost_lc + unrealized_pnl_lc - provision_lc_val
+                ) or 0)
                 sync_data = {
                     'position_id': position_data['position_id'],
                     'version_id': version_id,
@@ -989,15 +1045,15 @@ class PositionService:
                     'average_cost_fc': average_cost,
                     'cost_fc': total_cost,
                     'market_value_fc': market_value,
-                    'net_book_value_fc': total_cost,  # cost - provision (no provision for now)
+                    'net_book_value_fc': net_book_value_fc_val,
                     'unrealized_pnl_fc': unrealized_pnl,
                     'average_cost_lc': average_cost_lc,
                     'cost_lc': total_cost_lc,
                     'market_value_lc': market_value_lc,
-                    'net_book_value_lc': total_cost_lc,
+                    'net_book_value_lc': net_book_value_lc_val,
                     'unrealized_pnl_lc': unrealized_pnl_lc,
-                    'provision_fc': 0,
-                    'provision_lc': 0,
+                    'provision_fc': provision_fc_val,
+                    'provision_lc': provision_lc_val,
                     'dividend_fc': dividend_fc_val,
                     'dividend_lc': dividend_lc_val,
                     'realized_pnl_fc': realized_pnl,
@@ -1157,6 +1213,7 @@ class PositionService:
                    realized_pnl_lc, unrealized_pnl_lc,
                    market_price, market_value_fc, market_value_lc,
                    dividend_fc, dividend_lc,
+                   provision_fc, provision_lc,
                    trade_id, trade_type,
                    lots_held, custodian, sub_custodian,
                    security_currency, portfolio_currency, fx_rate,
@@ -1191,6 +1248,7 @@ class PositionService:
                  realized_pnl_lc, unrealized_pnl_lc,
                  market_price, market_value_fc, market_value_lc,
                  dividend_fc, dividend_lc,
+                 provision_fc, provision_lc,
                  trade_id, trade_type,
                  lots_held, custodian, sub_custodian,
                  security_currency, portfolio_currency, fx_rate,
@@ -1214,6 +1272,8 @@ class PositionService:
                     CAST({float(row.get('market_value_lc') or 0)} AS DECIMAL(30,8)),
                     CAST({float(row.get('dividend_fc') or 0)} AS DECIMAL(30,8)),
                     CAST({float(row.get('dividend_lc') or 0)} AS DECIMAL(30,8)),
+                    CAST({float(row.get('provision_fc') or 0)} AS DECIMAL(30,8)),
+                    CAST({float(row.get('provision_lc') or 0)} AS DECIMAL(30,8)),
                     {row.get('trade_id') or 'NULL'},
                     '{row.get('trade_type', '')}',
                     {row.get('lots_held') or 'NULL'},

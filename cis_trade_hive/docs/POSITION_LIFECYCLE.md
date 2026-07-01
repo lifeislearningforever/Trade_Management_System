@@ -56,7 +56,7 @@ contextual_today = 2026-07-01
 | SETTLE_DATE | 2026-07-03 | INT | Queued → `cis_settlement_queue` (processed on settle date) |
 
 - TRADE_DATE position created today with full AVP
-- SETTLE_DATE position **held in settlement queue** until 2026-07-03 becomes `contextual_today`
+- SETTLE_DATE position **held in settlement queue** (status = PENDING) until 2026-07-03 becomes `contextual_today`, at which point the SOD job applies its AVP effect to the previous day's EOD row and writes it as SOD — no separate INT is created
 
 ---
 
@@ -96,7 +96,7 @@ No position is created.
 | trade_date | settle_date | TD position | SD position |
 |-----------|------------|-------------|-------------|
 | == today | == today (T+0) | INT, immediate | INT, immediate |
-| == today | > today (T+1/T+2) | INT, immediate | INT, held in settlement queue |
+| == today | > today (T+1/T+2) | INT, immediate | held in settlement queue (PENDING); applied by SOD job on settle_date |
 | < today (backdated) | < today | INT, chain recalc | INT, chain recalc |
 | < today (backdated) | == today | INT, chain recalc | INT, immediate |
 | > today | any | **BLOCKED** | **BLOCKED** |
@@ -203,23 +203,37 @@ These updates happen **before EOD runs**, so EOD picks up all CA/CF impacts via 
 
 ### 4D. SOD Job — `create_sod_snapshot` (next morning)
 
-Copies previous day's EOD row to today's date as `SOD`.
+Copies previous day's EOD rows to today's date as `SOD`, **and simultaneously folds in any pending settlement queue entries** whose `settle_date == today`. The resulting SOD already reflects those settled trades — no separate INT positions are created for them.
 
-**What changes:**
+**Step-by-step:**
+
+1. Fetch all EOD rows for `prev_day` from `cis_position`
+2. Fetch PENDING entries from `cis_settlement_queue` where `settle_date == contextual_today`
+3. Apply each queued trade's AVP effect to the matching EOD row in memory:
+   - **BUY:** `new_cost_fc = old_cost_fc + (qty × price + charges)`; `new_avg_fc = new_cost_fc / new_qty`; LC via existing `avg_cost_lc / avg_cost_fc` ratio; all CA/CF fields carried unchanged
+   - **SELL partial:** qty reduced; AVP unchanged; `realized_pnl` accumulated; market value and unrealized PnL prorated by `new_qty / old_qty`
+   - **SELL full close:** qty → 0; all costs/market values → 0; `realized_pnl` accumulated; CA/CF obligations (uncall, pipeline, provision) carried
+   - **New security (no prior EOD):** BUY creates a brand-new SOD row; SELL with no existing position → marked FAILED
+4. Write the merged result as `position_type = 'SOD'`
+5. Mark processed queue entries `COMPLETED` (skipped by the async settlement worker)
+
+**What changes from EOD → SOD:**
 
 | Field | From | To |
 |-------|------|----|
 | `position_date` | 2026-06-30 (EOD date) | 2026-07-01 (today) |
 | `processing_date` | 2026-06-30 | 2026-07-01 |
 | `position_type` | `EOD` | `SOD` |
+| `quantity`, `cost_fc/lc`, `average_cost_fc/lc` | EOD values | Updated if a settlement trade applied |
+| `realized_pnl_fc/lc` | EOD values | Accumulated if a SELL settled today |
 
-**Everything else copied exactly:**
-- `quantity`, `average_cost_fc/lc`, `cost_fc/lc`
-- `market_value_fc/lc`, `unrealized_pnl_fc/lc`, `net_book_value_fc/lc`
-- `realized_pnl_fc/lc`, `provision_fc/lc`
-- `dividend_fc/lc`, `uncall_fc/lc`, `pipeline_fc/lc`
+**Everything else carried from EOD unchanged:**
+- `market_value_fc/lc`, `unrealized_pnl_fc/lc`, `net_book_value_fc/lc` (re-priced by tonight's EOD job)
+- `dividend_fc/lc`, `uncall_fc/lc`, `pipeline_fc/lc`, `provision_fc/lc`
 
-SOD represents the **opening position** for the new day — carrying all accumulated CA, CF, and revaluation from the previous EOD.
+> **Note:** `market_value` and `unrealized_pnl` are NOT recalculated during SOD — they are carried from the prior EOD and will be corrected by tonight's EOD revaluation run.
+
+SOD represents the **opening position** for the new day — carrying all accumulated CA, CF, revaluation from the previous EOD, plus the quantity and cost effects of any trades that settled overnight.
 
 ---
 
@@ -227,13 +241,19 @@ SOD represents the **opening position** for the new day — carrying all accumul
 
 ```
 06:00  SOD job runs
-       └─ Copies yesterday's EOD → today's SOD for all positions
-          (position_date = today, position_type = SOD)
+       └─ Fetches yesterday's EOD rows from cis_position
+       └─ Fetches PENDING settlement queue entries where settle_date == today
+       └─ Applies each queued trade's AVP effect to the matching EOD row:
+            BUY  → recalculates qty, avg_cost, cost; carries CA/CF unchanged
+            SELL → reduces qty, accumulates realized_pnl; zeros on full close
+       └─ Writes merged result as SOD (position_type = SOD, position_date = today)
+       └─ Marks processed queue entries COMPLETED
+          (async settlement worker skips COMPLETED entries)
 
 During day
        ├─ New trades create INT positions (TRADE_DATE + SETTLE_DATE basis)
        ├─ Backdated trades create INT positions + trigger chain recalc
-       ├─ T+2 settle legs held in settlement_queue
+       ├─ T+1/T+2 settle legs held in cis_settlement_queue (PENDING)
        ├─ Corporate actions update dividend_fc, quantity, avg_cost
        └─ Cash flows update uncall_fc, pipeline_fc, provision_fc
 
@@ -246,12 +266,9 @@ During day
           (position_type = EOD, position_date = today)
 
 Next morning
-       └─ SOD job copies today's EOD → tomorrow's SOD
+       └─ SOD job runs again:
+            copies today's EOD + applies any new settlements due tomorrow
           (position_date = tomorrow, position_type = SOD)
-
-On settle_date (T+2)
-       └─ Settlement queue processes SETTLE_DATE position
-          (creates INT position on the settlement date)
 ```
 
 ---
@@ -262,7 +279,7 @@ On settle_date (T+2)
 |------|-------------|----------------|
 | `INT` | Trade booked (any date ≤ today); position upload | `position_service`, `upload_service` |
 | `EOD` | Nightly batch revaluation | `refresh_positions` management command |
-| `SOD` | Morning batch copy of previous EOD | `create_sod_snapshot` management command |
+| `SOD` | Morning batch: previous EOD + settled trades applied (settle_date == today) | `create_sod_snapshot` management command |
 | `CORR` | Last-month-end correction (external trigger only) | External correction process via `alldatesinfo` |
 
 > `BACK` type is **not used** in this system.

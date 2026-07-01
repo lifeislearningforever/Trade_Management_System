@@ -3694,10 +3694,10 @@ class UploadService:
             # This guarantees that re-running ETL for the same batch replaces
             # existing rows rather than inserting duplicates.
             #
-            # position_type is derived by comparing reporting_date to contextual_today:
-            #   == today  → 'INT'   (intraday / live)
-            #   <  today  → 'CORR'  (correction to a past snapshot)
-            #   >  today  → blocked in pre-validation (Step 6 rejects these rows)
+            # position_type is always 'INT' for uploads:
+            #   == today  → 'INT'  (intraday / live)
+            #   <  today  → 'INT'  (backdated upload — still INT, not CORR)
+            #   >  today  → blocked in pre-validation (Step 6C rejects these rows)
             # ------------------------------------------------------------------
             from core.services.system_date_service import system_date_service as _sds
             _contextual_today_iso = _sds.get_system_date().isoformat()  # 'YYYY-MM-DD'
@@ -3741,47 +3741,76 @@ class UploadService:
                 )
                 SELECT
                     ABS(CAST(fnv_hash(CONCAT_WS('|',
-                        COALESCE(portfolio, ''),
-                        COALESCE(COALESCE(matched_security_name, security_full_name, security_short_name), ''),
-                        COALESCE(position_basis, ''),
-                        COALESCE(CAST(reporting_date AS STRING), ''),
-                        COALESCE(src_system, '')
+                        COALESCE(s.portfolio, ''),
+                        COALESCE(COALESCE(s.matched_security_name, s.security_full_name, s.security_short_name), ''),
+                        COALESCE(s.position_basis, ''),
+                        COALESCE(CAST(s.reporting_date AS STRING), ''),
+                        COALESCE(s.src_system, '')
                     )) AS BIGINT))                          AS position_id,
                     CAST(UNIX_TIMESTAMP() * 1000 AS BIGINT) AS version_id,
-                    portfolio,
-                    COALESCE(matched_security_name, security_full_name, security_short_name) AS security_label,
-                    position_basis,
-                    reporting_date AS position_date,
-                    src_system,
-                    processing_date,
-                    CAST(final_quantity          AS DECIMAL(30,8)) AS quantity,
-                    CAST(average_cost            AS DECIMAL(30,8)) AS average_cost_fc,
-                    CAST(cost_fc                 AS DECIMAL(30,8)) AS cost_fc,
-                    CAST(final_market_value_fc   AS DECIMAL(30,8)) AS market_value_fc,
-                    CAST(final_net_book_value_fc AS DECIMAL(30,8)) AS net_book_value_fc,
-                    CAST(unrealized_pnl_fc       AS DECIMAL(30,8)) AS unrealized_pnl_fc,
-                    CAST(cost_lc                 AS DECIMAL(30,8)) AS cost_lc,
-                    CAST(market_value_lc         AS DECIMAL(30,8)) AS market_value_lc,
-                    CAST(net_book_value_lc       AS DECIMAL(30,8)) AS net_book_value_lc,
-                    CAST(unrealized_pnl_lc       AS DECIMAL(30,8)) AS unrealized_pnl_lc,
-                    CAST(provision_lc            AS DECIMAL(30,8)) AS provision_lc,
-                    CAST(provision_fc            AS DECIMAL(30,8)) AS provision_fc,
-                    CAST(0                       AS DECIMAL(30,8)) AS dividend_fc,
-                    CAST(0                       AS DECIMAL(30,8)) AS dividend_lc,
-                    CAST(0                       AS DECIMAL(30,8)) AS realized_pnl_fc,
-                    CAST(0                       AS DECIMAL(30,8)) AS realized_pnl_lc,
-                    COALESCE(final_isin, isin)                     AS isin,
-                    CAST(0                       AS DECIMAL(30,8)) AS average_cost_lc,
-                    source_table                                   AS source_table,
+                    s.portfolio,
+                    COALESCE(s.matched_security_name, s.security_full_name, s.security_short_name) AS security_label,
+                    s.position_basis,
+                    s.reporting_date AS position_date,
+                    s.src_system,
+                    s.processing_date,
+                    CAST(s.final_quantity          AS DECIMAL(30,8)) AS quantity,
+                    CAST(s.average_cost            AS DECIMAL(30,8)) AS average_cost_fc,
+                    CAST(s.cost_fc                 AS DECIMAL(30,8)) AS cost_fc,
+                    CAST(s.final_market_value_fc   AS DECIMAL(30,8)) AS market_value_fc,
+                    CAST(s.final_net_book_value_fc AS DECIMAL(30,8)) AS net_book_value_fc,
+                    CAST(s.unrealized_pnl_fc       AS DECIMAL(30,8)) AS unrealized_pnl_fc,
+                    CAST(s.cost_lc                 AS DECIMAL(30,8)) AS cost_lc,
+                    CAST(s.market_value_lc         AS DECIMAL(30,8)) AS market_value_lc,
+                    CAST(s.net_book_value_lc       AS DECIMAL(30,8)) AS net_book_value_lc,
+                    CAST(s.unrealized_pnl_lc       AS DECIMAL(30,8)) AS unrealized_pnl_lc,
+                    CAST(s.provision_lc            AS DECIMAL(30,8)) AS provision_lc,
+                    CAST(s.provision_fc            AS DECIMAL(30,8)) AS provision_fc,
+                    -- CA/CF fields: carry from existing USER_UPLOAD position (never zeroed on re-upload)
+                    COALESCE(ep.dividend_fc,     CAST(0 AS DECIMAL(30,8))) AS dividend_fc,
+                    COALESCE(ep.dividend_lc,     CAST(0 AS DECIMAL(30,8))) AS dividend_lc,
+                    COALESCE(ep.realized_pnl_fc, CAST(0 AS DECIMAL(30,8))) AS realized_pnl_fc,
+                    COALESCE(ep.realized_pnl_lc, CAST(0 AS DECIMAL(30,8))) AS realized_pnl_lc,
+                    COALESCE(s.final_isin, s.isin)                   AS isin,
+                    -- average_cost_lc: recalculate from cost_lc / quantity; fallback to existing
+                    CASE
+                        WHEN CAST(s.final_quantity AS DECIMAL(30,8)) > 0
+                             AND s.cost_lc IS NOT NULL
+                             AND CAST(s.cost_lc AS DECIMAL(30,8)) > 0
+                            THEN CAST(
+                                CAST(s.cost_lc AS DECIMAL(30,8)) / CAST(s.final_quantity AS DECIMAL(30,8))
+                            AS DECIMAL(30,8))
+                        WHEN ep.average_cost_lc IS NOT NULL
+                            THEN CAST(ep.average_cost_lc AS DECIMAL(30,8))
+                        ELSE CAST(0 AS DECIMAL(30,8))
+                    END                                              AS average_cost_lc,
+                    s.source_table                                   AS source_table,
                     from_unixtime(unix_timestamp(), 'yyyy-MM-dd HH:mm:ss') AS processing_timestamp,
-                    CAST(0                       AS DECIMAL(30,8)) AS uncall_fc,
-                    CAST(0                       AS DECIMAL(30,8)) AS uncall_lc,
-                    CAST(0                       AS DECIMAL(30,8)) AS pipeline_fc,
-                    CAST(0                       AS DECIMAL(30,8)) AS pipeline_lc,
-                    'INT'                                          AS position_type
-                FROM position_upload_staging
-                WHERE overall_status LIKE 'VALID%'
-                  AND CAST(reporting_date AS STRING) <= '{_contextual_today_iso}'
+                    COALESCE(ep.uncall_fc,   CAST(0 AS DECIMAL(30,8))) AS uncall_fc,
+                    COALESCE(ep.uncall_lc,   CAST(0 AS DECIMAL(30,8))) AS uncall_lc,
+                    COALESCE(ep.pipeline_fc, CAST(0 AS DECIMAL(30,8))) AS pipeline_fc,
+                    COALESCE(ep.pipeline_lc, CAST(0 AS DECIMAL(30,8))) AS pipeline_lc,
+                    'INT'                                            AS position_type
+                FROM position_upload_staging s
+                LEFT JOIN (
+                    SELECT
+                        portfolio,
+                        security_label,
+                        position_basis,
+                        dividend_fc, dividend_lc,
+                        realized_pnl_fc, realized_pnl_lc,
+                        average_cost_lc,
+                        uncall_fc, uncall_lc,
+                        pipeline_fc, pipeline_lc
+                    FROM {db}.cis_position
+                    WHERE src_system = 'USER_UPLOAD'
+                      AND (is_latest = true OR is_latest IS NULL)
+                ) ep
+                    ON ep.portfolio      = s.portfolio
+                   AND ep.security_label = COALESCE(s.matched_security_name, s.security_full_name, s.security_short_name)
+                   AND ep.position_basis = s.position_basis
+                WHERE s.overall_status LIKE 'VALID%'
+                  AND CAST(s.reporting_date AS STRING) <= '{_contextual_today_iso}'
                 """,
                 database=db
             )
