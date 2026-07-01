@@ -882,11 +882,11 @@ class UploadService:
 
             # Determine position_basis default for this datasource's target table
             POSITION_TABLE_BASIS = {
-                'cis_user_sta_adhoc_position_1': 'TRADE_DATE',
-                'cis_user_sta_adhoc_position_2': 'TRADE_DATE',
-                'cis_user_sta_adhoc_position_3': 'TRADE_DATE',
-                'cis_user_sta_adhoc_position_4': 'SETTLE_DATE',
-                'cis_user_sta_adhoc_position_5': 'SETTLE_DATE',
+                'cis_user_sta_adhoc_position_1': 'TRADED',
+                'cis_user_sta_adhoc_position_2': 'TRADED',
+                'cis_user_sta_adhoc_position_3': 'TRADED',
+                'cis_user_sta_adhoc_position_4': 'SETTLED',
+                'cis_user_sta_adhoc_position_5': 'SETTLED',
             }
             target_table = datasource_config.get('target_table', '')
             target_table_key = target_table.lower().split('.')[-1]
@@ -1558,11 +1558,11 @@ class UploadService:
 
         # Additional columns appended to target
         POSITION_TABLE_BASIS = {
-            'cis_user_sta_adhoc_position_1': 'TRADE_DATE',
-            'cis_user_sta_adhoc_position_2': 'TRADE_DATE',
-            'cis_user_sta_adhoc_position_3': 'TRADE_DATE',
-            'cis_user_sta_adhoc_position_4': 'SETTLE_DATE',
-            'cis_user_sta_adhoc_position_5': 'SETTLE_DATE',
+            'cis_user_sta_adhoc_position_1': 'TRADED',
+            'cis_user_sta_adhoc_position_2': 'TRADED',
+            'cis_user_sta_adhoc_position_3': 'TRADED',
+            'cis_user_sta_adhoc_position_4': 'SETTLED',
+            'cis_user_sta_adhoc_position_5': 'SETTLED',
         }
         table_lower = target_table.lower().split('.')[-1]
         position_basis = POSITION_TABLE_BASIS.get(table_lower, '')
@@ -1871,14 +1871,14 @@ class UploadService:
             }
 
             # position_basis: defaulted at ingest time — not present in uploaded file.
-            # Tables 1-3 (trade date based) → TRADE_DATE
-            # Tables 4-5 (settled date based) → SETTLE_DATE
+            # Tables 1-3 (trade date based) → TRADED
+            # Tables 4-5 (settled date based) → SETTLED
             POSITION_TABLE_BASIS = {
-                'cis_user_sta_adhoc_position_1': 'TRADE_DATE',
-                'cis_user_sta_adhoc_position_2': 'TRADE_DATE',
-                'cis_user_sta_adhoc_position_3': 'TRADE_DATE',
-                'cis_user_sta_adhoc_position_4': 'SETTLE_DATE',
-                'cis_user_sta_adhoc_position_5': 'SETTLE_DATE',
+                'cis_user_sta_adhoc_position_1': 'TRADED',
+                'cis_user_sta_adhoc_position_2': 'TRADED',
+                'cis_user_sta_adhoc_position_3': 'TRADED',
+                'cis_user_sta_adhoc_position_4': 'SETTLED',
+                'cis_user_sta_adhoc_position_5': 'SETTLED',
             }
             table_lower = target_table.lower().split('.')[-1]  # strip db prefix if present
             if table_lower in POSITION_TABLE_BASIS and 'position_basis' in [c.lower() for c in target_table_cols]:
@@ -2487,7 +2487,7 @@ class UploadService:
                         NULL                                            AS bwcif_ovs,
                         NULL                                            AS mas_6d_code_sg,
                         NULL                                            AS mas_6d_code_ovs,
-                        'TRADE_DATE'                                    AS position_basis,
+                        'TRADED'                                    AS position_basis,
                         reporting_date                                  AS reporting_date,
                         NULL                                            AS maturity_date,
                         'USER_UPLOAD'                                   AS src_system,
@@ -2547,7 +2547,7 @@ class UploadService:
                         NULL                                            AS bwcif_ovs,
                         NULL                                            AS mas_6d_code_sg,
                         NULL                                            AS mas_6d_code_ovs,
-                        'TRADE_DATE'                                    AS position_basis,
+                        'TRADED'                                    AS position_basis,
                         reporting_date                                  AS reporting_date,
                         NULL                                            AS maturity_date,
                         'USER_UPLOAD'                                   AS src_system,
@@ -2607,7 +2607,7 @@ class UploadService:
                         NULL                                            AS bwcif_ovs,
                         NULL                                            AS mas_6d_code_sg,
                         NULL                                            AS mas_6d_code_ovs,
-                        'TRADE_DATE'                                    AS position_basis,
+                        'TRADED'                                    AS position_basis,
                         reporting_date                                  AS reporting_date,
                         NULL                                            AS maturity_date,
                         'USER_UPLOAD'                                   AS src_system,
@@ -2671,7 +2671,7 @@ class UploadService:
                         NULL                                                AS bwcif_ovs,
                         NULL                                                AS mas_6d_code_sg,
                         NULL                                                AS mas_6d_code_ovs,
-                        'SETTLE_DATE'                                       AS position_basis,
+                        'SETTLED'                                       AS position_basis,
                         reporting_date                                      AS reporting_date,
                         NULL                                                AS maturity_date,
                         'USER_UPLOAD'                                       AS src_system,
@@ -2731,7 +2731,7 @@ class UploadService:
                         p5.bwcif_number_overseas                           AS bwcif_ovs,
                         p5.mas_6d_code_sg,
                         p5.mas_6d_code_overseas                            AS mas_6d_code_ovs,
-                        'SETTLE_DATE'                                      AS position_basis,
+                        'SETTLED'                                      AS position_basis,
                         p5.reporting_date, p5.maturity_date,
                         'USER_UPLOAD'                                      AS src_system,
                         'user'                                             AS sub_system,
@@ -3746,8 +3746,7 @@ class UploadService:
                         COALESCE(COALESCE(s.matched_security_name, s.security_full_name, s.security_short_name), ''),
                         COALESCE(s.position_basis, ''),
                         COALESCE(CAST(s.reporting_date AS STRING), ''),
-                        COALESCE(s.src_system, ''),
-                        'INT'
+                        COALESCE(s.src_system, '')
                     )) AS BIGINT))                          AS position_id,
                     CAST(UNIX_TIMESTAMP() * 1000 AS BIGINT) AS version_id,
                     s.portfolio,
@@ -3862,7 +3861,7 @@ class UploadService:
                 for row in (_today_check_rows or []):
                     _ptf  = row.get('portfolio', '')
                     _sec  = row.get('security_label', '')
-                    _basis = row.get('position_basis', 'TRADE_DATE')
+                    _basis = row.get('position_basis', 'TRADED')
                     if not _ptf or not _sec:
                         continue
 
@@ -3897,8 +3896,7 @@ class UploadService:
                                 COALESCE(security_label, ''),
                                 COALESCE(position_basis, ''),
                                 '{_contextual_today_iso}',
-                                COALESCE(src_system, ''),
-                                'INT'
+                                COALESCE(src_system, '')
                             )) AS BIGINT))                          AS position_id,
                             CAST(UNIX_TIMESTAMP() * 1000 AS BIGINT) AS version_id,
                             portfolio_short_name,

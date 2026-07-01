@@ -88,7 +88,7 @@ class PositionQueueService:
         security_name: str = None,
         use_db_queue: bool = True,
         chain_recalc_metadata: str = None,
-        position_basis: str = 'TRADE_DATE',
+        position_basis: str = 'TRADED',
         position_date: str = None,
         deal_number: str = ''
     ) -> Tuple[bool, str, Optional[int]]:
@@ -115,8 +115,8 @@ class PositionQueueService:
             timestamp = datetime.now()
 
             # position_date: the actual date for this position record.
-            # For TRADE_DATE basis: position_date = trade_date (passed by caller)
-            # For SETTLE_DATE basis: position_date = settle_date (default)
+            # For TRADED basis: position_date = trade_date (passed by caller)
+            # For SETTLED basis: position_date = settle_date (default)
             effective_position_date = position_date or settle_date
 
             queue_item = {
@@ -176,7 +176,7 @@ class PositionQueueService:
             error_message = item.get('error_message')
             error_message_sql = f"'{self._escape(error_message)}'" if error_message else 'NULL'
 
-            position_basis = item.get('position_basis', 'TRADE_DATE')
+            position_basis = item.get('position_basis', 'TRADED')
             position_date = item.get('position_date') or item['settle_date']
 
             query = f"""
@@ -303,7 +303,7 @@ class PositionQueueService:
                 'portfolio':   item.get('portfolio_id', ''),
                 'security':    item.get('security_name') or item.get('security_id', ''),
                 'isin':        item.get('isin', ''),
-                'position_basis': item.get('position_basis', 'TRADE_DATE'),
+                'position_basis': item.get('position_basis', 'TRADED'),
             }
 
             # Notify user: AVP processing started
@@ -394,10 +394,10 @@ class PositionQueueService:
                 })
                 return
 
-            # For T+0 / TRADE_DATE basis: Calculate position directly
-            # position_date comes from queue (trade_date for TRADE_DATE basis,
-            # settle_date for SETTLE_DATE basis)
-            position_basis = item.get('position_basis', 'TRADE_DATE')
+            # For T+0 / TRADED basis: Calculate position directly
+            # position_date comes from queue (trade_date for TRADED basis,
+            # settle_date for SETTLED basis)
+            position_basis = item.get('position_basis', 'TRADED')
             position_date = item.get('position_date') or item['settle_date']
 
             success, message, position = self.position_service.calculate_position(
@@ -559,11 +559,11 @@ class PositionQueueService:
                     trade_date = trade.get('trade_date') or trade['settle_date']
 
                     # Recalculate BOTH position bases per trade so each chain stays correct.
-                    # TRADE_DATE basis uses trade_date as position_date.
-                    # SETTLE_DATE basis uses settle_date as position_date.
+                    # TRADED basis uses trade_date as position_date.
+                    # SETTLED basis uses settle_date as position_date.
                     for basis, pos_date in [
-                        ('TRADE_DATE', trade_date),
-                        ('SETTLE_DATE', trade['settle_date'])
+                        ('TRADED', trade_date),
+                        ('SETTLED', trade['settle_date'])
                     ]:
                         try:
                             success, msg, _ = self.position_service.calculate_position(
@@ -946,7 +946,7 @@ class PositionQueueService:
         charges: Decimal,
         settle_date: str,
         updated_by: str,
-        position_basis: str = 'TRADE_DATE',
+        position_basis: str = 'TRADED',
         position_date: str = None,
         **kwargs
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:

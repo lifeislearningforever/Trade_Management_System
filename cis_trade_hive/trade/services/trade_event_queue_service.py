@@ -498,7 +498,7 @@ class TradeEventQueueService:
             position_exists = self.check_position_exists(trade_id)
 
             # Step 1: REVERSE the old position for BOTH bases (only if position exists)
-            # We must reverse both TRADE_DATE and SETTLE_DATE chains that were originally created.
+            # We must reverse both TRADED and SETTLED chains that were originally created.
             if position_exists:
                 old_trade_type = old_data.get('trade_type', '')
                 reverse_type = 'SELL' if old_trade_type == 'BUY' else 'BUY'
@@ -509,8 +509,8 @@ class TradeEventQueueService:
 
                 logger.info(f"POSITION_MODIFY: Reversing old {old_trade_type} for trade {trade_id} (both bases)")
 
-                for basis in ['TRADE_DATE', 'SETTLE_DATE']:
-                    pos_date = old_trade_date if basis == 'TRADE_DATE' else old_settle_date
+                for basis in ['TRADED', 'SETTLED']:
+                    pos_date = old_trade_date if basis == 'TRADED' else old_settle_date
                     success_reverse, msg_reverse, _ = settlement_service.process_trade_settlement(
                         trade_id=trade_id,
                         portfolio_id=portfolio_id,
@@ -564,7 +564,7 @@ class TradeEventQueueService:
                 custodian=new_data.get('custodian', ''),
                 sub_custodian=new_data.get('sub_custodian', ''),
                 async_mode=False,
-                position_basis=None  # dual — creates both TRADE_DATE and SETTLE_DATE
+                position_basis=None  # dual — creates both TRADED and SETTLED
             )
 
             if success_new:
@@ -626,7 +626,7 @@ class TradeEventQueueService:
                 security_currency=event_data.get('security_currency'),
                 portfolio_currency=event_data.get('portfolio_currency'),
                 async_mode=False,
-                position_basis=None  # dual — reverses both TRADE_DATE and SETTLE_DATE
+                position_basis=None  # dual — reverses both TRADED and SETTLED
             )
 
             if success:

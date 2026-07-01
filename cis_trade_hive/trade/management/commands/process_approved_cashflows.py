@@ -270,7 +270,7 @@ class Command(BaseCommand):
         dry_run: bool
     ) -> Tuple[bool, str]:
         """Route to the correct position update logic based on cash flow type.
-        Applies CF to the SETTLE_DATE position in cis_trade_position (CIS) or cis_position (non-CIS)."""
+        Applies CF to the SETTLED position in cis_trade_position (CIS) or cis_position (non-CIS)."""
 
         # Fetch positions for both bases; apply to each independently
         positions = self._get_current_positions(portfolio, security)
@@ -294,7 +294,7 @@ class Command(BaseCommand):
         messages = []
 
         for position, pos_src in positions:
-            basis = position.get('position_basis') or position.get('pos_basis') or 'SETTLE_DATE'
+            basis = position.get('position_basis') or position.get('pos_basis') or 'SETTLED'
 
             if cf_type in ('UNCALL_COMMITMENT',):
                 ok, msg = self._accumulate_field(
@@ -616,7 +616,7 @@ class Command(BaseCommand):
                 {new_version_id},
                 {position_id},
                 '{_escape(position_date)}',
-                '{_escape(current.get("position_basis") or "SETTLE_DATE")}',
+                '{_escape(current.get("position_basis") or "SETTLED")}',
                 '{_escape(portfolio)}',
                 '{_escape(security)}',
                 {_f('quantity')},
@@ -708,7 +708,7 @@ class Command(BaseCommand):
             FROM {DATABASE}.{GOLDEN_TABLE}
             WHERE portfolio = '{_escape(portfolio)}'
               AND security_label = '{_escape(security)}'
-              AND position_basis = 'SETTLE_DATE'
+              AND position_basis = 'SETTLED'
             ORDER BY position_id DESC
             LIMIT 1
             """
@@ -723,13 +723,13 @@ class Command(BaseCommand):
                 isin          = row.get('isin')
                 source_table  = row.get('source_table')
                 effective_src = row.get('src_system') or src_system
-                pos_basis     = row.get('position_basis') or 'SETTLE_DATE'
+                pos_basis     = row.get('position_basis') or 'SETTLED'
             else:
                 row           = {}
                 isin          = current.get('isin')
                 source_table  = POSITION_TABLE
                 effective_src = src_system
-                pos_basis     = current.get('position_basis') or 'SETTLE_DATE'
+                pos_basis     = current.get('position_basis') or 'SETTLED'
                 logger.info(
                     f'[GOLDEN] No existing cis_position row for {portfolio}/{security} '
                     f'— creating first INT row position_id={new_position_id}'
@@ -889,7 +889,7 @@ class Command(BaseCommand):
         security: str
     ) -> List[Tuple[Dict[str, Any], str]]:
         """
-        Get latest open SETTLE_DATE position for portfolio/security.
+        Get latest open SETTLED position for portfolio/security.
         Returns list of (position_dict, src_system) with one entry if found.
         First tries cis_trade_position (CIS versioned ledger).
         Falls back to cis_position (golden copy) for non-CIS sources.
@@ -900,7 +900,7 @@ class Command(BaseCommand):
             FROM {DATABASE}.{POSITION_TABLE}
             WHERE portfolio_short_name = '{_escape(portfolio)}'
               AND security_label = '{_escape(security)}'
-              AND position_basis = 'SETTLE_DATE'
+              AND position_basis = 'SETTLED'
               AND status = 'OPEN'
               AND is_active = true
               AND (is_latest = true OR is_latest IS NULL)
@@ -911,7 +911,7 @@ class Command(BaseCommand):
             if cis_rows:
                 return [(cis_rows[0], 'CIS')]
         except Exception as e:
-            logger.error(f'Error fetching CIS SETTLE_DATE position for {portfolio}/{security}: {e}')
+            logger.error(f'Error fetching CIS SETTLED position for {portfolio}/{security}: {e}')
 
         # Fallback: golden copy for non-CIS sources
         try:
@@ -948,7 +948,7 @@ class Command(BaseCommand):
             FROM {DATABASE}.{GOLDEN_TABLE}
             WHERE portfolio = '{_escape(portfolio)}'
               AND security_label = '{_escape(security)}'
-              AND position_basis = 'SETTLE_DATE'
+              AND position_basis = 'SETTLED'
               AND quantity > 0
             ORDER BY position_date DESC
             LIMIT 1
@@ -958,11 +958,11 @@ class Command(BaseCommand):
                 row = golden_rows[0]
                 src = row.get('src_system') or 'GMP'
                 logger.info(
-                    f'[CF] No CIS SETTLE_DATE position for {portfolio}/{security} — '
+                    f'[CF] No CIS SETTLED position for {portfolio}/{security} — '
                     f'using golden copy (src_system={src})'
                 )
                 return [(row, src)]
         except Exception as e:
-            logger.error(f'Error fetching golden SETTLE_DATE position for {portfolio}/{security}: {e}')
+            logger.error(f'Error fetching golden SETTLED position for {portfolio}/{security}: {e}')
 
         return []

@@ -280,11 +280,11 @@ def upload_create(request):
                         print(f"[upload:direct] tbl_cols={_tbl_cols}", flush=True)
 
                         POSITION_BASIS = {
-                            'cis_user_sta_adhoc_position_1': 'TRADE_DATE',
-                            'cis_user_sta_adhoc_position_2': 'TRADE_DATE',
-                            'cis_user_sta_adhoc_position_3': 'TRADE_DATE',
-                            'cis_user_sta_adhoc_position_4': 'SETTLE_DATE',
-                            'cis_user_sta_adhoc_position_5': 'SETTLE_DATE',
+                            'cis_user_sta_adhoc_position_1': 'TRADED',
+                            'cis_user_sta_adhoc_position_2': 'TRADED',
+                            'cis_user_sta_adhoc_position_3': 'TRADED',
+                            'cis_user_sta_adhoc_position_4': 'SETTLED',
+                            'cis_user_sta_adhoc_position_5': 'SETTLED',
                         }
                         # Fixed server-injected columns (NOT including processing_date —
                         # that goes in PARTITION clause, not in the SELECT list)
@@ -294,7 +294,7 @@ def upload_create(request):
                             'sub_system': 'user',
                             'data_cat': 'sta',
                             'data_frq': 'adhoc',
-                            'position_basis': POSITION_BASIS.get(_src_id, 'TRADE_DATE'),
+                            'position_basis': POSITION_BASIS.get(_src_id, 'TRADED'),
                         }
 
                         # Build desc early (before thread so messages are correct)

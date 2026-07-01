@@ -462,7 +462,7 @@ class Command(BaseCommand):
                 vid      = row.get('version_id')
                 port     = self._escape(row.get('portfolio', ''))
                 sec      = self._escape(row.get('security_label', ''))
-                basis    = self._escape(row.get('position_basis', 'TRADE_DATE'))
+                basis    = self._escape(row.get('position_basis', 'TRADED'))
                 pos_date = row.get('position_date', '')
                 src_sys  = self._escape(row.get('src_system', ''))
                 proc_dt  = self._escape(row.get('processing_date', ''))
@@ -556,7 +556,7 @@ class Command(BaseCommand):
 
             portfolio = self._escape(position.get('portfolio', ''))
             security  = self._escape(position.get('security_label', ''))
-            pos_basis = self._escape(position.get('position_basis', 'TRADE_DATE'))
+            pos_basis = self._escape(position.get('position_basis', 'TRADED'))
             src_sys   = self._escape(position.get('src_system', 'CIS'))
             isin_val  = f"'{self._escape(position['isin'])}'" if position.get('isin') else 'NULL'
             src_tbl   = f"'{self._escape(position['source_table'])}'" if position.get('source_table') else 'NULL'
@@ -630,7 +630,7 @@ class Command(BaseCommand):
 
             portfolio     = self._escape(position.get('portfolio', ''))
             security      = self._escape(position.get('security_label', ''))
-            pos_basis     = self._escape(position.get('position_basis', 'TRADE_DATE'))
+            pos_basis     = self._escape(position.get('position_basis', 'TRADED'))
 
             # Remove any existing EOD row for this portfolio/security/basis/date before inserting
             impala_manager.execute_write(

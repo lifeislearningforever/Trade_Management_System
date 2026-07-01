@@ -80,7 +80,7 @@ class SettlementService:
         custodian: str = None,
         sub_custodian: str = None,
         async_mode: bool = True,
-        position_basis: str = None  # None = dual (both bases). 'TRADE_DATE' or 'SETTLE_DATE' = single.
+        position_basis: str = None  # None = dual (both bases). 'TRADED' or 'SETTLED' = single.
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """
         Process trade settlement based on settlement date.
@@ -130,20 +130,20 @@ class SettlementService:
 
             # DUAL POSITION LOGIC
             # position_basis=None (default) means create BOTH bases.
-            # position_basis='TRADE_DATE' or 'SETTLE_DATE' means a targeted single-basis call
+            # position_basis='TRADED' or 'SETTLED' means a targeted single-basis call
             # (used by POSITION_MODIFY reversal and POSITION_CANCEL which must mirror what
             #  was originally created).
             #
             # Corner cases:
             # 1. T+0 (trade_date == settle_date): Both bases land on same date — we still
             #    create two rows so queries by position_basis remain consistent.
-            # 2. FUTURE settle_date (> today): TRADE_DATE position is queued immediately
-            #    (async), SETTLE_DATE position is queued to cis_settlement_queue for EOD.
+            # 2. FUTURE settle_date (> today): TRADED position is queued immediately
+            #    (async), SETTLED position is queued to cis_settlement_queue for EOD.
             # 3. BACKDATED: Chain recalculation runs for BOTH bases (handled in worker).
             # 4. Single-basis calls (modify/cancel reversals): pass position_basis explicitly.
 
             bases_to_process = (
-                ['TRADE_DATE', 'SETTLE_DATE'] if position_basis is None
+                ['TRADED', 'SETTLED'] if position_basis is None
                 else [position_basis]
             )
 
@@ -151,9 +151,9 @@ class SettlementService:
             overall_success = True
 
             for basis in bases_to_process:
-                # For TRADE_DATE basis: position_date = trade_date
-                # For SETTLE_DATE basis: position_date = settle_date
-                pos_date = trade_date if basis == 'TRADE_DATE' else settle_date
+                # For TRADED basis: position_date = trade_date
+                # For SETTLED basis: position_date = settle_date
+                pos_date = trade_date if basis == 'TRADED' else settle_date
 
                 kwargs = dict(
                     trade_id=trade_id,
@@ -177,15 +177,15 @@ class SettlementService:
                 )
 
                 if async_mode:
-                    if basis == 'SETTLE_DATE' and settle_dt > today:
-                        # SETTLE_DATE future: queue to settlement queue (processed on settle_date)
+                    if basis == 'SETTLED' and settle_dt > today:
+                        # SETTLED future: queue to settlement queue (processed on settle_date)
                         success, msg, result = self._queue_for_settlement(**kwargs)
                     else:
-                        # TRADE_DATE (any timing) + SETTLE_DATE T+0/backdated: async position queue
+                        # TRADED (any timing) + SETTLED T+0/backdated: async position queue
                         success, msg, result = self._queue_for_async_processing(**kwargs)
                 else:
                     # SYNC MODE (worker / EOD job)
-                    if settle_dt == today or basis == 'TRADE_DATE':
+                    if settle_dt == today or basis == 'TRADED':
                         success, msg, result = self._process_immediate_settlement(
                             position_date=pos_date, **{
                                 k: v for k, v in kwargs.items()
@@ -208,9 +208,9 @@ class SettlementService:
                 return results[basis]
 
             # Dual basis: return success only if both succeeded
-            td_success, td_msg, td_result = results.get('TRADE_DATE', (False, 'not run', None))
-            sd_success, sd_msg, sd_result = results.get('SETTLE_DATE', (False, 'not run', None))
-            combined_msg = f"TRADE_DATE: {td_msg} | SETTLE_DATE: {sd_msg}"
+            td_success, td_msg, td_result = results.get('TRADED', (False, 'not run', None))
+            sd_success, sd_msg, sd_result = results.get('SETTLED', (False, 'not run', None))
+            combined_msg = f"TRADED: {td_msg} | SETTLED: {sd_msg}"
             return overall_success, combined_msg, {
                 'trade_date_result': td_result,
                 'settle_date_result': sd_result,
@@ -237,7 +237,7 @@ class SettlementService:
         settle_date: str,
         updated_by: str,
         settlement_type: str,
-        position_basis: str = 'TRADE_DATE',
+        position_basis: str = 'TRADED',
         position_date: str = None,
         **kwargs
     ) -> Tuple[bool, str, Dict[str, Any]]:
@@ -365,7 +365,7 @@ class SettlementService:
             security_name=kwargs.get('security_name'),
             custodian=kwargs.get('custodian'),
             sub_custodian=kwargs.get('sub_custodian'),
-            position_basis=kwargs.get('position_basis', 'TRADE_DATE')
+            position_basis=kwargs.get('position_basis', 'TRADED')
         )
 
         if success:
@@ -388,12 +388,12 @@ class SettlementService:
         charges: Decimal,
         settle_date: str,
         updated_by: str,
-        position_basis: str = 'SETTLE_DATE',
+        position_basis: str = 'SETTLED',
         position_date: str = None,
         **kwargs
     ) -> Tuple[bool, str, Dict[str, Any]]:
         """Queue trade for future settlement (EOD job processes on settle_date).
-        Only SETTLE_DATE basis goes here — TRADE_DATE is always queued immediately."""
+        Only SETTLED basis goes here — TRADED is always queued immediately."""
         try:
             queue_id = self._generate_id()
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -509,8 +509,8 @@ class SettlementService:
                     )
 
                     # Calculate position — use basis stored in queue row
-                    # EOD job processes SETTLE_DATE basis (the main use case for this queue)
-                    basis = item.get('position_basis', 'SETTLE_DATE')
+                    # EOD job processes SETTLED basis (the main use case for this queue)
+                    basis = item.get('position_basis', 'SETTLED')
                     pos_date = item.get('position_date') or item['settle_date']
 
                     success, message, position = self.position_service.calculate_position(
@@ -654,7 +654,7 @@ class SettlementService:
             security_name=kwargs.get('security_name'),
             custodian=kwargs.get('custodian'),
             sub_custodian=kwargs.get('sub_custodian'),
-            position_basis=kwargs.get('position_basis', 'TRADE_DATE')
+            position_basis=kwargs.get('position_basis', 'TRADED')
         )
 
         if not success:

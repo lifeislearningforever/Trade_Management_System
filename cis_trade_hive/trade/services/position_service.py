@@ -22,6 +22,7 @@ import uuid
 from core.repositories.impala_connection import impala_manager
 from core.services.system_date_service import system_date_service
 from trade.services.multicurrency_service import multicurrency_service
+from trade.services.position_id_service import position_id as _calc_position_id
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,7 @@ class PositionService:
         pipeline_fc: Decimal = None,
         pipeline_lc: Decimal = None,
         position_type: str = None,
-        position_basis: str = 'TRADE_DATE'
+        position_basis: str = 'TRADED'
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """
         Calculate position using weighted average method.
@@ -270,7 +271,7 @@ class PositionService:
         pipeline_fc: Decimal = None,
         pipeline_lc: Decimal = None,
         position_type: str = None,
-        position_basis: str = 'TRADE_DATE'
+        position_basis: str = 'TRADED'
     ) -> Tuple[bool, str, Dict[str, Any]]:
         """
         Process BUY trade - increase position, recalculate AVP.
@@ -303,8 +304,10 @@ class PositionService:
                 f"Old: {old_qty} @ {old_avg_cost}, New: {new_qty} @ {new_avg_cost}"
             )
         else:
-            # New position
-            position_id = self._generate_id()
+            # New position — deterministic id from natural key
+            position_id = _calc_position_id(
+                portfolio_id, security_id, position_basis, position_date, 'CIS'
+            )
             old_qty = Decimal('0')
             old_realized_pnl = Decimal('0')
 
@@ -468,7 +471,7 @@ class PositionService:
         pipeline_fc: Decimal = None,
         pipeline_lc: Decimal = None,
         position_type: str = None,
-        position_basis: str = 'TRADE_DATE'
+        position_basis: str = 'TRADED'
     ) -> Tuple[bool, str, Dict[str, Any]]:
         """
         Process SELL trade - decrease position, AVP unchanged.
@@ -690,12 +693,12 @@ class PositionService:
         security_id: str,
         as_of_date: str,
         include_same_date: bool = True,
-        position_basis: str = 'TRADE_DATE'
+        position_basis: str = 'TRADED'
     ) -> Optional[Dict[str, Any]]:
         """
         Get position as of a specific date, scoped to a specific position_basis.
 
-        Critical for dual-position logic: TRADE_DATE and SETTLE_DATE positions are
+        Critical for dual-position logic: TRADED and SETTLED positions are
         stored separately. Each basis chain must only look at its own prior positions
         to avoid cross-contamination of AVP calculations.
 
@@ -705,7 +708,7 @@ class PositionService:
             as_of_date: Date to check (YYYY-MM-DD)
             include_same_date: If True, includes positions with position_date <= as_of_date
                               If False, only positions with position_date < as_of_date (for backdated)
-            position_basis: 'TRADE_DATE' or 'SETTLE_DATE' — scope lookup to this basis only
+            position_basis: 'TRADED' or 'SETTLED' — scope lookup to this basis only
 
         Returns the latest version (is_latest=true) with position_date <= or < as_of_date.
         """
@@ -791,7 +794,7 @@ class PositionService:
 
             # Step 1: Mark existing versions for this date as is_latest=false
             # This is done via UPSERT with the same version_id but is_latest=false
-            position_basis = position_data.get('position_basis', 'TRADE_DATE')
+            position_basis = position_data.get('position_basis', 'TRADED')
             self._mark_old_versions_not_latest(portfolio_id, security_id, position_date, position_basis)
 
             # Get FX rate for multi-currency calculations
@@ -1018,7 +1021,7 @@ class PositionService:
                 )
 
                 # Sync to cis_position gold table
-                # TODO: DUAL POSITION LOGIC — position_basis hardcoded 'TRADE_DATE' here is WRONG.
+                # TODO: DUAL POSITION LOGIC — position_basis hardcoded 'TRADED' here is WRONG.
                 # Once dual position logic is implemented, position_basis must come from
                 # position_data (set by caller via calculate_position's position_basis param).
                 # See trade_kudu_repository.py TODO for full implementation plan.
@@ -1037,7 +1040,7 @@ class PositionService:
                     'version_id': version_id,
                     'portfolio': portfolio_id,
                     'security_label': security_id,
-                    'position_basis': position_data.get('position_basis', 'TRADE_DATE'),  # TODO: pass from caller
+                    'position_basis': position_data.get('position_basis', 'TRADED'),  # TODO: pass from caller
                     'position_date': position_date,
                     'src_system': 'CIS',
                     'processing_date': timestamp[:10].replace('-', ''),  # YYYYMMDD
@@ -1132,7 +1135,7 @@ class PositionService:
                 str(position_data.get('version_id', 0)),
                 f"'{self._escape(position_data.get('portfolio', ''))}'",
                 f"'{self._escape(position_data.get('security_label', ''))}'",
-                f"'{position_data.get('position_basis', 'TRADE_DATE')}'",
+                f"'{position_data.get('position_basis', 'TRADED')}'",
                 f"'{position_data.get('position_date', '')}'",
                 "'CIS'",  # src_system - always CIS for CIS-generated positions
                 f"'{position_data.get('processing_date', '')}'",
@@ -1191,12 +1194,12 @@ class PositionService:
         portfolio_id: str,
         security_id: str,
         position_date: str,
-        position_basis: str = 'TRADE_DATE'
+        position_basis: str = 'TRADED'
     ) -> bool:
         """
         Mark existing versions for a position_date+basis as is_latest=false.
 
-        Scoped to position_basis so TRADE_DATE and SETTLE_DATE chains are
+        Scoped to position_basis so TRADED and SETTLED chains are
         independently versioned — recalculating one basis never stomps on the other.
 
         Note: Kudu doesn't support UPDATE with complex WHERE, so we need to:

@@ -100,7 +100,7 @@ class Command(BaseCommand):
         # ── 3. Apply today's pending settlements to EOD baseline ─────────────
         #
         # Fetch cis_settlement_queue entries where settle_date == sod_date and
-        # status = PENDING.  These are T+1/T+2 trades whose SETTLE_DATE position
+        # status = PENDING.  These are T+1/T+2 trades whose SETTLED position
         # was deferred.  Apply each trade's effect to the matching EOD row so
         # the resulting SOD row already reflects the settled quantity and cost.
         #
@@ -122,7 +122,7 @@ class Command(BaseCommand):
             key = (
                 row.get('portfolio', ''),
                 row.get('security_label', ''),
-                row.get('position_basis', 'SETTLE_DATE'),
+                row.get('position_basis', 'SETTLED'),
             )
             eod_index[key] = row
 
@@ -133,7 +133,7 @@ class Command(BaseCommand):
         for item in pending_settlements:
             portfolio  = item.get('portfolio_id', '')
             security   = item.get('security_id', '')
-            basis      = item.get('position_basis', 'SETTLE_DATE')
+            basis      = item.get('position_basis', 'SETTLED')
             trade_type = item.get('trade_type', '')
             qty        = Decimal(str(item.get('quantity', 0) or 0))
             price      = Decimal(str(item.get('price', 0) or 0))
@@ -418,7 +418,7 @@ class Command(BaseCommand):
             base.update({
                 'portfolio':       item.get('portfolio_id', base.get('portfolio', '')),
                 'security_label':  item.get('security_id', base.get('security_label', '')),
-                'position_basis':  item.get('position_basis', 'SETTLE_DATE'),
+                'position_basis':  item.get('position_basis', 'SETTLED'),
                 'src_system':      base.get('src_system', 'CIS'),
                 'isin':            item.get('isin') or base.get('isin'),
                 'source_table':    base.get('source_table', 'cis_settlement_queue'),
@@ -548,7 +548,7 @@ class Command(BaseCommand):
                 continue
             port     = self._escape(row.get('portfolio', ''))
             sec      = self._escape(row.get('security_label', ''))
-            basis    = self._escape(row.get('position_basis', 'TRADE_DATE'))
+            basis    = self._escape(row.get('position_basis', 'TRADED'))
             pos_date = row.get('position_date', '')
             src_sys  = self._escape(row.get('src_system', ''))
             proc_dt  = self._escape(str(row.get('processing_date', '')))
@@ -668,9 +668,10 @@ class Command(BaseCommand):
 
         def _fnv_hash_expr(portfolio, security, basis, date, src):
             """
-            Return the Impala fnv_hash expression for a USER_UPLOAD SOD row.
-            'SOD' is included in the hash so this position_id is distinct from
-            the INT position_id for the same natural key on the same date.
+            Impala fnv_hash expression for a USER_UPLOAD SOD position_id.
+            Uses the same 5-component natural key as all other writers —
+            INT, EOD, SOD for the same natural key share the same position_id
+            and coexist via the composite PK (position_id, position_type).
             """
             p = portfolio.replace("'", "\\'")
             s = security.replace("'", "\\'")
@@ -679,14 +680,14 @@ class Command(BaseCommand):
             sy = src.replace("'", "\\'")
             return (
                 f"ABS(CAST(fnv_hash(CONCAT_WS('|', "
-                f"'{p}', '{s}', '{b}', '{d}', '{sy}', 'SOD'"
+                f"'{p}', '{s}', '{b}', '{d}', '{sy}'"
                 f")) AS BIGINT))"
             )
 
         def _build_row(idx, row):
             portfolio = self._escape(row.get('portfolio', ''))
             security  = self._escape(row.get('security_label', ''))
-            pos_basis = self._escape(row.get('position_basis', 'TRADE_DATE'))
+            pos_basis = self._escape(row.get('position_basis', 'TRADED'))
             src_sys   = self._escape(row.get('src_system', 'CIS'))
             isin_val  = f"'{self._escape(row['isin'])}'" if row.get('isin') else 'NULL'
             src_tbl   = f"'{self._escape(row['source_table'])}'" if row.get('source_table') else 'NULL'

@@ -2,7 +2,7 @@
 Management command: backfill_zero_price_positions
 
 Finds all BUY/SELL trades with price = 0.0 that have no row in cis_trade_position
-(for either TRADE_DATE or SETTLE_DATE basis) and re-queues position calculation
+(for either TRADED or SETTLED basis) and re-queues position calculation
 for each gap trade.
 
 Covers all trade statuses — the position calculation guard was blocking price=0
@@ -145,7 +145,7 @@ class Command(BaseCommand):
     def _find_gap_trades(self, portfolio_filter, trade_id_filter):
         """
         Return BUY/SELL trades where price=0 AND no row exists in cis_trade_position
-        for either TRADE_DATE or SETTLE_DATE basis.
+        for either TRADED or SETTLED basis.
         """
         where_extra = ''
         if portfolio_filter:
@@ -198,7 +198,7 @@ class Command(BaseCommand):
             raise CommandError(f'Error querying gap trades: {e}')
 
     def _print_trade_table(self, trades):
-        header = f'  {"TRADE_ID":<15} {"DEAL_NUMBER":<25} {"TYPE":<5} {"STATUS":<20} {"PORTFOLIO":<25} {"SECURITY":<35} {"TRADE_DATE":<12} {"SETTLE_DATE":<12}'
+        header = f'  {"TRADE_ID":<15} {"DEAL_NUMBER":<25} {"TYPE":<5} {"STATUS":<20} {"PORTFOLIO":<25} {"SECURITY":<35} {"TRADED":<12} {"SETTLED":<12}'
         self._tee.write(header)
         self._tee.write('  ' + '-' * 155)
         for t in trades:
@@ -247,7 +247,7 @@ class Command(BaseCommand):
                     custodian=t.get('custodian'),
                     sub_custodian=t.get('udf_sub_custodian'),
                     async_mode=True,
-                    position_basis=None,  # dual: TRADE_DATE + SETTLE_DATE
+                    position_basis=None,  # dual: TRADED + SETTLED
                 )
 
                 if success:

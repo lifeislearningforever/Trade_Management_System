@@ -173,7 +173,7 @@ class Command(BaseCommand):
               AND NOT EXISTS (
                   SELECT 1 FROM gmp_cis.cis_settlement_queue q
                   WHERE q.trade_id = t.trade_id
-                    AND q.position_basis = 'SETTLE_DATE'
+                    AND q.position_basis = 'SETTLED'
               )
             ORDER BY t.settle_date, t.trade_id
             """
@@ -225,7 +225,7 @@ class Command(BaseCommand):
                         isin=row.get('isin'),
                         security_name=row.get('security_full_name') or security,
                         async_mode=True,
-                        position_basis='SETTLE_DATE',
+                        position_basis='SETTLED',
                     )
                     if ok:
                         queued += 1

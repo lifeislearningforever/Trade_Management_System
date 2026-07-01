@@ -264,10 +264,10 @@
                         </td>
                         <td><code class="small">{{ p.isin|default:"-" }}</code></td>
                         <td>
-                            {% if p.position_basis == 'TRADE_DATE' %}
-                                <span class="badge bg-primary">TD</span>
-                            {% elif p.position_basis == 'SETTLE_DATE' %}
-                                <span class="badge bg-success">SD</span>
+                            {% if p.position_basis == 'TRADED' %}
+                                <span class="badge bg-primary">Traded</span>
+                            {% elif p.position_basis == 'SETTLED' %}
+                                <span class="badge bg-success">Settled</span>
                             {% else %}
                                 <span class="badge bg-secondary">{{ p.position_basis|default:"-" }}</span>
                             {% endif %}
