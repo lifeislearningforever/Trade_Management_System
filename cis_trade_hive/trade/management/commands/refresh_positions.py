@@ -10,7 +10,9 @@ For each position:
   3. unrealized_pnl = 0 if security_investment IN (ASSOC, SUBSI), else market_value_fc - cost_fc
   4. NON-REVALUED: LC columns recalculated from FC × latest FX rate (no MTM override)
   5. net_book_value = cost + unrealized_pnl - provision
-  6. INSERT new cis_position row per run (position_type='EOD', position_basis both TRADE_DATE+SETTLE_DATE) — never overwrite
+  6. UPSERT EOD row back into cis_position, reusing the source row's position_id (same
+     position_date = same logical position) with a new version_id and is_latest=true.
+     The superseded source row (INT/SOD) is updated to is_latest=false first.
 
 Usage:
     python manage.py refresh_positions
@@ -116,11 +118,11 @@ class Command(BaseCommand):
                         f"({position.get('portfolio')}/{position.get('security_label')}): {str(e)}"
                     ))
 
-            # Batch DELETE existing EOD rows then batch INSERT new ones
+            # Mark source rows is_latest=false, then UPSERT EOD rows with is_latest=true
             if not dry_run and insert_rows:
                 self.stdout.write(f'Writing {len(insert_rows)} EOD rows...')
-                self._batch_delete_eod(insert_rows, run_date)
-                self._batch_insert_eod(insert_rows, run_date)
+                self._batch_mark_source_not_latest(insert_rows)
+                self._batch_upsert_eod(insert_rows, run_date)
 
             self.stdout.write('')
             self.stdout.write(self.style.MIGRATE_HEADING('=' * 80))
@@ -418,63 +420,126 @@ class Command(BaseCommand):
         return ref
 
     # -------------------------------------------------------------------------
-    # Batch write: DELETE existing EOD rows then INSERT new ones
+    # Batch write: mark source rows is_latest=false, then UPSERT EOD rows
     # -------------------------------------------------------------------------
 
-    def _batch_delete_eod(self, insert_rows, run_date):
+    def _batch_mark_source_not_latest(self, insert_rows):
         """
-        Delete ALL existing EOD rows for each (portfolio, security_label, position_basis)
-        combination we are about to insert — regardless of position_date.
-        This prevents duplicate EOD rows when a prior run left stale rows with
-        a different position_date than the new insert.
+        Mark each source row (INT or SOD) as is_latest=false before we UPSERT
+        the EOD row in its place.  EOD reuses the same position_id (same
+        position_date = same logical position), so the UPSERT by position_id
+        would overwrite the source row anyway — but marking it false first
+        keeps a clean audit trail if is_latest is ever indexed or queried.
+
+        Kudu does not support multi-row UPDATE, so we batch DELETE + re-INSERT
+        with is_latest=false for the affected position_ids.
         """
         BATCH = 500
-        tuples = list({
-            (
-                self._escape(r['position'].get('portfolio', '')),
-                self._escape(r['position'].get('security_label', '')),
-                self._escape(r['position'].get('position_basis', 'TRADE_DATE')),
-            )
-            for r in insert_rows
-        })
+        # Collect (position_id, full row dict) pairs — we need all fields to re-insert
+        rows_by_pid = {r['position'].get('position_id'): r['position'] for r in insert_rows}
+        pid_list = list(rows_by_pid.keys())
 
-        for i in range(0, len(tuples), BATCH):
-            chunk = tuples[i: i + BATCH]
-            or_clause = ' OR '.join(
-                f"(portfolio = '{p}' AND security_label = '{s}' AND position_basis = '{b}')"
-                for p, s, b in chunk
-            )
-            impala_manager.execute_write(
-                f"""DELETE FROM {DATABASE}.cis_position
-                    WHERE position_type = 'EOD'
-                      AND ({or_clause})""",
+        for i in range(0, len(pid_list), BATCH):
+            chunk_ids = pid_list[i: i + BATCH]
+            ids_csv   = ', '.join(str(pid) for pid in chunk_ids if pid is not None)
+            if not ids_csv:
+                continue
+
+            # Fetch existing rows so we can re-insert with is_latest=false
+            existing = impala_manager.execute_query(
+                f"""
+                SELECT *
+                FROM {DATABASE}.cis_position
+                WHERE position_id IN ({ids_csv})
+                  AND (is_latest = true OR is_latest IS NULL)
+                """,
                 database=DATABASE
-            )
+            ) or []
 
-    def _batch_insert_eod(self, insert_rows, run_date):
+            for row in existing:
+                # Re-UPSERT same row with is_latest=false (position_id is PK → overwrites)
+                pid      = row.get('position_id')
+                vid      = row.get('version_id')
+                port     = self._escape(row.get('portfolio', ''))
+                sec      = self._escape(row.get('security_label', ''))
+                basis    = self._escape(row.get('position_basis', 'TRADE_DATE'))
+                pos_date = row.get('position_date', '')
+                src_sys  = self._escape(row.get('src_system', ''))
+                proc_dt  = self._escape(row.get('processing_date', ''))
+
+                def _fv(v):
+                    return float(v) if v is not None else 0.0
+
+                isin_val = f"'{self._escape(row['isin'])}'" if row.get('isin') else 'NULL'
+                src_tbl  = f"'{self._escape(row['source_table'])}'" if row.get('source_table') else 'NULL'
+                ptype    = self._escape(row.get('position_type', ''))
+
+                impala_manager.execute_write(
+                    f"""
+                    UPSERT INTO {DATABASE}.cis_position (
+                        position_id, version_id,
+                        portfolio, security_label, position_basis, position_date,
+                        src_system, processing_date, quantity,
+                        average_cost_fc, cost_fc, average_cost_lc, cost_lc,
+                        market_value_fc, market_value_lc,
+                        net_book_value_fc, net_book_value_lc,
+                        unrealized_pnl_fc, unrealized_pnl_lc,
+                        realized_pnl_fc, realized_pnl_lc,
+                        provision_fc, provision_lc,
+                        dividend_fc, dividend_lc,
+                        uncall_fc, uncall_lc,
+                        pipeline_fc, pipeline_lc,
+                        position_type, isin, source_table, is_latest
+                    ) VALUES (
+                        {pid}, {vid},
+                        '{port}', '{sec}', '{basis}', '{pos_date}',
+                        '{src_sys}', '{proc_dt}', {_fv(row.get('quantity'))},
+                        {_fv(row.get('average_cost_fc'))}, {_fv(row.get('cost_fc'))},
+                        {_fv(row.get('average_cost_lc'))}, {_fv(row.get('cost_lc'))},
+                        {_fv(row.get('market_value_fc'))}, {_fv(row.get('market_value_lc'))},
+                        {_fv(row.get('net_book_value_fc'))}, {_fv(row.get('net_book_value_lc'))},
+                        {_fv(row.get('unrealized_pnl_fc'))}, {_fv(row.get('unrealized_pnl_lc'))},
+                        {_fv(row.get('realized_pnl_fc'))}, {_fv(row.get('realized_pnl_lc'))},
+                        {_fv(row.get('provision_fc'))}, {_fv(row.get('provision_lc'))},
+                        {_fv(row.get('dividend_fc'))}, {_fv(row.get('dividend_lc'))},
+                        {_fv(row.get('uncall_fc'))}, {_fv(row.get('uncall_lc'))},
+                        {_fv(row.get('pipeline_fc'))}, {_fv(row.get('pipeline_lc'))},
+                        '{ptype}', {isin_val}, {src_tbl}, false
+                    )
+                    """,
+                    database=DATABASE
+                )
+
+    def _batch_upsert_eod(self, insert_rows, run_date):
         """
-        INSERT all accumulated EOD rows in batches of 500.
-        Each row dict comes from _process_position().
-        run_date is the --date arg (YYYY-MM-DD), used as position_date for all EOD rows.
+        UPSERT EOD rows into cis_position in batches of 500.
+
+        position_id: reused from the source row — EOD is on the SAME position_date,
+                     so it's the same logical position being repriced.  The UPSERT
+                     by position_id (Kudu PK) replaces the source row.
+        version_id:  new timestamp-based value to record when EOD ran.
+        is_latest:   true — this EOD row is now the authoritative state.
         """
-        BATCH = 500
+        BATCH  = 500
         now_ms = int(datetime.now().timestamp() * 1000)
 
         def _build_value(idx, row):
-            position  = row['position']
-            fc_dp     = row['fc_dp']
-            lc_dp     = row['lc_dp']
+            position      = row['position']
+            fc_dp         = row['fc_dp']
+            lc_dp         = row['lc_dp']
             avg_cost_lc   = row['average_cost_lc']
             cost_lc_write = row['cost_lc_write']
-            mkt_fc    = row['market_value_fc']
-            mkt_lc    = row['market_value_lc']
-            upnl_fc   = row['unrealized_pnl_fc']
-            upnl_lc   = row['unrealized_pnl_lc']
-            nbv_fc    = row['nbv_fc']
-            nbv_lc    = row['nbv_lc']
+            mkt_fc        = row['market_value_fc']
+            mkt_lc        = row['market_value_lc']
+            upnl_fc       = row['unrealized_pnl_fc']
+            upnl_lc       = row['unrealized_pnl_lc']
+            nbv_fc        = row['nbv_fc']
+            nbv_lc        = row['nbv_lc']
 
-            new_id    = now_ms + idx  # unique within this batch run
-            # Use the source position's own position_date; fall back to run_date if missing
+            # Reuse the source position_id — same position_date, same logical position
+            src_position_id = position.get('position_id')
+            version_id      = now_ms + idx   # new: records when EOD ran
+
             raw_pos_date = position.get('position_date')
             pos_date  = str(raw_pos_date)[:10] if raw_pos_date else run_date
             proc_date = pos_date.replace('-', '')  # YYYYMMDD
@@ -495,7 +560,7 @@ class Command(BaseCommand):
             src_tbl   = f"'{self._escape(position['source_table'])}'" if position.get('source_table') else 'NULL'
 
             return (
-                f"({new_id}, {new_id}, "
+                f"({src_position_id}, {version_id}, "
                 f"'{portfolio}', '{security}', '{pos_basis}', '{pos_date}', "
                 f"'{src_sys}', '{proc_date}', "
                 f"{float(position.get('quantity') or 0)}, "
@@ -509,7 +574,7 @@ class Command(BaseCommand):
                 f"{fc(position.get('dividend_fc'))}, {lc(position.get('dividend_lc'))}, "
                 f"{fc(position.get('uncall_fc'))}, {lc(position.get('uncall_lc'))}, "
                 f"{fc(position.get('pipeline_fc'))}, {lc(position.get('pipeline_lc'))}, "
-                f"'EOD', {isin_val}, {src_tbl})"
+                f"'EOD', {isin_val}, {src_tbl}, true)"
             )
 
         col_list = """(
@@ -527,17 +592,17 @@ class Command(BaseCommand):
             dividend_fc, dividend_lc,
             uncall_fc, uncall_lc,
             pipeline_fc, pipeline_lc,
-            position_type, isin, source_table
+            position_type, isin, source_table, is_latest
         )"""
 
         for i in range(0, len(insert_rows), BATCH):
-            chunk = insert_rows[i: i + BATCH]
+            chunk  = insert_rows[i: i + BATCH]
             values = ',\n'.join(_build_value(i + j, r) for j, r in enumerate(chunk))
             impala_manager.execute_write(
-                f"INSERT INTO {DATABASE}.cis_position {col_list} VALUES {values}",
+                f"UPSERT INTO {DATABASE}.cis_position {col_list} VALUES {values}",
                 database=DATABASE
             )
-            self.stdout.write(f"  Inserted rows {i + 1}–{i + len(chunk)}")
+            self.stdout.write(f"  Upserted rows {i + 1}–{i + len(chunk)}")
 
     # -------------------------------------------------------------------------
     # INSERT new EOD row into cis_position (legacy single-row path, kept for reference)

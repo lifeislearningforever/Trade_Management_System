@@ -3737,7 +3737,8 @@ class UploadService:
                     uncall_lc,
                     pipeline_fc,
                     pipeline_lc,
-                    position_type
+                    position_type,
+                    is_latest
                 )
                 SELECT
                     ABS(CAST(fnv_hash(CONCAT_WS('|',
@@ -3790,7 +3791,8 @@ class UploadService:
                     COALESCE(ep.uncall_lc,   CAST(0 AS DECIMAL(30,8))) AS uncall_lc,
                     COALESCE(ep.pipeline_fc, CAST(0 AS DECIMAL(30,8))) AS pipeline_fc,
                     COALESCE(ep.pipeline_lc, CAST(0 AS DECIMAL(30,8))) AS pipeline_lc,
-                    'INT'                                            AS position_type
+                    'INT'                                            AS position_type,
+                    true                                             AS is_latest
                 FROM position_upload_staging s
                 LEFT JOIN (
                     SELECT
@@ -3927,7 +3929,8 @@ class UploadService:
                             uncall_lc,
                             pipeline_fc,
                             pipeline_lc,
-                            'INT'                                   AS position_type
+                            'INT'                                   AS position_type,
+                            true                                    AS is_latest
                         FROM {db}.cis_position
                         WHERE portfolio_short_name = '{_ptf.replace("'", "''")}'
                           AND security_label        = '{_sec.replace("'", "''")}'

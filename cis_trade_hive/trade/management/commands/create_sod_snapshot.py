@@ -207,13 +207,21 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING('\nDRY RUN — no changes written'))
             return
 
-        # ── 4. Delete any existing SOD rows for sod_date ────────────────────
+        # ── 4. Mark previous EOD rows as is_latest=false ────────────────────
+        #
+        # SOD moves to a new position_date, so it gets a NEW position_id.
+        # The EOD row from prev_day retains its own position_id and stays in
+        # the table, but is no longer the "current" view — mark it false so
+        # queries filtering is_latest=true skip it in favour of today's SOD.
+        self._mark_eod_not_latest(eod_rows)
+
+        # ── 5. Delete any existing SOD rows for sod_date (idempotent re-run) ─
         self._delete_existing_sod(sod_date, sources, portfolio_filter)
 
-        # ── 5. Batch-insert SOD rows ─────────────────────────────────────────
+        # ── 6. Batch-insert SOD rows with is_latest=true ─────────────────────
         inserted = self._batch_insert_sod(sod_rows, sod_date, proc_date)
 
-        # ── 6. Mark processed settlements as COMPLETED ───────────────────────
+        # ── 7. Mark processed settlements as COMPLETED ───────────────────────
         if settled_queue_ids:
             self._mark_settlements_completed(settled_queue_ids)
             self.stdout.write(
@@ -518,6 +526,78 @@ class Command(BaseCommand):
             )
             return None
 
+    # ── Mark previous EOD rows as is_latest=false ───────────────────────────
+
+    def _mark_eod_not_latest(self, eod_rows: list):
+        """
+        Set is_latest=false on the EOD rows from prev_day.
+
+        SOD introduces a new position_date and therefore a new position_id.
+        The prev_day EOD rows are retained in full for history, but they are
+        no longer the authoritative "current" state — today's SOD rows are.
+
+        Kudu cannot UPDATE in-place, so we re-UPSERT each row with is_latest=false
+        (UPSERT by position_id, the Kudu primary key).
+        """
+        if not eod_rows:
+            return
+        for row in eod_rows:
+            pid      = row.get('position_id')
+            vid      = row.get('version_id')
+            if pid is None:
+                continue
+            port     = self._escape(row.get('portfolio', ''))
+            sec      = self._escape(row.get('security_label', ''))
+            basis    = self._escape(row.get('position_basis', 'TRADE_DATE'))
+            pos_date = row.get('position_date', '')
+            src_sys  = self._escape(row.get('src_system', ''))
+            proc_dt  = self._escape(str(row.get('processing_date', '')))
+            isin_val = f"'{self._escape(row['isin'])}'" if row.get('isin') else 'NULL'
+            src_tbl  = f"'{self._escape(row['source_table'])}'" if row.get('source_table') else 'NULL'
+            ptype    = self._escape(row.get('position_type', 'EOD'))
+
+            def _fv(v):
+                return float(v) if v is not None else 0.0
+
+            try:
+                impala_manager.execute_write(
+                    f"""
+                    UPSERT INTO {DATABASE}.cis_position (
+                        position_id, version_id,
+                        portfolio, security_label, position_basis, position_date,
+                        src_system, processing_date, quantity,
+                        average_cost_fc, cost_fc, average_cost_lc, cost_lc,
+                        market_value_fc, market_value_lc,
+                        net_book_value_fc, net_book_value_lc,
+                        unrealized_pnl_fc, unrealized_pnl_lc,
+                        realized_pnl_fc, realized_pnl_lc,
+                        provision_fc, provision_lc,
+                        dividend_fc, dividend_lc,
+                        uncall_fc, uncall_lc,
+                        pipeline_fc, pipeline_lc,
+                        position_type, isin, source_table, is_latest
+                    ) VALUES (
+                        {pid}, {vid},
+                        '{port}', '{sec}', '{basis}', '{pos_date}',
+                        '{src_sys}', '{proc_dt}', {_fv(row.get('quantity'))},
+                        {_fv(row.get('average_cost_fc'))}, {_fv(row.get('cost_fc'))},
+                        {_fv(row.get('average_cost_lc'))}, {_fv(row.get('cost_lc'))},
+                        {_fv(row.get('market_value_fc'))}, {_fv(row.get('market_value_lc'))},
+                        {_fv(row.get('net_book_value_fc'))}, {_fv(row.get('net_book_value_lc'))},
+                        {_fv(row.get('unrealized_pnl_fc'))}, {_fv(row.get('unrealized_pnl_lc'))},
+                        {_fv(row.get('realized_pnl_fc'))}, {_fv(row.get('realized_pnl_lc'))},
+                        {_fv(row.get('provision_fc'))}, {_fv(row.get('provision_lc'))},
+                        {_fv(row.get('dividend_fc'))}, {_fv(row.get('dividend_lc'))},
+                        {_fv(row.get('uncall_fc'))}, {_fv(row.get('uncall_lc'))},
+                        {_fv(row.get('pipeline_fc'))}, {_fv(row.get('pipeline_lc'))},
+                        '{ptype}', {isin_val}, {src_tbl}, false
+                    )
+                    """,
+                    database=DATABASE
+                )
+            except Exception as e:
+                logger.error(f'[SOD] Failed to mark EOD position_id={pid} as is_latest=false: {e}')
+
     # ── Delete existing SOD rows ─────────────────────────────────────────────
 
     def _delete_existing_sod(self, sod_date, sources, portfolio_filter):
@@ -546,9 +626,24 @@ class Command(BaseCommand):
     # ── Batch INSERT ─────────────────────────────────────────────────────────
 
     def _batch_insert_sod(self, sod_rows, sod_date, proc_date):
-        """Insert SOD rows in batches of 500. Returns total rows inserted."""
+        """
+        UPSERT SOD rows into cis_position in batches of 500.
+
+        SOD is a new position_date, so every row gets a NEW position_id:
+          - CIS / GMP / AMSICEQ : random (timestamp-based sequential)
+          - USER_UPLOAD          : deterministic fnv_hash of the natural key
+                                   (portfolio|security_label|position_basis|
+                                    sod_date|src_system)
+                                   — ensures re-running SOD for the same date
+                                     replaces rather than duplicates.
+
+        version_id is always a new timestamp value (records when SOD ran).
+        is_latest = true — this SOD row is now the authoritative current state.
+        """
         BATCH  = 500
         now_ms = int(datetime.now().timestamp() * 1000)
+
+        UPLOAD_SOURCES = {'USER_UPLOAD'}
 
         col_list = """(
             position_id, version_id,
@@ -565,14 +660,26 @@ class Command(BaseCommand):
             dividend_fc, dividend_lc,
             uncall_fc, uncall_lc,
             pipeline_fc, pipeline_lc,
-            position_type, isin, source_table
+            position_type, isin, source_table, is_latest
         )"""
 
         def _val(v, default=0):
             return float(v) if v is not None else float(default)
 
+        def _fnv_hash_expr(portfolio, security, basis, date, src):
+            """Return the Impala fnv_hash expression for a USER_UPLOAD SOD row."""
+            p = portfolio.replace("'", "\\'")
+            s = security.replace("'", "\\'")
+            b = basis.replace("'", "\\'")
+            d = date
+            sy = src.replace("'", "\\'")
+            return (
+                f"ABS(CAST(fnv_hash(CONCAT_WS('|', "
+                f"'{p}', '{s}', '{b}', '{d}', '{sy}'"
+                f")) AS BIGINT))"
+            )
+
         def _build_row(idx, row):
-            new_id    = now_ms + idx
             portfolio = self._escape(row.get('portfolio', ''))
             security  = self._escape(row.get('security_label', ''))
             pos_basis = self._escape(row.get('position_basis', 'TRADE_DATE'))
@@ -580,8 +687,16 @@ class Command(BaseCommand):
             isin_val  = f"'{self._escape(row['isin'])}'" if row.get('isin') else 'NULL'
             src_tbl   = f"'{self._escape(row['source_table'])}'" if row.get('source_table') else 'NULL'
 
+            version_id = now_ms + idx   # new: records when SOD ran
+
+            # position_id: deterministic for uploads, random for CIS sources
+            if row.get('src_system', '') in UPLOAD_SOURCES:
+                position_id_expr = _fnv_hash_expr(portfolio, security, pos_basis, sod_date, src_sys)
+            else:
+                position_id_expr = str(now_ms + idx + 1_000_000)  # offset avoids collision with version_id
+
             return (
-                f"({new_id}, {new_id}, "
+                f"({position_id_expr}, {version_id}, "
                 f"'{portfolio}', '{security}', '{pos_basis}', '{sod_date}', "
                 f"'{src_sys}', '{proc_date}', "
                 f"{_val(row.get('quantity'))}, "
@@ -595,7 +710,7 @@ class Command(BaseCommand):
                 f"{_val(row.get('dividend_fc'))}, {_val(row.get('dividend_lc'))}, "
                 f"{_val(row.get('uncall_fc'))}, {_val(row.get('uncall_lc'))}, "
                 f"{_val(row.get('pipeline_fc'))}, {_val(row.get('pipeline_lc'))}, "
-                f"'SOD', {isin_val}, {src_tbl})"
+                f"'SOD', {isin_val}, {src_tbl}, true)"
             )
 
         total = 0
@@ -603,7 +718,7 @@ class Command(BaseCommand):
             chunk  = sod_rows[i: i + BATCH]
             values = ',\n'.join(_build_row(i + j, r) for j, r in enumerate(chunk))
             impala_manager.execute_write(
-                f"INSERT INTO {DATABASE}.cis_position {col_list} VALUES {values}",
+                f"UPSERT INTO {DATABASE}.cis_position {col_list} VALUES {values}",
                 database=DATABASE
             )
             total += len(chunk)
