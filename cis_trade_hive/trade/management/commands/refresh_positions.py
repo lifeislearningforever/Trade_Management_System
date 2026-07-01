@@ -15,33 +15,39 @@ For each position:
 Run types
 ---------
   EOD  (default): Normal end-of-day run.
-        - Processes the latest open position for every portfolio/security/basis
-          regardless of position_date (picks up today's INT/SOD).
+        - position_date inferred from alldatesinfo: reporting_date (prev_day, T-1).
+        - Restricts to positions whose position_date = reporting_date.
         - Writes position_type = 'EOD'.
-        - processing_date = today.
+        - Override with --position-date if needed.
 
   CORR: Month-end correction run (scheduled D+1 … D+5 after month-end).
-        - Requires --position-date YYYY-MM-DD (the month-end date to correct).
-        - Restricts to positions whose position_date = <position-date>.
+        - position_date inferred as last calendar day of month before reporting_date.
+        - Restricts to positions whose position_date = last_month_end.
         - Writes position_type = 'CORR'.
-        - processing_date = today (the actual run date, not the month-end date).
+        - Override with --position-date if needed.
+
+  In both cases processing_date = today (the actual run date).
 
 Usage:
-    # Normal EOD (reporting date is implicit — uses latest position per security)
+    # Normal EOD — position_date inferred from alldatesinfo reporting_date
     python manage.py refresh_positions
     python manage.py refresh_positions --portfolio UOB-SG-TRADING
     python manage.py refresh_positions --source CIS
     python manage.py refresh_positions --dry-run
 
-    # Month-end CORR run (position-date = last month-end, runs on D+1 … D+5)
-    python manage.py refresh_positions --run-type CORR --position-date 2026-06-30
-    python manage.py refresh_positions --run-type CORR --position-date 2026-06-30 --portfolio UOB-SG-TRADING
-    python manage.py refresh_positions --run-type CORR --position-date 2026-06-30 --dry-run
+    # Month-end CORR — position_date inferred as last_month_end automatically
+    python manage.py refresh_positions --run-type CORR
+    python manage.py refresh_positions --run-type CORR --portfolio UOB-SG-TRADING
+    python manage.py refresh_positions --run-type CORR --dry-run
+
+    # Override inferred date explicitly (both run types)
+    python manage.py refresh_positions --position-date 2026-06-27
+    python manage.py refresh_positions --run-type CORR --position-date 2026-05-31
 """
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from decimal import Decimal
 
 from django.core.management.base import BaseCommand
@@ -73,7 +79,9 @@ class Command(BaseCommand):
         parser.add_argument(
             '--position-date', type=str, default=None,
             dest='position_date',
-            help='Required for --run-type CORR: the month-end position_date to revalue (YYYY-MM-DD).'
+            help='Override the inferred position_date (YYYY-MM-DD). '
+                 'EOD default: reporting_date from alldatesinfo. '
+                 'CORR default: last calendar day of previous month.'
         )
 
     def handle(self, *args, **options):
@@ -84,18 +92,13 @@ class Command(BaseCommand):
         position_date    = options.get('position_date')
         today            = datetime.now().strftime('%Y-%m-%d')
 
-        if run_type == 'CORR' and not position_date:
-            self.stderr.write(self.style.ERROR(
-                'ERROR: --position-date YYYY-MM-DD is required for --run-type CORR'
-            ))
-            return
-
-        if run_type == 'EOD' and position_date:
-            self.stdout.write(self.style.WARNING(
-                f'WARNING: --position-date {position_date} is ignored for EOD run type '
-                f'(EOD always uses the latest position per security)'
-            ))
-            position_date = None
+        # Infer position_date from alldatesinfo when not explicitly supplied
+        if not position_date:
+            reporting_date, last_month_end = self._get_dates_from_alldatesinfo()
+            if run_type == 'EOD':
+                position_date = reporting_date
+            else:
+                position_date = last_month_end
 
         position_type = run_type  # 'EOD' or 'CORR'
 
@@ -112,9 +115,8 @@ class Command(BaseCommand):
 
         sources = [source_filter] if source_filter else ALL_SOURCES
         self.stdout.write(f"Run type   : {run_type}")
-        self.stdout.write(f"Run date   : {today}")
-        if position_date:
-            self.stdout.write(f"Pos date   : {position_date}  (CORR — positions on this date only)")
+        self.stdout.write(f"Run date   : {today}  (processing_date stamped on output)")
+        self.stdout.write(f"Pos date   : {position_date}  (positions on this date revalued)")
         self.stdout.write(f"Sources    : {', '.join(sources)}")
         if portfolio_filter:
             self.stdout.write(f"Portfolio  : {portfolio_filter}")
@@ -193,6 +195,69 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f"Fatal error: {str(e)}"))
             logger.error(f"Fatal error in refresh_positions: {str(e)}", exc_info=True)
             raise
+
+    # -------------------------------------------------------------------------
+    # Date inference
+    # -------------------------------------------------------------------------
+
+    def _get_dates_from_alldatesinfo(self):
+        """
+        Query alldatesinfo for the two dates used by EOD and CORR runs.
+
+        Returns (reporting_date, last_month_end) as 'YYYY-MM-DD' strings.
+
+        reporting_date  = prev_day (T-1) from alldatesinfo — used by EOD.
+        last_month_end  = last calendar day of the month before reporting_date
+                          — used by CORR.
+
+        Falls back to (yesterday, last calendar day of previous month) if the
+        table is unavailable.
+        """
+        try:
+            rows = impala_manager.execute_query(
+                f"""
+                SELECT prev_day, reporting_date
+                FROM {DATABASE}.gmp_cis_sta_dly_alldatesinfo
+                WHERE src_system  = 'gmp'
+                  AND sub_system  = 'cis'
+                  AND data_frq    = 'dly'
+                  AND record_type = 'D'
+                  AND processing_date = (
+                      SELECT MAX(processing_date)
+                      FROM {DATABASE}.gmp_cis_sta_dly_alldatesinfo
+                      WHERE src_system  = 'gmp'
+                        AND sub_system  = 'cis'
+                        AND data_frq    = 'dly'
+                        AND record_type = 'D'
+                  )
+                LIMIT 1
+                """,
+                database=DATABASE
+            )
+            if rows:
+                # prev_day and reporting_date are YYYYMMDD strings
+                raw = rows[0].get('prev_day') or rows[0].get('reporting_date')
+                if raw:
+                    raw_str = str(raw)[:8]
+                    ref_date = datetime.strptime(raw_str, '%Y%m%d').date()
+                    reporting_date_iso = ref_date.strftime('%Y-%m-%d')
+                    # Last month-end = last day of month before ref_date
+                    first_of_ref_month = ref_date.replace(day=1)
+                    last_month_end = (first_of_ref_month - timedelta(days=1)).strftime('%Y-%m-%d')
+                    return reporting_date_iso, last_month_end
+        except Exception as e:
+            logger.warning(f"Could not read alldatesinfo for date inference: {e}")
+
+        # Fallback: use calendar dates
+        today = date.today()
+        yesterday = (today - timedelta(days=1)).strftime('%Y-%m-%d')
+        first_of_month = today.replace(day=1)
+        last_month_end = (first_of_month - timedelta(days=1)).strftime('%Y-%m-%d')
+        logger.warning(
+            f"alldatesinfo unavailable — falling back to reporting_date={yesterday}, "
+            f"last_month_end={last_month_end}"
+        )
+        return yesterday, last_month_end
 
     # -------------------------------------------------------------------------
     # Data fetching
