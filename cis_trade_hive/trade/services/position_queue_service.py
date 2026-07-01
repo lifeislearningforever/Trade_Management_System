@@ -553,6 +553,8 @@ class PositionQueueService:
             if trades:
                 logger.info(f"Recalculating {len(trades)} trades (both bases) from {from_date} to {today}")
 
+                last_trade_date_by_basis = {}
+
                 for trade in trades:
                     trade_date = trade.get('trade_date') or trade['settle_date']
 
@@ -590,6 +592,9 @@ class PositionQueueService:
                                     f"Recalculated trade {trade['trade_id']} "
                                     f"basis={basis} date={pos_date}"
                                 )
+                                # Track the latest trade date processed per basis
+                                if pos_date > last_trade_date_by_basis.get(basis, ''):
+                                    last_trade_date_by_basis[basis] = pos_date
                             else:
                                 counters['errors'] += 1
                                 logger.error(
@@ -602,6 +607,17 @@ class PositionQueueService:
                                 f"Error recalculating trade {trade['trade_id']} basis={basis}: {str(e)}"
                             )
                             counters['errors'] += 1
+
+                # After replaying all trades, carry the running position forward to every
+                # business date between the last trade date and today so that each day
+                # has an INT row (not just days with actual trades).
+                self._carry_forward_to_today(
+                    portfolio_id=portfolio_id,
+                    security_id=security_id,
+                    last_trade_date_by_basis=last_trade_date_by_basis,
+                    today_str=today_str,
+                    counters=counters,
+                )
             else:
                 logger.warning(f"No trades found for recalculation from {from_date}")
 
@@ -614,6 +630,104 @@ class PositionQueueService:
         except Exception as e:
             logger.error(f"Error in chain recalculation: {str(e)}")
             return counters
+
+    def _get_business_dates_between(self, from_date: str, to_date: str) -> List[str]:
+        """
+        Return all business dates (YYYY-MM-DD) from from_date (exclusive) to to_date (inclusive)
+        by querying gmp_cis_sta_dly_alldatesinfo which only contains business days.
+        Falls back to calendar days if the table is unavailable.
+        """
+        try:
+            query = f"""
+            SELECT DISTINCT CAST(contextual_today AS STRING) AS biz_date
+            FROM gmp_cis.gmp_cis_sta_dly_alldatesinfo
+            WHERE src_system = 'gmp'
+              AND sub_system = 'cis'
+              AND data_frq   = 'dly'
+              AND record_type = 'D'
+              AND CAST(contextual_today AS STRING) > '{from_date}'
+              AND CAST(contextual_today AS STRING) <= '{to_date}'
+            ORDER BY biz_date ASC
+            """
+            rows = impala_manager.execute_query(query, database='gmp_cis')
+            if rows:
+                return [r['biz_date'] for r in rows if r.get('biz_date')]
+        except Exception as e:
+            logger.warning(f"Could not fetch business dates from alldatesinfo: {e}. Falling back to calendar days.")
+
+        # Fallback: every calendar day (excluding weekends)
+        from datetime import date as _date, timedelta
+        result = []
+        cur = _date.fromisoformat(from_date) + timedelta(days=1)
+        end = _date.fromisoformat(to_date)
+        while cur <= end:
+            if cur.weekday() < 5:  # Mon–Fri
+                result.append(cur.isoformat())
+            cur += timedelta(days=1)
+        return result
+
+    def _carry_forward_to_today(
+        self,
+        portfolio_id: str,
+        security_id: str,
+        last_trade_date_by_basis: Dict[str, str],
+        today_str: str,
+        counters: Dict[str, int],
+    ) -> None:
+        """
+        For each position basis, carry the latest recalculated position forward to every
+        business date between the last trade date and today, creating an INT row per date.
+        This ensures every business date has an INT position record even on days with no trades.
+        """
+        for basis, last_trade_date in last_trade_date_by_basis.items():
+            if last_trade_date >= today_str:
+                continue  # already at today, nothing to carry forward
+
+            fill_dates = self._get_business_dates_between(last_trade_date, today_str)
+            if not fill_dates:
+                continue
+
+            # Get the running position after the last trade to carry forward
+            running = self.position_service._get_position_as_of_date(
+                portfolio_id=portfolio_id,
+                security_id=security_id,
+                as_of_date=last_trade_date,
+                include_same_date=True,
+                position_basis=basis,
+            )
+            if not running:
+                logger.warning(
+                    f"No position found at {last_trade_date} for {portfolio_id}/{security_id} "
+                    f"basis={basis} — skipping carry-forward"
+                )
+                continue
+
+            logger.info(
+                f"Carrying forward {portfolio_id}/{security_id} basis={basis} "
+                f"from {last_trade_date} to {today_str} over {len(fill_dates)} date(s)"
+            )
+
+            for fill_date in fill_dates:
+                try:
+                    carry = dict(running)
+                    carry['position_date'] = fill_date
+                    carry['position_type'] = 'INT'
+                    carry['processing_timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    # Generate a new position_id/version_id so we don't collide
+                    import time as _time
+                    carry['version_id'] = int(_time.time() * 1000)
+                    carry['position_id'] = carry['version_id'] + hash(f"{portfolio_id}{security_id}{basis}{fill_date}") % 10**6
+
+                    success = self.position_service._save_position(carry, updated_by='SYSTEM_CARRYFORWARD')
+                    if success:
+                        counters['recalculated'] += 1
+                        logger.info(f"Carried forward position to {fill_date} basis={basis}")
+                    else:
+                        counters['errors'] += 1
+                        logger.error(f"Failed to carry forward position to {fill_date} basis={basis}")
+                except Exception as e:
+                    counters['errors'] += 1
+                    logger.error(f"Error carrying forward to {fill_date} basis={basis}: {e}")
 
     def _handle_failure(self, item: Dict[str, Any], error_message: str, is_db_queue: bool = True):
         """Handle failed processing with retry logic."""

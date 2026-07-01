@@ -3791,6 +3791,137 @@ class UploadService:
             _t = _step_time("Step 7A", _t)
 
             # ------------------------------------------------------------------
+            # Step 7A2: For backdated uploads (reporting_date < today), create an
+            # INT position for today IF no USER_UPLOAD INT already exists for today.
+            # This ensures the current-date position reflects the latest state.
+            # ------------------------------------------------------------------
+            _backdated_count_rows = impala_manager.execute_query(
+                f"""
+                SELECT COUNT(*) AS cnt
+                FROM {db}.position_upload_staging
+                WHERE overall_status LIKE 'VALID%'
+                  AND CAST(reporting_date AS STRING) < '{_contextual_today_iso}'
+                """,
+                database=db
+            )
+            _has_backdated = int((_backdated_count_rows or [{}])[0].get('cnt', 0)) > 0
+
+            if _has_backdated:
+                logger.info(f"[position_etl] Step 7A2: backdated rows detected — checking for today's USER_UPLOAD INT positions")
+
+                # For each portfolio+security+basis in the backdated upload,
+                # check if today already has an INT row from USER_UPLOAD.
+                # If not, carry the backdated position forward to today.
+                _today_check_rows = impala_manager.execute_query(
+                    f"""
+                    SELECT
+                        s.portfolio,
+                        COALESCE(s.matched_security_name, s.security_full_name, s.security_short_name) AS security_label,
+                        s.position_basis
+                    FROM {db}.position_upload_staging s
+                    WHERE s.overall_status LIKE 'VALID%'
+                      AND CAST(s.reporting_date AS STRING) < '{_contextual_today_iso}'
+                    GROUP BY 1, 2, 3
+                    """,
+                    database=db
+                )
+
+                _carried = 0
+                for row in (_today_check_rows or []):
+                    _ptf  = row.get('portfolio', '')
+                    _sec  = row.get('security_label', '')
+                    _basis = row.get('position_basis', 'TRADE_DATE')
+                    if not _ptf or not _sec:
+                        continue
+
+                    # Check if today already has an INT USER_UPLOAD row
+                    _exists = impala_manager.execute_query(
+                        f"""
+                        SELECT COUNT(*) AS cnt
+                        FROM {db}.cis_position
+                        WHERE portfolio_short_name = '{_ptf.replace("'", "''")}'
+                          AND security_label        = '{_sec.replace("'", "''")}'
+                          AND position_basis        = '{_basis}'
+                          AND position_type         = 'INT'
+                          AND src_system            = 'USER_UPLOAD'
+                          AND CAST(position_date AS STRING) = '{_contextual_today_iso}'
+                          AND (is_latest = true OR is_latest IS NULL)
+                        """,
+                        database=db
+                    )
+                    _today_exists = int((_exists or [{}])[0].get('cnt', 0)) > 0
+
+                    if _today_exists:
+                        logger.info(f"[position_etl] Step 7A2: today INT already exists for {_ptf}/{_sec}/{_basis} — skipping carry-forward")
+                        continue
+
+                    # Carry forward: copy the just-uploaded backdated row to today's date
+                    _carry_ok = impala_manager.execute_write(
+                        f"""
+                        UPSERT INTO {db}.cis_position
+                        SELECT
+                            ABS(CAST(fnv_hash(CONCAT_WS('|',
+                                COALESCE(portfolio_short_name, ''),
+                                COALESCE(security_label, ''),
+                                COALESCE(position_basis, ''),
+                                '{_contextual_today_iso}',
+                                COALESCE(src_system, '')
+                            )) AS BIGINT))                          AS position_id,
+                            CAST(UNIX_TIMESTAMP() * 1000 AS BIGINT) AS version_id,
+                            portfolio_short_name,
+                            security_label,
+                            position_basis,
+                            '{_contextual_today_iso}'               AS position_date,
+                            src_system,
+                            '{processing_date}'                     AS processing_date,
+                            quantity,
+                            average_cost_fc,
+                            cost_fc,
+                            market_value_fc,
+                            net_book_value_fc,
+                            unrealized_pnl_fc,
+                            cost_lc,
+                            market_value_lc,
+                            net_book_value_lc,
+                            unrealized_pnl_lc,
+                            provision_lc,
+                            provision_fc,
+                            dividend_fc,
+                            dividend_lc,
+                            realized_pnl_fc,
+                            realized_pnl_lc,
+                            isin,
+                            average_cost_lc,
+                            source_table,
+                            from_unixtime(unix_timestamp(), 'yyyy-MM-dd HH:mm:ss') AS processing_timestamp,
+                            uncall_fc,
+                            uncall_lc,
+                            pipeline_fc,
+                            pipeline_lc,
+                            'INT'                                   AS position_type
+                        FROM {db}.cis_position
+                        WHERE portfolio_short_name = '{_ptf.replace("'", "''")}'
+                          AND security_label        = '{_sec.replace("'", "''")}'
+                          AND position_basis        = '{_basis}'
+                          AND CAST(position_date AS STRING) < '{_contextual_today_iso}'
+                          AND src_system = 'USER_UPLOAD'
+                          AND (is_latest = true OR is_latest IS NULL)
+                        ORDER BY position_date DESC
+                        LIMIT 1
+                        """,
+                        database=db
+                    )
+                    if _carry_ok:
+                        _carried += 1
+                        logger.info(f"[position_etl] Step 7A2: carried {_ptf}/{_sec}/{_basis} forward to {_contextual_today_iso}")
+                    else:
+                        logger.warning(f"[position_etl] Step 7A2: carry-forward failed for {_ptf}/{_sec}/{_basis}")
+
+                logger.info(f"[position_etl] Step 7A2 complete — {_carried} position(s) carried forward to today")
+                result['today_positions_carried_forward'] = _carried
+            _t = _step_time("Step 7A2", _t)
+
+            # ------------------------------------------------------------------
             # Step 7B: INSERT OVERWRITE into the existing external partitioned
             #          table gmp_cis.position_upload_report.
             #          Columns match the DDL in 25_position_upload_standardized.sql.
