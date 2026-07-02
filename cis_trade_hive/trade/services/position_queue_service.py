@@ -354,6 +354,33 @@ class PositionQueueService:
                     f"Backdated trade detected for queue_id={queue_id}, trade_id={trade_id}. "
                     f"Using chain recalculation from {chain_recalc_info['from_date']}"
                 )
+
+                # Deduplication: if another queue item with the same CHAIN_RECALC signature
+                # has already completed, skip re-running the full recalc — it would pre-invalidate
+                # positions the first run just wrote, leaving orphaned false rows.
+                chain_sig = f"CHAIN_RECALC:{chain_recalc_info['portfolio_id']}:{chain_recalc_info['security_id']}:{chain_recalc_info['from_date']}"
+                try:
+                    already_done = impala_manager.execute_query(
+                        f"""
+                        SELECT 1 FROM {self.DATABASE}.{self.QUEUE_TABLE}
+                        WHERE error_message LIKE '{chain_sig}%'
+                          AND status = '{self.STATUS_COMPLETED}'
+                          AND queue_id != {queue_id}
+                        LIMIT 1
+                        """,
+                        database=self.DATABASE
+                    )
+                    if already_done:
+                        logger.info(
+                            f"Chain recalc for {chain_sig} already completed by another "
+                            f"queue item — marking queue_id={queue_id} as COMPLETED (dedup)."
+                        )
+                        if is_db_queue:
+                            self._update_status(queue_id, self.STATUS_COMPLETED)
+                        return
+                except Exception as e:
+                    logger.warning(f"Could not check for duplicate chain recalc: {e}")
+
                 recalc_result = self._process_chain_recalculation(chain_recalc_info)
 
                 # Check for errors first
