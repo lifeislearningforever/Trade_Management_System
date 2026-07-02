@@ -127,13 +127,15 @@ def can_act(context, record, module):
         has_edit = _has_perm(request, 'trade-edit')
         has_approve = _has_perm(request, 'trade-approval')
         return {
-            'can_edit':       has_edit    and is_cis and status in ('INITIAL', 'MODIFIED', 'CANCELLED'),
-            'can_submit':     has_edit    and is_cis and status in ('INITIAL', 'MODIFIED'),
-            'can_cancel':     has_edit    and is_cis and status in ('INITIAL', 'MODIFIED', 'PENDING_VALIDATION'),
-            'can_reactivate': has_edit    and is_cis and status == 'CANCELLED',
-            'can_validate':   has_approve and is_cis and status == 'PENDING_VALIDATION',
-            'can_reject':     has_approve and is_cis and status == 'PENDING_VALIDATION',
-            'can_settle':     has_approve and is_cis and status == 'VALIDATED',
+            'can_edit':                   has_edit    and is_cis and status in ('INITIAL', 'MODIFIED', 'CANCELLED'),
+            'can_submit':                 has_edit    and is_cis and status in ('INITIAL', 'MODIFIED'),
+            'can_cancel':                 has_edit    and is_cis and status in ('INITIAL', 'MODIFIED', 'PENDING_VALIDATION', 'VALIDATED', 'SETTLED'),
+            'can_reactivate':             has_edit    and is_cis and status == 'CANCELLED',
+            'can_validate':               has_approve and is_cis and status == 'PENDING_VALIDATION',
+            'can_reject':                 has_approve and is_cis and status == 'PENDING_VALIDATION',
+            'can_settle':                 has_approve and is_cis and status == 'VALIDATED',
+            'can_approve_cancellation':   has_approve and is_cis and status == 'PENDING_CANCELLATION',
+            'can_reject_cancellation':    has_approve and is_cis and status == 'PENDING_CANCELLATION',
         }
 
     if module == 'portfolio':
