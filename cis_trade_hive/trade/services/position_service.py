@@ -179,13 +179,18 @@ class PositionService:
             # to avoid picking up the old position for the same date
             # For normal trades, we include same date positions
             if is_chain_recalc:
-                # Chain recalc: get position strictly BEFORE this date, scoped to same basis
+                # Chain recalc: include same-date positions but exclude the current trade's own
+                # row so that when two trades share the same position_date (e.g. both settle on
+                # Mar-02), the second trade correctly accumulates on top of the first rather than
+                # starting from zero.
                 current = self._get_position_as_of_date(
                     portfolio_id, security_id, position_date,
-                    include_same_date=False, position_basis=position_basis
+                    include_same_date=True, position_basis=position_basis,
+                    exclude_trade_id=trade_id
                 )
                 logger.info(
-                    f"Chain recalc mode: Getting position BEFORE {position_date} for "
+                    f"Chain recalc mode: Getting position <= {position_date} "
+                    f"(excl trade_id={trade_id}) for "
                     f"{portfolio_id}/{security_id} basis={position_basis}. Found: {current is not None}"
                 )
             else:
@@ -693,7 +698,8 @@ class PositionService:
         security_id: str,
         as_of_date: str,
         include_same_date: bool = True,
-        position_basis: str = 'TRADED'
+        position_basis: str = 'TRADED',
+        exclude_trade_id: int = None
     ) -> Optional[Dict[str, Any]]:
         """
         Get position as of a specific date, scoped to a specific position_basis.
@@ -709,11 +715,17 @@ class PositionService:
             include_same_date: If True, includes positions with position_date <= as_of_date
                               If False, only positions with position_date < as_of_date (for backdated)
             position_basis: 'TRADED' or 'SETTLED' — scope lookup to this basis only
+            exclude_trade_id: Exclude the row written by this trade_id (used during chain recalc
+                              so a trade does not use its own just-written row as its base)
 
         Returns the latest version (is_latest=true) with position_date <= or < as_of_date.
         """
         try:
             date_operator = '<=' if include_same_date else '<'
+
+            exclude_clause = ''
+            if exclude_trade_id is not None:
+                exclude_clause = f'AND (trade_id != {exclude_trade_id} OR trade_id IS NULL)'
 
             query = f"""
             SELECT *
@@ -723,6 +735,7 @@ class PositionService:
               AND position_date {date_operator} '{as_of_date}'
               AND position_basis = '{position_basis}'
               AND (is_latest = true OR is_latest IS NULL)
+              {exclude_clause}
             ORDER BY position_date DESC, version_id DESC
             LIMIT 1
             """
