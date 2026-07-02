@@ -574,7 +574,35 @@ class TradeEventQueueService:
                 if 'queued' in msg_new.lower() or 'future' in msg_new.lower():
                     return True
 
-            return success_new
+            # Step 3: If any date is backdated, run chain recalc from the earliest affected date.
+            # A simple reversal + re-apply only patches the one position row; all later positions
+            # in the chain still carry stale cumulative values.
+            from datetime import date as _date
+            today_str = _date.today().isoformat()
+            any_backdated = (
+                (old_trade_date and str(old_trade_date) < today_str) or
+                (old_settle_date and str(old_settle_date) < today_str) or
+                (new_trade_date and str(new_trade_date) < today_str) or
+                (new_settle_date and str(new_settle_date) < today_str)
+            )
+            if any_backdated:
+                dates = [
+                    d for d in [old_trade_date, new_trade_date]
+                    if d and str(d) < today_str
+                ]
+                from_date = min(str(d) for d in dates) if dates else str(old_trade_date or new_trade_date)
+                logger.info(
+                    f"POSITION_MODIFY: backdated dates detected — running chain recalc "
+                    f"from {from_date} for {portfolio_id}/{security_id}"
+                )
+                settlement_service._recalculate_position_chain(
+                    portfolio_id=portfolio_id,
+                    security_id=security_id,
+                    from_date=from_date,
+                    updated_by=created_by,
+                )
+
+            return True
 
         except Exception as e:
             logger.error(f"Error processing POSITION_MODIFY for trade {trade_id}: {e}")
@@ -636,7 +664,29 @@ class TradeEventQueueService:
                 if 'queued' in msg.lower() or 'future' in msg.lower():
                     return True
 
-            return success
+            # If the cancelled trade was backdated, all later positions in the chain
+            # still carry stale cumulative values — replay from the earliest affected date.
+            from datetime import date as _date
+            today_str = _date.today().isoformat()
+            any_backdated = (
+                (trade_date and str(trade_date) < today_str) or
+                (settle_date and str(settle_date) < today_str)
+            )
+            if any_backdated:
+                dates = [d for d in [trade_date, settle_date] if d and str(d) < today_str]
+                from_date = min(str(d) for d in dates) if dates else str(trade_date or settle_date)
+                logger.info(
+                    f"POSITION_CANCEL: backdated trade — running chain recalc "
+                    f"from {from_date} for {portfolio_id}/{security_id}"
+                )
+                settlement_service._recalculate_position_chain(
+                    portfolio_id=portfolio_id,
+                    security_id=security_id,
+                    from_date=from_date,
+                    updated_by=created_by,
+                )
+
+            return True
 
         except Exception as e:
             logger.error(f"Error processing POSITION_CANCEL for trade {trade_id}: {e}")
@@ -1056,15 +1106,16 @@ class TradeEventQueueService:
 
     def check_position_exists(self, trade_id: int) -> bool:
         """
-        Check if position has been calculated for a trade.
-
-        Used to determine if we need to reverse on modify/cancel.
+        Check if an active (is_latest=true) position exists for a trade.
+        Only counts live rows — is_latest=false rows are historical versions
+        and must not trigger a reversal on modify/cancel.
         """
         try:
             query = f"""
             SELECT COUNT(*) as cnt
             FROM {self.DATABASE}.cis_trade_position
             WHERE trade_id = {trade_id}
+              AND is_latest = true
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
             count = results[0]['cnt'] if results else 0

@@ -671,6 +671,12 @@ class SettlementService:
             f"settle_date={settle_date}, prev_month_end={prev_month_end}"
         )
 
+        position_basis = kwargs.get('position_basis', 'TRADED')
+        trade_date = kwargs.get('trade_date') or settle_date
+        position_date = kwargs.get('position_date') or (
+            trade_date if position_basis == 'TRADED' else settle_date
+        )
+
         # Step 1: Calculate position for the backdated date
         success, message, position = self.position_service.calculate_position(
             portfolio_id=portfolio_id,
@@ -679,7 +685,7 @@ class SettlementService:
             quantity=quantity,
             price=price,
             charges=charges,
-            position_date=settle_date,
+            position_date=position_date,
             trade_id=trade_id,
             updated_by=updated_by,
             security_currency=kwargs.get('security_currency'),
@@ -688,17 +694,20 @@ class SettlementService:
             security_name=kwargs.get('security_name'),
             custodian=kwargs.get('custodian'),
             sub_custodian=kwargs.get('sub_custodian'),
-            position_basis=kwargs.get('position_basis', 'TRADED')
+            position_basis=position_basis
         )
 
         if not success:
             return False, f"Backdated settlement failed: {message}", None
 
-        # Step 2: Recalculate position chain from settle_date to today
+        # Step 2: Recalculate full position chain from earliest affected date.
+        # Use trade_date (not settle_date) as from_date so TRADED basis positions
+        # that land on trade_date are included in the chain.
+        from_date = trade_date
         recalc_result = self._recalculate_position_chain(
             portfolio_id=portfolio_id,
             security_id=security_id,
-            from_date=settle_date,
+            from_date=from_date,
             updated_by=updated_by
         )
 
@@ -718,62 +727,80 @@ class SettlementService:
         updated_by: str
     ) -> Dict[str, int]:
         """
-        Recalculate all positions from a given date to today.
-
-        This handles the case where a backdated trade affects subsequent positions.
+        Recalculate all positions (both TRADED and SETTLED bases) from from_date to today.
+        Uses in-memory accumulation to avoid Kudu stale-read races between iterations.
         """
         counters = {'recalculated': 0, 'errors': 0}
 
         try:
-            from_dt = self._parse_date(from_date)
             today = datetime.now().date()
+            today_str = today.strftime("%Y-%m-%d")
 
-            # Get all trades for this portfolio+security from the date onwards
+            # Include the from_date itself (>=) so the reversed/modified trade is
+            # replayed, and fetch trade_date so TRADED basis uses the right position_date.
             query = f"""
             SELECT trade_id, trade_type, quantity, price,
                    COALESCE(commission, 0) + COALESCE(sec_fee, 0) + COALESCE(other_charges, 0) as charges,
-                   settle_date
+                   trade_date, settle_date
             FROM {self.DATABASE}.{self.TRADE_TABLE}
             WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
               AND security_label = '{self._escape(security_id)}'
-              AND settle_date > '{from_date}'
-              AND settle_date <= '{today.strftime("%Y-%m-%d")}'
+              AND (trade_date >= '{from_date}' OR settle_date >= '{from_date}')
+              AND settle_date <= '{today_str}'
               AND (trade_status IN ('INITIAL', 'VALIDATED', 'SETTLED') OR status IN ('INITIAL', 'VALIDATED', 'SETTLED'))
               AND (is_deleted = false OR is_deleted IS NULL)
-            ORDER BY settle_date ASC, created_at ASC
+            ORDER BY trade_date ASC, settle_date ASC, trade_id ASC
             """
 
             trades = impala_manager.execute_query(query, database=self.DATABASE)
 
-            if trades:
-                logger.info(
-                    f"Recalculating {len(trades)} trades from {from_date} to {today}"
-                )
+            if not trades:
+                logger.info(f"No trades to recalculate from {from_date}")
+                return counters
 
-                for trade in trades:
+            logger.info(f"Recalculating {len(trades)} trades (both bases) from {from_date} to {today_str}")
+
+            # In-memory accumulator per basis — avoids Kudu stale-read races
+            last_position_by_basis: Dict[str, Any] = {'TRADED': {}, 'SETTLED': {}}
+
+            for trade in trades:
+                settle_date = trade.get('settle_date') or ''
+                trade_date = trade.get('trade_date') or settle_date
+
+                for basis, pos_date in [('TRADED', trade_date), ('SETTLED', settle_date)]:
+                    if not pos_date:
+                        logger.warning(
+                            f"Skipping {basis} for trade {trade.get('trade_id')}: "
+                            f"pos_date empty (trade_date={trade_date!r}, settle_date={settle_date!r})"
+                        )
+                        continue
                     try:
-                        # Recalculate each position using chain_recalc mode
-                        # This ensures we get position BEFORE this date, not the old same-date position
-                        success, _, _ = self.position_service.calculate_position(
+                        base = last_position_by_basis.get(basis)  # {} = fresh start, dict = prior
+                        success, _, result = self.position_service.calculate_position(
                             portfolio_id=portfolio_id,
                             security_id=security_id,
                             trade_type=trade['trade_type'],
                             quantity=Decimal(str(trade['quantity'])),
                             price=Decimal(str(trade['price'])),
                             charges=Decimal(str(trade.get('charges', 0) or 0)),
-                            position_date=trade['settle_date'],
+                            position_date=pos_date,
                             trade_id=trade['trade_id'],
                             updated_by=updated_by,
-                            is_chain_recalc=True  # Use position BEFORE this date
+                            is_chain_recalc=True,
+                            position_basis=basis,
+                            base_position_override=base
                         )
-
                         if success:
                             counters['recalculated'] += 1
+                            if result:
+                                last_position_by_basis[basis] = result
                         else:
                             counters['errors'] += 1
-
+                            logger.error(
+                                f"Chain recalc failed for trade {trade['trade_id']} basis={basis}"
+                            )
                     except Exception as e:
-                        logger.error(f"Error recalculating trade {trade['trade_id']}: {str(e)}")
+                        logger.error(f"Error recalculating trade {trade['trade_id']} basis={basis}: {e}")
                         counters['errors'] += 1
 
             return counters
