@@ -558,6 +558,11 @@ class PositionQueueService:
                 # chain recalc loop picks them up as base positions via DB read it will
                 # double-count. Setting is_latest=false first means the loop's in-memory
                 # base_position_override is the only authoritative source within this run.
+                #
+                # Wait 2s for Kudu to propagate writes from direct queue items that ran
+                # just before this chain recalc — without this the SELECT below may miss
+                # rows on a different pooled connection (stale read window).
+                time.sleep(2)
                 invalidate_query = f"""
                 SELECT version_id, position_id, position_date, position_basis,
                        portfolio_short_name, security_label,
