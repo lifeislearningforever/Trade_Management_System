@@ -260,6 +260,7 @@
                                        readonly placeholder="-">
                                 <input type="hidden" name="currency_code" id="currency_code"
                                        value="{{ trade.currency_code|default:'' }}" required>
+                                <small class="text-muted" id="currency_info">Auto-set from security</small>
                             </div>
                         </div>
 
@@ -1603,9 +1604,8 @@ document.getElementById('security_label').addEventListener('change', function() 
         // Reset currency to default (both hidden and display fields)
         currencyHidden.value = '';
         currencyDisplay.value = '';
-        currencyInfo.textContent = 'Auto-set from security';
-        currencyInfo.className = 'text-muted small';
-        securityInfo.textContent = '';
+        if (currencyInfo) { currencyInfo.textContent = 'Auto-set from security'; currencyInfo.className = 'text-muted small'; }
+        if (securityInfo) { securityInfo.textContent = ''; }
         return;
     }
 
@@ -1656,11 +1656,9 @@ document.getElementById('security_label').addEventListener('change', function() 
             .then(data => {
                 if (data.found && data.price > 0) {
                     priceField.value = parseFloat(data.price).toFixed(4);
-                    securityInfo.textContent = `Price: ${data.price} (${data.price_date || 'latest'})`;
-                    securityInfo.className = 'text-success small';
+                    if (securityInfo) { securityInfo.textContent = `Price: ${data.price} (${data.price_date || 'latest'})`; securityInfo.className = 'text-success small'; }
                 } else {
-                    securityInfo.textContent = 'No equity price found for this security';
-                    securityInfo.className = 'text-warning small';
+                    if (securityInfo) { securityInfo.textContent = 'No equity price found for this security'; securityInfo.className = 'text-warning small'; }
                 }
             })
             .catch(error => {
