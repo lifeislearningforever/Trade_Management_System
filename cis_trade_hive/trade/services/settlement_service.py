@@ -760,8 +760,35 @@ class SettlementService:
 
             logger.info(f"Recalculating {len(trades)} trades (both bases) from {from_date} to {today_str}")
 
-            # In-memory accumulator per basis — avoids Kudu stale-read races
+            # Seed the in-memory accumulator with the last known position BEFORE from_date
+            # for each basis. Without this, when chain recalc starts mid-chain (e.g. from
+            # Mar-02 after an amendment), it starts from zero and misses earlier positions
+            # (e.g. Feb-26 + Feb-27) that form the base.
             last_position_by_basis: Dict[str, Any] = {'TRADED': {}, 'SETTLED': {}}
+            for basis in ('TRADED', 'SETTLED'):
+                seed_rows = impala_manager.execute_query(
+                    f"""
+                    SELECT position_id, quantity, average_cost_fc, average_cost_lc,
+                           total_cost_fc, total_cost_lc, realized_pnl_fc, realized_pnl_lc,
+                           dividend_fc, dividend_lc, pipeline_fc, pipeline_lc,
+                           provision_fc, provision_lc
+                    FROM {self.DATABASE}.cis_trade_position
+                    WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
+                      AND security_label = '{self._escape(security_id)}'
+                      AND position_basis = '{basis}'
+                      AND position_date < '{from_date}'
+                      AND is_latest = true
+                    ORDER BY position_date DESC
+                    LIMIT 1
+                    """,
+                    database=self.DATABASE
+                )
+                if seed_rows:
+                    last_position_by_basis[basis] = seed_rows[0]
+                    logger.info(
+                        f"Chain recalc seed for {basis}: qty={seed_rows[0].get('quantity')} "
+                        f"avg={seed_rows[0].get('average_cost_fc')} before {from_date}"
+                    )
 
             for trade in trades:
                 settle_date = trade.get('settle_date') or ''
