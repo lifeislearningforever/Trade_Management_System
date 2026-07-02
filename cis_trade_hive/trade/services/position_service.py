@@ -1118,7 +1118,7 @@ class PositionService:
                 'source_table', 'processing_timestamp',
                 'uncall_fc', 'uncall_lc',
                 'pipeline_fc', 'pipeline_lc',
-                'position_type'
+                'position_type', 'is_latest'
             ]
 
             # cis_position uses DECIMAL(30,8) columns.
@@ -1163,7 +1163,8 @@ class PositionService:
                 cast_decimal(position_data.get('uncall_lc', 0)),
                 cast_decimal(position_data.get('pipeline_fc', 0)),
                 cast_decimal(position_data.get('pipeline_lc', 0)),
-                f"'{position_data.get('position_type', 'INT')}'" if position_data.get('position_type') else "'INT'"
+                f"'{position_data.get('position_type', 'INT')}'" if position_data.get('position_type') else "'INT'",
+                'true'  # is_latest — _sync_to_cis_position is only called for the new is_latest=true version
             ]
 
             query = f"""
