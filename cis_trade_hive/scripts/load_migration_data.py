@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Migration Data Loader — cis_party, cis_party_cif, cis_security, cis_trade
+Migration Data Loader — cis_party, cis_party_cif, cis_security, cis_trade, cis_portfolio
 Loads records from CSV files with src_system = 'CIS'.
 
 Usage:
@@ -8,6 +8,7 @@ Usage:
     python scripts/load_migration_data.py --table party_cif  --file /path/to/party_cif.csv
     python scripts/load_migration_data.py --table security   --file /path/to/security.csv
     python scripts/load_migration_data.py --table trade      --file /path/to/trade.csv
+    python scripts/load_migration_data.py --table portfolio  --file /path/to/portfolio.csv
 
 Options:
     --dry-run                  Parse + validate only, no writes to Kudu
@@ -1120,6 +1121,164 @@ def load_position(
 
 
 # ---------------------------------------------------------------------------
+# cis_portfolio
+# ---------------------------------------------------------------------------
+
+PORTFOLIO_ALIASES: Dict[str, str] = {
+    # Primary key
+    'name':                 'name',
+    'portfolio_name':       'name',
+    'portfolio_short_name': 'name',
+    'short_name':           'name',
+    'code':                 'name',
+
+    'description':          'description',
+    'desc':                 'description',
+    'portfolio_full_name':  'description',
+    'full_name':            'description',
+
+    # Currency / settlement
+    'currency':             'currency',
+    'currency_code':        'currency',
+    'base_currency':        'currency',
+    'settlement_ccy':       'settlement_ccy',
+    'settlement_currency':  'settlement_ccy',
+
+    # People
+    'manager':              'manager',
+    'portfolio_manager':    'manager',
+    'desk_head':            'desk_head',
+    'portfolio_owner':      'portfolio_owner',
+    'portfolio_client':     'portfolio_client',
+    'client':               'portfolio_client',
+
+    # Grouping / classification
+    'account_group':        'account_group',
+    'portfolio_group':      'portfolio_group',
+    'report_group':         'report_group',
+    'entity_group':         'entity_group',
+    'entity':               'entity',
+    'business_line':        'business_line',
+    'investment_type':      'investment_type',
+    'accounting_section':   'accounting_section',
+
+    # Codes
+    'cost_centre_code':     'cost_centre_code',
+    'cost_centre':          'cost_centre_code',
+    'corp_code':            'corp_code',
+    'branch_code':          'branch_code',
+    'country':              'country',
+
+    # Settings
+    'revaluation_status':   'revaluation_status',
+    'revaluation':          'revaluation_status',
+    'cash_balance_list':    'cash_balance_list',
+    'closure_date':         'closure_date',
+
+    # Workflow & audit
+    'status':               'status',
+    'is_active':            'is_active',
+    'is_deleted':           'is_deleted',
+    'created_by':           'created_by',
+    'updated_by':           'updated_by',
+    'created_at':           'created_at',
+    'updated_at':           'updated_at',
+    'src_system':           'src_system',
+    'submitted_by':         'submitted_by',
+    'submitted_at':         'submitted_at',
+    'validated_by':         'validated_by',
+    'validated_at':         'validated_at',
+    'settled_by':           'settled_by',
+    'settled_at':           'settled_at',
+    'cancelled_by':         'cancelled_by',
+    'cancelled_at':         'cancelled_at',
+    'cancel_reason':        'cancel_reason',
+}
+
+PORTFOLIO_BOOL_COLS = {'is_active', 'is_deleted'}
+
+# All columns that exist in the live cis_portfolio Kudu table.
+# Any mapped key NOT in this set is silently dropped before the UPSERT.
+PORTFOLIO_VALID_COLS = {
+    'name', 'description', 'currency', 'manager', 'portfolio_client',
+    'settlement_ccy', 'cash_balance_list', 'status', 'cost_centre_code', 'corp_code',
+    'account_group', 'portfolio_group', 'report_group', 'entity_group',
+    'revaluation_status', 'is_active', 'is_deleted', 'accounting_section', 'src_system',
+    'created_by', 'created_at', 'updated_by', 'updated_at',
+    'submitted_by', 'submitted_at', 'validated_by', 'validated_at',
+    'settled_by', 'settled_at', 'cancelled_by', 'cancelled_at', 'cancel_reason',
+    'entity', 'business_line', 'investment_type', 'branch_code',
+    'desk_head', 'portfolio_owner', 'closure_date', 'country',
+}
+
+
+def load_portfolio(rows: List[Dict], status: str, dry_run: bool, processing_date: str = '') -> Tuple[int, int, List[str]]:
+    ok = fail = 0
+    errors: List[str] = []
+    ts = _now()
+
+    for i, raw in enumerate(rows, 1):
+        mapped: Dict[str, Any] = {}
+        for raw_col, raw_val in raw.items():
+            db_col = PORTFOLIO_ALIASES.get(raw_col)
+            if db_col:
+                mapped[db_col] = raw_val
+
+        pk = mapped.get('name', '').strip()
+        if not pk:
+            msg = f"Row {i}: missing portfolio name — skipped"
+            logger.warning(msg)
+            errors.append(msg)
+            fail += 1
+            continue
+
+        # Fixed / derived fields
+        mapped['src_system'] = SRC_SYSTEM
+        mapped.setdefault('status', status)
+        mapped.setdefault('is_active', True)
+        mapped.setdefault('is_deleted', False)
+        mapped.setdefault('created_by', SRC_SYSTEM)
+        mapped.setdefault('updated_by', SRC_SYSTEM)
+        mapped.setdefault('created_at', ts)
+        mapped['updated_at'] = ts
+
+        # Normalise closure_date if present
+        if mapped.get('closure_date'):
+            mapped['closure_date'] = _normalise_date(mapped['closure_date'])
+
+        # Drop columns not in live schema
+        mapped = {k: v for k, v in mapped.items() if k in PORTFOLIO_VALID_COLS}
+
+        col_names = []
+        col_vals = []
+        for col, val in mapped.items():
+            col_names.append(col)
+            if col in PORTFOLIO_BOOL_COLS:
+                col_vals.append(_bool(val))
+            else:
+                col_vals.append(_escape(val))
+
+        if dry_run:
+            logger.info("[DRY-RUN] portfolio row %d: name=%s status=%s currency=%s",
+                        i, pk, mapped.get('status'), mapped.get('currency'))
+            ok += 1
+            continue
+
+        sql = f"UPSERT INTO {DATABASE}.cis_portfolio ({', '.join(col_names)}) VALUES ({', '.join(col_vals)})"
+        try:
+            impala_manager.execute_write(sql, database=DATABASE)
+            logger.info("Loaded portfolio row %d: name=%s", i, pk)
+            ok += 1
+        except Exception as exc:
+            msg = f"Row {i} ({pk}): {exc}"
+            logger.error(msg)
+            errors.append(msg)
+            fail += 1
+
+    return ok, fail, errors
+
+
+# ---------------------------------------------------------------------------
 # cis_cash_flow
 # ---------------------------------------------------------------------------
 
@@ -1341,6 +1500,7 @@ LOADERS = {
     'party_cif':  load_party_cif,
     'security':   load_security,
     'trade':      load_trade,
+    'portfolio':  load_portfolio,
     'cash_flow':  load_cash_flow,
 }
 
@@ -1350,6 +1510,7 @@ DEFAULT_STATUS = {
     'party_cif':  'ACTIVE',
     'security':   'ACTIVE',
     'trade':      'SETTLED',
+    'portfolio':  'SETTLED',
     'cash_flow':  'VALIDATED',
 }
 
@@ -1365,6 +1526,15 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Load portfolios from CSV
+  python scripts/load_migration_data.py --table portfolio --file portfolios.csv
+
+  # Dry-run: validate portfolio CSV without writing
+  python scripts/load_migration_data.py --table portfolio --file portfolios.csv --dry-run
+
+  # Load portfolios with a specific status (default: SETTLED)
+  python scripts/load_migration_data.py --table portfolio --file portfolios.csv --status ACTIVE
+
   # Load trades from CSV (no positions)
   python scripts/load_migration_data.py --table trade --file trades.csv
 
