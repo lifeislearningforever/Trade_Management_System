@@ -556,15 +556,23 @@ class PositionQueueService:
                 last_trade_date_by_basis = {}
 
                 for trade in trades:
-                    trade_date = trade.get('trade_date') or trade['settle_date']
+                    settle_date = trade.get('settle_date') or ''
+                    trade_date  = trade.get('trade_date')  or settle_date
 
                     # Recalculate BOTH position bases per trade so each chain stays correct.
                     # TRADED basis uses trade_date as position_date.
                     # SETTLED basis uses settle_date as position_date.
+                    # Skip a basis if its position_date is empty (data integrity guard).
                     for basis, pos_date in [
-                        ('TRADED', trade_date),
-                        ('SETTLED', trade['settle_date'])
+                        ('TRADED',  trade_date),
+                        ('SETTLED', settle_date),
                     ]:
+                        if not pos_date:
+                            logger.warning(
+                                f"Skipping basis={basis} for trade {trade.get('trade_id')}: "
+                                f"pos_date is empty (trade_date={trade_date!r}, settle_date={settle_date!r})"
+                            )
+                            continue
                         try:
                             success, msg, _ = self.position_service.calculate_position(
                                 portfolio_id=portfolio_id,
