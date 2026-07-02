@@ -464,11 +464,14 @@ class TradeEventQueueService:
 
     def _process_position_modify_event(self, event: Dict, event_data: Dict, trade: Dict) -> bool:
         """
-        Process POSITION_MODIFY event - reverse old position (if exists) and recalculate with new values.
+        Process POSITION_MODIFY event — replay the full position chain from the
+        earliest affected date.
 
-        This is used when a trade is modified. Works for any trade status:
-        - If position exists (SETTLED): Reverse old position, then apply new values
-        - If no position yet (INITIAL/MODIFIED): Just calculate new position directly
+        Reversal+re-apply is wrong when multiple trades share the same date: reversing
+        one trade and re-applying it leaves the other same-date trades double-counted.
+        Instead we run _recalculate_position_chain which reads the already-updated
+        cis_trade rows and replays all trades from from_date in order, seeded from
+        the last known position before from_date.
         """
         trade_id = event.get('trade_id')
         created_by = event.get('created_by', 'system')
@@ -476,132 +479,52 @@ class TradeEventQueueService:
         try:
             from trade.services.settlement_service import settlement_service
 
-            # Get OLD trade values (what was originally calculated)
             old_data = event_data.get('old_trade', {})
             new_data = event_data.get('new_trade', {})
 
-            logger.info(f"POSITION_MODIFY: event_data keys={list(event_data.keys())}")
-            logger.info(f"POSITION_MODIFY: old_data type={type(old_data)}, has data={bool(old_data)}")
-            logger.info(f"POSITION_MODIFY: new_data type={type(new_data)}, has data={bool(new_data)}")
-
             if not old_data or not new_data:
                 logger.warning(f"POSITION_MODIFY event missing old/new trade data for {trade_id}")
-                logger.warning(f"POSITION_MODIFY: raw event_data={str(event_data)[:500]}")
-                return True  # Mark as completed to avoid retries
+                return True
 
             portfolio_id = old_data.get('portfolio_short_name', '')
             security_id = old_data.get('security_label', '')
+            old_trade_date = str(old_data.get('trade_date', '') or '')
+            old_settle_date = str(old_data.get('settle_date', '') or '')
+            new_trade_date = str(new_data.get('trade_date', '') or '')
+            new_settle_date = str(new_data.get('settle_date', '') or '')
 
-            logger.info(f"POSITION_MODIFY: portfolio={portfolio_id}, security={security_id}")
+            logger.info(
+                f"POSITION_MODIFY: trade={trade_id} portfolio={portfolio_id} "
+                f"security={security_id} old_date={old_trade_date} new_date={new_trade_date}"
+            )
 
-            # Check if position already exists for this trade
-            position_exists = self.check_position_exists(trade_id)
+            # Determine from_date: earliest of old/new trade dates.
+            # Chain recalc reads cis_trade (already updated) and replays all trades
+            # from from_date in chronological order, seeded from the position just
+            # before from_date — so every trade on that date is handled correctly
+            # regardless of how many trades share the same date.
+            candidate_dates = [
+                d for d in [old_trade_date, old_settle_date, new_trade_date, new_settle_date]
+                if d
+            ]
+            if not candidate_dates:
+                logger.warning(f"POSITION_MODIFY: no dates found for trade {trade_id}, skipping")
+                return True
 
-            # Step 1: REVERSE the old position for BOTH bases (only if position exists)
-            # We must reverse both TRADED and SETTLED chains that were originally created.
-            if position_exists:
-                old_trade_type = old_data.get('trade_type', '')
-                reverse_type = 'SELL' if old_trade_type == 'BUY' else 'BUY'
-                old_quantity = Decimal(str(old_data.get('quantity', 0) or 0))
-                old_price = Decimal(str(old_data.get('price', 0) or 0))
-                old_trade_date = old_data.get('trade_date', '')
-                old_settle_date = old_data.get('settle_date', '')
+            from_date = min(candidate_dates)
 
-                logger.info(f"POSITION_MODIFY: Reversing old {old_trade_type} for trade {trade_id} (both bases)")
-
-                for basis in ['TRADED', 'SETTLED']:
-                    pos_date = old_trade_date if basis == 'TRADED' else old_settle_date
-                    success_reverse, msg_reverse, _ = settlement_service.process_trade_settlement(
-                        trade_id=trade_id,
-                        portfolio_id=portfolio_id,
-                        security_id=security_id,
-                        trade_type=reverse_type,
-                        quantity=old_quantity,
-                        price=old_price,
-                        charges=Decimal('0'),  # No charges on reversal
-                        trade_date=old_trade_date,
-                        settle_date=old_settle_date,
-                        updated_by=created_by,
-                        security_currency=old_data.get('security_currency'),
-                        portfolio_currency=old_data.get('portfolio_currency'),
-                        async_mode=False,
-                        position_basis=basis
-                    )
-                    if not success_reverse:
-                        logger.error(
-                            f"Failed to reverse {basis} position for trade {trade_id}: {msg_reverse}"
-                        )
-                        raise Exception(f"Reversal failed ({basis}): {msg_reverse}")
-            else:
-                logger.info(f"POSITION_MODIFY: No existing position for trade {trade_id}, skipping reversal")
-
-            # Step 2: Apply NEW trade values for BOTH bases
-            new_trade_type = new_data.get('trade_type', '')
-            new_quantity = Decimal(str(new_data.get('quantity', 0) or 0))
-            new_price = Decimal(str(new_data.get('price', 0) or 0))
-            new_charges = self._calculate_charges(new_data)
-            new_trade_date = new_data.get('trade_date', '')
-            new_settle_date = new_data.get('settle_date', '')
-
-            logger.info(f"POSITION_MODIFY: Applying new {new_trade_type} for trade {trade_id} (both bases)")
-
-            # position_basis=None → dual mode (both bases created)
-            success_new, msg_new, _ = settlement_service.process_trade_settlement(
-                trade_id=trade_id,
+            logger.info(
+                f"POSITION_MODIFY: running chain recalc from {from_date} "
+                f"for {portfolio_id}/{security_id}"
+            )
+            settlement_service._recalculate_position_chain(
                 portfolio_id=portfolio_id,
                 security_id=security_id,
-                trade_type=new_trade_type,
-                quantity=new_quantity,
-                price=new_price,
-                charges=new_charges,
-                trade_date=new_trade_date,
-                settle_date=new_settle_date,
+                from_date=from_date,
                 updated_by=created_by,
-                security_currency=new_data.get('security_currency'),
-                portfolio_currency=new_data.get('portfolio_currency'),
-                isin=new_data.get('isin'),
-                security_name=new_data.get('security_name'),
-                custodian=new_data.get('custodian', ''),
-                sub_custodian=new_data.get('sub_custodian', ''),
-                async_mode=False,
-                position_basis=None  # dual — creates both TRADED and SETTLED
             )
 
-            if success_new:
-                logger.info(f"POSITION_MODIFY completed for trade {trade_id}")
-            else:
-                logger.warning(f"POSITION_MODIFY new trade note: {msg_new}")
-                if 'queued' in msg_new.lower() or 'future' in msg_new.lower():
-                    return True
-
-            # Step 3: If any date is backdated, run chain recalc from the earliest affected date.
-            # A simple reversal + re-apply only patches the one position row; all later positions
-            # in the chain still carry stale cumulative values.
-            from datetime import date as _date
-            today_str = _date.today().isoformat()
-            any_backdated = (
-                (old_trade_date and str(old_trade_date) < today_str) or
-                (old_settle_date and str(old_settle_date) < today_str) or
-                (new_trade_date and str(new_trade_date) < today_str) or
-                (new_settle_date and str(new_settle_date) < today_str)
-            )
-            if any_backdated:
-                dates = [
-                    d for d in [old_trade_date, new_trade_date]
-                    if d and str(d) < today_str
-                ]
-                from_date = min(str(d) for d in dates) if dates else str(old_trade_date or new_trade_date)
-                logger.info(
-                    f"POSITION_MODIFY: backdated dates detected — running chain recalc "
-                    f"from {from_date} for {portfolio_id}/{security_id}"
-                )
-                settlement_service._recalculate_position_chain(
-                    portfolio_id=portfolio_id,
-                    security_id=security_id,
-                    from_date=from_date,
-                    updated_by=created_by,
-                )
-
+            logger.info(f"POSITION_MODIFY completed for trade {trade_id}")
             return True
 
         except Exception as e:
@@ -610,11 +533,14 @@ class TradeEventQueueService:
 
     def _process_position_cancel_event(self, event: Dict, event_data: Dict, trade: Dict) -> bool:
         """
-        Process POSITION_CANCEL event - reverse position when trade is cancelled.
+        Process POSITION_CANCEL event — replay the full position chain from the
+        cancelled trade's date.
 
-        Steps:
-        1. Get the original trade details
-        2. Apply opposite trade (BUY -> SELL, SELL -> BUY) to reverse
+        Reversal-only is wrong when multiple trades share the same date: subtracting
+        the cancelled trade's qty leaves other same-date trades' cumulative positions
+        stale. Chain recalc reads cis_trade (cancelled trade now has is_deleted=true
+        so it is excluded), replays all remaining trades from from_date in order,
+        and produces correct cumulative positions for every date in the chain.
         """
         trade_id = event.get('trade_id')
         created_by = event.get('created_by', 'system')
@@ -624,68 +550,28 @@ class TradeEventQueueService:
 
             portfolio_id = event_data.get('portfolio_short_name', '')
             security_id = event_data.get('security_label', '')
-            original_trade_type = event_data.get('trade_type', '')
-            quantity = Decimal(str(event_data.get('quantity', 0) or 0))
-            price = Decimal(str(event_data.get('price', 0) or 0))
-            trade_date = event_data.get('trade_date', '')
-            settle_date = event_data.get('settle_date', '')
+            trade_date = str(event_data.get('trade_date', '') or '')
+            settle_date = str(event_data.get('settle_date', '') or '')
 
-            # Determine reversal type
-            reverse_type = 'SELL' if original_trade_type == 'BUY' else 'BUY'
+            candidate_dates = [d for d in [trade_date, settle_date] if d]
+            if not candidate_dates:
+                logger.warning(f"POSITION_CANCEL: no dates found for trade {trade_id}, skipping")
+                return True
+
+            from_date = min(candidate_dates)
 
             logger.info(
-                f"POSITION_CANCEL: Reversing {original_trade_type} with {reverse_type} "
-                f"for trade {trade_id} (both bases)"
+                f"POSITION_CANCEL: trade={trade_id} portfolio={portfolio_id} "
+                f"security={security_id} — running chain recalc from {from_date}"
             )
-
-            # Reverse BOTH bases — mirrors what was created on trade creation.
-            # position_basis=None triggers dual mode in process_trade_settlement.
-            success, msg, _ = settlement_service.process_trade_settlement(
-                trade_id=trade_id,
+            settlement_service._recalculate_position_chain(
                 portfolio_id=portfolio_id,
                 security_id=security_id,
-                trade_type=reverse_type,
-                quantity=quantity,
-                price=price,
-                charges=Decimal('0'),  # No charges on cancellation reversal
-                trade_date=trade_date,
-                settle_date=settle_date,
+                from_date=from_date,
                 updated_by=created_by,
-                security_currency=event_data.get('security_currency'),
-                portfolio_currency=event_data.get('portfolio_currency'),
-                async_mode=False,
-                position_basis=None  # dual — reverses both TRADED and SETTLED
             )
 
-            if success:
-                logger.info(f"POSITION_CANCEL completed for trade {trade_id}")
-            else:
-                logger.warning(f"POSITION_CANCEL note for trade {trade_id}: {msg}")
-                if 'queued' in msg.lower() or 'future' in msg.lower():
-                    return True
-
-            # If the cancelled trade was backdated, all later positions in the chain
-            # still carry stale cumulative values — replay from the earliest affected date.
-            from datetime import date as _date
-            today_str = _date.today().isoformat()
-            any_backdated = (
-                (trade_date and str(trade_date) < today_str) or
-                (settle_date and str(settle_date) < today_str)
-            )
-            if any_backdated:
-                dates = [d for d in [trade_date, settle_date] if d and str(d) < today_str]
-                from_date = min(str(d) for d in dates) if dates else str(trade_date or settle_date)
-                logger.info(
-                    f"POSITION_CANCEL: backdated trade — running chain recalc "
-                    f"from {from_date} for {portfolio_id}/{security_id}"
-                )
-                settlement_service._recalculate_position_chain(
-                    portfolio_id=portfolio_id,
-                    security_id=security_id,
-                    from_date=from_date,
-                    updated_by=created_by,
-                )
-
+            logger.info(f"POSITION_CANCEL completed for trade {trade_id}")
             return True
 
         except Exception as e:
