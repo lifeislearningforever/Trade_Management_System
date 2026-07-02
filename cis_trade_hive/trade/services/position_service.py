@@ -104,7 +104,8 @@ class PositionService:
         pipeline_fc: Decimal = None,
         pipeline_lc: Decimal = None,
         position_type: str = None,
-        position_basis: str = 'TRADED'
+        position_basis: str = 'TRADED',
+        base_position_override: Dict[str, Any] = None
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """
         Calculate position using weighted average method.
@@ -179,20 +180,26 @@ class PositionService:
             # to avoid picking up the old position for the same date
             # For normal trades, we include same date positions
             if is_chain_recalc:
-                # Chain recalc: include same-date positions but exclude the current trade's own
-                # row so that when two trades share the same position_date (e.g. both settle on
-                # Mar-02), the second trade correctly accumulates on top of the first rather than
-                # starting from zero.
-                current = self._get_position_as_of_date(
-                    portfolio_id, security_id, position_date,
-                    include_same_date=True, position_basis=position_basis,
-                    exclude_trade_id=trade_id
-                )
-                logger.info(
-                    f"Chain recalc mode: Getting position <= {position_date} "
-                    f"(excl trade_id={trade_id}) for "
-                    f"{portfolio_id}/{security_id} basis={position_basis}. Found: {current is not None}"
-                )
+                # Chain recalc: use in-memory override when the caller supplies it.
+                # This avoids Kudu/Impala stale-read races where the write from the
+                # previous loop iteration hasn't propagated to the connection pool yet.
+                if base_position_override is not None:
+                    current = base_position_override
+                    logger.info(
+                        f"Chain recalc mode: using in-memory base for {portfolio_id}/{security_id} "
+                        f"basis={position_basis} date={position_date}. qty={current.get('quantity')}"
+                    )
+                else:
+                    current = self._get_position_as_of_date(
+                        portfolio_id, security_id, position_date,
+                        include_same_date=True, position_basis=position_basis,
+                        exclude_trade_id=trade_id
+                    )
+                    logger.info(
+                        f"Chain recalc mode: DB lookup <= {position_date} "
+                        f"(excl trade_id={trade_id}) for "
+                        f"{portfolio_id}/{security_id} basis={position_basis}. Found: {current is not None}"
+                    )
             else:
                 # Normal mode: include same date positions, scoped to same basis
                 current = self._get_position_as_of_date(

@@ -554,6 +554,9 @@ class PositionQueueService:
                 logger.info(f"Recalculating {len(trades)} trades (both bases) from {from_date} to {today}")
 
                 last_trade_date_by_basis = {}
+                # In-memory position state per basis — avoids Kudu stale-read between
+                # consecutive writes in the same chain recalc loop.
+                last_position_by_basis = {}
 
                 for trade in trades:
                     settle_date = trade.get('settle_date') or ''
@@ -574,7 +577,7 @@ class PositionQueueService:
                             )
                             continue
                         try:
-                            success, msg, _ = self.position_service.calculate_position(
+                            success, msg, result = self.position_service.calculate_position(
                                 portfolio_id=portfolio_id,
                                 security_id=security_id,
                                 trade_type=trade['trade_type'],
@@ -591,7 +594,8 @@ class PositionQueueService:
                                 custodian=trade.get('custodian'),
                                 sub_custodian=trade.get('sub_custodian'),
                                 is_chain_recalc=True,
-                                position_basis=basis
+                                position_basis=basis,
+                                base_position_override=last_position_by_basis.get(basis)
                             )
 
                             if success:
@@ -600,6 +604,9 @@ class PositionQueueService:
                                     f"Recalculated trade {trade['trade_id']} "
                                     f"basis={basis} date={pos_date}"
                                 )
+                                # Keep in-memory state so next iteration doesn't need a DB read
+                                if result:
+                                    last_position_by_basis[basis] = result
                                 # Track the latest trade date processed per basis
                                 if pos_date > last_trade_date_by_basis.get(basis, ''):
                                     last_trade_date_by_basis[basis] = pos_date
