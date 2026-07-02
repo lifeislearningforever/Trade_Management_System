@@ -526,15 +526,15 @@ class PositionQueueService:
             query = f"""
             SELECT trade_id, trade_type, quantity, price,
                    COALESCE(commission, 0) + COALESCE(sec_fee, 0) + COALESCE(other_charges, 0) as charges,
-                   settle_date
+                   trade_date, settle_date
             FROM {self.DATABASE}.cis_trade
             WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
               AND security_label = '{self._escape(security_id)}'
-              AND settle_date >= '{from_date}'
+              AND (trade_date >= '{from_date}' OR settle_date >= '{from_date}')
               AND settle_date <= '{today_str}'
               AND (trade_status IN ('INITIAL', 'VALIDATED', 'SETTLED') OR status IN ('INITIAL', 'VALIDATED', 'SETTLED'))
               AND (is_deleted = false OR is_deleted IS NULL)
-            ORDER BY settle_date ASC, trade_id ASC
+            ORDER BY trade_date ASC, settle_date ASC, trade_id ASC
             """
 
             logger.info(
