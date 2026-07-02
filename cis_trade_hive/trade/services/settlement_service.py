@@ -250,12 +250,14 @@ class SettlementService:
         position_date is the effective date for this basis (trade_date or settle_date).
         """
         try:
-            # For backdated, generate CHAIN_RECALC metadata upfront.
-            # Use trade_date as from_date so the TRADED chain replays from the
-            # correct earliest date (trade_date may be earlier than settle_date).
+            # Generate CHAIN_RECALC metadata for backdated trades, and also for T+0 trades
+            # when a prior backdated position already exists for this portfolio/security.
+            # Without this, a T+0 trade entered alongside a backdated trade runs as a direct
+            # queue item and overwrites the chain-recalc result with a stale single-trade value.
             chain_recalc_metadata = None
+            trade_date = kwargs.get('trade_date') or settle_date
             if settlement_type == 'BACKDATED':
-                from_date = kwargs.get('trade_date') or settle_date
+                from_date = trade_date
                 chain_recalc_metadata = (
                     f"CHAIN_RECALC:{portfolio_id}:{security_id}:{from_date}"
                 )
@@ -263,6 +265,34 @@ class SettlementService:
                     f"Backdated trade detected basis={position_basis}, "
                     f"from_date={from_date}, chain_recalc_metadata: {chain_recalc_metadata}"
                 )
+            elif settlement_type == 'T+0':
+                # Check if any backdated position exists for this security (position_date < today).
+                # If so, this T+0 trade must also use chain recalc to accumulate correctly.
+                try:
+                    from datetime import date as _date
+                    today_str = _date.today().isoformat()
+                    prior_check = impala_manager.execute_query(
+                        f"""
+                        SELECT 1 FROM {self.DATABASE}.cis_trade_position
+                        WHERE portfolio_short_name = '{portfolio_id}'
+                          AND security_label = '{security_id}'
+                          AND position_date < '{today_str}'
+                          AND (is_latest = true OR is_latest IS NULL)
+                        LIMIT 1
+                        """,
+                        database=self.DATABASE
+                    )
+                    if prior_check:
+                        from_date = trade_date
+                        chain_recalc_metadata = (
+                            f"CHAIN_RECALC:{portfolio_id}:{security_id}:{from_date}"
+                        )
+                        logger.info(
+                            f"T+0 trade has prior backdated positions — upgrading to "
+                            f"CHAIN_RECALC from {from_date} basis={position_basis}"
+                        )
+                except Exception as e:
+                    logger.warning(f"Could not check for prior backdated positions: {e}")
 
             # Enqueue to position_queue (processed by background worker)
             success, message, queue_id = self.position_queue_service.enqueue_position_calculation(
