@@ -163,6 +163,7 @@ class SettlementService:
                     quantity=quantity,
                     price=price,
                     charges=charges,
+                    trade_date=trade_date,
                     settle_date=settle_date,
                     updated_by=updated_by,
                     security_currency=security_currency,
@@ -249,15 +250,18 @@ class SettlementService:
         position_date is the effective date for this basis (trade_date or settle_date).
         """
         try:
-            # For backdated, generate CHAIN_RECALC metadata upfront
+            # For backdated, generate CHAIN_RECALC metadata upfront.
+            # Use trade_date as from_date so the TRADED chain replays from the
+            # correct earliest date (trade_date may be earlier than settle_date).
             chain_recalc_metadata = None
             if settlement_type == 'BACKDATED':
+                from_date = kwargs.get('trade_date') or settle_date
                 chain_recalc_metadata = (
-                    f"CHAIN_RECALC:{portfolio_id}:{security_id}:{settle_date}"
+                    f"CHAIN_RECALC:{portfolio_id}:{security_id}:{from_date}"
                 )
                 logger.info(
                     f"Backdated trade detected basis={position_basis}, "
-                    f"chain_recalc_metadata: {chain_recalc_metadata}"
+                    f"from_date={from_date}, chain_recalc_metadata: {chain_recalc_metadata}"
                 )
 
             # Enqueue to position_queue (processed by background worker)
