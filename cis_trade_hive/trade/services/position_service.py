@@ -1248,7 +1248,7 @@ class PositionService:
               AND security_label = '{self._escape(security_id)}'
               AND position_date = '{position_date}'
               AND position_basis = '{position_basis}'
-              AND is_latest = true
+              AND (is_latest = true OR is_latest IS NULL)
             """
 
             existing = impala_manager.execute_query(query, database=self.DATABASE)

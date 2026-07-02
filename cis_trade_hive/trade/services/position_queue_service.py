@@ -553,6 +553,38 @@ class PositionQueueService:
             if trades:
                 logger.info(f"Recalculating {len(trades)} trades (both bases) from {from_date} to {today}")
 
+                # Pre-invalidate all existing positions from from_date onwards (both bases).
+                # Direct queue items may have already written positions for these dates; if the
+                # chain recalc loop picks them up as base positions via DB read it will
+                # double-count. Setting is_latest=false first means the loop's in-memory
+                # base_position_override is the only authoritative source within this run.
+                invalidate_query = f"""
+                SELECT version_id, position_id, position_date, position_basis,
+                       portfolio_short_name, security_label,
+                       quantity, average_cost_fc, total_cost_fc,
+                       average_cost_lc, total_cost_lc,
+                       realized_pnl_fc, unrealized_pnl_fc,
+                       realized_pnl_lc, unrealized_pnl_lc,
+                       market_price, market_value_fc, market_value_lc,
+                       dividend_fc, dividend_lc, provision_fc, provision_lc,
+                       trade_id, trade_type, lots_held, custodian, sub_custodian,
+                       security_currency, portfolio_currency, fx_rate,
+                       status, is_active, created_by, created_at, updated_by, updated_at
+                FROM {self.DATABASE}.{self.position_service.POSITION_TABLE}
+                WHERE portfolio_short_name = '{self.position_service._escape(portfolio_id)}'
+                  AND security_label = '{self.position_service._escape(security_id)}'
+                  AND (position_date >= '{from_date}')
+                  AND (is_latest = true OR is_latest IS NULL)
+                """
+                stale_rows = impala_manager.execute_query(invalidate_query, database=self.DATABASE)
+                if stale_rows:
+                    logger.info(f"Pre-invalidating {len(stale_rows)} stale position row(s) before chain recalc")
+                    for stale in stale_rows:
+                        self.position_service._mark_old_versions_not_latest(
+                            portfolio_id, security_id,
+                            stale['position_date'], stale['position_basis']
+                        )
+
                 last_trade_date_by_basis = {}
                 # In-memory position state per basis — avoids Kudu stale-read between
                 # consecutive writes in the same chain recalc loop.
