@@ -579,16 +579,70 @@ class PositionQueueService:
                 stale_rows = impala_manager.execute_query(invalidate_query, database=self.DATABASE)
                 if stale_rows:
                     logger.info(f"Pre-invalidating {len(stale_rows)} stale position row(s) before chain recalc")
+                    pos_table = self.position_service.POSITION_TABLE
+                    esc = self.position_service._escape
+                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     for stale in stale_rows:
-                        self.position_service._mark_old_versions_not_latest(
-                            portfolio_id, security_id,
-                            stale['position_date'], stale['position_basis']
+                        # Direct UPSERT by version_id — avoids a second DB read that may miss
+                        # rows not yet visible on the connection pool.
+                        def _cd(val):
+                            try:
+                                return f"CAST({float(val)} AS DECIMAL(30,8))"
+                            except (TypeError, ValueError):
+                                return 'NULL'
+                        upsert_q = f"""
+                        UPSERT INTO {self.DATABASE}.{pos_table}
+                        (version_id, position_id, position_date, position_basis,
+                         portfolio_short_name, security_label,
+                         quantity, average_cost_fc, total_cost_fc,
+                         average_cost_lc, total_cost_lc,
+                         realized_pnl_fc, unrealized_pnl_fc,
+                         realized_pnl_lc, unrealized_pnl_lc,
+                         market_price, market_value_fc, market_value_lc,
+                         dividend_fc, dividend_lc, provision_fc, provision_lc,
+                         trade_id, trade_type, lots_held, custodian, sub_custodian,
+                         security_currency, portfolio_currency, fx_rate,
+                         status, is_active, is_latest,
+                         created_by, created_at, updated_by, updated_at)
+                        VALUES (
+                            {stale['version_id']}, {stale['position_id']},
+                            '{stale['position_date']}', '{stale['position_basis']}',
+                            '{esc(stale['portfolio_short_name'])}', '{esc(stale['security_label'])}',
+                            {_cd(stale.get('quantity'))},
+                            {_cd(stale.get('average_cost_fc'))}, {_cd(stale.get('total_cost_fc'))},
+                            {_cd(stale.get('average_cost_lc'))}, {_cd(stale.get('total_cost_lc'))},
+                            {_cd(stale.get('realized_pnl_fc'))}, {_cd(stale.get('unrealized_pnl_fc'))},
+                            {_cd(stale.get('realized_pnl_lc'))}, {_cd(stale.get('unrealized_pnl_lc'))},
+                            {_cd(stale.get('market_price'))}, {_cd(stale.get('market_value_fc'))},
+                            {_cd(stale.get('market_value_lc'))},
+                            {_cd(stale.get('dividend_fc'))}, {_cd(stale.get('dividend_lc'))},
+                            {_cd(stale.get('provision_fc'))}, {_cd(stale.get('provision_lc'))},
+                            {stale['trade_id'] if stale.get('trade_id') else 'NULL'},
+                            '{stale.get('trade_type', '')}',
+                            {stale['lots_held'] if stale.get('lots_held') else 'NULL'},
+                            {f"'{esc(stale['custodian'])}'" if stale.get('custodian') else 'NULL'},
+                            {f"'{esc(stale['sub_custodian'])}'" if stale.get('sub_custodian') else 'NULL'},
+                            {f"'{esc(stale['security_currency'])}'" if stale.get('security_currency') else 'NULL'},
+                            {f"'{esc(stale['portfolio_currency'])}'" if stale.get('portfolio_currency') else 'NULL'},
+                            {_cd(stale['fx_rate']) if stale.get('fx_rate') else 'NULL'},
+                            '{stale.get('status', 'OPEN')}',
+                            {str(stale.get('is_active', True)).lower()},
+                            false,
+                            '{esc(stale.get('created_by', ''))}',
+                            '{stale.get('created_at', timestamp)}',
+                            'SYSTEM', '{timestamp}'
                         )
+                        """
+                        impala_manager.execute_write(upsert_q, database=self.DATABASE)
+                        logger.info(f"Pre-invalidated version_id={stale['version_id']} basis={stale['position_basis']} date={stale['position_date']}")
 
                 last_trade_date_by_basis = {}
                 # In-memory position state per basis — avoids Kudu stale-read between
                 # consecutive writes in the same chain recalc loop.
-                last_position_by_basis = {}
+                # Sentinel: {} means "start from zero" (first trade for this basis).
+                # None means "not set yet — look up from DB" (used outside chain recalc).
+                # We initialise to {} so the first trade always starts clean without a DB read.
+                last_position_by_basis = {'TRADED': {}, 'SETTLED': {}}
 
                 for trade in trades:
                     settle_date = trade.get('settle_date') or ''

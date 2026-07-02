@@ -184,10 +184,13 @@ class PositionService:
                 # This avoids Kudu/Impala stale-read races where the write from the
                 # previous loop iteration hasn't propagated to the connection pool yet.
                 if base_position_override is not None:
-                    current = base_position_override
+                    # {} = sentinel for "first trade, start from zero" (no DB lookup)
+                    # non-empty dict = accumulated position from previous loop iteration
+                    current = base_position_override if base_position_override else None
                     logger.info(
-                        f"Chain recalc mode: using in-memory base for {portfolio_id}/{security_id} "
-                        f"basis={position_basis} date={position_date}. qty={current.get('quantity')}"
+                        f"Chain recalc mode: in-memory base for {portfolio_id}/{security_id} "
+                        f"basis={position_basis} date={position_date}. "
+                        f"qty={current.get('quantity') if current else 'none (fresh start)'}"
                     )
                 else:
                     current = self._get_position_as_of_date(
