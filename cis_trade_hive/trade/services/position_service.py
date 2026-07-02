@@ -296,6 +296,13 @@ class PositionService:
             new_quantity = old_quantity + buy_qty
             new_avg_cost = new_total_cost / new_quantity
         """
+        # position_id is always deterministic from the natural key of THIS date.
+        # In chain recalc the `current` dict carries the running balance from a
+        # different date (e.g. Feb-27), so we must NOT inherit its position_id.
+        position_id = _calc_position_id(
+            portfolio_id, security_id, position_basis, position_date, 'CIS'
+        )
+
         if current:
             # Existing position - add to it
             old_qty = Decimal(str(current.get('quantity', 0) or 0))
@@ -304,7 +311,6 @@ class PositionService:
             old_total_cost = old_qty * old_avg_cost
             # Use new column name realized_pnl_fc (fallback to realized_pnl for backward compat)
             old_realized_pnl = Decimal(str(current.get('realized_pnl_fc') or current.get('realized_pnl', 0) or 0))
-            position_id = current.get('position_id')
 
             # Calculate new values
             trade_cost = (quantity * price) + charges
@@ -319,10 +325,6 @@ class PositionService:
                 f"Old: {old_qty} @ {old_avg_cost}, New: {new_qty} @ {new_avg_cost}"
             )
         else:
-            # New position — deterministic id from natural key
-            position_id = _calc_position_id(
-                portfolio_id, security_id, position_basis, position_date, 'CIS'
-            )
             old_qty = Decimal('0')
             old_realized_pnl = Decimal('0')
 
@@ -505,7 +507,11 @@ class PositionService:
         old_avg_cost = Decimal(str(current.get('average_cost_fc') or current.get('average_cost', 0) or 0))
         # Use new column name realized_pnl_fc (fallback to realized_pnl for backward compat)
         old_realized_pnl = Decimal(str(current.get('realized_pnl_fc') or current.get('realized_pnl', 0) or 0))
-        position_id = current.get('position_id')
+        # position_id is always deterministic from the natural key of THIS date — never
+        # inherited from the prior-date accumulator (which has a different position_date).
+        position_id = _calc_position_id(
+            portfolio_id, security_id, position_basis, position_date, 'CIS'
+        )
 
         # Validate: no short selling
         if quantity > old_qty:
