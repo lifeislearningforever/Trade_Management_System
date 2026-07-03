@@ -89,6 +89,26 @@ ORDER BY position_basis, position_date, created_at DESC
 
 
 -- -----------------------------------------------------------------------------
+-- Q7: Portfolio list — all portfolios (mirrors portfolio list page query)
+-- Replace status/currency filters as needed; remove WHERE clause to see all.
+-- -----------------------------------------------------------------------------
+SELECT name, description, currency, manager, portfolio_client,
+       settlement_ccy, status, revaluation_status, is_active,
+       src_system, account_group, portfolio_group, report_group, entity_group,
+       entity, business_line, investment_type, branch_code,
+       desk_head, portfolio_owner, country,
+       created_at, updated_at, updated_by
+FROM gmp_cis.cis_portfolio
+WHERE 1=1
+  -- AND status = 'SETTLED'          -- uncomment to filter active/settled only
+  -- AND currency = 'USD'            -- uncomment to filter by base currency
+  -- AND LOWER(name) LIKE '%test%'   -- uncomment to search by name
+ORDER BY CASE WHEN UPPER(src_system) = 'CIS' THEN 0 ELSE 1 END, name
+LIMIT 1000
+;
+
+
+-- -----------------------------------------------------------------------------
 -- Q5: Position queue — pending/failed items that may still fire chain recalc
 -- -----------------------------------------------------------------------------
 SELECT queue_id, trade_id, portfolio_id, security_id, trade_type,
