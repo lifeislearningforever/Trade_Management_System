@@ -14,6 +14,7 @@ from django.shortcuts import render
 from django.http import HttpResponse
 
 from core.views.auth_views import require_login
+from core.services.system_date_service import system_date_service
 from trade.repositories.position_repository import position_repository
 
 logger = logging.getLogger(__name__)
@@ -42,14 +43,13 @@ def position_list(request):
     date_to       = request.GET.get('date_to', '').strip()
     export        = request.GET.get('export', '').strip()
 
-    # Default date range: report_date (today) to report_date + 2 (settle+2).
+    # Default date range: system_date (business date T) to T+2 (settle+2).
     if not date_from and not date_to:
-        system_date = position_repository.get_max_position_date()
-        if not system_date:
-            system_date = datetime.now().strftime('%Y-%m-%d')
-        dt_report = datetime.strptime(system_date, '%Y-%m-%d')
-        date_from = system_date
-        date_to   = (dt_report + timedelta(days=2)).strftime('%Y-%m-%d')
+        sd_info   = system_date_service.get_system_date_info()
+        date_from = sd_info.system_date_display                          # T
+        date_to   = sd_info.settlement_t2_display or (
+            sd_info.system_date + timedelta(days=2)
+        ).strftime('%Y-%m-%d')                                           # T+2
 
     filter_kwargs = dict(
         portfolios=selected_portfolios or None,
