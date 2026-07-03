@@ -1224,10 +1224,10 @@ def trade_settle(request, trade_id):
                 portfolio_currency=trade_data.get('portfolio_currency'),
                 isin=trade_data.get('isin'),
                 security_name=trade_data.get('security_full_name'),
-                async_mode=True,
+                async_mode=False,  # sync: avoids duplicate queue writes producing stale rows
                 position_basis=None,  # dual: TRADED + SETTLED
             )
-            logger.info(f"Position calculation queued for settled trade {trade_id}")
+            logger.info(f"Position calculation completed synchronously for settled trade {trade_id}")
         except Exception as settle_err:
             # Non-fatal: trade is already SETTLED, queue failure should not roll it back.
             # Log the error so ops can manually re-trigger if needed.
