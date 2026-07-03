@@ -991,22 +991,30 @@ def trade_edit(request, trade_id):
             # Check if position exists for this trade (was previously settled)
             from trade.services.trade_event_queue_service import trade_event_queue_service
 
-            position_exists = trade_event_queue_service.check_position_exists(trade_id)
-            logger.info(f"Trade {trade_id} position_exists={position_exists}")
+            # Check if ANY position exists for this portfolio+security (not just this trade_id).
+            # trade_id in cis_trade_position is the last writer — unreliable when multiple
+            # trades share the same date. Check at portfolio+security level instead.
+            from trade.services.settlement_service import settlement_service
+            from core.repositories.impala_connection import impala_manager as _im
+            portfolio_id = trade_data.get('portfolio_short_name', '')
+            security_id = trade_data.get('security_label', '')
+            _pos_check = _im.execute_query(
+                f"SELECT 1 FROM gmp_cis.cis_trade_position "
+                f"WHERE portfolio_short_name = '{portfolio_id}' "
+                f"AND security_label = '{security_id}' "
+                f"AND is_latest = true LIMIT 1",
+                database='gmp_cis'
+            )
+            position_exists = bool(_pos_check)
+            logger.info(f"Trade {trade_id} portfolio/security position_exists={position_exists}")
 
             if position_exists:
-                # Run chain recalc synchronously so position is updated immediately.
-                # from_date = earliest of old/new trade dates so all affected positions
-                # in the chain are replayed correctly.
-                from trade.services.settlement_service import settlement_service
                 old_trade_date = str(trade_data.get('trade_date', '') or '')
                 new_trade_date = str(updated_data.get('trade_date', '') or old_trade_date)
                 old_settle_date = str(trade_data.get('settle_date', '') or '')
                 new_settle_date = str(updated_data.get('settle_date', '') or old_settle_date)
                 candidate_dates = [d for d in [old_trade_date, old_settle_date, new_trade_date, new_settle_date] if d]
                 from_date = min(candidate_dates) if candidate_dates else old_trade_date
-                portfolio_id = trade_data.get('portfolio_short_name', '')
-                security_id = trade_data.get('security_label', '')
                 settlement_service._recalculate_position_chain(
                     portfolio_id=portfolio_id,
                     security_id=security_id,
@@ -1358,15 +1366,22 @@ def trade_approve_cancellation(request, trade_id):
         # Run chain recalc synchronously so position is updated immediately after cancel.
         # The cancelled trade already has is_deleted=true at this point, so chain recalc
         # will naturally exclude it and produce correct positions for remaining trades.
-        from trade.services.trade_event_queue_service import trade_event_queue_service
         from trade.services.settlement_service import settlement_service
-        if trade_event_queue_service.check_position_exists(trade_id):
+        from core.repositories.impala_connection import impala_manager as _im
+        portfolio_id = trade_data.get('portfolio_short_name', '')
+        security_id = trade_data.get('security_label', '')
+        _pos_check = _im.execute_query(
+            f"SELECT 1 FROM gmp_cis.cis_trade_position "
+            f"WHERE portfolio_short_name = '{portfolio_id}' "
+            f"AND security_label = '{security_id}' "
+            f"AND is_latest = true LIMIT 1",
+            database='gmp_cis'
+        )
+        if _pos_check:
             trade_date = str(trade_data.get('trade_date', '') or '')
             settle_date = str(trade_data.get('settle_date', '') or '')
             candidate_dates = [d for d in [trade_date, settle_date] if d]
             from_date = min(candidate_dates) if candidate_dates else trade_date
-            portfolio_id = trade_data.get('portfolio_short_name', '')
-            security_id = trade_data.get('security_label', '')
             settlement_service._recalculate_position_chain(
                 portfolio_id=portfolio_id,
                 security_id=security_id,

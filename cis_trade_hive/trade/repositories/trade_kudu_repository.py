@@ -1530,6 +1530,7 @@ class TradeKuduRepository:
             UPDATE {self.DATABASE}.{self.TABLE_NAME}
             SET status = '{self.STATUS_CANCELLED}',
                 is_active = false,
+                is_deleted = true,
                 cancelled_at = '{timestamp}',
                 updated_by = {self.escape_value(approved_by)},
                 updated_at = '{timestamp}'
