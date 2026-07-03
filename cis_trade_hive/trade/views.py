@@ -1374,32 +1374,24 @@ def trade_approve_cancellation(request, trade_id):
             raise Exception('Failed to approve cancellation')
 
         # Run chain recalc synchronously so position is updated immediately after cancel.
-        # The cancelled trade already has is_deleted=true at this point, so chain recalc
-        # will naturally exclude it and produce correct positions for remaining trades.
+        # approve_cancellation already set is_deleted=true, so INVALIDATE METADATA ensures
+        # chain recalc sees that before querying cis_trade, excluding this trade from replay.
         from trade.services.settlement_service import settlement_service
         from core.repositories.impala_connection import impala_manager as _im
         portfolio_id = trade_data.get('portfolio_short_name', '')
         security_id = trade_data.get('security_label', '')
-        _pos_check = _im.execute_query(
-            f"SELECT 1 FROM gmp_cis.cis_trade_position "
-            f"WHERE portfolio_short_name = '{portfolio_id}' "
-            f"AND security_label = '{security_id}' "
-            f"AND is_latest = true LIMIT 1",
-            database='gmp_cis'
+        try:
+            _im.execute_write("INVALIDATE METADATA gmp_cis.cis_trade", database='gmp_cis')
+        except Exception as _inv_err:
+            logger.warning(f"INVALIDATE METADATA cis_trade failed (non-fatal): {_inv_err}")
+        from_date = str(trade_data.get('trade_date', '') or '')
+        settlement_service._recalculate_position_chain(
+            portfolio_id=portfolio_id,
+            security_id=security_id,
+            from_date=from_date,
+            updated_by=user_info['username'],
         )
-        if _pos_check:
-            trade_date = str(trade_data.get('trade_date', '') or '')
-            # from_date = trade_date of the cancelled trade.
-            # _recalculate_position_chain seeds from the last position before
-            # from_date, so earlier positions are carried forward automatically.
-            from_date = trade_date
-            settlement_service._recalculate_position_chain(
-                portfolio_id=portfolio_id,
-                security_id=security_id,
-                from_date=from_date,
-                updated_by=user_info['username'],
-            )
-            logger.info(f"Position chain recalculated synchronously for cancelled trade {trade_id} from {from_date}")
+        logger.info(f"Position chain recalculated synchronously for cancelled trade {trade_id} from {from_date}")
 
         audit_log_kudu_repository.log_action_async(
             user_id=user_info['user_id'],
