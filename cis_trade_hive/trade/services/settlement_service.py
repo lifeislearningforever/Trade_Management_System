@@ -854,11 +854,295 @@ class SettlementService:
                         logger.error(f"Error recalculating trade {trade['trade_id']} basis={basis}: {e}")
                         counters['errors'] += 1
 
+            # --- Carry-forward pass ---
+            # Fill any business-day gaps with no position row by carrying the
+            # preceding position's values forward. This covers:
+            #   (a) days between two trades (e.g. Feb-27 between Feb-26 and Mar-02)
+            #   (b) days after the last trade up to today
+            # Weekends / non-business days are skipped via the alldatesinfo table.
+            self._fill_carry_forward_positions(
+                portfolio_id=portfolio_id,
+                security_id=security_id,
+                from_date=from_date,
+                to_date=today_str,
+                updated_by=updated_by,
+                counters=counters,
+            )
+
             return counters
 
         except Exception as e:
             logger.error(f"Error in recalculate_position_chain: {str(e)}")
             return counters
+
+    def _fill_carry_forward_positions(
+        self,
+        portfolio_id: str,
+        security_id: str,
+        from_date: str,
+        to_date: str,
+        updated_by: str,
+        counters: Dict[str, int],
+    ) -> None:
+        """
+        After chain recalc, fill business-day gaps with no position row by
+        carrying the nearest preceding position forward.
+
+        Only valid business days (rows in gmp_cis_sta_dly_alldatesinfo) are
+        considered — weekends and public holidays are skipped.
+        Days that already have an is_latest=true position row are also skipped.
+        """
+        try:
+            # 1. Fetch all valid business dates in [from_date, to_date] from alldatesinfo.
+            biz_day_rows = impala_manager.execute_query(
+                f"""
+                SELECT contextual_today AS biz_date
+                FROM {self.DATABASE}.gmp_cis_sta_dly_alldatesinfo
+                WHERE src_system = 'gmp'
+                  AND sub_system  = 'cis'
+                  AND data_frq    = 'dly'
+                  AND record_type = 'D'
+                  AND contextual_today >= '{from_date}'
+                  AND contextual_today <= '{to_date}'
+                ORDER BY contextual_today ASC
+                """,
+                database=self.DATABASE,
+            )
+            if not biz_day_rows:
+                logger.info("carry-forward: no business days found in alldatesinfo for range")
+                return
+
+            biz_dates = [str(r['biz_date'])[:10] for r in biz_day_rows if r.get('biz_date')]
+
+            # 2. Fetch all position_dates that already have is_latest=true in this range.
+            existing_rows = impala_manager.execute_query(
+                f"""
+                SELECT DISTINCT position_basis, position_date
+                FROM {self.DATABASE}.cis_trade_position
+                WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
+                  AND security_label       = '{self._escape(security_id)}'
+                  AND position_date >= '{from_date}'
+                  AND position_date <= '{to_date}'
+                  AND is_latest = true
+                """,
+                database=self.DATABASE,
+            )
+            existing_by_basis: Dict[str, set] = {'TRADED': set(), 'SETTLED': set()}
+            for row in (existing_rows or []):
+                b = row.get('position_basis', '')
+                d = str(row.get('position_date', '') or '')[:10]
+                if b in existing_by_basis and d:
+                    existing_by_basis[b].add(d)
+
+            # 3. For each basis, walk business dates and carry forward on gaps.
+            for basis in ('TRADED', 'SETTLED'):
+                last_known: Optional[Dict[str, Any]] = None
+
+                # Seed last_known from the most recent is_latest row BEFORE from_date.
+                seed = impala_manager.execute_query(
+                    f"""
+                    SELECT position_id, quantity,
+                           average_cost_fc, average_cost_lc,
+                           total_cost_fc, total_cost_lc,
+                           realized_pnl_fc, realized_pnl_lc,
+                           unrealized_pnl_fc, unrealized_pnl_lc,
+                           market_price, market_value_fc, market_value_lc,
+                           dividend_fc, dividend_lc,
+                           provision_fc, provision_lc,
+                           uncall_fc, uncall_lc,
+                           pipeline_fc, pipeline_lc,
+                           trade_id, trade_type, status,
+                           security_currency, portfolio_currency, fx_rate,
+                           position_type
+                    FROM {self.DATABASE}.cis_trade_position
+                    WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
+                      AND security_label       = '{self._escape(security_id)}'
+                      AND position_basis        = '{basis}'
+                      AND position_date         < '{from_date}'
+                      AND is_latest = true
+                    ORDER BY position_date DESC
+                    LIMIT 1
+                    """,
+                    database=self.DATABASE,
+                )
+                if seed:
+                    last_known = seed[0]
+
+                for biz_date in biz_dates:
+                    if biz_date in existing_by_basis[basis]:
+                        # Position already written for this date — update last_known from DB.
+                        row_today = impala_manager.execute_query(
+                            f"""
+                            SELECT position_id, quantity,
+                                   average_cost_fc, average_cost_lc,
+                                   total_cost_fc, total_cost_lc,
+                                   realized_pnl_fc, realized_pnl_lc,
+                                   unrealized_pnl_fc, unrealized_pnl_lc,
+                                   market_price, market_value_fc, market_value_lc,
+                                   dividend_fc, dividend_lc,
+                                   provision_fc, provision_lc,
+                                   uncall_fc, uncall_lc,
+                                   pipeline_fc, pipeline_lc,
+                                   trade_id, trade_type, status,
+                                   security_currency, portfolio_currency, fx_rate,
+                                   position_type
+                            FROM {self.DATABASE}.cis_trade_position
+                            WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
+                              AND security_label       = '{self._escape(security_id)}'
+                              AND position_basis        = '{basis}'
+                              AND position_date         = '{biz_date}'
+                              AND is_latest = true
+                            LIMIT 1
+                            """,
+                            database=self.DATABASE,
+                        )
+                        if row_today:
+                            last_known = row_today[0]
+                        continue
+
+                    # Gap day — carry forward if we have a prior position.
+                    if last_known:
+                        try:
+                            self._write_carry_forward_position(
+                                last_known, basis, biz_date,
+                                portfolio_id, security_id, updated_by,
+                            )
+                            counters['recalculated'] += 1
+                            # Update last_known so the next gap day chains correctly.
+                            last_known = dict(last_known)
+                            last_known['position_date'] = biz_date
+                            existing_by_basis[basis].add(biz_date)
+                            logger.info(
+                                f"Carry-forward: wrote {basis} position for {biz_date} "
+                                f"(portfolio={portfolio_id}, security={security_id})"
+                            )
+                        except Exception as cf_err:
+                            logger.warning(
+                                f"Carry-forward write failed for {basis}/{biz_date}: {cf_err}"
+                            )
+
+        except Exception as e:
+            logger.warning(f"_fill_carry_forward_positions failed (non-fatal): {e}")
+
+    def _write_carry_forward_position(
+        self,
+        source: Dict[str, Any],
+        basis: str,
+        position_date: str,
+        portfolio_id: str,
+        security_id: str,
+        updated_by: str,
+    ) -> None:
+        """
+        Write a single carry-forward position row for `position_date`, copying
+        all financial values from `source` (the preceding position dict).
+        Uses the same versioned UPSERT pattern as _save_position:
+        mark old versions not-latest, then insert new version with is_latest=true.
+        """
+        from trade.services.position_id_service import position_id as _calc_position_id
+
+        version_id = str(uuid.uuid4()).replace('-', '')[:32]
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        position_id = _calc_position_id(
+            portfolio_id, security_id, basis, position_date, 'CIS'
+        )
+
+        def _f(val):
+            if val is None:
+                return 'NULL'
+            try:
+                return f"CAST({float(val)} AS DECIMAL(30,8))"
+            except (ValueError, TypeError):
+                return 'NULL'
+
+        def _s(val):
+            if val is None:
+                return 'NULL'
+            return f"'{str(val).replace(chr(39), chr(39)*2)}'"
+
+        # Mark any existing versions for this date/basis as not-latest
+        self._mark_old_versions_not_latest_in_settlement(
+            portfolio_id, security_id, position_date, basis, timestamp
+        )
+
+        query = f"""
+        UPSERT INTO {self.DATABASE}.cis_trade_position
+        (version_id, position_id, position_date, position_basis,
+         portfolio_short_name, security_label,
+         quantity,
+         average_cost_fc, total_cost_fc,
+         average_cost_lc, total_cost_lc,
+         realized_pnl_fc, unrealized_pnl_fc,
+         realized_pnl_lc, unrealized_pnl_lc,
+         market_price, market_value_fc, market_value_lc,
+         dividend_fc, dividend_lc,
+         trade_id, trade_type,
+         lots_held, custodian, sub_custodian,
+         security_currency, portfolio_currency, fx_rate,
+         status, is_active, is_latest,
+         uncall_fc, uncall_lc,
+         pipeline_fc, pipeline_lc,
+         provision_fc, provision_lc,
+         position_type,
+         created_by, created_at, updated_by, updated_at)
+        VALUES (
+         '{version_id}',
+         '{position_id}',
+         '{position_date}',
+         '{basis}',
+         '{self._escape(portfolio_id)}',
+         '{self._escape(security_id)}',
+         {_f(source.get('quantity'))},
+         {_f(source.get('average_cost_fc'))}, {_f(source.get('total_cost_fc'))},
+         {_f(source.get('average_cost_lc'))}, {_f(source.get('total_cost_lc'))},
+         {_f(source.get('realized_pnl_fc'))}, {_f(source.get('unrealized_pnl_fc'))},
+         {_f(source.get('realized_pnl_lc'))}, {_f(source.get('unrealized_pnl_lc'))},
+         {_f(source.get('market_price'))},
+         {_f(source.get('market_value_fc'))}, {_f(source.get('market_value_lc'))},
+         {_f(source.get('dividend_fc'))}, {_f(source.get('dividend_lc'))},
+         {source['trade_id'] if source.get('trade_id') else 'NULL'},
+         {_s(source.get('trade_type'))},
+         NULL, NULL, NULL,
+         {_s(source.get('security_currency'))},
+         {_s(source.get('portfolio_currency'))},
+         {_f(source.get('fx_rate'))},
+         {_s(source.get('status') or 'OPEN')},
+         true, true,
+         {_f(source.get('uncall_fc'))}, {_f(source.get('uncall_lc'))},
+         {_f(source.get('pipeline_fc'))}, {_f(source.get('pipeline_lc'))},
+         {_f(source.get('provision_fc'))}, {_f(source.get('provision_lc'))},
+         {_s(source.get('position_type') or 'INT')},
+         '{self._escape(updated_by)}', '{timestamp}',
+         '{self._escape(updated_by)}', '{timestamp}'
+        )
+        """
+        impala_manager.execute_write(query, database=self.DATABASE)
+
+    def _mark_old_versions_not_latest_in_settlement(
+        self,
+        portfolio_id: str,
+        security_id: str,
+        position_date: str,
+        basis: str,
+        timestamp: str,
+    ) -> None:
+        """Mark existing is_latest=true rows for this date/basis as false before inserting carry-forward."""
+        try:
+            impala_manager.execute_write(
+                f"""
+                UPDATE {self.DATABASE}.cis_trade_position
+                SET is_latest  = false,
+                    updated_at = '{timestamp}'
+                WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
+                  AND security_label       = '{self._escape(security_id)}'
+                  AND position_date        = '{position_date}'
+                  AND position_basis       = '{basis}'
+                  AND is_latest = true
+                """,
+                database=self.DATABASE,
+            )
+        except Exception as e:
+            logger.warning(f"_mark_old_versions_not_latest_in_settlement failed (non-fatal): {e}")
 
     def validate_backdated_settlement(self, settle_date: str) -> Tuple[bool, str]:
         """
