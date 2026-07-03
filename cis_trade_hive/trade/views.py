@@ -8,12 +8,11 @@ Workflow:
   MAKER Side:
     - Create Trade -> INITIAL
     - Update Trade -> MODIFIED
-    - Cancel Trade -> CANCELLED
-    - Submit for Validation -> PENDING_VALIDATION
+    - Cancel Trade (settled) -> MODIFIED (is_deleted=true, pending checker approval)
 
   CHECKER Side:
-    - Validate -> VALIDATED (or CANCELLED if rejected)
-    - Settle -> SETTLED (final active state)
+    - Validate INITIAL/MODIFIED -> VALIDATED (or CANCELLED if rejected)
+    - Settle VALIDATED -> SETTLED (final active state)
 """
 
 import json
@@ -502,7 +501,6 @@ def trade_list(request):
         ('', 'All Statuses'),
         (TradeKuduRepository.STATUS_INITIAL, 'Initial'),
         (TradeKuduRepository.STATUS_MODIFIED, 'Modified'),
-        (TradeKuduRepository.STATUS_PENDING_VALIDATION, 'Pending Validation'),
         (TradeKuduRepository.STATUS_VALIDATED, 'Validated'),
         (TradeKuduRepository.STATUS_SETTLED, 'Settled'),
         (TradeKuduRepository.STATUS_CANCELLED, 'Cancelled'),
@@ -614,24 +612,21 @@ def trade_detail(request, trade_id):
     # Determine allowed actions based on status and source system
     is_cis_record = src_system and src_system.upper() == 'CIS'
 
-    # Maker actions (only for CIS records)
+    # Maker actions (only for CIS records with edit access)
     can_edit = is_cis_record and status in TradeKuduRepository.MAKER_EDITABLE_STATUSES
-    can_submit = is_cis_record and status in [TradeKuduRepository.STATUS_INITIAL, TradeKuduRepository.STATUS_MODIFIED]
-    can_cancel = is_cis_record and status in [
-        TradeKuduRepository.STATUS_INITIAL,
-        TradeKuduRepository.STATUS_MODIFIED,
-        TradeKuduRepository.STATUS_PENDING_VALIDATION,
-        TradeKuduRepository.STATUS_VALIDATED,
-        TradeKuduRepository.STATUS_SETTLED,
-    ]
-    can_reactivate = is_cis_record and status == TradeKuduRepository.STATUS_CANCELLED
+    # Cancel allowed at every non-cancelled status, but not while a cancellation is already pending
+    can_cancel = is_cis_record and status != TradeKuduRepository.STATUS_CANCELLED and not _is_deleted
+    # Restore shown when: trade is CANCELLED, OR maker requested cancel (is_deleted=true, checker not yet acted)
+    can_restore = is_cis_record and (
+        status == TradeKuduRepository.STATUS_CANCELLED
+        or _is_deleted
+    )
 
-    # Checker actions (only for CIS records)
-    can_validate = is_cis_record and status == TradeKuduRepository.STATUS_PENDING_VALIDATION
-    can_reject = is_cis_record and status == TradeKuduRepository.STATUS_PENDING_VALIDATION
+    # Checker actions — INITIAL and MODIFIED (not pending-cancel) go straight to validate
+    _is_normal = not _is_deleted
+    can_validate = is_cis_record and status in [TradeKuduRepository.STATUS_INITIAL, TradeKuduRepository.STATUS_MODIFIED] and _is_normal
     can_settle = is_cis_record and status == TradeKuduRepository.STATUS_VALIDATED
     # Pending cancellation: maker set status=MODIFIED + is_deleted=true; checker approves/rejects
-    _is_deleted = trade_data.get('is_deleted') in (True, 'true', 1)
     _pending_cancel = is_cis_record and status == TradeKuduRepository.STATUS_MODIFIED and _is_deleted
     can_approve_cancellation = _pending_cancel
     can_reject_cancellation  = _pending_cancel
@@ -658,11 +653,9 @@ def trade_detail(request, trade_id):
         'history': history,
         'position': position,
         'can_edit': can_edit,
-        'can_submit': can_submit,
         'can_cancel': can_cancel,
-        'can_reactivate': can_reactivate,
+        'can_restore': can_restore,
         'can_validate': can_validate,
-        'can_reject': can_reject,
         'can_settle': can_settle,
         'can_approve_cancellation': can_approve_cancellation,
         'can_reject_cancellation': can_reject_cancellation,
@@ -1063,7 +1056,7 @@ def trade_edit(request, trade_id):
 # =============================================================================
 
 def trade_submit(request, trade_id):
-    """Submit trade for validation (Maker action: Submit -> PENDING_VALIDATION)."""
+    """Legacy submit endpoint — no longer reachable from UI. Kept for URL compatibility."""
     if request.method != 'POST':
         return redirect('trade:detail', trade_id=trade_id)
 
@@ -1118,10 +1111,10 @@ def trade_validate(request, trade_id):
     comments = request.POST.get('comments', '').strip()
     action = request.POST.get('action', 'approve')
 
-    # Four-eyes check
-    submitted_by = trade_data.get('submitted_by', '')
-    if submitted_by and submitted_by == user_info['username']:
-        messages.error(request, 'Four-eyes principle: You cannot validate your own submission.')
+    # Four-eyes check — checker cannot be the same person who created the trade
+    created_by = trade_data.get('created_by', '')
+    if created_by and created_by == user_info['username']:
+        messages.error(request, 'Four-eyes principle: You cannot validate your own trade.')
         return redirect('trade:detail', trade_id=trade_id)
 
     try:
@@ -1426,11 +1419,64 @@ def trade_reject_cancellation(request, trade_id):
 
 
 def trade_reactivate(request, trade_id):
-    """Reactivate cancelled trade."""
+    """Restore a trade — two cases:
+    1. CANCELLED → INITIAL (no position work, trade was never settled or position already reversed)
+    2. is_deleted=true (pending cancel, checker not yet acted) → reinstate is_deleted=false + chain recalc
+    """
     if request.method != 'POST':
         return redirect('trade:detail', trade_id=trade_id)
 
-    messages.info(request, 'Reactivate functionality not yet implemented.')
+    trade_data = trade_kudu_repository.get_trade_by_id(trade_id)
+    if not trade_data:
+        messages.error(request, f'Trade {trade_id} not found')
+        return redirect('trade:list')
+
+    user_info = get_user_info(request)
+    _is_deleted = trade_data.get('is_deleted') in (True, 'true', 1)
+
+    try:
+        if _is_deleted:
+            # Pending-cancel restore: same as reject_cancellation — flip is_deleted + chain recalc
+            reverted_to = trade_kudu_repository.reject_cancellation(trade_id, user_info['username'], 'Restored by maker')
+            from trade.services.settlement_service import settlement_service
+            from core.repositories.impala_connection import impala_manager as _im
+            try:
+                _im.execute_write("INVALIDATE METADATA gmp_cis.cis_trade", database='gmp_cis')
+            except Exception as _inv_err:
+                logger.warning(f"INVALIDATE METADATA failed (non-fatal): {_inv_err}")
+            settlement_service._recalculate_position_chain(
+                portfolio_id=trade_data.get('portfolio_short_name', ''),
+                security_id=trade_data.get('security_label', ''),
+                from_date=str(trade_data.get('trade_date', '') or ''),
+                updated_by=user_info['username'],
+            )
+            msg = f'Trade {trade_data.get("deal_number", trade_id)} cancellation withdrawn. Position reinstated.'
+        else:
+            # CANCELLED → INITIAL restore (no position recalc needed)
+            success = trade_kudu_repository.restore_trade(trade_id, user_info['username'])
+            if not success:
+                raise Exception('Failed to restore trade')
+            msg = f'Trade {trade_data.get("deal_number", trade_id)} restored to Initial.'
+
+        audit_log_kudu_repository.log_action_async(
+            user_id=user_info['user_id'],
+            username=user_info['username'],
+            user_email=user_info['user_email'],
+            action_type='RESTORE',
+            entity_type='TRADE',
+            entity_id=str(trade_id),
+            entity_name=trade_data.get('deal_number', ''),
+            action_description=f'Restored trade: {trade_data.get("deal_number", "")}',
+            request_method='POST',
+            request_path=request.path,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            status='SUCCESS'
+        )
+        messages.success(request, msg)
+    except Exception as e:
+        messages.error(request, f'Error restoring trade: {str(e)}')
+
     return redirect('trade:detail', trade_id=trade_id)
 
 

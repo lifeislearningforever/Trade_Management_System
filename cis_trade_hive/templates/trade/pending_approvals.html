@@ -19,7 +19,7 @@
         </h1>
         <p class="content-subtitle">
             {% if view_type == 'validation' %}
-                Review and validate trades submitted by makers
+                Review and validate trades booked by makers
             {% else %}
                 Settle validated trades to make them active
             {% endif %}
@@ -73,8 +73,9 @@
                                 <th>Quantity</th>
                                 <th>Price</th>
                                 <th>Total</th>
-                                <th>Submitted By</th>
-                                <th>Submitted At</th>
+                                <th>Status</th>
+                                <th>Created By</th>
+                                <th>Created At</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -97,8 +98,19 @@
                                 <td class="text-end">{{ trade.quantity|floatformat:2|default:"0.00" }}</td>
                                 <td class="text-end">{{ trade.price|floatformat:4|default:"0.0000" }}</td>
                                 <td class="text-end">{{ trade.total_amount|floatformat:2|default:"0.00" }}</td>
-                                <td>{{ trade.submitted_by|default:trade.created_by|default:"-" }}</td>
-                                <td style="font-size: 0.85rem;">{{ trade.submitted_at|default:trade.created_at|default:"-" }}</td>
+                                <td>
+                                    {% if trade.is_deleted %}
+                                        <span class="badge bg-danger">Cancel Pending</span>
+                                    {% elif trade.status == 'INITIAL' %}
+                                        <span class="badge bg-secondary">Initial</span>
+                                    {% elif trade.status == 'MODIFIED' %}
+                                        <span class="badge bg-info text-dark">Modified</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">{{ trade.status }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ trade.created_by|default:"-" }}</td>
+                                <td style="font-size: 0.85rem;">{{ trade.created_at|default:"-" }}</td>
                                 <td>
                                     <div class="btn-group btn-group-sm" role="group">
                                         <a href="{% url 'trade:detail' trade.trade_id %}" class="btn btn-sm btn-outline-primary" title="View Details">
@@ -109,11 +121,6 @@
                                                     onclick="showValidateModal({{ trade.trade_id }}, '{{ trade.deal_number }}')"
                                                     title="Validate">
                                                 <i class="bi bi-check-circle"></i>
-                                            </button>
-                                            <button type="button" class="btn btn-sm btn-danger"
-                                                    onclick="showRejectModal({{ trade.trade_id }}, '{{ trade.deal_number }}')"
-                                                    title="Reject">
-                                                <i class="bi bi-x-circle"></i>
                                             </button>
                                         {% else %}
                                             <button type="button" class="btn btn-sm btn-success"
@@ -147,7 +154,7 @@
     <div class="alert alert-info mt-4">
         <i class="bi bi-shield-check"></i>
         <strong>Four-Eyes Principle:</strong>
-        You cannot {% if view_type == 'validation' %}validate{% else %}settle{% endif %} trades that you submitted.
+        You cannot {% if view_type == 'validation' %}validate{% else %}settle{% endif %} trades that you created.
         The system will prevent self-approval.
     </div>
 </div>
@@ -173,33 +180,6 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="submit" class="btn btn-success">Validate</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<!-- Reject Modal -->
-<div class="modal fade" id="rejectModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <form method="post" id="rejectForm">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="reject">
-                <div class="modal-header">
-                    <h5 class="modal-title"><i class="bi bi-x-circle text-danger"></i> Reject Trade</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <p class="text-danger">Reject trade: <strong id="rejectDealNumber"></strong>?</p>
-                    <div class="mb-3">
-                        <label class="form-label">Rejection Reason <span class="text-danger">*</span></label>
-                        <textarea class="form-control" name="comments" rows="3" placeholder="Enter rejection reason..." required></textarea>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-danger">Reject</button>
                 </div>
             </form>
         </div>
@@ -240,12 +220,6 @@ function showValidateModal(tradeId, dealNumber) {
     document.getElementById('validateForm').action = `/trade/${tradeId}/validate/`;
     document.getElementById('validateDealNumber').textContent = dealNumber;
     new bootstrap.Modal(document.getElementById('validateModal')).show();
-}
-
-function showRejectModal(tradeId, dealNumber) {
-    document.getElementById('rejectForm').action = `/trade/${tradeId}/validate/`;
-    document.getElementById('rejectDealNumber').textContent = dealNumber;
-    new bootstrap.Modal(document.getElementById('rejectModal')).show();
 }
 
 function showSettleModal(tradeId, dealNumber) {

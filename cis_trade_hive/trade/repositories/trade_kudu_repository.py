@@ -62,9 +62,9 @@ class TradeKuduRepository:
     STATUS_PENDING_CANCELLATION = 'PENDING_CANCELLATION'
 
     # Status groups
-    MAKER_EDITABLE_STATUSES = [STATUS_INITIAL, STATUS_MODIFIED, STATUS_CANCELLED]
-    # Pending cancellations are MODIFIED+is_deleted=true; checker sees them via get_pending_validation_trades
-    CHECKER_ACTIONABLE_STATUSES = [STATUS_PENDING_VALIDATION, STATUS_VALIDATED]
+    MAKER_EDITABLE_STATUSES = [STATUS_INITIAL, STATUS_MODIFIED, STATUS_VALIDATED, STATUS_SETTLED]
+    # Checker acts on INITIAL/MODIFIED (pending validation) and VALIDATED (pending settlement)
+    CHECKER_ACTIONABLE_STATUSES = [STATUS_INITIAL, STATUS_MODIFIED, STATUS_VALIDATED]
 
     @staticmethod
     def escape_value(val: Any) -> str:
@@ -1331,20 +1331,20 @@ class TradeKuduRepository:
             raise
 
     def validate_trade(self, trade_id: int, validated_by: str, comments: str = '') -> bool:
-        """Validate trade (PENDING_VALIDATION -> VALIDATED)."""
+        """Validate trade (INITIAL/MODIFIED -> VALIDATED). No submit step required."""
         try:
             current_trade = self.get_trade_by_id(trade_id)
             if not current_trade:
                 raise ValueError(f"Trade {trade_id} not found")
 
             current_status = current_trade.get('status', '')
-            if current_status != self.STATUS_PENDING_VALIDATION:
+            if current_status not in [self.STATUS_INITIAL, self.STATUS_MODIFIED]:
                 raise ValueError(f"Cannot validate trade with status '{current_status}'")
 
-            # Four-eyes check
-            submitted_by = current_trade.get('submitted_by', '')
-            if submitted_by and submitted_by == validated_by:
-                raise ValueError("Four-eyes principle: You cannot validate your own submission")
+            # Four-eyes check — checker cannot be the same person who created the trade
+            created_by = current_trade.get('created_by', '')
+            if created_by and created_by == validated_by:
+                raise ValueError("Four-eyes principle: You cannot validate your own trade")
 
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -1382,14 +1382,14 @@ class TradeKuduRepository:
             raise
 
     def reject_trade(self, trade_id: int, rejected_by: str, reason: str = '') -> bool:
-        """Reject trade (PENDING_VALIDATION -> CANCELLED)."""
+        """Reject trade (INITIAL/MODIFIED -> CANCELLED)."""
         try:
             current_trade = self.get_trade_by_id(trade_id)
             if not current_trade:
                 raise ValueError(f"Trade {trade_id} not found")
 
             current_status = current_trade.get('status', '')
-            if current_status != self.STATUS_PENDING_VALIDATION:
+            if current_status not in [self.STATUS_INITIAL, self.STATUS_MODIFIED]:
                 raise ValueError(f"Cannot reject trade with status '{current_status}'")
 
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -1472,6 +1472,53 @@ class TradeKuduRepository:
 
         except Exception as e:
             logger.error(f"Error cancelling trade: {str(e)}")
+            raise
+
+    def restore_trade(self, trade_id: int, restored_by: str) -> bool:
+        """Restore a CANCELLED trade back to INITIAL so it can be re-validated."""
+        try:
+            current_trade = self.get_trade_by_id(trade_id)
+            if not current_trade:
+                raise ValueError(f"Trade {trade_id} not found")
+
+            if current_trade.get('status') != self.STATUS_CANCELLED:
+                raise ValueError(f"Only CANCELLED trades can be restored")
+
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            query = f"""
+            UPDATE {self.DATABASE}.{self.TABLE_NAME}
+            SET status = '{self.STATUS_INITIAL}',
+                is_deleted = false,
+                is_active = true,
+                cancel_reason = NULL,
+                cancelled_by = NULL,
+                cancelled_at = NULL,
+                updated_by = {self.escape_value(restored_by)},
+                updated_at = '{timestamp}'
+            WHERE trade_id = {trade_id}
+            """
+
+            success = impala_manager.execute_write(query, database=self.DATABASE)
+
+            if success:
+                self.insert_trade_history(
+                    trade_id=trade_id,
+                    deal_number=current_trade.get('deal_number', ''),
+                    action='RESTORE',
+                    old_status=self.STATUS_CANCELLED,
+                    new_status=self.STATUS_INITIAL,
+                    changes={},
+                    comments='Trade restored to Initial',
+                    performed_by=restored_by,
+                    async_write=True
+                )
+                logger.info(f"Trade {trade_id} restored to INITIAL by {restored_by}")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Error restoring trade: {str(e)}")
             raise
 
     def submit_for_cancellation(self, trade_id: int, submitted_by: str, reason: str = '') -> bool:
@@ -2488,7 +2535,7 @@ class TradeKuduRepository:
                     tb['notional'] += notional
                     stats['type_breakdown'][trade_type] = tb
 
-                    if status == self.STATUS_PENDING_VALIDATION:
+                    if status in (self.STATUS_INITIAL, self.STATUS_MODIFIED):
                         stats['pending_validation'] += count
                     if status == self.STATUS_VALIDATED:
                         stats['pending_settlement'] += count
@@ -2496,8 +2543,6 @@ class TradeKuduRepository:
                         stats['settled'] += count
                     elif status == self.STATUS_CANCELLED:
                         stats['cancelled'] += count
-                    elif status in (self.STATUS_INITIAL, self.STATUS_MODIFIED):
-                        stats['drafts'] += count
 
                     if trade_type == 'BUY':
                         stats['buy_notional'] += notional
@@ -2510,8 +2555,7 @@ class TradeKuduRepository:
             # Convert to sorted lists for template/JSON consumption
             status_order = [
                 self.STATUS_INITIAL, self.STATUS_MODIFIED,
-                self.STATUS_PENDING_VALIDATION, self.STATUS_VALIDATED,
-                self.STATUS_SETTLED, self.STATUS_CANCELLED,
+                self.STATUS_VALIDATED, self.STATUS_SETTLED, self.STATUS_CANCELLED,
             ]
             stats['status_breakdown'] = [
                 {'status': s, 'count': stats['status_breakdown'][s]['count']}
@@ -2543,21 +2587,19 @@ class TradeKuduRepository:
         """Invalidate statistics + trade list caches. Call after trade create/update/delete."""
         query_cache.invalidate(self.STATS_CACHE_KEY)
         # Invalidate simple trade list caches so stale data isn't served after mutations
-        for _status in ('', 'INITIAL', 'MODIFIED', 'PENDING_VALIDATION', 'VALIDATED', 'SETTLED', 'CANCELLED'):
+        for _status in ('', 'INITIAL', 'MODIFIED', 'VALIDATED', 'SETTLED', 'CANCELLED'):
             for _type in ('', 'BUY', 'SELL'):
                 query_cache.invalidate(f"trade_list_v2:{_status}:{_type}:1000")
         logger.debug("Trade statistics + list caches invalidated")
 
     def get_pending_validation_trades(self, limit: int = 100, cis_only: bool = True) -> List[Dict[str, Any]]:
         """
-        Get trades pending validation.
+        Get trades pending checker validation.
 
-        Only includes PENDING_VALIDATION — trades explicitly submitted by the maker.
-        INITIAL and MODIFIED trades are drafts not yet submitted, so they are excluded.
-
-        Per SA feedback (2026-03-04):
-        - By default, only show CIS trades (exclude GMP trades)
-        - Set cis_only=False to show all trades
+        Includes:
+        - INITIAL trades (newly booked, not yet validated)
+        - MODIFIED trades with is_deleted=false (edited, not yet validated)
+        - MODIFIED trades with is_deleted=true + cancel_reason set (pending cancellation approval)
 
         Args:
             limit: Maximum records to return
@@ -2569,15 +2611,13 @@ class TradeKuduRepository:
         try:
             cis_clause = "AND UPPER(src_system) = 'CIS'" if cis_only else ""
 
-            # Normal pending validation trades (not deleted)
-            # + pending-cancellation trades (MODIFIED + is_deleted=true, awaiting checker)
             query = f"""
             SELECT *
             FROM {self.DATABASE}.{self.TABLE_NAME}
             WHERE (
                 (
                     (is_deleted = false OR is_deleted IS NULL)
-                    AND status = '{self.STATUS_PENDING_VALIDATION}'
+                    AND status IN ('{self.STATUS_INITIAL}', '{self.STATUS_MODIFIED}')
                 )
                 OR
                 (

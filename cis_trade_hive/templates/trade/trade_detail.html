@@ -24,8 +24,6 @@
                 <span class="badge badge-secondary fs-6">Initial</span>
             {% elif trade.status == 'MODIFIED' %}
                 <span class="badge badge-info fs-6">Modified</span>
-            {% elif trade.status == 'PENDING_VALIDATION' %}
-                <span class="badge badge-warning fs-6">Pending Validation</span>
             {% elif trade.status == 'VALIDATED' %}
                 <span class="badge badge-primary fs-6">Validated</span>
             {% elif trade.status == 'SETTLED' %}
@@ -51,21 +49,9 @@
         </a>
         {% endif %}
 
-        {% if ta.can_submit %}
-        <form method="post" action="{% url 'trade:submit' trade.trade_id %}" class="d-inline">
-            {% csrf_token %}
-            <button type="submit" class="btn btn-info" onclick="return confirm('Submit this trade for validation?')">
-                <i class="bi bi-send"></i> Submit for Validation
-            </button>
-        </form>
-        {% endif %}
-
         {% if ta.can_validate %}
         <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#validateModal">
             <i class="bi bi-check-circle"></i> Validate
-        </button>
-        <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#rejectModal">
-            <i class="bi bi-x-circle"></i> Reject
         </button>
         {% endif %}
 
@@ -77,8 +63,17 @@
 
         {% if ta.can_cancel %}
         <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#cancelModal">
-            <i class="bi bi-trash"></i> Cancel
+            <i class="bi bi-x-circle"></i> Cancel
         </button>
+        {% endif %}
+
+        {% if ta.can_restore %}
+        <form method="post" action="{% url 'trade:reactivate' trade.trade_id %}" class="d-inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-outline-success" onclick="return confirm('Restore this trade to Initial?')">
+                <i class="bi bi-arrow-counterclockwise"></i> Restore
+            </button>
+        </form>
         {% endif %}
 
         {% if ta.can_approve_cancellation %}
@@ -88,15 +83,6 @@
         <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#rejectCancellationModal">
             <i class="bi bi-x-circle"></i> Reject Cancellation
         </button>
-        {% endif %}
-
-        {% if ta.can_reactivate %}
-        <form method="post" action="{% url 'trade:reactivate' trade.trade_id %}" class="d-inline">
-            {% csrf_token %}
-            <button type="submit" class="btn btn-outline-success" onclick="return confirm('Reactivate this trade?')">
-                <i class="bi bi-arrow-clockwise"></i> Reactivate
-            </button>
-        </form>
         {% endif %}
 
         <a href="{% url 'trade:history' trade.trade_id %}" class="btn btn-outline-info">
@@ -405,14 +391,6 @@
                         <div>{{ trade.created_by|default:"-" }}</div>
                         <small class="text-muted">{{ trade.created_at|default:"-" }}</small>
                     </div>
-
-                    {% if trade.submitted_by %}
-                    <div class="mb-3">
-                        <label class="form-label text-muted">Submitted By</label>
-                        <div>{{ trade.submitted_by }}</div>
-                        <small class="text-muted">{{ trade.submitted_at|default:"-" }}</small>
-                    </div>
-                    {% endif %}
 
                     {% if trade.validated_by %}
                     <div class="mb-3">
