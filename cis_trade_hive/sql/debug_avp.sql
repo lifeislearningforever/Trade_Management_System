@@ -63,6 +63,19 @@ ORDER BY position_basis, created_at DESC
 
 
 -- -----------------------------------------------------------------------------
+-- Q6: Full position history with realized_pnl — to see SELL impact per version
+-- -----------------------------------------------------------------------------
+SELECT version_id, trade_id, position_basis, position_date,
+       quantity, average_cost_fc, realized_pnl_fc, total_cost_fc,
+       is_latest, created_at
+FROM gmp_cis.cis_trade_position
+WHERE portfolio_short_name = 'Test_Prakash_ccy'
+  AND security_label = 'Test_Prakash'
+ORDER BY position_basis, position_date, created_at DESC
+;
+
+
+-- -----------------------------------------------------------------------------
 -- Q5: Position queue — pending/failed items that may still fire chain recalc
 -- -----------------------------------------------------------------------------
 SELECT queue_id, trade_id, portfolio_id, security_id, trade_type,
