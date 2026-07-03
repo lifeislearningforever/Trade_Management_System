@@ -779,7 +779,59 @@ class SettlementService:
             trades = impala_manager.execute_query(query, database=self.DATABASE)
 
             if not trades:
-                logger.info(f"No trades to recalculate from {from_date}")
+                # No active trades remain from from_date onward (e.g. the only trade was
+                # just cancelled). Zero-out all is_latest position rows from from_date so
+                # the position table reflects an empty/closed position.
+                logger.info(
+                    f"No active trades from {from_date} — zeroing positions for "
+                    f"{portfolio_id}/{security_id}"
+                )
+                try:
+                    impala_manager.execute_write(
+                        f"""
+                        UPDATE {self.DATABASE}.cis_trade_position
+                        SET quantity = 0,
+                            average_cost_fc = 0,
+                            average_cost_lc = 0,
+                            total_cost_fc = 0,
+                            total_cost_lc = 0,
+                            is_latest = false,
+                            updated_by = '{self._escape(updated_by)}',
+                            updated_at = '{today_str}'
+                        WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
+                          AND security_label = '{self._escape(security_id)}'
+                          AND position_date >= '{from_date}'
+                          AND is_latest = true
+                        """,
+                        database=self.DATABASE
+                    )
+                    logger.info(
+                        f"Zeroed is_latest positions for {portfolio_id}/{security_id} "
+                        f"from {from_date}"
+                    )
+                    # Also zero cis_position (gold/summary table) — uses 'portfolio' not 'portfolio_short_name'
+                    try:
+                        impala_manager.execute_write(
+                            f"""
+                            UPDATE {self.DATABASE}.cis_position
+                            SET quantity = CAST(0 AS DECIMAL(30,8)),
+                                average_cost_fc = CAST(0 AS DECIMAL(30,8)),
+                                average_cost_lc = CAST(0 AS DECIMAL(30,8)),
+                                cost_fc = CAST(0 AS DECIMAL(30,8)),
+                                cost_lc = CAST(0 AS DECIMAL(30,8)),
+                                is_latest = false
+                            WHERE portfolio = '{self._escape(portfolio_id)}'
+                              AND security_label = '{self._escape(security_id)}'
+                              AND position_date >= '{from_date}'
+                              AND is_latest = true
+                            """,
+                            database=self.DATABASE
+                        )
+                        logger.info(f"Zeroed cis_position for {portfolio_id}/{security_id} from {from_date}")
+                    except Exception as _cpos_err:
+                        logger.warning(f"cis_position zero update skipped (non-fatal): {_cpos_err}")
+                except Exception as _zero_err:
+                    logger.error(f"Failed to zero positions after full cancellation: {_zero_err}")
                 return counters
 
             logger.info(f"Recalculating {len(trades)} trades (both bases) from {from_date} to {today_str}")
