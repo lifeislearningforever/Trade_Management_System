@@ -608,6 +608,7 @@ def trade_detail(request, trade_id):
     trade = TradeWrapper(trade_data)
     status = trade.status
     src_system = trade.src_system
+    _is_deleted = str(trade_data.get('is_deleted', False)).lower() in ('true', '1')
 
     # Determine allowed actions based on status and source system
     is_cis_record = src_system and src_system.upper() == 'CIS'
