@@ -1296,7 +1296,7 @@ def trade_cancel(request, trade_id):
             )
             messages.warning(request, 'Cancellation request submitted. Awaiting checker approval.')
         else:
-            # No position — safe to cancel immediately (INITIAL/MODIFIED trades)
+            # No position via four-eyes — cancel immediately (INITIAL/MODIFIED trades)
             success = trade_kudu_repository.cancel_trade(trade_id, user_info['username'], reason)
             if not success:
                 raise Exception('Failed to cancel trade')
@@ -1304,6 +1304,27 @@ def trade_cancel(request, trade_id):
             cancelled_count, _ = trade_event_queue_service.cancel_pending_events(trade_id)
             if cancelled_count > 0:
                 logger.info(f"Cancelled {cancelled_count} pending events for trade {trade_id}")
+
+            # Run chain recalc — cancel_trade sets is_deleted=true so this trade is
+            # excluded from replay, correctly removing its contribution from the position.
+            try:
+                from trade.services.settlement_service import settlement_service
+                from core.repositories.impala_connection import impala_manager as _im
+                _port = trade_data.get('portfolio_short_name', '')
+                _sec = trade_data.get('security_label', '')
+                try:
+                    _im.execute_write("INVALIDATE METADATA gmp_cis.cis_trade", database='gmp_cis')
+                except Exception:
+                    pass
+                settlement_service._recalculate_position_chain(
+                    portfolio_id=_port,
+                    security_id=_sec,
+                    from_date=str(trade_data.get('trade_date', '') or ''),
+                    updated_by=user_info['username'],
+                )
+                logger.info(f"Position chain recalculated after direct cancel of trade {trade_id}")
+            except Exception as _ce:
+                logger.error(f"Chain recalc failed after cancel of trade {trade_id}: {_ce}")
 
             audit_log_kudu_repository.log_action_async(
                 user_id=user_info['user_id'],

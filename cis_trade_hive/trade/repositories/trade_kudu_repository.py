@@ -1441,6 +1441,8 @@ class TradeKuduRepository:
             query = f"""
             UPDATE {self.DATABASE}.{self.TABLE_NAME}
             SET status = '{self.STATUS_CANCELLED}',
+                is_deleted = true,
+                is_active = false,
                 cancelled_by = {self.escape_value(cancelled_by)},
                 cancelled_at = '{timestamp}',
                 cancel_reason = {self.escape_value(reason)},
