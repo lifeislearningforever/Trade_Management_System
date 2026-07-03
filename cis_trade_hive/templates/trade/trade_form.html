@@ -166,8 +166,18 @@
                             <!-- Trade Date -->
                             <div class="col-md-3">
                                 <label class="form-label">Trade Date <span class="text-danger">*</span></label>
-                                <input type="date" class="form-control" name="trade_date" id="trade_date"
-                                       value="{{ trade.trade_date|default:'' }}" required>
+                                <div class="input-group">
+                                    <input type="date" class="form-control" name="trade_date" id="trade_date"
+                                           value="{{ trade.trade_date|default:'' }}" required>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm px-2"
+                                            title="Copy trade date" onclick="copyDate('trade_date')">
+                                        <i class="bi bi-clipboard"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm px-2"
+                                            title="Paste date" onclick="pasteDate('trade_date')">
+                                        <i class="bi bi-clipboard-check"></i>
+                                    </button>
+                                </div>
                                 {% if not is_edit %}
                                 <small class="text-muted">
                                     <i class="bi bi-calendar-date"></i> Default: System Date
@@ -178,8 +188,18 @@
                             <!-- Settle Date -->
                             <div class="col-md-3">
                                 <label class="form-label">Settle Date <span class="text-danger">*</span></label>
-                                <input type="date" class="form-control" name="settle_date" id="settle_date"
-                                       value="{{ trade.settle_date|default:settlement_t2_display }}" required>
+                                <div class="input-group">
+                                    <input type="date" class="form-control" name="settle_date" id="settle_date"
+                                           value="{{ trade.settle_date|default:settlement_t2_display }}" required>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm px-2"
+                                            title="Copy settle date" onclick="copyDate('settle_date')">
+                                        <i class="bi bi-clipboard"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm px-2"
+                                            title="Paste date" onclick="pasteDate('settle_date')">
+                                        <i class="bi bi-clipboard-check"></i>
+                                    </button>
+                                </div>
                             </div>
                         </div>
 
@@ -641,8 +661,6 @@
                         <input type="hidden" name="cash_balance" value="0">
 
                         <div class="row g-3">
-
-                        <div class="row g-3 mt-2">
                             <div class="col-md-4">
                                 <label class="form-label">Contract Reference</label>
                                 <input type="text" class="form-control" name="contract_ref" id="contract_ref"
@@ -659,7 +677,6 @@
                                        value="{{ trade.org_pur_date|default:'' }}">
                             </div>
                         </div>
-
                     </div>
                 </div>
             </div>
@@ -1613,40 +1630,7 @@ document.getElementById('security_label').addEventListener('change', function() 
     autoPopulateCurrencyFromSecurity();
 
     // Auto-select counterparty from security issuer
-    (function() {
-        const secEl = document.getElementById('security_label');
-        const cpEl  = document.getElementById('counterparty');
-        const cpStatus = document.getElementById('counterparty_status');
-        if (!secEl || !cpEl) return;
-
-        const selectedOpt = secEl.options[secEl.selectedIndex];
-        const issuer = (selectedOpt && selectedOpt.dataset.issuer) ? selectedOpt.dataset.issuer.trim() : '';
-
-        if (!issuer) return;
-
-        // Find counterparty option whose value (party_short_name) matches issuer
-        var matched = false;
-        for (var i = 0; i < cpEl.options.length; i++) {
-            var opt = cpEl.options[i];
-            if (opt.value.trim().toLowerCase() === issuer.toLowerCase()) {
-                cpEl.value = opt.value;
-                // Refresh Select2 display
-                if (typeof $ !== 'undefined' && $.fn.select2) {
-                    $('#counterparty').val(opt.value).trigger('change.select2');
-                }
-                if (cpStatus) {
-                    cpStatus.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
-                    cpStatus.title = 'Auto-set from security issuer: ' + issuer;
-                }
-                matched = true;
-                break;
-            }
-        }
-        if (!matched && cpStatus) {
-            cpStatus.innerHTML = '<i class="bi bi-question-circle text-muted"></i>';
-            cpStatus.title = 'Issuer "' + issuer + '" not found in counterparty list';
-        }
-    })();
+    autoSelectCounterpartyFromSecurity();
 
     // Fetch price from equity price table via API
     const currencyCode = currencyHidden.value;
@@ -1666,6 +1650,95 @@ document.getElementById('security_label').addEventListener('change', function() 
             });
     }
 });
+
+// Auto-select counterparty dropdown based on current security's issuer field
+function autoSelectCounterpartyFromSecurity() {
+    const secEl = document.getElementById('security_label');
+    const cpEl  = document.getElementById('counterparty');
+    const cpStatus = document.getElementById('counterparty_status');
+    if (!secEl || !cpEl) return;
+
+    const selectedOpt = secEl.options[secEl.selectedIndex];
+    const issuer = (selectedOpt && selectedOpt.dataset.issuer) ? selectedOpt.dataset.issuer.trim() : '';
+
+    if (!issuer) return;
+
+    for (var i = 0; i < cpEl.options.length; i++) {
+        var opt = cpEl.options[i];
+        if (opt.value.trim().toLowerCase() === issuer.toLowerCase()) {
+            cpEl.value = opt.value;
+            if (typeof $ !== 'undefined' && $.fn.select2) {
+                $('#counterparty').val(opt.value).trigger('change.select2');
+            }
+            if (cpStatus) {
+                cpStatus.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
+                cpStatus.title = 'Auto-set from security issuer: ' + issuer;
+            }
+            return;
+        }
+    }
+    if (cpStatus) {
+        cpStatus.innerHTML = '<i class="bi bi-question-circle text-muted"></i>';
+        cpStatus.title = 'Issuer "' + issuer + '" not found in counterparty list';
+    }
+}
+
+// =========================================================================
+// DATE COPY / PASTE HELPERS
+// =========================================================================
+var _dateCopied = '';
+
+function copyDate(fieldId) {
+    var val = document.getElementById(fieldId).value;
+    if (!val) return;
+    _dateCopied = val;
+    // Also try system clipboard
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(val).catch(function() {});
+    }
+    // Visual feedback
+    var btn = event.currentTarget;
+    btn.innerHTML = '<i class="bi bi-clipboard-check-fill text-success"></i>';
+    setTimeout(function() { btn.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 1200);
+}
+
+function pasteDate(fieldId) {
+    var el = document.getElementById(fieldId);
+    // Try system clipboard first
+    if (navigator.clipboard && navigator.clipboard.readText) {
+        navigator.clipboard.readText().then(function(text) {
+            var d = parseDateString(text.trim());
+            if (d) { el.value = d; el.dispatchEvent(new Event('change')); }
+            else if (_dateCopied) { el.value = _dateCopied; el.dispatchEvent(new Event('change')); }
+        }).catch(function() {
+            if (_dateCopied) { el.value = _dateCopied; el.dispatchEvent(new Event('change')); }
+        });
+    } else if (_dateCopied) {
+        el.value = _dateCopied;
+        el.dispatchEvent(new Event('change'));
+    }
+}
+
+// Accept YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY, MM/DD/YYYY
+function parseDateString(s) {
+    if (!s) return null;
+    // Already YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    // DD/MM/YYYY or DD-MM-YYYY
+    var m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if (m) {
+        var day = m[1].padStart(2,'0'), mon = m[2].padStart(2,'0'), yr = m[3];
+        var candidate = yr + '-' + mon + '-' + day;
+        // Validate it's a real date
+        var d = new Date(candidate);
+        if (!isNaN(d.getTime())) return candidate;
+        // Try MM/DD/YYYY interpretation
+        candidate = yr + '-' + day + '-' + mon;
+        d = new Date(candidate);
+        if (!isNaN(d.getTime())) return candidate;
+    }
+    return null;
+}
 
 // Auto-populate currency from selected security (readonly field)
 function autoPopulateCurrencyFromSecurity() {
@@ -1898,6 +1971,9 @@ $(document).ready(function() {
 
         // Auto-populate currency from selected security
         autoPopulateCurrencyFromSecurity();
+
+        // Auto-select counterparty from security issuer
+        autoSelectCounterpartyFromSecurity();
 
         // Fetch and update price from API
         const securityLabel = $(this).val();
