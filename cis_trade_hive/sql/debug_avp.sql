@@ -29,3 +29,21 @@ WHERE portfolio_short_name = 'Test_Prakash_ccy'
   AND is_latest = true
 ORDER BY position_basis, position_date
 ;
+
+
+-- -----------------------------------------------------------------------------
+-- Q3: Exactly what chain recalc reads from cis_trade (mirror the service query)
+-- -----------------------------------------------------------------------------
+SELECT trade_id, deal_number, trade_type, quantity, price,
+       COALESCE(commission,0) + COALESCE(sec_fee,0) + COALESCE(other_charges,0) AS charges,
+       trade_date, settle_date, status, trade_status, is_deleted, updated_at
+FROM gmp_cis.cis_trade
+WHERE portfolio_short_name = 'Test_Prakash_ccy'
+  AND security_label = 'AAPL'
+  AND (trade_date >= '2026-03-02' OR settle_date >= '2026-03-02')
+  AND settle_date <= '2026-07-03'
+  AND (trade_status IN ('INITIAL','MODIFIED','VALIDATED','SETTLED')
+       OR status IN ('INITIAL','MODIFIED','VALIDATED','SETTLED'))
+  AND (is_deleted = false OR is_deleted IS NULL)
+ORDER BY trade_date ASC, settle_date ASC, trade_id ASC
+;
