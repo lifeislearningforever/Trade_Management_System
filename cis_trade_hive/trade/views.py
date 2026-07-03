@@ -988,17 +988,11 @@ def trade_edit(request, trade_id):
             if not success:
                 raise Exception('Failed to update trade')
 
-            # Check if position exists for this trade (was previously settled)
-            from trade.services.trade_event_queue_service import trade_event_queue_service
-
-            # Check if ANY position exists for this portfolio+security (not just this trade_id).
-            # trade_id in cis_trade_position is the last writer — unreliable when multiple
-            # trades share the same date. Check at portfolio+security level instead.
             from trade.services.settlement_service import settlement_service
             from core.repositories.impala_connection import impala_manager as _im
 
-            # Flush Impala's metadata cache for cis_trade so the chain recalc query
-            # below sees the just-written amended values and not the stale pre-amend row.
+            # Flush Impala's metadata cache so chain recalc sees the just-written
+            # amended values and not the stale pre-amend row.
             try:
                 _im.execute_write("INVALIDATE METADATA gmp_cis.cis_trade", database='gmp_cis')
             except Exception as _inv_err:
@@ -1006,37 +1000,19 @@ def trade_edit(request, trade_id):
 
             portfolio_id = trade_data.get('portfolio_short_name', '')
             security_id = trade_data.get('security_label', '')
-            _pos_check = _im.execute_query(
-                f"SELECT 1 FROM gmp_cis.cis_trade_position "
-                f"WHERE portfolio_short_name = '{portfolio_id}' "
-                f"AND security_label = '{security_id}' "
-                f"AND is_latest = true LIMIT 1",
-                database='gmp_cis'
+            old_trade_date = str(trade_data.get('trade_date', '') or '')
+            new_trade_date = str(updated_data.get('trade_date', '') or old_trade_date)
+            # from_date = earliest of old/new trade dates.
+            # Chain recalc seeds from the last position before from_date so earlier
+            # positions are carried forward automatically.
+            from_date = min(d for d in [old_trade_date, new_trade_date] if d)
+            settlement_service._recalculate_position_chain(
+                portfolio_id=portfolio_id,
+                security_id=security_id,
+                from_date=from_date,
+                updated_by=user_info['username'],
             )
-            position_exists = bool(_pos_check)
-            logger.info(f"Trade {trade_id} portfolio/security position_exists={position_exists}")
-
-            if position_exists:
-                old_trade_date = str(trade_data.get('trade_date', '') or '')
-                new_trade_date = str(updated_data.get('trade_date', '') or old_trade_date)
-                old_settle_date = str(trade_data.get('settle_date', '') or '')
-                new_settle_date = str(updated_data.get('settle_date', '') or old_settle_date)
-                # from_date = earliest of old/new trade dates only.
-                # _recalculate_position_chain seeds from the last position before
-                # from_date, so earlier positions (e.g. Feb-26, Feb-27) are carried
-                # forward automatically — no need to replay them from scratch.
-                # e.g. amend Mar-02 qty → from_date=Mar-02, seed=Feb-27 position.
-                # e.g. amend trade date Mar-02→Jan-15 → from_date=Jan-15.
-                from_date = min(d for d in [old_trade_date, new_trade_date] if d)
-                settlement_service._recalculate_position_chain(
-                    portfolio_id=portfolio_id,
-                    security_id=security_id,
-                    from_date=from_date,
-                    updated_by=user_info['username'],
-                )
-                logger.info(f"Position chain recalculated synchronously for trade {trade_id} from {from_date}")
-            else:
-                logger.info(f"Trade {trade_id} has no position yet, will be calculated on settlement")
+            logger.info(f"Position chain recalculated synchronously for trade {trade_id} from {from_date}")
 
             # Use async audit logging for fast UI response
             audit_log_kudu_repository.log_action_async(
