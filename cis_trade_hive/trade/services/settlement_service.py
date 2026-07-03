@@ -736,6 +736,30 @@ class SettlementService:
             today = datetime.now().date()
             today_str = today.strftime("%Y-%m-%d")
 
+            # Drain any pending queue items for this portfolio/security before recalculating.
+            # Old CHAIN_RECALC queue items from the initial settle may still be sitting in
+            # PENDING state. If the worker picks them up after this synchronous recalc
+            # completes, it will overwrite the correct result with a stale one.
+            try:
+                impala_manager.execute_write(
+                    f"""
+                    UPDATE {self.DATABASE}.cis_position_queue
+                    SET status = 'COMPLETED',
+                        error_message = 'Superseded by synchronous chain recalc',
+                        updated_at = '{today_str}'
+                    WHERE portfolio_id = '{self._escape(portfolio_id)}'
+                      AND security_id = '{self._escape(security_id)}'
+                      AND status IN ('PENDING', 'PROCESSING')
+                    """,
+                    database=self.DATABASE
+                )
+                logger.info(
+                    f"Drained pending queue items for {portfolio_id}/{security_id} "
+                    f"before chain recalc"
+                )
+            except Exception as _drain_err:
+                logger.warning(f"Could not drain queue items (non-fatal): {_drain_err}")
+
             # Include the from_date itself (>=) so the reversed/modified trade is
             # replayed, and fetch trade_date so TRADED basis uses the right position_date.
             query = f"""
@@ -803,7 +827,7 @@ class SettlementService:
                         continue
                     try:
                         base = last_position_by_basis.get(basis)  # {} = fresh start, dict = prior
-                        success, _, result = self.position_service.calculate_position(
+                        success, msg, result = self.position_service.calculate_position(
                             portfolio_id=portfolio_id,
                             security_id=security_id,
                             trade_type=trade['trade_type'],
@@ -824,7 +848,7 @@ class SettlementService:
                         else:
                             counters['errors'] += 1
                             logger.error(
-                                f"Chain recalc failed for trade {trade['trade_id']} basis={basis}"
+                                f"Chain recalc failed for trade {trade['trade_id']} basis={basis}: {msg}"
                             )
                     except Exception as e:
                         logger.error(f"Error recalculating trade {trade['trade_id']} basis={basis}: {e}")

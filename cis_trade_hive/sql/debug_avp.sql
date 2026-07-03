@@ -51,6 +51,19 @@ ORDER BY trade_date ASC, settle_date ASC, trade_id ASC
 
 
 -- -----------------------------------------------------------------------------
+-- Q3b: ALL trades including cancelled — to see full picture of what existed
+-- -----------------------------------------------------------------------------
+SELECT trade_id, deal_number, trade_type, quantity, price,
+       trade_date, settle_date, status, is_deleted, updated_at
+FROM gmp_cis.cis_trade
+WHERE portfolio_short_name = 'Test_Prakash_ccy'
+  AND security_label = 'AAPL'
+  AND (trade_date >= '2026-03-02' OR settle_date >= '2026-03-02')
+ORDER BY trade_date ASC, settle_date ASC, trade_id ASC
+;
+
+
+-- -----------------------------------------------------------------------------
 -- Q4: All position rows (not just is_latest) — shows full version history
 -- -----------------------------------------------------------------------------
 SELECT version_id, position_id, trade_id, position_basis, position_date,
