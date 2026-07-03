@@ -118,3 +118,31 @@ WHERE portfolio_id = 'Test_Prakash_ccy'
 ORDER BY created_at DESC
 LIMIT 20
 ;
+
+
+-- -----------------------------------------------------------------------------
+-- Q8: Cash flow list — mirrors cash flow list page (check cash_flow_number is set)
+-- -----------------------------------------------------------------------------
+SELECT cash_flow_id, cash_flow_number, portfolio_short_name, security_label,
+       cash_flow_type, send_receive, value_date, payment_date,
+       local_ccy, local_ccy_amt, foreign_ccy, foreign_ccy_amt,
+       status, src_system, ca_number,
+       is_deleted, created_by, created_at, updated_at
+FROM gmp_cis.cis_cash_flow
+WHERE (is_deleted = false OR is_deleted IS NULL)
+  -- AND portfolio_short_name = 'UOBS_VMS_AC'   -- uncomment to filter by portfolio
+ORDER BY created_at DESC
+LIMIT 50
+;
+
+
+-- -----------------------------------------------------------------------------
+-- Q8b: Cash flow detail by cash_flow_id — mirrors get_by_id query
+-- Replace 123 with the actual cash_flow_id from the URL.
+-- -----------------------------------------------------------------------------
+SELECT cash_flow_id, cash_flow_number, portfolio_short_name, security_label,
+       cash_flow_type, send_receive, value_date, status,
+       src_system, ca_number, created_at, updated_at
+FROM gmp_cis.cis_cash_flow
+WHERE cash_flow_id = 123
+;

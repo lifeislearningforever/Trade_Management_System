@@ -152,7 +152,25 @@ class CashFlowRepository:
         """
         try:
             query = f"""
-            SELECT *
+            SELECT cash_flow_id, cash_flow_number,
+                   security_label, portfolio_short_name,
+                   cash_flow_type, send_receive,
+                   position_updated,
+                   foreign_ccy, local_ccy,
+                   local_ccy_amt, foreign_ccy_amt,
+                   flow_amount_local, dividend_price, quantity, fx_rate,
+                   tax_deducted_fc, tax_deducted_lc, other_charges_fc,
+                   gl_acc_no, src_system,
+                   ca_id, ca_number,
+                   payment_date, trade_date, value_date,
+                   dividend_date, ex_date, record_date,
+                   is_deleted, is_active,
+                   created_by, created_at, updated_by, updated_at,
+                   status,
+                   validated_by, validated_at, validation_comments,
+                   settled_by, settled_at, settlement_comments,
+                   cancelled_by, cancelled_at, cancel_reason,
+                   remarks
             FROM {CashFlowRepository.DATABASE}.{CashFlowRepository.TABLE_NAME}
             WHERE cash_flow_id = {cash_flow_id}
             """
