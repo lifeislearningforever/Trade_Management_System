@@ -786,18 +786,36 @@ class SettlementService:
                     f"No active trades from {from_date} — zeroing positions for "
                     f"{portfolio_id}/{security_id}"
                 )
+                _z = 'CAST(0 AS DECIMAL(30,8))'
                 try:
                     impala_manager.execute_write(
                         f"""
                         UPDATE {self.DATABASE}.cis_trade_position
-                        SET quantity = 0,
-                            average_cost_fc = 0,
-                            average_cost_lc = 0,
-                            total_cost_fc = 0,
-                            total_cost_lc = 0,
-                            is_latest = false,
-                            updated_by = '{self._escape(updated_by)}',
-                            updated_at = '{today_str}'
+                        SET quantity           = {_z},
+                            average_cost_fc    = {_z},
+                            average_cost_lc    = {_z},
+                            total_cost_fc      = {_z},
+                            total_cost_lc      = {_z},
+                            market_price       = {_z},
+                            market_value_fc    = {_z},
+                            market_value_lc    = {_z},
+                            unrealized_pnl_fc  = {_z},
+                            unrealized_pnl_lc  = {_z},
+                            realized_pnl_fc    = {_z},
+                            realized_pnl_lc    = {_z},
+                            dividend_fc        = {_z},
+                            dividend_lc        = {_z},
+                            pipeline_fc        = {_z},
+                            pipeline_lc        = {_z},
+                            provision_fc       = {_z},
+                            provision_lc       = {_z},
+                            uncall_fc          = {_z},
+                            uncall_lc          = {_z},
+                            is_latest          = false,
+                            status             = 'CLOSED',
+                            is_active          = false,
+                            updated_by         = '{self._escape(updated_by)}',
+                            updated_at         = '{today_str}'
                         WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
                           AND security_label = '{self._escape(security_id)}'
                           AND position_date >= '{from_date}'
@@ -806,20 +824,36 @@ class SettlementService:
                         database=self.DATABASE
                     )
                     logger.info(
-                        f"Zeroed is_latest positions for {portfolio_id}/{security_id} "
-                        f"from {from_date}"
+                        f"Zeroed all value columns for {portfolio_id}/{security_id} "
+                        f"from {from_date} (no remaining trades)"
                     )
                     # Also zero cis_position (gold/summary table) — uses 'portfolio' not 'portfolio_short_name'
                     try:
                         impala_manager.execute_write(
                             f"""
                             UPDATE {self.DATABASE}.cis_position
-                            SET quantity = CAST(0 AS DECIMAL(30,8)),
-                                average_cost_fc = CAST(0 AS DECIMAL(30,8)),
-                                average_cost_lc = CAST(0 AS DECIMAL(30,8)),
-                                cost_fc = CAST(0 AS DECIMAL(30,8)),
-                                cost_lc = CAST(0 AS DECIMAL(30,8)),
-                                is_latest = false
+                            SET quantity           = {_z},
+                                average_cost_fc    = {_z},
+                                average_cost_lc    = {_z},
+                                cost_fc            = {_z},
+                                cost_lc            = {_z},
+                                market_value_fc    = {_z},
+                                market_value_lc    = {_z},
+                                unrealized_pnl_fc  = {_z},
+                                unrealized_pnl_lc  = {_z},
+                                realized_pnl_fc    = {_z},
+                                realized_pnl_lc    = {_z},
+                                net_book_value_fc  = {_z},
+                                net_book_value_lc  = {_z},
+                                dividend_fc        = {_z},
+                                dividend_lc        = {_z},
+                                pipeline_fc        = {_z},
+                                pipeline_lc        = {_z},
+                                provision_fc       = {_z},
+                                provision_lc       = {_z},
+                                uncall_fc          = {_z},
+                                uncall_lc          = {_z},
+                                is_latest          = false
                             WHERE portfolio = '{self._escape(portfolio_id)}'
                               AND security_label = '{self._escape(security_id)}'
                               AND position_date >= '{from_date}'
