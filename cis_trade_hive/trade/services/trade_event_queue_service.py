@@ -992,43 +992,16 @@ class TradeEventQueueService:
 
     def check_position_exists(self, trade_id: int) -> bool:
         """
-        Check if an active (is_latest=true) position exists for the portfolio/security
-        that this trade belongs to, on or after the trade's trade_date.
-
-        We deliberately do NOT filter by trade_id because chain recalc replaces
-        position rows with new versions whose trade_id points to the last trade in
-        the chain — so the original trade_id is no longer present in is_latest=true rows.
-        Instead we check whether ANY live position exists for the same portfolio/security
-        from the trade_date onward, which is the correct signal that a reversal is needed.
+        Check if an active (is_latest=true) position row exists that was written
+        by this specific trade (trade_id match). Used for informational checks only —
+        cancel routing no longer depends on this; all cancellations go via
+        PENDING_CANCELLATION for checker approval regardless.
         """
         try:
-            # First fetch the trade's portfolio, security and trade_date
-            trade_rows = impala_manager.execute_query(
-                f"""
-                SELECT portfolio_short_name, security_label, trade_date
-                FROM {self.DATABASE}.cis_trade
-                WHERE trade_id = {trade_id}
-                LIMIT 1
-                """,
-                database=self.DATABASE,
-            )
-            if not trade_rows:
-                return False
-
-            trade = trade_rows[0]
-            portfolio = (trade.get('portfolio_short_name') or '').replace("'", "''")
-            security  = (trade.get('security_label') or '').replace("'", "''")
-            trade_date = str(trade.get('trade_date') or '')[:10]
-
-            if not portfolio or not security or not trade_date:
-                return False
-
             query = f"""
             SELECT COUNT(*) as cnt
             FROM {self.DATABASE}.cis_trade_position
-            WHERE portfolio_short_name = '{portfolio}'
-              AND security_label       = '{security}'
-              AND position_date        >= '{trade_date}'
+            WHERE trade_id = {trade_id}
               AND is_latest = true
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)

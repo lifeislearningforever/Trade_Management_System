@@ -1242,8 +1242,8 @@ def trade_settle(request, trade_id):
 
 
 def trade_cancel(request, trade_id):
-    """Cancel trade. PORTIARP-7610: if trade has a position (settled/validated),
-    route to PENDING_CANCELLATION for checker approval instead of immediate cancel."""
+    """Cancel trade. All cancellations require checker approval (Four-Eyes) —
+    always routes to PENDING_CANCELLATION regardless of trade status or position."""
     if request.method != 'POST':
         return redirect('trade:detail', trade_id=trade_id)
 
@@ -1254,98 +1254,35 @@ def trade_cancel(request, trade_id):
 
     user_info = get_user_info(request)
     reason = request.POST.get('reason', '').strip()
+    current_status = trade_data.get('status', '')
 
     try:
-        from trade.services.trade_event_queue_service import trade_event_queue_service
-        has_position = trade_event_queue_service.check_position_exists(trade_id)
-        current_status = trade_data.get('status', '')
-
-        # Trades with an AVP position need checker approval before cancellation
-        # so position reversal only happens after the Four-Eyes check passes.
-        needs_approval = has_position or current_status in (
-            TradeKuduRepository.STATUS_SETTLED,
-            TradeKuduRepository.STATUS_VALIDATED,
+        success = trade_kudu_repository.submit_for_cancellation(
+            trade_id, user_info['username'], reason
         )
+        if not success:
+            raise Exception('Failed to submit cancellation for approval')
 
-        if needs_approval:
-            # Route to PENDING_CANCELLATION — checker must approve
-            success = trade_kudu_repository.submit_for_cancellation(
-                trade_id, user_info['username'], reason
-            )
-            if not success:
-                raise Exception('Failed to submit cancellation for approval')
-
-            audit_log_kudu_repository.log_action_async(
-                user_id=user_info['user_id'],
-                username=user_info['username'],
-                user_email=user_info['user_email'],
-                action_type='CANCEL_REQUEST',
-                entity_type='TRADE',
-                entity_id=str(trade_id),
-                entity_name=trade_data.get('deal_number', ''),
-                action_description=f'Cancellation requested for trade: {trade_data.get("deal_number", "")}' + (f'. Reason: {reason}' if reason else ''),
-                field_name='status',
-                old_value=json.dumps({'status': current_status}),
-                new_value=json.dumps({'status': 'PENDING_CANCELLATION', 'cancel_reason': reason}),
-                request_method='POST',
-                request_path=request.path,
-                request_params=json.dumps(dict(request.POST)) if request.POST else None,
-                ip_address=request.META.get('REMOTE_ADDR'),
-                user_agent=request.META.get('HTTP_USER_AGENT', ''),
-                status='SUCCESS'
-            )
-            messages.warning(request, 'Cancellation request submitted. Awaiting checker approval.')
-        else:
-            # No position via four-eyes — cancel immediately (INITIAL/MODIFIED trades)
-            success = trade_kudu_repository.cancel_trade(trade_id, user_info['username'], reason)
-            if not success:
-                raise Exception('Failed to cancel trade')
-
-            cancelled_count, _ = trade_event_queue_service.cancel_pending_events(trade_id)
-            if cancelled_count > 0:
-                logger.info(f"Cancelled {cancelled_count} pending events for trade {trade_id}")
-
-            # Run chain recalc — cancel_trade sets is_deleted=true so this trade is
-            # excluded from replay, correctly removing its contribution from the position.
-            try:
-                from trade.services.settlement_service import settlement_service
-                from core.repositories.impala_connection import impala_manager as _im
-                _port = trade_data.get('portfolio_short_name', '')
-                _sec = trade_data.get('security_label', '')
-                try:
-                    _im.execute_write("INVALIDATE METADATA gmp_cis.cis_trade", database='gmp_cis')
-                except Exception:
-                    pass
-                settlement_service._recalculate_position_chain(
-                    portfolio_id=_port,
-                    security_id=_sec,
-                    from_date=str(trade_data.get('trade_date', '') or ''),
-                    updated_by=user_info['username'],
-                )
-                logger.info(f"Position chain recalculated after direct cancel of trade {trade_id}")
-            except Exception as _ce:
-                logger.error(f"Chain recalc failed after cancel of trade {trade_id}: {_ce}")
-
-            audit_log_kudu_repository.log_action_async(
-                user_id=user_info['user_id'],
-                username=user_info['username'],
-                user_email=user_info['user_email'],
-                action_type='CANCEL',
-                entity_type='TRADE',
-                entity_id=str(trade_id),
-                entity_name=trade_data.get('deal_number', ''),
-                action_description=f'Cancelled trade: {trade_data.get("deal_number", "")}' + (f'. Reason: {reason}' if reason else ''),
-                field_name='status',
-                old_value=json.dumps({'status': current_status}),
-                new_value=json.dumps({'status': 'CANCELLED', 'cancel_reason': reason}),
-                request_method='POST',
-                request_path=request.path,
-                request_params=json.dumps(dict(request.POST)) if request.POST else None,
-                ip_address=request.META.get('REMOTE_ADDR'),
-                user_agent=request.META.get('HTTP_USER_AGENT', ''),
-                status='SUCCESS'
-            )
-            messages.warning(request, 'Trade has been cancelled.')
+        audit_log_kudu_repository.log_action_async(
+            user_id=user_info['user_id'],
+            username=user_info['username'],
+            user_email=user_info['user_email'],
+            action_type='CANCEL_REQUEST',
+            entity_type='TRADE',
+            entity_id=str(trade_id),
+            entity_name=trade_data.get('deal_number', ''),
+            action_description=f'Cancellation requested for trade: {trade_data.get("deal_number", "")}' + (f'. Reason: {reason}' if reason else ''),
+            field_name='status',
+            old_value=json.dumps({'status': current_status}),
+            new_value=json.dumps({'status': 'PENDING_CANCELLATION', 'cancel_reason': reason}),
+            request_method='POST',
+            request_path=request.path,
+            request_params=json.dumps(dict(request.POST)) if request.POST else None,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            status='SUCCESS'
+        )
+        messages.warning(request, 'Cancellation request submitted. Awaiting checker approval.')
 
     except Exception as e:
         messages.error(request, f'Error cancelling trade: {str(e)}')
