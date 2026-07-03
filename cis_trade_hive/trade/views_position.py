@@ -42,15 +42,14 @@ def position_list(request):
     date_to       = request.GET.get('date_to', '').strip()
     export        = request.GET.get('export', '').strip()
 
-    # Default date range: 30 days ending on the latest position_date in the table.
-    # Falls back to today only if the table is empty or unreachable.
+    # Default date range: report_date (today) to report_date + 2 (settle+2).
     if not date_from and not date_to:
         system_date = position_repository.get_max_position_date()
         if not system_date:
             system_date = datetime.now().strftime('%Y-%m-%d')
-        date_to   = system_date
-        dt_to     = datetime.strptime(system_date, '%Y-%m-%d')
-        date_from = (dt_to - timedelta(days=30)).strftime('%Y-%m-%d')
+        dt_report = datetime.strptime(system_date, '%Y-%m-%d')
+        date_from = system_date
+        date_to   = (dt_report + timedelta(days=2)).strftime('%Y-%m-%d')
 
     filter_kwargs = dict(
         portfolios=selected_portfolios or None,
