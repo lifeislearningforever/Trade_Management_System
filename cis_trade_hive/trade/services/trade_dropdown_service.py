@@ -330,7 +330,6 @@ class TradeDropdownService:
         return [
             {'value': 'INITIAL', 'label': 'Initial'},
             {'value': 'MODIFIED', 'label': 'Modified'},
-            {'value': 'PENDING_VALIDATION', 'label': 'Pending Validation'},
             {'value': 'VALIDATED', 'label': 'Validated'},
             {'value': 'SETTLED', 'label': 'Settled'},
             {'value': 'CANCELLED', 'label': 'Cancelled'},

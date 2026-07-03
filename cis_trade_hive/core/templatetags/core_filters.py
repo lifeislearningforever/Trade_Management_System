@@ -50,17 +50,17 @@ def get_item(dictionary, key):
 #
 #   {% can_act trade "trade" request as actions %}
 #   {% if actions.can_edit %} ... {% endif %}
-#   {% if actions.can_submit %} ... {% endif %}
 #
 # Supported modules and the flags each returns:
 #
-#   "trade"    → can_edit, can_submit, can_cancel, can_reactivate,
-#                can_validate, can_reject, can_settle
+#   "trade"    → can_edit, can_cancel, can_restore,
+#                can_validate, can_settle,
+#                can_approve_cancellation, can_reject_cancellation
 #   "security" → can_edit, can_validate
 #   "party"    → can_edit, can_delete
 #   "corp_action" → can_edit, can_delete, can_validate
-#   "portfolio" → can_edit, can_submit, can_cancel, can_reactivate,
-#                 can_validate, can_reject, can_settle
+#   "portfolio" → can_edit, can_cancel, can_restore,
+#                 can_validate, can_settle
 #
 # All flags are False when:
 #   - src_system != 'CIS'
@@ -126,16 +126,16 @@ def can_act(context, record, module):
     if module == 'trade':
         has_edit = _has_perm(request, 'trade-edit')
         has_approve = _has_perm(request, 'trade-approval')
+        is_deleted = str(_get_field(record, 'is_deleted')).lower() in ('true', '1')
+        pending_cancel = is_cis and status == 'MODIFIED' and is_deleted
         return {
-            'can_edit':                   has_edit    and is_cis and status in ('INITIAL', 'MODIFIED', 'CANCELLED'),
-            'can_submit':                 has_edit    and is_cis and status in ('INITIAL', 'MODIFIED'),
-            'can_cancel':                 has_edit    and is_cis and status in ('INITIAL', 'MODIFIED', 'PENDING_VALIDATION', 'VALIDATED', 'SETTLED'),
-            'can_reactivate':             has_edit    and is_cis and status == 'CANCELLED',
-            'can_validate':               has_approve and is_cis and status == 'PENDING_VALIDATION',
-            'can_reject':                 has_approve and is_cis and status == 'PENDING_VALIDATION',
+            'can_edit':                   has_edit    and is_cis and status in ('INITIAL', 'MODIFIED', 'VALIDATED', 'SETTLED'),
+            'can_cancel':                 has_edit    and is_cis and status != 'CANCELLED' and not is_deleted,
+            'can_restore':                has_edit    and is_cis and (status == 'CANCELLED' or is_deleted),
+            'can_validate':               has_approve and is_cis and status in ('INITIAL', 'MODIFIED') and not is_deleted,
             'can_settle':                 has_approve and is_cis and status == 'VALIDATED',
-            'can_approve_cancellation':   has_approve and is_cis and status == 'PENDING_CANCELLATION',
-            'can_reject_cancellation':    has_approve and is_cis and status == 'PENDING_CANCELLATION',
+            'can_approve_cancellation':   has_approve and pending_cancel,
+            'can_reject_cancellation':    has_approve and pending_cancel,
         }
 
     if module == 'portfolio':

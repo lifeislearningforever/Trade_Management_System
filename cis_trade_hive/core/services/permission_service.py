@@ -741,43 +741,48 @@ def get_trade_action_permissions(request: HttpRequest, trade_data: Any) -> Dict[
     Single source of truth for trade edit/submit/cancel/validate/settle icons.
     Use in trade_detail view (context flags) and trade_list view (annotate wrapper).
 
-    Maker statuses (editable): INITIAL, MODIFIED, CANCELLED
-    Checker statuses:          PENDING_VALIDATION → validate/reject
-                               VALIDATED          → settle
+    Maker statuses (editable): INITIAL, MODIFIED, VALIDATED, SETTLED
+    Checker statuses:          INITIAL, MODIFIED → validate
+                               VALIDATED         → settle
+    Cancel: available at all live statuses (not CANCELLED, not is_deleted)
+    Restore: available on CANCELLED or is_deleted=true (pending-cancel)
     """
     from django.conf import settings
 
     if hasattr(trade_data, 'status'):
         status = trade_data.status
         src_system = trade_data.src_system or ''
+        is_deleted = str(getattr(trade_data, 'is_deleted', False)).lower() in ('true', '1')
     else:
         status = trade_data.get('status', '')
         src_system = trade_data.get('src_system', '') or ''
+        is_deleted = str(trade_data.get('is_deleted', False)).lower() in ('true', '1')
 
     is_cis = src_system.upper() == 'CIS'
+    pending_cancel = is_cis and status == 'MODIFIED' and is_deleted
 
     if getattr(settings, 'SKIP_PERMISSION_CHECKS', False):
         return {
-            'can_edit': is_cis and status in ('INITIAL', 'MODIFIED', 'CANCELLED'),
-            'can_submit': is_cis and status in ('INITIAL', 'MODIFIED'),
-            'can_cancel': is_cis and status in ('INITIAL', 'MODIFIED', 'PENDING_VALIDATION'),
-            'can_reactivate': is_cis and status == 'CANCELLED',
-            'can_validate': is_cis and status == 'PENDING_VALIDATION',
-            'can_reject': is_cis and status == 'PENDING_VALIDATION',
-            'can_settle': is_cis and status == 'VALIDATED',
+            'can_edit':                 is_cis and status in ('INITIAL', 'MODIFIED', 'VALIDATED', 'SETTLED'),
+            'can_cancel':               is_cis and status != 'CANCELLED' and not is_deleted,
+            'can_restore':              is_cis and (status == 'CANCELLED' or is_deleted),
+            'can_validate':             is_cis and status in ('INITIAL', 'MODIFIED') and not is_deleted,
+            'can_settle':               is_cis and status == 'VALIDATED',
+            'can_approve_cancellation': pending_cancel,
+            'can_reject_cancellation':  pending_cancel,
         }
 
     has_edit = has_permission(request, 'trade-edit', 'WRITE')
     has_approve = has_permission(request, 'trade-approval', 'WRITE')
 
     return {
-        'can_edit': has_edit and is_cis and status in ('INITIAL', 'MODIFIED', 'CANCELLED'),
-        'can_submit': has_edit and is_cis and status in ('INITIAL', 'MODIFIED'),
-        'can_cancel': has_edit and is_cis and status in ('INITIAL', 'MODIFIED', 'PENDING_VALIDATION'),
-        'can_reactivate': has_edit and is_cis and status == 'CANCELLED',
-        'can_validate': has_approve and is_cis and status == 'PENDING_VALIDATION',
-        'can_reject': has_approve and is_cis and status == 'PENDING_VALIDATION',
-        'can_settle': has_approve and is_cis and status == 'VALIDATED',
+        'can_edit':                 has_edit    and is_cis and status in ('INITIAL', 'MODIFIED', 'VALIDATED', 'SETTLED'),
+        'can_cancel':               has_edit    and is_cis and status != 'CANCELLED' and not is_deleted,
+        'can_restore':              has_edit    and is_cis and (status == 'CANCELLED' or is_deleted),
+        'can_validate':             has_approve and is_cis and status in ('INITIAL', 'MODIFIED') and not is_deleted,
+        'can_settle':               has_approve and is_cis and status == 'VALIDATED',
+        'can_approve_cancellation': has_approve and pending_cancel,
+        'can_reject_cancellation':  has_approve and pending_cancel,
     }
 
 

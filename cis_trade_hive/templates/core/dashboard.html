@@ -263,7 +263,7 @@
                         {% for status, count in trade_stats.status_breakdown.items %}
                         <div class="col-6 col-md-4">
                             <div class="trade-status-stat">
-                                <span class="badge {% if status == 'SETTLED' %}bg-success{% elif status == 'PENDING_VALIDATION' %}bg-warning{% elif status == 'VALIDATED' %}bg-info{% elif status == 'CANCELLED' %}bg-danger{% else %}bg-secondary{% endif %}">{{ status }}</span>
+                                <span class="badge {% if status == 'SETTLED' %}bg-success{% elif status == 'VALIDATED' %}bg-info{% elif status == 'CANCELLED' %}bg-danger{% elif status == 'INITIAL' or status == 'MODIFIED' %}bg-warning{% else %}bg-secondary{% endif %}">{{ status }}</span>
                                 <span class="ms-2 fw-bold">{{ count }}</span>
                             </div>
                         </div>

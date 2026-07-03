@@ -225,7 +225,7 @@
                         </thead>
                         <tbody>
                             {% for trade in page_obj %}
-                            <tr class="{% if trade.status == 'PENDING_VALIDATION' %}row-pending-approval{% elif trade.status == 'SETTLED' %}row-settled{% elif trade.status == 'VALIDATED' %}row-validated{% elif trade.status == 'CANCELLED' %}row-can{% elif trade.status == 'REJECTED' %}row-rejected{% endif %}"
+                            <tr class="{% if trade.status == 'INITIAL' or trade.status == 'MODIFIED' %}row-pending-approval{% elif trade.status == 'SETTLED' %}row-settled{% elif trade.status == 'VALIDATED' %}row-validated{% elif trade.status == 'CANCELLED' %}row-can{% endif %}"
                                 {% if trade.status == 'CANCELLED' %}style="opacity:0.6"{% endif %}>
                                 <td>
                                     {% if trade.src_system|upper == 'CIS' %}
@@ -271,8 +271,6 @@
                                         <span class="status-pill status-initial"><i class="bi bi-pencil-square"></i> Initial</span>
                                     {% elif trade.status == 'MODIFIED' %}
                                         <span class="status-pill status-modified"><i class="bi bi-pencil"></i> Modified</span>
-                                    {% elif trade.status == 'PENDING_VALIDATION' %}
-                                        <span class="status-pill status-pending"><i class="bi bi-clock"></i> Pending</span>
                                     {% elif trade.status == 'VALIDATED' %}
                                         <span class="status-pill status-validated"><i class="bi bi-check-circle"></i> Validated</span>
                                     {% elif trade.status == 'SETTLED' %}
@@ -301,21 +299,12 @@
                                                 <i class="bi bi-pencil"></i>
                                             </a>
                                         {% endif %}
-                                        {% if ta.can_submit %}
-                                            <form method="post" action="{% url 'trade:submit' trade.trade_id %}" class="d-inline">
-                                                {% csrf_token %}
-                                                <button type="submit" class="btn btn-sm btn-outline-info" title="Submit for Validation"
-                                                        onclick="return confirm('Submit for validation?')">
-                                                    <i class="bi bi-send"></i>
-                                                </button>
-                                            </form>
-                                        {% endif %}
-                                        {% if ta.can_reactivate %}
+                                        {% if ta.can_restore %}
                                             <form method="post" action="{% url 'trade:reactivate' trade.trade_id %}" class="d-inline">
                                                 {% csrf_token %}
-                                                <button type="submit" class="btn btn-sm btn-outline-success" title="Reactivate"
-                                                        onclick="return confirm('Reactivate this trade?')">
-                                                    <i class="bi bi-arrow-clockwise"></i>
+                                                <button type="submit" class="btn btn-sm btn-outline-success" title="Restore"
+                                                        onclick="return confirm('Restore this trade?')">
+                                                    <i class="bi bi-arrow-counterclockwise"></i>
                                                 </button>
                                             </form>
                                         {% endif %}
@@ -686,9 +675,9 @@ document.getElementById('securityModalSearch').addEventListener('input', functio
 
 // ── Helpers ───────────────────────────────────────────────────
 function getStatusBadgeClass(status) {
-    const m = { INITIAL:'badge-secondary', MODIFIED:'badge-info', PENDING_VALIDATION:'badge-warning',
+    const m = { INITIAL:'badge-secondary', MODIFIED:'badge-info',
                 VALIDATED:'badge-primary', SETTLED:'badge-success', ACTIVE:'badge-success',
-                APPROVED:'badge-success', CANCELLED:'badge-dark', PENDING_CANCELLATION:'badge-danger' };
+                APPROVED:'badge-success', CANCELLED:'badge-dark' };
     return m[status] || 'badge-secondary';
 }
 function removePortfolioFilter(name) {
