@@ -63,7 +63,8 @@ class TradeKuduRepository:
 
     # Status groups
     MAKER_EDITABLE_STATUSES = [STATUS_INITIAL, STATUS_MODIFIED, STATUS_CANCELLED]
-    CHECKER_ACTIONABLE_STATUSES = [STATUS_PENDING_VALIDATION, STATUS_VALIDATED, STATUS_PENDING_CANCELLATION]
+    # Pending cancellations are MODIFIED+is_deleted=true; checker sees them via get_pending_validation_trades
+    CHECKER_ACTIONABLE_STATUSES = [STATUS_PENDING_VALIDATION, STATUS_VALIDATED]
 
     @staticmethod
     def escape_value(val: Any) -> str:
@@ -1475,9 +1476,10 @@ class TradeKuduRepository:
 
     def submit_for_cancellation(self, trade_id: int, submitted_by: str, reason: str = '') -> bool:
         """Submit trade for cancellation approval.
-        Sets status to PENDING_CANCELLATION and immediately marks is_deleted=true
-        so chain recalc can exclude this trade right away. The checker's approval
-        step only finalises the status to CANCELLED; position is already reversed."""
+        Sets status=MODIFIED + is_deleted=true immediately so the trade appears
+        in the checker's Pending Validation queue. is_deleted=true signals the
+        cancellation intent and excludes the trade from chain recalc right away.
+        Checker approval finalises to CANCELLED; rejection restores is_deleted=false."""
         try:
             current_trade = self.get_trade_by_id(trade_id)
             if not current_trade:
@@ -1488,7 +1490,7 @@ class TradeKuduRepository:
 
             query = f"""
             UPDATE {self.DATABASE}.{self.TABLE_NAME}
-            SET status = '{self.STATUS_PENDING_CANCELLATION}',
+            SET status = '{self.STATUS_MODIFIED}',
                 is_deleted = true,
                 is_active = false,
                 cancel_reason = {self.escape_value(reason)},
@@ -1507,13 +1509,13 @@ class TradeKuduRepository:
                     deal_number=current_trade.get('deal_number', ''),
                     action='CANCEL_REQUEST',
                     old_status=current_status,
-                    new_status=self.STATUS_PENDING_CANCELLATION,
+                    new_status=self.STATUS_MODIFIED,
                     changes={},
                     comments=f'Cancellation requested. Reason: {reason}',
                     performed_by=submitted_by,
                     async_write=True
                 )
-                logger.info(f"Trade {trade_id} submitted for cancellation approval")
+                logger.info(f"Trade {trade_id} submitted for cancellation (status=MODIFIED, is_deleted=true)")
 
             return success
 
@@ -1530,8 +1532,9 @@ class TradeKuduRepository:
             if not current_trade:
                 raise ValueError(f"Trade {trade_id} not found")
 
-            if current_trade.get('status') != self.STATUS_PENDING_CANCELLATION:
-                raise ValueError(f"Trade {trade_id} is not pending cancellation")
+            if not (current_trade.get('status') == self.STATUS_MODIFIED
+                    and current_trade.get('is_deleted') in (True, 'true', 1)):
+                raise ValueError(f"Trade {trade_id} is not pending cancellation approval")
 
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -1550,7 +1553,7 @@ class TradeKuduRepository:
                     trade_id=trade_id,
                     deal_number=current_trade.get('deal_number', ''),
                     action='CANCEL_APPROVE',
-                    old_status=self.STATUS_PENDING_CANCELLATION,
+                    old_status=self.STATUS_MODIFIED,
                     new_status=self.STATUS_CANCELLED,
                     changes={},
                     comments=f'Cancellation approved. {comments}' if comments else 'Cancellation approved.',
@@ -1566,15 +1569,16 @@ class TradeKuduRepository:
             raise
 
     def reject_cancellation(self, trade_id: int, rejected_by: str, comments: str = '') -> str:
-        """PORTIARP-7610: Checker rejects cancellation — reverts to previous status (SETTLED or MODIFIED).
-        Returns the status the trade was reverted to."""
+        """Checker rejects cancellation — restores is_deleted=false and reverts status
+        to the pre-cancel value from trade history. Returns the reverted-to status."""
         try:
             current_trade = self.get_trade_by_id(trade_id)
             if not current_trade:
                 raise ValueError(f"Trade {trade_id} not found")
 
-            if current_trade.get('status') != self.STATUS_PENDING_CANCELLATION:
-                raise ValueError(f"Trade {trade_id} is not pending cancellation")
+            if not (current_trade.get('status') == self.STATUS_MODIFIED
+                    and current_trade.get('is_deleted') in (True, 'true', 1)):
+                raise ValueError(f"Trade {trade_id} is not pending cancellation approval")
 
             # Revert: if cancel_reason was set from a SETTLED trade, go back to SETTLED;
             # otherwise MODIFIED. We check trade history for the pre-cancel status.
@@ -1608,7 +1612,7 @@ class TradeKuduRepository:
                     trade_id=trade_id,
                     deal_number=current_trade.get('deal_number', ''),
                     action='CANCEL_REJECT',
-                    old_status=self.STATUS_PENDING_CANCELLATION,
+                    old_status=self.STATUS_MODIFIED,
                     new_status=prev_status,
                     changes={},
                     comments=f'Cancellation rejected. {comments}' if comments else 'Cancellation rejected.',
@@ -2422,7 +2426,7 @@ class TradeKuduRepository:
         today = date.today().strftime('%Y-%m-%d')
 
         try:
-            # Single query: group by status + trade_type, sum notional, count today
+            # Main query: non-deleted trades grouped by status + trade_type
             # gross_amount may be NULL on older/GMP trades; fall back to quantity*price
             query = f"""
             SELECT
@@ -2436,6 +2440,17 @@ class TradeKuduRepository:
             GROUP BY status, trade_type
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
+
+            # Separate count for pending-cancellation trades (MODIFIED + is_deleted=true + cancel_reason set)
+            pending_cancel_query = f"""
+            SELECT COUNT(*) AS cnt
+            FROM {self.DATABASE}.{self.TABLE_NAME}
+            WHERE is_deleted = true
+              AND status = 'MODIFIED'
+              AND cancel_reason IS NOT NULL
+            """
+            pc_rows = impala_manager.execute_query(pending_cancel_query, database=self.DATABASE)
+            pending_cancel_count = int((pc_rows[0].get('cnt') or 0) if pc_rows else 0)
 
             stats = {
                 'total_trades': 0,
@@ -2473,9 +2488,9 @@ class TradeKuduRepository:
                     tb['notional'] += notional
                     stats['type_breakdown'][trade_type] = tb
 
-                    if status in (self.STATUS_PENDING_VALIDATION, self.STATUS_PENDING_CANCELLATION):
+                    if status == self.STATUS_PENDING_VALIDATION:
                         stats['pending_validation'] += count
-                    if status in (self.STATUS_VALIDATED, self.STATUS_PENDING_CANCELLATION):
+                    if status == self.STATUS_VALIDATED:
                         stats['pending_settlement'] += count
                     elif status == self.STATUS_SETTLED:
                         stats['settled'] += count
@@ -2488,6 +2503,9 @@ class TradeKuduRepository:
                         stats['buy_notional'] += notional
                     elif trade_type == 'SELL':
                         stats['sell_notional'] += notional
+
+            # Add pending-cancellation trades (MODIFIED + is_deleted=true) to pending_validation count
+            stats['pending_validation'] += pending_cancel_count
 
             # Convert to sorted lists for template/JSON consumption
             status_order = [
@@ -2549,24 +2567,26 @@ class TradeKuduRepository:
             List of trades pending validation
         """
         try:
-            # PORTIARP-7610: also include PENDING_CANCELLATION so checker can approve/reject
-            pending_statuses = [self.STATUS_PENDING_VALIDATION, self.STATUS_PENDING_CANCELLATION]
-            status_list = ", ".join([f"'{s}'" for s in pending_statuses])
+            cis_clause = "AND UPPER(src_system) = 'CIS'" if cis_only else ""
 
-            where_clauses = [
-                "(is_deleted = false OR is_deleted IS NULL)",
-                f"status IN ({status_list})"
-            ]
-
-            if cis_only:
-                where_clauses.append("UPPER(src_system) = 'CIS'")
-
-            where_clause = " AND ".join(where_clauses)
-
+            # Normal pending validation trades (not deleted)
+            # + pending-cancellation trades (MODIFIED + is_deleted=true, awaiting checker)
             query = f"""
             SELECT *
             FROM {self.DATABASE}.{self.TABLE_NAME}
-            WHERE {where_clause}
+            WHERE (
+                (
+                    (is_deleted = false OR is_deleted IS NULL)
+                    AND status = '{self.STATUS_PENDING_VALIDATION}'
+                )
+                OR
+                (
+                    is_deleted = true
+                    AND status = '{self.STATUS_MODIFIED}'
+                    AND cancel_reason IS NOT NULL
+                )
+            )
+            {cis_clause}
             ORDER BY created_at DESC
             LIMIT {limit}
             """
@@ -2579,12 +2599,8 @@ class TradeKuduRepository:
             return []
 
     def get_pending_settlement_trades(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """Get validated trades pending settlement, plus PENDING_CANCELLATION (PORTIARP-7610)."""
-        validated = self.get_all_trades(limit=limit, status=self.STATUS_VALIDATED)
-        pending_cancel = self.get_all_trades(limit=limit, status=self.STATUS_PENDING_CANCELLATION)
-        combined = validated + pending_cancel
-        combined.sort(key=lambda t: str(t.get('created_at', '')), reverse=True)
-        return combined[:limit]
+        """Get validated trades pending settlement."""
+        return self.get_all_trades(limit=limit, status=self.STATUS_VALIDATED)
 
 
 # Singleton instance

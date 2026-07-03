@@ -630,9 +630,11 @@ def trade_detail(request, trade_id):
     can_validate = is_cis_record and status == TradeKuduRepository.STATUS_PENDING_VALIDATION
     can_reject = is_cis_record and status == TradeKuduRepository.STATUS_PENDING_VALIDATION
     can_settle = is_cis_record and status == TradeKuduRepository.STATUS_VALIDATED
-    # PORTIARP-7610: cancellation of settled/validated trades requires checker approval
-    can_approve_cancellation = is_cis_record and status == TradeKuduRepository.STATUS_PENDING_CANCELLATION
-    can_reject_cancellation = is_cis_record and status == TradeKuduRepository.STATUS_PENDING_CANCELLATION
+    # Pending cancellation: maker set status=MODIFIED + is_deleted=true; checker approves/rejects
+    _is_deleted = trade_data.get('is_deleted') in (True, 'true', 1)
+    _pending_cancel = is_cis_record and status == TradeKuduRepository.STATUS_MODIFIED and _is_deleted
+    can_approve_cancellation = _pending_cancel
+    can_reject_cancellation  = _pending_cancel
 
     # Get trade history
     history = trade_kudu_repository.get_trade_history(trade_id)
