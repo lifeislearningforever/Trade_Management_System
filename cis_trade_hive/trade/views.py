@@ -1242,8 +1242,10 @@ def trade_settle(request, trade_id):
 
 
 def trade_cancel(request, trade_id):
-    """Cancel trade. All cancellations require checker approval (Four-Eyes) —
-    always routes to PENDING_CANCELLATION regardless of trade status or position."""
+    """Cancel trade — always requires checker approval (Four-Eyes / PENDING_CANCELLATION).
+    Position effect is immediate: is_deleted=true + chain recalc run now so the
+    position is reversed straight away. Checker approval only finalises the status
+    to CANCELLED for audit/tracking purposes."""
     if request.method != 'POST':
         return redirect('trade:detail', trade_id=trade_id)
 
@@ -1257,11 +1259,30 @@ def trade_cancel(request, trade_id):
     current_status = trade_data.get('status', '')
 
     try:
+        # Sets is_deleted=true + status=PENDING_CANCELLATION immediately.
         success = trade_kudu_repository.submit_for_cancellation(
             trade_id, user_info['username'], reason
         )
         if not success:
             raise Exception('Failed to submit cancellation for approval')
+
+        # Reverse position immediately — is_deleted=true means chain recalc
+        # will exclude this trade from replay, removing its contribution.
+        from trade.services.settlement_service import settlement_service
+        from core.repositories.impala_connection import impala_manager as _im
+        _port = trade_data.get('portfolio_short_name', '')
+        _sec  = trade_data.get('security_label', '')
+        try:
+            _im.execute_write("INVALIDATE METADATA gmp_cis.cis_trade", database='gmp_cis')
+        except Exception as _inv_err:
+            logger.warning(f"INVALIDATE METADATA failed (non-fatal): {_inv_err}")
+        settlement_service._recalculate_position_chain(
+            portfolio_id=_port,
+            security_id=_sec,
+            from_date=str(trade_data.get('trade_date', '') or ''),
+            updated_by=user_info['username'],
+        )
+        logger.info(f"Position chain recalculated immediately after cancel request for trade {trade_id}")
 
         audit_log_kudu_repository.log_action_async(
             user_id=user_info['user_id'],
@@ -1282,7 +1303,7 @@ def trade_cancel(request, trade_id):
             user_agent=request.META.get('HTTP_USER_AGENT', ''),
             status='SUCCESS'
         )
-        messages.warning(request, 'Cancellation request submitted. Awaiting checker approval.')
+        messages.warning(request, 'Cancellation request submitted. Position reversed immediately. Awaiting checker approval.')
 
     except Exception as e:
         messages.error(request, f'Error cancelling trade: {str(e)}')
@@ -1292,8 +1313,9 @@ def trade_cancel(request, trade_id):
 
 @require_login
 def trade_approve_cancellation(request, trade_id):
-    """PORTIARP-7610: Checker approves cancellation of a settled/validated trade.
-    Confirms CANCELLED status and queues POSITION_CANCEL to reverse AVP."""
+    """Checker approves cancellation — finalises status to CANCELLED.
+    No position work needed: is_deleted=true was set and chain recalc ran
+    immediately when the maker submitted the cancellation request."""
     if request.method != 'POST':
         return redirect('trade:detail', trade_id=trade_id)
 
@@ -1309,26 +1331,6 @@ def trade_approve_cancellation(request, trade_id):
         success = trade_kudu_repository.approve_cancellation(trade_id, user_info['username'], comments)
         if not success:
             raise Exception('Failed to approve cancellation')
-
-        # Run chain recalc synchronously so position is updated immediately after cancel.
-        # approve_cancellation already set is_deleted=true, so INVALIDATE METADATA ensures
-        # chain recalc sees that before querying cis_trade, excluding this trade from replay.
-        from trade.services.settlement_service import settlement_service
-        from core.repositories.impala_connection import impala_manager as _im
-        portfolio_id = trade_data.get('portfolio_short_name', '')
-        security_id = trade_data.get('security_label', '')
-        try:
-            _im.execute_write("INVALIDATE METADATA gmp_cis.cis_trade", database='gmp_cis')
-        except Exception as _inv_err:
-            logger.warning(f"INVALIDATE METADATA cis_trade failed (non-fatal): {_inv_err}")
-        from_date = str(trade_data.get('trade_date', '') or '')
-        settlement_service._recalculate_position_chain(
-            portfolio_id=portfolio_id,
-            security_id=security_id,
-            from_date=from_date,
-            updated_by=user_info['username'],
-        )
-        logger.info(f"Position chain recalculated synchronously for cancelled trade {trade_id} from {from_date}")
 
         audit_log_kudu_repository.log_action_async(
             user_id=user_info['user_id'],
@@ -1349,7 +1351,7 @@ def trade_approve_cancellation(request, trade_id):
             user_agent=request.META.get('HTTP_USER_AGENT', ''),
             status='SUCCESS'
         )
-        messages.success(request, 'Trade cancellation approved. Position updated.')
+        messages.success(request, 'Trade cancellation approved.')
 
     except Exception as e:
         messages.error(request, f'Error approving cancellation: {str(e)}')
@@ -1359,7 +1361,8 @@ def trade_approve_cancellation(request, trade_id):
 
 @require_login
 def trade_reject_cancellation(request, trade_id):
-    """PORTIARP-7610: Checker rejects cancellation — trade reverts to prior status (SETTLED/MODIFIED)."""
+    """Checker rejects cancellation — restores is_deleted=false and reruns chain
+    recalc to reinstate the position immediately, then reverts status to prior value."""
     if request.method != 'POST':
         return redirect('trade:detail', trade_id=trade_id)
 
@@ -1372,7 +1375,26 @@ def trade_reject_cancellation(request, trade_id):
     comments = request.POST.get('comments', '').strip()
 
     try:
+        # Restores is_deleted=false, is_active=true and reverts status.
         reverted_to = trade_kudu_repository.reject_cancellation(trade_id, user_info['username'], comments)
+
+        # Reinstate position immediately — trade is live again so chain recalc
+        # will include it in replay now that is_deleted=false.
+        from trade.services.settlement_service import settlement_service
+        from core.repositories.impala_connection import impala_manager as _im
+        _port = trade_data.get('portfolio_short_name', '')
+        _sec  = trade_data.get('security_label', '')
+        try:
+            _im.execute_write("INVALIDATE METADATA gmp_cis.cis_trade", database='gmp_cis')
+        except Exception as _inv_err:
+            logger.warning(f"INVALIDATE METADATA failed (non-fatal): {_inv_err}")
+        settlement_service._recalculate_position_chain(
+            portfolio_id=_port,
+            security_id=_sec,
+            from_date=str(trade_data.get('trade_date', '') or ''),
+            updated_by=user_info['username'],
+        )
+        logger.info(f"Position reinstated after cancellation rejection for trade {trade_id}")
 
         audit_log_kudu_repository.log_action_async(
             user_id=user_info['user_id'],
@@ -1393,7 +1415,7 @@ def trade_reject_cancellation(request, trade_id):
             user_agent=request.META.get('HTTP_USER_AGENT', ''),
             status='SUCCESS'
         )
-        messages.info(request, f'Trade cancellation rejected. Trade reverted to {reverted_to}.')
+        messages.info(request, f'Cancellation rejected. Trade reverted to {reverted_to} and position reinstated.')
 
     except Exception as e:
         messages.error(request, f'Error rejecting cancellation: {str(e)}')

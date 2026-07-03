@@ -1474,8 +1474,10 @@ class TradeKuduRepository:
             raise
 
     def submit_for_cancellation(self, trade_id: int, submitted_by: str, reason: str = '') -> bool:
-        """PORTIARP-7610: Submit a settled/validated trade for cancellation approval.
-        Sets status to PENDING_CANCELLATION; position is NOT reversed yet."""
+        """Submit trade for cancellation approval.
+        Sets status to PENDING_CANCELLATION and immediately marks is_deleted=true
+        so chain recalc can exclude this trade right away. The checker's approval
+        step only finalises the status to CANCELLED; position is already reversed."""
         try:
             current_trade = self.get_trade_by_id(trade_id)
             if not current_trade:
@@ -1487,8 +1489,11 @@ class TradeKuduRepository:
             query = f"""
             UPDATE {self.DATABASE}.{self.TABLE_NAME}
             SET status = '{self.STATUS_PENDING_CANCELLATION}',
+                is_deleted = true,
+                is_active = false,
                 cancel_reason = {self.escape_value(reason)},
                 cancelled_by = {self.escape_value(submitted_by)},
+                cancelled_at = '{timestamp}',
                 updated_by = {self.escape_value(submitted_by)},
                 updated_at = '{timestamp}'
             WHERE trade_id = {trade_id}
@@ -1517,7 +1522,9 @@ class TradeKuduRepository:
             raise
 
     def approve_cancellation(self, trade_id: int, approved_by: str, comments: str = '') -> bool:
-        """PORTIARP-7610: Checker approves cancellation — sets CANCELLED, then caller reverses position."""
+        """Checker approves cancellation — finalises status to CANCELLED.
+        is_deleted=true was already set by submit_for_cancellation and chain recalc
+        already ran at that point, so no position work is needed here."""
         try:
             current_trade = self.get_trade_by_id(trade_id)
             if not current_trade:
@@ -1531,9 +1538,6 @@ class TradeKuduRepository:
             query = f"""
             UPDATE {self.DATABASE}.{self.TABLE_NAME}
             SET status = '{self.STATUS_CANCELLED}',
-                is_active = false,
-                is_deleted = true,
-                cancelled_at = '{timestamp}',
                 updated_by = {self.escape_value(approved_by)},
                 updated_at = '{timestamp}'
             WHERE trade_id = {trade_id}
@@ -1587,8 +1591,11 @@ class TradeKuduRepository:
             query = f"""
             UPDATE {self.DATABASE}.{self.TABLE_NAME}
             SET status = {self.escape_value(prev_status)},
+                is_deleted = false,
+                is_active = true,
                 cancel_reason = NULL,
                 cancelled_by = NULL,
+                cancelled_at = NULL,
                 updated_by = {self.escape_value(rejected_by)},
                 updated_at = '{timestamp}'
             WHERE trade_id = {trade_id}
