@@ -747,7 +747,7 @@ class SettlementService:
               AND security_label = '{self._escape(security_id)}'
               AND (trade_date >= '{from_date}' OR settle_date >= '{from_date}')
               AND settle_date <= '{today_str}'
-              AND (trade_status IN ('INITIAL', 'VALIDATED', 'SETTLED') OR status IN ('INITIAL', 'VALIDATED', 'SETTLED'))
+              AND (trade_status IN ('INITIAL', 'MODIFIED', 'VALIDATED', 'SETTLED') OR status IN ('INITIAL', 'MODIFIED', 'VALIDATED', 'SETTLED'))
               AND (is_deleted = false OR is_deleted IS NULL)
             ORDER BY trade_date ASC, settle_date ASC, trade_id ASC
             """
