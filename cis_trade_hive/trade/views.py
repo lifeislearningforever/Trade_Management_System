@@ -1013,8 +1013,13 @@ def trade_edit(request, trade_id):
                 new_trade_date = str(updated_data.get('trade_date', '') or old_trade_date)
                 old_settle_date = str(trade_data.get('settle_date', '') or '')
                 new_settle_date = str(updated_data.get('settle_date', '') or old_settle_date)
-                candidate_dates = [d for d in [old_trade_date, old_settle_date, new_trade_date, new_settle_date] if d]
-                from_date = min(candidate_dates) if candidate_dates else old_trade_date
+                # from_date = earliest of old/new trade dates only.
+                # _recalculate_position_chain seeds from the last position before
+                # from_date, so earlier positions (e.g. Feb-26, Feb-27) are carried
+                # forward automatically — no need to replay them from scratch.
+                # e.g. amend Mar-02 qty → from_date=Mar-02, seed=Feb-27 position.
+                # e.g. amend trade date Mar-02→Jan-15 → from_date=Jan-15.
+                from_date = min(d for d in [old_trade_date, new_trade_date] if d)
                 settlement_service._recalculate_position_chain(
                     portfolio_id=portfolio_id,
                     security_id=security_id,
@@ -1379,9 +1384,10 @@ def trade_approve_cancellation(request, trade_id):
         )
         if _pos_check:
             trade_date = str(trade_data.get('trade_date', '') or '')
-            settle_date = str(trade_data.get('settle_date', '') or '')
-            candidate_dates = [d for d in [trade_date, settle_date] if d]
-            from_date = min(candidate_dates) if candidate_dates else trade_date
+            # from_date = trade_date of the cancelled trade.
+            # _recalculate_position_chain seeds from the last position before
+            # from_date, so earlier positions are carried forward automatically.
+            from_date = trade_date
             settlement_service._recalculate_position_chain(
                 portfolio_id=portfolio_id,
                 security_id=security_id,
