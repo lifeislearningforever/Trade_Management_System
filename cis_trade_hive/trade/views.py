@@ -996,6 +996,14 @@ def trade_edit(request, trade_id):
             # trades share the same date. Check at portfolio+security level instead.
             from trade.services.settlement_service import settlement_service
             from core.repositories.impala_connection import impala_manager as _im
+
+            # Flush Impala's metadata cache for cis_trade so the chain recalc query
+            # below sees the just-written amended values and not the stale pre-amend row.
+            try:
+                _im.execute_write("INVALIDATE METADATA gmp_cis.cis_trade", database='gmp_cis')
+            except Exception as _inv_err:
+                logger.warning(f"INVALIDATE METADATA cis_trade failed (non-fatal): {_inv_err}")
+
             portfolio_id = trade_data.get('portfolio_short_name', '')
             security_id = trade_data.get('security_label', '')
             _pos_check = _im.execute_query(
