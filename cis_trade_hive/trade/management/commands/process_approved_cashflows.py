@@ -72,6 +72,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from core.repositories.impala_connection import impala_manager
 from trade.services.multicurrency_service import multicurrency_service
+from trade.services.position_id_service import position_id as _calc_position_id
 
 logger = logging.getLogger(__name__)
 
@@ -845,20 +846,15 @@ class Command(BaseCommand):
                 effective_src = src_system
                 pos_basis     = current.get('position_basis') or 'SETTLED'
 
-            # Natural key hash — consistent with upload_service and trade creation
-            new_position_id = impala_manager.execute_query(
-                f"""
-                SELECT ABS(CAST(fnv_hash(CONCAT_WS('|',
-                    '{_escape(portfolio)}',
-                    '{_escape(security)}',
-                    '{_escape(pos_basis)}',
-                    '{_escape(position_date)}',
-                    '{_escape(effective_src)}'
-                )) AS BIGINT)) AS pid
-                """,
-                database=DATABASE
+            # Natural key hash — uses same MD5-based formula as position_id_service
+            # (position_service, upload_service, refresh_positions all use this)
+            new_position_id = _calc_position_id(
+                portfolio=portfolio,
+                security_label=security,
+                position_basis=pos_basis,
+                position_date=position_date,
+                src_system=effective_src,
             )
-            new_position_id = int((new_position_id or [{}])[0].get('pid', 0))
             logger.info(
                 f'[GOLDEN] position_id={new_position_id} for '
                 f'{portfolio}/{security}/{pos_basis}/{position_date}/{effective_src}'
