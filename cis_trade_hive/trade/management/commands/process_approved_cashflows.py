@@ -802,6 +802,8 @@ class Command(BaseCommand):
         Non-fatal: logs errors but does not fail the parent write.
         """
         try:
+            # Look up the existing golden row for this exact date to determine
+            # src_system — needed to compute the correct natural key hash.
             find_q = f"""
             SELECT position_id, version_id, realized_pnl_fc, realized_pnl_lc,
                    isin, source_table, src_system, position_basis,
@@ -813,9 +815,10 @@ class Command(BaseCommand):
                    uncall_fc, uncall_lc,
                    pipeline_fc, pipeline_lc
             FROM {DATABASE}.{GOLDEN_TABLE}
-            WHERE portfolio = '{_escape(portfolio)}'
+            WHERE portfolio      = '{_escape(portfolio)}'
               AND security_label = '{_escape(security)}'
               AND position_basis = 'SETTLED'
+              AND position_date  = '{_escape(position_date)}'
             ORDER BY position_id DESC
             LIMIT 1
             """
