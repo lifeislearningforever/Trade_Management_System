@@ -206,9 +206,13 @@ class Command(BaseCommand):
 
         Returns (reporting_date, last_month_end) as 'YYYY-MM-DD' strings.
 
-        reporting_date  = prev_day (T-1) from alldatesinfo — used by EOD.
-        last_month_end  = last calendar day of the month before reporting_date
-                          — used by CORR.
+        reporting_date  = reporting_date column (T-1) — used by EOD.
+
+        CORR last_month_end logic (SA rule):
+          - If contextual_today and reporting_date are in DIFFERENT months
+            → last_month_end = reporting_date  (reporting_date IS the month-end)
+          - Else (same month)
+            → last calendar day of month before reporting_date
 
         Falls back to (yesterday, last calendar day of previous month) if the
         table is unavailable.
@@ -216,7 +220,7 @@ class Command(BaseCommand):
         try:
             rows = impala_manager.execute_query(
                 f"""
-                SELECT prev_day, reporting_date
+                SELECT contextual_today, reporting_date
                 FROM {DATABASE}.gmp_cis_sta_dly_alldatesinfo
                 WHERE src_system  = 'gmp'
                   AND sub_system  = 'cis'
@@ -235,15 +239,25 @@ class Command(BaseCommand):
                 database=DATABASE
             )
             if rows:
-                # prev_day and reporting_date are YYYYMMDD strings
-                raw = rows[0].get('prev_day') or rows[0].get('reporting_date')
-                if raw:
-                    raw_str = str(raw)[:8]
-                    ref_date = datetime.strptime(raw_str, '%Y%m%d').date()
-                    reporting_date_iso = ref_date.strftime('%Y-%m-%d')
-                    # Last month-end = last day of month before ref_date
-                    first_of_ref_month = ref_date.replace(day=1)
-                    last_month_end = (first_of_ref_month - timedelta(days=1)).strftime('%Y-%m-%d')
+                raw_ct = str(rows[0].get('contextual_today', '') or '')[:8]
+                raw_rd = str(rows[0].get('reporting_date',   '') or '')[:8]
+                if raw_ct and raw_rd:
+                    contextual_today = datetime.strptime(raw_ct, '%Y%m%d').date()
+                    reporting_date   = datetime.strptime(raw_rd, '%Y%m%d').date()
+                    reporting_date_iso = reporting_date.strftime('%Y-%m-%d')
+
+                    # SA rule: different months → reporting_date is the month-end
+                    if contextual_today.month != reporting_date.month or \
+                       contextual_today.year  != reporting_date.year:
+                        last_month_end = reporting_date_iso
+                    else:
+                        first_of_ref_month = reporting_date.replace(day=1)
+                        last_month_end = (first_of_ref_month - timedelta(days=1)).strftime('%Y-%m-%d')
+
+                    logger.info(
+                        f"alldatesinfo: contextual_today={raw_ct} reporting_date={raw_rd} "
+                        f"→ reporting_date_iso={reporting_date_iso} last_month_end={last_month_end}"
+                    )
                     return reporting_date_iso, last_month_end
         except Exception as e:
             logger.warning(f"Could not read alldatesinfo for date inference: {e}")
