@@ -53,6 +53,7 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand
 
 from core.repositories.impala_connection import impala_manager
+from trade.services.multicurrency_service import multicurrency_service
 
 logger = logging.getLogger(__name__)
 
@@ -496,36 +497,24 @@ class Command(BaseCommand):
                 if v is not None:
                     ref['prices'][r.get('security_label')] = Decimal(str(v))
 
-        # 4. Collect all sec_ccy-port_ccy pairs that need FX rates
-        pairs = set()
+        # 4. Collect all sec_ccy-port_ccy pairs that need FX rates.
+        # Use multicurrency_service.get_fx_rates_batch which fetches both direct
+        # and reverse pairs and inverts when only the reverse direction exists —
+        # matching the same logic used during trade booking.
+        pair_tuples = []
         for p in positions:
             sec   = p.get('security_label')
             port  = p.get('portfolio')
             s_ccy = ref['sec_ccy'].get(sec)
             p_ccy = ref['port_info'].get(port, {}).get('currency')
             if s_ccy and p_ccy and s_ccy != p_ccy:
-                pairs.add(f'{s_ccy}-{p_ccy}')
+                pair_tuples.append((s_ccy, p_ccy))
 
-        if pairs:
-            rows = impala_manager.execute_query(
-                f"""
-                SELECT fr.ref_quot_ccy, fr.spot_rate_d
-                FROM {DATABASE}.gmp_cis_sta_dly_fx_rates fr
-                INNER JOIN (
-                    SELECT ref_quot_ccy, MAX(`date`) AS max_date
-                    FROM {DATABASE}.gmp_cis_sta_dly_fx_rates
-                    WHERE ref_quot_ccy IN ({_in_list(list(pairs))})
-                    GROUP BY ref_quot_ccy
-                ) latest
-                  ON fr.ref_quot_ccy = latest.ref_quot_ccy
-                 AND fr.`date`        = latest.max_date
-                """,
-                database=DATABASE
-            ) or []
-            for r in rows:
-                v = r.get('spot_rate_d')
-                if v is not None:
-                    ref['fx_rates'][r.get('ref_quot_ccy')] = Decimal(str(v))
+        if pair_tuples:
+            batch_rates = multicurrency_service.get_fx_rates_batch(pair_tuples)
+            for pair_key, (rate, _date_used) in batch_rates.items():
+                if rate and rate != Decimal('0'):
+                    ref['fx_rates'][pair_key] = rate
 
         # 5. Currency decimal places for all currencies involved
         all_ccys = set()
