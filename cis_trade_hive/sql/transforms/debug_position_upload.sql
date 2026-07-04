@@ -113,3 +113,58 @@ LIMIT 10;
 -- ============================================================================
 -- END DEBUG
 -- ============================================================================
+
+
+-- ============================================================================
+-- CASH FLOW RESET QUERIES
+-- Use these to reset a cash flow so it can be reprocessed by
+-- process_approved_cashflows. Run in Hue against gmp_cis.
+-- ============================================================================
+
+USE gmp_cis;
+
+-- 1. Check current cash flow state
+--    Replace 'CF-20260704-00001' with the actual cash flow number.
+SELECT cash_flow_id, cash_flow_number, status, position_updated,
+       portfolio_short_name, security_label, cash_flow_type,
+       send_receive, local_ccy_amt, foreign_ccy_amt,
+       payment_date, value_date, is_deleted
+FROM gmp_cis.cis_cash_flow
+WHERE cash_flow_number = 'CF-20260704-00001';
+
+-- 2. Reset position_updated flag so the command picks it up again.
+--    (Idempotency: once processed the flag is set to true — this clears it.)
+UPDATE gmp_cis.cis_cash_flow
+SET position_updated = false,
+    updated_at = now()
+WHERE cash_flow_number = 'CF-20260704-00001';
+
+-- 3. (Optional) Reset ALL unprocessed cash flows for a portfolio
+--    Useful when testing a full rerun for a portfolio.
+-- UPDATE gmp_cis.cis_cash_flow
+-- SET position_updated = false,
+--     updated_at = now()
+-- WHERE portfolio_short_name = 'Test_Prakash_ccy'
+--   AND status IN ('APPROVED', 'VALIDATED')
+--   AND (is_deleted = false OR is_deleted IS NULL);
+
+-- 4. Check duplicate cis_position rows for a portfolio/security/date
+--    (Run after process_approved_cashflows to verify UPSERT worked correctly.)
+SELECT position_id, version_id, position_type, position_basis,
+       src_system, dividend_lc, processing_timestamp
+FROM gmp_cis.cis_position
+WHERE portfolio      = 'Test_Prakash_ccy'
+  AND security_label = '000898 CS'
+  AND position_date  = '2026-02-27'
+ORDER BY position_basis, processing_timestamp;
+
+-- 5. Delete duplicate cis_position rows — keep only the one with correct position_id.
+--    WARNING: run query 4 first to identify the duplicate position_ids to delete.
+--    Replace <duplicate_position_id> with the actual value to remove.
+-- DELETE FROM gmp_cis.cis_position
+-- WHERE position_id = <duplicate_position_id>
+--   AND portfolio   = 'Test_Prakash_ccy';
+
+-- ============================================================================
+-- END CASH FLOW RESET
+-- ============================================================================
