@@ -3855,12 +3855,23 @@ class UploadService:
 
             if _has_backdated:
                 logger.info(f"[position_etl] Step 7A2: {len(_backdated_rows)} backdated combo(s) — walking business dates forward")
+                logger.info(f"[position_etl] Step 7A2 DEBUG: backdated_rows raw = {_backdated_rows}")
+                logger.info(f"[position_etl] Step 7A2 DEBUG: calendar_today_iso = {_calendar_today_iso}")
 
                 # Fetch all valid business dates from the earliest upload date through calendar today
                 _min_upload_date = min(
                     (r.get('upload_date', _calendar_today_iso) or _calendar_today_iso)
                     for r in _backdated_rows
                 )
+                logger.info(f"[position_etl] Step 7A2 DEBUG: min_upload_date (raw) = {repr(_min_upload_date)}")
+
+                # _min_upload_date and _calendar_today_iso are 'YYYY-MM-DD'.
+                # contextual_today is stored as an integer (YYYYMMDD) in alldatesinfo,
+                # so compare as integers for safety.
+                _min_upload_date_nodash = _min_upload_date[:10].replace('-', '')
+                _calendar_today_nodash  = _calendar_today_iso.replace('-', '')
+                logger.info(f"[position_etl] Step 7A2 DEBUG: alldatesinfo query bounds — "
+                            f"contextual_today > {_min_upload_date_nodash} AND <= {_calendar_today_nodash}")
                 _biz_dates_rows = impala_manager.execute_query(
                     f"""
                     SELECT contextual_today AS biz_date
@@ -3869,13 +3880,24 @@ class UploadService:
                       AND sub_system  = 'cis'
                       AND data_frq    = 'dly'
                       AND record_type = 'D'
-                      AND CAST(contextual_today AS STRING) > '{_min_upload_date}'
-                      AND CAST(contextual_today AS STRING) <= '{_calendar_today_iso}'
+                      AND CAST(contextual_today AS BIGINT) > {_min_upload_date_nodash}
+                      AND CAST(contextual_today AS BIGINT) <= {_calendar_today_nodash}
                     ORDER BY contextual_today ASC
                     """,
                     database=db
                 )
-                _biz_dates = [str(r['biz_date'])[:10] for r in (_biz_dates_rows or []) if r.get('biz_date')]
+                logger.info(f"[position_etl] Step 7A2 DEBUG: alldatesinfo raw rows = {_biz_dates_rows}")
+
+                # contextual_today may come back as an integer (e.g. 20260302) or a
+                # date/string.  Normalise to ISO 'YYYY-MM-DD' in all cases.
+                def _to_iso(val):
+                    s = str(val).strip()[:10].replace('-', '').replace('/', '')
+                    if len(s) == 8 and s.isdigit():
+                        return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+                    return str(val)[:10]  # already has dashes
+
+                _biz_dates = [_to_iso(r['biz_date']) for r in (_biz_dates_rows or []) if r.get('biz_date')]
+                logger.info(f"[position_etl] Step 7A2 DEBUG: biz_dates after ISO normalise = {_biz_dates}")
 
                 _carried = 0
                 for row in _backdated_rows:
@@ -3883,6 +3905,8 @@ class UploadService:
                     _sec   = row.get('security_label', '')
                     _basis = row.get('position_basis', 'TRADED')
                     _upload_date = (row.get('upload_date') or '')[:10]
+                    logger.info(f"[position_etl] Step 7A2 DEBUG: processing combo "
+                                f"ptf={_ptf} sec={_sec} basis={_basis} upload_date={repr(_upload_date)}")
                     if not _ptf or not _sec:
                         continue
 
@@ -3890,6 +3914,7 @@ class UploadService:
                     # Stop as soon as an existing INT USER_UPLOAD record is found
                     for _biz_date in _biz_dates:
                         if _biz_date <= _upload_date:
+                            logger.info(f"[position_etl] Step 7A2 DEBUG: skipping {_biz_date} <= upload_date {_upload_date}")
                             continue  # skip dates on or before the upload date itself
 
                         _exists_rows = impala_manager.execute_query(
