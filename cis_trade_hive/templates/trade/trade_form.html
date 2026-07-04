@@ -83,10 +83,17 @@
     padding: 0;
     margin: 0;
 }
-/* Force date inputs to respect their column width — prevents row overflow */
+/* Force date inputs to respect their column width */
 .trade-form-container input[type="date"].form-control {
     width: 100%;
     min-width: 0;
+}
+/* Ensure form and container fill full available width */
+.trade-form-container,
+.trade-form-container form {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 </style>
 {% endblock %}
