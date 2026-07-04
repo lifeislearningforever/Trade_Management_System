@@ -3832,6 +3832,11 @@ class UploadService:
             #   e.g.2: INT exists for 2-Mar               → write 26, 27 only
             #   e.g.3: INT exists for 27-Feb              → write 26 only, stop
             # ------------------------------------------------------------------
+            # Use calendar today (not GMP system date) so carry-forward reaches
+            # all dates from upload_date through the actual current date.
+            from datetime import date as _cal_date_cls
+            _calendar_today_iso = _cal_date_cls.today().isoformat()  # e.g. '2026-07-04'
+
             _backdated_rows = impala_manager.execute_query(
                 f"""
                 SELECT
@@ -3841,7 +3846,7 @@ class UploadService:
                     MIN(CAST(s.reporting_date AS STRING)) AS upload_date
                 FROM {db}.position_upload_staging s
                 WHERE s.overall_status LIKE 'VALID%'
-                  AND CAST(s.reporting_date AS STRING) < '{_contextual_today_iso}'
+                  AND CAST(s.reporting_date AS STRING) < '{_calendar_today_iso}'
                 GROUP BY 1, 2, 3
                 """,
                 database=db
@@ -3851,9 +3856,9 @@ class UploadService:
             if _has_backdated:
                 logger.info(f"[position_etl] Step 7A2: {len(_backdated_rows)} backdated combo(s) — walking business dates forward")
 
-                # Fetch all valid business dates from the earliest upload date through today
+                # Fetch all valid business dates from the earliest upload date through calendar today
                 _min_upload_date = min(
-                    (r.get('upload_date', _contextual_today_iso) or _contextual_today_iso)
+                    (r.get('upload_date', _calendar_today_iso) or _calendar_today_iso)
                     for r in _backdated_rows
                 )
                 _biz_dates_rows = impala_manager.execute_query(
@@ -3865,7 +3870,7 @@ class UploadService:
                       AND data_frq    = 'dly'
                       AND record_type = 'D'
                       AND CAST(contextual_today AS STRING) > '{_min_upload_date}'
-                      AND CAST(contextual_today AS STRING) <= '{_contextual_today_iso}'
+                      AND CAST(contextual_today AS STRING) <= '{_calendar_today_iso}'
                     ORDER BY contextual_today ASC
                     """,
                     database=db
