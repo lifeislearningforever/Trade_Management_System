@@ -91,9 +91,14 @@
 /* Ensure form and container fill full available width */
 .trade-form-container,
 .trade-form-container form {
-    width: 100%;
-    max-width: 100%;
+    width: 100% !important;
+    max-width: 100% !important;
     box-sizing: border-box;
+}
+/* Ensure content-area allows child to stretch full width */
+.content-area {
+    display: block !important;
+    width: 100%;
 }
 </style>
 {% endblock %}
