@@ -195,7 +195,7 @@ class Command(BaseCommand):
             # FIX: no fallback from local to foreign — zero is correct if foreign_ccy_amt is null
             amount_fc = Decimal(str(cf.get('foreign_ccy_amt') or 0))
             amount_lc = Decimal(str(cf.get('local_ccy_amt') or 0))
-            payment_date = cf.get('payment_date') or run_date
+            payment_date = cf.get('payment_date') or cf.get('value_date') or run_date
 
             self.stdout.write(
                 f'  [{cf_number}] {cf_type} | {portfolio}/{security} | '
@@ -337,7 +337,7 @@ class Command(BaseCommand):
             "status IN ('APPROVED', 'VALIDATED')",
             "src_system IN ('CIS', 'CA')",
             "(is_deleted = false OR is_deleted IS NULL)",
-            f"payment_date <= '{_escape(run_date)}'",
+            f"COALESCE(payment_date, value_date) <= '{_escape(run_date)}'",
         ]
         if not reprocess:
             clauses.append("(position_updated = false OR position_updated IS NULL)")
