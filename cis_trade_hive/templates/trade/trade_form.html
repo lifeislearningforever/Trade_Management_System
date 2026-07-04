@@ -110,25 +110,6 @@
 {% endblock %}
 
 {% block content %}
-<!-- DEBUG BAR — remove after fix -->
-<div id="debug-bar" style="background:#1e293b;color:#fff;font-size:11px;font-family:monospace;padding:6px 10px;margin-bottom:8px;border-radius:4px;"></div>
-<script>
-(function(){
-    function w(sel){ var el=document.querySelector(sel); return el ? el.offsetWidth+'px ('+window.getComputedStyle(el).display+')' : 'NOT FOUND'; }
-    document.addEventListener('DOMContentLoaded', function(){
-        var bar = document.getElementById('debug-bar');
-        var form = document.getElementById('tradeForm');
-        bar.innerHTML =
-            'viewport: ' + window.innerWidth + 'px | ' +
-            'body: ' + w('body') + ' | ' +
-            '.app-container: ' + w('.app-container') + ' | ' +
-            '.main-content: ' + w('.main-content') + ' | ' +
-            '.content-area: ' + w('.content-area') + ' | ' +
-            '.trade-form-container: ' + w('.trade-form-container') + ' | ' +
-            'form#tradeForm: ' + (form ? form.offsetWidth+'px' : 'NOT FOUND');
-    });
-})();
-</script>
 <div class="trade-form-container">
     <!-- Page Header -->
     <div class="content-header">
