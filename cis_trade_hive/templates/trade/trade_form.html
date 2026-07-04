@@ -170,34 +170,23 @@
                                 <small class="text-muted">Status is system-managed</small>
                             </div>
 
-                            <!-- Trade Date + arrow + Settle Date (combined col to stay within 12-column grid) -->
-                            <div class="col-md-6">
-                                <div class="d-flex align-items-end gap-2">
-                                    <div class="flex-fill">
-                                        <label class="form-label">Trade Date <span class="text-danger">*</span></label>
-                                        <input type="date" class="form-control" name="trade_date" id="trade_date"
-                                               value="{{ trade.trade_date|default:'' }}" required>
-                                        {% if not is_edit %}
-                                        <small class="text-muted">
-                                            <i class="bi bi-calendar-date"></i> Default: System Date
-                                        </small>
-                                        {% endif %}
-                                    </div>
-                                    <div class="pb-1" style="flex:0 0 auto;">
-                                        <button type="button" class="btn btn-outline-secondary btn-sm"
-                                                title="Copy trade date to settle date"
-                                                id="copyDateBtn"
-                                                onclick="copyTradeDateToSettle()">
-                                            <i class="bi bi-arrow-right"></i>
-                                        </button>
-                                    </div>
-                                    <div class="flex-fill">
-                                        <label class="form-label">Settle Date <span class="text-danger">*</span></label>
-                                        <input type="date" class="form-control" name="settle_date" id="settle_date"
-                                               value="{{ trade.settle_date|default:settlement_t2_display }}" required>
-                                        <small class="text-muted">Override or use → to copy from Trade Date</small>
-                                    </div>
-                                </div>
+                            <!-- Trade Date -->
+                            <div class="col-md-3">
+                                <label class="form-label">Trade Date <span class="text-danger">*</span></label>
+                                <input type="date" class="form-control" name="trade_date" id="trade_date"
+                                       value="{{ trade.trade_date|default:'' }}" required>
+                                {% if not is_edit %}
+                                <small class="text-muted">
+                                    <i class="bi bi-calendar-date"></i> Default: System Date
+                                </small>
+                                {% endif %}
+                            </div>
+
+                            <!-- Settle Date -->
+                            <div class="col-md-3">
+                                <label class="form-label">Settle Date <span class="text-danger">*</span></label>
+                                <input type="date" class="form-control" name="settle_date" id="settle_date"
+                                       value="{{ trade.settle_date|default:settlement_t2_display }}" required>
                             </div>
                         </div>
 
@@ -1679,19 +1668,6 @@ function autoSelectCounterpartyFromSecurity() {
         cpStatus.innerHTML = '<i class="bi bi-question-circle text-muted"></i>';
         cpStatus.title = 'Issuer "' + issuer + '" not found in counterparty list';
     }
-}
-
-// Copy trade date value into settle date field
-function copyTradeDateToSettle() {
-    var tradeDate = document.getElementById('trade_date').value;
-    if (!tradeDate) return;
-    var settleEl = document.getElementById('settle_date');
-    settleEl.value = tradeDate;
-    settleEl.dispatchEvent(new Event('change'));
-    // Brief visual feedback on the arrow button
-    var btn = event.currentTarget;
-    btn.innerHTML = '<i class="bi bi-check text-success"></i>';
-    setTimeout(function() { btn.innerHTML = '<i class="bi bi-arrow-right"></i>'; }, 1000);
 }
 
 // Auto-populate currency from selected security (readonly field)
