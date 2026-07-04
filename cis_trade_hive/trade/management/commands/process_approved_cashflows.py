@@ -267,10 +267,13 @@ class Command(BaseCommand):
 
         Returns (reporting_date, last_month_end) as 'YYYY-MM-DD' strings.
 
-        reporting_date = prev_day (T-1) — used as CF cutoff and position lookup
-                         date for EOD runs.
-        last_month_end = last calendar day of the month before reporting_date
-                         — used for CORR runs.
+        reporting_date = reporting_date column (T-1) — used for EOD runs.
+
+        CORR last_month_end logic (SA rule):
+          - If contextual_today and reporting_date are in DIFFERENT months
+            → last_month_end = reporting_date  (reporting_date IS the month-end)
+          - Else (same month)
+            → last_month_end = last calendar day of month before reporting_date
 
         Falls back to (yesterday, last calendar day of previous month) if the
         table is unavailable.
@@ -278,7 +281,7 @@ class Command(BaseCommand):
         try:
             rows = impala_manager.execute_query(
                 f"""
-                SELECT prev_day, reporting_date
+                SELECT contextual_today, reporting_date
                 FROM {DATABASE}.gmp_cis_sta_dly_alldatesinfo
                 WHERE src_system  = 'gmp'
                   AND sub_system  = 'cis'
@@ -297,13 +300,26 @@ class Command(BaseCommand):
                 database=DATABASE
             )
             if rows:
-                raw = rows[0].get('prev_day') or rows[0].get('reporting_date')
-                if raw:
-                    raw_str = str(raw)[:8]
-                    ref_date = datetime.strptime(raw_str, '%Y%m%d').date()
-                    reporting_date_iso = ref_date.strftime('%Y-%m-%d')
-                    first_of_ref_month = ref_date.replace(day=1)
-                    last_month_end = (first_of_ref_month - timedelta(days=1)).strftime('%Y-%m-%d')
+                raw_ct = str(rows[0].get('contextual_today', '') or '')[:8]
+                raw_rd = str(rows[0].get('reporting_date', '') or '')[:8]
+                if raw_ct and raw_rd:
+                    contextual_today = datetime.strptime(raw_ct, '%Y%m%d').date()
+                    reporting_date   = datetime.strptime(raw_rd, '%Y%m%d').date()
+                    reporting_date_iso = reporting_date.strftime('%Y-%m-%d')
+
+                    # SA rule: if contextual_today and reporting_date are in different
+                    # months, reporting_date itself is the month-end for CORR.
+                    if contextual_today.month != reporting_date.month or \
+                       contextual_today.year  != reporting_date.year:
+                        last_month_end = reporting_date_iso
+                    else:
+                        first_of_ref_month = reporting_date.replace(day=1)
+                        last_month_end = (first_of_ref_month - timedelta(days=1)).strftime('%Y-%m-%d')
+
+                    logger.info(
+                        f'[CF] alldatesinfo: contextual_today={raw_ct} reporting_date={raw_rd} '
+                        f'→ reporting_date_iso={reporting_date_iso} last_month_end={last_month_end}'
+                    )
                     return reporting_date_iso, last_month_end
         except Exception as e:
             logger.warning(f'Could not read alldatesinfo for date inference: {e}')
@@ -786,8 +802,6 @@ class Command(BaseCommand):
         Non-fatal: logs errors but does not fail the parent write.
         """
         try:
-            import uuid as _uuid
-
             find_q = f"""
             SELECT position_id, version_id, realized_pnl_fc, realized_pnl_lc,
                    isin, source_table, src_system, position_basis,
@@ -807,9 +821,12 @@ class Command(BaseCommand):
             """
             rows = impala_manager.execute_query(find_q, database=DATABASE)
             processing_date = datetime.now().strftime('%Y%m%d')  # YYYYMMDD to match INT records
+            processing_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            # Always a fresh position_id for every INSERT — never reuse existing
-            new_position_id = int(datetime.now().timestamp() * 1000) + (_uuid.uuid4().int % 999999)
+            # position_id: deterministic natural key hash — consistent with upload_service
+            # and trade creation: fnv_hash(portfolio|security_label|position_basis|position_date|src_system)
+            # Use effective_src after we know it; compute after rows check below.
+            # (We compute new_position_id after the rows block where pos_basis/effective_src are set.)
 
             if rows:
                 row           = rows[0]
@@ -821,12 +838,28 @@ class Command(BaseCommand):
                 row           = {}
                 isin          = current.get('isin')
                 source_table  = POSITION_TABLE
+
                 effective_src = src_system
                 pos_basis     = current.get('position_basis') or 'SETTLED'
-                logger.info(
-                    f'[GOLDEN] No existing cis_position row for {portfolio}/{security} '
-                    f'— creating first INT row position_id={new_position_id}'
-                )
+
+            # Natural key hash — consistent with upload_service and trade creation
+            new_position_id = impala_manager.execute_query(
+                f"""
+                SELECT ABS(CAST(fnv_hash(CONCAT_WS('|',
+                    '{_escape(portfolio)}',
+                    '{_escape(security)}',
+                    '{_escape(pos_basis)}',
+                    '{_escape(position_date)}',
+                    '{_escape(effective_src)}'
+                )) AS BIGINT)) AS pid
+                """,
+                database=DATABASE
+            )
+            new_position_id = int((new_position_id or [{}])[0].get('pid', 0))
+            logger.info(
+                f'[GOLDEN] position_id={new_position_id} for '
+                f'{portfolio}/{security}/{pos_basis}/{position_date}/{effective_src}'
+            )
 
             def _gv(field, default=0.0):
                 """Prefer override → cis_trade_position current → golden row."""
@@ -854,7 +887,7 @@ class Command(BaseCommand):
             nbv_lc = float(round(Decimal(str(cost_lc_val)) + Decimal(str(upnl_lc_val)) - Decimal(str(provision_lc_val)), lc_dp))
 
             insert_sql = f"""
-            INSERT INTO {DATABASE}.{GOLDEN_TABLE} (
+            UPSERT INTO {DATABASE}.{GOLDEN_TABLE} (
                 position_id, version_id,
                 portfolio, security_label,
                 position_basis, position_date,
@@ -871,6 +904,7 @@ class Command(BaseCommand):
                 uncall_fc, uncall_lc,
                 pipeline_fc, pipeline_lc,
                 position_type,
+                processing_timestamp,
                 isin, source_table
             ) VALUES (
                 {new_position_id}, {new_position_id},
@@ -889,6 +923,7 @@ class Command(BaseCommand):
                 {_gfc('uncall_fc')}, {_glc('uncall_lc')},
                 {_gfc('pipeline_fc')}, {_glc('pipeline_lc')},
                 'INT',
+                '{processing_timestamp}',
                 {f"'{_escape(isin)}'" if isin else 'NULL'},
                 {f"'{_escape(source_table)}'" if source_table else 'NULL'}
             )
