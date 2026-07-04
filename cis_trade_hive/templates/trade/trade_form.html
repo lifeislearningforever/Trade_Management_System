@@ -95,11 +95,6 @@
     max-width: 100% !important;
     box-sizing: border-box;
 }
-/* Ensure content-area allows child to stretch full width */
-.content-area {
-    display: block !important;
-    width: 100%;
-}
 </style>
 {% endblock %}
 
@@ -139,11 +134,6 @@
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="gl-tab" data-bs-toggle="tab" data-bs-target="#gl" type="button">
                     <i class="bi bi-bank"></i> GL & Broker
-                </button>
-            </li>
-            <li class="nav-item" role="presentation">
-                <button class="nav-link" id="udf-tab" data-bs-toggle="tab" data-bs-target="#udf" type="button">
-                    <i class="bi bi-sliders"></i> UDF
                 </button>
             </li>
         </ul>
@@ -685,126 +675,6 @@
                 </div>
             </div>
 
-            <!-- UDF Tab -->
-            <div class="tab-pane fade" id="udf" role="tabpanel">
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="card-title mb-0">User Defined Fields (Trade)</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="row g-3">
-                            <div class="col-md-4">
-                                <label class="form-label">Fund Type</label>
-                                <select class="form-select" name="udf_fund_type" id="udf_fund_type">
-                                    <option value="">Select</option>
-                                    {% for ft in dropdown_options.fund_types %}
-                                    <option value="{{ ft.value }}"
-                                        {% if trade.udf_fund_type == ft.value %}selected{% endif %}>
-                                        {{ ft.label }}
-                                    </option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div class="col-md-4">
-                                <label class="form-label">Section 31/26</label>
-                                <select class="form-select" name="udf_section_31_26" id="udf_section_31_26">
-                                    <option value="">Select</option>
-                                    {% for sec in dropdown_options.section_options %}
-                                    <option value="{{ sec.value }}"
-                                        {% if trade.udf_section_31_26 == sec.value %}selected{% endif %}>
-                                        {{ sec.label }}
-                                    </option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div class="col-md-4">
-                                <label class="form-label">Sub Custodian</label>
-                                <select class="form-select" name="udf_sub_custodian" id="udf_sub_custodian">
-                                    <option value="">Select</option>
-                                    {% for sc in dropdown_options.sub_custodians %}
-                                    <option value="{{ sc.value }}"
-                                        {% if trade.udf_sub_custodian == sc.value %}selected{% endif %}>
-                                        {{ sc.label }}
-                                    </option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                        </div>
-
-                        <div class="row g-3 mt-2">
-                            <div class="col-md-4">
-                                <label class="form-label">UOBN/UOBN-HK</label>
-                                <select class="form-select" name="udf_uobn_uobn_hk" id="udf_uobn_uobn_hk">
-                                    <option value="">Select</option>
-                                    {% for uobn in dropdown_options.uobn_options %}
-                                    <option value="{{ uobn.value }}"
-                                        {% if trade.udf_uobn_uobn_hk == uobn.value %}selected{% endif %}>
-                                        {{ uobn.label }}
-                                    </option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div class="col-md-4">
-                                <label class="form-label">Income/Expense Type</label>
-                                <select class="form-select" name="udf_income_exp_type" id="udf_income_exp_type">
-                                    <option value="">Select</option>
-                                    {% for iet in dropdown_options.income_exp_types %}
-                                    <option value="{{ iet.value }}"
-                                        {% if trade.udf_income_exp_type == iet.value %}selected{% endif %}>
-                                        {{ iet.label }}
-                                    </option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div class="col-md-4">
-                                <label class="form-label">Revision Code</label>
-                                <select class="form-select" name="udf_revision_code" id="udf_revision_code">
-                                    <option value="">Select</option>
-                                    {% for rc in dropdown_options.revision_codes %}
-                                    <option value="{{ rc.value }}"
-                                        {% if trade.udf_revision_code == rc.value %}selected{% endif %}>
-                                        {{ rc.label }}
-                                    </option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                        </div>
-
-                        <hr class="my-4">
-                        <div class="section-header"><i class="bi bi-toggle-on"></i> Boolean Flags</div>
-
-                        <div class="row g-3">
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="udf_disclosure_req"
-                                           id="udf_disclosure_req" {% if trade.udf_disclosure_req %}checked{% endif %}>
-                                    <label class="form-check-label" for="udf_disclosure_req">
-                                        Disclosure Required
-                                    </label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="udf_counter_pledged"
-                                           id="udf_counter_pledged" {% if trade.udf_counter_pledged %}checked{% endif %}>
-                                    <label class="form-check-label" for="udf_counter_pledged">
-                                        Counter Pledged
-                                    </label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="udf_currency_hedge"
-                                           id="udf_currency_hedge" {% if trade.udf_currency_hedge %}checked{% endif %}>
-                                    <label class="form-check-label" for="udf_currency_hedge">
-                                        Currency Hedge
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
         </div>
 
         <!-- Form Actions -->
