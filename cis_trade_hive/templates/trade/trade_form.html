@@ -170,33 +170,34 @@
                                 <small class="text-muted">Status is system-managed</small>
                             </div>
 
-                            <!-- Trade Date -->
-                            <div class="col-md-3">
-                                <label class="form-label">Trade Date <span class="text-danger">*</span></label>
-                                <input type="date" class="form-control" name="trade_date" id="trade_date"
-                                       value="{{ trade.trade_date|default:'' }}" required>
-                                {% if not is_edit %}
-                                <small class="text-muted">
-                                    <i class="bi bi-calendar-date"></i> Default: System Date
-                                </small>
-                                {% endif %}
-                            </div>
-
-                            <!-- Copy trade date → settle date -->
-                            <div class="col-md-1 d-flex align-items-end pb-1">
-                                <button type="button" class="btn btn-outline-secondary btn-sm w-100"
-                                        title="Copy trade date to settle date"
-                                        onclick="copyTradeDateToSettle()">
-                                    <i class="bi bi-arrow-right"></i>
-                                </button>
-                            </div>
-
-                            <!-- Settle Date -->
-                            <div class="col-md-3">
-                                <label class="form-label">Settle Date <span class="text-danger">*</span></label>
-                                <input type="date" class="form-control" name="settle_date" id="settle_date"
-                                       value="{{ trade.settle_date|default:settlement_t2_display }}" required>
-                                <small class="text-muted">Override or use → to copy from Trade Date</small>
+                            <!-- Trade Date + arrow + Settle Date (combined col to stay within 12-column grid) -->
+                            <div class="col-md-6">
+                                <div class="d-flex align-items-end gap-2">
+                                    <div class="flex-fill">
+                                        <label class="form-label">Trade Date <span class="text-danger">*</span></label>
+                                        <input type="date" class="form-control" name="trade_date" id="trade_date"
+                                               value="{{ trade.trade_date|default:'' }}" required>
+                                        {% if not is_edit %}
+                                        <small class="text-muted">
+                                            <i class="bi bi-calendar-date"></i> Default: System Date
+                                        </small>
+                                        {% endif %}
+                                    </div>
+                                    <div class="pb-1" style="flex:0 0 auto;">
+                                        <button type="button" class="btn btn-outline-secondary btn-sm"
+                                                title="Copy trade date to settle date"
+                                                id="copyDateBtn"
+                                                onclick="copyTradeDateToSettle()">
+                                            <i class="bi bi-arrow-right"></i>
+                                        </button>
+                                    </div>
+                                    <div class="flex-fill">
+                                        <label class="form-label">Settle Date <span class="text-danger">*</span></label>
+                                        <input type="date" class="form-control" name="settle_date" id="settle_date"
+                                               value="{{ trade.settle_date|default:settlement_t2_display }}" required>
+                                        <small class="text-muted">Override or use → to copy from Trade Date</small>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
