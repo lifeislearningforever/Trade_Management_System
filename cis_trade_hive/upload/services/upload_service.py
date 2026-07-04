@@ -3870,11 +3870,11 @@ class UploadService:
                         f"""
                         SELECT COUNT(*) AS cnt
                         FROM {db}.cis_position
-                        WHERE portfolio_short_name = '{_ptf.replace("'", "''")}'
-                          AND security_label        = '{_sec.replace("'", "''")}'
-                          AND position_basis        = '{_basis}'
-                          AND position_type         = 'INT'
-                          AND src_system            = 'USER_UPLOAD'
+                        WHERE portfolio           = '{_ptf.replace("'", "''")}'
+                          AND security_label      = '{_sec.replace("'", "''")}'
+                          AND position_basis      = '{_basis}'
+                          AND position_type       = 'INT'
+                          AND src_system          = 'USER_UPLOAD'
                           AND CAST(position_date AS STRING) = '{_contextual_today_iso}'
                           AND (is_latest = true OR is_latest IS NULL)
                         """,
@@ -3892,14 +3892,14 @@ class UploadService:
                         UPSERT INTO {db}.cis_position
                         SELECT
                             ABS(CAST(fnv_hash(CONCAT_WS('|',
-                                COALESCE(portfolio_short_name, ''),
+                                COALESCE(portfolio, ''),
                                 COALESCE(security_label, ''),
                                 COALESCE(position_basis, ''),
                                 '{_contextual_today_iso}',
                                 COALESCE(src_system, '')
                             )) AS BIGINT))                          AS position_id,
                             CAST(UNIX_TIMESTAMP() * 1000 AS BIGINT) AS version_id,
-                            portfolio_short_name,
+                            portfolio,
                             security_label,
                             position_basis,
                             '{_contextual_today_iso}'               AS position_date,
@@ -3932,9 +3932,9 @@ class UploadService:
                             'INT'                                   AS position_type,
                             true                                    AS is_latest
                         FROM {db}.cis_position
-                        WHERE portfolio_short_name = '{_ptf.replace("'", "''")}'
-                          AND security_label        = '{_sec.replace("'", "''")}'
-                          AND position_basis        = '{_basis}'
+                        WHERE portfolio           = '{_ptf.replace("'", "''")}'
+                          AND security_label      = '{_sec.replace("'", "''")}'
+                          AND position_basis      = '{_basis}'
                           AND CAST(position_date AS STRING) < '{_contextual_today_iso}'
                           AND src_system = 'USER_UPLOAD'
                           AND (is_latest = true OR is_latest IS NULL)
