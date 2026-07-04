@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 PAGE_SIZE = 100
 
 POSITION_BASIS_CHOICES = ['TRADED', 'SETTLED']
-POSITION_TYPE_CHOICES = ['INT', 'EOD', 'SOD']
+POSITION_TYPE_CHOICES = ['INT', 'EOD', 'SOD', 'CORR']
 
 
 @require_login

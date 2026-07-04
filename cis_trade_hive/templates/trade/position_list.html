@@ -281,6 +281,8 @@
                                 <span class="badge bg-success">EOD</span>
                             {% elif p.position_type == 'SOD' %}
                                 <span class="badge bg-warning text-dark">SOD</span>
+                            {% elif p.position_type == 'CORR' %}
+                                <span class="badge bg-info text-dark">CORR</span>
                             {% else %}
                                 <span class="badge bg-secondary">{{ p.position_type|default:"-" }}</span>
                             {% endif %}
