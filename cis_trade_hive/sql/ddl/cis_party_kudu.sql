@@ -69,27 +69,27 @@ STORED AS KUDU;
 -- CIS_PARTY_CIF - Party CIF Table (formerly cis_counterparty_cif_kudu)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS cis_party_cif (
-    party_name STRING NOT NULL,
-    m_label STRING,
-    country STRING,
-    isin STRING,
-    description STRING,
-    is_active BOOLEAN,
-    is_deleted BOOLEAN,
-    created_by STRING,
-    created_at TIMESTAMP,
-    updated_by STRING,
-    updated_at TIMESTAMP,
-    src_system STRING,
-    sub_system STRING,
-    data_cat STRING,
-    data_frq STRING,
-    src_id STRING,
+    party_name      STRING NOT NULL,
+    m_label         STRING NOT NULL,   -- CIF number (from GMP m_label / counterparty_cif)
+    country         STRING NOT NULL,   -- Country code (SG, MY, etc.) — part of composite PK
+    isin            STRING,
+    description     STRING,
+    is_active       BOOLEAN,
+    is_deleted      BOOLEAN,
+    created_by      STRING,
+    created_at      TIMESTAMP,
+    updated_by      STRING,
+    updated_at      TIMESTAMP,
+    src_system      STRING,
+    sub_system      STRING,
+    data_cat        STRING,
+    data_frq        STRING,
+    src_id          STRING,
     processing_date STRING,
-    record_type STRING,
-    PRIMARY KEY (party_name)
+    record_type     STRING,
+    PRIMARY KEY (party_name, m_label, country)   -- composite PK: one row per party+CIF+country
 )
-PARTITION BY HASH PARTITIONS 4
+PARTITION BY HASH(party_name) PARTITIONS 4
 STORED AS KUDU;
 
 -- ============================================================================
