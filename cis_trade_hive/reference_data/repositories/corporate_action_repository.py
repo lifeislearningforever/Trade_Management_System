@@ -568,6 +568,7 @@ class CorporateActionRepository:
             # Embed ca_id in upper bits and add random salt to avoid collisions when
             # multiple history rows are written within the same millisecond for the same CA.
             history_id = (ca_id % 10**6) * 10**10 + timestamp_ms * 10**3 + random.randint(0, 999)
+            performed_at_str = now.strftime('%Y-%m-%d %H:%M:%S')
 
             # Convert changes dict to JSON string
             changes_json = json.dumps(changes) if changes else '{}'
@@ -585,7 +586,7 @@ class CorporateActionRepository:
                 {CorporateActionRepository.escape_value(changes_json)},
                 {CorporateActionRepository.escape_value(comments)},
                 {CorporateActionRepository.escape_value(performed_by)},
-                {timestamp_ms}
+                {CorporateActionRepository.escape_value(performed_at_str)}
             )
             """
 
