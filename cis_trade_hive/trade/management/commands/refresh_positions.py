@@ -32,6 +32,8 @@ Usage:
     # Normal EOD — position_date inferred from alldatesinfo reporting_date
     python manage.py refresh_positions
     python manage.py refresh_positions --portfolio UOB-SG-TRADING
+    python manage.py refresh_positions --security 'UQ-UOB-102 CH'
+    python manage.py refresh_positions --portfolio UOB-SG-TRADING --security 'UQ-UOB-102 CH'
     python manage.py refresh_positions --source CIS
     python manage.py refresh_positions --dry-run
 
@@ -67,6 +69,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('--portfolio', type=str, help='Filter by portfolio short name (optional)')
+        parser.add_argument('--security', type=str, help='Filter by security label (optional)')
         parser.add_argument(
             '--source', type=str, choices=ALL_SOURCES,
             help='Filter by source system: CIS, GMP, AMSICEQ, USER_UPLOAD (default: all)'
@@ -87,6 +90,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         portfolio_filter = options.get('portfolio')
+        security_filter  = options.get('security')
         source_filter    = options.get('source')
         dry_run          = options.get('dry_run', False)
         run_type         = options.get('run_type', 'EOD')
@@ -121,12 +125,14 @@ class Command(BaseCommand):
         self.stdout.write(f"Sources    : {', '.join(sources)}")
         if portfolio_filter:
             self.stdout.write(f"Portfolio  : {portfolio_filter}")
+        if security_filter:
+            self.stdout.write(f"Security   : {security_filter}")
         self.stdout.write('')
 
         processed = updated = skipped = errors = 0
 
         try:
-            positions = self._get_open_positions(portfolio_filter, sources, position_date)
+            positions = self._get_open_positions(portfolio_filter, sources, position_date, security_filter)
 
             if not positions:
                 self.stdout.write(self.style.WARNING('No positions found'))
@@ -278,7 +284,7 @@ class Command(BaseCommand):
     # Data fetching
     # -------------------------------------------------------------------------
 
-    def _get_open_positions(self, portfolio_filter, sources, position_date=None):
+    def _get_open_positions(self, portfolio_filter, sources, position_date=None, security_filter=None):
         """
         Fetch the single latest row per portfolio/security/position_basis from cis_position.
         Latest = highest position_id (most recently inserted row of any type).
@@ -293,6 +299,10 @@ class Command(BaseCommand):
             portfolio_clause = (
                 f"AND portfolio = '{self._escape(portfolio_filter)}'"
                 if portfolio_filter else ""
+            )
+            security_clause = (
+                f"AND security_label = '{self._escape(security_filter)}'"
+                if security_filter else ""
             )
             date_clause = (
                 f"AND position_date = '{self._escape(position_date)}'"
@@ -324,6 +334,7 @@ class Command(BaseCommand):
                     WHERE src_system IN ('{src_list}')
                       AND quantity > 0
                       {portfolio_clause}
+                      {security_clause}
                       {date_clause}
                     GROUP BY portfolio, security_label, position_basis
                 ) latest
