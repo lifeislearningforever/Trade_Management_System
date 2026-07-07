@@ -130,6 +130,9 @@ class Command(BaseCommand):
         failed_queue_ids  = []
         new_sod_rows      = []   # brand-new positions (no prior EOD)
 
+        # Cache portfolio revaluation status to avoid repeated DB calls
+        _reval_cache: dict = {}
+
         for item in pending_settlements:
             portfolio  = item.get('portfolio_id', '')
             security   = item.get('security_id', '')
@@ -140,6 +143,12 @@ class Command(BaseCommand):
             charges    = Decimal(str(item.get('charges', 0) or 0))
             queue_id   = item.get('queue_id')
             trade_id   = item.get('trade_id')
+            raw_lc     = item.get('total_amount_lc')
+            trade_lc   = Decimal(str(raw_lc)) if raw_lc else None
+
+            if portfolio not in _reval_cache:
+                _reval_cache[portfolio] = self._get_portfolio_revaluation_status(portfolio)
+            reval_status = _reval_cache[portfolio]
 
             key = (portfolio, security, basis)
             existing = eod_index.get(key)
@@ -154,6 +163,8 @@ class Command(BaseCommand):
                     settle_date=sod_date,
                     trade_id=trade_id,
                     item=item,
+                    reval_status=reval_status,
+                    trade_lc=trade_lc,
                 )
                 if updated is None:
                     # e.g. SELL with no existing position — skip
@@ -325,23 +336,28 @@ class Command(BaseCommand):
 
         Only entries settling today are folded into SOD.  Future entries
         (settle_date > today) remain in the queue for a later SOD run.
+
+        Joins cis_trade to pick up total_amount_lc (the as-traded LC amount
+        entered by the user at booking time) — needed for NON-REVAL portfolios.
         """
         try:
             return impala_manager.execute_query(
                 f"""
                 SELECT
-                    queue_id, trade_id,
-                    portfolio_id, security_id,
-                    trade_type,
-                    quantity, price, charges,
-                    settle_date, position_basis,
-                    security_currency, portfolio_currency,
-                    isin, security_name,
-                    custodian, sub_custodian
-                FROM {DATABASE}.cis_settlement_queue
-                WHERE settle_date = '{settle_date}'
-                  AND status      = 'PENDING'
-                ORDER BY queued_at ASC
+                    q.queue_id, q.trade_id,
+                    q.portfolio_id, q.security_id,
+                    q.trade_type,
+                    q.quantity, q.price, q.charges,
+                    q.settle_date, q.position_basis,
+                    q.security_currency, q.portfolio_currency,
+                    q.isin, q.security_name,
+                    q.custodian, q.sub_custodian,
+                    t.total_amount_lc
+                FROM {DATABASE}.cis_settlement_queue q
+                LEFT JOIN {DATABASE}.cis_trade t ON t.trade_id = q.trade_id
+                WHERE q.settle_date = '{settle_date}'
+                  AND q.status      = 'PENDING'
+                ORDER BY q.queued_at ASC
                 """,
                 database=DATABASE
             ) or []
@@ -361,6 +377,8 @@ class Command(BaseCommand):
         settle_date: str,
         trade_id,
         item: dict,
+        reval_status: str = 'REVALUED',
+        trade_lc: Decimal = None,
     ) -> dict:
         """
         Apply a BUY or SELL trade to an EOD position dict and return
@@ -401,9 +419,14 @@ class Command(BaseCommand):
                 AVP_PRECISION, rounding=ROUND_HALF_UP
             ) if new_qty > 0 else Decimal('0')
 
-            # LC: carry the trade at same FX proportion (avg_cost_lc / avg_cost_fc ratio)
-            if old_avg_fc > 0 and old_avg_lc > 0:
-                fx_ratio   = old_avg_lc / old_avg_fc
+            # LC cost for this trade:
+            #   NON-REVAL: use as-traded total_amount_lc (preserves the rate at booking time).
+            #              Fallback to fx_ratio proxy if trade_lc not available.
+            #   REVAL:     use the existing position's lc/fc ratio (latest FX applied at EOD).
+            if reval_status == 'NON-REVALUED' and trade_lc is not None:
+                trade_cost_lc = trade_lc
+            elif old_avg_fc > 0 and old_avg_lc > 0:
+                fx_ratio      = old_avg_lc / old_avg_fc
                 trade_cost_lc = trade_cost_fc * fx_ratio
             else:
                 trade_cost_lc = trade_cost_fc   # same-currency fallback
@@ -774,6 +797,26 @@ class Command(BaseCommand):
             logger.error(f'Error marking settlements failed: {e}')
 
     # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _get_portfolio_revaluation_status(self, portfolio_id: str) -> str:
+        """Return 'REVALUED' or 'NON-REVALUED' for the given portfolio."""
+        try:
+            rows = impala_manager.execute_query(
+                f"""
+                SELECT revaluation_status
+                FROM {DATABASE}.cis_portfolio
+                WHERE name = '{self._escape(portfolio_id)}'
+                LIMIT 1
+                """,
+                database=DATABASE
+            )
+            if rows and rows[0].get('revaluation_status'):
+                status = rows[0]['revaluation_status'].upper()
+                if status in ('REVALUED', 'NON-REVALUED'):
+                    return status
+        except Exception as e:
+            logger.error(f'Error fetching revaluation status for {portfolio_id}: {e}')
+        return 'REVALUED'
 
     @staticmethod
     def _escape(value):

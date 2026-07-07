@@ -1410,8 +1410,21 @@ class CACashFlowService:
                 except Exception:
                     fx_rate = Decimal('1')
 
-            new_total_cost_lc = (new_total_cost * fx_rate).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
-            new_avg_cost_lc   = (new_avg_cost * fx_rate).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+            # Get portfolio revaluation status for LC cost treatment
+            try:
+                _rv_rows = impala_manager.execute_query(
+                    f"SELECT revaluation_status FROM {self.DATABASE}.cis_portfolio "
+                    f"WHERE name = '{self._escape(portfolio_short_name)}' LIMIT 1",
+                    database=self.DATABASE
+                )
+                reval_status = (
+                    (_rv_rows[0].get('revaluation_status') or '').upper()
+                    if _rv_rows else ''
+                )
+                if reval_status not in ('REVALUED', 'NON-REVALUED'):
+                    reval_status = 'REVALUED'
+            except Exception:
+                reval_status = 'REVALUED'
 
             updated_any = False
 
@@ -1420,6 +1433,7 @@ class CACashFlowService:
                 # Find the existing INT row for this basis — INT only, never EOD/SOD/CORR
                 find_q = f"""
                 SELECT position_id, version_id, market_value_fc, quantity,
+                       cost_lc,
                        dividend_fc, dividend_lc, uncall_fc, uncall_lc,
                        pipeline_fc, pipeline_lc, provision_fc, provision_lc,
                        realized_pnl_fc, realized_pnl_lc, isin, src_system,
@@ -1445,6 +1459,20 @@ class CACashFlowService:
                 old_qty       = Decimal(str(row.get('quantity') or 0))
                 old_mv_fc     = Decimal(str(row.get('market_value_fc') or 0))
                 market_price  = (old_mv_fc / old_qty).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP) if old_qty else Decimal('0')
+
+                # LC cost treatment — SA rule:
+                #   NON-REVAL: redistribute the existing LC total cost over new qty
+                #              (no FX recompute; cost in LC is preserved as-traded)
+                #   REVAL:     recompute from FC cost × current FX rate
+                if reval_status == 'NON-REVALUED':
+                    old_total_cost_lc = Decimal(str(row.get('cost_lc') or 0))
+                    new_total_cost_lc = old_total_cost_lc
+                    new_avg_cost_lc   = (new_total_cost_lc / new_quantity).quantize(
+                        Decimal('0.00000001'), rounding=ROUND_HALF_UP
+                    ) if new_quantity > 0 else Decimal('0')
+                else:
+                    new_total_cost_lc = (new_total_cost * fx_rate).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+                    new_avg_cost_lc   = (new_avg_cost * fx_rate).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
 
                 market_value_fc   = (new_quantity * market_price).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
                 market_value_lc   = (market_value_fc * fx_rate).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
@@ -1701,8 +1729,35 @@ class CACashFlowService:
 
             market_value_fc = (new_quantity * td_market_price).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
             market_value_lc = (market_value_fc * fx_rate).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
-            new_total_cost_lc = (new_total_cost * fx_rate).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
-            new_avg_cost_lc = (new_avg_cost * fx_rate).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+
+            # LC cost treatment — SA rule:
+            #   NON-REVAL: redistribute existing LC total cost over new qty (no FX recompute)
+            #   REVAL:     recompute from FC cost × current FX rate
+            try:
+                _rv_rows = impala_manager.execute_query(
+                    f"SELECT revaluation_status FROM {self.DATABASE}.cis_portfolio "
+                    f"WHERE name = '{self._escape(portfolio_short_name)}' LIMIT 1",
+                    database=self.DATABASE
+                )
+                _reval_status = (
+                    (_rv_rows[0].get('revaluation_status') or '').upper()
+                    if _rv_rows else ''
+                )
+                if _reval_status not in ('REVALUED', 'NON-REVALUED'):
+                    _reval_status = 'REVALUED'
+            except Exception:
+                _reval_status = 'REVALUED'
+
+            if _reval_status == 'NON-REVALUED':
+                old_total_cost_lc = Decimal(str(td_position.get('total_cost_lc') or 0))
+                new_total_cost_lc = old_total_cost_lc
+                new_avg_cost_lc = (new_total_cost_lc / new_quantity).quantize(
+                    Decimal('0.00000001'), rounding=ROUND_HALF_UP
+                ) if new_quantity > 0 else Decimal('0')
+            else:
+                new_total_cost_lc = (new_total_cost * fx_rate).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+                new_avg_cost_lc = (new_avg_cost * fx_rate).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+
             unrealized_pnl_fc = market_value_fc - new_total_cost
             unrealized_pnl_lc = market_value_lc - new_total_cost_lc
 

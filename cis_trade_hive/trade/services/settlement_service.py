@@ -913,6 +913,8 @@ class SettlementService:
                         continue
                     try:
                         base = last_position_by_basis.get(basis)  # {} = fresh start, dict = prior
+                        raw_lc = trade.get('total_amount_lc')
+                        trade_lc = Decimal(str(raw_lc)) if raw_lc else None
                         success, msg, result = self.position_service.calculate_position(
                             portfolio_id=portfolio_id,
                             security_id=security_id,
@@ -925,7 +927,8 @@ class SettlementService:
                             updated_by=updated_by,
                             is_chain_recalc=True,
                             position_basis=basis,
-                            base_position_override=base
+                            base_position_override=base,
+                            trade_lc=trade_lc
                         )
                         if success:
                             counters['recalculated'] += 1

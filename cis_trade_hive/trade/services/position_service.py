@@ -105,7 +105,8 @@ class PositionService:
         pipeline_lc: Decimal = None,
         position_type: str = None,
         position_basis: str = 'TRADED',
-        base_position_override: Dict[str, Any] = None
+        base_position_override: Dict[str, Any] = None,
+        trade_lc: Decimal = None
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """
         Calculate position using weighted average method.
@@ -234,7 +235,8 @@ class PositionService:
                     pipeline_fc=pipeline_fc,
                     pipeline_lc=pipeline_lc,
                     position_type=position_type,
-                    position_basis=position_basis
+                    position_basis=position_basis,
+                    trade_lc=trade_lc
                 )
             elif trade_type == 'SELL':
                 return self._process_sell(
@@ -257,7 +259,8 @@ class PositionService:
                     pipeline_fc=pipeline_fc,
                     pipeline_lc=pipeline_lc,
                     position_type=position_type,
-                    position_basis=position_basis
+                    position_basis=position_basis,
+                    trade_lc=trade_lc
                 )
 
         except Exception as e:
@@ -286,7 +289,8 @@ class PositionService:
         pipeline_fc: Decimal = None,
         pipeline_lc: Decimal = None,
         position_type: str = None,
-        position_basis: str = 'TRADED'
+        position_basis: str = 'TRADED',
+        trade_lc: Decimal = None
     ) -> Tuple[bool, str, Dict[str, Any]]:
         """
         Process BUY trade - increase position, recalculate AVP.
@@ -350,28 +354,36 @@ class PositionService:
         else:
             unrealized_pnl = market_value - new_total_cost
 
-        # Calculate LC values for NON-REVALUED portfolios (historical cost basis)
-        # Get current FX rate at trade time - this becomes the "historical" rate
+        # FX rate — used for REVAL cost_lc and market_value_lc
         fx_rate = Decimal('1')
         if security_currency and portfolio_currency and security_currency != portfolio_currency:
             fx_rate = self._get_fx_rate(security_currency, portfolio_currency)
 
-        # For NON-REVALUED: maintain weighted average LC cost
-        # new_total_cost_lc = old_total_cost_lc + (trade_cost * fx_rate_at_trade_time)
-        # new_avg_cost_lc = new_total_cost_lc / new_qty
+        # cost_lc rules (SA):
+        #   NON-REVAL: use user-entered trade_lc (total_amount_lc from the trade form).
+        #              This preserves the as-traded LC amount regardless of system FX rate.
+        #              Fallback to fx_rate if trade_lc not supplied (chain recalc / legacy).
+        #   REVAL:     always recompute from trade_cost × system fx_rate at booking time.
+        reval_status = self._get_portfolio_revaluation_status(portfolio_id)
+
         if current:
             old_total_cost_lc = Decimal(str(current.get('total_cost_lc', 0) or 0))
             if old_total_cost_lc == 0:
-                # Fallback if no LC value stored - use FC * current FX
                 old_total_cost_lc = Decimal(str(current.get('total_cost_fc') or current.get('total_cost', 0) or 0)) * fx_rate
-            trade_cost_lc = trade_cost * fx_rate
+            if reval_status == 'NON-REVALUED' and trade_lc is not None:
+                trade_cost_lc = Decimal(str(trade_lc))
+            else:
+                trade_cost_lc = trade_cost * fx_rate
             new_total_cost_lc = old_total_cost_lc + trade_cost_lc
             new_avg_cost_lc = (new_total_cost_lc / new_qty).quantize(
                 self.AVP_PRECISION, rounding=ROUND_HALF_UP
             )
             old_realized_pnl_lc = Decimal(str(current.get('realized_pnl_lc', 0) or 0))
         else:
-            trade_cost_lc = trade_cost * fx_rate
+            if reval_status == 'NON-REVALUED' and trade_lc is not None:
+                trade_cost_lc = Decimal(str(trade_lc))
+            else:
+                trade_cost_lc = trade_cost * fx_rate
             new_total_cost_lc = trade_cost_lc
             new_avg_cost_lc = (new_total_cost_lc / new_qty).quantize(
                 self.AVP_PRECISION, rounding=ROUND_HALF_UP
@@ -488,7 +500,8 @@ class PositionService:
         pipeline_fc: Decimal = None,
         pipeline_lc: Decimal = None,
         position_type: str = None,
-        position_basis: str = 'TRADED'
+        position_basis: str = 'TRADED',
+        trade_lc: Decimal = None
     ) -> Tuple[bool, str, Dict[str, Any]]:
         """
         Process SELL trade - decrease position, AVP unchanged.
@@ -539,9 +552,17 @@ class PositionService:
             old_avg_cost_lc = old_avg_cost * fx_rate
             old_total_cost_lc = old_qty * old_avg_cost_lc
 
-        # Calculate realized P&L in LC
-        # For NON-REVALUED: use historical avg_cost_lc, current sell_price * fx_rate
-        realized_pnl_this_trade_lc = (price * fx_rate - old_avg_cost_lc) * quantity
+        # Realized P&L in LC (SA rule):
+        #   NON-REVAL: sell proceeds LC = user-entered trade_lc (total_amount_lc from form).
+        #              Fallback to price × fx_rate if trade_lc not supplied.
+        #   REVAL:     sell proceeds LC = price × latest system fx_rate.
+        reval_status = self._get_portfolio_revaluation_status(portfolio_id)
+        if reval_status == 'NON-REVALUED' and trade_lc is not None:
+            sell_proceeds_lc = Decimal(str(trade_lc))
+            sell_lc_per_unit = sell_proceeds_lc / quantity if quantity else Decimal('0')
+            realized_pnl_this_trade_lc = (sell_lc_per_unit - old_avg_cost_lc) * quantity
+        else:
+            realized_pnl_this_trade_lc = (price * fx_rate - old_avg_cost_lc) * quantity
         new_realized_pnl_lc = old_realized_pnl_lc + realized_pnl_this_trade_lc
 
         logger.info(
