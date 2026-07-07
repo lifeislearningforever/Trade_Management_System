@@ -681,14 +681,27 @@ class Command(BaseCommand):
             )
 
         # 2. Find queue entries for this CA — auto-create if missing
+        auto_created = False
         entries = ca_cash_flow_queue_repository.get_by_ca_id(ca_id)
         if not entries:
             self.stdout.write(self.style.WARNING(
                 f'No queue entry found for CA {ca_id} ({ca_number}) — auto-creating from CA master record'
             ))
+            if dry_run:
+                # In dry-run: show what would happen without actually inserting
+                self.stdout.write(self.style.WARNING(
+                    f'  [DRY RUN] Would create queue entry and process CA {ca_number} — no changes written'
+                ))
+                self.stdout.write('')
+                self.stdout.write(self.style.HTTP_INFO('--- Correction Run Summary ---'))
+                self.stdout.write(f'  CA          : {ca_number}')
+                self.stdout.write(f'  Voided CFs  : 0 (no existing cash flows)')
+                self.stdout.write(self.style.WARNING('\n  DRY RUN complete — no changes written.'))
+                return
             entries = self._auto_create_queue_entry(ca_id, dry_run)
             if not entries:
                 raise CommandError(f'Could not create queue entry for CA {ca_id} ({ca_number})')
+            auto_created = True
 
         self.stdout.write(f'Found {len(entries)} queue entry(ies)')
 
@@ -737,14 +750,21 @@ class Command(BaseCommand):
                 self.stdout.write(f'  [DRY RUN] Would void {len(cf_ids)} cash flow(s): {cf_ids}')
                 total_voided += len(cf_ids)
 
-            # --- reset queue entry ---
+            # --- reset queue entry to PENDING ---
             if q_status in ('PROCESSING',):
                 self.stdout.write(self.style.WARNING(
                     f'  Queue {queue_id} is PROCESSING — skipping (use --reset-stuck first)'
                 ))
                 continue
 
-            # Refresh queue entry fields from current CA
+            # If we just auto-created this entry it is already PENDING with correct
+            # CA fields — no UPDATE needed; go straight to reprocessing.
+            if auto_created:
+                self.stdout.write(self.style.SUCCESS(f'  Queue {queue_id} auto-created as PENDING — ready to process'))
+                queue_ids_to_reprocess.append(queue_id)
+                continue
+
+            # Existing entry: refresh fields from current CA master record
             now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             ex_date_val = f"'{ca.get('ex_date')}'" if ca.get('ex_date') else 'NULL'
             record_date_val = f"'{ca.get('record_date')}'" if ca.get('record_date') else 'NULL'
