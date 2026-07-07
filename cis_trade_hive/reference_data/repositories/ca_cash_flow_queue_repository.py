@@ -93,6 +93,12 @@ class CACashFlowQueueRepository:
 
             if success:
                 logger.info(f"Queued CA {queue_data.get('ca_number')} for cash flow processing (queue_id: {queue_id})")
+                # Mark CA as queued on the master record
+                CACashFlowQueueRepository._update_ca_processed_flag(
+                    ca_id=queue_data.get('ca_id'),
+                    queued=True,
+                    processed=False
+                )
                 return True, queue_id
             else:
                 logger.error(f"Failed to queue CA {queue_data.get('ca_number')}")
@@ -302,7 +308,7 @@ class CACashFlowQueueRepository:
         total_amount: Decimal = Decimal('0')
     ) -> bool:
         """
-        Mark queue entry as completed.
+        Mark queue entry as completed and set cash_flow_processed=true on the CA.
 
         Args:
             queue_id: Queue entry ID
@@ -312,12 +318,25 @@ class CACashFlowQueueRepository:
         Returns:
             True if successful
         """
-        return CACashFlowQueueRepository.update_status(
+        success = CACashFlowQueueRepository.update_status(
             queue_id,
             CACashFlowQueueRepository.STATUS_COMPLETED,
             cash_flows_created=cash_flows_created,
             total_amount=total_amount
         )
+        if success:
+            # Reflect completion back to the CA master record
+            try:
+                entry = CACashFlowQueueRepository.get_by_id(queue_id)
+                if entry and entry.get('ca_id'):
+                    CACashFlowQueueRepository._update_ca_processed_flag(
+                        ca_id=entry['ca_id'],
+                        queued=True,
+                        processed=True
+                    )
+            except Exception as e:
+                logger.warning(f"Could not update CA processed flag for queue {queue_id}: {e}")
+        return success
 
     @staticmethod
     def mark_failed(queue_id: int, error_message: str) -> bool:
@@ -506,6 +525,34 @@ class CACashFlowQueueRepository:
         except Exception as e:
             logger.error(f"Error fetching logs for queue {queue_id}: {str(e)}")
             return []
+
+    @staticmethod
+    def _update_ca_processed_flag(
+        ca_id,
+        queued: bool,
+        processed: bool
+    ) -> None:
+        """
+        Update cash_flow_queued / cash_flow_processed on cis_corporate_actions.
+
+        Called automatically by insert() and mark_completed() — non-fatal if it
+        fails (the queue state is the source of truth; this is a convenience flag).
+        """
+        try:
+            now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            processed_at_clause = (
+                f", cash_flow_processed_at = '{now_str}'" if processed else ""
+            )
+            sql = f"""
+            UPDATE {CACashFlowQueueRepository.DATABASE}.cis_corporate_actions
+            SET cash_flow_queued    = {'true' if queued else 'false'},
+                cash_flow_processed = {'true' if processed else 'false'}
+                {processed_at_clause}
+            WHERE ca_id = {int(ca_id)}
+            """
+            impala_manager.execute_write(sql, database=CACashFlowQueueRepository.DATABASE)
+        except Exception as e:
+            logger.warning(f"[CA_FLAG] Could not update processed flag for ca_id={ca_id}: {e}")
 
 
 # Create singleton instance
