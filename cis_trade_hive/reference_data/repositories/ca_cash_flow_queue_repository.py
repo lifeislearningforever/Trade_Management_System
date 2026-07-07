@@ -138,6 +138,44 @@ class CACashFlowQueueRepository:
             return []
 
     @staticmethod
+    def get_pending_for_corr(last_month_end: str, limit: int = 500) -> List[Dict[str, Any]]:
+        """
+        Get unprocessed queue entries for a CORR run.
+
+        Returns PENDING (and FAILED with retries remaining) entries whose
+        ex_date falls on or before last_month_end — i.e. CAs that should
+        have been processed during the month but were not yet completed.
+
+        Args:
+            last_month_end: Cutoff date (YYYY-MM-DD). Only CAs with ex_date <= this date.
+            limit: Max entries to return.
+
+        Returns:
+            List of queue entries ordered by ex_date ASC.
+        """
+        try:
+            ev = CACashFlowQueueRepository.escape_value
+            query = f"""
+            SELECT *
+            FROM {CACashFlowQueueRepository.DATABASE}.{CACashFlowQueueRepository.TABLE_NAME}
+            WHERE status IN (
+                    '{CACashFlowQueueRepository.STATUS_PENDING}',
+                    '{CACashFlowQueueRepository.STATUS_FAILED}'
+                  )
+              AND retry_count < {CACashFlowQueueRepository.MAX_RETRIES}
+              AND ex_date <= {ev(last_month_end)}
+            ORDER BY ex_date ASC, created_at ASC
+            LIMIT {limit}
+            """
+            result = impala_manager.execute_query(
+                query, database=CACashFlowQueueRepository.DATABASE
+            )
+            return result if result else []
+        except Exception as e:
+            logger.error(f"Error fetching CORR pending CA queue entries: {str(e)}")
+            return []
+
+    @staticmethod
     def get_by_id(queue_id: int) -> Optional[Dict[str, Any]]:
         """
         Get a specific queue entry by ID.

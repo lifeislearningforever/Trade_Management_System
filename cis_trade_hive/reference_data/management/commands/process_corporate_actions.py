@@ -1,30 +1,46 @@
 """
 Django Management Command: Process Corporate Actions
 
-EOD (End of Day) processing for corporate actions to generate cash flows.
+EOD / CORR processing for corporate actions to generate cash flows.
 Processes validated CAs from cis_ca_cash_flow_queue and creates
 cash flow entries in cis_cash_flow table.
 
+Run types
+---------
+  EOD  (default): Normal end-of-day run.
+        Processes all PENDING CAs.
+        --date YYYY-MM-DD: restrict to CAs with that ex-date (backdated runs).
+
+  CORR: Month-end correction run (D+1 to D+5 after month-end).
+        Processes PENDING/FAILED CAs with ex_date <= last_month_end.
+        last_month_end is inferred from alldatesinfo (same logic as
+        process_approved_cashflows --run-type CORR).
+        --date overrides the inferred last_month_end cutoff.
+
 Usage:
-    python manage.py process_corporate_actions                    # Process all pending
-    python manage.py process_corporate_actions --date 2026-03-18  # Process by payment date
-    python manage.py process_corporate_actions --dry-run          # Show what would be processed
-    python manage.py process_corporate_actions --ca-id 123456     # Process specific CA
-    python manage.py process_corporate_actions --verbose          # Verbose output
+    python manage.py process_corporate_actions                          # EOD: all pending
+    python manage.py process_corporate_actions --date 2026-02-27        # EOD: ex-date filter
+    python manage.py process_corporate_actions --run-type CORR          # CORR: infer month-end
+    python manage.py process_corporate_actions --run-type CORR --date 2026-05-31  # CORR: explicit cutoff
+    python manage.py process_corporate_actions --dry-run                # Preview without writing
+    python manage.py process_corporate_actions --ca-id 123456           # Specific CA
 
 Created: 2026-03-19
-Version: 1.0
+Version: 2.0
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from decimal import Decimal
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from django.core.management.base import BaseCommand, CommandError
 
+from core.repositories.impala_connection import impala_manager
 from reference_data.services.ca_cash_flow_service import ca_cash_flow_service
 from reference_data.repositories.ca_cash_flow_queue_repository import ca_cash_flow_queue_repository
+
+DATABASE = 'gmp_cis'
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +50,18 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
+            '--run-type', type=str, choices=['EOD', 'CORR'], default='EOD',
+            help='EOD (default): normal run. CORR: month-end correction — processes unprocessed CAs up to last_month_end.'
+        )
+        parser.add_argument(
             '-d', '--date',
             type=str,
             default=None,
-            help='Filter by ex-date (YYYY-MM-DD). Processes all pending CAs with this ex-date. Default: process all pending'
+            help=(
+                'EOD: filter by ex-date (YYYY-MM-DD). '
+                'CORR: override the inferred last_month_end cutoff (YYYY-MM-DD). '
+                'Default: process all pending (EOD) or infer from alldatesinfo (CORR).'
+            )
         )
         parser.add_argument(
             '-n', '--dry-run',
@@ -97,28 +121,40 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         """Main entry point for the command."""
-        payment_date = options['date']
-        dry_run = options['dry_run']
-        verbose = options['verbose']
-        ca_id = options['ca_id']
-        queue_id = options['queue_id']
-        run_by = options['user']
-        batch_size = options['batch_size']
+        run_type     = options['run_type']
+        date_param   = options['date']
+        dry_run      = options['dry_run']
+        verbose      = options['verbose']
+        ca_id        = options['ca_id']
+        queue_id     = options['queue_id']
+        run_by       = options['user']
+        batch_size   = options['batch_size']
         retry_failed = options['retry_failed']
-        reset_stuck = options['reset_stuck']
-        show_status = options['status']
-        correction = options['correction']
+        reset_stuck  = options['reset_stuck']
+        show_status  = options['status']
+        correction   = options['correction']
+
+        # Resolve the effective date for this run
+        # EOD:  date_param is an ex_date filter (optional)
+        # CORR: date_param overrides last_month_end; otherwise infer from alldatesinfo
+        if run_type == 'CORR':
+            last_month_end = date_param or self._get_last_month_end_from_alldatesinfo()
+        else:
+            last_month_end = None  # not used in EOD
 
         # Print header
         self.stdout.write(self.style.HTTP_INFO('=' * 70))
         self.stdout.write(self.style.HTTP_INFO('  CIS Trade Hive - Corporate Action Cash Flow Processing'))
         self.stdout.write(self.style.HTTP_INFO('=' * 70))
-        self.stdout.write(f'\nStarted: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
-        self.stdout.write(f'Run By: {run_by}')
-        if payment_date:
-            self.stdout.write(f'Ex-Date Filter: {payment_date}')
+        self.stdout.write(f'\nStarted  : {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+        self.stdout.write(f'Run By   : {run_by}')
+        self.stdout.write(f'Run Type : {run_type}')
+        if run_type == 'CORR':
+            self.stdout.write(f'Cutoff   : {last_month_end}  (last_month_end — ex_date <= this)')
+        elif date_param:
+            self.stdout.write(f'Ex-Date  : {date_param}')
         if dry_run:
-            self.stdout.write(self.style.WARNING('Mode: DRY RUN'))
+            self.stdout.write(self.style.WARNING('Mode     : DRY RUN'))
         self.stdout.write('')
 
         try:
@@ -154,8 +190,13 @@ class Command(BaseCommand):
                 self._process_by_ca_id(ca_id, dry_run, verbose)
                 return
 
-            # Process all pending
-            self._process_pending(payment_date, batch_size, dry_run, verbose)
+            # CORR: process unprocessed CAs up to last_month_end
+            if run_type == 'CORR':
+                self._process_corr(last_month_end, batch_size, dry_run, verbose)
+                return
+
+            # EOD: process all pending (optionally filtered by ex-date)
+            self._process_pending(date_param, batch_size, dry_run, verbose)
 
         except Exception as e:
             self.stderr.write(self.style.ERROR(f'\nError: {str(e)}'))
@@ -167,6 +208,138 @@ class Command(BaseCommand):
         self.stdout.write(self.style.HTTP_INFO('=' * 70))
         self.stdout.write(f'Completed: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
         self.stdout.write(self.style.HTTP_INFO('=' * 70))
+
+    def _get_last_month_end_from_alldatesinfo(self) -> str:
+        """
+        Infer last_month_end from alldatesinfo — mirrors process_approved_cashflows logic.
+
+        SA rule:
+          - If contextual_today and reporting_date are in DIFFERENT months
+            → last_month_end = reporting_date  (it IS the month-end)
+          - Else (same month)
+            → last_month_end = last calendar day of month before reporting_date
+
+        Falls back to last calendar day of previous month if table unavailable.
+        """
+        try:
+            rows = impala_manager.execute_query(
+                f"""
+                SELECT contextual_today, reporting_date
+                FROM {DATABASE}.gmp_cis_sta_dly_alldatesinfo
+                WHERE src_system  = 'gmp'
+                  AND sub_system  = 'cis'
+                  AND data_frq    = 'dly'
+                  AND record_type = 'D'
+                  AND processing_date = (
+                      SELECT MAX(processing_date)
+                      FROM {DATABASE}.gmp_cis_sta_dly_alldatesinfo
+                      WHERE src_system  = 'gmp'
+                        AND sub_system  = 'cis'
+                        AND data_frq    = 'dly'
+                        AND record_type = 'D'
+                  )
+                LIMIT 1
+                """,
+                database=DATABASE
+            )
+            if rows:
+                raw_ct = str(rows[0].get('contextual_today', '') or '')[:8]
+                raw_rd = str(rows[0].get('reporting_date',   '') or '')[:8]
+                if raw_ct and raw_rd:
+                    contextual_today = datetime.strptime(raw_ct, '%Y%m%d').date()
+                    reporting_date   = datetime.strptime(raw_rd, '%Y%m%d').date()
+                    if (contextual_today.month != reporting_date.month or
+                            contextual_today.year != reporting_date.year):
+                        last_month_end = reporting_date.strftime('%Y-%m-%d')
+                    else:
+                        first_of_ref = reporting_date.replace(day=1)
+                        last_month_end = (first_of_ref - timedelta(days=1)).strftime('%Y-%m-%d')
+                    logger.info(
+                        f'[CORR] alldatesinfo: contextual_today={raw_ct} '
+                        f'reporting_date={raw_rd} → last_month_end={last_month_end}'
+                    )
+                    return last_month_end
+        except Exception as e:
+            logger.warning(f'Could not read alldatesinfo for CORR date: {e}')
+
+        # Fallback
+        today = date.today()
+        last_month_end = (today.replace(day=1) - timedelta(days=1)).strftime('%Y-%m-%d')
+        logger.warning(f'alldatesinfo unavailable — falling back to last_month_end={last_month_end}')
+        return last_month_end
+
+    def _process_corr(self, last_month_end: str, batch_size: int, dry_run: bool, verbose: bool):
+        """
+        CORR run: process CAs with ex_date <= last_month_end that are still PENDING or FAILED.
+
+        These are CAs that missed the EOD run (late validation, late entry, etc.) and
+        need to be caught up as part of month-end correction.
+        """
+        self.stdout.write(self.style.HTTP_INFO(
+            f'\n--- CORR Run: Processing CAs up to {last_month_end} ---\n'
+        ))
+
+        pending = ca_cash_flow_queue_repository.get_pending_for_corr(
+            last_month_end=last_month_end,
+            limit=batch_size
+        )
+
+        if not pending:
+            self.stdout.write(self.style.SUCCESS(
+                f'No unprocessed CAs found with ex_date <= {last_month_end}'
+            ))
+            return
+
+        self.stdout.write(f'Found {len(pending)} CA(s) to process\n')
+
+        if verbose or dry_run:
+            self._show_pending_entries(pending)
+
+        if dry_run:
+            self.stdout.write(self.style.WARNING('\n--- DRY RUN - no changes will be written ---\n'))
+
+        total_cf_created = 0
+        total_amount = Decimal('0')
+        successful = 0
+        failed = 0
+
+        for entry in pending:
+            queue_id  = entry.get('queue_id')
+            ca_number = entry.get('ca_number', 'Unknown')
+            ca_type   = entry.get('ca_type', '')
+            security  = entry.get('security_name', '')
+            ex_date   = entry.get('ex_date', '')
+            status    = entry.get('status', '')
+
+            self.stdout.write(
+                f'\nProcessing [CORR]: {ca_number} ({ca_type}) - {security} '
+                f'ex_date={ex_date} status={status}'
+            )
+
+            success, message, cf_count, amount = ca_cash_flow_service.process_ca_cash_flows(
+                queue_id=queue_id,
+                dry_run=dry_run
+            )
+
+            if success:
+                successful += 1
+                total_cf_created += cf_count
+                total_amount += amount
+                self.stdout.write(self.style.SUCCESS(f'  ✓ {message}'))
+            else:
+                failed += 1
+                self.stdout.write(self.style.ERROR(f'  ✗ Failed: {message}'))
+
+        self.stdout.write(self.style.HTTP_INFO('\n--- CORR Summary ---\n'))
+        self.stdout.write(f'  Cutoff (last_month_end) : {last_month_end}')
+        self.stdout.write(f'  Total Processed         : {len(pending)}')
+        self.stdout.write(self.style.SUCCESS(f'  Successful              : {successful}'))
+        if failed:
+            self.stdout.write(self.style.ERROR(f'  Failed                  : {failed}'))
+        else:
+            self.stdout.write(f'  Failed                  : {failed}')
+        self.stdout.write(f'  Cash Flows Created      : {total_cf_created}')
+        self.stdout.write(f'  Total Amount            : {total_amount}')
 
     def _show_statistics(self):
         """Show queue statistics."""
