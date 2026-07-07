@@ -291,16 +291,25 @@ def trade_list(request):
     # Batch fetch FX rates (single DB query)
     fx_rates_batch = multicurrency_service.get_fx_rates_batch(list(set(currency_pairs))) if currency_pairs else {}
 
-    # Apply FX rates to trades
+    # Apply LC amounts to trades.
+    # SA rule: always use the stored total_amount_lc from the trade record (the
+    # as-traded LC amount). Only fall back to system FX rate when the stored
+    # value is absent or zero (legacy/migrated records with no LC stored).
     for trade in trades_data:
         fc = trade.get('currency_code', '')
         lc = trade.get('portfolio_currency', '')
         total_fc = Decimal(str(trade.get('total_amount_fc') or trade.get('total_amount', 0) or 0))
+        stored_lc = trade.get('total_amount_lc')
 
         # Always write resolved FC value back so TradeWrapper.total_amount reflects it
         trade['total_amount_fc'] = float(total_fc)
 
-        if fc and lc and fc != lc:
+        if stored_lc and float(stored_lc) != 0:
+            # Use the as-traded LC amount stored on the record
+            trade['total_amount_lc'] = float(stored_lc)
+            trade['fx_rate'] = float(trade.get('open_fx_rate') or 1.0)
+        elif fc and lc and fc != lc:
+            # Fallback: stored LC missing — compute from system rate (legacy records)
             fx_key = f"{fc}-{lc}"
             if fx_key in fx_rates_batch:
                 fx_rate, _ = fx_rates_batch[fx_key]
@@ -308,13 +317,12 @@ def trade_list(request):
                 trade['fx_rate'] = float(fx_rate)
                 trade['total_amount_lc'] = float(total_lc)
             else:
-                # Fallback - shouldn't happen after batch fetch
                 trade['fx_rate'] = 1.0
                 trade['total_amount_lc'] = float(total_fc)
         else:
-            # Same currency - no conversion needed, LC = FC
-            trade['fx_rate'] = 1.0
-            trade['total_amount_lc'] = float(total_fc)
+            # Same currency — no conversion needed
+            trade['fx_rate'] = float(trade.get('open_fx_rate') or 1.0)
+            trade['total_amount_lc'] = float(stored_lc or total_fc)
 
     wrapped_trades = [TradeWrapper(t, idx) for idx, t in enumerate(trades_data)]
 

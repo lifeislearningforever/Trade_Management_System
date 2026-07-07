@@ -383,14 +383,31 @@ class Command(BaseCommand):
         fc_dp        = ref['currency_dp'].get(sec_ccy, 2)
         lc_dp        = ref['currency_dp'].get(port_ccy, 2)
 
-        # cost_lc: recalculate for REVALUED; carry forward for NON-REVALUED
+        # cost_lc rules (SA):
+        #   NON-REVAL: always carry forward the as-traded LC (never recompute)
+        #   REVAL: use latest FX rate if it is >= position_date (the traded date);
+        #          otherwise keep the as-traded LC stored on the position
         average_cost_fc = Decimal(str(position.get('average_cost_fc') or 0))
         if reval_status == 'NON-REVALUED':
             average_cost_lc = Decimal(str(position.get('average_cost_lc') or 0))
             cost_lc_write   = cost_lc_dec
         else:
-            average_cost_lc = round(average_cost_fc * fx_rate, lc_dp)
-            cost_lc_write   = round(cost_fc_dec * fx_rate, lc_dp)
+            # Determine whether the latest FX rate is more recent than the traded rate
+            raw_pos_date = position.get('position_date')
+            pos_date_str = str(raw_pos_date)[:10] if raw_pos_date else ''
+            fx_rate_date = ref['fx_rate_dates'].get(fx_pair, '') if fx_pair else ''
+            # Normalise both to YYYY-MM-DD for string comparison
+            if isinstance(fx_rate_date, str) and len(fx_rate_date) == 8 and '-' not in fx_rate_date:
+                fx_rate_date = f'{fx_rate_date[:4]}-{fx_rate_date[4:6]}-{fx_rate_date[6:]}'
+
+            if fx_rate_date and pos_date_str and fx_rate_date >= pos_date_str:
+                # Latest FX rate is as-of or after the trade date — use it
+                average_cost_lc = round(average_cost_fc * fx_rate, lc_dp)
+                cost_lc_write   = round(cost_fc_dec * fx_rate, lc_dp)
+            else:
+                # Latest FX rate predates the trade — keep as-traded LC
+                average_cost_lc = Decimal(str(position.get('average_cost_lc') or 0))
+                cost_lc_write   = cost_lc_dec
 
         # Market value
         if latest_price is not None:
@@ -451,6 +468,7 @@ class Command(BaseCommand):
             'port_info':     {},
             'prices':        {},
             'fx_rates':      {},
+            'fx_rate_dates': {},  # {pair_key: date_str} — date of latest FX rate
             'currency_dp':   {},
         }
 
@@ -527,9 +545,12 @@ class Command(BaseCommand):
 
         if pair_tuples:
             batch_rates = multicurrency_service.get_fx_rates_batch(pair_tuples)
-            for pair_key, (rate, _date_used) in batch_rates.items():
+            for pair_key, (rate, date_used) in batch_rates.items():
                 if rate and rate != Decimal('0'):
                     ref['fx_rates'][pair_key] = rate
+                    # Store the FX rate date so _process_position can compare
+                    # against position_date (traded rate date) for REVAL portfolios
+                    ref['fx_rate_dates'][pair_key] = date_used
 
         # 5. Currency decimal places for all currencies involved
         all_ccys = set()
