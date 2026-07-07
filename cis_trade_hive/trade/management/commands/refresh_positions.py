@@ -678,7 +678,7 @@ class Command(BaseCommand):
 
             raw_pos_date = position.get('position_date')
             pos_date  = str(raw_pos_date)[:10] if raw_pos_date else run_date
-            proc_date = pos_date.replace('-', '')  # YYYYMMDD
+            proc_date = run_date.replace('-', '')  # YYYYMMDD — always the actual run date, not position_date
 
             def fc(v, default=0):
                 val = Decimal(str(v)) if v is not None else Decimal(str(default))
