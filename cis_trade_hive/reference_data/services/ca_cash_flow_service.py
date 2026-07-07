@@ -993,12 +993,18 @@ class CACashFlowService:
         security_name: str,
         position_basis: str = 'SETTLED'
     ) -> Optional[Dict[str, Any]]:
-        """Get the current open position for a portfolio/security combination.
+        """Get the current open CIS position for a portfolio/security combination.
+
+        Primary:  cis_trade_position (versioned CIS ledger)
+        Fallback: cis_position WHERE src_system='CIS' — covers cases where the
+                  position exists in the golden copy but not yet in cis_trade_position
+                  (e.g. positions created via a bulk tool before the CA runs).
 
         Args:
             position_basis: 'SETTLED' (default) or 'TRADED'
         """
         try:
+            # --- Primary: cis_trade_position ---
             query = f"""
             SELECT *
             FROM {self.DATABASE}.{self.WRITE_POSITION_TABLE}
@@ -1012,7 +1018,73 @@ class CACashFlowService:
             LIMIT 1
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
-            return results[0] if results else None
+            if results:
+                return results[0]
+
+            # --- Fallback: cis_position WHERE src_system='CIS' ---
+            logger.info(
+                f"[UPDATE_POS] cis_trade_position miss for {portfolio_short_name}/{security_name} "
+                f"basis={position_basis} — checking cis_position (src_system=CIS)"
+            )
+            cp_basis = 'SETTLE_DATE' if position_basis == 'SETTLED' else 'TRADE_DATE'
+            fallback_query = f"""
+            SELECT
+                position_id,
+                version_id,
+                portfolio        AS portfolio_short_name,
+                security_label,
+                position_basis,
+                position_date,
+                src_system,
+                quantity,
+                average_cost_fc,
+                average_cost_lc,
+                cost_fc          AS total_cost_fc,
+                cost_lc          AS total_cost_lc,
+                market_value_fc,
+                market_value_lc,
+                unrealized_pnl_fc,
+                unrealized_pnl_lc,
+                realized_pnl_fc,
+                realized_pnl_lc,
+                dividend_fc,
+                dividend_lc,
+                uncall_fc,
+                uncall_lc,
+                pipeline_fc,
+                pipeline_lc,
+                provision_fc,
+                provision_lc,
+                position_type,
+                isin
+            FROM {self.DATABASE}.{self.POSITION_TABLE}
+            WHERE portfolio = '{self._escape(portfolio_short_name)}'
+              AND security_label = '{self._escape(security_name)}'
+              AND src_system = 'CIS'
+              AND position_basis = '{cp_basis}'
+              AND quantity > 0
+            ORDER BY position_date DESC, version_id DESC
+            LIMIT 1
+            """
+            fallback = impala_manager.execute_query(fallback_query, database=self.DATABASE)
+            if fallback:
+                row = fallback[0]
+                qty = float(row.get('quantity') or 0)
+                mv_fc = float(row.get('market_value_fc') or 0)
+                row['market_price'] = mv_fc / qty if qty else 0
+                row['status'] = 'OPEN'
+                row['is_latest'] = True
+                logger.info(
+                    f"[UPDATE_POS] Fallback hit: found CIS position in cis_position for "
+                    f"{portfolio_short_name}/{security_name}"
+                )
+                return row
+
+            logger.warning(
+                f"[UPDATE_POS] No open CIS position found for {portfolio_short_name}/{security_name} "
+                f"basis={position_basis} in cis_trade_position or cis_position"
+            )
+            return None
         except Exception as e:
             logger.error(f"[UPDATE_POS] Error getting current position ({position_basis}): {str(e)}")
             return None
@@ -1632,7 +1704,7 @@ class CACashFlowService:
         All other columns (realized_pnl, isin, src_system) are carried forward unchanged.
         """
         try:
-            # Find the current row in cis_position for this portfolio+security (CIS source)
+            # Find the current row in cis_position for this portfolio+security (CIS source only)
             find_query = f"""
             SELECT position_id, version_id, realized_pnl_fc, realized_pnl_lc,
                    isin, source_table, src_system, position_basis
@@ -1640,7 +1712,7 @@ class CACashFlowService:
             WHERE portfolio = '{self._escape(portfolio_short_name)}'
               AND security_label = '{self._escape(security_name)}'
               AND src_system = 'CIS'
-            ORDER BY position_date DESC
+            ORDER BY position_date DESC, version_id DESC
             LIMIT 1
             """
             rows = impala_manager.execute_query(find_query, database=self.DATABASE)
