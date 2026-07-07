@@ -601,7 +601,7 @@ class CACashFlowService:
                 'portfolio_short_name': portfolio_short_name,
                 'security_label': security_name,
                 'cash_flow_type': cf_type,
-                'send_receive': 'RECEIVE',  # Dividends are received
+                'send_receive': 'INCREASE',  # Dividends increase the portfolio cash position
                 'position_updated': False,
                 'value_date': ex_date,
                 'payment_date': payment_date,
