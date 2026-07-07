@@ -37,7 +37,7 @@ class Command(BaseCommand):
             '-d', '--date',
             type=str,
             default=None,
-            help='Filter by payment date (YYYY-MM-DD). Default: process all pending'
+            help='Filter by ex-date (YYYY-MM-DD). Processes all pending CAs with this ex-date. Default: process all pending'
         )
         parser.add_argument(
             '-n', '--dry-run',
@@ -116,7 +116,7 @@ class Command(BaseCommand):
         self.stdout.write(f'\nStarted: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
         self.stdout.write(f'Run By: {run_by}')
         if payment_date:
-            self.stdout.write(f'Payment Date Filter: {payment_date}')
+            self.stdout.write(f'Ex-Date Filter: {payment_date}')
         if dry_run:
             self.stdout.write(self.style.WARNING('Mode: DRY RUN'))
         self.stdout.write('')
@@ -198,13 +198,13 @@ class Command(BaseCommand):
         self.stdout.write(f"  Total Amount: {stats.get('total_amount', Decimal('0'))}")
 
     def _process_pending(self, payment_date: str, batch_size: int, dry_run: bool, verbose: bool):
-        """Process all pending queue entries."""
+        """Process all pending queue entries, filtered by ex-date when --date is supplied."""
         self.stdout.write(self.style.HTTP_INFO('\n--- Processing Pending Corporate Actions ---\n'))
 
-        # Get pending entries
+        # Get pending entries — filter by ex_date when a date is provided
         pending = ca_cash_flow_queue_repository.get_pending(
             limit=batch_size,
-            payment_date=payment_date
+            ex_date=payment_date  # --date flag maps to ex_date filter
         )
 
         if not pending:

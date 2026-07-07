@@ -103,13 +103,14 @@ class CACashFlowQueueRepository:
             return False, None
 
     @staticmethod
-    def get_pending(limit: int = 100, payment_date: str = None) -> List[Dict[str, Any]]:
+    def get_pending(limit: int = 100, payment_date: str = None, ex_date: str = None) -> List[Dict[str, Any]]:
         """
         Get pending queue entries for processing.
 
         Args:
             limit: Maximum entries to return
             payment_date: Optional filter by payment date (YYYY-MM-DD)
+            ex_date: Optional filter by ex-date (YYYY-MM-DD) — use for backdated runs
 
         Returns:
             List of pending queue entries
@@ -122,7 +123,9 @@ class CACashFlowQueueRepository:
               AND retry_count < {CACashFlowQueueRepository.MAX_RETRIES}
             """
 
-            if payment_date:
+            if ex_date:
+                query += f" AND ex_date = {CACashFlowQueueRepository.escape_value(ex_date)}"
+            elif payment_date:
                 query += f" AND payment_date = {CACashFlowQueueRepository.escape_value(payment_date)}"
 
             query += f" ORDER BY created_at ASC LIMIT {limit}"
