@@ -711,7 +711,8 @@ class CACashFlowService:
             timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             updated_any = False
 
-            for cp_basis in ('TRADE_DATE', 'SETTLE_DATE'):
+            # cis_position stores position_basis as 'TRADED' / 'SETTLED'
+            for cp_basis in ('TRADED', 'SETTLED'):
                 # Find the existing CIS INT row for this basis
                 find_q = f"""
                 SELECT position_id, version_id,
@@ -1413,7 +1414,8 @@ class CACashFlowService:
 
             updated_any = False
 
-            for cp_basis in ('TRADE_DATE', 'SETTLE_DATE'):
+            # cis_position stores position_basis as 'TRADED' / 'SETTLED'
+            for cp_basis in ('TRADED', 'SETTLED'):
                 # Find the existing INT row for this basis
                 find_q = f"""
                 SELECT position_id, version_id, market_value_fc, quantity,
