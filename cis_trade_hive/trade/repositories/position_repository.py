@@ -25,54 +25,107 @@ class PositionRepository:
             return ''
         return str(value).replace("\\", "\\\\").replace("'", "\\'")
 
+    # Columns allowed for ORDER BY (whitelist to prevent injection)
+    SORTABLE_COLUMNS = {
+        'portfolio':         'pos.portfolio',
+        'security_label':    'pos.security_label',
+        'isin':              'pos.isin',
+        'position_basis':    'pos.position_basis',
+        'position_date':     'pos.position_date',
+        'src_system':        'pos.src_system',
+        'position_type':     'pos.position_type',
+        'quantity':          'pos.quantity',
+        'average_cost_fc':   'pos.average_cost_fc',
+        'cost_fc':           'pos.cost_fc',
+        'cost_lc':           'pos.cost_lc',
+        'market_value_fc':   'pos.market_value_fc',
+        'market_value_lc':   'pos.market_value_lc',
+        'net_book_value_fc': 'pos.net_book_value_fc',
+        'unrealized_pnl_fc': 'pos.unrealized_pnl_fc',
+        'unrealized_pnl_lc': 'pos.unrealized_pnl_lc',
+        'realized_pnl_fc':   'pos.realized_pnl_fc',
+        'provision_fc':      'pos.provision_fc',
+        'provision_lc':      'pos.provision_lc',
+        'dividend_fc':       'pos.dividend_fc',
+        'uncall_fc':         'pos.uncall_fc',
+        'uncall_lc':         'pos.uncall_lc',
+        'pipeline_fc':       'pos.pipeline_fc',
+        'processing_date':   'pos.processing_date',
+        'revaluation_status': 'revaluation_status',
+    }
+
+    def _build_position_conditions(
+        self,
+        portfolios=None, securities=None, src_system=None,
+        position_basis=None, position_type=None,
+        date_from=None, date_to=None,
+        prefix='pos.'
+    ):
+        """Build shared WHERE conditions. position_type accepts str or list."""
+        e = self._escape
+        conditions = []
+        if portfolios and len(portfolios) == 1:
+            conditions.append(f"UPPER({prefix}portfolio) LIKE '%{e(portfolios[0].upper())}%'")
+        elif portfolios and len(portfolios) > 1:
+            vals = "', '".join(e(p) for p in portfolios)
+            conditions.append(f"{prefix}portfolio IN ('{vals}')")
+        if securities and len(securities) == 1:
+            conditions.append(f"UPPER({prefix}security_label) LIKE '%{e(securities[0].upper())}%'")
+        elif securities and len(securities) > 1:
+            vals = "', '".join(e(s) for s in securities)
+            conditions.append(f"{prefix}security_label IN ('{vals}')")
+        if src_system:
+            src_list = [s for s in (src_system if isinstance(src_system, list) else [src_system]) if s]
+            if len(src_list) == 1:
+                conditions.append(f"{prefix}src_system = '{e(src_list[0])}'")
+            elif len(src_list) > 1:
+                vals = "', '".join(e(s) for s in src_list)
+                conditions.append(f"{prefix}src_system IN ('{vals}')")
+        if position_basis:
+            conditions.append(f"{prefix}position_basis = '{e(position_basis)}'")
+        if position_type:
+            pt_list = [t for t in (position_type if isinstance(position_type, list) else [position_type]) if t]
+            if len(pt_list) == 1:
+                conditions.append(f"{prefix}position_type = '{e(pt_list[0])}'")
+            elif len(pt_list) > 1:
+                vals = "', '".join(e(t) for t in pt_list)
+                conditions.append(f"{prefix}position_type IN ('{vals}')")
+        if date_from:
+            conditions.append(f"{prefix}position_date >= '{e(date_from)}'")
+        if date_to:
+            conditions.append(f"{prefix}position_date <= '{e(date_to)}'")
+        return conditions
+
     def get_positions(
         self,
         portfolios: Optional[list] = None,
         securities: Optional[list] = None,
-        src_system: Optional[Any] = None,  # str or list[str]
+        src_system: Optional[Any] = None,
         position_basis: Optional[str] = None,
-        position_type: Optional[str] = None,
+        position_type: Optional[Any] = None,   # str or list[str]
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_dir: Optional[str] = None,
         limit: int = 500,
         offset: int = 0
     ) -> List[Dict[str, Any]]:
-        """
-        Fetch positions from cis_position with optional filters.
-
-        Returns list of position dicts matching cis_position schema.
-        """
+        """Fetch positions from cis_position with optional filters and sorting."""
         try:
-            conditions = []
-
-            if portfolios and len(portfolios) == 1:
-                conditions.append(f"UPPER(pos.portfolio) LIKE '%{self._escape(portfolios[0].upper())}%'")
-            elif portfolios and len(portfolios) > 1:
-                vals = "', '".join(self._escape(p) for p in portfolios)
-                conditions.append(f"pos.portfolio IN ('{vals}')")
-            if securities and len(securities) == 1:
-                conditions.append(f"UPPER(pos.security_label) LIKE '%{self._escape(securities[0].upper())}%'")
-            elif securities and len(securities) > 1:
-                vals = "', '".join(self._escape(s) for s in securities)
-                conditions.append(f"pos.security_label IN ('{vals}')")
-            if src_system:
-                src_list = src_system if isinstance(src_system, list) else [src_system]
-                src_list = [s for s in src_list if s]
-                if len(src_list) == 1:
-                    conditions.append(f"pos.src_system = '{self._escape(src_list[0])}'")
-                elif len(src_list) > 1:
-                    vals = "', '".join(self._escape(s) for s in src_list)
-                    conditions.append(f"pos.src_system IN ('{vals}')")
-            if position_basis:
-                conditions.append(f"pos.position_basis = '{self._escape(position_basis)}'")
-            if position_type:
-                conditions.append(f"pos.position_type = '{self._escape(position_type)}'")
-            if date_from:
-                conditions.append(f"pos.position_date >= '{self._escape(date_from)}'")
-            if date_to:
-                conditions.append(f"pos.position_date <= '{self._escape(date_to)}'")
-
+            conditions = self._build_position_conditions(
+                portfolios=portfolios, securities=securities, src_system=src_system,
+                position_basis=position_basis, position_type=position_type,
+                date_from=date_from, date_to=date_to, prefix='pos.'
+            )
             where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+            # Build ORDER BY — whitelist column, default asc/desc
+            order_col = self.SORTABLE_COLUMNS.get(sort_by, 'pos.position_date')
+            order_dir = 'ASC' if str(sort_dir).upper() == 'ASC' else 'DESC'
+            # Default sort: date DESC when no explicit sort chosen
+            if not sort_by:
+                order_dir = 'DESC'
+            order_by = f"{order_col} {order_dir}, pos.portfolio, pos.security_label"
 
             query = f"""
                 SELECT
@@ -102,7 +155,7 @@ class PositionRepository:
                 LEFT JOIN {DATABASE}.cis_security s
                     ON pos.security_label = s.security_name
                 {where}
-                ORDER BY pos.position_date DESC, pos.portfolio, pos.security_label
+                ORDER BY {order_by}
                 LIMIT {limit}
                 OFFSET {offset}
             """
@@ -118,49 +171,23 @@ class PositionRepository:
         self,
         portfolios: Optional[list] = None,
         securities: Optional[list] = None,
-        src_system: Optional[Any] = None,  # str or list[str]
+        src_system: Optional[Any] = None,
         position_basis: Optional[str] = None,
-        position_type: Optional[str] = None,
+        position_type: Optional[Any] = None,   # str or list[str]
         date_from: Optional[str] = None,
         date_to: Optional[str] = None
     ) -> int:
         """Return total count matching filters (for pagination)."""
         try:
-            conditions = []
-
-            if portfolios and len(portfolios) == 1:
-                conditions.append(f"UPPER(portfolio) LIKE '%{self._escape(portfolios[0].upper())}%'")
-            elif portfolios and len(portfolios) > 1:
-                vals = "', '".join(self._escape(p) for p in portfolios)
-                conditions.append(f"portfolio IN ('{vals}')")
-            if securities and len(securities) == 1:
-                conditions.append(f"UPPER(security_label) LIKE '%{self._escape(securities[0].upper())}%'")
-            elif securities and len(securities) > 1:
-                vals = "', '".join(self._escape(s) for s in securities)
-                conditions.append(f"security_label IN ('{vals}')")
-            if src_system:
-                src_list = src_system if isinstance(src_system, list) else [src_system]
-                src_list = [s for s in src_list if s]
-                if len(src_list) == 1:
-                    conditions.append(f"src_system = '{self._escape(src_list[0])}'")
-                elif len(src_list) > 1:
-                    vals = "', '".join(self._escape(s) for s in src_list)
-                    conditions.append(f"src_system IN ('{vals}')")
-            if position_basis:
-                conditions.append(f"position_basis = '{self._escape(position_basis)}'")
-            if position_type:
-                conditions.append(f"position_type = '{self._escape(position_type)}'")
-            if date_from:
-                conditions.append(f"position_date >= '{self._escape(date_from)}'")
-            if date_to:
-                conditions.append(f"position_date <= '{self._escape(date_to)}'")
-
+            conditions = self._build_position_conditions(
+                portfolios=portfolios, securities=securities, src_system=src_system,
+                position_basis=position_basis, position_type=position_type,
+                date_from=date_from, date_to=date_to, prefix=''
+            )
             where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
             query = f"SELECT COUNT(*) AS cnt FROM {DATABASE}.{TABLE} {where}"
             results = impala_manager.execute_query(query, database=DATABASE)
             return int(results[0].get('cnt', 0)) if results else 0
-
         except Exception as e:
             logger.error(f"Error counting positions: {str(e)}")
             return 0
@@ -169,43 +196,19 @@ class PositionRepository:
         self,
         portfolios: Optional[list] = None,
         securities: Optional[list] = None,
-        src_system: Optional[Any] = None,  # str or list[str]
+        src_system: Optional[Any] = None,
         position_basis: Optional[str] = None,
-        position_type: Optional[str] = None,
+        position_type: Optional[Any] = None,   # str or list[str]
         date_from: Optional[str] = None,
         date_to: Optional[str] = None
     ) -> Dict[str, Any]:
         """Aggregate stats for summary cards matching current filters."""
         try:
-            conditions = []
-
-            if portfolios and len(portfolios) == 1:
-                conditions.append(f"UPPER(portfolio) LIKE '%{self._escape(portfolios[0].upper())}%'")
-            elif portfolios and len(portfolios) > 1:
-                vals = "', '".join(self._escape(p) for p in portfolios)
-                conditions.append(f"portfolio IN ('{vals}')")
-            if securities and len(securities) == 1:
-                conditions.append(f"UPPER(security_label) LIKE '%{self._escape(securities[0].upper())}%'")
-            elif securities and len(securities) > 1:
-                vals = "', '".join(self._escape(s) for s in securities)
-                conditions.append(f"security_label IN ('{vals}')")
-            if src_system:
-                src_list = src_system if isinstance(src_system, list) else [src_system]
-                src_list = [s for s in src_list if s]
-                if len(src_list) == 1:
-                    conditions.append(f"src_system = '{self._escape(src_list[0])}'")
-                elif len(src_list) > 1:
-                    vals = "', '".join(self._escape(s) for s in src_list)
-                    conditions.append(f"src_system IN ('{vals}')")
-            if position_basis:
-                conditions.append(f"position_basis = '{self._escape(position_basis)}'")
-            if position_type:
-                conditions.append(f"position_type = '{self._escape(position_type)}'")
-            if date_from:
-                conditions.append(f"position_date >= '{self._escape(date_from)}'")
-            if date_to:
-                conditions.append(f"position_date <= '{self._escape(date_to)}'")
-
+            conditions = self._build_position_conditions(
+                portfolios=portfolios, securities=securities, src_system=src_system,
+                position_basis=position_basis, position_type=position_type,
+                date_from=date_from, date_to=date_to, prefix=''
+            )
             where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
             query = f"""

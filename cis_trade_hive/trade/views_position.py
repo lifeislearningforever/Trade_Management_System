@@ -30,86 +30,102 @@ def position_list(request):
     """
     Read-only position list from cis_position.
     Filters: portfolio, security, src_system, position_basis,
-             position_type, date_from, date_to.
+             position_type (multi), date_from, date_to.
+    Sorting: sort_by + sort_dir params, preserved across pagination.
     Supports CSV export via ?export=csv.
     """
     # --- Filter params ---
-    selected_portfolios = request.GET.getlist('portfolios')
-    selected_securities = request.GET.getlist('securities')
-    selected_src_systems = request.GET.getlist('src_system')
-    position_basis = request.GET.get('position_basis', '').strip()
-    position_type  = request.GET.get('position_type', 'INT').strip()
-    date_from     = request.GET.get('date_from', '').strip()
-    date_to       = request.GET.get('date_to', '').strip()
-    export        = request.GET.get('export', '').strip()
+    selected_portfolios   = request.GET.getlist('portfolios')
+    selected_securities   = request.GET.getlist('securities')
+    selected_src_systems  = request.GET.getlist('src_system')
+    selected_pos_types    = request.GET.getlist('position_type')   # multi-select
+    position_basis        = request.GET.get('position_basis', '').strip()
+    date_from             = request.GET.get('date_from', '').strip()
+    date_to               = request.GET.get('date_to', '').strip()
+    export                = request.GET.get('export', '').strip()
 
-    # Default date range: system_date (business date T) to T+2 (settle+2).
+    # --- Sort params ---
+    sort_by  = request.GET.get('sort_by', '').strip()
+    sort_dir = request.GET.get('sort_dir', 'DESC').strip().upper()
+    if sort_dir not in ('ASC', 'DESC'):
+        sort_dir = 'DESC'
+
+    # Default date range: system_date (T) to T+2.
     if not date_from and not date_to:
         sd_info   = system_date_service.get_system_date_info()
-        date_from = sd_info.system_date_display                          # T
+        date_from = sd_info.system_date_display
         date_to   = sd_info.settlement_t2_display or (
             sd_info.system_date + timedelta(days=2)
-        ).strftime('%Y-%m-%d')                                           # T+2
+        ).strftime('%Y-%m-%d')
 
     filter_kwargs = dict(
         portfolios=selected_portfolios or None,
         securities=selected_securities or None,
         src_system=selected_src_systems or None,
         position_basis=position_basis or None,
-        position_type=position_type or None,
+        position_type=selected_pos_types or None,
         date_from=date_from or None,
         date_to=date_to or None,
     )
 
     # --- CSV Export ---
     if export == 'csv':
-        positions = position_repository.get_positions(**filter_kwargs, limit=50000, offset=0)
+        positions = position_repository.get_positions(
+            **filter_kwargs, sort_by=sort_by, sort_dir=sort_dir,
+            limit=50000, offset=0
+        )
         return _export_csv(positions)
 
-    # --- Paginated fetch — filtering done at DB level via IN clause ---
+    # --- Paginated fetch ---
     try:
         page = max(1, int(request.GET.get('page', 1)))
     except (ValueError, TypeError):
         page = 1
 
-    offset = (page - 1) * PAGE_SIZE
-    total  = position_repository.get_position_count(**filter_kwargs)
+    offset      = (page - 1) * PAGE_SIZE
+    total       = position_repository.get_position_count(**filter_kwargs)
     total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-    positions = position_repository.get_positions(**filter_kwargs, limit=PAGE_SIZE, offset=offset)
-    stats     = position_repository.get_summary_stats(**filter_kwargs)
+    positions   = position_repository.get_positions(
+        **filter_kwargs, sort_by=sort_by, sort_dir=sort_dir,
+        limit=PAGE_SIZE, offset=offset
+    )
+    stats = position_repository.get_summary_stats(**filter_kwargs)
 
     # --- Dropdown data ---
     src_systems = position_repository.get_distinct_src_systems()
     portfolios  = position_repository.get_distinct_portfolios()
 
-    # Build a base query string that preserves ALL multi-value params (portfolios,
-    # securities, src_system) correctly.  Pagination links append &page=N to this.
+    # base_qs: all params except page — used by pagination and sort links.
     _qs = request.GET.copy()
-    _qs.pop('page', None)   # strip page so pagination links add their own
-    base_qs = _qs.urlencode()  # handles repeated keys: portfolios=A&portfolios=B&...
+    _qs.pop('page', None)
+    base_qs = _qs.urlencode()
 
     context = {
         # Data
-        'positions':       positions,
-        'stats':           stats,
-        'total':           total,
-        'page':            page,
-        'total_pages':     total_pages,
-        'page_range':      _page_range(page, total_pages),
-        'base_qs':         base_qs,   # used by pagination links in template
+        'positions':    positions,
+        'stats':        stats,
+        'total':        total,
+        'page':         page,
+        'total_pages':  total_pages,
+        'page_range':   _page_range(page, total_pages),
+        'base_qs':      base_qs,
 
-        # Active filters (echo back)
-        'selected_portfolios':  selected_portfolios,
-        'selected_securities':  selected_securities,
-        'selected_src_systems': selected_src_systems,
-        'f_position_basis': position_basis,
-        'f_position_type':  position_type,
-        'f_date_from':      date_from,
-        'f_date_to':        date_to,
+        # Active filters
+        'selected_portfolios':   selected_portfolios,
+        'selected_securities':   selected_securities,
+        'selected_src_systems':  selected_src_systems,
+        'selected_pos_types':    selected_pos_types,
+        'f_position_basis':      position_basis,
+        'f_date_from':           date_from,
+        'f_date_to':             date_to,
+
+        # Sort state
+        'sort_by':  sort_by,
+        'sort_dir': sort_dir,
 
         # Dropdown options
-        'src_systems':           src_systems,
-        'portfolios':            portfolios,
+        'src_systems':            src_systems,
+        'portfolios':             portfolios,
         'position_basis_choices': POSITION_BASIS_CHOICES,
         'position_type_choices':  POSITION_TYPE_CHOICES,
     }

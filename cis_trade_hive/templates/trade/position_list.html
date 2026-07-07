@@ -11,10 +11,24 @@
 
 {% block extra_css %}
 <style>
-.pos-table th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em; color: #495057; white-space: nowrap; padding: 6px 8px; }
+.pos-table th {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em;
+    color: #495057; white-space: nowrap; padding: 6px 8px;
+}
 .pos-table td { font-size: 0.82rem; padding: 5px 8px; vertical-align: middle; }
 .pos-table tbody tr:hover { background: #f0f4ff !important; }
 .num { font-variant-numeric: tabular-nums; }
+
+/* Sort header */
+.sort-th { cursor: pointer; user-select: none; }
+.sort-th:hover { background: #e2e8f0 !important; }
+.sort-th .sort-icon { font-size: 0.65rem; margin-left: 3px; opacity: 0.45; }
+.sort-th.sorted-asc .sort-icon::before  { content: "▲"; opacity: 1; }
+.sort-th.sorted-desc .sort-icon::before { content: "▼"; opacity: 1; }
+.sort-th:not(.sorted-asc):not(.sorted-desc) .sort-icon::before { content: "⇅"; }
+
+/* Type multi-select dropdown */
+.type-dropdown-menu { min-width: 120px; z-index: 1055; }
 </style>
 {% endblock %}
 
@@ -39,6 +53,10 @@
     </div>
     <div class="card-body py-2" style="overflow: visible;">
         <form method="get" id="positionFilterForm" class="row g-2 align-items-end">
+
+            <!-- Keep sort params across filter submits -->
+            {% if sort_by %}<input type="hidden" name="sort_by" value="{{ sort_by }}">{% endif %}
+            <input type="hidden" name="sort_dir" value="{{ sort_dir }}">
 
             <!-- Portfolio Multi-Select -->
             <div class="col-md-2">
@@ -85,9 +103,7 @@
                 <div class="dropdown">
                     <button type="button"
                             class="btn btn-outline-secondary btn-sm w-100 d-flex justify-content-between align-items-center"
-                            data-bs-toggle="dropdown"
-                            data-bs-auto-close="true"
-                            aria-expanded="false">
+                            data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
                         <span id="srcSystemLabel">
                             {% if selected_src_systems %}{{ selected_src_systems|length }} selected{% else %}All{% endif %}
                         </span>
@@ -128,15 +144,51 @@
                 </select>
             </div>
 
-            <!-- Position Type -->
+            <!-- Position Type multi-select (INT / EOD / SOD / CORR) -->
             <div class="col-md-1">
                 <label class="form-label form-label-sm">Type</label>
-                <select name="position_type" class="form-select form-select-sm">
-                    <option value="">All</option>
-                    {% for t in position_type_choices %}
-                        <option value="{{ t }}" {% if f_position_type == t %}selected{% endif %}>{{ t }}</option>
+                <div id="posTypeInputs">
+                    {% for t in selected_pos_types %}
+                    <input type="hidden" name="position_type" value="{{ t }}">
                     {% endfor %}
-                </select>
+                </div>
+                <div class="dropdown">
+                    <button type="button"
+                            class="btn btn-outline-secondary btn-sm w-100 d-flex justify-content-between align-items-center"
+                            data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                        <span id="posTypeLabel">
+                            {% if selected_pos_types %}{{ selected_pos_types|length }} selected{% else %}All{% endif %}
+                        </span>
+                        <i class="bi bi-chevron-down ms-1"></i>
+                    </button>
+                    <ul class="dropdown-menu p-2 type-dropdown-menu">
+                        {% for t in position_type_choices %}
+                        <li>
+                            <label class="d-flex align-items-center gap-2 px-2 py-1 rounded"
+                                   style="cursor:pointer; user-select:none;"
+                                   onmouseover="this.style.background='#f8f9fa'"
+                                   onmouseout="this.style.background=''">
+                                <input type="checkbox" class="form-check-input pos-type-cb"
+                                       value="{{ t }}"
+                                       {% if t in selected_pos_types %}checked{% endif %}
+                                       onchange="updatePosType()">
+                                <span>
+                                    {% if t == 'INT' %}<span class="badge bg-primary">INT</span>
+                                    {% elif t == 'EOD' %}<span class="badge bg-success">EOD</span>
+                                    {% elif t == 'SOD' %}<span class="badge bg-warning text-dark">SOD</span>
+                                    {% elif t == 'CORR' %}<span class="badge bg-info text-dark">CORR</span>
+                                    {% else %}{{ t }}{% endif %}
+                                </span>
+                            </label>
+                        </li>
+                        {% endfor %}
+                        <li><hr class="dropdown-divider my-1"></li>
+                        <li class="px-2">
+                            <button type="button" class="btn btn-link btn-sm p-0 text-secondary"
+                                    onclick="clearPosTypes()">Clear all</button>
+                        </li>
+                    </ul>
+                </div>
             </div>
 
             <!-- Date From -->
@@ -162,7 +214,7 @@
             </div>
 
             <!-- Active filter badges -->
-            {% if selected_portfolios or selected_securities %}
+            {% if selected_portfolios or selected_securities or selected_pos_types %}
             <div class="col-12">
                 <div class="d-flex flex-wrap gap-2 align-items-center mt-1">
                     <span class="text-muted small">Active:</span>
@@ -180,6 +232,13 @@
                                 onclick="removeSecurityFilter('{{ s }}')" style="font-size: 0.55rem;"></button>
                     </span>
                     {% endfor %}
+                    {% for t in selected_pos_types %}
+                    <span class="badge bg-secondary d-flex align-items-center gap-1">
+                        {{ t }}
+                        <button type="button" class="btn-close btn-close-white btn-sm"
+                                onclick="removePosTypeFilter('{{ t }}')" style="font-size: 0.55rem;"></button>
+                    </span>
+                    {% endfor %}
                 </div>
             </div>
             {% endif %}
@@ -195,37 +254,115 @@
             <table class="table table-hover table-sm mb-0 pos-table" style="width: max-content; min-width: 100%;">
                 <thead class="table-light" style="position: sticky; top: 0; z-index: 10;">
                     <tr>
-                        <th style="min-width: 120px; position: sticky; left: 0; background:#f8f9fa; z-index:11;">Portfolio</th>
-                        <th style="min-width: 90px;">Reval</th>
-                        <th style="min-width: 180px;">Security</th>
-                        <th style="min-width: 100px;">ISIN</th>
-                        <th style="min-width: 100px;">Basis</th>
-                        <th style="min-width: 100px;">Pos Date</th>
-                        <th style="min-width: 80px;">Src</th>
-                        <th style="min-width: 90px;">Type</th>
-                        <th class="text-end" style="min-width: 110px;">Quantity</th>
-                        <th class="text-end" style="min-width: 110px;">Avg Cost FC</th>
-                        <th class="text-end" style="min-width: 110px;">Cost FC</th>
-                        <th class="text-end" style="min-width: 110px;">Cost LC</th>
-                        <th class="text-end" style="min-width: 120px;">Mkt Val FC</th>
-                        <th class="text-end" style="min-width: 120px;">Mkt Val LC</th>
-                        <th class="text-end" style="min-width: 120px;">NBV FC</th>
-                        <th class="text-end" style="min-width: 120px;">Unreal PnL FC</th>
-                        <th class="text-end" style="min-width: 120px;">Unreal PnL LC</th>
-                        <th class="text-end" style="min-width: 110px;">Real PnL FC</th>
-                        <th class="text-end" style="min-width: 100px;">Provision FC</th>
-                        <th class="text-end" style="min-width: 100px;">Provision LC</th>
-                        <th class="text-end" style="min-width: 100px;">Dividend FC</th>
-                        <th class="text-end" style="min-width: 100px;">Uncall FC</th>
-                        <th class="text-end" style="min-width: 100px;">Uncall LC</th>
-                        <th class="text-end" style="min-width: 100px;">Pipeline FC</th>
-                        <th style="min-width: 100px;">Proc Date</th>
+                        {% with sb=sort_by sd=sort_dir %}
+                        <th class="sort-th {% if sb == 'portfolio' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:120px; position:sticky; left:0; background:#f8f9fa; z-index:11;"
+                            onclick="sortBy('portfolio')">
+                            Portfolio <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th {% if sb == 'revaluation_status' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:70px;" onclick="sortBy('revaluation_status')">
+                            Reval <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th {% if sb == 'security_label' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:180px;" onclick="sortBy('security_label')">
+                            Security <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th {% if sb == 'isin' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:100px;" onclick="sortBy('isin')">
+                            ISIN <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th {% if sb == 'position_basis' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:100px;" onclick="sortBy('position_basis')">
+                            Basis <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th {% if sb == 'position_date' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:105px;" onclick="sortBy('position_date')">
+                            Pos Date <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th {% if sb == 'src_system' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:75px;" onclick="sortBy('src_system')">
+                            Src <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th {% if sb == 'position_type' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:80px;" onclick="sortBy('position_type')">
+                            Type <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'quantity' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:110px;" onclick="sortBy('quantity')">
+                            Quantity <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'average_cost_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:110px;" onclick="sortBy('average_cost_fc')">
+                            Avg Cost FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'cost_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:110px;" onclick="sortBy('cost_fc')">
+                            Cost FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'cost_lc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:110px;" onclick="sortBy('cost_lc')">
+                            Cost LC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'market_value_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:120px;" onclick="sortBy('market_value_fc')">
+                            Mkt Val FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'market_value_lc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:120px;" onclick="sortBy('market_value_lc')">
+                            Mkt Val LC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'net_book_value_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:110px;" onclick="sortBy('net_book_value_fc')">
+                            NBV FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'unrealized_pnl_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:120px;" onclick="sortBy('unrealized_pnl_fc')">
+                            Unreal PnL FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'unrealized_pnl_lc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:120px;" onclick="sortBy('unrealized_pnl_lc')">
+                            Unreal PnL LC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'realized_pnl_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:110px;" onclick="sortBy('realized_pnl_fc')">
+                            Real PnL FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'provision_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:100px;" onclick="sortBy('provision_fc')">
+                            Provision FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'provision_lc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:100px;" onclick="sortBy('provision_lc')">
+                            Provision LC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'dividend_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:100px;" onclick="sortBy('dividend_fc')">
+                            Dividend FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'uncall_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:100px;" onclick="sortBy('uncall_fc')">
+                            Uncall FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'uncall_lc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:100px;" onclick="sortBy('uncall_lc')">
+                            Uncall LC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th text-end {% if sb == 'pipeline_fc' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:100px;" onclick="sortBy('pipeline_fc')">
+                            Pipeline FC <span class="sort-icon"></span>
+                        </th>
+                        <th class="sort-th {% if sb == 'processing_date' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:100px;" onclick="sortBy('processing_date')">
+                            Proc Date <span class="sort-icon"></span>
+                        </th>
+                        {% endwith %}
                     </tr>
                 </thead>
                 <tbody>
                     {% for p in positions %}
                     <tr>
-                        <td style="position: sticky; left: 0; background:#fff; z-index:1;">
+                        <td style="position:sticky; left:0; background:#fff; z-index:1;">
                             {% if p.portfolio %}
                                 <a href="{% url 'portfolio:detail' p.portfolio %}" class="text-primary fw-semibold">
                                     {{ p.portfolio }}
@@ -237,7 +374,7 @@
                         <td>
                             {% if p.revaluation_status %}
                                 {% with rs=p.revaluation_status|upper %}
-                                <span class="badge {% if rs == 'Y' or rs == 'REVAL' or 'NON' not in rs %}bg-success{% else %}bg-secondary{% endif %}"
+                                <span class="badge {% if 'NON' not in rs %}bg-success{% else %}bg-secondary{% endif %}"
                                       title="{{ p.revaluation_status }}">
                                     {% if 'NON' in rs %}NR{% else %}R{% endif %}
                                 </span>
@@ -328,13 +465,11 @@
                         <a class="page-link" href="?{{ base_qs }}&page={{ page|add:"-1" }}">&laquo;</a>
                     </li>
                     {% endif %}
-
                     {% for p in page_range %}
                     <li class="page-item {% if p == page %}active{% endif %}">
                         <a class="page-link" href="?{{ base_qs }}&page={{ p }}">{{ p }}</a>
                     </li>
                     {% endfor %}
-
                     {% if page < total_pages %}
                     <li class="page-item">
                         <a class="page-link" href="?{{ base_qs }}&page={{ page|add:"1" }}">&raquo;</a>
@@ -397,12 +532,10 @@
                             </tr>
                         </thead>
                         <tbody id="portfolioModalTableBody">
-                            <tr>
-                                <td colspan="6" class="text-center py-4">
-                                    <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
-                                    <span class="ms-2">Loading portfolios...</span>
-                                </td>
-                            </tr>
+                            <tr><td colspan="6" class="text-center py-4">
+                                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                                <span class="ms-2">Loading portfolios...</span>
+                            </td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -463,12 +596,10 @@
                             </tr>
                         </thead>
                         <tbody id="securityModalTableBody">
-                            <tr>
-                                <td colspan="9" class="text-center py-4">
-                                    <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
-                                    <span class="ms-2">Loading securities...</span>
-                                </td>
-                            </tr>
+                            <tr><td colspan="9" class="text-center py-4">
+                                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                                <span class="ms-2">Loading securities...</span>
+                            </td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -486,12 +617,27 @@
 
 {% block extra_js %}
 <script>
-let portfolioData = [];
-let securityData = [];
-let selectedPortfolios = new Set([{% for p in selected_portfolios %}'{{ p }}',{% endfor %}]);
-let selectedSecurities = new Set([{% for s in selected_securities %}'{{ s }}',{% endfor %}]);
+// ── Sort ──────────────────────────────────────────────────────────────────────
+const CURRENT_SORT_BY  = '{{ sort_by }}';
+const CURRENT_SORT_DIR = '{{ sort_dir }}';
 
-// ── Portfolio Modal ───────────────────────────────────
+function sortBy(col) {
+    const params = new URLSearchParams(window.location.search);
+    const curDir = params.get('sort_dir') || 'DESC';
+    // Toggle direction if clicking same column, otherwise default to ASC
+    const newDir = (params.get('sort_by') === col && curDir === 'ASC') ? 'DESC' : 'ASC';
+    params.set('sort_by', col);
+    params.set('sort_dir', newDir);
+    params.delete('page');   // reset to page 1 on sort change
+    window.location.search = params.toString();
+}
+
+// ── Portfolio Modal ───────────────────────────────────────────────────────────
+let portfolioData = [];
+let securityData  = [];
+let selectedPortfolios = new Set([{% for p in selected_portfolios %}'{{ p|escapejs }}',{% endfor %}]);
+let selectedSecurities = new Set([{% for s in selected_securities %}'{{ s|escapejs }}',{% endfor %}]);
+
 document.getElementById('portfolioModal').addEventListener('show.bs.modal', loadPortfolios);
 
 function loadPortfolios() {
@@ -510,7 +656,7 @@ function loadPortfolios() {
 
 function renderPortfolioTable() {
     const tbody = document.getElementById('portfolioModalTableBody');
-    const term = document.getElementById('portfolioModalSearch').value.toLowerCase();
+    const term  = document.getElementById('portfolioModalSearch').value.toLowerCase();
     const filtered = portfolioData.filter(p =>
         `${p.portfolio_short_name} ${p.portfolio_full_name} ${p.currency} ${p.manager}`.toLowerCase().includes(term)
     );
@@ -545,18 +691,16 @@ function updatePortfolioCount() {
 }
 function selectAllPortfolios() {
     const term = document.getElementById('portfolioModalSearch').value.toLowerCase();
-    const filtered = portfolioData.filter(p =>
+    portfolioData.filter(p =>
         `${p.portfolio_short_name} ${p.portfolio_full_name} ${p.currency} ${p.manager}`.toLowerCase().includes(term)
-    );
-    filtered.forEach(p => selectedPortfolios.add(p.portfolio_short_name));
+    ).forEach(p => selectedPortfolios.add(p.portfolio_short_name));
     renderPortfolioTable();
 }
 function clearAllPortfolios() {
     const term = document.getElementById('portfolioModalSearch').value.toLowerCase();
-    const filtered = portfolioData.filter(p =>
+    portfolioData.filter(p =>
         `${p.portfolio_short_name} ${p.portfolio_full_name} ${p.currency} ${p.manager}`.toLowerCase().includes(term)
-    );
-    filtered.forEach(p => selectedPortfolios.delete(p.portfolio_short_name));
+    ).forEach(p => selectedPortfolios.delete(p.portfolio_short_name));
     renderPortfolioTable();
 }
 function toggleAllPortfolioCheckboxes(cb) { if (cb.checked) selectAllPortfolios(); else clearAllPortfolios(); }
@@ -578,7 +722,7 @@ function removePortfolioFilter(name) {
 }
 document.getElementById('portfolioModalSearch').addEventListener('input', renderPortfolioTable);
 
-// ── Security Modal ────────────────────────────────────
+// ── Security Modal ────────────────────────────────────────────────────────────
 document.getElementById('securityModal').addEventListener('show.bs.modal', loadSecurities);
 
 function loadSecurities() {
@@ -597,7 +741,7 @@ function loadSecurities() {
 
 function renderSecurityTable() {
     const tbody = document.getElementById('securityModalTableBody');
-    const term = document.getElementById('securityModalSearch').value.toLowerCase();
+    const term  = document.getElementById('securityModalSearch').value.toLowerCase();
     const filtered = securityData.filter(s =>
         `${s.security_label} ${s.security_name} ${s.isin} ${s.ticker} ${s.issuer}`.toLowerCase().includes(term)
     );
@@ -635,18 +779,16 @@ function updateSecurityCount() {
 }
 function selectAllSecurities() {
     const term = document.getElementById('securityModalSearch').value.toLowerCase();
-    const filtered = securityData.filter(s =>
+    securityData.filter(s =>
         `${s.security_label} ${s.security_name} ${s.isin} ${s.ticker} ${s.issuer}`.toLowerCase().includes(term)
-    );
-    filtered.forEach(s => selectedSecurities.add(s.security_label));
+    ).forEach(s => selectedSecurities.add(s.security_label));
     renderSecurityTable();
 }
 function clearAllSecurities() {
     const term = document.getElementById('securityModalSearch').value.toLowerCase();
-    const filtered = securityData.filter(s =>
+    securityData.filter(s =>
         `${s.security_label} ${s.security_name} ${s.isin} ${s.ticker} ${s.issuer}`.toLowerCase().includes(term)
-    );
-    filtered.forEach(s => selectedSecurities.delete(s.security_label));
+    ).forEach(s => selectedSecurities.delete(s.security_label));
     renderSecurityTable();
 }
 function toggleAllSecurityCheckboxes(cb) { if (cb.checked) selectAllSecurities(); else clearAllSecurities(); }
@@ -668,23 +810,7 @@ function removeSecurityFilter(label) {
 }
 document.getElementById('securityModalSearch').addEventListener('input', renderSecurityTable);
 
-// ── Src System multi-select ───────────────────────────
-(function () {
-    const srcDropdownEl = document.querySelector('#srcSystemInputs')
-        ?.closest('.col-md-1')
-        ?.querySelector('.dropdown');
-    if (!srcDropdownEl) return;
-    const menu = srcDropdownEl.querySelector('.dropdown-menu');
-    let clickedInsideMenu = false;
-    menu.addEventListener('mousedown', function () { clickedInsideMenu = true; });
-    srcDropdownEl.addEventListener('hide.bs.dropdown', function (e) {
-        if (clickedInsideMenu) {
-            e.preventDefault();
-            clickedInsideMenu = false;
-        }
-    });
-})();
-
+// ── Src System multi-select ───────────────────────────────────────────────────
 function updateSrcSystem() {
     const checked = [...document.querySelectorAll('.src-system-cb:checked')].map(cb => cb.value);
     const container = document.getElementById('srcSystemInputs');
@@ -700,6 +826,30 @@ function updateSrcSystem() {
 function clearSrcSystems() {
     document.querySelectorAll('.src-system-cb').forEach(cb => cb.checked = false);
     updateSrcSystem();
+}
+
+// ── Position Type multi-select ────────────────────────────────────────────────
+function updatePosType() {
+    const checked = [...document.querySelectorAll('.pos-type-cb:checked')].map(cb => cb.value);
+    const container = document.getElementById('posTypeInputs');
+    container.innerHTML = '';
+    checked.forEach(v => {
+        const i = document.createElement('input');
+        i.type = 'hidden'; i.name = 'position_type'; i.value = v;
+        container.appendChild(i);
+    });
+    document.getElementById('posTypeLabel').textContent =
+        checked.length > 0 ? `${checked.length} selected` : 'All';
+}
+function clearPosTypes() {
+    document.querySelectorAll('.pos-type-cb').forEach(cb => cb.checked = false);
+    updatePosType();
+}
+function removePosTypeFilter(t) {
+    const cb = document.querySelector(`.pos-type-cb[value="${t}"]`);
+    if (cb) cb.checked = false;
+    document.querySelectorAll(`#posTypeInputs input[value="${t}"]`).forEach(i => i.remove());
+    document.getElementById('positionFilterForm').submit();
 }
 </script>
 {% endblock %}
