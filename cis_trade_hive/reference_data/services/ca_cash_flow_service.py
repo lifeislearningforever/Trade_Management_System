@@ -689,302 +689,191 @@ class CACashFlowService:
         updated_by: str
     ) -> bool:
         """
-        Create a NEW position version with CA/cash flow details.
+        Update existing INT rows in cis_position for a CA cash flow event.
 
-        Based on SA Specification for AVP changes:
-        - DIVIDEND/SPECIAL_DIVIDEND: AVP unchanged (just record cash flow)
-        - ROC (Return of Capital): AVP = AVP_old - price_per_share (cost basis reduction)
+        SA rule: All CA types update the existing INT records in place — no new
+        position type. Both TRADE_DATE and SETTLE_DATE basis rows are updated
+        if they exist. position_type stays INT throughout.
 
-        Args:
-            portfolio_short_name: Portfolio short name
-            security_name: Security label
-            ca_id: Corporate Action ID
-            ca_number: CA number
-            ca_type: CA type (DIVIDEND, INTEREST, ROC, etc.)
-            ex_date: Ex-dividend date
-            cash_flow_id: Created cash flow ID
-            cash_flow_number: Cash flow number
-            cash_flow_amount_fc: Cash flow amount in Foreign Currency (security currency)
-            cash_flow_amount_lc: Cash flow amount in Local Currency (portfolio currency)
-            security_currency: Security currency code (FC)
-            portfolio_currency: Portfolio currency code (LC)
-            fx_rate: FX rate used (FC to LC)
-            updated_by: User who triggered the update
-
-        Returns:
-            True if successful, False otherwise
+        AVP rules per CA type:
+        - DIVIDEND / SPECIAL_DIVIDEND / INTEREST / COUPON: AVP unchanged; accumulate dividend_fc/lc
+        - ROC / CAPITAL_DISTRIBUTION: AVP reduced by cash_flow_amount / qty
+        - INCOME_DISTRIBUTION: AVP unchanged; accumulate realized_pnl_fc/lc
+        - Default: AVP unchanged, no accumulation
         """
         try:
-            logger.info(f"[UPDATE_POS] Creating new position version with CA details: "
-                       f"portfolio={portfolio_short_name}, security={security_name}, "
-                       f"ca_number={ca_number}, cf_number={cash_flow_number}, "
-                       f"amount_fc={cash_flow_amount_fc} {security_currency}, "
-                       f"amount_lc={cash_flow_amount_lc} {portfolio_currency}, fx_rate={fx_rate}")
+            logger.info(
+                f"[UPDATE_POS] Updating INT positions for CA: portfolio={portfolio_short_name}, "
+                f"security={security_name}, ca_number={ca_number}, ca_type={ca_type}, "
+                f"amount_fc={cash_flow_amount_fc}, amount_lc={cash_flow_amount_lc}"
+            )
 
-            # Step 1: Get current open position
-            current_position = self._get_current_position(portfolio_short_name, security_name)
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            updated_any = False
 
-            if not current_position:
-                logger.warning(f"[UPDATE_POS] No open position found for {portfolio_short_name}/{security_name}")
-                return False
-
-            # Step 2: Extract current values (using new FC/LC column names)
-            position_id = current_position.get('position_id')
-            old_version_id = current_position.get('version_id')
-            quantity = Decimal(str(current_position.get('quantity', 0) or 0))
-            # FC = Foreign Currency (Security Currency)
-            old_total_cost_fc = Decimal(str(current_position.get('total_cost_fc', 0) or 0))
-            old_avg_cost_fc = Decimal(str(current_position.get('average_cost_fc', 0) or 0))
-            # LC = Local Currency (Portfolio Currency)
-            old_total_cost_lc = Decimal(str(current_position.get('total_cost_lc', 0) or 0))
-            old_avg_cost_lc = Decimal(str(current_position.get('average_cost_lc', 0) or 0))
-            market_price = Decimal(str(current_position.get('market_price', 0) or 0))
-            market_value_fc = Decimal(str(current_position.get('market_value_fc', 0) or 0))
-            # Accumulated dividends
-            old_dividend_fc = Decimal(str(current_position.get('dividend_fc', 0) or 0))
-            old_dividend_lc = Decimal(str(current_position.get('dividend_lc', 0) or 0))
-
-            # Get existing P&L values
-            realized_pnl_fc = Decimal(str(current_position.get('realized_pnl_fc', 0) or 0))
-            realized_pnl_lc = Decimal(str(current_position.get('realized_pnl_lc', 0) or 0))
-
-            # Carry forward fields that CA cash flow events don't change
-            uncall_fc = float(current_position.get('uncall_fc', 0) or 0)
-            uncall_lc = float(current_position.get('uncall_lc', 0) or 0)
-            pipeline_fc = float(current_position.get('pipeline_fc', 0) or 0)
-            pipeline_lc = float(current_position.get('pipeline_lc', 0) or 0)
-            commit_fc = float(current_position.get('commit_fc', 0) or 0)
-            commit_lc = float(current_position.get('commit_lc', 0) or 0)
-            provision_fc = float(current_position.get('provision_fc', 0) or 0)
-            provision_lc = float(current_position.get('provision_lc', 0) or 0)
-            position_type = current_position.get('position_type') or 'NORMAL'
-
-            logger.info(f"[UPDATE_POS] Current position: qty={quantity}, total_cost_fc={old_total_cost_fc}, "
-                       f"avg_cost_fc={old_avg_cost_fc}, dividend_fc={old_dividend_fc}, dividend_lc={old_dividend_lc}")
-
-            # Step 3: Calculate new values based on CA type per SA specification
-            if ca_type in self.NO_AVP_CHANGE_CA_TYPES:
-                # DIVIDEND, SPECIAL_DIVIDEND, INTEREST, COUPON: AVP unchanged
-                # Just record the cash flow, no cost basis change
-                logger.info(f"[UPDATE_POS] CA type {ca_type}: AVP unchanged per SA specification")
-                new_total_cost_fc = old_total_cost_fc
-                new_avg_cost_fc = old_avg_cost_fc
-                new_total_cost_lc = old_total_cost_lc
-                new_avg_cost_lc = old_avg_cost_lc
-            elif ca_type in self.AVP_REDUCTION_CA_TYPES:
-                # ROC / CAPITAL_DISTRIBUTION: avp_new = avp_old - price (per-share reduction)
-                # The CA 'price' field holds the per-share distribution amount.
-                # We look it up from the queue_entry via the passed cash_flow_amount_fc / quantity.
-                price_per_share_fc = (cash_flow_amount_fc / quantity).quantize(
-                    Decimal('0.00000001'), rounding=ROUND_HALF_UP
-                ) if quantity > 0 else Decimal('0')
-                price_per_share_lc = (cash_flow_amount_lc / quantity).quantize(
-                    Decimal('0.00000001'), rounding=ROUND_HALF_UP
-                ) if quantity > 0 else Decimal('0')
-
-                logger.info(f"[UPDATE_POS] CA type {ca_type}: AVP reduced per-share. "
-                           f"price_per_share_fc={price_per_share_fc}, price_per_share_lc={price_per_share_lc}")
-
-                # avp_new = avp_old - price_per_share (floor at 0)
-                new_avg_cost_fc = max(
-                    Decimal('0'),
-                    (old_avg_cost_fc - price_per_share_fc).quantize(
-                        Decimal('0.00000001'), rounding=ROUND_HALF_UP
+            for cp_basis in ('TRADE_DATE', 'SETTLE_DATE'):
+                # Find the existing CIS INT row for this basis
+                find_q = f"""
+                SELECT position_id, version_id,
+                       quantity,
+                       average_cost_fc, cost_fc AS total_cost_fc,
+                       average_cost_lc, cost_lc AS total_cost_lc,
+                       market_value_fc, market_value_lc,
+                       unrealized_pnl_fc, unrealized_pnl_lc,
+                       realized_pnl_fc, realized_pnl_lc,
+                       dividend_fc, dividend_lc,
+                       uncall_fc, uncall_lc,
+                       pipeline_fc, pipeline_lc,
+                       provision_fc, provision_lc,
+                       isin, src_system, source_table, position_date
+                FROM {self.DATABASE}.{self.POSITION_TABLE}
+                WHERE portfolio = '{self._escape(portfolio_short_name)}'
+                  AND security_label = '{self._escape(security_name)}'
+                  AND src_system = 'CIS'
+                  AND position_basis = '{cp_basis}'
+                  AND quantity > 0
+                ORDER BY position_date DESC, version_id DESC
+                LIMIT 1
+                """
+                rows = impala_manager.execute_query(find_q, database=self.DATABASE)
+                if not rows:
+                    logger.info(
+                        f"[UPDATE_POS] No CIS {cp_basis} INT row found for "
+                        f"{portfolio_short_name}/{security_name} — skipping basis"
                     )
+                    continue
+
+                row = rows[0]
+                position_id   = row.get('position_id')
+                position_date = row.get('position_date') or ex_date
+                quantity      = Decimal(str(row.get('quantity') or 0))
+
+                old_avg_cost_fc   = Decimal(str(row.get('average_cost_fc') or 0))
+                old_total_cost_fc = Decimal(str(row.get('total_cost_fc') or 0))
+                old_avg_cost_lc   = Decimal(str(row.get('average_cost_lc') or 0))
+                old_total_cost_lc = Decimal(str(row.get('total_cost_lc') or 0))
+                market_value_fc   = Decimal(str(row.get('market_value_fc') or 0))
+                market_value_lc   = Decimal(str(row.get('market_value_lc') or 0))
+                old_dividend_fc   = Decimal(str(row.get('dividend_fc') or 0))
+                old_dividend_lc   = Decimal(str(row.get('dividend_lc') or 0))
+                realized_pnl_fc   = Decimal(str(row.get('realized_pnl_fc') or 0))
+                realized_pnl_lc   = Decimal(str(row.get('realized_pnl_lc') or 0))
+                uncall_fc    = Decimal(str(row.get('uncall_fc') or 0))
+                uncall_lc    = Decimal(str(row.get('uncall_lc') or 0))
+                pipeline_fc  = Decimal(str(row.get('pipeline_fc') or 0))
+                pipeline_lc  = Decimal(str(row.get('pipeline_lc') or 0))
+                provision_fc = Decimal(str(row.get('provision_fc') or 0))
+                provision_lc = Decimal(str(row.get('provision_lc') or 0))
+                isin         = row.get('isin')
+                source_table = row.get('source_table')
+
+                logger.info(
+                    f"[UPDATE_POS] {cp_basis}: qty={quantity}, avg_cost_fc={old_avg_cost_fc}, "
+                    f"dividend_fc={old_dividend_fc}"
                 )
-                new_avg_cost_lc = max(
-                    Decimal('0'),
-                    (old_avg_cost_lc - price_per_share_lc).quantize(
-                        Decimal('0.00000001'), rounding=ROUND_HALF_UP
+
+                # --- AVP calculation ---
+                if ca_type in self.NO_AVP_CHANGE_CA_TYPES:
+                    new_avg_cost_fc   = old_avg_cost_fc
+                    new_total_cost_fc = old_total_cost_fc
+                    new_avg_cost_lc   = old_avg_cost_lc
+                    new_total_cost_lc = old_total_cost_lc
+                elif ca_type in self.AVP_REDUCTION_CA_TYPES:
+                    pps_fc = (cash_flow_amount_fc / quantity).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP) if quantity > 0 else Decimal('0')
+                    pps_lc = (cash_flow_amount_lc / quantity).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP) if quantity > 0 else Decimal('0')
+                    new_avg_cost_fc   = max(Decimal('0'), (old_avg_cost_fc - pps_fc).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP))
+                    new_avg_cost_lc   = max(Decimal('0'), (old_avg_cost_lc - pps_lc).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP))
+                    new_total_cost_fc = (new_avg_cost_fc * quantity).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+                    new_total_cost_lc = (new_avg_cost_lc * quantity).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+                    logger.info(f"[UPDATE_POS] {cp_basis} AVP reduction: {old_avg_cost_fc} -> {new_avg_cost_fc}")
+                else:
+                    new_avg_cost_fc   = old_avg_cost_fc
+                    new_total_cost_fc = old_total_cost_fc
+                    new_avg_cost_lc   = old_avg_cost_lc
+                    new_total_cost_lc = old_total_cost_lc
+
+                # --- Accumulation ---
+                if ca_type in ['DIVIDEND', 'SPECIAL_DIVIDEND', 'INTEREST', 'COUPON']:
+                    new_dividend_fc     = (old_dividend_fc + cash_flow_amount_fc).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+                    new_dividend_lc     = (old_dividend_lc + cash_flow_amount_lc).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+                    new_realized_pnl_fc = realized_pnl_fc
+                    new_realized_pnl_lc = realized_pnl_lc
+                elif ca_type == 'INCOME_DISTRIBUTION':
+                    new_dividend_fc     = old_dividend_fc
+                    new_dividend_lc     = old_dividend_lc
+                    new_realized_pnl_fc = (realized_pnl_fc + cash_flow_amount_fc).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+                    new_realized_pnl_lc = (realized_pnl_lc + cash_flow_amount_lc).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+                else:
+                    new_dividend_fc     = old_dividend_fc
+                    new_dividend_lc     = old_dividend_lc
+                    new_realized_pnl_fc = realized_pnl_fc
+                    new_realized_pnl_lc = realized_pnl_lc
+
+                new_unrealized_pnl_fc = (market_value_fc - new_total_cost_fc).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+                new_unrealized_pnl_lc = (market_value_lc - new_total_cost_lc).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+
+                # UPSERT on existing position_id — keeps position_type=INT
+                new_version_id = int(datetime.now().timestamp() * 1000)
+                upsert_sql = f"""
+                UPSERT INTO {self.DATABASE}.{self.POSITION_TABLE} (
+                    position_id, version_id,
+                    portfolio, security_label,
+                    position_basis, position_date,
+                    src_system, processing_date,
+                    position_type,
+                    quantity,
+                    average_cost_fc, cost_fc,
+                    average_cost_lc, cost_lc,
+                    market_value_fc, market_value_lc,
+                    net_book_value_fc, net_book_value_lc,
+                    unrealized_pnl_fc, unrealized_pnl_lc,
+                    realized_pnl_fc, realized_pnl_lc,
+                    dividend_fc, dividend_lc,
+                    uncall_fc, uncall_lc,
+                    pipeline_fc, pipeline_lc,
+                    provision_fc, provision_lc,
+                    isin, source_table
+                ) VALUES (
+                    {position_id}, {new_version_id},
+                    '{self._escape(portfolio_short_name)}',
+                    '{self._escape(security_name)}',
+                    '{cp_basis}',
+                    '{self._escape(str(position_date))}',
+                    'CIS',
+                    '{timestamp_str}',
+                    'INT',
+                    {float(quantity)},
+                    {float(new_avg_cost_fc)},   {float(new_total_cost_fc)},
+                    {float(new_avg_cost_lc)},   {float(new_total_cost_lc)},
+                    {float(market_value_fc)},   {float(market_value_lc)},
+                    {float(market_value_fc)},   {float(market_value_lc)},
+                    {float(new_unrealized_pnl_fc)}, {float(new_unrealized_pnl_lc)},
+                    {float(new_realized_pnl_fc)},   {float(new_realized_pnl_lc)},
+                    {float(new_dividend_fc)},   {float(new_dividend_lc)},
+                    {float(uncall_fc)},         {float(uncall_lc)},
+                    {float(pipeline_fc)},       {float(pipeline_lc)},
+                    {float(provision_fc)},      {float(provision_lc)},
+                    {f"'{self._escape(isin)}'" if isin else 'NULL'},
+                    {f"'{self._escape(source_table)}'" if source_table else 'NULL'}
+                )
+                """
+                ok = impala_manager.execute_write(upsert_sql, database=self.DATABASE)
+                if ok:
+                    logger.info(
+                        f"[UPDATE_POS] Updated {cp_basis} INT row: position_id={position_id} "
+                        f"avg_cost_fc={new_avg_cost_fc} dividend_fc={new_dividend_fc} ca_type={ca_type}"
                     )
-                )
-                # Recalculate total cost from new AVP
-                new_total_cost_fc = (new_avg_cost_fc * quantity).quantize(
-                    Decimal('0.00000001'), rounding=ROUND_HALF_UP
-                )
-                new_total_cost_lc = (new_avg_cost_lc * quantity).quantize(
-                    Decimal('0.00000001'), rounding=ROUND_HALF_UP
-                )
-            else:
-                # Default: keep existing values
-                new_total_cost_fc = old_total_cost_fc
-                new_avg_cost_fc = old_avg_cost_fc
-                new_total_cost_lc = old_total_cost_lc
-                new_avg_cost_lc = old_avg_cost_lc
+                    updated_any = True
+                else:
+                    logger.error(
+                        f"[UPDATE_POS] Failed to update {cp_basis} INT row for "
+                        f"{portfolio_short_name}/{security_name}"
+                    )
 
-            # Step 4: Accumulate dividend or income distribution on position
-            if ca_type in ['DIVIDEND', 'SPECIAL_DIVIDEND']:
-                # Accumulate on dividend_fc / dividend_lc
-                new_dividend_fc = (old_dividend_fc + cash_flow_amount_fc).quantize(
-                    Decimal('0.00000001'), rounding=ROUND_HALF_UP
-                )
-                new_dividend_lc = (old_dividend_lc + cash_flow_amount_lc).quantize(
-                    Decimal('0.00000001'), rounding=ROUND_HALF_UP
-                )
-                logger.info(f"[UPDATE_POS] Dividend accumulation: "
-                           f"FC {old_dividend_fc} + {cash_flow_amount_fc} = {new_dividend_fc}, "
-                           f"LC {old_dividend_lc} + {cash_flow_amount_lc} = {new_dividend_lc}")
-                new_realized_pnl_fc = realized_pnl_fc
-                new_realized_pnl_lc = realized_pnl_lc
-            elif ca_type == 'INCOME_DISTRIBUTION':
-                # Income Distribution: accumulate on realized_pnl_fc / realized_pnl_lc
-                new_dividend_fc = old_dividend_fc
-                new_dividend_lc = old_dividend_lc
-                new_realized_pnl_fc = (realized_pnl_fc + cash_flow_amount_fc).quantize(
-                    Decimal('0.00000001'), rounding=ROUND_HALF_UP
-                )
-                new_realized_pnl_lc = (realized_pnl_lc + cash_flow_amount_lc).quantize(
-                    Decimal('0.00000001'), rounding=ROUND_HALF_UP
-                )
-                logger.info(f"[UPDATE_POS] Income Distribution accumulation on RL: "
-                           f"FC {realized_pnl_fc} + {cash_flow_amount_fc} = {new_realized_pnl_fc}, "
-                           f"LC {realized_pnl_lc} + {cash_flow_amount_lc} = {new_realized_pnl_lc}")
-            else:
-                new_dividend_fc = old_dividend_fc
-                new_dividend_lc = old_dividend_lc
-                new_realized_pnl_fc = realized_pnl_fc
-                new_realized_pnl_lc = realized_pnl_lc
-
-            # Market value in LC
-            market_value_lc = (market_value_fc * fx_rate).quantize(
-                Decimal('0.00000001'), rounding=ROUND_HALF_UP
-            )
-
-            # Calculate unrealized P&L in FC
-            new_unrealized_pnl_fc = (market_value_fc - new_total_cost_fc).quantize(
-                Decimal('0.00000001'), rounding=ROUND_HALF_UP
-            )
-
-            # Unrealized P&L in LC
-            new_unrealized_pnl_lc = (market_value_lc - new_total_cost_lc).quantize(
-                Decimal('0.00000001'), rounding=ROUND_HALF_UP
-            )
-
-            logger.info(f"[UPDATE_POS] After {ca_type} in FC: total_cost={new_total_cost_fc}, "
-                       f"avg_cost={new_avg_cost_fc}, unrealized_pnl={new_unrealized_pnl_fc}")
-            logger.info(f"[UPDATE_POS] After {ca_type} in LC: total_cost={new_total_cost_lc}, "
-                       f"avg_cost={new_avg_cost_lc}, unrealized_pnl={new_unrealized_pnl_lc}")
-
-            # Step 5: Mark old version as not latest
-            self._mark_old_version_not_latest(old_version_id)
-
-            # Step 6: Create new position version with all currency values (using new FC/LC column names)
-            timestamp = datetime.now()
-            timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
-            new_version_id = int(timestamp.timestamp() * 1000)
-
-            insert_sql = f"""
-            UPSERT INTO {self.DATABASE}.{self.WRITE_POSITION_TABLE} (
-                version_id, position_id, position_date, position_basis,
-                portfolio_short_name, security_label,
-                quantity,
-                average_cost_fc, total_cost_fc,
-                average_cost_lc, total_cost_lc,
-                market_price, market_value_fc, market_value_lc,
-                realized_pnl_fc, unrealized_pnl_fc,
-                realized_pnl_lc, unrealized_pnl_lc,
-                dividend_fc, dividend_lc,
-                uncall_fc, uncall_lc,
-                pipeline_fc, pipeline_lc,
-                commit_fc, commit_lc,
-                provision_fc, provision_lc,
-                position_type,
-                trade_id, trade_type,
-                security_currency, portfolio_currency, fx_rate,
-                status, is_active, is_latest,
-                last_ca_id, last_ca_number, last_ca_type, last_ca_date,
-                last_cash_flow_id, last_cash_flow_number,
-                last_cash_flow_amount_fc, last_cash_flow_amount_lc,
-                created_by, created_at, updated_by, updated_at
-            ) VALUES (
-                {new_version_id},
-                {position_id},
-                '{ex_date}',
-                'SETTLED',
-                '{self._escape(portfolio_short_name)}',
-                '{self._escape(security_name)}',
-                {float(quantity)},
-                {float(new_avg_cost_fc)},
-                {float(new_total_cost_fc)},
-                {float(new_avg_cost_lc)},
-                {float(new_total_cost_lc)},
-                {float(market_price)},
-                {float(market_value_fc)},
-                {float(market_value_lc)},
-                {float(new_realized_pnl_fc)},
-                {float(new_unrealized_pnl_fc)},
-                {float(new_realized_pnl_lc)},
-                {float(new_unrealized_pnl_lc)},
-                {float(new_dividend_fc)},
-                {float(new_dividend_lc)},
-                {uncall_fc},
-                {uncall_lc},
-                {pipeline_fc},
-                {pipeline_lc},
-                {commit_fc},
-                {commit_lc},
-                {provision_fc},
-                {provision_lc},
-                '{self._escape(position_type)}',
-                NULL,
-                'CA_{ca_type}',
-                '{self._escape(security_currency)}',
-                '{self._escape(portfolio_currency)}',
-                {float(fx_rate)},
-                'OPEN',
-                true,
-                true,
-                {ca_id},
-                '{self._escape(ca_number)}',
-                '{self._escape(ca_type)}',
-                '{ex_date}',
-                {cash_flow_id},
-                '{self._escape(cash_flow_number)}',
-                {float(cash_flow_amount_fc)},
-                {float(cash_flow_amount_lc)},
-                '{self._escape(updated_by)}',
-                '{timestamp_str}',
-                '{self._escape(updated_by)}',
-                '{timestamp_str}'
-            )
-            """
-
-            success = impala_manager.execute_write(insert_sql, database=self.DATABASE)
-
-            if success:
-                logger.info(f"[UPDATE_POS] SUCCESS - Created new position version {new_version_id} "
-                           f"with CA/cash flow details. New avg_cost_fc={new_avg_cost_fc}, avg_cost_lc={new_avg_cost_lc}")
-                # Mirror dividend/AVP changes into cis_position (golden copy)
-                self._sync_ca_adjustment_to_golden_position(
-                    portfolio_short_name=portfolio_short_name,
-                    security_name=security_name,
-                    new_quantity=quantity,
-                    new_avg_cost=new_avg_cost_fc,
-                    new_total_cost=new_total_cost_fc,
-                    market_value_fc=market_value_fc,
-                    market_value_lc=market_value_lc,
-                    unrealized_pnl_fc=new_unrealized_pnl_fc,
-                    unrealized_pnl_lc=new_unrealized_pnl_lc,
-                    dividend_fc=new_dividend_fc,
-                    dividend_lc=new_dividend_lc,
-                    uncall_fc=Decimal(str(uncall_fc)),
-                    uncall_lc=Decimal(str(uncall_lc)),
-                    pipeline_fc=Decimal(str(pipeline_fc)),
-                    pipeline_lc=Decimal(str(pipeline_lc)),
-                    provision_fc=Decimal(str(provision_fc)),
-                    provision_lc=Decimal(str(provision_lc)),
-                    position_date=ex_date,
-                    ca_type=ca_type,
-                    updated_by=updated_by
-                )
-            else:
-                logger.error(f"[UPDATE_POS] FAILED - Could not create new position version")
-
-            return success
+            return updated_any
 
         except Exception as e:
-            logger.error(f"[UPDATE_POS] Error creating position version with CA details: {str(e)}")
-            # Don't fail the cash flow creation if position update fails
+            logger.error(f"[UPDATE_POS] Error updating position with CA details: {str(e)}")
             return False
 
     def _get_current_position(
