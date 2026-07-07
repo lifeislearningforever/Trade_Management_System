@@ -286,13 +286,16 @@ class Command(BaseCommand):
 
     def _get_open_positions(self, portfolio_filter, sources, position_date=None, security_filter=None):
         """
-        Fetch the single latest row per portfolio/security/position_basis from cis_position.
-        Latest = highest position_id (most recently inserted row of any type).
+        Fetch the single latest INT row per portfolio/security/position_basis from cis_position.
 
-        EOD  (position_date=None): picks up the latest position across all dates —
-             the normal end-of-day path.
-        CORR (position_date=YYYY-MM-DD): restricts to rows whose position_date equals
-             the supplied month-end date, so only that date's positions are revalued.
+        INT is the authoritative running position — it is updated by every trade and CA.
+        EOD/SOD/CORR are derived snapshots and must NOT be used as the quantity source,
+        because they lag behind CA updates (e.g. after a STOCK_SPLIT the INT qty is correct
+        but the old EOD row still has the pre-split quantity).
+
+        EOD  (position_date=None): picks up the latest INT row across all dates.
+        CORR (position_date=YYYY-MM-DD): restricts to INT rows whose position_date equals
+             the supplied month-end date.
         """
         try:
             src_list = "', '".join(self._escape(s) for s in sources)
@@ -332,6 +335,7 @@ class Command(BaseCommand):
                            MAX(position_id) AS max_position_id
                     FROM {DATABASE}.cis_position
                     WHERE src_system IN ('{src_list}')
+                      AND position_type = 'INT'
                       AND quantity > 0
                       {portfolio_clause}
                       {security_clause}
