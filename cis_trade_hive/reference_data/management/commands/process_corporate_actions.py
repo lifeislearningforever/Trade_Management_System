@@ -209,6 +209,58 @@ class Command(BaseCommand):
         self.stdout.write(f'Completed: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
         self.stdout.write(self.style.HTTP_INFO('=' * 70))
 
+    def _auto_create_queue_entry(self, ca_id: int, dry_run: bool) -> list:
+        """
+        Create a PENDING queue entry from the CA master record when none exists.
+        Used by --ca-id and --correction when the CA was validated but never queued
+        (e.g. queued before ex_date/payment_date columns were added to the table).
+
+        Returns list of newly created queue entries, or empty list on failure.
+        """
+        from reference_data.repositories.corporate_action_repository import CorporateActionRepository
+        ca = CorporateActionRepository.get_by_id(ca_id)
+        if not ca:
+            self.stdout.write(self.style.ERROR(f'CA {ca_id} not found in cis_corporate_actions'))
+            return []
+
+        ca_status = ca.get('status', '')
+        if ca_status not in ('VALIDATED', 'APPROVED'):
+            self.stdout.write(self.style.ERROR(
+                f'CA {ca_id} has status "{ca_status}" — only VALIDATED/APPROVED CAs can be queued'
+            ))
+            return []
+
+        queue_data = {
+            'ca_id':          ca_id,
+            'ca_number':      ca.get('ca_number'),
+            'ca_type':        ca.get('ca_type', '').upper(),
+            'security_name':  ca.get('security_name'),
+            'ex_date':        ca.get('ex_date'),
+            'record_date':    ca.get('record_date'),
+            'payment_date':   ca.get('payment_date'),
+            'price':          ca.get('price'),
+            'currency':       ca.get('currency'),
+            'created_by':     'SYSTEM_AUTO',
+        }
+
+        self.stdout.write(
+            f'  Auto-queue: {queue_data["ca_number"]} ({queue_data["ca_type"]}) '
+            f'security={queue_data["security_name"]} ex_date={queue_data["ex_date"]}'
+        )
+
+        if dry_run:
+            self.stdout.write(self.style.WARNING('  [DRY RUN] Would create queue entry — skipping'))
+            return []
+
+        success, queue_id = ca_cash_flow_queue_repository.insert(queue_data)
+        if success and queue_id:
+            self.stdout.write(self.style.SUCCESS(f'  Queue entry created: queue_id={queue_id}'))
+            entry = ca_cash_flow_queue_repository.get_by_id(queue_id)
+            return [entry] if entry else []
+        else:
+            self.stdout.write(self.style.ERROR('  Failed to create queue entry'))
+            return []
+
     def _get_last_month_end_from_alldatesinfo(self) -> str:
         """
         Infer last_month_end from alldatesinfo — mirrors process_approved_cashflows logic.
@@ -455,13 +507,16 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR(f'\n✗ Failed: {message}'))
 
     def _process_by_ca_id(self, ca_id: int, dry_run: bool, verbose: bool):
-        """Process queue entries for a specific CA."""
+        """Process queue entries for a specific CA.
+        If no queue entry exists, auto-creates one from the CA master record."""
         self.stdout.write(self.style.HTTP_INFO(f'\n--- Processing CA ID: {ca_id} ---\n'))
 
         entries = ca_cash_flow_queue_repository.get_by_ca_id(ca_id)
         if not entries:
-            self.stdout.write(self.style.WARNING(f'No queue entries found for CA {ca_id}'))
-            return
+            self.stdout.write(self.style.WARNING(f'No queue entry found for CA {ca_id} — auto-creating from CA master record'))
+            entries = self._auto_create_queue_entry(ca_id, dry_run)
+            if not entries:
+                return
 
         for entry in entries:
             queue_id = entry.get('queue_id')
@@ -625,10 +680,15 @@ class Command(BaseCommand):
                 f'Correction requires a VALIDATED or APPROVED CA.'
             )
 
-        # 2. Find queue entries for this CA
+        # 2. Find queue entries for this CA — auto-create if missing
         entries = ca_cash_flow_queue_repository.get_by_ca_id(ca_id)
         if not entries:
-            raise CommandError(f'No queue entries found for CA {ca_id} ({ca_number})')
+            self.stdout.write(self.style.WARNING(
+                f'No queue entry found for CA {ca_id} ({ca_number}) — auto-creating from CA master record'
+            ))
+            entries = self._auto_create_queue_entry(ca_id, dry_run)
+            if not entries:
+                raise CommandError(f'Could not create queue entry for CA {ca_id} ({ca_number})')
 
         self.stdout.write(f'Found {len(entries)} queue entry(ies)')
 

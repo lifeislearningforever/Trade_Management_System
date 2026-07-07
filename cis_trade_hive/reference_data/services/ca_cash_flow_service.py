@@ -713,7 +713,7 @@ class CACashFlowService:
 
             # cis_position stores position_basis as 'TRADED' / 'SETTLED'
             for cp_basis in ('TRADED', 'SETTLED'):
-                # Find the existing CIS INT row for this basis
+                # Find the existing CIS INT row for this basis — INT only, never EOD/SOD/CORR
                 find_q = f"""
                 SELECT position_id, version_id,
                        quantity,
@@ -731,6 +731,7 @@ class CACashFlowService:
                 WHERE portfolio = '{self._escape(portfolio_short_name)}'
                   AND security_label = '{self._escape(security_name)}'
                   AND src_system = 'CIS'
+                  AND position_type = 'INT'
                   AND position_basis = '{cp_basis}'
                   AND quantity > 0
                 ORDER BY position_date DESC, version_id DESC
@@ -1416,7 +1417,7 @@ class CACashFlowService:
 
             # cis_position stores position_basis as 'TRADED' / 'SETTLED'
             for cp_basis in ('TRADED', 'SETTLED'):
-                # Find the existing INT row for this basis
+                # Find the existing INT row for this basis — INT only, never EOD/SOD/CORR
                 find_q = f"""
                 SELECT position_id, version_id, market_value_fc, quantity,
                        dividend_fc, dividend_lc, uncall_fc, uncall_lc,
@@ -1427,6 +1428,7 @@ class CACashFlowService:
                 WHERE portfolio = '{self._escape(portfolio_short_name)}'
                   AND security_label = '{self._escape(security_name)}'
                   AND src_system = 'CIS'
+                  AND position_type = 'INT'
                   AND position_basis = '{cp_basis}'
                   AND quantity > 0
                 ORDER BY position_date DESC, version_id DESC
