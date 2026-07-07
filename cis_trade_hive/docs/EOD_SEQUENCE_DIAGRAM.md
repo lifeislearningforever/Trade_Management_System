@@ -16,86 +16,92 @@ Each actor represents a system component. Arrows show data flow and dependencies
 sequenceDiagram
     autonumber
 
-    participant GMP   as GMP ETL (External)
-    participant ALT   as alldatesinfo
-    participant CA_Q  as cis_ca_cash_flow_queue
-    participant CA_T  as cis_corporate_actions
-    participant CF    as cis_cash_flow
-    participant SQ    as cis_settlement_queue
-    participant CTP   as cis_trade_position
-    participant CP    as cis_position (Golden Copy)
-    participant PRC   as cis_equity_price / FX Rates
+    participant GMP  as GMP ETL
+    participant ALT  as alldatesinfo
+    participant CAT  as cis_corporate_actions
+    participant CAQ  as ca_cash_flow_queue
+    participant CF   as cis_cash_flow
+    participant SQ   as cis_settlement_queue
+    participant CTP  as cis_trade_position
+    participant CP   as cis_position
+    participant PRC  as Price and FX Rates
 
-    Note over GMP,PRC: ── WAVE 0: Pre-flight (17:45) ──────────────────────────────────────
-
-    GMP->>ALT: ETL complete — alldatesinfo updated (prev_day=T-1, contextual_today=T)
-    ALT-->>GMP: ack
-    Note over GMP,PRC: CIS_PREFLIGHT_CHECK: verify Impala connection
-    Note over PRC: CIS_VERIFY_PRICES: assert cis_equity_price + FX rates loaded for T-1
-
-    Note over GMP,PRC: ── WAVE 1: GMP CA Sync (18:00) ──────────────────────────────────────
-
-    GMP->>CA_T: gmp_cis_sfa_dly_corporate_action → UPSERT cis_corporate_actions<br/>(src_system=GMP, status=VALIDATED — bypasses four-eyes)
-    CA_T->>CA_Q: INSERT PENDING entries for DIVIDEND / INTEREST / COUPON / ROC / BONUS / SPLIT / RIGHTS types
-
-    Note over GMP,PRC: ── WAVE 2: CA Cash Flow Processing (18:15) ───────────────────────────
-
-    CA_Q->>CA_Q: status PENDING → PROCESSING
-    CA_Q->>CP: lookup portfolios holding the security on ex-date
-    CP-->>CA_Q: portfolio list + quantities
-    CA_Q->>CF: INSERT one cis_cash_flow row per portfolio × security<br/>(ca_type → cash_flow_type; amount = qty × price_per_share)
-    CA_Q->>CA_Q: status PROCESSING → COMPLETED<br/>(FAILED → retry up to 3×)
-
-    Note over GMP,PRC: ── WAVE 3a: Cash Flow Application (18:30) ────────────────────────────
-
-    CF->>CF: SELECT APPROVED, payment_date ≤ T-1, position_updated=false
-    CF->>CTP: lookup open SETTLE_DATE position (latest version, is_latest=true)
-    CTP-->>CF: current qty, avg_cost, accumulated fields
-    CF->>CTP: mark old version is_latest=false
-    CF->>CTP: UPSERT new version row (CF fields accumulated:<br/>dividend / uncall / pipeline / provision / realized_pnl / avg_cost reduction)
-    CF->>CP: UPSERT cis_position (position_type=INT, position_basis=SETTLE_DATE,<br/>position_date=payment_date, src_system=CIS)
-    CF->>CF: UPDATE position_updated=true (idempotency flag)
-
-    Note over GMP,PRC: ── WAVE 3b: Settlement Processing (18:30, parallel) ──────────────────
-
-    SQ->>SQ: SELECT PENDING where settle_date = T (contextual_today)
-    SQ->>CTP: UPSERT settled position versions
-    SQ->>SQ: UPDATE status → COMPLETED
-
-    Note over GMP,PRC: ── WAVE 4: EOD Position Revaluation (18:45) ──────────────────────────
-
-    CP->>CP: SELECT latest INT row per portfolio / security / basis / date<br/>(all src_systems: CIS, GMP, AMSICEQ, USER_UPLOAD)
-    PRC-->>CP: latest closing price (cis_equity_price, ordered by price_date DESC)
-    PRC-->>CP: FX spot rate (gmp_cis_sta_dly_fx_rates, FC→LC pair)
-
-    alt REVALUED portfolio, normal security (Case A)
-        CP->>CP: market_value_fc = qty × price<br/>market_value_lc = market_value_fc × fx_rate<br/>cost_lc = cost_fc × fx_rate (MTM override)<br/>unrealized_pnl = market_value − cost
-    else NON-REVALUED portfolio (Case B)
-        CP->>CP: market_value_fc = qty × price<br/>market_value_lc = market_value_fc × fx_rate<br/>cost_lc carried forward (no MTM override)<br/>unrealized_pnl = market_value − cost
-    else Equity-method security ASSOC / SUBSI (Case C)
-        CP->>CP: market_value_fc = qty × price<br/>unrealized_pnl_fc = 0, unrealized_pnl_lc = 0<br/>net_book_value = cost − provision
-    else No price available (Case D)
-        CP->>CP: market_value_fc carried forward<br/>market_value_lc = market_value_fc × fx_rate
+    rect rgb(230, 240, 255)
+        Note over GMP,PRC: WAVE 0 — Pre-flight 17:45
+        GMP->>ALT: ETL done — prev_day=T-1, contextual_today=T
+        Note over GMP,PRC: CIS_PREFLIGHT_CHECK — verify Impala connection
+        Note over PRC: CIS_VERIFY_PRICES — assert prices and FX loaded for T-1
     end
 
-    CP->>CP: DELETE existing EOD row for same (portfolio, security, basis, date)<br/>INSERT new EOD row (position_type=EOD, position_date=T-1)
-    Note right of CP: Accumulated fields carried forward unchanged:<br/>dividend / uncall / pipeline / provision / realized_pnl
-
-    Note over GMP,PRC: ── WAVE 5: SOD Snapshot (19:00) ──────────────────────────────────────
-
-    CP->>CP: SELECT all EOD rows where position_date = prev_day (T-1)
-    SQ->>CP: SELECT PENDING settlement queue entries where settle_date = contextual_today
-
-    alt Settled trade is a BUY
-        CP->>CP: new_qty = old_qty + trade_qty<br/>new_cost_fc = old_cost_fc + (qty × price + charges)<br/>new_avg_fc = new_cost_fc / new_qty<br/>CA/CF fields carried unchanged
-    else Settled trade is a SELL (partial)
-        CP->>CP: new_qty = old_qty − trade_qty<br/>avg_cost unchanged<br/>realized_pnl accumulated<br/>market_value prorated by new_qty/old_qty
-    else Settled trade is a SELL (full close)
-        CP->>CP: qty → 0, cost → 0, market_value → 0<br/>realized_pnl accumulated<br/>uncall / pipeline / provision carried
+    rect rgb(220, 255, 220)
+        Note over GMP,PRC: WAVE 1 — GMP CA Sync 18:00
+        GMP->>CAT: UPSERT corporate actions (src=GMP, status=VALIDATED)
+        CAT->>CAQ: INSERT PENDING entries for DIVIDEND, INTEREST, COUPON, ROC, SPLIT
     end
 
-    CP->>CP: INSERT SOD rows (position_type=SOD, position_date=contextual_today)
-    SQ->>SQ: UPDATE processed entries → COMPLETED
+    rect rgb(255, 245, 200)
+        Note over GMP,PRC: WAVE 2 — CA Cash Flow Processing 18:15
+        CAQ->>CAQ: PENDING to PROCESSING
+        CAQ->>CP: lookup portfolios holding security on ex-date
+        CP-->>CAQ: portfolio list and quantities
+        CAQ->>CF: INSERT one cash_flow row per portfolio (amount = qty x price_per_share)
+        CAQ->>CAQ: PROCESSING to COMPLETED (FAILED retried up to 3x)
+    end
+
+    rect rgb(255, 230, 230)
+        Note over GMP,PRC: WAVE 3a — Cash Flow Application 18:30
+        CF->>CF: SELECT APPROVED where payment_date <= T-1 and position_updated=false
+        CF->>CTP: lookup open SETTLE_DATE position (is_latest=true)
+        CTP-->>CF: current qty, avg_cost, accumulated fields
+        CF->>CTP: mark old version is_latest=false
+        CF->>CTP: UPSERT new version — accumulate dividend, uncall, pipeline, provision, realized_pnl
+        CF->>CP: UPSERT INT row (basis=SETTLE_DATE, position_date=payment_date)
+        CF->>CF: UPDATE position_updated=true
+    end
+
+    rect rgb(255, 230, 230)
+        Note over GMP,PRC: WAVE 3b — Settlement Processing 18:30 (parallel)
+        SQ->>SQ: SELECT PENDING where settle_date = contextual_today
+        SQ->>CTP: UPSERT settled position versions
+        SQ->>SQ: UPDATE status to COMPLETED
+    end
+
+    rect rgb(240, 220, 255)
+        Note over GMP,PRC: WAVE 4 — EOD Position Revaluation 18:45
+        CP->>CP: SELECT latest INT row per portfolio / security / basis
+        PRC-->>CP: latest closing price from cis_equity_price
+        PRC-->>CP: FX spot rate from gmp_cis_sta_dly_fx_rates (FC to LC)
+
+        alt Case A — REVALUED portfolio, normal security
+            CP->>CP: market_value_fc = qty x price, cost_lc = cost_fc x fx_rate (MTM override)
+        else Case B — NON-REVALUED portfolio
+            CP->>CP: market_value_fc = qty x price, cost_lc carried forward unchanged
+        else Case C — Equity-method (ASSOC or SUBSI)
+            CP->>CP: market_value_fc = qty x price, unrealized_pnl = 0
+        else Case D — No price available
+            CP->>CP: market_value_fc carried forward, market_value_lc = fc x fx_rate
+        end
+
+        CP->>CP: DELETE old EOD row, INSERT new EOD row (position_type=EOD, position_date=T-1)
+        Note right of CP: dividend, uncall, pipeline, provision, realized_pnl carried forward unchanged
+    end
+
+    rect rgb(200, 240, 255)
+        Note over GMP,PRC: WAVE 5 — SOD Snapshot 19:00
+        CP->>CP: SELECT all EOD rows where position_date = T-1
+        SQ->>CP: SELECT PENDING settlement entries where settle_date = today
+
+        alt BUY settles today
+            CP->>CP: new_qty = old + trade_qty, new_avg_cost recalculated
+        else SELL partial settles today
+            CP->>CP: new_qty = old - trade_qty, realized_pnl accumulated
+        else SELL full close settles today
+            CP->>CP: qty to 0, cost to 0, realized_pnl accumulated
+        end
+
+        CP->>CP: INSERT SOD rows (position_type=SOD, position_date=today)
+        SQ->>SQ: UPDATE processed entries to COMPLETED
+    end
 ```
 
 ---
@@ -108,42 +114,46 @@ Runs D+1 to D+5 after month-end. Replays cash flow application and revaluation f
 sequenceDiagram
     autonumber
 
-    participant ALT  as alldatesinfo
-    participant CF   as cis_cash_flow
-    participant CTP  as cis_trade_position
-    participant CP   as cis_position (Golden Copy)
-    participant PRC  as cis_equity_price / FX Rates
+    participant ALT as alldatesinfo
+    participant CF  as cis_cash_flow
+    participant CTP as cis_trade_position
+    participant CP  as cis_position
+    participant PRC as Price and FX Rates
 
-    Note over ALT,PRC: ── CORR Wave C1: Cash Flow Application (18:30) ─────────────────────
+    rect rgb(240, 220, 200)
+        Note over ALT,PRC: CORR Wave C1 — Cash Flow Application 18:30
 
-    ALT-->>CF: contextual_today = first-of-month date (e.g. 2026-07-01)<br/>reporting_date = last-month-end (e.g. 2026-06-30)<br/>last_month_end computed as: first_of_ref_month − 1 day
+        ALT-->>CF: Read contextual_today and reporting_date (both as YYYYMMDD integers)
 
-    Note over ALT,PRC: Date rule — contextual_today and reporting_date in different months?
-    alt Different months (contextual_today month ≠ reporting_date month)
-        Note over CF: last_month_end = reporting_date itself<br/>(reporting_date IS the month-end)
-    else Same month
-        Note over CF: last_month_end = last calendar day of month before reporting_date
+        alt contextual_today month differs from reporting_date month
+            Note over CF: last_month_end = reporting_date (it IS the month-end)
+        else same month
+            Note over CF: last_month_end = first_of_ref_month minus 1 day
+        end
+
+        CF->>CF: SELECT APPROVED where payment_date <= last_month_end and position_updated=false
+        CF->>CTP: lookup open SETTLE_DATE position for last_month_end
+        CTP-->>CF: current qty, avg_cost, accumulated fields
+        CF->>CTP: mark old version is_latest=false
+        CF->>CTP: UPSERT new version with accumulated CF fields
+        CF->>CP: UPSERT INT row (position_type=INT, position_date=last_month_end)
+        CF->>CF: UPDATE position_updated=true
     end
 
-    CF->>CF: SELECT APPROVED cash flows<br/>payment_date ≤ last_month_end AND position_updated=false
-    CF->>CTP: lookup open SETTLE_DATE position for last_month_end
-    CTP-->>CF: current accumulated fields
-    CF->>CTP: mark old version is_latest=false
-    CF->>CTP: UPSERT new version (CF fields accumulated)
-    CF->>CP: UPSERT cis_position (position_type=INT, position_date=last_month_end)
-    CF->>CF: UPDATE position_updated=true
+    rect rgb(220, 200, 240)
+        Note over ALT,PRC: CORR Wave C2 — Position Revaluation 18:45
 
-    Note over ALT,PRC: ── CORR Wave C2: Position Revaluation (18:45) ──────────────────────
+        CP->>CP: SELECT latest INT rows for position_date = last_month_end
+        PRC-->>CP: closing price for last_month_end
+        PRC-->>CP: FX spot rate for last_month_end
 
-    CP->>CP: SELECT latest INT rows for position_date = last_month_end
-    PRC-->>CP: closing price for last_month_end date
-    PRC-->>CP: FX spot rate for last_month_end date
+        CP->>CP: Apply revaluation Cases A, B, C, D (same as EOD Wave 4)
 
-    CP->>CP: Apply revaluation cases A / B / C / D<br/>(same logic as EOD Wave 4)
+        CP->>CP: DELETE existing CORR row for same portfolio / security / basis / date
+        CP->>CP: INSERT new CORR row (position_type=CORR, position_date=last_month_end)
 
-    CP->>CP: DELETE existing CORR row for same (portfolio, security, basis, date)<br/>INSERT new CORR row (position_type=CORR, position_date=last_month_end)
-
-    Note right of CP: CORR rows are separate from EOD rows.<br/>Both exist in cis_position for the same date.<br/>CORR = corrected month-end view.<br/>EOD = regular nightly revaluation.
+        Note right of CP: CORR and EOD rows coexist for the same date. CORR = corrected month-end view.
+    end
 ```
 
 ---
@@ -247,63 +257,76 @@ flowchart TD
 
 ## Diagram 4 — Data Flow (Tables)
 
-Shows which management command reads/writes each table.
+Shows which management command reads/writes each Kudu table. Flow is top-to-bottom by EOD wave.
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph EXT["External Feeds"]
-        GMP_ETL["GMP ETL\ngmp_cis_sfa_dly_corporate_action\ngmp_cis_sta_dly_alldatesinfo\ngmp_cis_sta_dly_fx_rates"]
-        PRICE_FEED["Market Data ETL\ncis_equity_price"]
+        direction LR
+        GMP_ETL["GMP ETL\n(corporate_action, alldatesinfo, fx_rates)"]
+        PRICE_FEED["Market Data ETL\n(cis_equity_price)"]
     end
 
-    subgraph CMD["Management Commands"]
+    subgraph W1["Wave 1 — GMP CA Sync"]
+        direction LR
         SYNC["sync_gmp_corporate_actions"]
+        CAT["cis_corporate_actions"]
+        CAQ["cis_ca_cash_flow_queue"]
+        SYNC -->|UPSERT| CAT
+        SYNC -->|INSERT PENDING| CAQ
+    end
+
+    subgraph W2["Wave 2 — CA Processing"]
+        direction LR
         PCA["process_corporate_actions"]
+        CFT["cis_cash_flow"]
+        PCA -->|INSERT| CFT
+        PCA -->|UPDATE COMPLETED| CAQ2["ca_cash_flow_queue"]
+    end
+
+    subgraph W3["Wave 3 — Cash Flow and Settlement"]
+        direction LR
         PAC["process_approved_cashflows"]
         PS["process_settlements"]
-        RP["refresh_positions"]
-        SOD["create_sod_snapshot"]
-    end
-
-    subgraph TABLES["Kudu Tables — gmp_cis"]
-        CA_T["cis_corporate_actions"]
-        CA_Q["cis_ca_cash_flow_queue"]
-        CF_T["cis_cash_flow"]
-        SQ_T["cis_settlement_queue"]
         CTP["cis_trade_position"]
-        CP["cis_position\n(Golden Copy)"]
+        SQT["cis_settlement_queue"]
+        PAC -->|UPSERT new version| CTP
+        PS  -->|UPSERT settled| CTP
+        PS  -->|UPDATE COMPLETED| SQT
     end
 
-    GMP_ETL -->|"READ CA source"| SYNC
-    SYNC -->|"UPSERT"| CA_T
-    SYNC -->|"INSERT PENDING"| CA_Q
+    subgraph W4["Wave 4 — EOD Revaluation"]
+        direction LR
+        RP["refresh_positions"]
+        CPW4["cis_position"]
+        RP -->|DELETE old EOD, INSERT new EOD| CPW4
+    end
 
-    CA_Q -->|"READ PENDING"| PCA
-    PCA -->|"INSERT"| CF_T
-    PCA -->|"UPDATE → COMPLETED"| CA_Q
+    subgraph W5["Wave 5 — SOD Snapshot"]
+        direction LR
+        SOD["create_sod_snapshot"]
+        CPW5["cis_position"]
+        SOD -->|INSERT SOD rows| CPW5
+        SOD -->|UPDATE COMPLETED| SQT2["cis_settlement_queue"]
+    end
 
-    CF_T -->|"READ APPROVED"| PAC
-    PAC -->|"UPSERT new version"| CTP
-    PAC -->|"UPSERT INT"| CP
-    PAC -->|"UPDATE position_updated=true"| CF_T
-
-    SQ_T -->|"READ PENDING settle_date=today"| PS
-    PS -->|"UPSERT settled versions"| CTP
-    PS -->|"UPDATE → COMPLETED"| SQ_T
-
-    CP -->|"READ latest INT rows"| RP
-    PRICE_FEED -->|"READ latest price"| RP
-    GMP_ETL -->|"READ FX rates"| RP
-    RP -->|"DELETE old EOD/CORR\nINSERT new EOD/CORR"| CP
-
-    CP -->|"READ EOD rows prev_day"| SOD
-    SQ_T -->|"READ PENDING settle_date=today"| SOD
-    SOD -->|"INSERT SOD rows"| CP
-    SOD -->|"UPDATE → COMPLETED"| SQ_T
+    GMP_ETL  -->|READ CA source| SYNC
+    CAQ      -->|READ PENDING| PCA
+    CFT      -->|READ APPROVED| PAC
+    SQT      -->|READ PENDING settle_date=today| PS
+    PAC      -->|UPSERT INT| CPW4
+    CPW4     -->|READ latest INT rows| RP
+    PRICE_FEED -->|READ latest price| RP
+    GMP_ETL  -->|READ FX rates| RP
+    CPW4     -->|READ EOD rows| SOD
+    SQT      -->|READ PENDING settle_date=today| SOD
 
     style EXT fill:#fce4ec,stroke:#E91E63,stroke-width:2px
-    style CMD fill:#e3f2fd,stroke:#1565C0,stroke-width:2px
-    style TABLES fill:#e8f5e9,stroke:#2E7D32,stroke-width:2px
+    style W1  fill:#e8f5e9,stroke:#2E7D32,stroke-width:2px
+    style W2  fill:#fff8e1,stroke:#FFA000,stroke-width:2px
+    style W3  fill:#fce4ec,stroke:#c62828,stroke-width:2px
+    style W4  fill:#ede7f6,stroke:#6A1B9A,stroke-width:2px
+    style W5  fill:#e3f2fd,stroke:#1565C0,stroke-width:2px
 ```
 
 ---
