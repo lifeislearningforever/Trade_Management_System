@@ -731,8 +731,34 @@ class Command(BaseCommand):
             position_type, isin, source_table, is_latest
         )"""
 
+        # Delete any existing EOD/CORR rows for the same natural keys before inserting.
+        # Without this, re-running the same run-type on the same date creates duplicates.
         for i in range(0, len(insert_rows), BATCH):
-            chunk  = insert_rows[i: i + BATCH]
+            chunk = insert_rows[i: i + BATCH]
+
+            # Build a set of (portfolio, security_label, position_basis, position_date) tuples
+            # and delete matching rows of this position_type in one pass per batch.
+            key_clauses = []
+            for r in chunk:
+                p = r['position']
+                port     = self._escape(p.get('portfolio', ''))
+                sec      = self._escape(p.get('security_label', ''))
+                basis    = self._escape(p.get('position_basis', 'TRADED'))
+                raw_date = p.get('position_date')
+                pos_date = str(raw_date)[:10] if raw_date else run_date
+                key_clauses.append(
+                    f"(portfolio = '{port}' AND security_label = '{sec}' "
+                    f"AND position_basis = '{basis}' AND position_date = '{pos_date}')"
+                )
+
+            if key_clauses:
+                delete_sql = (
+                    f"DELETE FROM {DATABASE}.cis_position "
+                    f"WHERE position_type = '{position_type}' "
+                    f"AND ({' OR '.join(key_clauses)})"
+                )
+                impala_manager.execute_write(delete_sql, database=DATABASE)
+
             values = ',\n'.join(_build_value(i + j, r) for j, r in enumerate(chunk))
             impala_manager.execute_write(
                 f"INSERT INTO {DATABASE}.cis_position {col_list} VALUES {values}",
