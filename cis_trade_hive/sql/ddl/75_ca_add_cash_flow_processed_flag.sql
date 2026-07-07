@@ -34,21 +34,22 @@ ALTER TABLE gmp_cis.cis_corporate_actions
 -- ============================================================================
 
 -- 2a: Mark CAs whose queue entry is COMPLETED
-UPDATE gmp_cis.cis_corporate_actions ca
+-- Note: Impala UPDATE does not support table aliases — use full table name in WHERE
+UPDATE gmp_cis.cis_corporate_actions
 SET cash_flow_queued    = true,
     cash_flow_processed = true
-WHERE ca.ca_id IN (
+WHERE ca_id IN (
     SELECT DISTINCT ca_id
     FROM gmp_cis.cis_ca_cash_flow_queue
     WHERE status = 'COMPLETED'
 );
 
 -- 2b: Mark CAs that have a queue entry but NOT completed (PENDING / PROCESSING / FAILED)
-UPDATE gmp_cis.cis_corporate_actions ca
+UPDATE gmp_cis.cis_corporate_actions
 SET cash_flow_queued    = true,
     cash_flow_processed = false
-WHERE ca.cash_flow_queued IS NULL           -- not already set by 2a
-  AND ca.ca_id IN (
+WHERE cash_flow_queued IS NULL
+  AND ca_id IN (
     SELECT DISTINCT ca_id
     FROM gmp_cis.cis_ca_cash_flow_queue
     WHERE status IN ('PENDING', 'PROCESSING', 'FAILED')
