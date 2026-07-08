@@ -320,6 +320,18 @@
                                    placeholder="0.00">
                         </div>
 
+                        <!-- FX Rate (derived read-only: local / foreign) -->
+                        <div class="col-md-3">
+                            <label class="form-label">FX Rate <small class="text-muted">(derived)</small></label>
+                            <input type="text"
+                                   class="form-control bg-light"
+                                   id="cf_fx_rate_display"
+                                   readonly
+                                   placeholder="-"
+                                   value="{% if cash_flow.fx_rate %}{{ cash_flow.fx_rate|floatformat:6 }}{% endif %}">
+                            <small class="text-muted" id="cf_fx_rate_hint">Local ÷ Foreign</small>
+                        </div>
+
                         <!-- Withholding Tax (item 9) -->
                         <div class="col-md-3">
                             <label for="withholding_tax_fc" class="form-label">
@@ -588,6 +600,25 @@ function validateSecurity(security) {
         }
     });
 }
+
+// Derived FX Rate display: local_amount / foreign_ccy_amount, shown to 6dp
+function updateCfFxRate() {
+    var local   = parseFloat(document.getElementById('local_amount').value)   || 0;
+    var foreign = parseFloat(document.getElementById('foreign_ccy_amount').value) || 0;
+    var display = document.getElementById('cf_fx_rate_display');
+    var hint    = document.getElementById('cf_fx_rate_hint');
+    if (!display) return;
+    if (foreign > 0 && local > 0) {
+        display.value = (local / foreign).toFixed(6);
+        if (hint) hint.textContent = 'Local ÷ Foreign';
+    } else {
+        display.value = '';
+        if (hint) hint.textContent = 'Enter both amounts';
+    }
+}
+document.getElementById('local_amount').addEventListener('input', updateCfFxRate);
+document.getElementById('foreign_ccy_amount').addEventListener('input', updateCfFxRate);
+updateCfFxRate();  // Populate on page load for edit mode
 
 // Client-side form validation
 (function() {
