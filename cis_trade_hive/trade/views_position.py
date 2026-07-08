@@ -110,6 +110,8 @@ def position_list(request):
         'stats':        stats,
         'total':        total,
         'page':         page,
+        'page_prev':    page - 1,
+        'page_next':    page + 1,
         'total_pages':  total_pages,
         'page_range':   _page_range(page, total_pages),
         'base_qs':      base_qs,

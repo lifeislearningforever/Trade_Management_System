@@ -627,7 +627,7 @@
                 <ul class="pagination pagination-sm mb-0">
                     {% if page > 1 %}
                     <li class="page-item">
-                        <a class="page-link" href="?{{ base_qs }}&page={{ page|add:"-1" }}">&laquo;</a>
+                        <a class="page-link" href="?{{ base_qs }}&page={{ page_prev }}">&laquo;</a>
                     </li>
                     {% endif %}
                     {% for p in page_range %}
@@ -637,7 +637,7 @@
                     {% endfor %}
                     {% if page < total_pages %}
                     <li class="page-item">
-                        <a class="page-link" href="?{{ base_qs }}&page={{ page|add:"1" }}">&raquo;</a>
+                        <a class="page-link" href="?{{ base_qs }}&page={{ page_next }}">&raquo;</a>
                     </li>
                     {% endif %}
                 </ul>
