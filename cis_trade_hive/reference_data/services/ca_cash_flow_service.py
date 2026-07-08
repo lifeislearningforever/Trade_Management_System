@@ -618,7 +618,7 @@ class CACashFlowService:
                 # Dividend price per share (Amount FC / Quantity)
                 'dividend_price': float(amount_fc / quantity) if quantity else 0,
                 'quantity': float(quantity),    # Quantity held at ex-date
-                'fx_rate': float(fx_rate.quantize(Decimal('0.000001'), rounding=ROUND_HALF_UP)),  # 6dp — matches detail display
+                'fx_rate': float(fx_rate.quantize(Decimal('0.0000001'), rounding=ROUND_HALF_UP)),  # 7dp — max GMP precision
                 # CA-generated cash flows skip four-eyes and are auto-validated
                 'status': 'VALIDATED',
                 'src_system': 'CA',  # Mark as CA-generated (not manual CIS entry)

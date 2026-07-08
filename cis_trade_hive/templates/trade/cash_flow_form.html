@@ -328,7 +328,7 @@
                                    id="cf_fx_rate_display"
                                    readonly
                                    placeholder="-"
-                                   value="{% if cash_flow.fx_rate %}{{ cash_flow.fx_rate|floatformat:6 }}{% endif %}">
+                                   value="{% if cash_flow.fx_rate %}{{ cash_flow.fx_rate|floatformat:7 }}{% endif %}">
                             <small class="text-muted" id="cf_fx_rate_hint">Local ÷ Foreign</small>
                         </div>
 
@@ -609,7 +609,7 @@ function updateCfFxRate() {
     var hint    = document.getElementById('cf_fx_rate_hint');
     if (!display) return;
     if (foreign > 0 && local > 0) {
-        display.value = (local / foreign).toFixed(6);
+        display.value = (local / foreign).toFixed(7);
         if (hint) hint.textContent = 'Local ÷ Foreign';
     } else {
         display.value = '';

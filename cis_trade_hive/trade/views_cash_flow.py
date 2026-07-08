@@ -166,7 +166,7 @@ def cash_flow_list(request):
                 fx_rate_csv = ''
                 if local_amt and foreign_amt:
                     try:
-                        fx_rate_csv = round(float(local_amt) / float(foreign_amt), 6)
+                        fx_rate_csv = round(float(local_amt) / float(foreign_amt), 7)
                     except (ZeroDivisionError, TypeError, ValueError):
                         fx_rate_csv = cf.get('fx_rate', '')
                 else:

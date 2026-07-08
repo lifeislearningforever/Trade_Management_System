@@ -305,8 +305,8 @@
                             <div class="col-md-2">
                                 <label class="form-label">FX Rate</label>
                                 <input type="number" class="form-control" name="open_fx_rate" id="open_fx_rate"
-                                       step="0.000001" value="{{ trade.open_fx_rate|default:'' }}" placeholder="Auto-set or override">
-                                <small class="text-muted" id="fx_rate_hint">Up to 6 decimal places</small>
+                                       step="0.0000001" value="{{ trade.open_fx_rate|default:'' }}" placeholder="Auto-set or override">
+                                <small class="text-muted" id="fx_rate_hint">Up to 7 decimal places</small>
                                 <small class="text-muted d-block" id="fx_rate_info">Auto-set from currencies</small>
                             </div>
                         </div>
@@ -395,7 +395,7 @@
                                 <label class="form-label">Price <span class="text-danger">*</span></label>
                                 <input type="number" class="form-control" name="price" id="price"
                                        step="0.000001" min="0" value="{{ trade.price|default:'' }}" required>
-                                <small class="text-muted" id="price_hint">Up to 6 decimal places</small>
+                                <small class="text-muted" id="price_hint">Up to 7 decimal places</small>
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label">Gross Amount</label>
@@ -1228,7 +1228,7 @@ enforceMaxDecimals(document.getElementById('quantity'), 4);
     enforceMaxDecimals(priceEl, 6);
     if (priceEl && priceHint) {
         priceEl.addEventListener('focus', function() {
-            priceHint.textContent = 'Up to 6 decimal places';
+            priceHint.textContent = 'Up to 7 decimal places';
             priceHint.className = 'text-muted';
         });
     }
@@ -1238,14 +1238,14 @@ enforceMaxDecimals(document.getElementById('quantity'), 4);
 (function() {
     var fxEl   = document.getElementById('open_fx_rate');
     var fxHint = document.getElementById('fx_rate_hint');
-    enforceMaxDecimals(fxEl, 6);
+    enforceMaxDecimals(fxEl, 7);
     if (fxEl && fxHint) {
         fxEl.addEventListener('focus', function() {
-            fxHint.textContent = 'Up to 6 decimal places';
+            fxHint.textContent = 'Up to 7 decimal places';
             fxHint.className = 'text-muted';
         });
         fxEl.addEventListener('blur', function() {
-            fxHint.textContent = 'Up to 6 decimal places';
+            fxHint.textContent = 'Up to 7 decimal places';
             fxHint.className = 'text-muted';
         });
     }
@@ -1647,7 +1647,7 @@ function fetchFxRate() {
 
     // Same currency - rate is 1.0
     if (securityCurrency === portfolioCurrency) {
-        fxRateField.value = '1.000000';
+        fxRateField.value = '1.0000000';
         if (fxRateInfo) {
             fxRateInfo.textContent = 'Same currency (1.0)';
             fxRateInfo.className = 'text-info small';
@@ -1668,15 +1668,15 @@ function fetchFxRate() {
         .then(data => {
             console.log('FX Rate API response:', data);
             if (data.rate && data.rate > 0) {
-                const rate6dp = parseFloat(data.rate).toFixed(6);
-                fxRateField.value = rate6dp;
+                const rate7dp = parseFloat(data.rate).toFixed(7);
+                fxRateField.value = rate7dp;
                 if (fxRateInfo) {
-                    fxRateInfo.textContent = `${securityCurrency}-${portfolioCurrency}: ${rate6dp} (${data.date || 'latest'})`;
+                    fxRateInfo.textContent = `${securityCurrency}-${portfolioCurrency}: ${rate7dp} (${data.date || 'latest'})`;
                     fxRateInfo.className = 'text-success small';
                 }
             } else {
                 // No rate found - default to 1.0
-                fxRateField.value = '1.000000';
+                fxRateField.value = '1.0000000';
                 if (fxRateInfo) {
                     fxRateInfo.textContent = `No rate found for ${securityCurrency}-${portfolioCurrency}, using 1.0`;
                     fxRateInfo.className = 'text-warning small';
@@ -1687,7 +1687,7 @@ function fetchFxRate() {
         })
         .catch(error => {
             console.error('Error fetching FX rate:', error);
-            fxRateField.value = '1.000000';
+            fxRateField.value = '1.0000000';
             if (fxRateInfo) {
                 fxRateInfo.textContent = 'Error fetching rate, using 1.0';
                 fxRateInfo.className = 'text-danger small';
@@ -1986,7 +1986,7 @@ function calculateBrokerChargesSync(callback) {
             // Also update commission field
             const commissionField = document.getElementById('commission');
             if (commissionField) {
-                commissionField.value = data.total_charges.toFixed(6);
+                commissionField.value = data.total_charges.toFixed(7);
             }
 
             console.log('Hidden fields updated - Total charges:', data.total_charges);
