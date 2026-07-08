@@ -2472,9 +2472,9 @@ class UploadService:
                         NULL                                            AS fin_nonfin_co,
                         NULL                                            AS issuer_type,
                         NULL                                            AS reits_or_fund_y_n,
-                        exchange_quoted                                 AS exchange,
+                        p1.exchange_quoted                              AS exchange,
                         NULL                                            AS country_code,
-                        NULL                                            AS country_of_exchange,
+                        exc.country                                     AS country_of_exchange,
                         NULL                                            AS country_of_incorporation,
                         NULL                                            AS country_of_risk,
                         NULL                                            AS country_of_operation,
@@ -2487,8 +2487,8 @@ class UploadService:
                         NULL                                            AS bwcif_ovs,
                         NULL                                            AS mas_6d_code_sg,
                         NULL                                            AS mas_6d_code_ovs,
-                        'TRADED'                                    AS position_basis,
-                        reporting_date                                  AS reporting_date,
+                        'TRADED'                                        AS position_basis,
+                        p1.reporting_date                               AS reporting_date,
                         NULL                                            AS maturity_date,
                         'USER_UPLOAD'                                   AS src_system,
                         'user'                                          AS sub_system,
@@ -2497,9 +2497,17 @@ class UploadService:
                         'cis_user_sta_adhoc_position_1'                 AS source_table,
                         CURRENT_TIMESTAMP()                             AS etl_insert_ts,
                         'python_etl'                                    AS etl_batch_id
-                    FROM {db}.cis_user_sta_adhoc_position_1
-                    WHERE processing_date = '{processing_date}'
-                      AND src_id = '{src_id}'
+                    FROM {db}.cis_user_sta_adhoc_position_1 p1
+                    LEFT JOIN (
+                        SELECT DISTINCT
+                            UPPER(TRIM(exchange_name)) AS exchange_name,
+                            country
+                        FROM {db}.gmp_cis_sta_dly_exchange
+                        WHERE processing_date = '{processing_date}'
+                    ) exc
+                        ON UPPER(TRIM(p1.exchange_quoted)) = exc.exchange_name
+                    WHERE p1.processing_date = '{processing_date}'
+                      AND p1.src_id = '{src_id}'
                 """,
                 # position_2: portfolio_name, security_description, stock_name, isin_code, qty_held, shares_issued, pct_holding, country_id
                 'cis_user_sta_adhoc_position_2': f"""
