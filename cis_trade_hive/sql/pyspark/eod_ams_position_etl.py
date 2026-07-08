@@ -204,7 +204,7 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
                 NULL                                                    AS security_short_name,
                 isin                                                    AS isin,
                 NULL                                                    AS ticker,
-                CAST(SUM({safe_decimal('quantity', 'DECIMAL(30,8)')})
+                CAST(SUM({safe_decimal('quantity', 'DECIMAL(30,8)')}) * 1000
                      AS DECIMAL(30,8))                                  AS quantity,
                 CAST(NULL AS DECIMAL(30,8))                             AS shares_outstanding,
                 CAST(NULL AS DECIMAL(30,8))                             AS shares_issued,
