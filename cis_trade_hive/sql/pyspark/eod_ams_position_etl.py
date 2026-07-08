@@ -204,13 +204,12 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
                 NULL                                                    AS security_short_name,
                 isin                                                    AS isin,
                 NULL                                                    AS ticker,
-                CAST(SUM({safe_decimal('units', 'DECIMAL(30,8)')})
+                CAST(SUM({safe_decimal('quantity', 'DECIMAL(30,8)')})
                      AS DECIMAL(30,8))                                  AS quantity,
                 CAST(NULL AS DECIMAL(30,8))                             AS shares_outstanding,
                 CAST(NULL AS DECIMAL(30,8))                             AS shares_issued,
                 CAST(NULL AS DECIMAL(10,6))                             AS pct_holding,
-                CAST(MAX({safe_decimal('price', 'DECIMAL(30,8)')})
-                     AS DECIMAL(30,8))                                  AS market_price,
+                CAST(NULL AS DECIMAL(30,8))                             AS market_price,
                 CAST(NULL AS DECIMAL(30,8))                             AS average_cost,
                 CAST(NULL AS DECIMAL(30,8))                             AS cost_fc,
                 CAST(NULL AS DECIMAL(30,8))                             AS market_value_fc,

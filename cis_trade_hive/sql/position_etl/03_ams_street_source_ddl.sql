@@ -9,7 +9,6 @@
 -- AMS_STREET_1: AMS Multi Discretionary Fund
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.gmp_cis_sta_dly_ams_multi_dis_cif (
-    src_id                  STRING,
     src_system              STRING,
     sub_system              STRING,
     data_cat                STRING,
@@ -17,9 +16,10 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.gmp_cis_sta_dly_ams_multi_dis_cif (
     portfolio_code          STRING,
     security_name           STRING,
     isin                    STRING,
-    price                   STRING,
-    units                   STRING,
-    country_code            STRING
+    quantity                STRING,
+    a_c_no                  STRING,
+    country_code            STRING,
+    src_id                  STRING
 )
 COMMENT 'AMS Street Source 1 - AMS Multi Discretionary Fund'
 PARTITIONED BY (
