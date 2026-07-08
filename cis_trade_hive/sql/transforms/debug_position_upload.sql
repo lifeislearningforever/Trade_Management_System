@@ -205,12 +205,12 @@ SELECT
     CAST(dl.unrealised_p_l_fc AS DECIMAL(30,8))                 AS unrealized_pnl_fc,
     CAST(dl.total_cost_sgd   AS DECIMAL(30,8))                  AS cost_lc,
     CAST(dl.mkt_value_sgd    AS DECIMAL(30,8))                  AS market_value_lc,
-    CAST(dl.unrealised_pl_sgd AS DECIMAL(30,8))                 AS unrealized_pnl_lc,
+    CAST(dl.unrealised_p_l_sgd AS DECIMAL(30,8))                AS unrealized_pnl_lc,
     dl.product_type                                             AS product_type,
     dl.quoted_unquoted                                          AS quoted_unquoted,
-    dl.ctry_of_exchange                                         AS exchange,
-    dl.ctry_of_exchange                                         AS country_of_exchange,
-    dl.ctry_incorporation                                       AS country_of_incorporation,
+    dl.city_of_exchange                                         AS exchange,
+    dl.city_of_exchange                                         AS country_of_exchange,
+    dl.city_incorporation                                       AS country_of_incorporation,
     dl.ccy                                                      AS security_currency,
     dl.mas_6digit_code                                          AS mas_6d_code_sg,
     'TRADED'                                                    AS position_basis,
@@ -232,7 +232,7 @@ LEFT JOIN (
       AND TRIM(isin) != ''
 ) mh
     ON  UPPER(TRIM(dl.security_desc))    = mh.security_name
-    AND UPPER(TRIM(dl.ctry_of_exchange)) = mh.country_code
+    AND UPPER(TRIM(dl.city_of_exchange)) = mh.country_code
 WHERE dl.processing_date = '20260227'
 LIMIT 1;
 
@@ -252,7 +252,7 @@ LEFT JOIN (
       AND isin IS NOT NULL AND TRIM(isin) != ''
 ) mh
     ON  UPPER(TRIM(dl.security_desc))    = mh.security_name
-    AND UPPER(TRIM(dl.ctry_of_exchange)) = mh.country_code
+    AND UPPER(TRIM(dl.city_of_exchange)) = mh.country_code
 WHERE dl.processing_date = '20260227';
 
 -- ============================================================================
