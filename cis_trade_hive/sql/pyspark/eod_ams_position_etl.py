@@ -414,10 +414,10 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
                 NULL                                                    AS fin_nonfin_co,
                 NULL                                                    AS issuer_type,
                 NULL                                                    AS reits_or_fund_y_n,
-                dl.city_of_exchange                                     AS exchange,
+                dl.ctry_of_exchange                                     AS exchange,
                 NULL                                                    AS country_code,
-                dl.city_of_exchange                                     AS country_of_exchange,
-                dl.city_incorporation                                   AS country_of_incorporation,
+                dl.ctry_of_exchange                                     AS country_of_exchange,
+                dl.ctry_incorporation                                   AS country_of_incorporation,
                 NULL                                                    AS country_of_risk,
                 NULL                                                    AS country_of_operation,
                 dl.ccy                                                  AS security_currency,
@@ -451,7 +451,7 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
                   AND TRIM(isin) != ''
             ) mh
                 ON  UPPER(TRIM(dl.security_desc))    = mh.security_name
-                AND UPPER(TRIM(dl.city_of_exchange)) = mh.country_code
+                AND UPPER(TRIM(dl.ctry_of_exchange)) = mh.country_code
             WHERE dl.processing_date = '{processing_date}'
         """
 
