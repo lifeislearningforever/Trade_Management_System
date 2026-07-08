@@ -27,8 +27,32 @@
 .sort-th.sorted-desc .sort-icon::before { content: "▼"; opacity: 1; }
 .sort-th:not(.sorted-asc):not(.sorted-desc) .sort-icon::before { content: "⇅"; }
 
+/* Filter bar — stable layout */
+.filter-row { flex-wrap: nowrap; }
+.filter-col  { flex: 0 0 auto; }
+
+/* All filter controls the same height so nothing shifts */
+.filter-btn  {
+    height: 31px;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.filter-btn .btn-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+    max-width: calc(100% - 18px);
+}
+
+/* Dropdowns stay in-place */
+.filter-dropdown { position: relative; }
+.filter-dropdown .dropdown-menu { position: absolute; top: 100%; left: 0; }
+
 /* Type multi-select dropdown */
-.type-dropdown-menu { min-width: 120px; z-index: 1055; }
+.type-dropdown-menu { min-width: 130px; z-index: 1055; }
 </style>
 {% endblock %}
 
@@ -52,64 +76,67 @@
         <span class="fw-semibold small">Filters</span>
     </div>
     <div class="card-body py-2" style="overflow: visible;">
-        <form method="get" id="positionFilterForm" class="row g-2 align-items-end">
+        <form method="get" id="positionFilterForm">
+            <div class="d-flex flex-wrap gap-2 align-items-end">
 
             <!-- Keep sort params across filter submits -->
             {% if sort_by %}<input type="hidden" name="sort_by" value="{{ sort_by }}">{% endif %}
             <input type="hidden" name="sort_dir" value="{{ sort_dir }}">
 
             <!-- Portfolio Multi-Select -->
-            <div class="col-md-2">
-                <label class="form-label form-label-sm">Portfolios</label>
-                <button type="button" class="btn btn-outline-secondary btn-sm w-100 d-flex justify-content-between align-items-center"
-                        data-bs-toggle="modal" data-bs-target="#portfolioModal">
-                    <span id="selectedPortfoliosLabel">
-                        {% if selected_portfolios %}{{ selected_portfolios|length }} selected{% else %}All Portfolios{% endif %}
-                    </span>
-                    <i class="bi bi-chevron-down"></i>
-                </button>
+            <div style="width:160px; flex-shrink:0;">
+                <label class="form-label form-label-sm mb-1">Portfolios</label>
                 <div id="selectedPortfoliosInputs">
                     {% for p in selected_portfolios %}
                     <input type="hidden" name="portfolios" value="{{ p }}">
                     {% endfor %}
                 </div>
+                <button type="button"
+                        class="btn btn-outline-secondary btn-sm w-100 filter-btn d-flex justify-content-between align-items-center"
+                        data-bs-toggle="modal" data-bs-target="#portfolioModal">
+                    <span id="selectedPortfoliosLabel" class="btn-label">
+                        {% if selected_portfolios %}{{ selected_portfolios|length }} selected{% else %}All Portfolios{% endif %}
+                    </span>
+                    <i class="bi bi-chevron-down flex-shrink-0"></i>
+                </button>
             </div>
 
             <!-- Security Multi-Select -->
-            <div class="col-md-2">
-                <label class="form-label form-label-sm">Securities</label>
-                <button type="button" class="btn btn-outline-secondary btn-sm w-100 d-flex justify-content-between align-items-center"
-                        data-bs-toggle="modal" data-bs-target="#securityModal">
-                    <span id="selectedSecuritiesLabel">
-                        {% if selected_securities %}{{ selected_securities|length }} selected{% else %}All Securities{% endif %}
-                    </span>
-                    <i class="bi bi-chevron-down"></i>
-                </button>
+            <div style="width:160px; flex-shrink:0;">
+                <label class="form-label form-label-sm mb-1">Securities</label>
                 <div id="selectedSecuritiesInputs">
                     {% for s in selected_securities %}
                     <input type="hidden" name="securities" value="{{ s }}">
                     {% endfor %}
                 </div>
+                <button type="button"
+                        class="btn btn-outline-secondary btn-sm w-100 filter-btn d-flex justify-content-between align-items-center"
+                        data-bs-toggle="modal" data-bs-target="#securityModal">
+                    <span id="selectedSecuritiesLabel" class="btn-label">
+                        {% if selected_securities %}{{ selected_securities|length }} selected{% else %}All Securities{% endif %}
+                    </span>
+                    <i class="bi bi-chevron-down flex-shrink-0"></i>
+                </button>
             </div>
 
             <!-- Src System multi-select -->
-            <div class="col-md-1">
-                <label class="form-label form-label-sm">Src System</label>
+            <div style="width:130px; flex-shrink:0;">
+                <label class="form-label form-label-sm mb-1">Src System</label>
                 <div id="srcSystemInputs">
                     {% for s in selected_src_systems %}
                     <input type="hidden" name="src_system" value="{{ s }}">
                     {% endfor %}
                 </div>
-                <div class="dropdown">
+                <div class="dropdown filter-dropdown">
                     <button type="button"
-                            class="btn btn-outline-secondary btn-sm w-100 d-flex justify-content-between align-items-center"
+                            class="btn btn-outline-secondary btn-sm w-100 filter-btn d-flex justify-content-between align-items-center"
                             data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
-                        <span id="srcSystemLabel">
+                        <span id="srcSystemLabel" class="btn-label">
                             {% if selected_src_systems %}{{ selected_src_systems|length }} selected{% else %}All{% endif %}
                         </span>
-                        <i class="bi bi-chevron-down ms-1"></i>
+                        <i class="bi bi-chevron-down flex-shrink-0"></i>
                     </button>
-                    <ul class="dropdown-menu p-2" style="min-width:140px; z-index:1055;">
+                    <ul class="dropdown-menu p-2" style="min-width:150px; z-index:1055;">
                         {% for s in src_systems %}
                         <li>
                             <label class="d-flex align-items-center gap-2 px-2 py-1 rounded"
@@ -134,9 +161,9 @@
             </div>
 
             <!-- Position Basis -->
-            <div class="col-md-2">
-                <label class="form-label form-label-sm">Position Basis</label>
-                <select name="position_basis" class="form-select form-select-sm">
+            <div style="width:130px; flex-shrink:0;">
+                <label class="form-label form-label-sm mb-1">Position Basis</label>
+                <select name="position_basis" class="form-select form-select-sm" style="height:31px;">
                     <option value="">All</option>
                     {% for b in position_basis_choices %}
                         <option value="{{ b }}" {% if f_position_basis == b %}selected{% endif %}>{{ b }}</option>
@@ -145,22 +172,22 @@
             </div>
 
             <!-- Position Type multi-select (INT / EOD / SOD / CORR) -->
-            <div class="col-md-1">
-                <label class="form-label form-label-sm">Type</label>
+            <div style="width:120px; flex-shrink:0;">
+                <label class="form-label form-label-sm mb-1">Type</label>
                 <div id="posTypeInputs">
                     {% for t in selected_pos_types %}
                     <input type="hidden" name="position_type" value="{{ t }}">
                     {% endfor %}
                 </div>
                 <input type="hidden" id="posTypeCleared" name="position_type_cleared" value="0">
-                <div class="dropdown">
+                <div class="dropdown filter-dropdown">
                     <button type="button"
-                            class="btn btn-outline-secondary btn-sm w-100 d-flex justify-content-between align-items-center"
+                            class="btn btn-outline-secondary btn-sm w-100 filter-btn d-flex justify-content-between align-items-center"
                             data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
-                        <span id="posTypeLabel">
+                        <span id="posTypeLabel" class="btn-label">
                             {% if selected_pos_types %}{{ selected_pos_types|length }} selected{% else %}All{% endif %}
                         </span>
-                        <i class="bi bi-chevron-down ms-1"></i>
+                        <i class="bi bi-chevron-down flex-shrink-0"></i>
                     </button>
                     <ul class="dropdown-menu p-2 type-dropdown-menu">
                         {% for t in position_type_choices %}
@@ -193,26 +220,28 @@
             </div>
 
             <!-- Date From -->
-            <div class="col-md-1">
-                <label class="form-label form-label-sm">Date From</label>
-                <input type="date" name="date_from" class="form-control form-control-sm" value="{{ f_date_from }}">
+            <div style="width:130px; flex-shrink:0;">
+                <label class="form-label form-label-sm mb-1">Date From</label>
+                <input type="date" name="date_from" class="form-control form-control-sm" style="height:31px;" value="{{ f_date_from }}">
             </div>
 
             <!-- Date To -->
-            <div class="col-md-1">
-                <label class="form-label form-label-sm">Date To</label>
-                <input type="date" name="date_to" class="form-control form-control-sm" value="{{ f_date_to }}">
+            <div style="width:130px; flex-shrink:0;">
+                <label class="form-label form-label-sm mb-1">Date To</label>
+                <input type="date" name="date_to" class="form-control form-control-sm" style="height:31px;" value="{{ f_date_to }}">
             </div>
 
             <!-- Buttons -->
-            <div class="col-md-2 d-flex gap-1">
-                <button type="submit" class="btn btn-primary btn-sm">
+            <div class="d-flex gap-1 flex-shrink-0" style="padding-bottom:1px;">
+                <button type="submit" class="btn btn-primary btn-sm filter-btn px-3">
                     <i class="bi bi-search"></i> Filter
                 </button>
-                <a href="{% url 'trade:position_list' %}" class="btn btn-outline-secondary btn-sm">
+                <a href="{% url 'trade:position_list' %}" class="btn btn-outline-secondary btn-sm filter-btn px-3">
                     <i class="bi bi-x-circle"></i> Clear
                 </a>
             </div>
+
+            </div><!-- /d-flex -->
 
             <!-- Active filter badges -->
             {% if selected_portfolios or selected_securities or selected_pos_types %}
