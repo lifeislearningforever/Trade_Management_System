@@ -217,6 +217,8 @@
                                 <th class="sortable" data-sort-type="number" style="min-width:100px;text-align:right;">Price</th>
                                 <th class="sortable" data-sort-type="number" style="min-width:120px;text-align:right;">Total FC</th>
                                 <th class="sortable" data-sort-type="number" style="min-width:120px;text-align:right;">Total LC</th>
+                                <th class="sortable" data-sort-type="number" style="min-width:120px;text-align:right;">Gross FC</th>
+                                <th class="sortable" data-sort-type="number" style="min-width:120px;text-align:right;">Gross LC</th>
                                 <th class="sortable" data-sort-type="text" style="min-width:130px;">Status</th>
                                 <th class="sortable" data-sort-type="text" style="min-width:120px;">Counterparty</th>
                                 <th class="sortable" data-sort-type="date" style="min-width:135px;">Created At</th>
@@ -266,6 +268,8 @@
                                 <td class="num">{{ trade.price|floatformat:4|default:"0.0000" }}</td>
                                 <td class="num">{{ trade.total_amount_fc|floatformat:2|default:"0.00" }}</td>
                                 <td class="num">{{ trade.total_amount_lc|floatformat:2|default:"0.00" }}</td>
+                                <td class="num">{{ trade.gross_amount_fc|floatformat:2|default:"0.00" }}</td>
+                                <td class="num">{{ trade.gross_amount_lc|floatformat:2|default:"0.00" }}</td>
                                 <td>
                                     {% if trade.status == 'INITIAL' %}
                                         <span class="status-pill status-initial"><i class="bi bi-pencil-square"></i> Initial</span>

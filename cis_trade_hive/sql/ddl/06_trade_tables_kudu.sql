@@ -105,9 +105,12 @@ CREATE TABLE cis_trade (
     other_charges DECIMAL(20,6),     -- Other charges
     total_amount DECIMAL(20,6),      -- Calculated: Final amount (legacy, same as total_amount_fc)
 
-    -- Multi-Currency Total Amount (FC = Foreign/Security Currency, LC = Local/Portfolio Currency)
-    total_amount_fc DECIMAL(30,8),   -- Total amount in Foreign Currency (Security Currency)
-    total_amount_lc DECIMAL(30,8),   -- Total amount in Local Currency (Portfolio Currency)
+    -- Multi-Currency Amounts (FC = Foreign/Security Currency, LC = Local/Portfolio Currency)
+    -- gross = qty × price (excluding charges); total = gross + charges
+    gross_amount_fc DECIMAL(30,8),   -- Gross amount FC: qty × price (no charges) — used for AVP cost basis
+    gross_amount_lc DECIMAL(30,8),   -- Gross amount LC: gross_fc × fx_rate (no charges)
+    total_amount_fc DECIMAL(30,8),   -- Total amount FC: gross + charges (including commission, fees)
+    total_amount_lc DECIMAL(30,8),   -- Total amount LC: total_fc × fx_rate (including charges)
 
     -- ========================================
     -- AUTO-CALCULATED CHARGES (from Charge LUT)

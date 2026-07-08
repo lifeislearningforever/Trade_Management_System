@@ -241,7 +241,7 @@
                     <hr>
                     <div class="row">
                         <div class="col-md-3 mb-3">
-                            <label class="form-label text-muted">Total Amount FC</label>
+                            <label class="form-label text-muted">Total Amount FC <small class="text-muted">(incl. charges)</small></label>
                             <div class="fw-bold fs-5 text-primary">
                                 {{ trade.total_amount_fc|floatformat:2|default:"0.00" }}
                                 {% if trade.currency_code %}
@@ -250,13 +250,33 @@
                             </div>
                         </div>
                         <div class="col-md-3 mb-3">
-                            <label class="form-label text-muted">Total Amount LC</label>
+                            <label class="form-label text-muted">Total Amount LC <small class="text-muted">(incl. charges)</small></label>
                             <div class="fw-bold fs-5 text-success">
                                 {{ trade.total_amount_lc|floatformat:2|default:"0.00" }}
                                 {% if trade.portfolio_currency %}
                                     <span class="badge bg-success">{{ trade.portfolio_currency }}</span>
                                 {% elif trade.currency_code %}
                                     <span class="badge bg-success">{{ trade.currency_code }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label text-muted">Gross Amount FC <small class="text-muted">(excl. charges)</small></label>
+                            <div class="fw-bold fs-5 text-info">
+                                {{ trade.gross_amount_fc|floatformat:2|default:"0.00" }}
+                                {% if trade.currency_code %}
+                                    <span class="badge bg-info">{{ trade.currency_code }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label text-muted">Gross Amount LC <small class="text-muted">(excl. charges)</small></label>
+                            <div class="fw-bold fs-5 text-secondary">
+                                {{ trade.gross_amount_lc|floatformat:2|default:"0.00" }}
+                                {% if trade.portfolio_currency %}
+                                    <span class="badge bg-secondary">{{ trade.portfolio_currency }}</span>
+                                {% elif trade.currency_code %}
+                                    <span class="badge bg-secondary">{{ trade.currency_code }}</span>
                                 {% endif %}
                             </div>
                         </div>

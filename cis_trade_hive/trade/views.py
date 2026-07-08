@@ -100,6 +100,9 @@ class TradeWrapper:
         # total_amount_fc: Use new column if available, fallback to total_amount for backward compatibility
         self.total_amount_fc = data.get('total_amount_fc') or data.get('total_amount', 0)
         self.total_amount_lc = data.get('total_amount_lc', 0)  # Total Amount LC (Local Currency)
+        # Gross amounts: qty × price only (no charges) — used for AVP cost basis
+        self.gross_amount_fc = data.get('gross_amount_fc', 0)
+        self.gross_amount_lc = data.get('gross_amount_lc', 0)
 
         # GL & Broker
         self.open_close_position = data.get('open_close_position', '')
@@ -354,6 +357,7 @@ def trade_list(request):
             'Portfolio Currency (LC)', 'CCY Exchange Rate', 'Open FX Rate',
             # Amounts
             'Total Amount', 'Total Amount (FC)', 'Total Amount (LC)',
+            'Gross Amount (FC)', 'Gross Amount (LC)',
             # Charges (manual)
             'Commission', 'Accrued Interest', 'SEC Fee', 'Other Charges',
             # Charges (auto-calculated)
@@ -429,6 +433,8 @@ def trade_list(request):
                 fmt_num(trade.get('total_amount')),
                 fmt_num(trade.get('total_amount_fc')),
                 fmt_num(trade.get('total_amount_lc')),
+                fmt_num(trade.get('gross_amount_fc')),
+                fmt_num(trade.get('gross_amount_lc')),
                 fmt_num(trade.get('commission')),
                 fmt_num(trade.get('accrued_interest')),
                 fmt_num(trade.get('sec_fee')),
@@ -755,6 +761,20 @@ def trade_create(request, trade_type=None):
                 'charges_auto_calculated': request.POST.get('charges_auto_calculated', 'false') == 'true',
             }
 
+            # --- Compute gross amounts server-side (qty × price, no charges) ---
+            try:
+                _qty = Decimal(str(trade_data.get('quantity') or 0))
+                _price = Decimal(str(trade_data.get('price') or 0))
+                _fx = Decimal(str(trade_data.get('open_fx_rate') or 1))
+                _gross_fc = (_qty * _price).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+                _gross_lc = (_gross_fc * _fx).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+                trade_data['gross_amount_fc'] = float(_gross_fc)
+                trade_data['gross_amount_lc'] = float(_gross_lc)
+            except Exception as _e:
+                logger.warning(f"gross_amount computation failed: {_e}")
+                trade_data['gross_amount_fc'] = 0
+                trade_data['gross_amount_lc'] = 0
+
             # --- UOB KAY HIAN* + SGX broker charge rounding rule (server-side guard) ---
             # SGX trades via UOB Kay Hian (any suffix): broker charges rounded to 2dp.
             _broker   = str(trade_data.get('brokers', '') or '').upper()
@@ -955,6 +975,20 @@ def trade_edit(request, trade_id):
                 'total_calculated_charges': request.POST.get('total_calculated_charges', 0),
                 'charges_auto_calculated': request.POST.get('charges_auto_calculated', 'false') == 'true',
             }
+
+            # --- Compute gross amounts server-side (qty × price, no charges) ---
+            try:
+                _qty = Decimal(str(updated_data.get('quantity') or 0))
+                _price = Decimal(str(updated_data.get('price') or 0))
+                _fx = Decimal(str(updated_data.get('open_fx_rate') or 1))
+                _gross_fc = (_qty * _price).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+                _gross_lc = (_gross_fc * _fx).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+                updated_data['gross_amount_fc'] = float(_gross_fc)
+                updated_data['gross_amount_lc'] = float(_gross_lc)
+            except Exception as _e:
+                logger.warning(f"gross_amount computation failed: {_e}")
+                updated_data['gross_amount_fc'] = 0
+                updated_data['gross_amount_lc'] = 0
 
             # --- UOB KAY HIAN* + SGX broker charge rounding rule (server-side guard) ---
             _broker   = str(updated_data.get('brokers', '') or '').upper()
