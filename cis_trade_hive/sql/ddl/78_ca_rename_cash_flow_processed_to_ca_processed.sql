@@ -5,13 +5,13 @@
 -- Rationale:
 --   The old names implied the flag tracked whether the *cash flow* was
 --   processed (e.g. whether it updated positions). That meaning belongs to
---   cis_cash_flow.position_updated.
+--   cis_cash_flow.cf_processed.
 --
 --   The CA-level flag only means "the CA queue job ran and generated its cash
 --   flows". Renaming to ca_processed makes the two-layer lifecycle explicit:
 --
 --     cis_corporate_actions.ca_processed     → CA produced its cash flows
---     cis_cash_flow.position_updated         → CF was applied to positions
+--     cis_cash_flow.cf_processed         → CF was applied to positions
 --
 -- Run with:
 --   impala-shell -i <host>:21050 -d gmp_cis \

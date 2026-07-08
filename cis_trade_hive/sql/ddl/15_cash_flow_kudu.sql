@@ -32,8 +32,10 @@ CREATE TABLE IF NOT EXISTS cis_cash_flow (
     cash_flow_type STRING,                      -- UDF: DIVIDEND, INTEREST, FEE, COUPON, etc.
     send_receive STRING,                        -- UDF: SEND, RECEIVE
 
-    -- Position Flag
-    position_updated BOOLEAN DEFAULT FALSE,     -- Whether position was updated
+    -- Cash Flow Processing Flag
+    -- cf_processed: set true after the CF has been applied to positions by process_approved_cashflows.
+    -- Mirrors ca_processed on cis_corporate_actions (which tracks whether the CA generated its CFs).
+    cf_processed BOOLEAN DEFAULT FALSE,         -- Whether this CF has been applied to positions
 
     -- Currency and Amounts
     foreign_ccy STRING,                         -- Foreign currency code (Security currency)

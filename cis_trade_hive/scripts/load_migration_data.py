@@ -1353,7 +1353,7 @@ CASH_FLOW_DECIMAL_COLS = {
     'dividend_price', 'quantity', 'fx_rate',
 }
 CASH_FLOW_BIGINT_COLS = {'ca_id'}
-CASH_FLOW_BOOL_COLS   = {'is_active', 'is_deleted', 'position_updated'}
+CASH_FLOW_BOOL_COLS   = {'is_active', 'is_deleted', 'cf_processed'}
 
 
 def _next_cf_number(index: int) -> str:
@@ -1421,7 +1421,7 @@ def load_cash_flow(rows: List[Dict], status: str, dry_run: bool, processing_date
         mapped['cash_flow_id']     = cash_flow_id
         mapped['cash_flow_number'] = cash_flow_number
         mapped['src_system']       = SRC_SYSTEM
-        mapped['position_updated'] = False
+        mapped['cf_processed'] = False
         mapped.setdefault('status',     status)
         mapped.setdefault('is_active',  True)
         mapped.setdefault('is_deleted', False)

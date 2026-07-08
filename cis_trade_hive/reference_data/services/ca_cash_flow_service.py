@@ -602,7 +602,7 @@ class CACashFlowService:
                 'security_label': security_name,
                 'cash_flow_type': cf_type,
                 'send_receive': 'INCREASE',  # Dividends increase the portfolio cash position
-                'position_updated': False,
+                'cf_processed': False,
                 'value_date': ex_date,
                 'payment_date': payment_date,
                 'dividend_date': record_date,

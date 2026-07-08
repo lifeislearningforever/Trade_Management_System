@@ -537,7 +537,7 @@ class CACashFlowQueueRepository:
 
         ca_processed=true means the CA queue job ran and generated its cash flows.
         Whether those cash flows have been applied to positions is tracked separately
-        on cis_cash_flow.position_updated.
+        on cis_cash_flow.cf_processed.
 
         Called automatically by insert() and mark_completed() — non-fatal if it
         fails (the queue state is the source of truth; this is a convenience flag).

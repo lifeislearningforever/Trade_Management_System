@@ -493,7 +493,7 @@ def step2_generate_cash_flows(spark: SparkSession, kudu_master: str,
             F.col("security_label"),
             F.col("cf_type").alias("cash_flow_type"),
             F.lit("RECEIVE").alias("send_receive"),
-            F.lit(False).alias("position_updated"),
+            F.lit(False).alias("cf_processed"),
             # Foreign currency (security currency)
             F.col("security_currency").alias("foreign_ccy"),
             F.col("amount_fc").alias("foreign_ccy_amt"),

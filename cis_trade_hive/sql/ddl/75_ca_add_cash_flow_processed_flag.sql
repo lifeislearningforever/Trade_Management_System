@@ -8,7 +8,7 @@
 --   ca_processed      BOOLEAN — set true when queue entry reaches COMPLETED
 --                               (means the CA generated its cash flows;
 --                                whether those CFs updated positions is tracked
---                                separately on cis_cash_flow.position_updated)
+--                                separately on cis_cash_flow.cf_processed)
 --   ca_processed_at   STRING  — timestamp (YYYY-MM-DD HH:MM:SS) of completion
 --
 -- Run with:

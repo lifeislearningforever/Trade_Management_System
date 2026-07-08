@@ -587,7 +587,7 @@ CREATE TABLE IF NOT EXISTS gmp_cis.cis_cash_flow_new (
     portfolio_short_name  STRING,
     cash_flow_type        STRING,
     send_receive          STRING,
-    position_updated      BOOLEAN,
+    cf_processed          BOOLEAN,
     foreign_ccy           STRING,
     local_ccy             STRING,
     local_ccy_amt         DECIMAL(20, 8),
@@ -635,7 +635,7 @@ TBLPROPERTIES (
 INSERT INTO gmp_cis.cis_cash_flow_new
 SELECT
     cash_flow_id, cash_flow_number, security_label, portfolio_short_name,
-    cash_flow_type, send_receive, position_updated,
+    cash_flow_type, send_receive, cf_processed,
     foreign_ccy, local_ccy, local_ccy_amt, foreign_ccy_amt,
     flow_amount_local, dividend_price, quantity, fx_rate,
     tax_deducted_fc, tax_deducted_lc, other_charges_fc,

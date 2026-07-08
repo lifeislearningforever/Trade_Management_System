@@ -607,7 +607,7 @@ CREATE EXTERNAL TABLE gmp_cis.hive_cis_cash_flow (
     portfolio_short_name    STRING,
     cash_flow_type          STRING,
     send_receive            STRING,
-    position_updated        BOOLEAN,
+    cf_processed            BOOLEAN,
     foreign_ccy             STRING,
     local_ccy               STRING,
     local_ccy_amt           DECIMAL(30,8),

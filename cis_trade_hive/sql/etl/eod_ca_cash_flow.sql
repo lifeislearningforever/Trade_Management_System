@@ -167,7 +167,7 @@ UPSERT INTO cis_cash_flow (
     security_label,
     cash_flow_type,
     send_receive,
-    position_updated,
+    cf_processed,
     foreign_ccy,
     foreign_ccy_amt,
     local_ccy,
@@ -218,7 +218,7 @@ SELECT
     END                                                         AS cash_flow_type,
 
     'RECEIVE'                                                   AS send_receive,
-    false                                                       AS position_updated,
+    false                                                       AS cf_processed,
 
     -- Foreign currency = security currency
     pos.security_currency                                       AS foreign_ccy,

@@ -26,7 +26,7 @@ Exception — DIVIDEND / CASH_DIVIDEND:
   RECEIVE → increase (fund received dividend)
   SEND    → decrease (fund distributed/paid out dividend)
 
-Idempotency: once processed, position_updated=true is set on the cash flow
+Idempotency: once processed, cf_processed=true is set on the cash flow
 record so re-runs on the same date skip already-processed records.
 
 Run types
@@ -128,7 +128,7 @@ class Command(BaseCommand):
         parser.add_argument(
             '--reprocess',
             action='store_true',
-            help='Re-process already-processed records (position_updated=true). Use for corrections.'
+            help='Re-process already-processed records (cf_processed=true). Use for corrections.'
         )
         parser.add_argument(
             '--run-type', type=str, choices=['EOD', 'CORR'], default='EOD',
@@ -231,7 +231,7 @@ class Command(BaseCommand):
                 if success:
                     self.stdout.write(self.style.SUCCESS(f'    ✓ {message}'))
                     if not dry_run:
-                        self._mark_position_updated(cf_id)
+                        self._mark_cf_processed(cf_id)
                     stats['processed'] += 1
                 else:
                     if 'No open position' in message:
@@ -357,7 +357,7 @@ class Command(BaseCommand):
             f"COALESCE(payment_date, value_date) <= '{_escape(run_date)}'",
         ]
         if not reprocess:
-            clauses.append("(position_updated = false OR position_updated IS NULL)")
+            clauses.append("(cf_processed = false OR cf_processed IS NULL)")
         if portfolio_filter:
             clauses.append(f"portfolio_short_name = '{_escape(portfolio_filter)}'")
 
@@ -946,18 +946,18 @@ class Command(BaseCommand):
     # MARK PROCESSED
     # =========================================================================
 
-    def _mark_position_updated(self, cash_flow_id: int) -> None:
-        """Set position_updated=true on the cash flow record."""
+    def _mark_cf_processed(self, cash_flow_id: int) -> None:
+        """Set cf_processed=true on the cash flow record after positions are updated."""
         try:
             ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             impala_manager.execute_write(
                 f"""UPDATE {DATABASE}.{CASH_FLOW_TABLE}
-                    SET position_updated = true, updated_at = '{ts}'
+                    SET cf_processed = true, updated_at = '{ts}'
                     WHERE cash_flow_id = {cash_flow_id}""",
                 database=DATABASE
             )
         except Exception as e:
-            logger.warning(f'Could not mark cash_flow {cash_flow_id} as position_updated: {e}')
+            logger.warning(f'Could not mark cash_flow {cash_flow_id} as cf_processed: {e}')
 
     # =========================================================================
     # POSITION FETCH

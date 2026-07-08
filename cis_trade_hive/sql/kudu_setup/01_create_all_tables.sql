@@ -1288,7 +1288,7 @@ CREATE TABLE IF NOT EXISTS cis_cash_flow (
     portfolio_short_name STRING,
     cash_flow_type       STRING,
     send_receive         STRING,
-    position_updated     BOOLEAN DEFAULT FALSE,
+    cf_processed         BOOLEAN DEFAULT FALSE,
     foreign_ccy          STRING,
     local_ccy            STRING,
     local_ccy_amt        DECIMAL(20, 8),

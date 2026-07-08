@@ -125,24 +125,24 @@ USE gmp_cis;
 
 -- 1. Check current cash flow state
 --    Replace 'CF-20260704-00001' with the actual cash flow number.
-SELECT cash_flow_id, cash_flow_number, status, position_updated,
+SELECT cash_flow_id, cash_flow_number, status, cf_processed,
        portfolio_short_name, security_label, cash_flow_type,
        send_receive, local_ccy_amt, foreign_ccy_amt,
        payment_date, value_date, is_deleted
 FROM gmp_cis.cis_cash_flow
 WHERE cash_flow_number = 'CF-20260704-00001';
 
--- 2. Reset position_updated flag so the command picks it up again.
+-- 2. Reset cf_processed flag so the command picks it up again.
 --    (Idempotency: once processed the flag is set to true — this clears it.)
 UPDATE gmp_cis.cis_cash_flow
-SET position_updated = false,
+SET cf_processed = false,
     updated_at = now()
 WHERE cash_flow_number = 'CF-20260704-00001';
 
 -- 3. (Optional) Reset ALL unprocessed cash flows for a portfolio
 --    Useful when testing a full rerun for a portfolio.
 -- UPDATE gmp_cis.cis_cash_flow
--- SET position_updated = false,
+-- SET cf_processed = false,
 --     updated_at = now()
 -- WHERE portfolio_short_name = 'Test_Prakash_ccy'
 --   AND status IN ('APPROVED', 'VALIDATED')
