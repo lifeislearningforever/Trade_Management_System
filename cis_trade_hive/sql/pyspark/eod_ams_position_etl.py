@@ -86,11 +86,8 @@ ALL_SOURCES = {
         'src_system':     'AMS_STREET',
         'description':    'AMS Multi Discretionary Fund',
     },
-    'gmp_cis_sta_dly_ams_multi_hold': {
-        'position_basis': 'TRADED',
-        'src_system':     'AMS_STREET',
-        'description':    'AMS Multiple Holdings Daily',
-    },
+    # gmp_cis_sta_dly_ams_multi_hold is used only as an ISIN lookup for
+    # gmp_cis_sta_dly_stat_street_ams_daily_limit — not processed as its own pipeline.
     'gmp_cis_sta_dly_stat_street_ams_iceq': {
         'position_basis': 'TRADED',
         'src_system':     'AMS_STREET',
@@ -119,7 +116,7 @@ AMS_SOURCES = ALL_SOURCES
 # Short alias → table name (for --source CLI arg)
 SOURCE_ALIASES = {
     'ams_multi_dis':  'gmp_cis_sta_dly_ams_multi_dis_cif',
-    'ams_multi_hold': 'gmp_cis_sta_dly_ams_multi_hold',
+    # 'ams_multi_hold' removed — used only as ISIN lookup, not a standalone ETL source
     'ams_iceq':       'gmp_cis_sta_dly_stat_street_ams_iceq',
     'ams_iceq_end':   'gmp_cis_sta_mthly_stat_street_ams_iceq_end',
     'ams_daily_limit':'gmp_cis_sta_dly_stat_street_ams_daily_limit',
@@ -263,66 +260,6 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
                 processing_date
         """
 
-    if table == 'gmp_cis_sta_dly_ams_multi_hold':
-        return f"""
-            SELECT
-                portfolio_code                                      AS portfolio,
-                security_name                                       AS security_full_name,
-                NULL                                                AS security_short_name,
-                isin                                                AS isin,
-                NULL                                                AS ticker,
-                {safe_decimal('quantity', 'DECIMAL(30,8)')}        AS quantity,
-                CAST(NULL AS DECIMAL(30,8))                         AS shares_outstanding,
-                CAST(NULL AS DECIMAL(30,8))                         AS shares_issued,
-                CAST(NULL AS DECIMAL(10,6))                         AS pct_holding,
-                CAST(NULL AS DECIMAL(30,8))                         AS market_price,
-                CAST(NULL AS DECIMAL(30,8))                         AS average_cost,
-                CAST(NULL AS DECIMAL(30,8))                         AS cost_fc,
-                CAST(NULL AS DECIMAL(30,8))                         AS market_value_fc,
-                CAST(NULL AS DECIMAL(30,8))                         AS net_book_value_fc,
-                CAST(NULL AS DECIMAL(30,8))                         AS unrealized_pnl_fc,
-                CAST(NULL AS DECIMAL(30,8))                         AS provision_fc,
-                CAST(NULL AS DECIMAL(30,8))                         AS cost_lc,
-                CAST(NULL AS DECIMAL(30,8))                         AS market_value_lc,
-                CAST(NULL AS DECIMAL(30,8))                         AS net_book_value_lc,
-                CAST(NULL AS DECIMAL(30,8))                         AS unrealized_pnl_lc,
-                CAST(NULL AS DECIMAL(30,8))                         AS provision_lc,
-                NULL                                                AS product_type,
-                NULL                                                AS security_type,
-                NULL                                                AS quoted_unquoted,
-                NULL                                                AS industry,
-                NULL                                                AS fin_nonfin_co,
-                NULL                                                AS issuer_type,
-                NULL                                                AS reits_or_fund_y_n,
-                country_code                                        AS exchange,
-                country_code                                        AS country_code,
-                country_code                                        AS country_of_exchange,
-                NULL                                                AS country_of_incorporation,
-                NULL                                                AS country_of_risk,
-                NULL                                                AS country_of_operation,
-                NULL                                                AS security_currency,
-                NULL                                                AS corp_code,
-                NULL                                                AS branch_code,
-                NULL                                                AS cost_centre,
-                NULL                                                AS cels,
-                NULL                                                AS bwcif_sg,
-                NULL                                                AS bwcif_ovs,
-                NULL                                                AS mas_6d_code_sg,
-                NULL                                                AS mas_6d_code_ovs,
-                '{pos_basis}'                                       AS position_basis,
-                processing_date                                     AS reporting_date,
-                NULL                                                AS maturity_date,
-                '{src_sys}'                                         AS src_system,
-                'ams'                                               AS sub_system,
-                'sta'                                               AS data_cat,
-                'dly'                                               AS data_frq,
-                '{table}'                                           AS source_table,
-                CURRENT_TIMESTAMP()                                 AS etl_insert_ts,
-                'eod_ams_etl'                                       AS etl_batch_id
-            FROM {DB}.{table}
-            WHERE processing_date = '{processing_date}'
-        """
-
     if table == 'gmp_cis_sta_dly_stat_street_ams_iceq':
         return f"""
             SELECT
@@ -444,53 +381,56 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
         """
 
     if table == 'gmp_cis_sta_dly_stat_street_ams_daily_limit':
+        # PORTIARP-7364: daily_limit has no ISIN column. Look up ISIN from
+        # gmp_cis_sta_dly_ams_multi_hold by matching security_name = security_desc
+        # and country_code = ctry_of_exchange (same processing_date partition).
         return f"""
             SELECT
-                portfolio                                               AS portfolio,
-                security_desc                                           AS security_full_name,
+                dl.portfolio                                            AS portfolio,
+                dl.security_desc                                        AS security_full_name,
                 NULL                                                    AS security_short_name,
-                NULL                                                    AS isin,
-                {normalize_ticker_suffix('ticker')}                     AS ticker,
-                {safe_decimal('quantity_units', 'DECIMAL(30,8)')}      AS quantity,
+                mh.isin                                                 AS isin,
+                {normalize_ticker_suffix('dl.ticker')}                  AS ticker,
+                {safe_decimal('dl.quantity_units', 'DECIMAL(30,8)')}   AS quantity,
                 CAST(NULL AS DECIMAL(30,8))                             AS shares_outstanding,
                 CAST(NULL AS DECIMAL(30,8))                             AS shares_issued,
-                {safe_decimal('stake_holdings', 'DECIMAL(10,6)')}      AS pct_holding,
-                {safe_decimal('market_price', 'DECIMAL(30,8)')}        AS market_price,
-                {safe_decimal('unit_cost', 'DECIMAL(30,8)')}           AS average_cost,
-                {safe_decimal('total_cost_fc', 'DECIMAL(30,8)')}       AS cost_fc,
-                {safe_decimal('mkt_value_fc', 'DECIMAL(30,8)')}        AS market_value_fc,
+                {safe_decimal('dl.stake_holdings', 'DECIMAL(10,6)')}   AS pct_holding,
+                {safe_decimal('dl.market_price', 'DECIMAL(30,8)')}     AS market_price,
+                {safe_decimal('dl.unit_cost', 'DECIMAL(30,8)')}        AS average_cost,
+                {safe_decimal('dl.total_cost_fc', 'DECIMAL(30,8)')}    AS cost_fc,
+                {safe_decimal('dl.mkt_value_fc', 'DECIMAL(30,8)')}     AS market_value_fc,
                 CAST(NULL AS DECIMAL(30,8))                             AS net_book_value_fc,
-                {safe_decimal('unrealised_p_l_fc', 'DECIMAL(30,8)')}   AS unrealized_pnl_fc,
+                {safe_decimal('dl.unrealised_p_l_fc', 'DECIMAL(30,8)')} AS unrealized_pnl_fc,
                 CAST(NULL AS DECIMAL(30,8))                             AS provision_fc,
-                {safe_decimal('total_cost_sgd', 'DECIMAL(30,8)')}      AS cost_lc,
-                {safe_decimal('mkt_value_sgd', 'DECIMAL(30,8)')}       AS market_value_lc,
+                {safe_decimal('dl.total_cost_sgd', 'DECIMAL(30,8)')}   AS cost_lc,
+                {safe_decimal('dl.mkt_value_sgd', 'DECIMAL(30,8)')}    AS market_value_lc,
                 CAST(NULL AS DECIMAL(30,8))                             AS net_book_value_lc,
-                {safe_decimal('unrealised_pl_sgd', 'DECIMAL(30,8)')}   AS unrealized_pnl_lc,
+                {safe_decimal('dl.unrealised_pl_sgd', 'DECIMAL(30,8)')} AS unrealized_pnl_lc,
                 CAST(NULL AS DECIMAL(30,8))                             AS provision_lc,
-                product_type                                            AS product_type,
+                dl.product_type                                         AS product_type,
                 NULL                                                    AS security_type,
-                quoted_unquoted                                         AS quoted_unquoted,
+                dl.quoted_unquoted                                      AS quoted_unquoted,
                 NULL                                                    AS industry,
                 NULL                                                    AS fin_nonfin_co,
                 NULL                                                    AS issuer_type,
                 NULL                                                    AS reits_or_fund_y_n,
-                ctry_of_exchange                                        AS exchange,
+                dl.ctry_of_exchange                                     AS exchange,
                 NULL                                                    AS country_code,
-                ctry_of_exchange                                        AS country_of_exchange,
-                ctry_incorporation                                      AS country_of_incorporation,
+                dl.ctry_of_exchange                                     AS country_of_exchange,
+                dl.ctry_incorporation                                   AS country_of_incorporation,
                 NULL                                                    AS country_of_risk,
                 NULL                                                    AS country_of_operation,
-                ccy                                                     AS security_currency,
+                dl.ccy                                                  AS security_currency,
                 NULL                                                    AS corp_code,
                 NULL                                                    AS branch_code,
                 NULL                                                    AS cost_centre,
                 NULL                                                    AS cels,
                 NULL                                                    AS bwcif_sg,
                 NULL                                                    AS bwcif_ovs,
-                mas_6digit_code                                         AS mas_6d_code_sg,
+                dl.mas_6digit_code                                      AS mas_6d_code_sg,
                 NULL                                                    AS mas_6d_code_ovs,
                 '{pos_basis}'                                           AS position_basis,
-                COALESCE(trade_date, processing_date)                   AS reporting_date,
+                COALESCE(dl.trade_date, dl.processing_date)             AS reporting_date,
                 NULL                                                    AS maturity_date,
                 '{src_sys}'                                             AS src_system,
                 'ams'                                                   AS sub_system,
@@ -499,8 +439,20 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
                 '{table}'                                               AS source_table,
                 CURRENT_TIMESTAMP()                                     AS etl_insert_ts,
                 'eod_ams_etl'                                           AS etl_batch_id
-            FROM {DB}.{table}
-            WHERE processing_date = '{processing_date}'
+            FROM {DB}.{table} dl
+            LEFT JOIN (
+                SELECT DISTINCT
+                    UPPER(TRIM(security_name)) AS security_name,
+                    UPPER(TRIM(country_code))  AS country_code,
+                    isin
+                FROM {DB}.gmp_cis_sta_dly_ams_multi_hold
+                WHERE processing_date = '{processing_date}'
+                  AND isin IS NOT NULL
+                  AND TRIM(isin) != ''
+            ) mh
+                ON  UPPER(TRIM(dl.security_desc))    = mh.security_name
+                AND UPPER(TRIM(dl.ctry_of_exchange)) = mh.country_code
+            WHERE dl.processing_date = '{processing_date}'
         """
 
     if table == 'gmp_cis_sta_dly_position':
