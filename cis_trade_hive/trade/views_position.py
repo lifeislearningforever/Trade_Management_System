@@ -54,10 +54,10 @@ def position_list(request):
     if sort_dir not in ('ASC', 'DESC'):
         sort_dir = 'DESC'
 
-    # Default date range: system_date (T) to T+2.
+    # Default date range: report_date (T-1) to settlement T+2.
     if not date_from and not date_to:
         sd_info   = system_date_service.get_system_date_info()
-        date_from = sd_info.system_date_display
+        date_from = sd_info.report_date_display or sd_info.system_date_display
         date_to   = sd_info.settlement_t2_display or (
             sd_info.system_date + timedelta(days=2)
         ).strftime('%Y-%m-%d')
