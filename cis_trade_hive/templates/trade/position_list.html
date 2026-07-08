@@ -11,270 +11,405 @@
 
 {% block extra_css %}
 <style>
-.pos-table th {
-    font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em;
-    color: #495057; white-space: nowrap; padding: 6px 8px;
+/* ── KPI strip ──────────────────────────────────────────────────────────── */
+.pos-kpi-strip {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: .75rem;
+    margin-bottom: 1rem;
 }
-.pos-table td { font-size: 0.82rem; padding: 5px 8px; vertical-align: middle; }
+.pos-kpi-card {
+    background: #fff;
+    border: 1px solid var(--gray-200, #e5e7eb);
+    border-radius: 10px;
+    padding: .85rem 1rem .8rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    display: flex; flex-direction: column; gap: .25rem;
+    position: relative; overflow: hidden;
+    transition: box-shadow 140ms ease, transform 140ms ease;
+}
+.pos-kpi-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.1); transform: translateY(-1px); }
+.pos-kpi-card::after {
+    content: ''; position: absolute; top: 0; left: 0; right: 0;
+    height: 3px; border-radius: 10px 10px 0 0;
+}
+.pos-kpi-mv::after   { background: linear-gradient(90deg,#2563eb,#60a5fa); }
+.pos-kpi-cost::after { background: linear-gradient(90deg,#7c3aed,#a78bfa); }
+.pos-kpi-upnl::after { background: linear-gradient(90deg,#059669,#34d399); }
+.pos-kpi-rpnl::after { background: linear-gradient(90deg,#0891b2,#67e8f9); }
+.pos-kpi-cnt::after  { background: linear-gradient(90deg,#d97706,#fcd34d); }
+.pos-kpi-label {
+    font-size: .68rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--gray-500, #6b7280);
+}
+.pos-kpi-value {
+    font-family: var(--font-mono, monospace);
+    font-size: 1.25rem; font-weight: 700;
+    letter-spacing: -.02em; line-height: 1.1;
+    color: var(--gray-800, #1f2937);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pos-kpi-mv   .pos-kpi-value { color: #1d4ed8; }
+.pos-kpi-cost .pos-kpi-value { color: #5b21b6; }
+.pos-kpi-upnl .pos-kpi-value { color: #047857; }
+.pos-kpi-rpnl .pos-kpi-value { color: #0e7490; }
+.pos-kpi-cnt  .pos-kpi-value { color: #b45309; }
+.pos-kpi-sub {
+    font-size: .72rem; color: var(--gray-400, #9ca3af); margin-top: .05rem;
+}
+.pos-kpi-icon {
+    position: absolute; right: .75rem; bottom: .65rem;
+    font-size: 1.6rem; opacity: .07;
+}
+@media(max-width:900px){ .pos-kpi-strip { grid-template-columns: repeat(3,1fr); } }
+@media(max-width:540px){ .pos-kpi-strip { grid-template-columns: repeat(2,1fr); } }
+
+/* ── Section header ─────────────────────────────────────────────────────── */
+.pos-section-hdr {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: .75rem; margin-bottom: .65rem;
+}
+.pos-section-title { font-size: 1.05rem; font-weight: 700; color: var(--gray-800,#1f2937); }
+.pos-section-sub   { font-size: .8rem; color: var(--gray-500,#6b7280); margin-top: .1rem; }
+.pos-section-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+
+/* ── Filter bar ─────────────────────────────────────────────────────────── */
+.pos-filter-bar {
+    background: #fff;
+    border: 1px solid var(--gray-200,#e5e7eb);
+    border-radius: 10px;
+    padding: .55rem .9rem;
+    display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    margin-bottom: .85rem;
+}
+.pos-filter-group  { display: flex; align-items: center; gap: .3rem; }
+.pos-filter-label  {
+    font-size: .69rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--gray-500,#6b7280); white-space: nowrap;
+}
+.pos-filter-control {
+    height: 30px; padding: 0 .5rem;
+    border: 1px solid var(--gray-300,#d1d5db);
+    border-radius: 6px; font-size: .8rem;
+    color: var(--gray-700,#374151);
+    background: #fff; cursor: pointer;
+    transition: border-color 140ms ease; outline: none;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pos-filter-control:focus {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59,130,246,.12);
+}
+.pos-filter-btn {
+    display: inline-flex; align-items: center; gap: .3rem;
+    min-width: 90px; max-width: 150px;
+}
+.pos-filter-btn .pfb-label {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1; min-width: 0;
+}
+.pos-filter-divider {
+    width: 1px; height: 20px;
+    background: var(--gray-200,#e5e7eb);
+    margin: 0 .15rem; flex-shrink: 0;
+}
+.pos-filter-dropdown .dropdown-menu { z-index: 1055; min-width: 150px; }
+
+/* ── Active filter chips ────────────────────────────────────────────────── */
+.pos-active-filters {
+    display: flex; flex-wrap: wrap; gap: .35rem;
+    align-items: center; margin-bottom: .65rem;
+}
+.pos-chip {
+    display: inline-flex; align-items: center; gap: .25rem;
+    background: #eff6ff; border: 1px solid #bfdbfe;
+    border-radius: 20px; padding: .2rem .55rem .2rem .45rem;
+    font-size: .72rem; font-weight: 600; color: #1d4ed8;
+    white-space: nowrap;
+}
+.pos-chip .chip-x {
+    cursor: pointer; opacity: .5; font-size: .65rem;
+    margin-left: .1rem; line-height: 1;
+}
+.pos-chip .chip-x:hover { opacity: 1; }
+.pos-chip-label { font-size: .65rem; color: var(--gray-500,#6b7280); font-weight: 400; }
+
+/* ── Table ──────────────────────────────────────────────────────────────── */
+.pos-table th {
+    font-size: .69rem; text-transform: uppercase; letter-spacing: .04em;
+    color: #6b7280; white-space: nowrap; padding: 6px 8px; font-weight: 600;
+}
+.pos-table td { font-size: .81rem; padding: 5px 8px; vertical-align: middle; }
 .pos-table tbody tr:hover { background: #f0f4ff !important; }
 .num { font-variant-numeric: tabular-nums; }
 
-/* Sort header */
+/* Sort */
 .sort-th { cursor: pointer; user-select: none; }
 .sort-th:hover { background: #e2e8f0 !important; }
-.sort-th .sort-icon { font-size: 0.65rem; margin-left: 3px; opacity: 0.45; }
-.sort-th.sorted-asc .sort-icon::before  { content: "▲"; opacity: 1; }
+.sort-th .sort-icon { font-size: .6rem; margin-left: 3px; opacity: .4; }
+.sort-th.sorted-asc  .sort-icon::before { content: "▲"; opacity: 1; }
 .sort-th.sorted-desc .sort-icon::before { content: "▼"; opacity: 1; }
 .sort-th:not(.sorted-asc):not(.sorted-desc) .sort-icon::before { content: "⇅"; }
-
-/* Filter bar — stable layout */
-.filter-row { flex-wrap: nowrap; }
-.filter-col  { flex: 0 0 auto; }
-
-/* All filter controls the same height so nothing shifts */
-.filter-btn  {
-    height: 31px;
-    min-width: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.filter-btn .btn-label {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    display: inline-block;
-    max-width: calc(100% - 18px);
-}
-
-/* Dropdowns stay in-place */
-.filter-dropdown { position: relative; }
-.filter-dropdown .dropdown-menu { position: absolute; top: 100%; left: 0; }
-
-/* Type multi-select dropdown */
-.type-dropdown-menu { min-width: 130px; z-index: 1055; }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="content-header d-flex justify-content-between align-items-start mb-2">
+
+<!-- ── KPI Strip ─────────────────────────────────────────────────────────────── -->
+<div class="pos-kpi-strip">
+    <div class="pos-kpi-card pos-kpi-cnt">
+        <div class="pos-kpi-label">Positions</div>
+        <div class="pos-kpi-value">{{ total|default:"0" }}</div>
+        <div class="pos-kpi-sub">matching filters</div>
+        <i class="bi bi-list-ul pos-kpi-icon"></i>
+    </div>
+    <div class="pos-kpi-card pos-kpi-mv">
+        <div class="pos-kpi-label">Mkt Value FC</div>
+        <div class="pos-kpi-value" title="{{ stats.total_market_value_fc }}">
+            {{ stats.total_market_value_fc|default:0|floatformat:0|intcomma }}
+        </div>
+        <div class="pos-kpi-sub">foreign currency</div>
+        <i class="bi bi-graph-up pos-kpi-icon"></i>
+    </div>
+    <div class="pos-kpi-card pos-kpi-cost">
+        <div class="pos-kpi-label">Cost FC</div>
+        <div class="pos-kpi-value" title="{{ stats.total_cost_fc }}">
+            {{ stats.total_cost_fc|default:0|floatformat:0|intcomma }}
+        </div>
+        <div class="pos-kpi-sub">total cost basis</div>
+        <i class="bi bi-currency-exchange pos-kpi-icon"></i>
+    </div>
+    <div class="pos-kpi-card pos-kpi-upnl">
+        <div class="pos-kpi-label">Unrealised PnL FC</div>
+        <div class="pos-kpi-value {% if stats.total_unrealized_pnl_fc and stats.total_unrealized_pnl_fc < 0 %}text-danger{% endif %}"
+             title="{{ stats.total_unrealized_pnl_fc }}">
+            {{ stats.total_unrealized_pnl_fc|default:0|floatformat:0|intcomma }}
+        </div>
+        <div class="pos-kpi-sub">open positions</div>
+        <i class="bi bi-arrow-up-right pos-kpi-icon"></i>
+    </div>
+    <div class="pos-kpi-card pos-kpi-rpnl">
+        <div class="pos-kpi-label">Realised PnL FC</div>
+        <div class="pos-kpi-value {% if stats.total_realized_pnl_fc and stats.total_realized_pnl_fc < 0 %}text-danger{% endif %}"
+             title="{{ stats.total_realized_pnl_fc }}">
+            {{ stats.total_realized_pnl_fc|default:0|floatformat:0|intcomma }}
+        </div>
+        <div class="pos-kpi-sub">closed positions</div>
+        <i class="bi bi-check2-circle pos-kpi-icon"></i>
+    </div>
+</div>
+
+<!-- ── Section header ────────────────────────────────────────────────────────── -->
+<div class="pos-section-hdr">
     <div>
-        <h1 class="content-title mb-0">
-            <i class="bi bi-pie-chart text-primary"></i> Positions
-        </h1>
-        <p class="content-subtitle mb-0">Read-only view of cis_position &mdash; <strong>{{ total }}</strong> record{{ total|pluralize }} found</p>
+        <div class="pos-section-title"><i class="bi bi-pie-chart text-primary me-1"></i>Position Viewer</div>
+        <div class="pos-section-sub">Read-only view of <code>cis_position</code> — <strong>{{ total }}</strong> record{{ total|pluralize }} found</div>
     </div>
-    <a href="?{{ base_qs }}&export=csv" class="btn btn-success btn-sm">
-        <i class="bi bi-download"></i> Export CSV
-    </a>
-</div>
-
-<!-- Filters -->
-<div class="card mb-3 shadow-sm" style="overflow: visible;">
-    <div class="card-header py-2 d-flex align-items-center gap-2" style="background:linear-gradient(135deg,#f8f9fa,#e9ecef);">
-        <i class="bi bi-funnel-fill text-primary"></i>
-        <span class="fw-semibold small">Filters</span>
-    </div>
-    <div class="card-body py-2" style="overflow: visible;">
-        <form method="get" id="positionFilterForm">
-            <div class="d-flex flex-wrap gap-2 align-items-end">
-
-            <!-- Keep sort params across filter submits -->
-            {% if sort_by %}<input type="hidden" name="sort_by" value="{{ sort_by }}">{% endif %}
-            <input type="hidden" name="sort_dir" value="{{ sort_dir }}">
-
-            <!-- Portfolio Multi-Select -->
-            <div style="width:160px; flex-shrink:0;">
-                <label class="form-label form-label-sm mb-1">Portfolios</label>
-                <div id="selectedPortfoliosInputs">
-                    {% for p in selected_portfolios %}
-                    <input type="hidden" name="portfolios" value="{{ p }}">
-                    {% endfor %}
-                </div>
-                <button type="button"
-                        class="btn btn-outline-secondary btn-sm w-100 filter-btn d-flex justify-content-between align-items-center"
-                        data-bs-toggle="modal" data-bs-target="#portfolioModal">
-                    <span id="selectedPortfoliosLabel" class="btn-label">
-                        {% if selected_portfolios %}{{ selected_portfolios|length }} selected{% else %}All Portfolios{% endif %}
-                    </span>
-                    <i class="bi bi-chevron-down flex-shrink-0"></i>
-                </button>
-            </div>
-
-            <!-- Security Multi-Select -->
-            <div style="width:160px; flex-shrink:0;">
-                <label class="form-label form-label-sm mb-1">Securities</label>
-                <div id="selectedSecuritiesInputs">
-                    {% for s in selected_securities %}
-                    <input type="hidden" name="securities" value="{{ s }}">
-                    {% endfor %}
-                </div>
-                <button type="button"
-                        class="btn btn-outline-secondary btn-sm w-100 filter-btn d-flex justify-content-between align-items-center"
-                        data-bs-toggle="modal" data-bs-target="#securityModal">
-                    <span id="selectedSecuritiesLabel" class="btn-label">
-                        {% if selected_securities %}{{ selected_securities|length }} selected{% else %}All Securities{% endif %}
-                    </span>
-                    <i class="bi bi-chevron-down flex-shrink-0"></i>
-                </button>
-            </div>
-
-            <!-- Src System multi-select -->
-            <div style="width:130px; flex-shrink:0;">
-                <label class="form-label form-label-sm mb-1">Src System</label>
-                <div id="srcSystemInputs">
-                    {% for s in selected_src_systems %}
-                    <input type="hidden" name="src_system" value="{{ s }}">
-                    {% endfor %}
-                </div>
-                <div class="dropdown filter-dropdown">
-                    <button type="button"
-                            class="btn btn-outline-secondary btn-sm w-100 filter-btn d-flex justify-content-between align-items-center"
-                            data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
-                        <span id="srcSystemLabel" class="btn-label">
-                            {% if selected_src_systems %}{{ selected_src_systems|length }} selected{% else %}All{% endif %}
-                        </span>
-                        <i class="bi bi-chevron-down flex-shrink-0"></i>
-                    </button>
-                    <ul class="dropdown-menu p-2" style="min-width:150px; z-index:1055;">
-                        {% for s in src_systems %}
-                        <li>
-                            <label class="d-flex align-items-center gap-2 px-2 py-1 rounded"
-                                   style="cursor:pointer; user-select:none;"
-                                   onmouseover="this.style.background='#f8f9fa'"
-                                   onmouseout="this.style.background=''">
-                                <input type="checkbox" class="form-check-input src-system-cb"
-                                       value="{{ s }}"
-                                       {% if s in selected_src_systems %}checked{% endif %}
-                                       onchange="updateSrcSystem()">
-                                <span>{{ s }}</span>
-                            </label>
-                        </li>
-                        {% endfor %}
-                        <li><hr class="dropdown-divider my-1"></li>
-                        <li class="px-2">
-                            <button type="button" class="btn btn-link btn-sm p-0 text-secondary"
-                                    onclick="clearSrcSystems()">Clear all</button>
-                        </li>
-                    </ul>
-                </div>
-            </div>
-
-            <!-- Position Basis -->
-            <div style="width:130px; flex-shrink:0;">
-                <label class="form-label form-label-sm mb-1">Position Basis</label>
-                <select name="position_basis" class="form-select form-select-sm" style="height:31px;">
-                    <option value="">All</option>
-                    {% for b in position_basis_choices %}
-                        <option value="{{ b }}" {% if f_position_basis == b %}selected{% endif %}>{{ b }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <!-- Position Type multi-select (INT / EOD / SOD / CORR) -->
-            <div style="width:120px; flex-shrink:0;">
-                <label class="form-label form-label-sm mb-1">Type</label>
-                <div id="posTypeInputs">
-                    {% for t in selected_pos_types %}
-                    <input type="hidden" name="position_type" value="{{ t }}">
-                    {% endfor %}
-                </div>
-                <input type="hidden" id="posTypeCleared" name="position_type_cleared" value="0">
-                <div class="dropdown filter-dropdown">
-                    <button type="button"
-                            class="btn btn-outline-secondary btn-sm w-100 filter-btn d-flex justify-content-between align-items-center"
-                            data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
-                        <span id="posTypeLabel" class="btn-label">
-                            {% if selected_pos_types %}{{ selected_pos_types|length }} selected{% else %}All{% endif %}
-                        </span>
-                        <i class="bi bi-chevron-down flex-shrink-0"></i>
-                    </button>
-                    <ul class="dropdown-menu p-2 type-dropdown-menu">
-                        {% for t in position_type_choices %}
-                        <li>
-                            <label class="d-flex align-items-center gap-2 px-2 py-1 rounded"
-                                   style="cursor:pointer; user-select:none;"
-                                   onmouseover="this.style.background='#f8f9fa'"
-                                   onmouseout="this.style.background=''">
-                                <input type="checkbox" class="form-check-input pos-type-cb"
-                                       value="{{ t }}"
-                                       {% if t in selected_pos_types %}checked{% endif %}
-                                       onchange="updatePosType()">
-                                <span>
-                                    {% if t == 'INT' %}<span class="badge bg-primary">INT</span>
-                                    {% elif t == 'EOD' %}<span class="badge bg-success">EOD</span>
-                                    {% elif t == 'SOD' %}<span class="badge bg-warning text-dark">SOD</span>
-                                    {% elif t == 'CORR' %}<span class="badge bg-info text-dark">CORR</span>
-                                    {% else %}{{ t }}{% endif %}
-                                </span>
-                            </label>
-                        </li>
-                        {% endfor %}
-                        <li><hr class="dropdown-divider my-1"></li>
-                        <li class="px-2">
-                            <button type="button" class="btn btn-link btn-sm p-0 text-secondary"
-                                    onclick="clearPosTypes()">Clear all</button>
-                        </li>
-                    </ul>
-                </div>
-            </div>
-
-            <!-- Date From -->
-            <div style="width:130px; flex-shrink:0;">
-                <label class="form-label form-label-sm mb-1">Date From</label>
-                <input type="date" name="date_from" class="form-control form-control-sm" style="height:31px;" value="{{ f_date_from }}">
-            </div>
-
-            <!-- Date To -->
-            <div style="width:130px; flex-shrink:0;">
-                <label class="form-label form-label-sm mb-1">Date To</label>
-                <input type="date" name="date_to" class="form-control form-control-sm" style="height:31px;" value="{{ f_date_to }}">
-            </div>
-
-            <!-- Buttons -->
-            <div class="d-flex gap-1 flex-shrink-0" style="padding-bottom:1px;">
-                <button type="submit" class="btn btn-primary btn-sm filter-btn px-3">
-                    <i class="bi bi-search"></i> Filter
-                </button>
-                <a href="{% url 'trade:position_list' %}" class="btn btn-outline-secondary btn-sm filter-btn px-3">
-                    <i class="bi bi-x-circle"></i> Clear
-                </a>
-            </div>
-
-            </div><!-- /d-flex -->
-
-            <!-- Active filter badges -->
-            {% if selected_portfolios or selected_securities or selected_pos_types %}
-            <div class="col-12">
-                <div class="d-flex flex-wrap gap-2 align-items-center mt-1">
-                    <span class="text-muted small">Active:</span>
-                    {% for p in selected_portfolios %}
-                    <span class="badge bg-primary d-flex align-items-center gap-1">
-                        <i class="bi bi-briefcase"></i> {{ p }}
-                        <button type="button" class="btn-close btn-close-white btn-sm"
-                                onclick="removePortfolioFilter('{{ p }}')" style="font-size: 0.55rem;"></button>
-                    </span>
-                    {% endfor %}
-                    {% for s in selected_securities %}
-                    <span class="badge bg-success d-flex align-items-center gap-1">
-                        <i class="bi bi-file-earmark-text"></i> {{ s }}
-                        <button type="button" class="btn-close btn-close-white btn-sm"
-                                onclick="removeSecurityFilter('{{ s }}')" style="font-size: 0.55rem;"></button>
-                    </span>
-                    {% endfor %}
-                    {% for t in selected_pos_types %}
-                    <span class="badge bg-secondary d-flex align-items-center gap-1">
-                        {{ t }}
-                        <button type="button" class="btn-close btn-close-white btn-sm"
-                                onclick="removePosTypeFilter('{{ t }}')" style="font-size: 0.55rem;"></button>
-                    </span>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-        </form>
+    <div class="pos-section-actions">
+        <a href="?{{ base_qs }}&export=csv" class="btn btn-sm btn-outline-success">
+            <i class="bi bi-download"></i> Export CSV
+        </a>
     </div>
 </div>
+
+<!-- ── Filter bar ─────────────────────────────────────────────────────────────── -->
+<form method="get" id="positionFilterForm">
+    {% if sort_by %}<input type="hidden" name="sort_by" value="{{ sort_by }}">{% endif %}
+    <input type="hidden" name="sort_dir" value="{{ sort_dir }}">
+
+    <div class="pos-filter-bar">
+
+        <!-- Portfolio -->
+        <div class="pos-filter-group">
+            <span class="pos-filter-label">Portfolio</span>
+            <div id="selectedPortfoliosInputs">
+                {% for p in selected_portfolios %}<input type="hidden" name="portfolios" value="{{ p }}">{% endfor %}
+            </div>
+            <button type="button"
+                    class="pos-filter-control pos-filter-btn"
+                    data-bs-toggle="modal" data-bs-target="#portfolioModal">
+                <span id="selectedPortfoliosLabel" class="pfb-label">
+                    {% if selected_portfolios %}{{ selected_portfolios|length }} selected{% else %}All{% endif %}
+                </span>
+                <i class="bi bi-chevron-down" style="font-size:.6rem;opacity:.5;flex-shrink:0;"></i>
+            </button>
+        </div>
+
+        <div class="pos-filter-divider"></div>
+
+        <!-- Security -->
+        <div class="pos-filter-group">
+            <span class="pos-filter-label">Security</span>
+            <div id="selectedSecuritiesInputs">
+                {% for s in selected_securities %}<input type="hidden" name="securities" value="{{ s }}">{% endfor %}
+            </div>
+            <button type="button"
+                    class="pos-filter-control pos-filter-btn"
+                    data-bs-toggle="modal" data-bs-target="#securityModal">
+                <span id="selectedSecuritiesLabel" class="pfb-label">
+                    {% if selected_securities %}{{ selected_securities|length }} selected{% else %}All{% endif %}
+                </span>
+                <i class="bi bi-chevron-down" style="font-size:.6rem;opacity:.5;flex-shrink:0;"></i>
+            </button>
+        </div>
+
+        <div class="pos-filter-divider"></div>
+
+        <!-- Src System -->
+        <div class="pos-filter-group pos-filter-dropdown">
+            <span class="pos-filter-label">Src</span>
+            <div id="srcSystemInputs">
+                {% for s in selected_src_systems %}<input type="hidden" name="src_system" value="{{ s }}">{% endfor %}
+            </div>
+            <div class="dropdown">
+                <button type="button"
+                        class="pos-filter-control pos-filter-btn"
+                        data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                    <span id="srcSystemLabel" class="pfb-label">
+                        {% if selected_src_systems %}{{ selected_src_systems|length }} selected{% else %}All{% endif %}
+                    </span>
+                    <i class="bi bi-chevron-down" style="font-size:.6rem;opacity:.5;flex-shrink:0;"></i>
+                </button>
+                <ul class="dropdown-menu p-2" style="min-width:140px;z-index:1055;">
+                    {% for s in src_systems %}
+                    <li>
+                        <label class="d-flex align-items-center gap-2 px-2 py-1 rounded"
+                               style="cursor:pointer;user-select:none;"
+                               onmouseover="this.style.background='#f8f9fa'"
+                               onmouseout="this.style.background=''">
+                            <input type="checkbox" class="form-check-input src-system-cb"
+                                   value="{{ s }}" {% if s in selected_src_systems %}checked{% endif %}
+                                   onchange="updateSrcSystem()">
+                            <span class="small">{{ s }}</span>
+                        </label>
+                    </li>
+                    {% endfor %}
+                    <li><hr class="dropdown-divider my-1"></li>
+                    <li class="px-2"><button type="button" class="btn btn-link btn-sm p-0 text-secondary" onclick="clearSrcSystems()">Clear</button></li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="pos-filter-divider"></div>
+
+        <!-- Position Basis -->
+        <div class="pos-filter-group">
+            <span class="pos-filter-label">Basis</span>
+            <select name="position_basis" class="pos-filter-control" style="min-width:90px;">
+                <option value="">All</option>
+                {% for b in position_basis_choices %}
+                    <option value="{{ b }}" {% if f_position_basis == b %}selected{% endif %}>{{ b }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="pos-filter-divider"></div>
+
+        <!-- Position Type -->
+        <div class="pos-filter-group pos-filter-dropdown">
+            <span class="pos-filter-label">Type</span>
+            <div id="posTypeInputs">
+                {% for t in selected_pos_types %}<input type="hidden" name="position_type" value="{{ t }}">{% endfor %}
+            </div>
+            <input type="hidden" id="posTypeCleared" name="position_type_cleared" value="0">
+            <div class="dropdown">
+                <button type="button"
+                        class="pos-filter-control pos-filter-btn"
+                        data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                    <span id="posTypeLabel" class="pfb-label">
+                        {% if selected_pos_types %}{{ selected_pos_types|length }} selected{% else %}All{% endif %}
+                    </span>
+                    <i class="bi bi-chevron-down" style="font-size:.6rem;opacity:.5;flex-shrink:0;"></i>
+                </button>
+                <ul class="dropdown-menu p-2" style="min-width:130px;z-index:1055;">
+                    {% for t in position_type_choices %}
+                    <li>
+                        <label class="d-flex align-items-center gap-2 px-2 py-1 rounded"
+                               style="cursor:pointer;user-select:none;"
+                               onmouseover="this.style.background='#f8f9fa'"
+                               onmouseout="this.style.background=''">
+                            <input type="checkbox" class="form-check-input pos-type-cb"
+                                   value="{{ t }}" {% if t in selected_pos_types %}checked{% endif %}
+                                   onchange="updatePosType()">
+                            <span>
+                                {% if t == 'INT' %}<span class="badge bg-primary">INT</span>
+                                {% elif t == 'EOD' %}<span class="badge bg-success">EOD</span>
+                                {% elif t == 'SOD' %}<span class="badge bg-warning text-dark">SOD</span>
+                                {% elif t == 'CORR' %}<span class="badge bg-info text-dark">CORR</span>
+                                {% else %}{{ t }}{% endif %}
+                            </span>
+                        </label>
+                    </li>
+                    {% endfor %}
+                    <li><hr class="dropdown-divider my-1"></li>
+                    <li class="px-2"><button type="button" class="btn btn-link btn-sm p-0 text-secondary" onclick="clearPosTypes()">Clear</button></li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="pos-filter-divider"></div>
+
+        <!-- Dates -->
+        <div class="pos-filter-group">
+            <span class="pos-filter-label">From</span>
+            <input type="date" name="date_from" class="pos-filter-control" style="min-width:120px;" value="{{ f_date_from }}">
+        </div>
+        <div class="pos-filter-group">
+            <span class="pos-filter-label">To</span>
+            <input type="date" name="date_to" class="pos-filter-control" style="min-width:120px;" value="{{ f_date_to }}">
+        </div>
+
+        <div class="pos-filter-divider"></div>
+
+        <!-- Actions -->
+        <div class="pos-filter-group" style="margin-left:auto;">
+            <button type="submit" class="btn btn-primary btn-sm px-3" style="height:30px;">
+                <i class="bi bi-search"></i> Filter
+            </button>
+            <a href="{% url 'trade:position_list' %}" class="btn btn-outline-secondary btn-sm px-3" style="height:30px;line-height:18px;">
+                <i class="bi bi-x-circle"></i> Clear
+            </a>
+        </div>
+    </div>
+</form>
+
+<!-- ── Active filter chips ────────────────────────────────────────────────────── -->
+{% if selected_portfolios or selected_securities or selected_pos_types or selected_src_systems or f_position_basis %}
+<div class="pos-active-filters">
+    <span class="pos-chip-label">Active filters:</span>
+    {% for p in selected_portfolios %}
+    <span class="pos-chip">
+        <i class="bi bi-briefcase" style="font-size:.65rem;"></i> {{ p }}
+        <span class="chip-x" onclick="removePortfolioFilter('{{ p }}')">✕</span>
+    </span>
+    {% endfor %}
+    {% for s in selected_securities %}
+    <span class="pos-chip" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d;">
+        <i class="bi bi-file-earmark-text" style="font-size:.65rem;"></i> {{ s }}
+        <span class="chip-x" onclick="removeSecurityFilter('{{ s }}')">✕</span>
+    </span>
+    {% endfor %}
+    {% for t in selected_pos_types %}
+    <span class="pos-chip" style="background:#faf5ff;border-color:#e9d5ff;color:#7c3aed;">
+        {{ t }}
+        <span class="chip-x" onclick="removePosTypeFilter('{{ t }}')">✕</span>
+    </span>
+    {% endfor %}
+    {% for s in selected_src_systems %}
+    <span class="pos-chip" style="background:#fff7ed;border-color:#fed7aa;color:#c2410c;">
+        {{ s }}
+        <span class="chip-x" onclick="removeSrcFilter('{{ s }}')">✕</span>
+    </span>
+    {% endfor %}
+    {% if f_position_basis %}
+    <span class="pos-chip" style="background:#f0f9ff;border-color:#bae6fd;color:#0369a1;">
+        {{ f_position_basis }}
+        <span class="chip-x" onclick="removeBasisFilter()">✕</span>
+    </span>
+    {% endif %}
+</div>
+{% endif %}
 
 <!-- Table -->
 <div class="card">
@@ -856,6 +991,16 @@ function updateSrcSystem() {
 function clearSrcSystems() {
     document.querySelectorAll('.src-system-cb').forEach(cb => cb.checked = false);
     updateSrcSystem();
+}
+function removeSrcFilter(s) {
+    const cb = document.querySelector(`.src-system-cb[value="${s}"]`);
+    if (cb) cb.checked = false;
+    document.querySelectorAll(`#srcSystemInputs input[value="${s}"]`).forEach(i => i.remove());
+    document.getElementById('positionFilterForm').submit();
+}
+function removeBasisFilter() {
+    document.querySelector('select[name="position_basis"]').value = '';
+    document.getElementById('positionFilterForm').submit();
 }
 
 // ── Position Type multi-select ────────────────────────────────────────────────
