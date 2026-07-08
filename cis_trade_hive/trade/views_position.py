@@ -39,6 +39,10 @@ def position_list(request):
     selected_securities   = request.GET.getlist('securities')
     selected_src_systems  = request.GET.getlist('src_system')
     selected_pos_types    = request.GET.getlist('position_type')   # multi-select
+    pos_type_cleared      = request.GET.get('position_type_cleared', '0').strip()
+    # Default to INT on first load; honour explicit "Clear all" (sentinel=1) to show all types
+    if not selected_pos_types and pos_type_cleared != '1':
+        selected_pos_types = ['INT']
     position_basis        = request.GET.get('position_basis', '').strip()
     date_from             = request.GET.get('date_from', '').strip()
     date_to               = request.GET.get('date_to', '').strip()

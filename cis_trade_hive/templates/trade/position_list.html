@@ -152,6 +152,7 @@
                     <input type="hidden" name="position_type" value="{{ t }}">
                     {% endfor %}
                 </div>
+                <input type="hidden" id="posTypeCleared" name="position_type_cleared" value="0">
                 <div class="dropdown">
                     <button type="button"
                             class="btn btn-outline-secondary btn-sm w-100 d-flex justify-content-between align-items-center"
@@ -840,9 +841,12 @@ function updatePosType() {
     });
     document.getElementById('posTypeLabel').textContent =
         checked.length > 0 ? `${checked.length} selected` : 'All';
+    // If user manually selects types, clear the "show all" sentinel
+    if (checked.length > 0) document.getElementById('posTypeCleared').value = '0';
 }
 function clearPosTypes() {
     document.querySelectorAll('.pos-type-cb').forEach(cb => cb.checked = false);
+    document.getElementById('posTypeCleared').value = '1';
     updatePosType();
 }
 function removePosTypeFilter(t) {
