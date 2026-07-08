@@ -601,7 +601,7 @@ function validateSecurity(security) {
     });
 }
 
-// Derived FX Rate display: local_amount / foreign_ccy_amount, shown to 6dp
+// Derived FX Rate display: local_amount / foreign_ccy_amount, shown to 7dp
 function updateCfFxRate() {
     var local   = parseFloat(document.getElementById('local_amount').value)   || 0;
     var foreign = parseFloat(document.getElementById('foreign_ccy_amount').value) || 0;

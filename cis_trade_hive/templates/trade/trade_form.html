@@ -305,7 +305,7 @@
                             <div class="col-md-2">
                                 <label class="form-label">FX Rate</label>
                                 <input type="number" class="form-control" name="open_fx_rate" id="open_fx_rate"
-                                       step="0.0000001" value="{{ trade.open_fx_rate|default:'' }}" placeholder="Auto-set or override">
+                                       step="0.0000001" value="{{ trade.open_fx_rate|floatformat:7|default:'' }}" placeholder="Auto-set or override">
                                 <small class="text-muted" id="fx_rate_hint">Up to 7 decimal places</small>
                                 <small class="text-muted d-block" id="fx_rate_info">Auto-set from currencies</small>
                             </div>
