@@ -295,10 +295,11 @@ class PositionService:
         """
         Process BUY trade - increase position, recalculate AVP.
 
-        Formula:
-            new_total_cost = old_total_cost + (buy_qty * buy_price) + charges
-            new_quantity = old_quantity + buy_qty
-            new_avg_cost = new_total_cost / new_quantity
+        Formula (gross only — charges excluded per SA PORTIARP-8206):
+            trade_cost    = buy_qty * buy_price          (no charges)
+            new_total_cost = old_total_cost + trade_cost
+            new_quantity   = old_quantity + buy_qty
+            new_avg_cost   = new_total_cost / new_quantity
         """
         # position_id is always deterministic from the natural key of THIS date.
         # In chain recalc the `current` dict carries the running balance from a
@@ -316,8 +317,8 @@ class PositionService:
             # Use new column name realized_pnl_fc (fallback to realized_pnl for backward compat)
             old_realized_pnl = Decimal(str(current.get('realized_pnl_fc') or current.get('realized_pnl', 0) or 0))
 
-            # Calculate new values
-            trade_cost = (quantity * price) + charges
+            # Gross cost only — charges are a P&L item, not cost basis (SA PORTIARP-8206)
+            trade_cost = quantity * price
             new_qty = old_qty + quantity
             new_total_cost = old_total_cost + trade_cost
             new_avg_cost = (new_total_cost / new_qty).quantize(
@@ -332,7 +333,8 @@ class PositionService:
             old_qty = Decimal('0')
             old_realized_pnl = Decimal('0')
 
-            trade_cost = (quantity * price) + charges
+            # Gross cost only — charges excluded (SA PORTIARP-8206)
+            trade_cost = quantity * price
             new_qty = quantity
             new_total_cost = trade_cost
             new_avg_cost = (new_total_cost / new_qty).quantize(
@@ -359,31 +361,25 @@ class PositionService:
         if security_currency and portfolio_currency and security_currency != portfolio_currency:
             fx_rate = self._get_fx_rate(security_currency, portfolio_currency)
 
-        # cost_lc rules (SA):
-        #   NON-REVAL: use user-entered trade_lc (total_amount_lc from the trade form).
-        #              This preserves the as-traded LC amount regardless of system FX rate.
-        #              Fallback to fx_rate if trade_lc not supplied (chain recalc / legacy).
-        #   REVAL:     always recompute from trade_cost × system fx_rate at booking time.
+        # cost_lc rules (SA PORTIARP-8206):
+        #   Gross LC cost = trade_cost (qty × price) × fx_rate.
+        #   trade_lc (total_amount_lc from the trade form) is intentionally NOT used
+        #   for cost basis because it includes charges. Charges are a P&L item.
+        #   NON-REVAL and REVAL both use trade_cost × fx_rate for cost basis.
         reval_status = self._get_portfolio_revaluation_status(portfolio_id)
 
         if current:
             old_total_cost_lc = Decimal(str(current.get('total_cost_lc', 0) or 0))
             if old_total_cost_lc == 0:
                 old_total_cost_lc = Decimal(str(current.get('total_cost_fc') or current.get('total_cost', 0) or 0)) * fx_rate
-            if reval_status == 'NON-REVALUED' and trade_lc is not None:
-                trade_cost_lc = Decimal(str(trade_lc))
-            else:
-                trade_cost_lc = trade_cost * fx_rate
+            trade_cost_lc = trade_cost * fx_rate
             new_total_cost_lc = old_total_cost_lc + trade_cost_lc
             new_avg_cost_lc = (new_total_cost_lc / new_qty).quantize(
                 self.AVP_PRECISION, rounding=ROUND_HALF_UP
             )
             old_realized_pnl_lc = Decimal(str(current.get('realized_pnl_lc', 0) or 0))
         else:
-            if reval_status == 'NON-REVALUED' and trade_lc is not None:
-                trade_cost_lc = Decimal(str(trade_lc))
-            else:
-                trade_cost_lc = trade_cost * fx_rate
+            trade_cost_lc = trade_cost * fx_rate
             new_total_cost_lc = trade_cost_lc
             new_avg_cost_lc = (new_total_cost_lc / new_qty).quantize(
                 self.AVP_PRECISION, rounding=ROUND_HALF_UP
