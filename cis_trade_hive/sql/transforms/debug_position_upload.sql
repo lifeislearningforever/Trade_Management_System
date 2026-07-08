@@ -168,3 +168,93 @@ ORDER BY position_basis, processing_timestamp;
 -- ============================================================================
 -- END CASH FLOW RESET
 -- ============================================================================
+
+-- ============================================================================
+-- DEBUG: PORTIARP-7364 — daily_limit ISIN lookup from multi_hold
+-- Tests the LEFT JOIN between gmp_cis_sta_dly_stat_street_ams_daily_limit
+-- and gmp_cis_sta_dly_ams_multi_hold on (security_desc=security_name,
+-- ctry_of_exchange=country_code) to populate isin.
+-- Replace '20260227' with the target processing_date before running.
+-- ============================================================================
+
+-- Step 1: Check row counts in both source tables for the date
+SELECT 'daily_limit rows'  AS table_name, COUNT(*) AS cnt
+FROM gmp_cis.gmp_cis_sta_dly_stat_street_ams_daily_limit
+WHERE processing_date = '20260227'
+UNION ALL
+SELECT 'multi_hold rows', COUNT(*)
+FROM gmp_cis.gmp_cis_sta_dly_ams_multi_hold
+WHERE processing_date = '20260227'
+  AND isin IS NOT NULL AND TRIM(isin) != '';
+
+-- Step 2: Sample one daily_limit row joined to multi_hold — verify ISIN is populated
+SELECT
+    dl.portfolio                                                AS portfolio,
+    dl.security_desc                                            AS security_full_name,
+    NULL                                                        AS security_short_name,
+    mh.isin                                                     AS isin,
+    dl.ticker                                                   AS ticker,
+    CAST(dl.quantity_units   AS DECIMAL(30,8))                  AS quantity,
+    CAST(NULL AS DECIMAL(30,8))                                 AS shares_outstanding,
+    CAST(NULL AS DECIMAL(30,8))                                 AS shares_issued,
+    CAST(dl.stake_holdings   AS DECIMAL(10,6))                  AS pct_holding,
+    CAST(dl.market_price     AS DECIMAL(30,8))                  AS market_price,
+    CAST(dl.unit_cost        AS DECIMAL(30,8))                  AS average_cost,
+    CAST(dl.total_cost_fc    AS DECIMAL(30,8))                  AS cost_fc,
+    CAST(dl.mkt_value_fc     AS DECIMAL(30,8))                  AS market_value_fc,
+    CAST(dl.unrealised_p_l_fc AS DECIMAL(30,8))                 AS unrealized_pnl_fc,
+    CAST(dl.total_cost_sgd   AS DECIMAL(30,8))                  AS cost_lc,
+    CAST(dl.mkt_value_sgd    AS DECIMAL(30,8))                  AS market_value_lc,
+    CAST(dl.unrealised_pl_sgd AS DECIMAL(30,8))                 AS unrealized_pnl_lc,
+    dl.product_type                                             AS product_type,
+    dl.quoted_unquoted                                          AS quoted_unquoted,
+    dl.ctry_of_exchange                                         AS exchange,
+    dl.ctry_of_exchange                                         AS country_of_exchange,
+    dl.ctry_incorporation                                       AS country_of_incorporation,
+    dl.ccy                                                      AS security_currency,
+    dl.mas_6digit_code                                          AS mas_6d_code_sg,
+    'TRADED'                                                    AS position_basis,
+    COALESCE(dl.trade_date, dl.processing_date)                 AS reporting_date,
+    'AMS_STREET'                                                AS src_system,
+    dl.processing_date,
+    -- join diagnostics: NULL means no match found in multi_hold
+    mh.security_name                                            AS mh_matched_security_name,
+    mh.country_code                                             AS mh_matched_country_code
+FROM gmp_cis.gmp_cis_sta_dly_stat_street_ams_daily_limit dl
+LEFT JOIN (
+    SELECT DISTINCT
+        UPPER(TRIM(security_name)) AS security_name,
+        UPPER(TRIM(country_code))  AS country_code,
+        isin
+    FROM gmp_cis.gmp_cis_sta_dly_ams_multi_hold
+    WHERE processing_date = '20260227'
+      AND isin IS NOT NULL
+      AND TRIM(isin) != ''
+) mh
+    ON  UPPER(TRIM(dl.security_desc))    = mh.security_name
+    AND UPPER(TRIM(dl.ctry_of_exchange)) = mh.country_code
+WHERE dl.processing_date = '20260227'
+LIMIT 1;
+
+-- Step 3: ISIN match rate — how many daily_limit rows got an ISIN from multi_hold
+SELECT
+    COUNT(*)                                        AS total_rows,
+    SUM(CASE WHEN mh.isin IS NOT NULL THEN 1 ELSE 0 END) AS rows_with_isin,
+    SUM(CASE WHEN mh.isin IS NULL     THEN 1 ELSE 0 END) AS rows_without_isin
+FROM gmp_cis.gmp_cis_sta_dly_stat_street_ams_daily_limit dl
+LEFT JOIN (
+    SELECT DISTINCT
+        UPPER(TRIM(security_name)) AS security_name,
+        UPPER(TRIM(country_code))  AS country_code,
+        isin
+    FROM gmp_cis.gmp_cis_sta_dly_ams_multi_hold
+    WHERE processing_date = '20260227'
+      AND isin IS NOT NULL AND TRIM(isin) != ''
+) mh
+    ON  UPPER(TRIM(dl.security_desc))    = mh.security_name
+    AND UPPER(TRIM(dl.ctry_of_exchange)) = mh.country_code
+WHERE dl.processing_date = '20260227';
+
+-- ============================================================================
+-- END PORTIARP-7364 DEBUG
+-- ============================================================================
