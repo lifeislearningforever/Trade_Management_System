@@ -62,10 +62,13 @@ CREATE TABLE cis_corporate_actions (
     is_deleted BOOLEAN COMMENT 'Soft delete flag (true = deleted)',
     is_active BOOLEAN COMMENT 'Active flag (true = active)',
 
-    -- Cash Flow Processing Flags
-    cash_flow_queued       BOOLEAN COMMENT 'True when a queue entry has been created for this CA',
-    cash_flow_processed    BOOLEAN COMMENT 'True when cash flow processing completed successfully',
-    cash_flow_processed_at STRING  COMMENT 'Timestamp when processing completed (YYYY-MM-DD HH:MM:SS)',
+    -- CA Processing Flags
+    -- cash_flow_queued: set when the CA is queued for cash flow generation
+    -- ca_processed:     set when the queue job completes — i.e. the CA has produced its cash flows
+    --                   (whether those cash flows have reached positions is tracked on cis_cash_flow.position_updated)
+    cash_flow_queued BOOLEAN COMMENT 'True when a queue entry has been created for this CA',
+    ca_processed     BOOLEAN COMMENT 'True when the CA queue job completed — cash flows were generated',
+    ca_processed_at  STRING  COMMENT 'Timestamp when CA processing completed (YYYY-MM-DD HH:MM:SS)',
 
     -- Audit Fields
     created_by STRING COMMENT 'Username who created the record',

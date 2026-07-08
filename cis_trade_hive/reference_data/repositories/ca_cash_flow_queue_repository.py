@@ -308,7 +308,7 @@ class CACashFlowQueueRepository:
         total_amount: Decimal = Decimal('0')
     ) -> bool:
         """
-        Mark queue entry as completed and set cash_flow_processed=true on the CA.
+        Mark queue entry as completed and set ca_processed=true on the CA.
 
         Args:
             queue_id: Queue entry ID
@@ -533,7 +533,11 @@ class CACashFlowQueueRepository:
         processed: bool
     ) -> None:
         """
-        Update cash_flow_queued / cash_flow_processed on cis_corporate_actions.
+        Update cash_flow_queued / ca_processed on cis_corporate_actions.
+
+        ca_processed=true means the CA queue job ran and generated its cash flows.
+        Whether those cash flows have been applied to positions is tracked separately
+        on cis_cash_flow.position_updated.
 
         Called automatically by insert() and mark_completed() — non-fatal if it
         fails (the queue state is the source of truth; this is a convenience flag).
@@ -541,18 +545,18 @@ class CACashFlowQueueRepository:
         try:
             now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             processed_at_clause = (
-                f", cash_flow_processed_at = '{now_str}'" if processed else ""
+                f", ca_processed_at = '{now_str}'" if processed else ""
             )
             sql = f"""
             UPDATE {CACashFlowQueueRepository.DATABASE}.cis_corporate_actions
-            SET cash_flow_queued    = {'true' if queued else 'false'},
-                cash_flow_processed = {'true' if processed else 'false'}
+            SET cash_flow_queued = {'true' if queued else 'false'},
+                ca_processed     = {'true' if processed else 'false'}
                 {processed_at_clause}
             WHERE ca_id = {int(ca_id)}
             """
             impala_manager.execute_write(sql, database=CACashFlowQueueRepository.DATABASE)
         except Exception as e:
-            logger.warning(f"[CA_FLAG] Could not update processed flag for ca_id={ca_id}: {e}")
+            logger.warning(f"[CA_FLAG] Could not update ca_processed flag for ca_id={ca_id}: {e}")
 
 
 # Create singleton instance
