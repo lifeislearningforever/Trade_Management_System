@@ -120,14 +120,28 @@ ORDER BY b.row_id, s.security_id;
 
 -- ============================================================================
 
--- STEP 5: Check the LUT table — does exchange_quoted match exchange_name?
--- Replace 'HKSE' / 'LSE' with the actual exchange_quoted values from Step 1
+-- STEP 5a: Check the LUT table — does exchange_quoted match exchange_name?
 SELECT
     exchange_name,
     country_name
 FROM gmp_cis.cis_exchange_mapping_lut
 WHERE UPPER(exchange_name) IN ('HKSE', 'LSE', 'HK', 'GB', 'HK HKSE', 'GB LSE')
 ORDER BY exchange_name;
+
+-- STEP 5b: Check cis_security for this ISIN — what are exchange_code and country_of_exchange?
+SELECT
+    security_id,
+    security_name,
+    isin,
+    exchange_code,
+    country_of_exchange,
+    currency_code,
+    src_system,
+    is_active
+FROM gmp_cis.cis_security
+WHERE isin = 'GB0005405286'
+  AND is_active = true
+ORDER BY security_id;
 
 -- ============================================================================
 
