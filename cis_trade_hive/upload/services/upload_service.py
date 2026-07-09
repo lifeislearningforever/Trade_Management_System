@@ -2180,6 +2180,54 @@ class UploadService:
                 logger.info(f"[position_etl] {label} — {elapsed:.1f}s")
                 return _etl_time.time()
 
+            def _count(table: str, where: str = '') -> int:
+                """Return COUNT(*) from a staging table; -1 on error (non-fatal)."""
+                try:
+                    clause = f"WHERE {where}" if where else ''
+                    rows = impala_manager.execute_query(
+                        f"SELECT COUNT(*) AS n FROM {table} {clause}", database=db
+                    )
+                    return int((rows or [{}])[0].get('n', 0))
+                except Exception as _ce:
+                    logger.debug(f"[position_etl] _count({table}) failed: {_ce}")
+                    return -1
+
+            def _breakdown(table: str, col: str) -> str:
+                """Return 'VAL1:N VAL2:N ...' for quick per-value counts; '' on error."""
+                try:
+                    rows = impala_manager.execute_query(
+                        f"SELECT {col}, COUNT(*) AS n FROM {table} GROUP BY {col} ORDER BY n DESC",
+                        database=db
+                    )
+                    return '  '.join(f"{r.get(col,'?')}:{r.get('n',0)}" for r in (rows or []))
+                except Exception as _be:
+                    logger.debug(f"[position_etl] _breakdown({table},{col}) failed: {_be}")
+                    return ''
+
+            def _sample_fails(table: str, status_col: str, limit: int = 5) -> None:
+                """Log up to `limit` failing rows — portfolio + security + reason."""
+                try:
+                    rows = impala_manager.execute_query(
+                        f"""
+                        SELECT portfolio, security_full_name, isin, {status_col}
+                        FROM {table}
+                        WHERE {status_col} LIKE 'FAIL%'
+                           OR {status_col} LIKE 'NOT_FOUND%'
+                        LIMIT {limit}
+                        """,
+                        database=db
+                    )
+                    for r in (rows or []):
+                        logger.warning(
+                            f"[position_etl]   FAIL sample — "
+                            f"portfolio={r.get('portfolio')} "
+                            f"isin={r.get('isin')} "
+                            f"name={r.get('security_full_name')} "
+                            f"status={r.get(status_col)}"
+                        )
+                except Exception as _se:
+                    logger.debug(f"[position_etl] _sample_fails({table}) failed: {_se}")
+
             # ------------------------------------------------------------------
             # safe_decimal(col, dec_type): generates SQL that handles every
             # real-world dirty numeric format before CAST to DECIMAL:
@@ -2896,8 +2944,9 @@ class UploadService:
             )
             if not ok:
                 return False, "Step 1 CREATE TABLE pos_stage_1_base failed — check Impala logs (likely column mismatch in position_upload_standardized)", result
-            logger.info("[position_etl] Step 1 complete")
-            _t = _step_time("Step 1", _t)
+            _s1_rows = _count('pos_stage_1_base')
+            logger.info(f"[position_etl] Step 1 complete — {_s1_rows} rows in pos_stage_1_base")
+            _t = _step_time("Step 1 (base staging)", _t)
 
             # ------------------------------------------------------------------
             # Step 2: Portfolio validation — join on pf.name (exact match)
@@ -2923,8 +2972,21 @@ class UploadService:
                 """,
                 database=db
             )
-            logger.info("[position_etl] Step 2 complete")
-            _t = _step_time("Step 2", _t)
+            _s2_bd = _breakdown('pos_stage_2_portfolio', 'portfolio_status')
+            _s2_fail = _count('pos_stage_2_portfolio', "portfolio_status LIKE 'FAIL%'")
+            logger.info(f"[position_etl] Step 2 complete — portfolio validation: {_s2_bd}")
+            if _s2_fail > 0:
+                try:
+                    _pf_rows = impala_manager.execute_query(
+                        "SELECT DISTINCT portfolio FROM pos_stage_2_portfolio "
+                        "WHERE portfolio_status LIKE 'FAIL%' LIMIT 10",
+                        database=db
+                    )
+                    _bad_pf = [r.get('portfolio') for r in (_pf_rows or [])]
+                    logger.warning(f"[position_etl] Step 2: {_s2_fail} row(s) failed portfolio — unknown portfolios: {_bad_pf}")
+                except Exception:
+                    pass
+            _t = _step_time("Step 2 (portfolio validation)", _t)
 
             # ------------------------------------------------------------------
             # Step 3: Security ISIN match — conditional on exchange presence.
@@ -3071,8 +3133,25 @@ class UploadService:
                 """,
                 database=db
             )
-            logger.info("[position_etl] Step 3 complete")
-            _t = _step_time("Step 3", _t)
+            _s3_bd = _breakdown('pos_stage_3_security', 'match_type')
+            logger.info(f"[position_etl] Step 3 complete — ISIN match: {_s3_bd}")
+            _s3_multi = _count('pos_stage_3_security', "match_type = 'FAIL: Multiple securities found'")
+            if _s3_multi > 0:
+                try:
+                    _multi_rows = impala_manager.execute_query(
+                        "SELECT isin, exchange, country_of_exchange "
+                        "FROM pos_stage_3_security "
+                        "WHERE match_type = 'FAIL: Multiple securities found' LIMIT 10",
+                        database=db
+                    )
+                    for r in (_multi_rows or []):
+                        logger.warning(
+                            f"[position_etl] Step 3: multiple-security ISIN={r.get('isin')} "
+                            f"exchange={r.get('exchange')} country={r.get('country_of_exchange')}"
+                        )
+                except Exception:
+                    pass
+            _t = _step_time("Step 3 (ISIN match)", _t)
 
             # ------------------------------------------------------------------
             # Step 4: Security fallback matching for rows where ISIN did not match.
@@ -3261,8 +3340,12 @@ class UploadService:
                 """,
                 database=db
             )
-            logger.info("[position_etl] Step 4 complete")
-            _t = _step_time("Step 4", _t)
+            _s4_bd = _breakdown('pos_stage_4_security_fallback', 'security_status')
+            logger.info(f"[position_etl] Step 4 complete — security fallback: {_s4_bd}")
+            _s4_notfound = _count('pos_stage_4_security_fallback', "security_status = 'NOT_FOUND: Create new security'")
+            if _s4_notfound > 0:
+                _sample_fails('pos_stage_4_security_fallback', 'security_status')
+            _t = _step_time("Step 4 (security fallback)", _t)
 
             # ------------------------------------------------------------------
             # Step 4B: Abbreviated-name fuzzy match (Python-side).
@@ -3448,8 +3531,9 @@ class UploadService:
             if not ok_5:
                 logger.error("[position_etl] Step 5 FAILED — pos_stage_5_price not created; aborting ETL")
                 return False, "Step 5 CREATE TABLE pos_stage_5_price failed", result
-            logger.info("[position_etl] Step 5 complete")
-            _t = _step_time("Step 5", _t)
+            _s5_bd = _breakdown('pos_stage_5_price', 'price_status')
+            logger.info(f"[position_etl] Step 5 complete — price lookup: {_s5_bd}")
+            _t = _step_time("Step 5 (price lookup)", _t)
 
             # ------------------------------------------------------------------
             # Step 5B: Create new securities for NOT_FOUND rows.
@@ -3590,8 +3674,11 @@ class UploadService:
                 # on the next ETL run without waiting for TTL expiry
                 UploadService._cis_abbrev_cache_ts = 0.0
 
-            logger.info(f"[position_etl] Step 5B complete ({len(_candidates)} new securities created)")
-            _t = _step_time("Step 5B", _t)
+            logger.info(f"[position_etl] Step 5B complete — {len(_candidates)} new securities created")
+            if _candidates:
+                for _c in _candidates[:5]:
+                    logger.info(f"[position_etl] Step 5B: created security label='{_c.get('security_label')}' isin='{_c.get('isin')}' currency='{_c.get('currency_code')}'")
+            _t = _step_time("Step 5B (new security creation)", _t)
 
             # ------------------------------------------------------------------
             # Step 6: Final staging — INNER JOIN on portfolio PASS; compute
@@ -3673,8 +3760,13 @@ class UploadService:
                 """,
                 database=db
             )
-            logger.info("[position_etl] Step 6 complete")
-            _t = _step_time("Step 6", _t)
+            _s6_bd = _breakdown('position_upload_staging', 'overall_status')
+            _s6_total = _count('position_upload_staging')
+            logger.info(f"[position_etl] Step 6 complete — {_s6_total} rows in staging: {_s6_bd}")
+            _s6_invalid = _count('position_upload_staging', "overall_status LIKE 'INVALID%'")
+            if _s6_invalid > 0:
+                _sample_fails('position_upload_staging', 'overall_status')
+            _t = _step_time("Step 6 (final staging)", _t)
 
             # Failed records table (for reporting — records that never made it to staging)
             impala_manager.execute_write(
@@ -3729,8 +3821,9 @@ class UploadService:
                 """,
                 database=db
             )
-            logger.info("[position_etl] Step 6B complete (failed table created)")
-            _t = _step_time("Step 6B", _t)
+            _s6b_rows = _count('position_upload_failed')
+            logger.info(f"[position_etl] Step 6B complete — {_s6b_rows} failed rows (portfolio/security reject)")
+            _t = _step_time("Step 6B (failed table)", _t)
 
             # ------------------------------------------------------------------
             # Step 6C: Reject rows with reporting_date > contextual_today.
@@ -3889,8 +3982,13 @@ class UploadService:
             )
             if not ok:
                 return False, "Step 7A UPSERT INTO cis_position failed — check Impala logs for column/type mismatch", result
-            logger.info("[position_etl] Step 7A complete (cis_position upsert)")
-            _t = _step_time("Step 7A", _t)
+            _s7a_upserted = _count(
+                f'{db}.cis_position',
+                f"portfolio IN (SELECT DISTINCT portfolio FROM position_upload_staging) "
+                f"AND position_date = '{processing_date}' AND src_system = 'USER_UPLOAD' AND is_latest = true"
+            )
+            logger.info(f"[position_etl] Step 7A complete — {_s7a_upserted} is_latest=true rows in cis_position for this run")
+            _t = _step_time("Step 7A (cis_position upsert)", _t)
 
             # ------------------------------------------------------------------
             # Step 7A2: For backdated uploads (reporting_date < today), carry the
@@ -3925,24 +4023,30 @@ class UploadService:
             _has_backdated = bool(_backdated_rows)
 
             if _has_backdated:
-                logger.info(f"[position_etl] Step 7A2: {len(_backdated_rows)} backdated combo(s) — walking business dates forward")
-                logger.info(f"[position_etl] Step 7A2 DEBUG: backdated_rows raw = {_backdated_rows}")
-                logger.info(f"[position_etl] Step 7A2 DEBUG: calendar_today_iso = {_calendar_today_iso}")
+                logger.info(
+                    f"[position_etl] Step 7A2: {len(_backdated_rows)} backdated combo(s) "
+                    f"(upload_date < today={_calendar_today_iso}) — carry-forward starting"
+                )
+                for _dbr in _backdated_rows:
+                    logger.info(
+                        f"[position_etl] Step 7A2: backdated combo — "
+                        f"portfolio={_dbr.get('portfolio')} "
+                        f"security={_dbr.get('security_label')} "
+                        f"basis={_dbr.get('position_basis')} "
+                        f"upload_date={_dbr.get('upload_date')}"
+                    )
 
-                # Fetch all valid business dates from the earliest upload date through calendar today
                 _min_upload_date = min(
                     (r.get('upload_date', _calendar_today_iso) or _calendar_today_iso)
                     for r in _backdated_rows
                 )
-                logger.info(f"[position_etl] Step 7A2 DEBUG: min_upload_date (raw) = {repr(_min_upload_date)}")
 
-                # _min_upload_date and _calendar_today_iso are 'YYYY-MM-DD'.
-                # contextual_today is stored as an integer (YYYYMMDD) in alldatesinfo,
-                # so compare as integers for safety.
                 _min_upload_date_nodash = _min_upload_date[:10].replace('-', '')
                 _calendar_today_nodash  = _calendar_today_iso.replace('-', '')
-                logger.info(f"[position_etl] Step 7A2 DEBUG: alldatesinfo query bounds — "
-                            f"contextual_today > {_min_upload_date_nodash} AND <= {_calendar_today_nodash}")
+                logger.info(
+                    f"[position_etl] Step 7A2: querying alldatesinfo for biz dates "
+                    f"{_min_upload_date_nodash} < date <= {_calendar_today_nodash}"
+                )
                 _biz_dates_rows = impala_manager.execute_query(
                     f"""
                     SELECT contextual_today AS biz_date
@@ -3957,8 +4061,6 @@ class UploadService:
                     """,
                     database=db
                 )
-                logger.info(f"[position_etl] Step 7A2 DEBUG: alldatesinfo raw rows = {_biz_dates_rows}")
-
                 # contextual_today may come back as an integer (e.g. 20260302) or a
                 # date/string.  Normalise to ISO 'YYYY-MM-DD' in all cases.
                 def _to_iso(val):
@@ -3968,7 +4070,7 @@ class UploadService:
                     return str(val)[:10]  # already has dashes
 
                 _biz_dates = [_to_iso(r['biz_date']) for r in (_biz_dates_rows or []) if r.get('biz_date')]
-                logger.info(f"[position_etl] Step 7A2 DEBUG: biz_dates after ISO normalise = {_biz_dates}")
+                logger.info(f"[position_etl] Step 7A2: {len(_biz_dates)} business date(s) to carry forward: {_biz_dates}")
 
                 _carried = 0
                 for row in _backdated_rows:
@@ -3976,8 +4078,10 @@ class UploadService:
                     _sec   = row.get('security_label', '')
                     _basis = row.get('position_basis', 'TRADED')
                     _upload_date = (row.get('upload_date') or '')[:10]
-                    logger.info(f"[position_etl] Step 7A2 DEBUG: processing combo "
-                                f"ptf={_ptf} sec={_sec} basis={_basis} upload_date={repr(_upload_date)}")
+                    logger.info(
+                        f"[position_etl] Step 7A2: carry-forward start — "
+                        f"portfolio={_ptf} security={_sec} basis={_basis} from={_upload_date}"
+                    )
                     if not _ptf or not _sec:
                         continue
 
@@ -3985,7 +4089,6 @@ class UploadService:
                     # Stop as soon as an existing INT USER_UPLOAD record is found
                     for _biz_date in _biz_dates:
                         if _biz_date <= _upload_date:
-                            logger.info(f"[position_etl] Step 7A2 DEBUG: skipping {_biz_date} <= upload_date {_upload_date}")
                             continue  # skip dates on or before the upload date itself
 
                         _exists_rows = impala_manager.execute_query(
@@ -4079,9 +4182,14 @@ class UploadService:
                                 f"{_ptf}/{_sec}/{_basis} on {_biz_date}"
                             )
 
-                logger.info(f"[position_etl] Step 7A2 complete — {_carried} position date(s) carried forward")
+                logger.info(
+                    f"[position_etl] Step 7A2 complete — {_carried} date(s) carried forward "
+                    f"across {len(_backdated_rows)} combo(s)"
+                )
                 result['today_positions_carried_forward'] = _carried
-            _t = _step_time("Step 7A2", _t)
+            else:
+                logger.info("[position_etl] Step 7A2: no backdated rows — carry-forward skipped")
+            _t = _step_time("Step 7A2 (carry-forward)", _t)
 
             # ------------------------------------------------------------------
             # Step 7B: INSERT OVERWRITE into the existing external partitioned
@@ -4177,8 +4285,32 @@ class UploadService:
                 f"REFRESH {db}.position_upload_report PARTITION (processing_date='{processing_date}', src_id='{src_id}')",
                 database=db
             )
-            logger.info("[position_etl] Step 7B complete — INSERT OVERWRITE into partitioned position_upload_report")
-            _t = _step_time("Step 7B", _t)
+            _s7b_total = _count(f'{db}.position_upload_report', f"processing_date='{processing_date}' AND src_id='{src_id}'")
+            _s7b_pass  = _count(f'{db}.position_upload_report', f"processing_date='{processing_date}' AND src_id='{src_id}' AND row_status='PASS'")
+            _s7b_fail  = _s7b_total - _s7b_pass
+            logger.info(
+                f"[position_etl] Step 7B complete — report rows: {_s7b_total} total / "
+                f"{_s7b_pass} PASS / {_s7b_fail} FAIL"
+            )
+            if _s7b_fail > 0:
+                try:
+                    _fail_reasons = impala_manager.execute_query(
+                        f"""
+                        SELECT fail_reason, COUNT(*) AS n
+                        FROM {db}.position_upload_report
+                        WHERE processing_date='{processing_date}' AND src_id='{src_id}'
+                          AND row_status='FAIL'
+                        GROUP BY fail_reason ORDER BY n DESC LIMIT 10
+                        """,
+                        database=db
+                    )
+                    for r in (_fail_reasons or []):
+                        logger.warning(
+                            f"[position_etl] Step 7B fail_reason: '{r.get('fail_reason')}' × {r.get('n')} row(s)"
+                        )
+                except Exception:
+                    pass
+            _t = _step_time("Step 7B (report write)", _t)
 
             # ------------------------------------------------------------------
             # Count totals from report
