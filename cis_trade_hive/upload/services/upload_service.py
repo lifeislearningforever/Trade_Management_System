@@ -2695,11 +2695,15 @@ class UploadService:
                 # subquery four times — reduces the country table scan from 4× to 1×.
                 'cis_user_sta_adhoc_position_5': f"""
                     WITH country_lut AS (
-                        SELECT UPPER(TRIM(full_name)) AS full_name, label
+                        -- One row per full_name (deduped). If a country name maps to
+                        -- multiple labels (e.g. 'United Kingdom' → 'GB' and 'UK'),
+                        -- keep MIN(label) to avoid fan-out duplicates on the JOIN.
+                        SELECT UPPER(TRIM(full_name)) AS full_name, MIN(label) AS label
                         FROM {db}.gmp_cis_sta_dly_country
                         WHERE processing_date = (
                             SELECT MAX(processing_date) FROM {db}.gmp_cis_sta_dly_country
                         )
+                        GROUP BY UPPER(TRIM(full_name))
                     )
                     SELECT
                         p5.portfolio                                       AS portfolio,
