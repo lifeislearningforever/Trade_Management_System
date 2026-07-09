@@ -2944,7 +2944,28 @@ class UploadService:
                 f"""
                 CREATE TABLE pos_stage_3_security
                 STORED AS PARQUET AS
-                WITH sec_join AS (
+                WITH
+                -- Resolve exchange_quoted → country at query time via LUT.
+                -- Dedup to one row per exchange_name (prefer country that exists
+                -- as exchange_code in cis_security, else MIN).
+                lut_dedup AS (
+                    SELECT
+                        lut.exchange_name,
+                        COALESCE(
+                            MIN(CASE WHEN sec.exchange_code IS NOT NULL THEN lut.country_name END),
+                            MIN(lut.country_name)
+                        ) AS country_name
+                    FROM (
+                        SELECT UPPER(TRIM(exchange_name)) AS exchange_name, country_name
+                        FROM {db}.cis_exchange_mapping_lut
+                    ) lut
+                    LEFT JOIN (
+                        SELECT DISTINCT UPPER(TRIM(exchange_code)) AS exchange_code
+                        FROM {db}.cis_security WHERE is_active = true
+                    ) sec ON lut.country_name = sec.exchange_code
+                    GROUP BY lut.exchange_name
+                ),
+                sec_join AS (
                     SELECT
                         b.row_id,
                         b.isin                  AS upload_isin,
@@ -2960,81 +2981,43 @@ class UploadService:
                         s.country_of_exchange,
                         s.currency_code,
                         s.src_system            AS s_src_system,
-                        -- 1 when this cis_security row also matches the upload exchange.
-                        -- exchange_quoted may be "HK HKSE" (country + exchange code space-separated)
-                        -- so we match on: full value, first token (before space), LUT-resolved country
-                        -- against both s.country_of_exchange and s.exchange_code.
+                        -- Resolved country: use stored country_of_exchange if populated,
+                        -- else fall back to LUT lookup on raw exchange value
+                        COALESCE(b.country_of_exchange, lut.country_name) AS resolved_country,
+                        -- resolved_country = stored country_of_exchange OR LUT lookup on exchange_quoted
+                        -- Use it to match against cis_security.exchange_code or country_of_exchange
                         CASE
                             WHEN (
-                                -- full raw exchange vs security fields
-                                (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                                 AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
-                                OR
-                                (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                                 AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
-                                OR
-                                -- first token of exchange_quoted (e.g. "HK" from "HK HKSE")
-                                (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                                 AND UPPER(REGEXP_EXTRACT(TRIM(b.`exchange`), '^(\\S+)', 1)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
-                                OR
-                                (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                                 AND UPPER(REGEXP_EXTRACT(TRIM(b.`exchange`), '^(\\S+)', 1)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
-                                OR
-                                -- LUT-resolved country vs security fields
-                                (b.country_of_exchange IS NOT NULL AND TRIM(b.country_of_exchange) != ''
-                                 AND UPPER(TRIM(b.country_of_exchange)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
-                                OR
-                                (b.country_of_exchange IS NOT NULL AND TRIM(b.country_of_exchange) != ''
-                                 AND UPPER(TRIM(b.country_of_exchange)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
+                                resolved_country IS NOT NULL AND TRIM(resolved_country) != ''
+                                AND (
+                                    UPPER(TRIM(resolved_country)) = UPPER(TRIM(COALESCE(s.exchange_code, '')))
+                                    OR UPPER(TRIM(resolved_country)) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
+                                )
                             ) THEN 1 ELSE 0
                         END AS is_exchange_match,
                         -- How many cis_security rows match isin + exchange for this upload row
                         SUM(CASE
                             WHEN (
-                                (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                                 AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
-                                OR
-                                (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                                 AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
-                                OR
-                                (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                                 AND UPPER(REGEXP_EXTRACT(TRIM(b.`exchange`), '^(\\S+)', 1)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
-                                OR
-                                (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                                 AND UPPER(REGEXP_EXTRACT(TRIM(b.`exchange`), '^(\\S+)', 1)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
-                                OR
-                                (b.country_of_exchange IS NOT NULL AND TRIM(b.country_of_exchange) != ''
-                                 AND UPPER(TRIM(b.country_of_exchange)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
-                                OR
-                                (b.country_of_exchange IS NOT NULL AND TRIM(b.country_of_exchange) != ''
-                                 AND UPPER(TRIM(b.country_of_exchange)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
+                                resolved_country IS NOT NULL AND TRIM(resolved_country) != ''
+                                AND (
+                                    UPPER(TRIM(resolved_country)) = UPPER(TRIM(COALESCE(s.exchange_code, '')))
+                                    OR UPPER(TRIM(resolved_country)) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
+                                )
                             ) THEN 1 ELSE 0
                         END) OVER (PARTITION BY b.row_id) AS cnt_isin_exchange,
                         -- How many cis_security rows match isin alone for this upload row
                         COUNT(s.security_id) OVER (PARTITION BY b.row_id) AS cnt_isin_only,
-                        -- Priority: exact exchange match first, then GMP src, then lowest id
+                        -- Priority: exchange match first, then GMP src, then lowest id
                         ROW_NUMBER() OVER (
                             PARTITION BY b.row_id
                             ORDER BY
                                 CASE
                                     WHEN (
-                                        (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                                         AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
-                                        OR
-                                        (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                                         AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
-                                        OR
-                                        (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                                         AND UPPER(REGEXP_EXTRACT(TRIM(b.`exchange`), '^(\\S+)', 1)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
-                                        OR
-                                        (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                                         AND UPPER(REGEXP_EXTRACT(TRIM(b.`exchange`), '^(\\S+)', 1)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
-                                        OR
-                                        (b.country_of_exchange IS NOT NULL AND TRIM(b.country_of_exchange) != ''
-                                         AND UPPER(TRIM(b.country_of_exchange)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
-                                        OR
-                                        (b.country_of_exchange IS NOT NULL AND TRIM(b.country_of_exchange) != ''
-                                         AND UPPER(TRIM(b.country_of_exchange)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
+                                        resolved_country IS NOT NULL AND TRIM(resolved_country) != ''
+                                        AND (
+                                            UPPER(TRIM(resolved_country)) = UPPER(TRIM(COALESCE(s.exchange_code, '')))
+                                            OR UPPER(TRIM(resolved_country)) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
+                                        )
                                     ) THEN 0 ELSE 1
                                 END,
                                 CASE WHEN s.src_system = 'GMP' THEN 0 ELSE 1 END,
@@ -3048,6 +3031,8 @@ class UploadService:
                         AND b.isin IS NOT NULL AND TRIM(b.isin) != ''
                         AND UPPER(TRIM(b.isin)) NOT IN ('NA', 'N/A', 'NIL', 'NONE', '-', 'N.A.', 'NAP')
                         AND b.isin = s.isin
+                    LEFT JOIN lut_dedup lut
+                        ON UPPER(TRIM(b.`exchange`)) = lut.exchange_name
                 )
                 SELECT
                     row_id,
