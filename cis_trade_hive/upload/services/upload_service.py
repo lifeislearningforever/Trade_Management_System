@@ -2194,46 +2194,6 @@ class UploadService:
             #   9. Final CAST to target DECIMAL type
             # Any value that still can't parse becomes NULL (never throws UDF error).
             # ------------------------------------------------------------------
-            def country_joins(db: str = db) -> str:
-                """
-                Generate four LEFT JOIN clauses — one per country field in
-                position_5 — against gmp_cis_sta_dly_country.
-                Impala does not support correlated scalar subqueries in SELECT,
-                so we use one aliased join per source column instead.
-                Each join is independent: a miss on one field does not null
-                out the others.
-                """
-                return f"""
-                    LEFT JOIN (
-                        SELECT UPPER(TRIM(full_name)) AS full_name, label
-                        FROM {db}.gmp_cis_sta_dly_country
-                        WHERE processing_date = (
-                            SELECT MAX(processing_date) FROM {db}.gmp_cis_sta_dly_country
-                        )
-                    ) cn_exc ON cn_exc.full_name = UPPER(TRIM(CAST(p5.country_of_exchange AS STRING)))
-                    LEFT JOIN (
-                        SELECT UPPER(TRIM(full_name)) AS full_name, label
-                        FROM {db}.gmp_cis_sta_dly_country
-                        WHERE processing_date = (
-                            SELECT MAX(processing_date) FROM {db}.gmp_cis_sta_dly_country
-                        )
-                    ) cn_inc ON cn_inc.full_name = UPPER(TRIM(CAST(p5.country_of_incorporation AS STRING)))
-                    LEFT JOIN (
-                        SELECT UPPER(TRIM(full_name)) AS full_name, label
-                        FROM {db}.gmp_cis_sta_dly_country
-                        WHERE processing_date = (
-                            SELECT MAX(processing_date) FROM {db}.gmp_cis_sta_dly_country
-                        )
-                    ) cn_rsk ON cn_rsk.full_name = UPPER(TRIM(CAST(p5.country_of_risk AS STRING)))
-                    LEFT JOIN (
-                        SELECT UPPER(TRIM(full_name)) AS full_name, label
-                        FROM {db}.gmp_cis_sta_dly_country
-                        WHERE processing_date = (
-                            SELECT MAX(processing_date) FROM {db}.gmp_cis_sta_dly_country
-                        )
-                    ) cn_opr ON cn_opr.full_name = UPPER(TRIM(CAST(p5.country_of_operation AS STRING)))
-                """
-
             def safe_decimal(col: str, dec_type: str) -> str:
                 return (
                     f"CAST(NULLIF(regexp_extract("
@@ -2438,10 +2398,9 @@ class UploadService:
             #         Each source table has a different column layout — we map
             #         them here to the common schema.
             # ------------------------------------------------------------------
-            # Step 0 writes raw STRING values to position_upload_standardized (all columns are STRING).
-            # Numeric CASTs are applied in Step 1 when building pos_stage_1_base (internal PARQUET).
-            # exchange_code is the DDL column name; it is aliased to `exchange` in Step 1 for
-            # use as a reserved-word-safe name throughout the internal pipeline.
+            # Step 0 writes into position_upload_standardized whose numeric columns are DECIMAL —
+            # safe_decimal() handles dirty formatting (commas, currency symbols, parentheses).
+            # Step 1 reads those DECIMALs back and wraps them with COALESCE(col, 0).
 
             STANDARDIZE_SELECT = {
                 # ------------------------------------------------------------------
@@ -2664,6 +2623,8 @@ class UploadService:
                 #   net_book_value_lc, local_currency_home_ccy, cost_lc, pct_holdings,
                 #   no_of_shares_issues_by_the_company, country_of_incorporation, country_of_exchange,
                 #   isin_code, ticker_code, industry, financial_non_financial_co, position_basis
+                # Uses safe_decimal for dirty-data resilience (commas, currency symbols, parens).
+                # If format 4 source is always clean numeric, replace with CAST for speed.
                 'cis_user_sta_adhoc_position_4': f"""
                     SELECT
                         portfolio                                           AS portfolio,
@@ -2728,7 +2689,18 @@ class UploadService:
                 # gmp_cis_sta_dly_country (full_name → label/code).
                 # Impala does not support correlated scalar subqueries so each
                 # country column gets its own aliased join (cn_exc, cn_inc, etc.).
+                # CTE scans gmp_cis_sta_dly_country ONCE for the latest partition,
+                # then the four country aliases (cn_exc/cn_inc/cn_rsk/cn_opr) join
+                # against that single materialised result instead of repeating the
+                # subquery four times — reduces the country table scan from 4× to 1×.
                 'cis_user_sta_adhoc_position_5': f"""
+                    WITH country_lut AS (
+                        SELECT UPPER(TRIM(full_name)) AS full_name, label
+                        FROM {db}.gmp_cis_sta_dly_country
+                        WHERE processing_date = (
+                            SELECT MAX(processing_date) FROM {db}.gmp_cis_sta_dly_country
+                        )
+                    )
                     SELECT
                         p5.portfolio                                       AS portfolio,
                         p5.security_full_name                              AS security_full_name,
@@ -2754,8 +2726,6 @@ class UploadService:
                         p5.product_type, p5.security_type, p5.quoted_unquoted, p5.industry,
                         NULL                                               AS fin_nonfin_co,
                         p5.issuer_type, p5.reits_or_fund_y_n,
-                        -- Country normalization: full_name → label (e.g. 'Singapore' → 'SG')
-                        -- NULL when full_name not found in gmp_cis_sta_dly_country
                         cn_exc.label                                       AS exchange,
                         NULL                                               AS country_code,
                         cn_exc.label                                       AS country_of_exchange,
@@ -2779,7 +2749,14 @@ class UploadService:
                         CURRENT_TIMESTAMP()                                AS etl_insert_ts,
                         'python_etl'                                       AS etl_batch_id
                     FROM {db}.cis_user_sta_adhoc_position_5 p5
-                    {country_joins()}
+                    LEFT JOIN country_lut cn_exc
+                        ON cn_exc.full_name = UPPER(TRIM(CAST(p5.country_of_exchange AS STRING)))
+                    LEFT JOIN country_lut cn_inc
+                        ON cn_inc.full_name = UPPER(TRIM(CAST(p5.country_of_incorporation AS STRING)))
+                    LEFT JOIN country_lut cn_rsk
+                        ON cn_rsk.full_name = UPPER(TRIM(CAST(p5.country_of_risk AS STRING)))
+                    LEFT JOIN country_lut cn_opr
+                        ON cn_opr.full_name = UPPER(TRIM(CAST(p5.country_of_operation AS STRING)))
                     WHERE p5.processing_date = '{processing_date}'
                       AND p5.src_id = '{src_id}'
                 """,
@@ -2789,7 +2766,8 @@ class UploadService:
             if not std_select:
                 return False, f"Unknown src_id '{src_id}' — no standardization mapping defined", result
 
-            # Write this partition into position_upload_standardized (STRING columns, no casts).
+            _t = _etl_t0
+            logger.info(f"[position_etl] Step 0 starting — INSERT OVERWRITE position_upload_standardized for {src_id}")
             ok = impala_manager.execute_write(
                 f"""
                 INSERT OVERWRITE {db}.position_upload_standardized
@@ -2800,9 +2778,6 @@ class UploadService:
             )
             if not ok:
                 return False, f"Step 0 INSERT into position_upload_standardized failed — check Impala logs", result
-            # REFRESH PARTITION is much faster than INVALIDATE METADATA — it only syncs
-            # the single partition just written, not the entire table's metastore entry.
-            # INVALIDATE METADATA on a large partitioned table can take minutes.
             impala_manager.execute_write(
                 f"REFRESH {db}.position_upload_standardized PARTITION (processing_date='{processing_date}', src_id='{src_id}')",
                 database=db
@@ -2819,8 +2794,8 @@ class UploadService:
                 database=db
             )
             std_rows = (std_count[0].get('cnt', 0) if std_count else 0)
-            logger.info(f"[position_etl] Step 0 complete — {std_rows} rows standardized into position_upload_standardized")
-            _t = _step_time("Step 0", _etl_t0)
+            logger.info(f"[position_etl] Step 0 complete — {std_rows} rows standardized")
+            _t = _step_time("Step 0 (standardize+refresh)", _t)
             if std_rows == 0:
                 return False, f"Standardization produced 0 rows — check src_id='{src_id}' processing_date='{processing_date}' in {src_id} table", result
 
