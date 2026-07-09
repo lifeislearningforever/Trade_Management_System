@@ -2204,14 +2204,34 @@ class UploadService:
                 out the others.
                 """
                 return f"""
-                    LEFT JOIN {db}.gmp_cis_sta_dly_country cn_exc
-                        ON UPPER(TRIM(cn_exc.full_name)) = UPPER(TRIM(CAST(p5.country_of_exchange AS STRING)))
-                    LEFT JOIN {db}.gmp_cis_sta_dly_country cn_inc
-                        ON UPPER(TRIM(cn_inc.full_name)) = UPPER(TRIM(CAST(p5.country_of_incorporation AS STRING)))
-                    LEFT JOIN {db}.gmp_cis_sta_dly_country cn_rsk
-                        ON UPPER(TRIM(cn_rsk.full_name)) = UPPER(TRIM(CAST(p5.country_of_risk AS STRING)))
-                    LEFT JOIN {db}.gmp_cis_sta_dly_country cn_opr
-                        ON UPPER(TRIM(cn_opr.full_name)) = UPPER(TRIM(CAST(p5.country_of_operation AS STRING)))
+                    LEFT JOIN (
+                        SELECT UPPER(TRIM(full_name)) AS full_name, label
+                        FROM {db}.gmp_cis_sta_dly_country
+                        WHERE processing_date = (
+                            SELECT MAX(processing_date) FROM {db}.gmp_cis_sta_dly_country
+                        )
+                    ) cn_exc ON cn_exc.full_name = UPPER(TRIM(CAST(p5.country_of_exchange AS STRING)))
+                    LEFT JOIN (
+                        SELECT UPPER(TRIM(full_name)) AS full_name, label
+                        FROM {db}.gmp_cis_sta_dly_country
+                        WHERE processing_date = (
+                            SELECT MAX(processing_date) FROM {db}.gmp_cis_sta_dly_country
+                        )
+                    ) cn_inc ON cn_inc.full_name = UPPER(TRIM(CAST(p5.country_of_incorporation AS STRING)))
+                    LEFT JOIN (
+                        SELECT UPPER(TRIM(full_name)) AS full_name, label
+                        FROM {db}.gmp_cis_sta_dly_country
+                        WHERE processing_date = (
+                            SELECT MAX(processing_date) FROM {db}.gmp_cis_sta_dly_country
+                        )
+                    ) cn_rsk ON cn_rsk.full_name = UPPER(TRIM(CAST(p5.country_of_risk AS STRING)))
+                    LEFT JOIN (
+                        SELECT UPPER(TRIM(full_name)) AS full_name, label
+                        FROM {db}.gmp_cis_sta_dly_country
+                        WHERE processing_date = (
+                            SELECT MAX(processing_date) FROM {db}.gmp_cis_sta_dly_country
+                        )
+                    ) cn_opr ON cn_opr.full_name = UPPER(TRIM(CAST(p5.country_of_operation AS STRING)))
                 """
 
             def safe_decimal(col: str, dec_type: str) -> str:
