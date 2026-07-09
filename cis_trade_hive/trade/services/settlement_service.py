@@ -870,6 +870,35 @@ class SettlementService:
 
             logger.info(f"Recalculating {len(trades)} trades (both bases) from {from_date} to {today_str}")
 
+            # Before replaying, retire all is_latest=true position rows from from_date
+            # onward. This prevents stale rows (e.g. a cancelled trade's settle_date
+            # position) from remaining visible when no active trade covers that date.
+            # The replay loop below will re-create rows only for dates with active trades;
+            # carry-forward will then fill gaps from the last active position.
+            _z = 'CAST(0 AS DECIMAL(30,8))'
+            for _tbl, _port_col in [
+                ('cis_trade_position', 'portfolio_short_name'),
+                ('cis_position',       'portfolio'),
+            ]:
+                try:
+                    impala_manager.execute_write(
+                        f"""
+                        UPDATE {self.DATABASE}.{_tbl}
+                        SET is_latest = false
+                        WHERE {_port_col} = '{self._escape(portfolio_id)}'
+                          AND security_label = '{self._escape(security_id)}'
+                          AND position_date >= '{from_date}'
+                          AND is_latest = true
+                        """,
+                        database=self.DATABASE
+                    )
+                    logger.info(
+                        f"Retired is_latest rows in {_tbl} for "
+                        f"{portfolio_id}/{security_id} from {from_date}"
+                    )
+                except Exception as _ret_err:
+                    logger.warning(f"Retire is_latest in {_tbl} skipped (non-fatal): {_ret_err}")
+
             # Seed the in-memory accumulator with the last known position BEFORE from_date
             # for each basis. Without this, when chain recalc starts mid-chain (e.g. from
             # Mar-02 after an amendment), it starts from zero and misses earlier positions
