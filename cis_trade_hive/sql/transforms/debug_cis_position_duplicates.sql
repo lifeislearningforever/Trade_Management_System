@@ -169,14 +169,6 @@ GROUP BY
 -- 6b: Verify — count rows that will be retired
 --     Should equal the total_duplicate_groups from STEP 2
 SELECT COUNT(*) AS rows_to_retire
-FROM gmp_cis.cis_position
-JOIN gmp_cis.cis_position_dedup_keep
-    ON gmp_cis.cis_position.position_id = gmp_cis.cis_position_dedup_keep.keep_id
-    IS NOT MATCHED
-WHERE gmp_cis.cis_position.is_latest = true;
-
--- NOTE: If the JOIN syntax above is not supported, use this alternative:
-SELECT COUNT(*) AS rows_to_retire
 FROM gmp_cis.cis_position pos
 LEFT JOIN gmp_cis.cis_position_dedup_keep k
     ON pos.position_id = k.keep_id
