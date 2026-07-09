@@ -4104,31 +4104,12 @@ class UploadService:
 
                 -- One row per source row — LEFT JOIN all staging tables, pick status by priority:
                 -- portfolio fail > security fail > staging INVALID > staging VALID
+                -- Column order matches live table DDL (data cols first, status cols at end).
                 SELECT
                     b.portfolio,
                     COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
                     b.security_short_name,
                     b.isin,
-                    CASE
-                        WHEN p2.portfolio_status LIKE 'FAIL%'  THEN 'FAIL'
-                        WHEN p4.security_status  LIKE 'FAIL%'  THEN 'FAIL'
-                        WHEN s.overall_status    LIKE 'INVALID%' THEN 'FAIL'
-                        WHEN s.overall_status    LIKE 'VALID%'   THEN 'PASS'
-                        ELSE 'FAIL'
-                    END AS row_status,
-                    CASE
-                        WHEN p2.portfolio_status LIKE 'FAIL%'    THEN 'Portfolio not found in cis_portfolio'
-                        WHEN p4.security_status  LIKE 'FAIL%'    THEN p4.security_status
-                        WHEN s.overall_status    LIKE 'INVALID%' THEN s.overall_status
-                        ELSE NULL
-                    END AS fail_reason,
-                    COALESCE(p2.portfolio_status, s.portfolio_status) AS portfolio_status,
-                    COALESCE(p4.security_status,  s.security_status)  AS security_status,
-                    s.price_status,
-                    s.quantity_status,
-                    s.exchange_status,
-                    CAST(s.final_security_id AS STRING) AS matched_security_id,
-                    s.matched_security_name,
                     b.ticker,
                     b.quantity,
                     b.shares_outstanding,
@@ -4171,7 +4152,27 @@ class UploadService:
                     b.reporting_date,
                     b.maturity_date,
                     b.src_system,
-                    b.source_table
+                    b.source_table,
+                    CASE
+                        WHEN p2.portfolio_status LIKE 'FAIL%'  THEN 'FAIL'
+                        WHEN p4.security_status  LIKE 'FAIL%'  THEN 'FAIL'
+                        WHEN s.overall_status    LIKE 'INVALID%' THEN 'FAIL'
+                        WHEN s.overall_status    LIKE 'VALID%'   THEN 'PASS'
+                        ELSE 'FAIL'
+                    END AS row_status,
+                    CASE
+                        WHEN p2.portfolio_status LIKE 'FAIL%'    THEN 'Portfolio not found in cis_portfolio'
+                        WHEN p4.security_status  LIKE 'FAIL%'    THEN p4.security_status
+                        WHEN s.overall_status    LIKE 'INVALID%' THEN s.overall_status
+                        ELSE NULL
+                    END AS fail_reason,
+                    COALESCE(p2.portfolio_status, s.portfolio_status) AS portfolio_status,
+                    COALESCE(p4.security_status,  s.security_status)  AS security_status,
+                    s.price_status,
+                    s.quantity_status,
+                    s.exchange_status,
+                    CAST(s.final_security_id AS STRING) AS matched_security_id,
+                    s.matched_security_name
                 FROM pos_stage_1_base b
                 LEFT JOIN pos_stage_2_portfolio       p2 ON b.row_id = p2.row_id
                 LEFT JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
