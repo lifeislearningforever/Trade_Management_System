@@ -1615,23 +1615,14 @@ class UploadService:
             if position_basis and 'position_basis' not in col_names_lower:
                 extra_cols.append(f"'{position_basis}' AS position_basis")
 
-            # Step 4: Clear the target partition BEFORE inserting.
-            # cis_user_sta_adhoc_position_* tables are partitioned by processing_date
-            # only (no src_id partition). Always DROP the partition first so that
-            # re-runs never double-insert.
-            impala_manager.execute_write(
-                f"ALTER TABLE {db}.{target_table} "
-                f"DROP IF EXISTS PARTITION (processing_date='{processing_date}')",
-                database=db
-            )
-            logger.info(f"[hdfs:impala] dropped partition processing_date={processing_date} in {target_table} before insert")
-
-            # Step 5: INSERT from staging table into target (always INSERT INTO
-            # after the partition drop — INSERT OVERWRITE on a single-partition-col
-            # table would wipe all partitions if spec omitted, so be explicit).
+            # Step 4+5: INSERT OVERWRITE into the target partition — atomically
+            # replaces exactly the (processing_date) partition so re-runs never
+            # double-insert. DROP + INSERT INTO was previously used but is not
+            # safe: if DROP fails or a concurrent upload shares the same date,
+            # rows accumulate. INSERT OVERWRITE PARTITION is the safe alternative.
             extra_cols_sql = ',\n                    '.join(extra_cols)
             ok = impala_manager.execute_write(f"""
-                INSERT INTO {db}.{target_table}
+                INSERT OVERWRITE {db}.{target_table}
                 PARTITION (processing_date='{processing_date}')
                 SELECT
                     {stg_col_select},
