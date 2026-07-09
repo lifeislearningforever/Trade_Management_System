@@ -2944,19 +2944,26 @@ class UploadService:
                         s.currency_code,
                         s.src_system            AS s_src_system,
                         -- 1 when this cis_security row also matches the upload exchange.
-                        -- Four ways to match (any one sufficient):
-                        --   1. raw exchange_quoted  vs s.country_of_exchange  (e.g. "HK" = "HK")
-                        --   2. raw exchange_quoted  vs s.exchange_code         (e.g. "HK" = "HK")
-                        --   3. LUT country_of_exchange vs s.country_of_exchange (e.g. "HK" = "HK")
-                        --   4. LUT country_of_exchange vs s.exchange_code       (e.g. "HK" = "HK")
+                        -- exchange_quoted may be "HK HKSE" (country + exchange code space-separated)
+                        -- so we match on: full value, first token (before space), LUT-resolved country
+                        -- against both s.country_of_exchange and s.exchange_code.
                         CASE
                             WHEN (
+                                -- full raw exchange vs security fields
                                 (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
                                  AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
                                 OR
                                 (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
                                  AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
                                 OR
+                                -- first token of exchange_quoted (e.g. "HK" from "HK HKSE")
+                                (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
+                                 AND UPPER(REGEXP_EXTRACT(TRIM(b.`exchange`), '^(\\S+)', 1)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
+                                OR
+                                (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
+                                 AND UPPER(REGEXP_EXTRACT(TRIM(b.`exchange`), '^(\\S+)', 1)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
+                                OR
+                                -- LUT-resolved country vs security fields
                                 (b.country_of_exchange IS NOT NULL AND TRIM(b.country_of_exchange) != ''
                                  AND UPPER(TRIM(b.country_of_exchange)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
                                 OR
@@ -2972,6 +2979,12 @@ class UploadService:
                                 OR
                                 (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
                                  AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
+                                OR
+                                (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
+                                 AND UPPER(REGEXP_EXTRACT(TRIM(b.`exchange`), '^(\\S+)', 1)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
+                                OR
+                                (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
+                                 AND UPPER(REGEXP_EXTRACT(TRIM(b.`exchange`), '^(\\S+)', 1)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
                                 OR
                                 (b.country_of_exchange IS NOT NULL AND TRIM(b.country_of_exchange) != ''
                                  AND UPPER(TRIM(b.country_of_exchange)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
@@ -2993,6 +3006,12 @@ class UploadService:
                                         OR
                                         (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
                                          AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
+                                        OR
+                                        (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
+                                         AND UPPER(REGEXP_EXTRACT(TRIM(b.`exchange`), '^(\\S+)', 1)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
+                                        OR
+                                        (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
+                                         AND UPPER(REGEXP_EXTRACT(TRIM(b.`exchange`), '^(\\S+)', 1)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
                                         OR
                                         (b.country_of_exchange IS NOT NULL AND TRIM(b.country_of_exchange) != ''
                                          AND UPPER(TRIM(b.country_of_exchange)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
