@@ -283,7 +283,7 @@ class TradeKuduRepository:
                 return _cached
 
         try:
-            where_clauses = ["(t.is_deleted = false OR t.is_deleted IS NULL)"]
+            where_clauses = []
 
             if trade_type:
                 where_clauses.append(f"t.trade_type = {self.escape_value(trade_type)}")
@@ -328,7 +328,7 @@ class TradeKuduRepository:
             if settle_date_to:
                 where_clauses.append(f"t.settle_date <= {self.escape_value(settle_date_to)}")
 
-            where_clause = " AND ".join(where_clauses)
+            where_clause = " AND ".join(where_clauses) if where_clauses else "1=1"
 
             query = f"""
             SELECT

@@ -2474,7 +2474,7 @@ class UploadService:
                         NULL                                            AS reits_or_fund_y_n,
                         p1.exchange_quoted                              AS exchange,
                         NULL                                            AS country_code,
-                        exc.country                                     AS country_of_exchange,
+                        exc.country_name                                AS country_of_exchange,
                         NULL                                            AS country_of_incorporation,
                         NULL                                            AS country_of_risk,
                         NULL                                            AS country_of_operation,
@@ -2501,9 +2501,8 @@ class UploadService:
                     LEFT JOIN (
                         SELECT DISTINCT
                             UPPER(TRIM(exchange_name)) AS exchange_name,
-                            country
-                        FROM {db}.gmp_cis_sta_dly_exchange
-                        WHERE processing_date = '{processing_date}'
+                            country_name
+                        FROM {db}.cis_exchange_mapping_lut
                     ) exc
                         ON UPPER(TRIM(p1.exchange_quoted)) = exc.exchange_name
                     WHERE p1.processing_date = '{processing_date}'
