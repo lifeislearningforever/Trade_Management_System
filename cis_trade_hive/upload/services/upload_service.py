@@ -1634,7 +1634,10 @@ class UploadService:
                 impala_manager.execute_write(f"DROP TABLE IF EXISTS {db}.{stg_table}", database=db)
                 return False, f"INSERT from {stg_table} into {target_table} failed — check Impala logs"
 
-            impala_manager.execute_write(f"INVALIDATE METADATA {db}.{target_table}", database=db)
+            impala_manager.execute_write(
+                f"REFRESH {db}.{target_table} PARTITION (processing_date='{processing_date}')",
+                database=db
+            )
 
             # Step 6: Confirm rows landed — filter by processing_date only
             # (src_id is a data column, not a partition key, on these tables)
@@ -2014,7 +2017,7 @@ class UploadService:
             # Step 3: Refresh metadata
             try:
                 impala_manager.execute_write(
-                    f"INVALIDATE METADATA {self.repository.DATABASE}.{target_table}",
+                    f"REFRESH {self.repository.DATABASE}.{target_table}",
                     database=self.repository.DATABASE
                 )
                 logger.info(f"Refreshed metadata for {target_table}")
