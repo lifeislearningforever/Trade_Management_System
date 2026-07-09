@@ -2944,27 +2944,50 @@ class UploadService:
                         s.currency_code,
                         s.src_system            AS s_src_system,
                         -- 1 when this cis_security row also matches the upload exchange
+                        -- Match on: raw exchange value OR resolved country_of_exchange (from LUT)
+                        -- OR security exchange_code — covers cases like HKSE→HK, LSE→GB
                         CASE
-                            WHEN b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                             AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
-                            THEN 1 ELSE 0
+                            WHEN (
+                                (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
+                                 AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
+                                OR
+                                (b.country_of_exchange IS NOT NULL AND TRIM(b.country_of_exchange) != ''
+                                 AND UPPER(TRIM(b.country_of_exchange)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
+                                OR
+                                (b.country_of_exchange IS NOT NULL AND TRIM(b.country_of_exchange) != ''
+                                 AND UPPER(TRIM(b.country_of_exchange)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
+                            ) THEN 1 ELSE 0
                         END AS is_exchange_match,
                         -- How many cis_security rows match isin + exchange for this upload row
                         SUM(CASE
-                            WHEN b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                             AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
-                            THEN 1 ELSE 0
+                            WHEN (
+                                (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
+                                 AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
+                                OR
+                                (b.country_of_exchange IS NOT NULL AND TRIM(b.country_of_exchange) != ''
+                                 AND UPPER(TRIM(b.country_of_exchange)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
+                                OR
+                                (b.country_of_exchange IS NOT NULL AND TRIM(b.country_of_exchange) != ''
+                                 AND UPPER(TRIM(b.country_of_exchange)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
+                            ) THEN 1 ELSE 0
                         END) OVER (PARTITION BY b.row_id) AS cnt_isin_exchange,
                         -- How many cis_security rows match isin alone for this upload row
                         COUNT(s.security_id) OVER (PARTITION BY b.row_id) AS cnt_isin_only,
-                        -- Priority: exact exchange match first, then CIS src, then lowest id
+                        -- Priority: exact exchange match first, then GMP src, then lowest id
                         ROW_NUMBER() OVER (
                             PARTITION BY b.row_id
                             ORDER BY
                                 CASE
-                                    WHEN b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                                     AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
-                                    THEN 0 ELSE 1
+                                    WHEN (
+                                        (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
+                                         AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
+                                        OR
+                                        (b.country_of_exchange IS NOT NULL AND TRIM(b.country_of_exchange) != ''
+                                         AND UPPER(TRIM(b.country_of_exchange)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
+                                        OR
+                                        (b.country_of_exchange IS NOT NULL AND TRIM(b.country_of_exchange) != ''
+                                         AND UPPER(TRIM(b.country_of_exchange)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
+                                    ) THEN 0 ELSE 1
                                 END,
                                 CASE WHEN s.src_system = 'GMP' THEN 0 ELSE 1 END,
                                 s.security_id
@@ -4038,6 +4061,26 @@ class UploadService:
                     COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
                     b.security_short_name,
                     b.isin,
+                    CASE
+                        WHEN p2.portfolio_status LIKE 'FAIL%'  THEN 'FAIL'
+                        WHEN p4.security_status  LIKE 'FAIL%'  THEN 'FAIL'
+                        WHEN s.overall_status    LIKE 'INVALID%' THEN 'FAIL'
+                        WHEN s.overall_status    LIKE 'VALID%'   THEN 'PASS'
+                        ELSE 'FAIL'
+                    END AS row_status,
+                    CASE
+                        WHEN p2.portfolio_status LIKE 'FAIL%'    THEN 'Portfolio not found in cis_portfolio'
+                        WHEN p4.security_status  LIKE 'FAIL%'    THEN p4.security_status
+                        WHEN s.overall_status    LIKE 'INVALID%' THEN s.overall_status
+                        ELSE NULL
+                    END AS fail_reason,
+                    COALESCE(p2.portfolio_status, s.portfolio_status) AS portfolio_status,
+                    COALESCE(p4.security_status,  s.security_status)  AS security_status,
+                    s.price_status,
+                    s.quantity_status,
+                    s.exchange_status,
+                    CAST(s.final_security_id AS STRING) AS matched_security_id,
+                    s.matched_security_name,
                     b.ticker,
                     b.quantity,
                     b.shares_outstanding,
@@ -4080,27 +4123,7 @@ class UploadService:
                     b.reporting_date,
                     b.maturity_date,
                     b.src_system,
-                    b.source_table,
-                    CASE
-                        WHEN p2.portfolio_status LIKE 'FAIL%'  THEN 'FAIL'
-                        WHEN p4.security_status  LIKE 'FAIL%'  THEN 'FAIL'
-                        WHEN s.overall_status    LIKE 'INVALID%' THEN 'FAIL'
-                        WHEN s.overall_status    LIKE 'VALID%'   THEN 'PASS'
-                        ELSE 'FAIL'
-                    END AS row_status,
-                    CASE
-                        WHEN p2.portfolio_status LIKE 'FAIL%'    THEN 'Portfolio not found in cis_portfolio'
-                        WHEN p4.security_status  LIKE 'FAIL%'    THEN p4.security_status
-                        WHEN s.overall_status    LIKE 'INVALID%' THEN s.overall_status
-                        ELSE NULL
-                    END AS fail_reason,
-                    COALESCE(p2.portfolio_status, s.portfolio_status) AS portfolio_status,
-                    COALESCE(p4.security_status,  s.security_status)  AS security_status,
-                    s.price_status,
-                    s.quantity_status,
-                    s.exchange_status,
-                    CAST(s.final_security_id AS STRING) AS matched_security_id,
-                    s.matched_security_name
+                    b.source_table
                 FROM pos_stage_1_base b
                 LEFT JOIN pos_stage_2_portfolio       p2 ON b.row_id = p2.row_id
                 LEFT JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id

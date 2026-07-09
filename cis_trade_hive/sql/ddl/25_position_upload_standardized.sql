@@ -108,11 +108,24 @@ LOCATION '/data/gmp_cis/position_upload_standardized';
 -- 2. REPORT TABLE: position_upload_report
 -- ============================================================================
 CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.position_upload_report (
-    -- Original upload columns (echo back to user)
+    -- Core identifiers
     portfolio                   STRING,
     security_full_name          STRING,
     security_short_name         STRING,
     isin                        STRING,
+
+    -- Validation result columns (immediately after ISIN for quick review)
+    row_status                  STRING  COMMENT 'PASS or FAIL',
+    fail_reason                 STRING  COMMENT 'Null if PASS; detailed reason if FAIL',
+    portfolio_status            STRING  COMMENT 'Step 1 portfolio check result',
+    security_status             STRING  COMMENT 'Step 2 security match result',
+    price_status                STRING  COMMENT 'Step 3 price lookup result',
+    quantity_status             STRING  COMMENT 'Step 4 quantity check result',
+    exchange_status             STRING  COMMENT 'Step 5 exchange check result',
+    matched_security_id         STRING  COMMENT 'Matched security ID (if found)',
+    matched_security_name       STRING  COMMENT 'Matched security name (if found)',
+
+    -- Original upload columns (echo back to user)
     ticker                      STRING,
     quantity                    DECIMAL(30,8),
     shares_outstanding          DECIMAL(30,8),
@@ -155,18 +168,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.position_upload_report (
     reporting_date              STRING,
     maturity_date               STRING,
     src_system                  STRING,
-    source_table                STRING,
-
-    -- Validation result columns
-    row_status                  STRING  COMMENT 'PASS or FAIL',
-    fail_reason                 STRING  COMMENT 'Null if PASS; detailed reason if FAIL',
-    portfolio_status            STRING  COMMENT 'Step 1 portfolio check result',
-    security_status             STRING  COMMENT 'Step 2 security match result',
-    price_status                STRING  COMMENT 'Step 3 price lookup result',
-    quantity_status             STRING  COMMENT 'Step 4 quantity check result',
-    exchange_status             STRING  COMMENT 'Step 5 exchange check result',
-    matched_security_id         STRING  COMMENT 'Matched security ID (if found)',
-    matched_security_name       STRING  COMMENT 'Matched security name (if found)'
+    source_table                STRING
 )
 COMMENT 'Position upload validation report — one row per uploaded row, with PASS/FAIL status'
 PARTITIONED BY (
