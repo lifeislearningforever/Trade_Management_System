@@ -2175,9 +2175,29 @@ class UploadService:
 
             db = 'gmp_cis'
 
+            # ETL steps in order — used to compute % progress for the UI progress bar.
+            _ETL_STEPS = [
+                'Step 0', 'Step 1', 'Step 2', 'Step 3', 'Step 4',
+                'Step 4B', 'Step 5', 'Step 5B', 'Step 6', 'Step 6B',
+                'Step 6C', 'Step 7A', 'Step 7A2', 'Step 7B',
+            ]
+            _step_index = [0]  # mutable counter for closure
+
             def _step_time(label: str, t_start: float) -> float:
                 elapsed = _etl_time.time() - t_start
                 logger.info(f"[position_etl] {label} — {elapsed:.1f}s")
+                _step_index[0] += 1
+                pct = min(int(_step_index[0] / len(_ETL_STEPS) * 100), 95)
+                try:
+                    notify_user(updated_by, EVT_UPLOAD_STEP, {
+                        **_notif_base,
+                        'step':    label,
+                        'elapsed': round(elapsed, 1),
+                        'pct':     pct,
+                        'message': f'{label} ({elapsed:.1f}s)',
+                    })
+                except Exception:
+                    pass
                 return _etl_time.time()
 
             def _count(table: str, where: str = '') -> int:
