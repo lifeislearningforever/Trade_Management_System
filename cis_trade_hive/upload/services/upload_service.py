@@ -2499,10 +2499,27 @@ class UploadService:
                         'python_etl'                                    AS etl_batch_id
                     FROM {db}.cis_user_sta_adhoc_position_1 p1
                     LEFT JOIN (
-                        SELECT DISTINCT
-                            UPPER(TRIM(exchange_name)) AS exchange_name,
-                            country_name
-                        FROM {db}.cis_exchange_mapping_lut
+                        -- Deduplicate LUT: one row per exchange_name.
+                        -- When exchange maps to multiple countries (e.g. LSE→GB, LSE→LU),
+                        -- prefer the country that exists in cis_security; else take MIN.
+                        SELECT
+                            exchange_name,
+                            COALESCE(
+                                MIN(CASE WHEN sec.exchange_code IS NOT NULL THEN lut.country_name END),
+                                MIN(lut.country_name)
+                            ) AS country_name
+                        FROM (
+                            SELECT
+                                UPPER(TRIM(exchange_name)) AS exchange_name,
+                                country_name
+                            FROM {db}.cis_exchange_mapping_lut
+                        ) lut
+                        LEFT JOIN (
+                            SELECT DISTINCT UPPER(TRIM(exchange_code)) AS exchange_code
+                            FROM {db}.cis_security
+                            WHERE is_active = true
+                        ) sec ON lut.country_name = sec.exchange_code
+                        GROUP BY lut.exchange_name
                     ) exc
                         ON UPPER(TRIM(p1.exchange_quoted)) = exc.exchange_name
                     WHERE p1.processing_date = '{processing_date}'
