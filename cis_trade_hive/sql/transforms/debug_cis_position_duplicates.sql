@@ -127,18 +127,58 @@ ORDER BY position_type, is_latest;
 
 
 -- ============================================================================
--- STEP 6: Fix — retire older duplicate rows (keep MAX position_id as latest)
---         Only run after confirming duplicates in STEP 1.
---         Review STEP 3 output first to understand what will be retired.
+-- STEP 6: Fix — retire older duplicate rows (keep MAX position_id per group)
+--         Groups by position_type + portfolio + security_label + position_basis
+--         + position_date. Covers INT, SOD, EOD, CORR all in one pass.
+--
+--         Only run after confirming duplicates in STEP 1 and reviewing STEP 3.
+--         Impala does not support subqueries in UPDATE WHERE — use a temp table.
 -- ============================================================================
--- UPDATE gmp_cis.cis_position
--- SET is_latest = false
--- WHERE position_type = 'INT'
---   AND is_latest     = true
---   AND position_id NOT IN (
---       SELECT MAX(position_id)
---       FROM gmp_cis.cis_position
---       WHERE position_type = 'INT'
---         AND is_latest     = true
---       GROUP BY portfolio, security_label, position_basis, position_date
---   );
+
+-- 6a: Create temp table of position_ids to KEEP (one per natural key group)
+CREATE TABLE gmp_cis.cis_position_dedup_keep
+STORED AS PARQUET AS
+SELECT MAX(position_id) AS keep_id
+FROM gmp_cis.cis_position
+WHERE is_latest = true
+GROUP BY
+    position_type,
+    portfolio,
+    security_label,
+    position_basis,
+    position_date;
+
+-- 6b: Verify — count of rows that will be retired (should match Step 2 total)
+SELECT COUNT(*) AS rows_to_retire
+FROM gmp_cis.cis_position p
+WHERE p.is_latest = true
+  AND p.position_id NOT IN (SELECT keep_id FROM gmp_cis.cis_position_dedup_keep);
+
+-- 6c: Retire duplicate rows — set is_latest=false for all except the keeper
+--     Run only after confirming 6b row count looks correct.
+UPDATE gmp_cis.cis_position p
+SET is_latest = false
+WHERE p.is_latest = true
+  AND p.position_id NOT IN (SELECT keep_id FROM gmp_cis.cis_position_dedup_keep);
+
+-- 6d: Drop temp table
+DROP TABLE IF EXISTS gmp_cis.cis_position_dedup_keep;
+
+-- 6e: Final verify — re-run Step 1 to confirm zero duplicates remain
+SELECT
+    position_type,
+    portfolio,
+    security_label,
+    position_basis,
+    position_date,
+    COUNT(*) AS duplicate_count
+FROM gmp_cis.cis_position
+WHERE is_latest = true
+GROUP BY
+    position_type,
+    portfolio,
+    security_label,
+    position_basis,
+    position_date
+HAVING COUNT(*) > 1
+ORDER BY duplicate_count DESC, portfolio, security_label, position_date;
