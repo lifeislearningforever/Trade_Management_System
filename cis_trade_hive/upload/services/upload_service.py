@@ -2943,13 +2943,19 @@ class UploadService:
                         s.country_of_exchange,
                         s.currency_code,
                         s.src_system            AS s_src_system,
-                        -- 1 when this cis_security row also matches the upload exchange
-                        -- Match on: raw exchange value OR resolved country_of_exchange (from LUT)
-                        -- OR security exchange_code — covers cases like HKSE→HK, LSE→GB
+                        -- 1 when this cis_security row also matches the upload exchange.
+                        -- Four ways to match (any one sufficient):
+                        --   1. raw exchange_quoted  vs s.country_of_exchange  (e.g. "HK" = "HK")
+                        --   2. raw exchange_quoted  vs s.exchange_code         (e.g. "HK" = "HK")
+                        --   3. LUT country_of_exchange vs s.country_of_exchange (e.g. "HK" = "HK")
+                        --   4. LUT country_of_exchange vs s.exchange_code       (e.g. "HK" = "HK")
                         CASE
                             WHEN (
                                 (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
                                  AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
+                                OR
+                                (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
+                                 AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
                                 OR
                                 (b.country_of_exchange IS NOT NULL AND TRIM(b.country_of_exchange) != ''
                                  AND UPPER(TRIM(b.country_of_exchange)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
@@ -2963,6 +2969,9 @@ class UploadService:
                             WHEN (
                                 (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
                                  AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
+                                OR
+                                (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
+                                 AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
                                 OR
                                 (b.country_of_exchange IS NOT NULL AND TRIM(b.country_of_exchange) != ''
                                  AND UPPER(TRIM(b.country_of_exchange)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
@@ -2981,6 +2990,9 @@ class UploadService:
                                     WHEN (
                                         (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
                                          AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
+                                        OR
+                                        (b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
+                                         AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.exchange_code, ''))))
                                         OR
                                         (b.country_of_exchange IS NOT NULL AND TRIM(b.country_of_exchange) != ''
                                          AND UPPER(TRIM(b.country_of_exchange)) = UPPER(TRIM(COALESCE(s.country_of_exchange, ''))))
@@ -4235,6 +4247,15 @@ class UploadService:
                     security_full_name,
                     security_short_name,
                     isin,
+                    row_status,
+                    fail_reason,
+                    portfolio_status,
+                    security_status,
+                    price_status,
+                    quantity_status,
+                    exchange_status,
+                    matched_security_id,
+                    matched_security_name,
                     ticker,
                     quantity,
                     shares_outstanding,
@@ -4277,16 +4298,7 @@ class UploadService:
                     reporting_date,
                     maturity_date,
                     src_system,
-                    source_table,
-                    row_status,
-                    fail_reason,
-                    portfolio_status,
-                    security_status,
-                    price_status,
-                    quantity_status,
-                    exchange_status,
-                    matched_security_id,
-                    matched_security_name
+                    source_table
                 FROM gmp_cis.position_upload_report
                 WHERE src_id = '{src_id}'
                   AND processing_date = '{processing_date}'
