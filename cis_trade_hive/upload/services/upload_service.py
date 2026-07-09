@@ -2965,7 +2965,10 @@ class UploadService:
                     ) sec ON lut.country_name = sec.exchange_code
                     GROUP BY lut.exchange_name
                 ),
-                sec_join AS (
+                -- sec_raw: join base + security + LUT, materialise resolved_country as a column
+                -- so the outer CTE (sec_join) can reference it by name in CASE/window functions.
+                -- Impala does not allow referencing a SELECT alias within the same SELECT list.
+                sec_raw AS (
                     SELECT
                         b.row_id,
                         b.isin                  AS upload_isin,
@@ -2981,48 +2984,7 @@ class UploadService:
                         s.country_of_exchange,
                         s.currency_code,
                         s.src_system            AS s_src_system,
-                        -- Resolved country: use stored country_of_exchange if populated,
-                        -- else fall back to LUT lookup on raw exchange value
-                        COALESCE(b.country_of_exchange, lut.country_name) AS resolved_country,
-                        -- resolved_country = stored country_of_exchange OR LUT lookup on exchange_quoted
-                        -- Use it to match against cis_security.exchange_code or country_of_exchange
-                        CASE
-                            WHEN (
-                                resolved_country IS NOT NULL AND TRIM(resolved_country) != ''
-                                AND (
-                                    UPPER(TRIM(resolved_country)) = UPPER(TRIM(COALESCE(s.exchange_code, '')))
-                                    OR UPPER(TRIM(resolved_country)) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
-                                )
-                            ) THEN 1 ELSE 0
-                        END AS is_exchange_match,
-                        -- How many cis_security rows match isin + exchange for this upload row
-                        SUM(CASE
-                            WHEN (
-                                resolved_country IS NOT NULL AND TRIM(resolved_country) != ''
-                                AND (
-                                    UPPER(TRIM(resolved_country)) = UPPER(TRIM(COALESCE(s.exchange_code, '')))
-                                    OR UPPER(TRIM(resolved_country)) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
-                                )
-                            ) THEN 1 ELSE 0
-                        END) OVER (PARTITION BY b.row_id) AS cnt_isin_exchange,
-                        -- How many cis_security rows match isin alone for this upload row
-                        COUNT(s.security_id) OVER (PARTITION BY b.row_id) AS cnt_isin_only,
-                        -- Priority: exchange match first, then GMP src, then lowest id
-                        ROW_NUMBER() OVER (
-                            PARTITION BY b.row_id
-                            ORDER BY
-                                CASE
-                                    WHEN (
-                                        resolved_country IS NOT NULL AND TRIM(resolved_country) != ''
-                                        AND (
-                                            UPPER(TRIM(resolved_country)) = UPPER(TRIM(COALESCE(s.exchange_code, '')))
-                                            OR UPPER(TRIM(resolved_country)) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
-                                        )
-                                    ) THEN 0 ELSE 1
-                                END,
-                                CASE WHEN s.src_system = 'GMP' THEN 0 ELSE 1 END,
-                                s.security_id
-                        ) AS rn_priority
+                        COALESCE(b.country_of_exchange, lut.country_name) AS resolved_country
                     FROM pos_stage_1_base b
                     JOIN pos_stage_2_portfolio p2
                         ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
@@ -3033,6 +2995,59 @@ class UploadService:
                         AND b.isin = s.isin
                     LEFT JOIN lut_dedup lut
                         ON UPPER(TRIM(b.`exchange`)) = lut.exchange_name
+                ),
+                sec_join AS (
+                    SELECT
+                        row_id,
+                        upload_isin,
+                        security_full_name,
+                        security_short_name,
+                        ticker,
+                        upload_exchange,
+                        portfolio_status,
+                        security_id,
+                        security_name,
+                        s_isin,
+                        exchange_code,
+                        country_of_exchange,
+                        currency_code,
+                        s_src_system,
+                        resolved_country,
+                        CASE
+                            WHEN (
+                                resolved_country IS NOT NULL AND TRIM(resolved_country) != ''
+                                AND (
+                                    UPPER(TRIM(resolved_country)) = UPPER(TRIM(COALESCE(exchange_code, '')))
+                                    OR UPPER(TRIM(resolved_country)) = UPPER(TRIM(COALESCE(country_of_exchange, '')))
+                                )
+                            ) THEN 1 ELSE 0
+                        END AS is_exchange_match,
+                        SUM(CASE
+                            WHEN (
+                                resolved_country IS NOT NULL AND TRIM(resolved_country) != ''
+                                AND (
+                                    UPPER(TRIM(resolved_country)) = UPPER(TRIM(COALESCE(exchange_code, '')))
+                                    OR UPPER(TRIM(resolved_country)) = UPPER(TRIM(COALESCE(country_of_exchange, '')))
+                                )
+                            ) THEN 1 ELSE 0
+                        END) OVER (PARTITION BY row_id) AS cnt_isin_exchange,
+                        COUNT(security_id) OVER (PARTITION BY row_id) AS cnt_isin_only,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY row_id
+                            ORDER BY
+                                CASE
+                                    WHEN (
+                                        resolved_country IS NOT NULL AND TRIM(resolved_country) != ''
+                                        AND (
+                                            UPPER(TRIM(resolved_country)) = UPPER(TRIM(COALESCE(exchange_code, '')))
+                                            OR UPPER(TRIM(resolved_country)) = UPPER(TRIM(COALESCE(country_of_exchange, '')))
+                                        )
+                                    ) THEN 0 ELSE 1
+                                END,
+                                CASE WHEN s_src_system = 'GMP' THEN 0 ELSE 1 END,
+                                security_id
+                        ) AS rn_priority
+                    FROM sec_raw
                 )
                 SELECT
                     row_id,
