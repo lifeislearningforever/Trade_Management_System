@@ -3050,7 +3050,7 @@ class UploadService:
                         WHEN upload_isin IS NULL OR TRIM(upload_isin) = ''
                           OR UPPER(TRIM(upload_isin)) IN ('NA', 'N/A', 'NIL', 'NONE', '-', 'N.A.', 'NAP')
                             THEN 'NO_ISIN'
-                        WHEN cnt_isin_only > 1 AND cnt_isin_exchange != 1
+                        WHEN cnt_isin_only > 1 AND cnt_isin_exchange > 1
                             THEN 'FAIL: Multiple securities found'
                         WHEN cnt_isin_only >= 1
                             THEN 'ISIN_MATCH'
