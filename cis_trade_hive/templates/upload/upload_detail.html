@@ -788,10 +788,14 @@ $(document).ready(function() {
             document.addEventListener('DOMContentLoaded', _hookNotifications);
         }
 
-        // Safety fallback: poll status API every 8s.
-        // Only used if WebSocket/Kudu-poll deliver no events (e.g. first page load).
+        // Safety fallback: poll status API only when WS is not connected.
+        // Skipped entirely when WebSocket is live — avoids redundant HTTP requests.
+        // upload_completed / upload_failed are Kudu-persisted so the Kudu poll in
+        // notifications.js (every 5s) also picks them up cross-worker.
         var _pollTimer = setInterval(function() {
             if (done) { clearInterval(_pollTimer); return; }
+            // Skip poll if WebSocket is connected — events arrive via WS instead
+            if (window.CISNotifications && window.CISNotifications.getState().connected) return;
             fetch("{% url 'upload:api_status' upload.upload_id %}", {credentials: 'same-origin'})
                 .then(function(r) { return r.ok ? r.json() : null; })
                 .then(function(data) {
@@ -803,10 +807,9 @@ $(document).ready(function() {
                         clearInterval(_pollTimer);
                         markComplete(false);
                     }
-                    // Still running — progress bar keeps moving via WebSocket events
                 })
                 .catch(function() { /* network blip — keep polling */ });
-        }, 8000);
+        }, 10000);
     })();
     {% endif %}
 });

@@ -2189,13 +2189,16 @@ class UploadService:
                 _step_index[0] += 1
                 pct = min(int(_step_index[0] / len(_ETL_STEPS) * 100), 95)
                 try:
+                    # persist=False: skip Kudu UPSERT for transient progress ticks.
+                    # WS delivers it instantly; in-memory pending covers same-worker
+                    # fallback. No Impala round-trip in the ETL hot path.
                     notify_user(updated_by, EVT_UPLOAD_STEP, {
                         **_notif_base,
                         'step':    label,
                         'elapsed': round(elapsed, 1),
                         'pct':     pct,
                         'message': f'{label} ({elapsed:.1f}s)',
-                    })
+                    }, persist=False)
                 except Exception:
                     pass
                 return _etl_time.time()

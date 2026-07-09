@@ -133,6 +133,7 @@ def notify_user(
     username: str,
     event_type: str,
     payload: Optional[Dict[str, Any]] = None,
+    persist: bool = True,
 ) -> bool:
     """
     Send a notification to a specific user's WebSocket group.
@@ -143,6 +144,9 @@ def notify_user(
         username:   The CIS username (from queued_by / session user_login).
         event_type: One of the EVT_* constants from constants.py.
         payload:    Arbitrary dict with event-specific data.
+        persist:    If False, skip the Kudu store (use for high-frequency
+                    transient events like upload_step where persistence adds
+                    latency but the data has no value after the event fires).
 
     Returns:
         True if the message was dispatched to the channel layer successfully.
@@ -162,25 +166,27 @@ def notify_user(
     store_pending(username, message)
 
     # 3. Persist to Kudu so the JS polling fallback can deliver it cross-worker.
-    #    This is the reliable path when Gunicorn has multiple workers and no Redis.
-    try:
-        from core.notifications.kudu_store import store as _kudu_store
-        from core.notifications.constants import EVENT_TITLE
-        _kudu_store(
-            username=username,
-            event_type=event_type,
-            severity=message.get('severity', 'info'),
-            title=p.get('title') or EVENT_TITLE.get(event_type) or event_type,
-            message=p.get('message') or p.get('body') or '',
-            payload=p,
-        )
-    except Exception as _kex:
-        logger.debug('Kudu notification store failed (non-fatal): %s', _kex)
+    #    Skipped for transient progress events (persist=False) to avoid adding a
+    #    synchronous Impala round-trip inside the ETL hot path.
+    if persist:
+        try:
+            from core.notifications.kudu_store import store as _kudu_store
+            from core.notifications.constants import EVENT_TITLE
+            _kudu_store(
+                username=username,
+                event_type=event_type,
+                severity=message.get('severity', 'info'),
+                title=p.get('title') or EVENT_TITLE.get(event_type) or event_type,
+                message=p.get('message') or p.get('body') or '',
+                payload=p,
+            )
+        except Exception as _kex:
+            logger.debug('Kudu notification store failed (non-fatal): %s', _kex)
 
     if ok:
-        logger.debug('Notification %s → user %s sent (+ stored pending + kudu).', event_type, username)
+        logger.debug('Notification %s → user %s sent (persist=%s).', event_type, username, persist)
     else:
-        logger.debug('Notification %s → user %s stored pending + kudu (no active WS).', event_type, username)
+        logger.debug('Notification %s → user %s stored pending (persist=%s).', event_type, username, persist)
     return ok
 
 
