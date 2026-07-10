@@ -3045,6 +3045,30 @@ class UploadService:
             if not std_select:
                 return False, f"Unknown src_id '{src_id}' — no standardization mapping defined", result
 
+            # ── Pre-Step 0: INVALIDATE METADATA on the source table so Impala
+            # sees the current HDFS state.  Previous failed/partial runs can leave
+            # the metastore pointing at parquet files that were overwritten or
+            # deleted, causing NoSuchFileException on the very first read.
+            logger.info(f"[position_etl] Pre-Step 0 INVALIDATE METADATA {db}.{src_id} ...")
+            impala_manager.execute_write(f"INVALIDATE METADATA {db}.{src_id}", database=db)
+            impala_manager.execute_write(
+                f"REFRESH {db}.{src_id} PARTITION (processing_date='{processing_date}')",
+                database=db
+            )
+            # Verify the source partition actually has rows before running the ETL.
+            _src_count_rows = impala_manager.execute_query(
+                f"SELECT COUNT(*) AS n FROM {db}.{src_id} WHERE processing_date='{processing_date}'",
+                database=db
+            )
+            _src_count = int((_src_count_rows or [{}])[0].get('n', 0))
+            if _src_count == 0:
+                return False, (
+                    f"Step 0 aborted — source partition {src_id}/"
+                    f"processing_date={processing_date} has 0 rows after INVALIDATE+REFRESH. "
+                    f"The HDFS parquet file may be missing. Re-upload the file first."
+                ), result
+            logger.info(f"[position_etl] Pre-Step 0 source partition confirmed: {_src_count} rows in {src_id}")
+
             # For format 5: replace the gmp_cis_sta_dly_country CTE join entirely.
             # gmp_cis_sta_dly_country is a large Hive external table — even a single
             # partition scan causes 60-150s Impala planning + execution overhead.
