@@ -623,11 +623,15 @@ def _inject_country_case_when(std_select: str, country_map: dict, db: str) -> st
     """
     import re
 
+    def _sql_str(s: str) -> str:
+        """Escape a string for safe embedding in an Impala single-quoted literal."""
+        return s.replace("'", "''").replace("\\", "\\\\")
+
     def _case_expr(col: str) -> str:
         if not country_map:
             return "CAST(NULL AS STRING)"
         branches = '\n'.join(
-            f"        WHEN UPPER(TRIM(CAST({col} AS STRING))) = '{k.replace(chr(39), chr(39)*2)}' THEN '{v.replace(chr(39), chr(39)*2)}'"
+            f"        WHEN UPPER(TRIM(CAST({col} AS STRING))) = '{_sql_str(k)}' THEN '{_sql_str(v)}'"
             for k, v in country_map.items()
         )
         return f"CASE\n{branches}\n        ELSE CAST(NULL AS STRING)\n    END"
@@ -639,30 +643,38 @@ def _inject_country_case_when(std_select: str, country_map: dict, db: str) -> st
         std_select,
         flags=re.DOTALL | re.IGNORECASE,
     )
-    # Replace cn_*.label column references with CASE WHEN literals
+    # Replace cn_*.label column references with CASE WHEN literals.
+    # Use lambda replacements so re.sub never interprets backslashes in the
+    # generated CASE WHEN expression (e.g. country names with \ would otherwise
+    # raise "bad escape" or silently corrupt the output).
+    exc_expr = _case_expr('p5.country_of_exchange')
+    inc_expr = _case_expr('p5.country_of_incorporation')
+    rsk_expr = _case_expr('p5.country_of_risk')
+    opr_expr = _case_expr('p5.country_of_operation')
+
     std_select = re.sub(
         r'cn_exc\.label\s+AS\s+exchange',
-        _case_expr('p5.country_of_exchange') + '  AS exchange',
+        lambda m: exc_expr + '  AS exchange',
         std_select
     )
     std_select = re.sub(
         r'cn_exc\.label\s+AS\s+country_of_exchange',
-        _case_expr('p5.country_of_exchange') + '  AS country_of_exchange',
+        lambda m: exc_expr + '  AS country_of_exchange',
         std_select
     )
     std_select = re.sub(
         r'cn_inc\.label\s+AS\s+country_of_incorporation',
-        _case_expr('p5.country_of_incorporation') + '  AS country_of_incorporation',
+        lambda m: inc_expr + '  AS country_of_incorporation',
         std_select
     )
     std_select = re.sub(
         r'cn_rsk\.label\s+AS\s+country_of_risk',
-        _case_expr('p5.country_of_risk') + '  AS country_of_risk',
+        lambda m: rsk_expr + '  AS country_of_risk',
         std_select
     )
     std_select = re.sub(
         r'cn_opr\.label\s+AS\s+country_of_operation',
-        _case_expr('p5.country_of_operation') + '  AS country_of_operation',
+        lambda m: opr_expr + '  AS country_of_operation',
         std_select
     )
     # Remove the LEFT JOIN country_lut lines
