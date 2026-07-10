@@ -3096,12 +3096,20 @@ class UploadService:
                 return n
 
             # ── Pre-Step 0: resync source upload table ────────────────────────
+            print(f"[position_etl] PRE-STEP-0-A: INVALIDATE {src_id}", flush=True)
+            logger.info(f"[position_etl] PRE-STEP-0-A: INVALIDATE {src_id}")
             _hive_invalidate(src_id, "Pre-Step 0")
+
+            print(f"[position_etl] PRE-STEP-0-B: REFRESH PARTITION {src_id}", flush=True)
+            logger.info(f"[position_etl] PRE-STEP-0-B: REFRESH PARTITION {src_id}")
             _hive_refresh_partition(
                 src_id,
                 f"processing_date='{processing_date}'",
                 "Pre-Step 0"
             )
+
+            print(f"[position_etl] PRE-STEP-0-C: COUNT check {src_id}", flush=True)
+            logger.info(f"[position_etl] PRE-STEP-0-C: COUNT check {src_id}")
             try:
                 _hive_check_rows(
                     src_id,
@@ -3113,6 +3121,8 @@ class UploadService:
                 )
             except RuntimeError as _pre_err:
                 return False, str(_pre_err), result
+            print(f"[position_etl] PRE-STEP-0-DONE: source partition confirmed", flush=True)
+            logger.info(f"[position_etl] PRE-STEP-0-DONE: source partition confirmed")
 
             # For format 5: replace the gmp_cis_sta_dly_country CTE join entirely.
             # gmp_cis_sta_dly_country is a large Hive external table — even a single
@@ -3125,24 +3135,32 @@ class UploadService:
                 try:
                     import time as _ct
                     _ct0 = _ct.time()
-                    # Refresh gmp_cis_sta_dly_country before reading — it's a Hive
-                    # external table and stale metadata causes NoSuchFileException.
+                    print(f"[position_etl] COUNTRY-A: REFRESH gmp_cis_sta_dly_country", flush=True)
+                    logger.info(f"[position_etl] COUNTRY-A: REFRESH gmp_cis_sta_dly_country")
                     _hive_refresh_table('gmp_cis_sta_dly_country', "Step 0 (country map)")
-                    logger.info(f"[position_etl] Step 0 fetching country map from gmp_cis_sta_dly_country ...")
+                    print(f"[position_etl] COUNTRY-B: fetching country map ...", flush=True)
+                    logger.info(f"[position_etl] COUNTRY-B: fetching country map ...")
                     _country_map = _build_country_map_for_format5(
                         impala_manager, db, processing_date, src_id
                     )
-                    logger.info(f"[position_etl] Step 0 country map done in {_ct.time()-_ct0:.1f}s — {len(_country_map)} entries")
+                    print(f"[position_etl] COUNTRY-C: map done {_ct.time()-_ct0:.1f}s — {len(_country_map)} entries", flush=True)
+                    logger.info(f"[position_etl] COUNTRY-C: map done in {_ct.time()-_ct0:.1f}s — {len(_country_map)} entries")
                     if _country_map:
+                        print(f"[position_etl] COUNTRY-D: injecting CASE WHEN ...", flush=True)
+                        logger.info(f"[position_etl] COUNTRY-D: injecting CASE WHEN ...")
                         std_select = _inject_country_case_when(std_select, _country_map, db)
-                        logger.info(f"[position_etl] Step 0 country CTE replaced with CASE WHEN literals ({len(_country_map)} keys)")
+                        print(f"[position_etl] COUNTRY-E: inject done — {len(_country_map)} keys, SQL len={len(std_select)}", flush=True)
+                        logger.info(f"[position_etl] COUNTRY-E: inject done — {len(_country_map)} keys, SQL len={len(std_select)}")
                     else:
-                        logger.warning(f"[position_etl] Step 0 country map is EMPTY — country fields will be NULL")
+                        print(f"[position_etl] COUNTRY-EMPTY: country map empty — fields will be NULL", flush=True)
+                        logger.warning(f"[position_etl] COUNTRY-EMPTY: country map empty — country fields will be NULL")
                 except Exception as _ce:
-                    logger.error(f"[position_etl] Step 0 country map/inject FAILED — aborting ETL to avoid 400s hang on CTE: {_ce}", exc_info=True)
+                    print(f"[position_etl] COUNTRY-FAIL: {_ce}", flush=True)
+                    logger.error(f"[position_etl] COUNTRY-FAIL — aborting ETL: {_ce}", exc_info=True)
                     return False, f"Step 0 country lookup failed: {_ce}", result
 
             _t = _etl_t0
+            print(f"[position_etl] STEP-0-INSERT: starting INSERT OVERWRITE position_upload_standardized SQL_LEN={len(std_select)}", flush=True)
             logger.info(f"[position_etl] Step 0 starting — INSERT OVERWRITE position_upload_standardized for {src_id}")
             logger.info(f"[position_etl] Step 0 SQL length={len(std_select)} chars — submitting to Impala now ...")
             ok = impala_manager.execute_write(
