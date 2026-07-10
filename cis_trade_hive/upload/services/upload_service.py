@@ -627,7 +627,7 @@ def _inject_country_case_when(std_select: str, country_map: dict, db: str) -> st
         if not country_map:
             return "CAST(NULL AS STRING)"
         branches = '\n'.join(
-            f"        WHEN UPPER(TRIM(CAST({col} AS STRING))) = '{k}' THEN '{v}'"
+            f"        WHEN UPPER(TRIM(CAST({col} AS STRING))) = '{k.replace(chr(39), chr(39)*2)}' THEN '{v.replace(chr(39), chr(39)*2)}'"
             for k, v in country_map.items()
         )
         return f"CASE\n{branches}\n        ELSE CAST(NULL AS STRING)\n    END"
