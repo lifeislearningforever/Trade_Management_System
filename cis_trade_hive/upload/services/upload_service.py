@@ -3124,6 +3124,9 @@ class UploadService:
             print(f"[position_etl] PRE-STEP-0-DONE: source partition confirmed", flush=True)
             logger.info(f"[position_etl] PRE-STEP-0-DONE: source partition confirmed")
 
+            print(f"[position_etl] SRC-ID-CHECK: src_id={repr(src_id)} match={src_id == 'cis_user_sta_adhoc_position_5'} std_select_len={len(std_select)}", flush=True)
+            logger.info(f"[position_etl] SRC-ID-CHECK: src_id={repr(src_id)} match={src_id == 'cis_user_sta_adhoc_position_5'} std_select_len={len(std_select)}")
+
             # For format 5: replace the gmp_cis_sta_dly_country CTE join entirely.
             # gmp_cis_sta_dly_country is a large Hive external table — even a single
             # partition scan causes 60-150s Impala planning + execution overhead.
@@ -3160,8 +3163,12 @@ class UploadService:
                     return False, f"Step 0 country lookup failed: {_ce}", result
 
             _t = _etl_t0
-            print(f"[position_etl] STEP-0-INSERT: starting INSERT OVERWRITE position_upload_standardized SQL_LEN={len(std_select)}", flush=True)
-            logger.info(f"[position_etl] Step 0 starting — INSERT OVERWRITE position_upload_standardized for {src_id}")
+            print(f"[position_etl] STEP-0-INSERT: starting INSERT OVERWRITE SQL_LEN={len(std_select)}", flush=True)
+            logger.info(f"[position_etl] STEP-0-INSERT: starting INSERT OVERWRITE SQL_LEN={len(std_select)}")
+            # Log first 500 chars of std_select so we can confirm CTE is/isn't present
+            _std_head = std_select.strip()[:500].replace('\n', ' ')
+            print(f"[position_etl] STD-SELECT-HEAD: {_std_head}", flush=True)
+            logger.info(f"[position_etl] STD-SELECT-HEAD: {_std_head}")
             logger.info(f"[position_etl] Step 0 SQL length={len(std_select)} chars — submitting to Impala now ...")
             ok = impala_manager.execute_write(
                 f"""
