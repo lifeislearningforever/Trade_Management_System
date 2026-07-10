@@ -788,28 +788,40 @@ $(document).ready(function() {
             document.addEventListener('DOMContentLoaded', _hookNotifications);
         }
 
-        // Safety fallback: poll status API only when WS is not connected.
-        // Skipped entirely when WebSocket is live — avoids redundant HTTP requests.
-        // upload_completed / upload_failed are Kudu-persisted so the Kudu poll in
-        // notifications.js (every 5s) also picks them up cross-worker.
+        // Progress simulation + completion poll.
+        // ETL runs in a background thread on the server — in multi-worker deployments
+        // (Gunicorn/CML) the WS connection may be on a different worker than the ETL
+        // thread, so upload_step WS events are often not delivered. We always poll the
+        // status API every 3 s to:
+        //   1. Detect COMPLETED / FAILED → trigger markComplete()
+        //   2. Advance a simulated progress bar so the user sees movement (not stuck at 5%)
+        // WS events (if they do arrive) still override the simulated % via _onNotif().
+        var _simPct = 5;   // current simulated progress; WS events may jump it higher
         var _pollTimer = setInterval(function() {
             if (done) { clearInterval(_pollTimer); return; }
-            // Skip poll if WebSocket is connected — events arrive via WS instead
-            if (window.CISNotifications && window.CISNotifications.getState().connected) return;
             fetch("{% url 'upload:api_status' upload.upload_id %}", {credentials: 'same-origin'})
                 .then(function(r) { return r.ok ? r.json() : null; })
                 .then(function(data) {
-                    if (!data) return;
+                    if (!data || done) return;
                     if (data.status === 'COMPLETED') {
                         clearInterval(_pollTimer);
                         markComplete(true);
                     } else if (data.status === 'FAILED' || data.status === 'VALIDATION_FAILED') {
                         clearInterval(_pollTimer);
                         markComplete(false);
+                    } else if (data.status === 'INGESTING') {
+                        // Advance simulated bar: slow approach toward 90%, never reaches it
+                        // unless a WS step event pushes it higher.
+                        var barNow = parseFloat(bar ? bar.style.width : '5') || _simPct;
+                        if (barNow < 90) {
+                            // Each tick: close 12% of remaining gap (logarithmic feel)
+                            _simPct = Math.min(90, barNow + (90 - barNow) * 0.12);
+                            setProgress(_simPct, stepLabel ? stepLabel.textContent : '', '');
+                        }
                     }
                 })
                 .catch(function() { /* network blip — keep polling */ });
-        }, 10000);
+        }, 3000);
     })();
     {% endif %}
 });
