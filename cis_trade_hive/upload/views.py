@@ -1136,6 +1136,7 @@ def upload_detail(request, upload_id: str):
     # For position uploads: query the actual Hive partition count so the
     # detail page shows the real row count regardless of what Kudu stores.
     hive_row_count = None
+    etl_passed = etl_failed = etl_total = None
     _pd2 = None
     if is_position_upload:
         try:
@@ -1153,6 +1154,24 @@ def upload_detail(request, upload_id: str):
                 )
                 hive_row_count = int(_cnt[0].get('cnt', 0)) if _cnt else None
                 logger.info(f"[detail] hive_row_count={hive_row_count} for {_tgt} pd={_pd2}")
+            # If ETL has run, fetch pass/fail counts from position_upload_report
+            if _tgt and _pd2 and upload_status in [
+                UploadKuduRepository.STATUS_ETL_COMPLETE,
+                UploadKuduRepository.STATUS_ETL_RUNNING,
+                UploadKuduRepository.STATUS_FAILED,
+            ]:
+                _rpt = _imp2.execute_query(
+                    f"SELECT COUNT(*) AS total, "
+                    f"SUM(CASE WHEN row_status='PASS' THEN 1 ELSE 0 END) AS passed, "
+                    f"SUM(CASE WHEN row_status='FAIL' THEN 1 ELSE 0 END) AS failed "
+                    f"FROM gmp_cis.position_upload_report "
+                    f"WHERE src_id='{_tgt}' AND processing_date='{_pd2}'",
+                    database='gmp_cis'
+                )
+                if _rpt:
+                    etl_total  = int(_rpt[0].get('total',  0) or 0)
+                    etl_passed = int(_rpt[0].get('passed', 0) or 0)
+                    etl_failed = int(_rpt[0].get('failed', 0) or 0)
         except Exception as _hce:
             logger.warning(f"[detail] Could not count Hive rows: {_hce}")
 
@@ -1161,6 +1180,9 @@ def upload_detail(request, upload_id: str):
         'schema': schema,
         'sample_data': sample_data[:10],
         'hive_row_count': hive_row_count,
+        'etl_passed': etl_passed,
+        'etl_failed': etl_failed,
+        'etl_total': etl_total,
         'validation_errors': validation_errors,
         'table_preview': table_preview,
         'recon_data': recon_data,
@@ -1444,16 +1466,21 @@ def run_position_etl(request, upload_id: str):
             # Read current record to preserve user's original description
             _rec = upload_service.repository.get_upload_by_id(upload_id)
             _orig_desc = (_rec or {}).get('description', '') or ''
+            _total   = result.get('total', 0)
+            _passed  = result.get('passed', 0)
+            _failed  = result.get('failed', 0)
             if ok:
                 _etl_note = (
-                    f"ETL complete: {result.get('passed', 0)}/{result.get('total', 0)} passed"
-                    f" [{_src_id} processing_date={_proc_date}]"
+                    f"Position ETL: {_passed}/{_total} rows → cis_position"
+                    + (f" | {_failed} failed validation (see Download Report)" if _failed else "")
                 )
                 _new_desc = f"{_orig_desc}\n{_etl_note}".strip() if _orig_desc else _etl_note
                 upload_service.repository.update_upload(
                     upload_id,
-                    {'status': UploadKuduRepository.STATUS_ETL_COMPLETE,
-                     'description': _new_desc[:2000]},
+                    {
+                        'status': UploadKuduRepository.STATUS_ETL_COMPLETE,
+                        'description': _new_desc[:2000],
+                    },
                     _username
                 )
                 audit_log_kudu_repository.log_action(
