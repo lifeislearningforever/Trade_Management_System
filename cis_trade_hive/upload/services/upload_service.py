@@ -2706,20 +2706,20 @@ class UploadService:
                         NULL                                                AS security_short_name,
                         {clean_isin('isin_code')}                           AS isin,
                         {clean_ticker('ticker_code')}                       AS ticker,
-                        {safe_decimal('quantity', 'DECIMAL(30,8)')} AS quantity,
-                        {safe_decimal('no_of_shares_issues_by_the_company', 'DECIMAL(30,8)')} AS shares_outstanding,
-                        {safe_decimal('no_of_shares_issues_by_the_company', 'DECIMAL(30,8)')} AS shares_issued,
-                        {safe_decimal('pct_holdings', 'DECIMAL(10,6)')} AS pct_holding,
+                        CAST(quantity AS DECIMAL(30,8))                     AS quantity,
+                        CAST(no_of_shares_issues_by_the_company AS DECIMAL(30,8)) AS shares_outstanding,
+                        CAST(no_of_shares_issues_by_the_company AS DECIMAL(30,8)) AS shares_issued,
+                        CAST(pct_holdings AS DECIMAL(10,6))                 AS pct_holding,
                         CAST(NULL AS DECIMAL(30,8))                         AS market_price,
                         CAST(NULL AS DECIMAL(30,8))                         AS average_cost,
-                        {safe_decimal('cost_fc', 'DECIMAL(30,8)')} AS cost_fc,
+                        CAST(cost_fc AS DECIMAL(30,8))                      AS cost_fc,
                         CAST(NULL AS DECIMAL(30,8))                         AS market_value_fc,
-                        {safe_decimal('net_book_value_fc', 'DECIMAL(30,8)')} AS net_book_value_fc,
+                        CAST(net_book_value_fc AS DECIMAL(30,8))            AS net_book_value_fc,
                         CAST(NULL AS DECIMAL(30,8))                         AS unrealized_pnl_fc,
                         CAST(NULL AS DECIMAL(30,8))                         AS provision_fc,
-                        {safe_decimal('cost_lc', 'DECIMAL(30,8)')} AS cost_lc,
+                        CAST(cost_lc AS DECIMAL(30,8))                      AS cost_lc,
                         CAST(NULL AS DECIMAL(30,8))                         AS market_value_lc,
-                        {safe_decimal('net_book_value_lc', 'DECIMAL(30,8)')} AS net_book_value_lc,
+                        CAST(net_book_value_lc AS DECIMAL(30,8))            AS net_book_value_lc,
                         CAST(NULL AS DECIMAL(30,8))                         AS unrealized_pnl_lc,
                         CAST(NULL AS DECIMAL(30,8))                         AS provision_lc,
                         product_type                                        AS product_type,
@@ -2772,6 +2772,8 @@ class UploadService:
                         -- One row per full_name (deduped). If a country name maps to
                         -- multiple labels (e.g. 'United Kingdom' → 'GB' and 'UK'),
                         -- keep MIN(label) to avoid fan-out duplicates on the JOIN.
+                        -- NOTE: processing_date is injected as a literal by the pre-resolve
+                        -- step above (MAX(processing_date) resolved before plan compilation).
                         SELECT UPPER(TRIM(full_name)) AS full_name, MIN(label) AS label
                         FROM {db}.gmp_cis_sta_dly_country
                         WHERE processing_date = (
@@ -2785,22 +2787,22 @@ class UploadService:
                         NULL                                               AS security_short_name,
                         {clean_isin('p5.isin_code')}                       AS isin,
                         {clean_ticker('p5.ticker_code')}                   AS ticker,
-                        {safe_decimal('p5.quantity', 'DECIMAL(30,8)')} AS quantity,
-                        {safe_decimal('p5.no_of_shares_issues_by_the_company', 'DECIMAL(30,8)')} AS shares_outstanding,
-                        {safe_decimal('p5.no_of_shares_issues_by_the_company', 'DECIMAL(30,8)')} AS shares_issued,
-                        {safe_decimal('p5.pct_holdings', 'DECIMAL(10,6)')} AS pct_holding,
-                        {safe_decimal('p5.market_price_unit_fc', 'DECIMAL(30,8)')} AS market_price,
-                        {safe_decimal('p5.unit_avg_cost_unit_fc', 'DECIMAL(30,8)')} AS average_cost,
-                        {safe_decimal('p5.cost_fc', 'DECIMAL(30,8)')} AS cost_fc,
-                        {safe_decimal('p5.market_value_fc', 'DECIMAL(30,8)')} AS market_value_fc,
-                        {safe_decimal('p5.net_book_value_fc', 'DECIMAL(30,8)')} AS net_book_value_fc,
-                        {safe_decimal('p5.unrealised_gain_loss_fc', 'DECIMAL(30,8)')} AS unrealized_pnl_fc,
-                        {safe_decimal('p5.provision_fc', 'DECIMAL(30,8)')} AS provision_fc,
-                        {safe_decimal('p5.cost_lc', 'DECIMAL(30,8)')} AS cost_lc,
-                        {safe_decimal('p5.market_value_lc', 'DECIMAL(30,8)')} AS market_value_lc,
-                        {safe_decimal('p5.net_book_value_lc', 'DECIMAL(30,8)')} AS net_book_value_lc,
-                        {safe_decimal('p5.unrealised_gain_loss_lc', 'DECIMAL(30,8)')} AS unrealized_pnl_lc,
-                        {safe_decimal('p5.provision_lc', 'DECIMAL(30,8)')} AS provision_lc,
+                        CAST(p5.quantity AS DECIMAL(30,8))                 AS quantity,
+                        CAST(p5.no_of_shares_issues_by_the_company AS DECIMAL(30,8)) AS shares_outstanding,
+                        CAST(p5.no_of_shares_issues_by_the_company AS DECIMAL(30,8)) AS shares_issued,
+                        CAST(p5.pct_holdings AS DECIMAL(10,6))             AS pct_holding,
+                        CAST(p5.market_price_unit_fc AS DECIMAL(30,8))     AS market_price,
+                        CAST(p5.unit_avg_cost_unit_fc AS DECIMAL(30,8))    AS average_cost,
+                        CAST(p5.cost_fc AS DECIMAL(30,8))                  AS cost_fc,
+                        CAST(p5.market_value_fc AS DECIMAL(30,8))          AS market_value_fc,
+                        CAST(p5.net_book_value_fc AS DECIMAL(30,8))        AS net_book_value_fc,
+                        CAST(p5.unrealised_gain_loss_fc AS DECIMAL(30,8))  AS unrealized_pnl_fc,
+                        CAST(p5.provision_fc AS DECIMAL(30,8))             AS provision_fc,
+                        CAST(p5.cost_lc AS DECIMAL(30,8))                  AS cost_lc,
+                        CAST(p5.market_value_lc AS DECIMAL(30,8))          AS market_value_lc,
+                        CAST(p5.net_book_value_lc AS DECIMAL(30,8))        AS net_book_value_lc,
+                        CAST(p5.unrealised_gain_loss_lc AS DECIMAL(30,8))  AS unrealized_pnl_lc,
+                        CAST(p5.provision_lc AS DECIMAL(30,8))             AS provision_lc,
                         p5.product_type, p5.security_type, p5.quoted_unquoted, p5.industry,
                         NULL                                               AS fin_nonfin_co,
                         p5.issuer_type, p5.reits_or_fund_y_n,
@@ -2843,6 +2845,25 @@ class UploadService:
             std_select = STANDARDIZE_SELECT.get(src_id)
             if not std_select:
                 return False, f"Unknown src_id '{src_id}' — no standardization mapping defined", result
+
+            # For format 5: pre-resolve MAX(processing_date) from gmp_cis_sta_dly_country
+            # so the CTE uses a literal date string instead of a correlated subquery.
+            # This eliminates a full Hive metastore scan inside the INSERT plan.
+            if src_id == 'cis_user_sta_adhoc_position_5':
+                try:
+                    _cdate_rows = impala_manager.execute_query(
+                        f"SELECT MAX(processing_date) AS max_pd FROM {db}.gmp_cis_sta_dly_country",
+                        database=db
+                    )
+                    _cdate = (_cdate_rows or [{}])[0].get('max_pd', '')
+                    if _cdate:
+                        std_select = std_select.replace(
+                            f"SELECT MAX(processing_date) FROM {db}.gmp_cis_sta_dly_country",
+                            f"'{_cdate}'"
+                        )
+                        logger.info(f"[position_etl] Step 0 country_lut date resolved: {_cdate}")
+                except Exception as _ce:
+                    logger.warning(f"[position_etl] Step 0 country date pre-resolve failed (non-fatal): {_ce}")
 
             _t = _etl_t0
             logger.info(f"[position_etl] Step 0 starting — INSERT OVERWRITE position_upload_standardized for {src_id}")
