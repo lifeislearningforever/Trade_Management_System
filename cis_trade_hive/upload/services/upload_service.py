@@ -2346,7 +2346,6 @@ class UploadService:
             Tuple of (success, message, result_dict)
         """
         logger.info(f"[position_etl] run_position_etl ENTERED src_id={src_id} date={processing_date} user={updated_by}")
-        print(f"[position_etl] run_position_etl ENTERED src_id={src_id} date={processing_date}", flush=True)
 
         from core.repositories.impala_connection import impala_manager
         from core.notifications import notify_user, notify_admins
@@ -3096,11 +3095,9 @@ class UploadService:
                 return n
 
             # ── Pre-Step 0: resync source upload table ────────────────────────
-            print(f"[position_etl] PRE-STEP-0-A: INVALIDATE {src_id}", flush=True)
             logger.info(f"[position_etl] PRE-STEP-0-A: INVALIDATE {src_id}")
             _hive_invalidate(src_id, "Pre-Step 0")
 
-            print(f"[position_etl] PRE-STEP-0-B: REFRESH PARTITION {src_id}", flush=True)
             logger.info(f"[position_etl] PRE-STEP-0-B: REFRESH PARTITION {src_id}")
             _hive_refresh_partition(
                 src_id,
@@ -3108,7 +3105,6 @@ class UploadService:
                 "Pre-Step 0"
             )
 
-            print(f"[position_etl] PRE-STEP-0-C: COUNT check {src_id}", flush=True)
             logger.info(f"[position_etl] PRE-STEP-0-C: COUNT check {src_id}")
             try:
                 _hive_check_rows(
@@ -3121,10 +3117,7 @@ class UploadService:
                 )
             except RuntimeError as _pre_err:
                 return False, str(_pre_err), result
-            print(f"[position_etl] PRE-STEP-0-DONE: source partition confirmed", flush=True)
             logger.info(f"[position_etl] PRE-STEP-0-DONE: source partition confirmed")
-
-            print(f"[position_etl] SRC-ID-CHECK: src_id={repr(src_id)} match={src_id == 'cis_user_sta_adhoc_position_5'} std_select_len={len(std_select)}", flush=True)
             logger.info(f"[position_etl] SRC-ID-CHECK: src_id={repr(src_id)} match={src_id == 'cis_user_sta_adhoc_position_5'} std_select_len={len(std_select)}")
 
             # For format 5: replace the gmp_cis_sta_dly_country CTE join entirely.
@@ -3145,16 +3138,13 @@ class UploadService:
                     import time as _ct
                     _ct0 = _ct.time()
                     _t = _etl_t0
-                    print(f"[position_etl] F5-STEP0-A: REFRESH gmp_cis_sta_dly_country", flush=True)
                     logger.info(f"[position_etl] F5-STEP0-A: REFRESH gmp_cis_sta_dly_country")
                     _hive_refresh_table('gmp_cis_sta_dly_country', "Step 0 (country map)")
 
-                    print(f"[position_etl] F5-STEP0-B: fetching country map", flush=True)
                     logger.info(f"[position_etl] F5-STEP0-B: fetching country map")
                     _country_map = _build_country_map_for_format5(
                         impala_manager, db, processing_date, src_id
                     )
-                    print(f"[position_etl] F5-STEP0-C: country map {len(_country_map)} keys in {_ct.time()-_ct0:.1f}s", flush=True)
                     logger.info(f"[position_etl] F5-STEP0-C: country map {len(_country_map)} keys in {_ct.time()-_ct0:.1f}s")
 
                     def _resolve_country(raw_val):
@@ -3182,7 +3172,6 @@ class UploadService:
                         m = _re.match(r'^-?[0-9]+\.?[0-9]*([eE][+-]?[0-9]+)?$', s)
                         return s if m else 'NULL'
 
-                    print(f"[position_etl] F5-STEP0-D: reading source rows from {src_id}", flush=True)
                     logger.info(f"[position_etl] F5-STEP0-D: reading source rows from {src_id}")
                     _src_rows = impala_manager.execute_query(
                         f"""
@@ -3193,7 +3182,6 @@ class UploadService:
                         """,
                         database=db
                     ) or []
-                    print(f"[position_etl] F5-STEP0-E: {len(_src_rows)} source rows fetched", flush=True)
                     logger.info(f"[position_etl] F5-STEP0-E: {len(_src_rows)} source rows fetched")
 
                     if not _src_rows:
@@ -3259,7 +3247,6 @@ class UploadService:
                         )""")
 
                     _values_sql = ',\n'.join(_val_rows)
-                    print(f"[position_etl] F5-STEP0-F: INSERT {len(_val_rows)} rows via VALUES", flush=True)
                     logger.info(f"[position_etl] F5-STEP0-F: INSERT {len(_val_rows)} rows via VALUES")
                     ok = impala_manager.execute_write(
                         f"""
@@ -3276,14 +3263,12 @@ class UploadService:
                         database=db
                     )
                     std_rows = len(_val_rows)
-                    print(f"[position_etl] F5-STEP0-DONE: {std_rows} rows in {_ct.time()-_ct0:.1f}s total", flush=True)
                     logger.info(f"[position_etl] F5-STEP0-DONE: {std_rows} rows in {_ct.time()-_ct0:.1f}s total")
                     _t = _step_time("Step 0 (F5 python-resolve+insert)", _t)
                     if std_rows == 0:
                         return False, "Step 0 (F5) produced 0 rows", result
 
                 except Exception as _f5e:
-                    print(f"[position_etl] F5-STEP0-FAIL: {_f5e}", flush=True)
                     logger.error(f"[position_etl] F5-STEP0-FAIL: {_f5e}", exc_info=True)
                     return False, f"Step 0 (F5) failed: {_f5e}", result
 
