@@ -2102,93 +2102,26 @@ class UploadService:
 
 def _build_country_map_for_format5(impala_manager, db: str, processing_date: str, src_id: str) -> dict:
     """
-    Build a country name → code mapping for the format-5 upload partition.
+    Fetch the complete country name → code mapping from gmp_cis_sta_dly_country.
 
-    Strategy (avoids full gmp_cis_sta_dly_country table scan):
-    1. Fetch the distinct country name values from the upload's small partition
-       (3-100 rows × 4 country columns = at most 12 distinct names).
-    2. Look them up in gmp_cis_sta_dly_country using WHERE IN(<12 literals>) +
-       WHERE processing_date = <latest known date from partition pruning>.
-       Because the IN list is tiny, Impala prunes to only the matching rows
-       rather than full-scanning the partition.
+    The table has only ~247 rows total — fetch all of them once into Python,
+    build a dict, then inject as CASE WHEN literals so the INSERT plan has
+    zero references to gmp_cis_sta_dly_country.
 
-    Returns dict: {UPPER(TRIM(country_full_name)): country_code_label}
+    Returns dict: {UPPER(TRIM(full_name)): label}
     """
-    # Step 1: collect distinct country names from the upload rows (fast — small partition)
-    raw_rows = impala_manager.execute_query(
+    rows = impala_manager.execute_query(
         f"""
-        SELECT DISTINCT
-            UPPER(TRIM(CAST(country_of_exchange      AS STRING))) AS c1,
-            UPPER(TRIM(CAST(country_of_incorporation AS STRING))) AS c2,
-            UPPER(TRIM(CAST(country_of_risk          AS STRING))) AS c3,
-            UPPER(TRIM(CAST(country_of_operation     AS STRING))) AS c4
-        FROM {db}.cis_user_sta_adhoc_position_5
-        WHERE processing_date = '{processing_date}'
-          AND src_id = '{src_id}'
+        SELECT UPPER(TRIM(full_name)) AS full_name, MIN(label) AS label
+        FROM {db}.gmp_cis_sta_dly_country
+        WHERE processing_date = (
+            SELECT MAX(processing_date) FROM {db}.gmp_cis_sta_dly_country
+        )
+        GROUP BY UPPER(TRIM(full_name))
         """,
         database=db
     ) or []
-
-    distinct_names = set()
-    _skip = {'NA', 'N/A', 'NIL', 'NONE', '-', 'NULL', 'N.A.', 'NAP', ''}
-    for r in raw_rows:
-        for col in ('c1', 'c2', 'c3', 'c4'):
-            v = (r.get(col) or '').strip()
-            if v and v.upper() not in _skip:
-                distinct_names.add(v)
-
-    if not distinct_names:
-        return {}
-
-    logger.info(f"[position_etl] country map: resolving {len(distinct_names)} distinct names: {distinct_names}")
-
-    # Step 2: look up only those names in gmp_cis_sta_dly_country.
-    # Use the latest partition date from gmp_cis_sta_dly_country's own partition metadata
-    # (SHOW PARTITIONS — fast metadata-only call, no data scan).
-    max_pd = ''
-    try:
-        pd_rows = impala_manager.execute_query(
-            f"SHOW PARTITIONS {db}.gmp_cis_sta_dly_country",
-            database=db
-        ) or []
-        # SHOW PARTITIONS returns rows with a 'processing_date' column or '#Rows' etc.
-        # Extract max date from the first column of each row.
-        dates = []
-        for pr in pd_rows:
-            v = list(pr.values())[0] if pr else ''
-            if isinstance(v, str) and len(v) == 8 and v.isdigit():
-                dates.append(v)
-        if dates:
-            max_pd = max(dates)
-    except Exception as _pe:
-        logger.debug(f"[position_etl] SHOW PARTITIONS failed: {_pe}")
-
-    in_clause = ', '.join(f"'{n.replace(chr(39), chr(39)*2)}'" for n in distinct_names)
-
-    if max_pd:
-        lookup_rows = impala_manager.execute_query(
-            f"""
-            SELECT UPPER(TRIM(full_name)) AS full_name, MIN(label) AS label
-            FROM {db}.gmp_cis_sta_dly_country
-            WHERE processing_date = '{max_pd}'
-              AND UPPER(TRIM(full_name)) IN ({in_clause})
-            GROUP BY UPPER(TRIM(full_name))
-            """,
-            database=db
-        ) or []
-    else:
-        # Fallback: no partition date — scan with IN filter only (still much faster than full scan)
-        lookup_rows = impala_manager.execute_query(
-            f"""
-            SELECT UPPER(TRIM(full_name)) AS full_name, MIN(label) AS label
-            FROM {db}.gmp_cis_sta_dly_country
-            WHERE UPPER(TRIM(full_name)) IN ({in_clause})
-            GROUP BY UPPER(TRIM(full_name))
-            """,
-            database=db
-        ) or []
-
-    return {r['full_name']: r['label'] for r in lookup_rows if r.get('full_name') and r.get('label')}
+    return {r['full_name']: r['label'] for r in rows if r.get('full_name') and r.get('label')}
 
 
 def _inject_country_case_when(std_select: str, country_map: dict, db: str) -> str:
@@ -3011,10 +2944,13 @@ def _inject_country_case_when(std_select: str, country_map: dict, db: str) -> st
             # so no Hive table join exists in the plan at all.
             if src_id == 'cis_user_sta_adhoc_position_5':
                 try:
+                    import time as _ct
+                    _ct0 = _ct.time()
+                    logger.info(f"[position_etl] Step 0 fetching country map from gmp_cis_sta_dly_country ...")
                     _country_map = _build_country_map_for_format5(
                         impala_manager, db, processing_date, src_id
                     )
-                    logger.info(f"[position_etl] Step 0 country map built: {len(_country_map)} entries")
+                    logger.info(f"[position_etl] Step 0 country map done in {_ct.time()-_ct0:.1f}s — {len(_country_map)} entries")
                     if _country_map:
                         std_select = _inject_country_case_when(std_select, _country_map, db)
                         logger.info(f"[position_etl] Step 0 country CTE replaced with CASE WHEN literals")
@@ -3023,6 +2959,7 @@ def _inject_country_case_when(std_select: str, country_map: dict, db: str) -> st
 
             _t = _etl_t0
             logger.info(f"[position_etl] Step 0 starting — INSERT OVERWRITE position_upload_standardized for {src_id}")
+            logger.info(f"[position_etl] Step 0 SQL length={len(std_select)} chars — submitting to Impala now ...")
             ok = impala_manager.execute_write(
                 f"""
                 INSERT OVERWRITE {db}.position_upload_standardized
