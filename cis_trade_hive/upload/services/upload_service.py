@@ -3144,6 +3144,7 @@ class UploadService:
                 try:
                     import time as _ct
                     _ct0 = _ct.time()
+                    _t = _etl_t0
                     print(f"[position_etl] F5-STEP0-A: REFRESH gmp_cis_sta_dly_country", flush=True)
                     logger.info(f"[position_etl] F5-STEP0-A: REFRESH gmp_cis_sta_dly_country")
                     _hive_refresh_table('gmp_cis_sta_dly_country', "Step 0 (country map)")
