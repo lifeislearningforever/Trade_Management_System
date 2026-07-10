@@ -1420,10 +1420,13 @@ def run_position_etl(request, upload_id: str):
         processing_date = datetime.now().strftime('%Y%m%d')
 
     # Mark ETL_RUNNING so the UI can distinguish ingest-complete from ETL-in-progress
-    upload_service.repository.update_upload(
-        upload_id, {'status': UploadKuduRepository.STATUS_ETL_RUNNING},
-        user_info['username']
-    )
+    try:
+        upload_service.repository.update_upload(
+            upload_id, {'status': UploadKuduRepository.STATUS_ETL_RUNNING},
+            user_info['username']
+        )
+    except Exception as _ue:
+        logger.warning(f"[run_position_etl] Could not set ETL_RUNNING status: {_ue}")
 
     # Capture request-bound data before handing off to the thread
     _username   = user_info['username']
@@ -1522,28 +1525,37 @@ def run_position_etl(request, upload_id: str):
                 })
         except Exception as _ex:
             logger.error(f"[etl:bg] EXCEPTION upload_id={upload_id}: {_ex}", exc_info=True)
+            _exc_rec = upload_service.repository.get_upload_by_id(upload_id)
+            _exc_orig = (_exc_rec or {}).get('description', '') or ''
+            _exc_note = f"ETL exception: {str(_ex)[:400]}"
             upload_service.repository.update_upload(
                 upload_id,
                 {'status': UploadKuduRepository.STATUS_FAILED,
-                 'description': str(_ex)[:500]},
+                 'description': (f"{_exc_orig}\n{_exc_note}".strip() if _exc_orig else _exc_note)[:2000]},
                 _username
             )
-            _notify(_username, EVT_UPLOAD_FAILED, {
-                'upload_id': upload_id,
-                'file_name': _file_name,
-                'message': f'Position ETL exception for {_file_name}: {str(_ex)[:200]}',
-            })
+            try:
+                _notify(_username, EVT_UPLOAD_FAILED, {
+                    'upload_id': upload_id,
+                    'file_name': _file_name,
+                    'message': f'Position ETL exception for {_file_name}: {str(_ex)[:200]}',
+                })
+            except Exception:
+                pass
 
-    import threading as _threading
-    _t = _threading.Thread(target=_do_etl, daemon=True, name=f"etl-{upload_id[:8]}")
-    _t.start()
-
-    messages.info(request, (
-        f'Position ETL started for {_file_name} '
-        f'(src_id={_src_id}, date={_proc_date}). '
-        f'You will receive a notification when it completes — you can navigate freely.'
-    ))
-    return redirect('upload:list')
+    try:
+        import threading as _threading
+        _t = _threading.Thread(target=_do_etl, daemon=True, name=f"etl-{upload_id[:8]}")
+        _t.start()
+        messages.info(request, (
+            f'Position ETL started for {_file_name} '
+            f'(src_id={_src_id}, date={_proc_date}). '
+            f'You will receive a notification when it completes — you can navigate freely.'
+        ))
+    except Exception as _te:
+        logger.error(f"[run_position_etl] Failed to start ETL thread: {_te}", exc_info=True)
+        messages.error(request, f'Failed to start ETL: {_te}')
+    return redirect('upload:detail', upload_id=upload_id)
 
 
 @require_http_methods(["GET"])
