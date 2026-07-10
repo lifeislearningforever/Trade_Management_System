@@ -597,16 +597,24 @@ class FileValidationService:
 def _normalize_country_key(name: str) -> str:
     """
     Normalize a country full_name for safe SQL comparison.
-    Strips punctuation chars and collapses whitespace so that names like
-    "DEMOCRATIC PEOPLE'S REPUBLIC OF (KOREA)" become
-    "DEMOCRATIC PEOPLE S REPUBLIC OF KOREA" — no SQL-breaking chars remain.
-    Must mirror exactly what _NORM_EXPR does in Impala so both sides match.
+
+    Steps (must mirror what _NORM_EXPR does in Impala):
+      1. Strip accents via Unicode NFKD decomposition (CÔTE → COTE, É → E, etc.)
+      2. Drop any remaining non-ASCII bytes
+      3. Upper-case
+      4. Punctuation → space  ( ) , . / : – — -
+      5. Apostrophe / double-quote / backslash → space
+      6. Collapse whitespace
     """
     import re
-    s = name.upper()
-    s = re.sub(r"[().,/:–—-]+",   ' ', s)  # parens, hyphens, commas, dots, slashes → space
-    s = re.sub(r"['\"\\\\]+",     ' ', s)  # apostrophe, double-quote, backslash → space
-    s = re.sub(r'\s+',            ' ', s).strip()
+    import unicodedata
+    # Decompose accented chars (é→e+combining, ô→o+combining) then drop combiners
+    s = unicodedata.normalize('NFKD', name)
+    s = s.encode('ascii', errors='ignore').decode('ascii')
+    s = s.upper()
+    s = re.sub(r"[().,/:–—-]+", ' ', s)   # punctuation → space
+    s = re.sub(r"['\"\\\\]+",   ' ', s)   # quotes / backslash → space
+    s = re.sub(r'\s+',          ' ', s).strip()
     return s
 
 
@@ -653,26 +661,46 @@ def _inject_country_case_when(std_select: str, country_map: dict, db: str) -> st
     """
     import re
 
-    # Impala regexp_replace expression that mirrors _normalize_country_key().
-    # Applied to the upload column before comparison so both sides are normalized.
-    # Uses only single-quoted literals (Impala does not support double-quoted strings).
-    # Character class strips: apostrophe  " \ ( ) - , . / :
-    # Written as two separate passes so the regex stays readable and avoids
-    # complex escaping inside a single character class.
-    _NORM_EXPR = (
-        "regexp_replace("
-        "regexp_replace("
-        "regexp_replace("
-        "UPPER(TRIM(CAST({col} AS STRING))),"
-        " '[\\\\(\\\\)\\\\-,\\./:]+', ' '),"  # parens, hyphens, commas, dots, slashes → space
-        " '[\\\\x27\\\\x22]+', ' '),"          # apostrophe (0x27) and double-quote (0x22) → space
-        " '\\\\s+', ' ')"                      # collapse multiple spaces → single space
-    )
+    # Impala regexp_replace chain that mirrors _normalize_country_key().
+    # Impala uses RE2 / single-quoted literals only (no double-quoted strings).
+    # Steps applied in order:
+    #   1. Accent stripping — cover all accented chars in ISO-3166 country names:
+    #        Ô/ô→O  É/é→E  È/è→E  Ê/ê→E  Ë/ë→E  Â/â→A  Ä/ä→A  À/à→A
+    #        Å/å→A  Ã/ã→A  Î/î→I  Ï/ï→I  Û/û→U  Ü/ü→U  Ù/ù→U  Ç/ç→C
+    #        Ñ/ñ→N  Ø/ø→O  Œ/œ→OE (handled as O below for simplicity)
+    #   2. Punctuation chars → space
+    #   3. Apostrophe / double-quote → space (hex escapes inside single-quoted regex)
+    #   4. Collapse whitespace
+    _ACCENT_REPLACEMENTS = [
+        # (pattern, replacement) — all single-quoted, ASCII replacements only
+        (r'[ÔÒÓÖØôòóöø]', 'O'),
+        (r'[ÉÈÊËéèêë]',   'E'),
+        (r'[ÂÄÀÃÅâäàãå]', 'A'),
+        (r'[ÎÏîï]',        'I'),
+        (r'[ÛÜÙûüù]',     'U'),
+        (r'[Çç]',          'C'),
+        (r'[Ññ]',          'N'),
+        (r'[Œœ]',          'O'),
+    ]
+
+    def _build_norm_expr(col: str) -> str:
+        # Start with UPPER(TRIM(CAST(col AS STRING)))
+        expr = f"UPPER(TRIM(CAST({col} AS STRING)))"
+        # Apply accent replacements
+        for pattern, repl in _ACCENT_REPLACEMENTS:
+            expr = f"regexp_replace({expr}, '{pattern}', '{repl}')"
+        # Strip punctuation → space
+        expr = f"regexp_replace({expr}, '[\\\\(\\\\),\\./:–—-]+', ' ')"
+        # Strip apostrophe (\\x27) and double-quote (\\x22) → space
+        expr = f"regexp_replace({expr}, '[\\\\x27\\\\x22]+', ' ')"
+        # Collapse multiple spaces
+        expr = f"regexp_replace({expr}, '\\\\s+', ' ')"
+        return expr
 
     def _case_expr(col: str) -> str:
         if not country_map:
             return "CAST(NULL AS STRING)"
-        norm_col = _NORM_EXPR.format(col=col)
+        norm_col = _build_norm_expr(col)
         branches = '\n'.join(
             f"        WHEN {norm_col} = '{k}' THEN '{v}'"
             for k, v in country_map.items()
