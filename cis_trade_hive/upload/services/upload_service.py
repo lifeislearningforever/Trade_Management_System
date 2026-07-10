@@ -2146,6 +2146,9 @@ class UploadService:
         Returns:
             Tuple of (success, message, result_dict)
         """
+        logger.info(f"[position_etl] run_position_etl ENTERED src_id={src_id} date={processing_date} user={updated_by}")
+        print(f"[position_etl] run_position_etl ENTERED src_id={src_id} date={processing_date}", flush=True)
+
         from core.repositories.impala_connection import impala_manager
         from core.notifications import notify_user, notify_admins
         from core.notifications.constants import (

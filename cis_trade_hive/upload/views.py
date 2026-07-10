@@ -1401,8 +1401,23 @@ def run_position_etl(request, upload_id: str):
     _proc_date  = processing_date
 
     def _do_etl():
-        from core.notifications import notify_user as _notify
-        from core.notifications.constants import EVT_UPLOAD_COMPLETED, EVT_UPLOAD_FAILED
+        import logging as _logging
+        _tlog = _logging.getLogger('upload')
+        _tlog.info(f"[etl:thread] _do_etl STARTED upload_id={upload_id} src_id={_src_id} date={_proc_date} user={_username}")
+        print(f"[etl:thread] _do_etl STARTED upload_id={upload_id} src_id={_src_id} date={_proc_date}", flush=True)
+        try:
+            from core.notifications import notify_user as _notify
+            from core.notifications.constants import EVT_UPLOAD_COMPLETED, EVT_UPLOAD_FAILED
+        except Exception as _imp_ex:
+            _tlog.error(f"[etl:thread] IMPORT FAILED upload_id={upload_id}: {_imp_ex}", exc_info=True)
+            print(f"[etl:thread] IMPORT FAILED upload_id={upload_id}: {_imp_ex}", flush=True)
+            upload_service.repository.update_upload(
+                upload_id,
+                {'status': UploadKuduRepository.STATUS_FAILED,
+                 'description': f'ETL import error: {str(_imp_ex)[:400]}'},
+                _username
+            )
+            return
         try:
             ok, msg, result = upload_service.run_position_etl(
                 upload_id=upload_id,
