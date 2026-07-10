@@ -1182,10 +1182,24 @@ def upload_detail(request, upload_id: str):
             UploadKuduRepository.STATUS_VALIDATED,
             UploadKuduRepository.STATUS_INGESTING,
             UploadKuduRepository.STATUS_COMPLETED,
+            UploadKuduRepository.STATUS_INGESTED,
+            UploadKuduRepository.STATUS_ETL_COMPLETE,
             UploadKuduRepository.STATUS_FAILED,
         ],
-        # Show a "still processing" banner when INGESTING
-        'is_ingesting': upload_status == UploadKuduRepository.STATUS_INGESTING,
+        # Show download report link whenever ETL has been run (at least once)
+        'can_download_report': is_position_upload and upload_status in [
+            UploadKuduRepository.STATUS_INGESTING,
+            UploadKuduRepository.STATUS_COMPLETED,
+            UploadKuduRepository.STATUS_INGESTED,
+            UploadKuduRepository.STATUS_ETL_RUNNING,
+            UploadKuduRepository.STATUS_ETL_COMPLETE,
+            UploadKuduRepository.STATUS_FAILED,
+        ],
+        # Show a "still processing" banner when INGESTING or ETL running
+        'is_ingesting': upload_status in [
+            UploadKuduRepository.STATUS_INGESTING,
+            UploadKuduRepository.STATUS_ETL_RUNNING,
+        ],
     }
 
     return render(request, 'upload/upload_detail.html', context)

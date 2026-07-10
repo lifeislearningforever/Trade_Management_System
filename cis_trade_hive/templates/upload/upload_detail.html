@@ -41,6 +41,8 @@
                     <i class="bi bi-play-circle"></i> Run Position
                 </button>
             </form>
+            {% endif %}
+            {% if can_download_report %}
             <a href="{% url 'upload:download_position_report' upload.upload_id %}" class="btn btn-outline-info"
                title="Download PASS/FAIL report as CSV">
                 <i class="bi bi-file-earmark-arrow-down"></i> Download Report
@@ -559,6 +561,8 @@
                                 <i class="bi bi-play-circle"></i> Run Position ETL
                             </button>
                         </form>
+                        {% endif %}
+                        {% if can_download_report %}
                         <a href="{% url 'upload:download_position_report' upload.upload_id %}"
                            class="btn btn-outline-info">
                             <i class="bi bi-file-earmark-arrow-down"></i> Download Report CSV
