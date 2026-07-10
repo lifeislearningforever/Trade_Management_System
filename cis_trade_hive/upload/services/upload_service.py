@@ -594,6 +594,87 @@ class FileValidationService:
         return 'STRING'
 
 
+def _build_country_map_for_format5(impala_manager, db: str, processing_date: str, src_id: str) -> dict:
+    """
+    Fetch the complete country name → code mapping from gmp_cis_sta_dly_country.
+    The table has only ~247 rows — fetch all at once, build a Python dict,
+    then inject as CASE WHEN literals so the INSERT plan has zero Hive table references.
+    Returns dict: {UPPER(TRIM(full_name)): label}
+    """
+    rows = impala_manager.execute_query(
+        f"""
+        SELECT UPPER(TRIM(full_name)) AS full_name, MIN(label) AS label
+        FROM {db}.gmp_cis_sta_dly_country
+        WHERE processing_date = (
+            SELECT MAX(processing_date) FROM {db}.gmp_cis_sta_dly_country
+        )
+        GROUP BY UPPER(TRIM(full_name))
+        """,
+        database=db
+    ) or []
+    return {r['full_name']: r['label'] for r in rows if r.get('full_name') and r.get('label')}
+
+
+def _inject_country_case_when(std_select: str, country_map: dict, db: str) -> str:
+    """
+    Replace the country_lut CTE + 4 LEFT JOINs in the format-5 std_select with
+    inline CASE WHEN expressions using pre-fetched literal values.
+    Removes gmp_cis_sta_dly_country entirely from the INSERT execution plan.
+    """
+    import re
+
+    def _case_expr(col: str) -> str:
+        if not country_map:
+            return "CAST(NULL AS STRING)"
+        branches = '\n'.join(
+            f"        WHEN UPPER(TRIM(CAST({col} AS STRING))) = '{k}' THEN '{v}'"
+            for k, v in country_map.items()
+        )
+        return f"CASE\n{branches}\n        ELSE CAST(NULL AS STRING)\n    END"
+
+    # Remove the WITH country_lut AS (...) CTE block
+    std_select = re.sub(
+        r'WITH\s+country_lut\s+AS\s*\(.*?\)\s*(?=SELECT)',
+        '',
+        std_select,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    # Replace cn_*.label column references with CASE WHEN literals
+    std_select = re.sub(
+        r'cn_exc\.label\s+AS\s+exchange',
+        _case_expr('p5.country_of_exchange') + '  AS exchange',
+        std_select
+    )
+    std_select = re.sub(
+        r'cn_exc\.label\s+AS\s+country_of_exchange',
+        _case_expr('p5.country_of_exchange') + '  AS country_of_exchange',
+        std_select
+    )
+    std_select = re.sub(
+        r'cn_inc\.label\s+AS\s+country_of_incorporation',
+        _case_expr('p5.country_of_incorporation') + '  AS country_of_incorporation',
+        std_select
+    )
+    std_select = re.sub(
+        r'cn_rsk\.label\s+AS\s+country_of_risk',
+        _case_expr('p5.country_of_risk') + '  AS country_of_risk',
+        std_select
+    )
+    std_select = re.sub(
+        r'cn_opr\.label\s+AS\s+country_of_operation',
+        _case_expr('p5.country_of_operation') + '  AS country_of_operation',
+        std_select
+    )
+    # Remove the LEFT JOIN country_lut lines
+    std_select = re.sub(
+        r'LEFT\s+JOIN\s+country_lut\s+cn_\w+\s+ON\s+cn_\w+\.full_name\s*=\s*UPPER\(TRIM\(CAST\(p5\.\w+\s+AS\s+STRING\)\)\)\s*',
+        '',
+        std_select,
+        flags=re.IGNORECASE
+    )
+    return std_select
+
+
 class UploadService:
     """Service class for upload operations."""
 
@@ -2098,95 +2179,6 @@ class UploadService:
     def get_all_datasource_configs(self) -> List[Dict[str, Any]]:
         """Get all datasource configurations for dropdown."""
         return datasource_repository.get_all_datasources()
-
-
-def _build_country_map_for_format5(impala_manager, db: str, processing_date: str, src_id: str) -> dict:
-    """
-    Fetch the complete country name → code mapping from gmp_cis_sta_dly_country.
-
-    The table has only ~247 rows total — fetch all of them once into Python,
-    build a dict, then inject as CASE WHEN literals so the INSERT plan has
-    zero references to gmp_cis_sta_dly_country.
-
-    Returns dict: {UPPER(TRIM(full_name)): label}
-    """
-    rows = impala_manager.execute_query(
-        f"""
-        SELECT UPPER(TRIM(full_name)) AS full_name, MIN(label) AS label
-        FROM {db}.gmp_cis_sta_dly_country
-        WHERE processing_date = (
-            SELECT MAX(processing_date) FROM {db}.gmp_cis_sta_dly_country
-        )
-        GROUP BY UPPER(TRIM(full_name))
-        """,
-        database=db
-    ) or []
-    return {r['full_name']: r['label'] for r in rows if r.get('full_name') and r.get('label')}
-
-
-def _inject_country_case_when(std_select: str, country_map: dict, db: str) -> str:
-    """
-    Replace the country_lut CTE + JOIN block in the format-5 std_select with
-    inline CASE WHEN expressions using literal country code values.
-    This removes the gmp_cis_sta_dly_country Hive table from the INSERT plan entirely.
-    """
-    def _case_expr(col: str) -> str:
-        """Build CASE WHEN UPPER(TRIM(CAST(col AS STRING))) = 'NAME' THEN 'CODE' ... END"""
-        if not country_map:
-            return f"CAST(NULL AS STRING)"
-        branches = '\n'.join(
-            f"        WHEN UPPER(TRIM(CAST({col} AS STRING))) = '{k}' THEN '{v}'"
-            for k, v in country_map.items()
-        )
-        return f"CASE\n{branches}\n        ELSE CAST(NULL AS STRING)\n    END"
-
-    import re
-
-    # Remove the WITH country_lut AS (...) CTE block
-    std_select = re.sub(
-        r'WITH\s+country_lut\s+AS\s*\(.*?\)\s*(?=SELECT)',
-        '',
-        std_select,
-        flags=re.DOTALL | re.IGNORECASE,
-    )
-
-    # Replace cn_exc.label / cn_inc.label / cn_rsk.label / cn_opr.label references
-    std_select = re.sub(
-        r'cn_exc\.label\s+AS\s+exchange',
-        _case_expr('p5.country_of_exchange') + '                                       AS exchange',
-        std_select
-    )
-    std_select = re.sub(
-        r'cn_exc\.label\s+AS\s+country_of_exchange',
-        _case_expr('p5.country_of_exchange') + '                                       AS country_of_exchange',
-        std_select
-    )
-    std_select = re.sub(
-        r'cn_inc\.label\s+AS\s+country_of_incorporation',
-        _case_expr('p5.country_of_incorporation') + '                                   AS country_of_incorporation',
-        std_select
-    )
-    std_select = re.sub(
-        r'cn_rsk\.label\s+AS\s+country_of_risk',
-        _case_expr('p5.country_of_risk') + '                                            AS country_of_risk',
-        std_select
-    )
-    std_select = re.sub(
-        r'cn_opr\.label\s+AS\s+country_of_operation',
-        _case_expr('p5.country_of_operation') + '                                       AS country_of_operation',
-        std_select
-    )
-
-    # Remove the LEFT JOIN country_lut ... ON ... lines
-    std_select = re.sub(
-        r'LEFT\s+JOIN\s+country_lut\s+cn_\w+\s+ON\s+cn_\w+\.full_name\s*=\s*UPPER\(TRIM\(CAST\(p5\.\w+\s+AS\s+STRING\)\)\)\s*',
-        '',
-        std_select,
-        flags=re.IGNORECASE
-    )
-
-    return std_select
-
 
     # =========================================================================
     # POSITION UPLOAD ETL — Run transform pipeline & report download
