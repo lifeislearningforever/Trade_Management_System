@@ -635,12 +635,23 @@ def _normalize_country_key(name: str) -> str:
 
 def _build_country_map_for_format5(impala_manager, db: str, processing_date: str, src_id: str) -> dict:
     """
-    Fetch the complete country name → code mapping from gmp_cis_sta_dly_country.
-    The table has only ~247 rows — fetch all at once, build a Python dict,
-    then inject as CASE WHEN literals so the INSERT plan has zero Hive table references.
-    Keys are normalized (apostrophes/parens/hyphens removed) to match what the
-    Impala CASE WHEN expression produces from the upload column.
-    Returns dict: {normalized_full_name: label}
+    Fetch the complete country name → label mapping from gmp_cis_sta_dly_country.
+
+    The table has ~247 rows and often contains mojibake (UTF-8 bytes stored as
+    Latin-1, e.g. 'TÃ¼rkiye' instead of 'Türkiye').  Upload CSVs may arrive
+    with clean ASCII ('Turkiye'), proper Unicode ('Türkiye'), or the same
+    mojibake as the DB.
+
+    To match all variants without fragile Impala-side regex, we register up to
+    THREE keys per label in the returned dict:
+      1. raw  — UPPER(TRIM(full_name)) exactly as stored in DB (mojibake form)
+      2. fixed — mojibake decoded back to proper Unicode, then UPPER/TRIM
+      3. norm  — fully ASCII-normalized (NFKD accent-strip + punct → space)
+
+    The Impala CASE WHEN then uses a plain UPPER(TRIM(col)) comparison with no
+    regex at all — simple, fast, and immune to encoding edge-cases.
+
+    Returns dict: {key_variant: label}  (multiple keys may map to same label)
     """
     rows = impala_manager.execute_query(
         f"""
@@ -653,14 +664,27 @@ def _build_country_map_for_format5(impala_manager, db: str, processing_date: str
         """,
         database=db
     ) or []
+
     result = {}
     for r in rows:
-        raw = (r.get('full_name') or '').strip()
+        raw = (r.get('full_name') or '').strip().upper()
         label = (r.get('label') or '').strip()
-        if raw and label:
-            norm = _normalize_country_key(raw)
-            if norm:
-                result[norm] = label
+        if not raw or not label:
+            continue
+
+        # Variant 1 — raw DB value (mojibake form, already UPPER/TRIM'd by SQL)
+        result[raw] = label
+
+        # Variant 2 — mojibake decoded to proper Unicode then upper
+        fixed = _fix_mojibake(raw).upper().strip()
+        if fixed and fixed != raw:
+            result[fixed] = label
+
+        # Variant 3 — fully ASCII-normalized (strips accents, punct, spaces)
+        norm = _normalize_country_key(raw)
+        if norm and norm not in (raw, fixed):
+            result[norm] = label
+
     return result
 
 
@@ -676,48 +700,23 @@ def _inject_country_case_when(std_select: str, country_map: dict, db: str) -> st
     """
     import re
 
-    # Impala regexp_replace chain that mirrors _normalize_country_key().
-    # Impala uses RE2 / single-quoted literals only (no double-quoted strings).
-    # Steps applied in order:
-    #   1. Accent stripping — cover all accented chars in ISO-3166 country names:
-    #        Ô/ô→O  É/é→E  È/è→E  Ê/ê→E  Ë/ë→E  Â/â→A  Ä/ä→A  À/à→A
-    #        Å/å→A  Ã/ã→A  Î/î→I  Ï/ï→I  Û/û→U  Ü/ü→U  Ù/ù→U  Ç/ç→C
-    #        Ñ/ñ→N  Ø/ø→O  Œ/œ→OE (handled as O below for simplicity)
-    #   2. Punctuation chars → space
-    #   3. Apostrophe / double-quote → space (hex escapes inside single-quoted regex)
-    #   4. Collapse whitespace
-    _ACCENT_REPLACEMENTS = [
-        # (pattern, replacement) — all single-quoted, ASCII replacements only
-        (r'[ÔÒÓÖØôòóöø]', 'O'),
-        (r'[ÉÈÊËéèêë]',   'E'),
-        (r'[ÂÄÀÃÅâäàãå]', 'A'),
-        (r'[ÎÏîï]',        'I'),
-        (r'[ÛÜÙûüù]',     'U'),
-        (r'[Çç]',          'C'),
-        (r'[Ññ]',          'N'),
-        (r'[Œœ]',          'O'),
-    ]
-
-    def _build_norm_expr(col: str) -> str:
-        # Start with UPPER(TRIM(CAST(col AS STRING)))
-        expr = f"UPPER(TRIM(CAST({col} AS STRING)))"
-        # Apply accent replacements
-        for pattern, repl in _ACCENT_REPLACEMENTS:
-            expr = f"regexp_replace({expr}, '{pattern}', '{repl}')"
-        # Strip punctuation → space
-        expr = f"regexp_replace({expr}, '[\\\\(\\\\),\\./:–—-]+', ' ')"
-        # Strip apostrophe (\\x27) and double-quote (\\x22) → space
-        expr = f"regexp_replace({expr}, '[\\\\x27\\\\x22]+', ' ')"
-        # Collapse multiple spaces
-        expr = f"regexp_replace({expr}, '\\\\s+', ' ')"
-        return expr
+    def _sql_str(s: str) -> str:
+        """Escape a value for embedding in an Impala single-quoted string literal."""
+        return s.replace("'", "''").replace("\\", "\\\\")
 
     def _case_expr(col: str) -> str:
+        """
+        Build a CASE WHEN expression comparing UPPER(TRIM(col)) against every
+        key variant in country_map.  No regex on the Impala side — all encoding
+        variants (raw mojibake, fixed Unicode, ASCII-normalized) are pre-registered
+        as separate keys in the dict by _build_country_map_for_format5(), so a
+        plain string equality check is sufficient and fast.
+        """
         if not country_map:
             return "CAST(NULL AS STRING)"
-        norm_col = _build_norm_expr(col)
+        norm_col = f"UPPER(TRIM(CAST({col} AS STRING)))"
         branches = '\n'.join(
-            f"        WHEN {norm_col} = '{k}' THEN '{v}'"
+            f"        WHEN {norm_col} = '{_sql_str(k)}' THEN '{_sql_str(v)}'"
             for k, v in country_map.items()
         )
         return f"CASE\n{branches}\n        ELSE CAST(NULL AS STRING)\n    END"
