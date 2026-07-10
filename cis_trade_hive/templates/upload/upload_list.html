@@ -186,17 +186,25 @@
                             <td>{{ upload.row_count|default:"-" }}</td>
                             <td>
                                 {% if upload.status == 'PENDING' %}
-                                    <span class="badge bg-warning">Pending</span>
+                                    <span class="badge bg-warning text-dark">Pending</span>
                                 {% elif upload.status == 'VALIDATING' %}
-                                    <span class="badge bg-info">Validating</span>
+                                    <span class="badge bg-info text-dark">Validating</span>
                                 {% elif upload.status == 'VALIDATED' %}
                                     <span class="badge bg-primary">Validated</span>
                                 {% elif upload.status == 'INGESTING' %}
-                                    <span class="badge bg-info">
+                                    <span class="badge bg-info text-dark">
                                         <span class="spinner-border spinner-border-sm me-1"></span>Ingesting
                                     </span>
                                 {% elif upload.status == 'COMPLETED' %}
                                     <span class="badge bg-success">Completed</span>
+                                {% elif upload.status == 'INGESTED' %}
+                                    <span class="badge bg-teal text-white" style="background-color:#0d9488;">Ingested — ETL Pending</span>
+                                {% elif upload.status == 'ETL_RUNNING' %}
+                                    <span class="badge bg-primary">
+                                        <span class="spinner-border spinner-border-sm me-1"></span>ETL Running
+                                    </span>
+                                {% elif upload.status == 'ETL_COMPLETE' %}
+                                    <span class="badge bg-success">ETL Complete</span>
                                 {% elif upload.status == 'FAILED' or upload.status == 'VALIDATION_FAILED' %}
                                     <span class="badge bg-danger">Failed</span>
                                 {% elif upload.status == 'CANCELLED' %}

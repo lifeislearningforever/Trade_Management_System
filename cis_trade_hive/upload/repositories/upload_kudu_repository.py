@@ -102,18 +102,22 @@ class UploadKuduRepository:
     HDFS_BASE_PATH = '/mrw/cis/staging'
 
     # Upload Status Constants
-    STATUS_PENDING = 'PENDING'           # File uploaded, not yet validated
-    STATUS_VALIDATING = 'VALIDATING'     # Validation in progress
-    STATUS_VALIDATED = 'VALIDATED'       # Validation passed
+    STATUS_PENDING = 'PENDING'               # File uploaded, not yet validated
+    STATUS_VALIDATING = 'VALIDATING'         # Validation in progress
+    STATUS_VALIDATED = 'VALIDATED'           # Validation passed
     STATUS_VALIDATION_FAILED = 'VALIDATION_FAILED'  # Validation failed
-    STATUS_INGESTING = 'INGESTING'       # Ingestion in progress
-    STATUS_COMPLETED = 'COMPLETED'       # Successfully ingested to Hive
-    STATUS_FAILED = 'FAILED'             # Ingestion failed
-    STATUS_CANCELLED = 'CANCELLED'       # Cancelled by user
+    STATUS_INGESTING = 'INGESTING'           # Ingestion to Hive table in progress
+    STATUS_COMPLETED = 'COMPLETED'           # Successfully ingested to Hive table
+    STATUS_INGESTED = 'INGESTED'             # Hive ingest done; position ETL not yet run
+    STATUS_ETL_RUNNING = 'ETL_RUNNING'       # Position ETL pipeline in progress
+    STATUS_ETL_COMPLETE = 'ETL_COMPLETE'     # Position ETL pipeline finished successfully
+    STATUS_FAILED = 'FAILED'                 # Ingestion or ETL failed
+    STATUS_CANCELLED = 'CANCELLED'           # Cancelled by user
 
     ALL_STATUSES = [
         STATUS_PENDING, STATUS_VALIDATING, STATUS_VALIDATED,
         STATUS_VALIDATION_FAILED, STATUS_INGESTING, STATUS_COMPLETED,
+        STATUS_INGESTED, STATUS_ETL_RUNNING, STATUS_ETL_COMPLETE,
         STATUS_FAILED, STATUS_CANCELLED
     ]
 

@@ -1383,9 +1383,9 @@ def run_position_etl(request, upload_id: str):
         from datetime import datetime
         processing_date = datetime.now().strftime('%Y%m%d')
 
-    # Mark INGESTING so the UI shows "processing" banner while ETL runs
+    # Mark ETL_RUNNING so the UI can distinguish ingest-complete from ETL-in-progress
     upload_service.repository.update_upload(
-        upload_id, {'status': UploadKuduRepository.STATUS_INGESTING},
+        upload_id, {'status': UploadKuduRepository.STATUS_ETL_RUNNING},
         user_info['username']
     )
 
@@ -1404,17 +1404,19 @@ def run_position_etl(request, upload_id: str):
         import logging as _logging
         _tlog = _logging.getLogger('upload')
         _tlog.info(f"[etl:thread] _do_etl STARTED upload_id={upload_id} src_id={_src_id} date={_proc_date} user={_username}")
-        print(f"[etl:thread] _do_etl STARTED upload_id={upload_id} src_id={_src_id} date={_proc_date}", flush=True)
         try:
             from core.notifications import notify_user as _notify
             from core.notifications.constants import EVT_UPLOAD_COMPLETED, EVT_UPLOAD_FAILED
         except Exception as _imp_ex:
             _tlog.error(f"[etl:thread] IMPORT FAILED upload_id={upload_id}: {_imp_ex}", exc_info=True)
-            print(f"[etl:thread] IMPORT FAILED upload_id={upload_id}: {_imp_ex}", flush=True)
+            # Preserve user description; append error note
+            _rec = upload_service.repository.get_upload_by_id(upload_id)
+            _orig = (_rec or {}).get('description', '') or ''
+            _err_note = f"ETL import error: {str(_imp_ex)[:400]}"
             upload_service.repository.update_upload(
                 upload_id,
                 {'status': UploadKuduRepository.STATUS_FAILED,
-                 'description': f'ETL import error: {str(_imp_ex)[:400]}'},
+                 'description': (f"{_orig}\n{_err_note}".strip() if _orig else _err_note)[:2000]},
                 _username
             )
             return
@@ -1425,17 +1427,19 @@ def run_position_etl(request, upload_id: str):
                 processing_date=_proc_date,
                 updated_by=_username,
             )
+            # Read current record to preserve user's original description
+            _rec = upload_service.repository.get_upload_by_id(upload_id)
+            _orig_desc = (_rec or {}).get('description', '') or ''
             if ok:
-                _etl_desc = (
-                    f"Position ETL complete\n"
-                    f"src_id={_src_id}\n"
-                    f"processing_date={_proc_date}\n"
-                    f"total={result.get('total', 0)} pass={result.get('passed', 0)} fail={result.get('failed', 0)}"
+                _etl_note = (
+                    f"ETL complete: {result.get('passed', 0)}/{result.get('total', 0)} passed"
+                    f" [{_src_id} processing_date={_proc_date}]"
                 )
+                _new_desc = f"{_orig_desc}\n{_etl_note}".strip() if _orig_desc else _etl_note
                 upload_service.repository.update_upload(
                     upload_id,
-                    {'status': UploadKuduRepository.STATUS_COMPLETED,
-                     'description': _etl_desc},
+                    {'status': UploadKuduRepository.STATUS_ETL_COMPLETE,
+                     'description': _new_desc[:2000]},
                     _username
                 )
                 audit_log_kudu_repository.log_action(
@@ -1460,10 +1464,12 @@ def run_position_etl(request, upload_id: str):
                 logger.info(f"[etl:bg] DONE upload_id={upload_id}: {msg}")
             else:
                 logger.error(f"[etl:bg] FAILED upload_id={upload_id}: {msg}")
+                _fail_note = f"ETL failed: {msg[:400]}"
+                _fail_desc = f"{_orig_desc}\n{_fail_note}".strip() if _orig_desc else _fail_note
                 upload_service.repository.update_upload(
                     upload_id,
                     {'status': UploadKuduRepository.STATUS_FAILED,
-                     'description': msg[:500]},
+                     'description': _fail_desc[:2000]},
                     _username
                 )
                 _notify(_username, EVT_UPLOAD_FAILED, {

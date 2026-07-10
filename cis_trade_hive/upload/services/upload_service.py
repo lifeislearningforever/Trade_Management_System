@@ -970,6 +970,9 @@ class UploadService:
             (UploadKuduRepository.STATUS_VALIDATION_FAILED, 'Validation Failed'),
             (UploadKuduRepository.STATUS_INGESTING, 'Ingesting'),
             (UploadKuduRepository.STATUS_COMPLETED, 'Completed'),
+            (UploadKuduRepository.STATUS_INGESTED, 'Ingested (ETL Pending)'),
+            (UploadKuduRepository.STATUS_ETL_RUNNING, 'ETL Running'),
+            (UploadKuduRepository.STATUS_ETL_COMPLETE, 'ETL Complete'),
             (UploadKuduRepository.STATUS_FAILED, 'Failed'),
             (UploadKuduRepository.STATUS_CANCELLED, 'Cancelled'),
         ]
@@ -2225,17 +2228,28 @@ class UploadService:
 
             # Success - update status
             if not is_session_upload:
-                # Include duplicate info and mode in description for recon reference
                 mode_label = 'APPEND' if ingestion_mode == 'append' else 'OVERWRITE'
+                # Use INGESTED for position files (ETL step still pending);
+                # COMPLETED for all other file types.
+                _upload_rec = self.repository.get_upload_by_id(upload_id)
+                _is_pos = self.is_position_upload(_upload_rec or {})
+                new_status = (
+                    UploadKuduRepository.STATUS_INGESTED if _is_pos
+                    else UploadKuduRepository.STATUS_COMPLETED
+                )
+                # Preserve user's original description — append ingest notes as suffix.
+                _orig_desc = (_upload_rec or {}).get('description', '') or ''
+                ingest_note = f"Ingested {rows_inserted} rows → {target_table} [{mode_label}; processing_date={processing_date}"
+                if duplicate_count > 0:
+                    ingest_note += f"; {duplicate_count} duplicates removed"
+                ingest_note += "]"
+                new_desc = f"{_orig_desc}\n{ingest_note}".strip() if _orig_desc else ingest_note
                 update_data = {
-                    'status': UploadKuduRepository.STATUS_COMPLETED,
+                    'status': new_status,
                     'target_table_name': target_table,
                     'row_count': rows_inserted,
+                    'description': new_desc[:2000],
                 }
-                desc_parts = [f"processing_date={processing_date}", f"mode={mode_label}"]
-                if duplicate_count > 0:
-                    desc_parts.append(f"{duplicate_count} duplicates removed")
-                update_data['description'] = "; ".join(desc_parts)
                 self.repository.update_upload(upload_id, update_data, updated_by)
 
             # Build success message
@@ -3135,7 +3149,10 @@ class UploadService:
                     def _safe_str(v):
                         if v is None or str(v).strip() in ('', 'None', 'NULL', 'null'):
                             return 'NULL'
-                        return "'" + str(v).replace("'", "''").replace("\\", "\\\\") + "'"
+                        # Strip apostrophes and backslashes — Impala VALUES parser does
+                        # not reliably handle '' escaping inside multi-row VALUES blocks.
+                        s = str(v).replace("'", "").replace("\\", "")
+                        return "'" + s + "'"
 
                     def _safe_dec(v):
                         import re as _re
@@ -3268,7 +3285,10 @@ class UploadService:
                         """Return SQL string literal or NULL for None/empty values."""
                         if v is None or str(v).strip() in ('', 'None', 'NULL', 'null'):
                             return 'NULL'
-                        return "'" + str(v).replace("'", "''").replace("\\", "\\\\") + "'"
+                        # Strip apostrophes and backslashes — Impala VALUES parser does
+                        # not reliably handle '' escaping inside multi-row VALUES blocks.
+                        s = str(v).replace("'", "").replace("\\", "")
+                        return "'" + s + "'"
 
                     def _safe_dec(v):
                         """Return SQL decimal literal or NULL for unparseable values."""

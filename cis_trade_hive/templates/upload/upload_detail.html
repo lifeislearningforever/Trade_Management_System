@@ -101,13 +101,22 @@
                                     <span class="fs-5">Validating...</span>
                                 {% elif upload.status == 'VALIDATED' %}
                                     <span class="status-indicator bg-success"></span>
-                                    <span class="ms-2 fs-5">Validated - Ready for Ingestion</span>
+                                    <span class="ms-2 fs-5">Validated — Ready for Ingestion</span>
                                 {% elif upload.status == 'INGESTING' %}
                                     <span class="spinner-border spinner-border-sm text-primary me-2"></span>
                                     <span class="fs-5">Ingesting to Hive...</span>
                                 {% elif upload.status == 'COMPLETED' %}
                                     <span class="status-indicator bg-success"></span>
                                     <span class="ms-2 fs-5 text-success">Completed</span>
+                                {% elif upload.status == 'INGESTED' %}
+                                    <span class="status-indicator" style="background-color:#0d9488;display:inline-block;width:10px;height:10px;border-radius:50%;"></span>
+                                    <span class="ms-2 fs-5" style="color:#0d9488;">Ingested — ETL Pending</span>
+                                {% elif upload.status == 'ETL_RUNNING' %}
+                                    <span class="spinner-border spinner-border-sm text-primary me-2"></span>
+                                    <span class="fs-5 text-primary">Position ETL Running...</span>
+                                {% elif upload.status == 'ETL_COMPLETE' %}
+                                    <span class="status-indicator bg-success"></span>
+                                    <span class="ms-2 fs-5 text-success">ETL Complete</span>
                                 {% elif upload.status == 'FAILED' or upload.status == 'VALIDATION_FAILED' %}
                                     <span class="status-indicator bg-danger"></span>
                                     <span class="ms-2 fs-5 text-danger">Failed</span>
@@ -327,7 +336,7 @@
             {% endif %}
 
             <!-- Reconciliation Section (for completed uploads) -->
-            {% if upload.status == 'COMPLETED' and recon_data %}
+            {% if upload.status == 'COMPLETED' or upload.status == 'INGESTED' or upload.status == 'ETL_RUNNING' or upload.status == 'ETL_COMPLETE' %}{% if recon_data %}
             <div class="card mb-4 border-info">
                 <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
                     <h5 class="card-title mb-0">
@@ -454,7 +463,7 @@
                     {% endif %}
                 </div>
             </div>
-            {% endif %}
+            {% endif %}{% endif %}
         </div>
 
         <!-- Sidebar -->
@@ -484,12 +493,23 @@
                             </div>
                         </div>
                         {% endif %}
-                        {% if upload.status == 'COMPLETED' %}
+                        {% if upload.status == 'COMPLETED' or upload.status == 'INGESTED' or upload.status == 'ETL_RUNNING' or upload.status == 'ETL_COMPLETE' %}
                         <div class="timeline-item">
                             <div class="timeline-marker bg-success"></div>
                             <div class="timeline-content">
                                 <small class="text-muted">{{ upload.updated_at }}</small>
                                 <div>Ingested to <code>{{ upload.target_table_name }}</code></div>
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% if upload.status == 'ETL_RUNNING' or upload.status == 'ETL_COMPLETE' %}
+                        <div class="timeline-item">
+                            <div class="timeline-marker {% if upload.status == 'ETL_COMPLETE' %}bg-success{% else %}bg-primary{% endif %}"></div>
+                            <div class="timeline-content">
+                                <small class="text-muted">{{ upload.updated_at }}</small>
+                                <div>
+                                    {% if upload.status == 'ETL_COMPLETE' %}Position ETL complete{% else %}<span class="spinner-border spinner-border-sm me-1"></span>Position ETL running...{% endif %}
+                                </div>
                             </div>
                         </div>
                         {% endif %}
@@ -523,12 +543,12 @@
                 </div>
                 <div class="card-body">
                     <div class="d-grid gap-2">
-                        {% if upload.status == 'COMPLETED' and upload.target_table_name %}
+                        {% if upload.status == 'COMPLETED' or upload.status == 'INGESTED' or upload.status == 'ETL_COMPLETE' %}{% if upload.target_table_name %}
                         <button type="button" class="btn btn-outline-primary" id="copyQueryBtn"
                                 data-query="SELECT * FROM gmp_cis.{{ upload.target_table_name }} LIMIT 100;">
                             <i class="bi bi-clipboard"></i> Copy Query
                         </button>
-                        {% endif %}
+                        {% endif %}{% endif %}
 
                         {% if can_run_position %}
                         <form method="post" action="{% url 'upload:run_position' upload.upload_id %}"
@@ -709,7 +729,7 @@ $(document).ready(function() {
 
     // ETL progress bar — driven by WebSocket upload_step events.
     // Falls back to status-poll for completion detection when WS is unavailable.
-    {% if upload.status == 'INGESTING' or upload.status == 'VALIDATING' %}
+    {% if upload.status == 'INGESTING' or upload.status == 'VALIDATING' or upload.status == 'ETL_RUNNING' %}
     (function() {
         var uploadId   = '{{ upload.upload_id }}';
         var initStatus = '{{ upload.status }}';
@@ -803,13 +823,13 @@ $(document).ready(function() {
                 .then(function(r) { return r.ok ? r.json() : null; })
                 .then(function(data) {
                     if (!data || done) return;
-                    if (data.status === 'COMPLETED') {
+                    if (data.status === 'COMPLETED' || data.status === 'INGESTED' || data.status === 'ETL_COMPLETE') {
                         clearInterval(_pollTimer);
                         markComplete(true);
                     } else if (data.status === 'FAILED' || data.status === 'VALIDATION_FAILED') {
                         clearInterval(_pollTimer);
                         markComplete(false);
-                    } else if (data.status === 'INGESTING') {
+                    } else if (data.status === 'INGESTING' || data.status === 'ETL_RUNNING') {
                         // Advance simulated bar: slow approach toward 90%, never reaches it
                         // unless a WS step event pushes it higher.
                         var barNow = parseFloat(bar ? bar.style.width : '5') || _simPct;
