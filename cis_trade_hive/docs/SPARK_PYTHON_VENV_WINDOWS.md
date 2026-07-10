@@ -1,15 +1,108 @@
 # Python 3.11 Virtual Environment on Windows — Pack for Spark Cluster Mode
 
+---
+
+## ⚠ STOP — venv-pack Does NOT Work on Windows
+
+If you see this error:
+
+```
+FileNotFoundError: [WinError 2] The system cannot find the path specified:
+'C:\Users\...\gmp_cis'
+```
+
+**You ran `venv-pack` inside Windows Command Prompt or PowerShell.
+`venv-pack` only works on Linux/macOS.** It cannot pack a venv on Windows
+because it tries to resolve Linux-style symlinks and shared library paths
+that do not exist on Windows.
+
+### Fix — Use WSL 2 (Windows Subsystem for Linux)
+
+WSL 2 gives you a real Linux terminal inside Windows. Open it and run
+everything from there — the resulting `cis_etl_env.tar.gz` will be a proper
+Linux binary that works on YARN worker nodes.
+
+**Quick fix — copy-paste these commands into WSL 2:**
+
+```bash
+# 1. Open WSL (Start Menu → "Ubuntu" or run: wsl)
+
+# 2. Install Python 3.11 if not present
+sudo apt update && sudo apt install -y python3.11 python3.11-venv python3.11-dev zip
+
+# 3. Go to your Windows working folder (accessible from WSL via /mnt/c/)
+cd /mnt/c/Users/<YourWindowsUsername>/CIS/cis/
+
+# 4. Remove any existing Windows-built venv
+rm -rf gmp_cis
+
+# 5. Create a fresh venv inside WSL (Linux binary)
+python3.11 -m venv gmp_cis
+source gmp_cis/bin/activate
+
+# 6. Install packages
+pip install --upgrade pip
+pip install \
+    PyHive==0.7.0 \
+    thrift==0.16.0 \
+    thrift-sasl==0.4.3 \
+    pyarrow>=14.0.0 \
+    openpyxl>=3.1.0 \
+    chardet>=5.0.0 \
+    python-dotenv==1.0.1 \
+    impyla \
+    venv-pack
+
+pip check
+
+# 7. Pack (run from OUTSIDE the venv)
+deactivate
+venv-pack -p gmp_cis -o gmp_cis.tar.gz
+
+# Done — gmp_cis.tar.gz is now in C:\Users\<YourUser>\CIS\cis\
+ls -lh gmp_cis.tar.gz
+```
+
+Then upload to HDFS and submit — see the full steps below.
+
+---
+
+## If WSL 2 Is Not Available — Use Docker Instead
+
+```powershell
+# In PowerShell — mount your CIS folder into a Linux container
+docker run -it --rm `
+  -v C:\Users\<YourUser>\CIS\cis:/workspace `
+  python:3.11-slim bash
+```
+
+Inside the container:
+
+```bash
+cd /workspace
+rm -rf gmp_cis
+python3.11 -m venv gmp_cis
+source gmp_cis/bin/activate
+pip install --upgrade pip
+pip install PyHive==0.7.0 thrift==0.16.0 thrift-sasl==0.4.3 \
+            pyarrow openpyxl chardet python-dotenv impyla venv-pack
+deactivate
+venv-pack -p gmp_cis -o gmp_cis.tar.gz
+ls -lh gmp_cis.tar.gz
+```
+
+The file is written to `C:\Users\<YourUser>\CIS\cis\gmp_cis.tar.gz`.
+
+---
+
 ## Overview
 
 This guide covers building a Python 3.11 virtual environment on **Windows**,
-packing it into a zip/tar.gz, uploading to HDFS, and submitting to a Cloudera
-YARN cluster via `spark-submit --archives`.
+packing it into a tar.gz using WSL 2 or Docker, uploading to HDFS, and
+submitting to a Cloudera YARN cluster via `spark-submit --archives`.
 
-> **Important:** The packed environment runs on **Linux** YARN worker nodes.
-> A venv built on Windows cannot be used directly — you must use **WSL 2**
-> (Windows Subsystem for Linux) or a **Docker container** to build the Linux
-> binary. Steps for both are covered below.
+> **Rule:** Everything that touches the venv (create, pip install, venv-pack)
+> must run inside **WSL 2** or **Docker** — never in Windows CMD or PowerShell.
 
 ---
 
