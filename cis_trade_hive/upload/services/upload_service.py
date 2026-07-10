@@ -3120,20 +3120,130 @@ class UploadService:
             logger.info(f"[position_etl] PRE-STEP-0-DONE: source partition confirmed")
             logger.info(f"[position_etl] SRC-ID-CHECK: src_id={repr(src_id)} match={src_id == 'cis_user_sta_adhoc_position_5'} std_select_len={len(std_select)}")
 
-            # For format 5: replace the gmp_cis_sta_dly_country CTE join entirely.
-            # gmp_cis_sta_dly_country is a large Hive external table — even a single
-            # partition scan causes 60-150s Impala planning + execution overhead.
-            # Instead: fetch only the distinct country names present in this upload's
-            # 3-row partition, look them up via a targeted IN() query on cis_country
-            # (small Kudu table), then inject CASE WHEN literals into the INSERT SQL
-            # so no Hive table join exists in the plan at all.
-            # ── Format-5 Step 0: Python-side country resolution ───────────────
-            # The CASE WHEN approach (741 keys × 5 columns = 3700+ branches) causes
-            # Impala query planner to take 150s even for 3 rows.
-            # Solution: read source rows into Python, resolve countries using the
-            # dict, write resolved rows as individual INSERT OVERWRITE ... VALUES.
-            # No complex SQL in the plan — Impala executes trivial literal inserts.
-            if src_id == 'cis_user_sta_adhoc_position_5':
+            # Formats 4 & 5: Impala query planner takes 150-300s even for small
+            # row counts when the INSERT SELECT reads from a Hive external parquet
+            # table. Solution for both: SELECT source rows into Python, build
+            # VALUES literals, INSERT OVERWRITE ... VALUES — trivial plan, <1s.
+            # Format 5 additionally resolves country columns via Python dict
+            # (avoids a 3700-branch CASE WHEN / gmp_cis_sta_dly_country scan).
+            if src_id == 'cis_user_sta_adhoc_position_4':
+                try:
+                    import time as _ct
+                    _ct0 = _ct.time()
+                    _t = _etl_t0
+
+                    def _safe_str(v):
+                        if v is None or str(v).strip() in ('', 'None', 'NULL', 'null'):
+                            return 'NULL'
+                        return "'" + str(v).replace("'", "''").replace("\\", "\\\\") + "'"
+
+                    def _safe_dec(v):
+                        import re as _re
+                        if v is None:
+                            return 'NULL'
+                        s = str(v).strip()
+                        s = _re.sub(r'[,$£€¥%]', '', s)
+                        s = _re.sub(r'^\(([0-9.]+)\)$', r'-\1', s)
+                        s = _re.sub(r'^[-–—]+$', '0', s)
+                        m = _re.match(r'^-?[0-9]+\.?[0-9]*([eE][+-]?[0-9]+)?$', s)
+                        return s if m else 'NULL'
+
+                    logger.info(f"[position_etl] F4-STEP0-A: reading source rows from {src_id}")
+                    _src_rows = impala_manager.execute_query(
+                        f"""
+                        SELECT *
+                        FROM {db}.{src_id}
+                        WHERE processing_date = '{processing_date}'
+                          AND src_id = '{src_id}'
+                        """,
+                        database=db
+                    ) or []
+                    logger.info(f"[position_etl] F4-STEP0-B: {len(_src_rows)} source rows fetched")
+
+                    if not _src_rows:
+                        return False, f"Step 0 (F4): no rows in {src_id} for processing_date={processing_date}", result
+
+                    _val_rows = []
+                    for _r in _src_rows:
+                        _val_rows.append(f"""(
+                            {_safe_str(_r.get('portfolio'))},
+                            {_safe_str(_r.get('security_full_name'))},
+                            NULL,
+                            {_safe_str(_r.get('isin_code'))},
+                            {_safe_str(_r.get('ticker_code'))},
+                            {_safe_dec(_r.get('quantity'))},
+                            {_safe_dec(_r.get('no_of_shares_issues_by_the_company'))},
+                            {_safe_dec(_r.get('no_of_shares_issues_by_the_company'))},
+                            {_safe_dec(_r.get('pct_holdings'))},
+                            NULL,
+                            NULL,
+                            {_safe_dec(_r.get('cost_fc'))},
+                            NULL,
+                            {_safe_dec(_r.get('net_book_value_fc'))},
+                            NULL,
+                            NULL,
+                            {_safe_dec(_r.get('cost_lc'))},
+                            NULL,
+                            {_safe_dec(_r.get('net_book_value_lc'))},
+                            NULL,
+                            NULL,
+                            {_safe_str(_r.get('product_type'))},
+                            {_safe_str(_r.get('security_type'))},
+                            {_safe_str(_r.get('quoted_unquoted'))},
+                            {_safe_str(_r.get('industry'))},
+                            {_safe_str(_r.get('financial_non_financial_co'))},
+                            NULL,
+                            NULL,
+                            {_safe_str(_r.get('country_of_exchange'))},
+                            NULL,
+                            {_safe_str(_r.get('country_of_exchange'))},
+                            {_safe_str(_r.get('country_of_incorporation'))},
+                            NULL,
+                            NULL,
+                            {_safe_str(_r.get('security_currency'))},
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            'SETTLED',
+                            {_safe_str(_r.get('reporting_date'))},
+                            NULL,
+                            'USER_UPLOAD', 'user', 'sta', 'adhoc',
+                            'cis_user_sta_adhoc_position_4',
+                            now(), 'python_etl'
+                        )""")
+
+                    _values_sql = ',\n'.join(_val_rows)
+                    logger.info(f"[position_etl] F4-STEP0-C: INSERT {len(_val_rows)} rows via VALUES")
+                    ok = impala_manager.execute_write(
+                        f"""
+                        INSERT OVERWRITE {db}.position_upload_standardized
+                        PARTITION (processing_date='{processing_date}', src_id='{src_id}')
+                        VALUES {_values_sql}
+                        """,
+                        database=db
+                    )
+                    if not ok:
+                        return False, "Step 0 (F4) INSERT VALUES into position_upload_standardized failed", result
+                    impala_manager.execute_write(
+                        f"REFRESH {db}.position_upload_standardized PARTITION (processing_date='{processing_date}', src_id='{src_id}')",
+                        database=db
+                    )
+                    std_rows = len(_val_rows)
+                    logger.info(f"[position_etl] F4-STEP0-DONE: {std_rows} rows in {_ct.time()-_ct0:.1f}s total")
+                    _t = _step_time("Step 0 (F4 python-insert)", _t)
+                    if std_rows == 0:
+                        return False, "Step 0 (F4) produced 0 rows", result
+
+                except Exception as _f4e:
+                    logger.error(f"[position_etl] F4-STEP0-FAIL: {_f4e}", exc_info=True)
+                    return False, f"Step 0 (F4) failed: {_f4e}", result
+
+            elif src_id == 'cis_user_sta_adhoc_position_5':
                 try:
                     import time as _ct
                     _ct0 = _ct.time()
