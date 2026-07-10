@@ -3045,29 +3045,74 @@ class UploadService:
             if not std_select:
                 return False, f"Unknown src_id '{src_id}' — no standardization mapping defined", result
 
-            # ── Pre-Step 0: INVALIDATE METADATA on the source table so Impala
-            # sees the current HDFS state.  Previous failed/partial runs can leave
-            # the metastore pointing at parquet files that were overwritten or
-            # deleted, causing NoSuchFileException on the very first read.
-            logger.info(f"[position_etl] Pre-Step 0 INVALIDATE METADATA {db}.{src_id} ...")
-            impala_manager.execute_write(f"INVALIDATE METADATA {db}.{src_id}", database=db)
-            impala_manager.execute_write(
-                f"REFRESH {db}.{src_id} PARTITION (processing_date='{processing_date}')",
-                database=db
+            # ── Hive external table guard helpers ─────────────────────────────
+            # Hive external Parquet tables can have stale metastore entries after
+            # partial/failed runs — the metastore believes a partition exists but
+            # the parquet file is missing on HDFS, causing NoSuchFileException on
+            # the very first read.  Always INVALIDATE + REFRESH + COUNT before
+            # reading any Hive external table.
+            #
+            # Kudu tables (cis_security, cis_position, cis_exchange_mapping_lut,
+            # cis_equity_price) are not affected — Kudu has no parquet files and
+            # its metadata is always consistent.
+            #
+            # Hive external tables in this ETL:
+            #   READ:  cis_user_sta_adhoc_position_{1-5}  (source, pre-Step 0)
+            #          position_upload_standardized        (Step 1 source)
+            #          gmp_cis_sta_dly_country             (Step 0 country map, format 5)
+            #          gmp_cis_sta_dly_alldatesinfo        (Step 7A2 calendar)
+            #   WRITE: position_upload_standardized        (Step 0 target → REFRESH after)
+            #          position_upload_report              (Step 7B target → REFRESH after)
+
+            def _hive_invalidate(table: str, step: str) -> None:
+                """INVALIDATE METADATA for a Hive external table (full resync)."""
+                logger.info(f"[position_etl] {step} INVALIDATE METADATA {db}.{table}")
+                impala_manager.execute_write(f"INVALIDATE METADATA {db}.{table}", database=db)
+
+            def _hive_refresh_partition(table: str, partition_clause: str, step: str) -> None:
+                """REFRESH a specific partition of a Hive external table."""
+                logger.info(f"[position_etl] {step} REFRESH {db}.{table} PARTITION ({partition_clause})")
+                impala_manager.execute_write(
+                    f"REFRESH {db}.{table} PARTITION ({partition_clause})", database=db
+                )
+
+            def _hive_refresh_table(table: str, step: str) -> None:
+                """REFRESH a whole Hive external table (no partition key known)."""
+                logger.info(f"[position_etl] {step} REFRESH {db}.{table}")
+                impala_manager.execute_write(f"REFRESH {db}.{table}", database=db)
+
+            def _hive_check_rows(table: str, where: str, step: str, abort_msg: str) -> int:
+                """
+                COUNT(*) a Hive partition after INVALIDATE+REFRESH.
+                Returns the row count.  Raises RuntimeError with abort_msg if 0.
+                """
+                rows = impala_manager.execute_query(
+                    f"SELECT COUNT(*) AS n FROM {db}.{table} WHERE {where}", database=db
+                )
+                n = int((rows or [{}])[0].get('n', 0))
+                if n == 0:
+                    raise RuntimeError(abort_msg)
+                logger.info(f"[position_etl] {step} confirmed {n} rows in {db}.{table} WHERE {where}")
+                return n
+
+            # ── Pre-Step 0: resync source upload table ────────────────────────
+            _hive_invalidate(src_id, "Pre-Step 0")
+            _hive_refresh_partition(
+                src_id,
+                f"processing_date='{processing_date}'",
+                "Pre-Step 0"
             )
-            # Verify the source partition actually has rows before running the ETL.
-            _src_count_rows = impala_manager.execute_query(
-                f"SELECT COUNT(*) AS n FROM {db}.{src_id} WHERE processing_date='{processing_date}'",
-                database=db
-            )
-            _src_count = int((_src_count_rows or [{}])[0].get('n', 0))
-            if _src_count == 0:
-                return False, (
-                    f"Step 0 aborted — source partition {src_id}/"
-                    f"processing_date={processing_date} has 0 rows after INVALIDATE+REFRESH. "
-                    f"The HDFS parquet file may be missing. Re-upload the file first."
-                ), result
-            logger.info(f"[position_etl] Pre-Step 0 source partition confirmed: {_src_count} rows in {src_id}")
+            try:
+                _hive_check_rows(
+                    src_id,
+                    f"processing_date='{processing_date}'",
+                    "Pre-Step 0",
+                    f"Source partition {src_id}/processing_date={processing_date} has 0 rows "
+                    f"after INVALIDATE+REFRESH — HDFS parquet file may be missing. "
+                    f"Re-upload the file before running Position ETL."
+                )
+            except RuntimeError as _pre_err:
+                return False, str(_pre_err), result
 
             # For format 5: replace the gmp_cis_sta_dly_country CTE join entirely.
             # gmp_cis_sta_dly_country is a large Hive external table — even a single
@@ -3080,6 +3125,9 @@ class UploadService:
                 try:
                     import time as _ct
                     _ct0 = _ct.time()
+                    # Refresh gmp_cis_sta_dly_country before reading — it's a Hive
+                    # external table and stale metadata causes NoSuchFileException.
+                    _hive_refresh_table('gmp_cis_sta_dly_country', "Step 0 (country map)")
                     logger.info(f"[position_etl] Step 0 fetching country map from gmp_cis_sta_dly_country ...")
                     _country_map = _build_country_map_for_format5(
                         impala_manager, db, processing_date, src_id
@@ -3130,6 +3178,24 @@ class UploadService:
             #         (all STRING), apply DECIMAL casts, rename exchange_code →
             #         `exchange` for use as internal name throughout the pipeline.
             # ------------------------------------------------------------------
+            # Guard: REFRESH the partition we just wrote in Step 0 so Impala
+            # sees the new parquet file before Step 1 reads it.
+            _hive_refresh_partition(
+                'position_upload_standardized',
+                f"processing_date='{processing_date}', src_id='{src_id}'",
+                "Step 1 (pre-read)"
+            )
+            try:
+                _hive_check_rows(
+                    'position_upload_standardized',
+                    f"src_id='{src_id}' AND processing_date='{processing_date}'",
+                    "Step 1 (pre-read)",
+                    f"position_upload_standardized partition src_id={src_id}/"
+                    f"processing_date={processing_date} has 0 rows after REFRESH — "
+                    f"Step 0 INSERT may have silently failed."
+                )
+            except RuntimeError as _s1_err:
+                return False, str(_s1_err), result
             impala_manager.execute_write(
                 "DROP TABLE IF EXISTS pos_stage_1_base", database=db
             )
@@ -4321,6 +4387,9 @@ class UploadService:
                     f"[position_etl] Step 7A2: querying alldatesinfo for biz dates "
                     f"{_min_upload_date_nodash} < date <= {_calendar_today_nodash}"
                 )
+                # Guard: REFRESH gmp_cis_sta_dly_alldatesinfo before reading —
+                # it's a Hive external table; stale metadata causes NoSuchFileException.
+                _hive_refresh_table('gmp_cis_sta_dly_alldatesinfo', "Step 7A2")
                 _biz_dates_rows = impala_manager.execute_query(
                     f"""
                     SELECT contextual_today AS biz_date
