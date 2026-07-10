@@ -594,12 +594,29 @@ class FileValidationService:
         return 'STRING'
 
 
+def _normalize_country_key(name: str) -> str:
+    """
+    Normalize a country full_name for safe SQL comparison.
+    Strips apostrophes, parentheses, hyphens and collapses whitespace so that
+    names like "DEMOCRATIC PEOPLE'S REPUBLIC OF (KOREA)" become
+    "DEMOCRATIC PEOPLES REPUBLIC OF KOREA" — pure alpha+space, no SQL-breaking chars.
+    Mirrors the regexp_replace applied to the upload column in _case_expr().
+    """
+    import re
+    s = name.upper()
+    s = re.sub(r"['\"\\\(\)\-\,\.\:]", ' ', s)   # drop SQL-unsafe / punctuation chars
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s
+
+
 def _build_country_map_for_format5(impala_manager, db: str, processing_date: str, src_id: str) -> dict:
     """
     Fetch the complete country name → code mapping from gmp_cis_sta_dly_country.
     The table has only ~247 rows — fetch all at once, build a Python dict,
     then inject as CASE WHEN literals so the INSERT plan has zero Hive table references.
-    Returns dict: {UPPER(TRIM(full_name)): label}
+    Keys are normalized (apostrophes/parens/hyphens removed) to match what the
+    Impala CASE WHEN expression produces from the upload column.
+    Returns dict: {normalized_full_name: label}
     """
     rows = impala_manager.execute_query(
         f"""
@@ -612,7 +629,15 @@ def _build_country_map_for_format5(impala_manager, db: str, processing_date: str
         """,
         database=db
     ) or []
-    return {r['full_name']: r['label'] for r in rows if r.get('full_name') and r.get('label')}
+    result = {}
+    for r in rows:
+        raw = (r.get('full_name') or '').strip()
+        label = (r.get('label') or '').strip()
+        if raw and label:
+            norm = _normalize_country_key(raw)
+            if norm:
+                result[norm] = label
+    return result
 
 
 def _inject_country_case_when(std_select: str, country_map: dict, db: str) -> str:
@@ -620,18 +645,29 @@ def _inject_country_case_when(std_select: str, country_map: dict, db: str) -> st
     Replace the country_lut CTE + 4 LEFT JOINs in the format-5 std_select with
     inline CASE WHEN expressions using pre-fetched literal values.
     Removes gmp_cis_sta_dly_country entirely from the INSERT execution plan.
+
+    Both the upload column and the dict keys are normalized with the same
+    regexp_replace (strip apostrophes, parens, hyphens → space, collapse spaces)
+    so no special characters ever appear inside Impala string literals.
     """
     import re
 
-    def _sql_str(s: str) -> str:
-        """Escape a string for safe embedding in an Impala single-quoted literal."""
-        return s.replace("'", "''").replace("\\", "\\\\")
+    # Impala regexp_replace expression that mirrors _normalize_country_key().
+    # Applied to the upload column before comparison so both sides are normalized.
+    _NORM_EXPR = (
+        "regexp_replace("
+        "regexp_replace("
+        "UPPER(TRIM(CAST({col} AS STRING))),"
+        " \"['\\\\\\\\.\\\\(\\\\)\\\\-,/:]\", ' '),"   # strip unsafe punct → space
+        " '\\\\s+', ' ')"                               # collapse multiple spaces
+    )
 
     def _case_expr(col: str) -> str:
         if not country_map:
             return "CAST(NULL AS STRING)"
+        norm_col = _NORM_EXPR.format(col=col)
         branches = '\n'.join(
-            f"        WHEN UPPER(TRIM(CAST({col} AS STRING))) = '{_sql_str(k)}' THEN '{_sql_str(v)}'"
+            f"        WHEN {norm_col} = '{k}' THEN '{v}'"
             for k, v in country_map.items()
         )
         return f"CASE\n{branches}\n        ELSE CAST(NULL AS STRING)\n    END"
