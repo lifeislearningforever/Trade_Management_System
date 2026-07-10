@@ -2986,22 +2986,22 @@ class UploadService:
                         NULL                                               AS security_short_name,
                         {clean_isin('p5.isin_code')}                       AS isin,
                         {clean_ticker('p5.ticker_code')}                   AS ticker,
-                        CAST(p5.quantity AS DECIMAL(30,8))                 AS quantity,
-                        CAST(p5.no_of_shares_issues_by_the_company AS DECIMAL(30,8)) AS shares_outstanding,
-                        CAST(p5.no_of_shares_issues_by_the_company AS DECIMAL(30,8)) AS shares_issued,
-                        CAST(p5.pct_holdings AS DECIMAL(10,6))             AS pct_holding,
-                        CAST(p5.market_price_unit_fc AS DECIMAL(30,8))     AS market_price,
-                        CAST(p5.unit_avg_cost_unit_fc AS DECIMAL(30,8))    AS average_cost,
-                        CAST(p5.cost_fc AS DECIMAL(30,8))                  AS cost_fc,
-                        CAST(p5.market_value_fc AS DECIMAL(30,8))          AS market_value_fc,
-                        CAST(p5.net_book_value_fc AS DECIMAL(30,8))        AS net_book_value_fc,
-                        CAST(p5.unrealised_gain_loss_fc AS DECIMAL(30,8))  AS unrealized_pnl_fc,
-                        CAST(p5.provision_fc AS DECIMAL(30,8))             AS provision_fc,
-                        CAST(p5.cost_lc AS DECIMAL(30,8))                  AS cost_lc,
-                        CAST(p5.market_value_lc AS DECIMAL(30,8))          AS market_value_lc,
-                        CAST(p5.net_book_value_lc AS DECIMAL(30,8))        AS net_book_value_lc,
-                        CAST(p5.unrealised_gain_loss_lc AS DECIMAL(30,8))  AS unrealized_pnl_lc,
-                        CAST(p5.provision_lc AS DECIMAL(30,8))             AS provision_lc,
+                        {safe_decimal('p5.quantity',                         'DECIMAL(30,8)')} AS quantity,
+                        {safe_decimal('p5.no_of_shares_issues_by_the_company','DECIMAL(30,8)')} AS shares_outstanding,
+                        {safe_decimal('p5.no_of_shares_issues_by_the_company','DECIMAL(30,8)')} AS shares_issued,
+                        {safe_decimal('p5.pct_holdings',                     'DECIMAL(10,6)')} AS pct_holding,
+                        {safe_decimal('p5.market_price_unit_fc',             'DECIMAL(30,8)')} AS market_price,
+                        {safe_decimal('p5.unit_avg_cost_unit_fc',            'DECIMAL(30,8)')} AS average_cost,
+                        {safe_decimal('p5.cost_fc',                          'DECIMAL(30,8)')} AS cost_fc,
+                        {safe_decimal('p5.market_value_fc',                  'DECIMAL(30,8)')} AS market_value_fc,
+                        {safe_decimal('p5.net_book_value_fc',                'DECIMAL(30,8)')} AS net_book_value_fc,
+                        {safe_decimal('p5.unrealised_gain_loss_fc',          'DECIMAL(30,8)')} AS unrealized_pnl_fc,
+                        {safe_decimal('p5.provision_fc',                     'DECIMAL(30,8)')} AS provision_fc,
+                        {safe_decimal('p5.cost_lc',                          'DECIMAL(30,8)')} AS cost_lc,
+                        {safe_decimal('p5.market_value_lc',                  'DECIMAL(30,8)')} AS market_value_lc,
+                        {safe_decimal('p5.net_book_value_lc',                'DECIMAL(30,8)')} AS net_book_value_lc,
+                        {safe_decimal('p5.unrealised_gain_loss_lc',          'DECIMAL(30,8)')} AS unrealized_pnl_lc,
+                        {safe_decimal('p5.provision_lc',                     'DECIMAL(30,8)')} AS provision_lc,
                         p5.product_type, p5.security_type, p5.quoted_unquoted, p5.industry,
                         NULL                                               AS fin_nonfin_co,
                         p5.issuer_type, p5.reits_or_fund_y_n,
@@ -3135,9 +3135,12 @@ class UploadService:
                     logger.info(f"[position_etl] Step 0 country map done in {_ct.time()-_ct0:.1f}s — {len(_country_map)} entries")
                     if _country_map:
                         std_select = _inject_country_case_when(std_select, _country_map, db)
-                        logger.info(f"[position_etl] Step 0 country CTE replaced with CASE WHEN literals")
+                        logger.info(f"[position_etl] Step 0 country CTE replaced with CASE WHEN literals ({len(_country_map)} keys)")
+                    else:
+                        logger.warning(f"[position_etl] Step 0 country map is EMPTY — country fields will be NULL")
                 except Exception as _ce:
-                    logger.warning(f"[position_etl] Step 0 country map build failed (non-fatal, keeping CTE): {_ce}")
+                    logger.error(f"[position_etl] Step 0 country map/inject FAILED — aborting ETL to avoid 400s hang on CTE: {_ce}", exc_info=True)
+                    return False, f"Step 0 country lookup failed: {_ce}", result
 
             _t = _etl_t0
             logger.info(f"[position_etl] Step 0 starting — INSERT OVERWRITE position_upload_standardized for {src_id}")
