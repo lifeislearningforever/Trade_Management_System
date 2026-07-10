@@ -3134,72 +3134,191 @@ class UploadService:
             # 3-row partition, look them up via a targeted IN() query on cis_country
             # (small Kudu table), then inject CASE WHEN literals into the INSERT SQL
             # so no Hive table join exists in the plan at all.
+            # ── Format-5 Step 0: Python-side country resolution ───────────────
+            # The CASE WHEN approach (741 keys × 5 columns = 3700+ branches) causes
+            # Impala query planner to take 150s even for 3 rows.
+            # Solution: read source rows into Python, resolve countries using the
+            # dict, write resolved rows as individual INSERT OVERWRITE ... VALUES.
+            # No complex SQL in the plan — Impala executes trivial literal inserts.
             if src_id == 'cis_user_sta_adhoc_position_5':
                 try:
                     import time as _ct
                     _ct0 = _ct.time()
-                    print(f"[position_etl] COUNTRY-A: REFRESH gmp_cis_sta_dly_country", flush=True)
-                    logger.info(f"[position_etl] COUNTRY-A: REFRESH gmp_cis_sta_dly_country")
+                    print(f"[position_etl] F5-STEP0-A: REFRESH gmp_cis_sta_dly_country", flush=True)
+                    logger.info(f"[position_etl] F5-STEP0-A: REFRESH gmp_cis_sta_dly_country")
                     _hive_refresh_table('gmp_cis_sta_dly_country', "Step 0 (country map)")
-                    print(f"[position_etl] COUNTRY-B: fetching country map ...", flush=True)
-                    logger.info(f"[position_etl] COUNTRY-B: fetching country map ...")
+
+                    print(f"[position_etl] F5-STEP0-B: fetching country map", flush=True)
+                    logger.info(f"[position_etl] F5-STEP0-B: fetching country map")
                     _country_map = _build_country_map_for_format5(
                         impala_manager, db, processing_date, src_id
                     )
-                    print(f"[position_etl] COUNTRY-C: map done {_ct.time()-_ct0:.1f}s — {len(_country_map)} entries", flush=True)
-                    logger.info(f"[position_etl] COUNTRY-C: map done in {_ct.time()-_ct0:.1f}s — {len(_country_map)} entries")
-                    if _country_map:
-                        print(f"[position_etl] COUNTRY-D: injecting CASE WHEN ...", flush=True)
-                        logger.info(f"[position_etl] COUNTRY-D: injecting CASE WHEN ...")
-                        std_select = _inject_country_case_when(std_select, _country_map, db)
-                        print(f"[position_etl] COUNTRY-E: inject done — {len(_country_map)} keys, SQL len={len(std_select)}", flush=True)
-                        logger.info(f"[position_etl] COUNTRY-E: inject done — {len(_country_map)} keys, SQL len={len(std_select)}")
-                    else:
-                        print(f"[position_etl] COUNTRY-EMPTY: country map empty — fields will be NULL", flush=True)
-                        logger.warning(f"[position_etl] COUNTRY-EMPTY: country map empty — country fields will be NULL")
-                except Exception as _ce:
-                    print(f"[position_etl] COUNTRY-FAIL: {_ce}", flush=True)
-                    logger.error(f"[position_etl] COUNTRY-FAIL — aborting ETL: {_ce}", exc_info=True)
-                    return False, f"Step 0 country lookup failed: {_ce}", result
+                    print(f"[position_etl] F5-STEP0-C: country map {len(_country_map)} keys in {_ct.time()-_ct0:.1f}s", flush=True)
+                    logger.info(f"[position_etl] F5-STEP0-C: country map {len(_country_map)} keys in {_ct.time()-_ct0:.1f}s")
 
-            _t = _etl_t0
-            print(f"[position_etl] STEP-0-INSERT: starting INSERT OVERWRITE SQL_LEN={len(std_select)}", flush=True)
-            logger.info(f"[position_etl] STEP-0-INSERT: starting INSERT OVERWRITE SQL_LEN={len(std_select)}")
-            # Log first 500 chars of std_select so we can confirm CTE is/isn't present
-            _std_head = std_select.strip()[:500].replace('\n', ' ')
-            print(f"[position_etl] STD-SELECT-HEAD: {_std_head}", flush=True)
-            logger.info(f"[position_etl] STD-SELECT-HEAD: {_std_head}")
-            logger.info(f"[position_etl] Step 0 SQL length={len(std_select)} chars — submitting to Impala now ...")
-            ok = impala_manager.execute_write(
-                f"""
-                INSERT OVERWRITE {db}.position_upload_standardized
-                PARTITION (processing_date='{processing_date}', src_id='{src_id}')
-                {std_select}
-                """,
-                database=db
-            )
-            if not ok:
-                return False, f"Step 0 INSERT into position_upload_standardized failed — check Impala logs", result
-            impala_manager.execute_write(
-                f"REFRESH {db}.position_upload_standardized PARTITION (processing_date='{processing_date}', src_id='{src_id}')",
-                database=db
-            )
+                    def _resolve_country(raw_val):
+                        """Look up country label from raw upload value using the pre-built map."""
+                        if not raw_val:
+                            return None
+                        key = str(raw_val).upper().strip()
+                        return _country_map.get(key) or _country_map.get(_normalize_country_key(key))
 
-            # Verify rows landed
-            std_count = impala_manager.execute_query(
-                f"""
-                SELECT COUNT(*) AS cnt
-                FROM {db}.position_upload_standardized
-                WHERE src_id = '{src_id}'
-                  AND processing_date = '{processing_date}'
-                """,
-                database=db
-            )
-            std_rows = (std_count[0].get('cnt', 0) if std_count else 0)
-            logger.info(f"[position_etl] Step 0 complete — {std_rows} rows standardized")
-            _t = _step_time("Step 0 (standardize+refresh)", _t)
-            if std_rows == 0:
-                return False, f"Standardization produced 0 rows — check src_id='{src_id}' processing_date='{processing_date}' in {src_id} table", result
+                    def _safe_str(v):
+                        """Return SQL string literal or NULL for None/empty values."""
+                        if v is None or str(v).strip() in ('', 'None', 'NULL', 'null'):
+                            return 'NULL'
+                        return "'" + str(v).replace("'", "''").replace("\\", "\\\\") + "'"
+
+                    def _safe_dec(v):
+                        """Return SQL decimal literal or NULL for unparseable values."""
+                        import re as _re
+                        if v is None:
+                            return 'NULL'
+                        s = str(v).strip()
+                        s = _re.sub(r'[,$£€¥%]', '', s)
+                        s = _re.sub(r'^\(([0-9.]+)\)$', r'-\1', s)
+                        s = _re.sub(r'^[-–—]+$', '0', s)
+                        m = _re.match(r'^-?[0-9]+\.?[0-9]*([eE][+-]?[0-9]+)?$', s)
+                        return s if m else 'NULL'
+
+                    print(f"[position_etl] F5-STEP0-D: reading source rows from {src_id}", flush=True)
+                    logger.info(f"[position_etl] F5-STEP0-D: reading source rows from {src_id}")
+                    _src_rows = impala_manager.execute_query(
+                        f"""
+                        SELECT *
+                        FROM {db}.{src_id}
+                        WHERE processing_date = '{processing_date}'
+                          AND src_id = '{src_id}'
+                        """,
+                        database=db
+                    ) or []
+                    print(f"[position_etl] F5-STEP0-E: {len(_src_rows)} source rows fetched", flush=True)
+                    logger.info(f"[position_etl] F5-STEP0-E: {len(_src_rows)} source rows fetched")
+
+                    if not _src_rows:
+                        return False, f"Step 0 (F5): no rows in {src_id} for processing_date={processing_date}", result
+
+                    # Build VALUES rows with country already resolved in Python
+                    _val_rows = []
+                    for _r in _src_rows:
+                        _exc = _resolve_country(_r.get('country_of_exchange'))
+                        _inc = _resolve_country(_r.get('country_of_incorporation'))
+                        _rsk = _resolve_country(_r.get('country_of_risk'))
+                        _opr = _resolve_country(_r.get('country_of_operation'))
+                        _val_rows.append(f"""(
+                            {_safe_str(_r.get('portfolio'))},
+                            {_safe_str(_r.get('security_full_name'))},
+                            NULL,
+                            {_safe_str(_r.get('isin_code'))},
+                            {_safe_str(_r.get('ticker_code'))},
+                            {_safe_dec(_r.get('quantity'))},
+                            {_safe_dec(_r.get('no_of_shares_issues_by_the_company'))},
+                            {_safe_dec(_r.get('no_of_shares_issues_by_the_company'))},
+                            {_safe_dec(_r.get('pct_holdings'))},
+                            {_safe_dec(_r.get('market_price_unit_fc'))},
+                            {_safe_dec(_r.get('unit_avg_cost_unit_fc'))},
+                            {_safe_dec(_r.get('cost_fc'))},
+                            {_safe_dec(_r.get('market_value_fc'))},
+                            {_safe_dec(_r.get('net_book_value_fc'))},
+                            {_safe_dec(_r.get('unrealised_gain_loss_fc'))},
+                            {_safe_dec(_r.get('provision_fc'))},
+                            {_safe_dec(_r.get('cost_lc'))},
+                            {_safe_dec(_r.get('market_value_lc'))},
+                            {_safe_dec(_r.get('net_book_value_lc'))},
+                            {_safe_dec(_r.get('unrealised_gain_loss_lc'))},
+                            {_safe_dec(_r.get('provision_lc'))},
+                            {_safe_str(_r.get('product_type'))},
+                            {_safe_str(_r.get('security_type'))},
+                            {_safe_str(_r.get('quoted_unquoted'))},
+                            {_safe_str(_r.get('industry'))},
+                            NULL,
+                            {_safe_str(_r.get('issuer_type'))},
+                            {_safe_str(_r.get('reits_or_fund_y_n'))},
+                            {_safe_str(_exc)},
+                            NULL,
+                            {_safe_str(_exc)},
+                            {_safe_str(_inc)},
+                            {_safe_str(_rsk)},
+                            {_safe_str(_opr)},
+                            {_safe_str(_r.get('security_currency_fc'))},
+                            {_safe_str(_r.get('corp_code'))},
+                            {_safe_str(_r.get('branch_code'))},
+                            {_safe_str(_r.get('cost_centre'))},
+                            {_safe_str(_r.get('cels_code'))},
+                            {_safe_str(_r.get('bwcif_number_sg'))},
+                            {_safe_str(_r.get('bwcif_number_overseas'))},
+                            {_safe_str(_r.get('mas_6d_code_sg'))},
+                            {_safe_str(_r.get('mas_6d_code_overseas'))},
+                            'SETTLED',
+                            {_safe_str(_r.get('reporting_date'))},
+                            {_safe_str(_r.get('maturity_date'))},
+                            'USER_UPLOAD', 'user', 'sta', 'adhoc',
+                            'cis_user_sta_adhoc_position_5',
+                            now(), 'python_etl'
+                        )""")
+
+                    _values_sql = ',\n'.join(_val_rows)
+                    print(f"[position_etl] F5-STEP0-F: INSERT {len(_val_rows)} rows via VALUES", flush=True)
+                    logger.info(f"[position_etl] F5-STEP0-F: INSERT {len(_val_rows)} rows via VALUES")
+                    ok = impala_manager.execute_write(
+                        f"""
+                        INSERT OVERWRITE {db}.position_upload_standardized
+                        PARTITION (processing_date='{processing_date}', src_id='{src_id}')
+                        VALUES {_values_sql}
+                        """,
+                        database=db
+                    )
+                    if not ok:
+                        return False, "Step 0 (F5) INSERT VALUES into position_upload_standardized failed", result
+                    impala_manager.execute_write(
+                        f"REFRESH {db}.position_upload_standardized PARTITION (processing_date='{processing_date}', src_id='{src_id}')",
+                        database=db
+                    )
+                    std_rows = len(_val_rows)
+                    print(f"[position_etl] F5-STEP0-DONE: {std_rows} rows in {_ct.time()-_ct0:.1f}s total", flush=True)
+                    logger.info(f"[position_etl] F5-STEP0-DONE: {std_rows} rows in {_ct.time()-_ct0:.1f}s total")
+                    _t = _step_time("Step 0 (F5 python-resolve+insert)", _t)
+                    if std_rows == 0:
+                        return False, "Step 0 (F5) produced 0 rows", result
+
+                except Exception as _f5e:
+                    print(f"[position_etl] F5-STEP0-FAIL: {_f5e}", flush=True)
+                    logger.error(f"[position_etl] F5-STEP0-FAIL: {_f5e}", exc_info=True)
+                    return False, f"Step 0 (F5) failed: {_f5e}", result
+
+            else:
+                # ── All other formats: standard SQL INSERT OVERWRITE ──────────
+                _t = _etl_t0
+                logger.info(f"[position_etl] Step 0 starting — INSERT OVERWRITE position_upload_standardized for {src_id}")
+                logger.info(f"[position_etl] Step 0 SQL length={len(std_select)} chars")
+                ok = impala_manager.execute_write(
+                    f"""
+                    INSERT OVERWRITE {db}.position_upload_standardized
+                    PARTITION (processing_date='{processing_date}', src_id='{src_id}')
+                    {std_select}
+                    """,
+                    database=db
+                )
+                if not ok:
+                    return False, f"Step 0 INSERT into position_upload_standardized failed — check Impala logs", result
+                impala_manager.execute_write(
+                    f"REFRESH {db}.position_upload_standardized PARTITION (processing_date='{processing_date}', src_id='{src_id}')",
+                    database=db
+                )
+                std_count = impala_manager.execute_query(
+                    f"""
+                    SELECT COUNT(*) AS cnt
+                    FROM {db}.position_upload_standardized
+                    WHERE src_id = '{src_id}'
+                      AND processing_date = '{processing_date}'
+                    """,
+                    database=db
+                )
+                std_rows = (std_count[0].get('cnt', 0) if std_count else 0)
+                logger.info(f"[position_etl] Step 0 complete — {std_rows} rows standardized")
+                _t = _step_time("Step 0 (standardize+refresh)", _t)
+                if std_rows == 0:
+                    return False, f"Standardization produced 0 rows — check src_id='{src_id}' processing_date='{processing_date}' in {src_id} table", result
 
             # ------------------------------------------------------------------
             # Step 1: Base staging table — read from position_upload_standardized
