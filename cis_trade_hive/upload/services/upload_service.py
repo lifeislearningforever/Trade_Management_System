@@ -2099,6 +2099,162 @@ class UploadService:
         """Get all datasource configurations for dropdown."""
         return datasource_repository.get_all_datasources()
 
+
+def _build_country_map_for_format5(impala_manager, db: str, processing_date: str, src_id: str) -> dict:
+    """
+    Build a country name → code mapping for the format-5 upload partition.
+
+    Strategy (avoids full gmp_cis_sta_dly_country table scan):
+    1. Fetch the distinct country name values from the upload's small partition
+       (3-100 rows × 4 country columns = at most 12 distinct names).
+    2. Look them up in gmp_cis_sta_dly_country using WHERE IN(<12 literals>) +
+       WHERE processing_date = <latest known date from partition pruning>.
+       Because the IN list is tiny, Impala prunes to only the matching rows
+       rather than full-scanning the partition.
+
+    Returns dict: {UPPER(TRIM(country_full_name)): country_code_label}
+    """
+    # Step 1: collect distinct country names from the upload rows (fast — small partition)
+    raw_rows = impala_manager.execute_query(
+        f"""
+        SELECT DISTINCT
+            UPPER(TRIM(CAST(country_of_exchange      AS STRING))) AS c1,
+            UPPER(TRIM(CAST(country_of_incorporation AS STRING))) AS c2,
+            UPPER(TRIM(CAST(country_of_risk          AS STRING))) AS c3,
+            UPPER(TRIM(CAST(country_of_operation     AS STRING))) AS c4
+        FROM {db}.cis_user_sta_adhoc_position_5
+        WHERE processing_date = '{processing_date}'
+          AND src_id = '{src_id}'
+        """,
+        database=db
+    ) or []
+
+    distinct_names = set()
+    _skip = {'NA', 'N/A', 'NIL', 'NONE', '-', 'NULL', 'N.A.', 'NAP', ''}
+    for r in raw_rows:
+        for col in ('c1', 'c2', 'c3', 'c4'):
+            v = (r.get(col) or '').strip()
+            if v and v.upper() not in _skip:
+                distinct_names.add(v)
+
+    if not distinct_names:
+        return {}
+
+    logger.info(f"[position_etl] country map: resolving {len(distinct_names)} distinct names: {distinct_names}")
+
+    # Step 2: look up only those names in gmp_cis_sta_dly_country.
+    # Use the latest partition date from gmp_cis_sta_dly_country's own partition metadata
+    # (SHOW PARTITIONS — fast metadata-only call, no data scan).
+    max_pd = ''
+    try:
+        pd_rows = impala_manager.execute_query(
+            f"SHOW PARTITIONS {db}.gmp_cis_sta_dly_country",
+            database=db
+        ) or []
+        # SHOW PARTITIONS returns rows with a 'processing_date' column or '#Rows' etc.
+        # Extract max date from the first column of each row.
+        dates = []
+        for pr in pd_rows:
+            v = list(pr.values())[0] if pr else ''
+            if isinstance(v, str) and len(v) == 8 and v.isdigit():
+                dates.append(v)
+        if dates:
+            max_pd = max(dates)
+    except Exception as _pe:
+        logger.debug(f"[position_etl] SHOW PARTITIONS failed: {_pe}")
+
+    in_clause = ', '.join(f"'{n.replace(chr(39), chr(39)*2)}'" for n in distinct_names)
+
+    if max_pd:
+        lookup_rows = impala_manager.execute_query(
+            f"""
+            SELECT UPPER(TRIM(full_name)) AS full_name, MIN(label) AS label
+            FROM {db}.gmp_cis_sta_dly_country
+            WHERE processing_date = '{max_pd}'
+              AND UPPER(TRIM(full_name)) IN ({in_clause})
+            GROUP BY UPPER(TRIM(full_name))
+            """,
+            database=db
+        ) or []
+    else:
+        # Fallback: no partition date — scan with IN filter only (still much faster than full scan)
+        lookup_rows = impala_manager.execute_query(
+            f"""
+            SELECT UPPER(TRIM(full_name)) AS full_name, MIN(label) AS label
+            FROM {db}.gmp_cis_sta_dly_country
+            WHERE UPPER(TRIM(full_name)) IN ({in_clause})
+            GROUP BY UPPER(TRIM(full_name))
+            """,
+            database=db
+        ) or []
+
+    return {r['full_name']: r['label'] for r in lookup_rows if r.get('full_name') and r.get('label')}
+
+
+def _inject_country_case_when(std_select: str, country_map: dict, db: str) -> str:
+    """
+    Replace the country_lut CTE + JOIN block in the format-5 std_select with
+    inline CASE WHEN expressions using literal country code values.
+    This removes the gmp_cis_sta_dly_country Hive table from the INSERT plan entirely.
+    """
+    def _case_expr(col: str) -> str:
+        """Build CASE WHEN UPPER(TRIM(CAST(col AS STRING))) = 'NAME' THEN 'CODE' ... END"""
+        if not country_map:
+            return f"CAST(NULL AS STRING)"
+        branches = '\n'.join(
+            f"        WHEN UPPER(TRIM(CAST({col} AS STRING))) = '{k}' THEN '{v}'"
+            for k, v in country_map.items()
+        )
+        return f"CASE\n{branches}\n        ELSE CAST(NULL AS STRING)\n    END"
+
+    import re
+
+    # Remove the WITH country_lut AS (...) CTE block
+    std_select = re.sub(
+        r'WITH\s+country_lut\s+AS\s*\(.*?\)\s*(?=SELECT)',
+        '',
+        std_select,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+
+    # Replace cn_exc.label / cn_inc.label / cn_rsk.label / cn_opr.label references
+    std_select = re.sub(
+        r'cn_exc\.label\s+AS\s+exchange',
+        _case_expr('p5.country_of_exchange') + '                                       AS exchange',
+        std_select
+    )
+    std_select = re.sub(
+        r'cn_exc\.label\s+AS\s+country_of_exchange',
+        _case_expr('p5.country_of_exchange') + '                                       AS country_of_exchange',
+        std_select
+    )
+    std_select = re.sub(
+        r'cn_inc\.label\s+AS\s+country_of_incorporation',
+        _case_expr('p5.country_of_incorporation') + '                                   AS country_of_incorporation',
+        std_select
+    )
+    std_select = re.sub(
+        r'cn_rsk\.label\s+AS\s+country_of_risk',
+        _case_expr('p5.country_of_risk') + '                                            AS country_of_risk',
+        std_select
+    )
+    std_select = re.sub(
+        r'cn_opr\.label\s+AS\s+country_of_operation',
+        _case_expr('p5.country_of_operation') + '                                       AS country_of_operation',
+        std_select
+    )
+
+    # Remove the LEFT JOIN country_lut ... ON ... lines
+    std_select = re.sub(
+        r'LEFT\s+JOIN\s+country_lut\s+cn_\w+\s+ON\s+cn_\w+\.full_name\s*=\s*UPPER\(TRIM\(CAST\(p5\.\w+\s+AS\s+STRING\)\)\)\s*',
+        '',
+        std_select,
+        flags=re.IGNORECASE
+    )
+
+    return std_select
+
+
     # =========================================================================
     # POSITION UPLOAD ETL — Run transform pipeline & report download
     # =========================================================================
@@ -2846,24 +3002,24 @@ class UploadService:
             if not std_select:
                 return False, f"Unknown src_id '{src_id}' — no standardization mapping defined", result
 
-            # For format 5: pre-resolve MAX(processing_date) from gmp_cis_sta_dly_country
-            # so the CTE uses a literal date string instead of a correlated subquery.
-            # This eliminates a full Hive metastore scan inside the INSERT plan.
+            # For format 5: replace the gmp_cis_sta_dly_country CTE join entirely.
+            # gmp_cis_sta_dly_country is a large Hive external table — even a single
+            # partition scan causes 60-150s Impala planning + execution overhead.
+            # Instead: fetch only the distinct country names present in this upload's
+            # 3-row partition, look them up via a targeted IN() query on cis_country
+            # (small Kudu table), then inject CASE WHEN literals into the INSERT SQL
+            # so no Hive table join exists in the plan at all.
             if src_id == 'cis_user_sta_adhoc_position_5':
                 try:
-                    _cdate_rows = impala_manager.execute_query(
-                        f"SELECT MAX(processing_date) AS max_pd FROM {db}.gmp_cis_sta_dly_country",
-                        database=db
+                    _country_map = _build_country_map_for_format5(
+                        impala_manager, db, processing_date, src_id
                     )
-                    _cdate = (_cdate_rows or [{}])[0].get('max_pd', '')
-                    if _cdate:
-                        std_select = std_select.replace(
-                            f"SELECT MAX(processing_date) FROM {db}.gmp_cis_sta_dly_country",
-                            f"'{_cdate}'"
-                        )
-                        logger.info(f"[position_etl] Step 0 country_lut date resolved: {_cdate}")
+                    logger.info(f"[position_etl] Step 0 country map built: {len(_country_map)} entries")
+                    if _country_map:
+                        std_select = _inject_country_case_when(std_select, _country_map, db)
+                        logger.info(f"[position_etl] Step 0 country CTE replaced with CASE WHEN literals")
                 except Exception as _ce:
-                    logger.warning(f"[position_etl] Step 0 country date pre-resolve failed (non-fatal): {_ce}")
+                    logger.warning(f"[position_etl] Step 0 country map build failed (non-fatal, keeping CTE): {_ce}")
 
             _t = _etl_t0
             logger.info(f"[position_etl] Step 0 starting — INSERT OVERWRITE position_upload_standardized for {src_id}")
