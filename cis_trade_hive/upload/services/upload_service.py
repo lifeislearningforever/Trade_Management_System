@@ -597,15 +597,16 @@ class FileValidationService:
 def _normalize_country_key(name: str) -> str:
     """
     Normalize a country full_name for safe SQL comparison.
-    Strips apostrophes, parentheses, hyphens and collapses whitespace so that
-    names like "DEMOCRATIC PEOPLE'S REPUBLIC OF (KOREA)" become
-    "DEMOCRATIC PEOPLES REPUBLIC OF KOREA" — pure alpha+space, no SQL-breaking chars.
-    Mirrors the regexp_replace applied to the upload column in _case_expr().
+    Strips punctuation chars and collapses whitespace so that names like
+    "DEMOCRATIC PEOPLE'S REPUBLIC OF (KOREA)" become
+    "DEMOCRATIC PEOPLE S REPUBLIC OF KOREA" — no SQL-breaking chars remain.
+    Must mirror exactly what _NORM_EXPR does in Impala so both sides match.
     """
     import re
     s = name.upper()
-    s = re.sub(r"['\"\\\(\)\-\,\.\:]", ' ', s)   # drop SQL-unsafe / punctuation chars
-    s = re.sub(r'\s+', ' ', s).strip()
+    s = re.sub(r"[().,/:–—-]+",   ' ', s)  # parens, hyphens, commas, dots, slashes → space
+    s = re.sub(r"['\"\\\\]+",     ' ', s)  # apostrophe, double-quote, backslash → space
+    s = re.sub(r'\s+',            ' ', s).strip()
     return s
 
 
@@ -654,12 +655,18 @@ def _inject_country_case_when(std_select: str, country_map: dict, db: str) -> st
 
     # Impala regexp_replace expression that mirrors _normalize_country_key().
     # Applied to the upload column before comparison so both sides are normalized.
+    # Uses only single-quoted literals (Impala does not support double-quoted strings).
+    # Character class strips: apostrophe  " \ ( ) - , . / :
+    # Written as two separate passes so the regex stays readable and avoids
+    # complex escaping inside a single character class.
     _NORM_EXPR = (
         "regexp_replace("
         "regexp_replace("
+        "regexp_replace("
         "UPPER(TRIM(CAST({col} AS STRING))),"
-        " \"['\\\\\\\\.\\\\(\\\\)\\\\-,/:]\", ' '),"   # strip unsafe punct → space
-        " '\\\\s+', ' ')"                               # collapse multiple spaces
+        " '[\\\\(\\\\)\\\\-,\\./:]+', ' '),"  # parens, hyphens, commas, dots, slashes → space
+        " '[\\\\x27\\\\x22]+', ' '),"          # apostrophe (0x27) and double-quote (0x22) → space
+        " '\\\\s+', ' ')"                      # collapse multiple spaces → single space
     )
 
     def _case_expr(col: str) -> str:
