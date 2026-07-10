@@ -627,9 +627,9 @@ def _normalize_country_key(name: str) -> str:
     s = unicodedata.normalize('NFKD', s)
     s = s.encode('ascii', errors='ignore').decode('ascii')
     s = s.upper()
-    s = re.sub(r"[().,/:–—-]+", ' ', s)
-    s = re.sub(r"['\"\\\\]+",   ' ', s)
-    s = re.sub(r'\s+',          ' ', s).strip()
+    s = re.sub(r"[().,/:–—-]+",      ' ', s)
+    s = re.sub(r"['‘’ʼ\"\\\\]+", ' ', s)  # all apostrophe variants + quotes
+    s = re.sub(r'\s+',               ' ', s).strip()
     return s
 
 
@@ -665,6 +665,12 @@ def _build_country_map_for_format5(impala_manager, db: str, processing_date: str
         database=db
     ) or []
 
+    def _is_safe_key(s: str) -> bool:
+        """Return True if s can be embedded in a SQL string literal without quoting issues.
+        Keys with apostrophes/backslashes are technically escapable but the CSV is
+        unlikely to contain them verbatim, so skip to avoid false matches."""
+        return bool(s) and "'" not in s and "\\" not in s
+
     result = {}
     for r in rows:
         raw = (r.get('full_name') or '').strip().upper()
@@ -672,15 +678,22 @@ def _build_country_map_for_format5(impala_manager, db: str, processing_date: str
         if not raw or not label:
             continue
 
-        # Variant 1 — raw DB value (mojibake form, already UPPER/TRIM'd by SQL)
-        result[raw] = label
+        # Variant 1 — raw DB value (mojibake, already UPPER/TRIM'd by SQL).
+        # Only register if it contains no apostrophes — otherwise a CSV value
+        # is extremely unlikely to match the raw DB form verbatim.
+        if _is_safe_key(raw):
+            result[raw] = label
 
-        # Variant 2 — mojibake decoded to proper Unicode then upper
+        # Variant 2 — mojibake decoded to proper Unicode.
+        # e.g. 'TÃ¼RKIYE' → 'TÜRKIYE'
         fixed = _fix_mojibake(raw).upper().strip()
-        if fixed and fixed != raw:
+        if fixed and fixed != raw and _is_safe_key(fixed):
             result[fixed] = label
 
-        # Variant 3 — fully ASCII-normalized (strips accents, punct, spaces)
+        # Variant 3 — fully ASCII-normalized (NFKD accent-strip + punct → space).
+        # e.g. 'TÜRKIYE' → 'TURKIYE', "CÔTE D'IVOIRE" → 'COTE D IVOIRE'
+        # The norm form always has apostrophes/parens removed so _is_safe_key is
+        # always True here — this is the universal fallback variant.
         norm = _normalize_country_key(raw)
         if norm and norm not in (raw, fixed):
             result[norm] = label
@@ -701,7 +714,15 @@ def _inject_country_case_when(std_select: str, country_map: dict, db: str) -> st
     import re
 
     def _sql_str(s: str) -> str:
-        """Escape a value for embedding in an Impala single-quoted string literal."""
+        """
+        Escape a value for embedding in an Impala single-quoted string literal.
+        Handles all quote variants: ASCII apostrophe (U+0027), right single
+        quotation mark (U+2019 ’), left single quotation mark (U+2018),
+        and prime (U+02BC) — any of these break Impala string literals if bare.
+        """
+        # Normalise all curly/fancy apostrophes to ASCII first
+        s = s.replace('’', "'").replace('‘', "'").replace('ʼ', "'")
+        # Now escape ASCII apostrophe and backslash
         return s.replace("'", "''").replace("\\", "\\\\")
 
     def _case_expr(col: str) -> str:
