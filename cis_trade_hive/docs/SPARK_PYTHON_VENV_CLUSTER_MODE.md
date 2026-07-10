@@ -1,67 +1,60 @@
-# Python Virtual Environment for Spark Cluster Mode (--archives)
+# Bundling Python + Packages for Spark Cluster Mode on Cloudera CML
 
-## Overview
+## The Problem
 
-When running a PySpark job in **cluster mode** on a Cloudera CDP / YARN cluster,
-the driver and all executors run on worker nodes that may not have your Python
-packages installed. The solution is to:
+On **Cloudera CML**, when a PySpark job runs in cluster mode, the driver and
+executors land on YARN worker nodes. Those nodes have a system Python managed
+by Cloudera — you cannot `pip install` into it, and there is no local venv to
+activate before submitting.
 
-1. Build a self-contained Python virtual environment locally
-2. Zip it
-3. Ship the zip via `--archives` in `spark-submit`
-4. Point Spark at the bundled Python interpreter with `PYSPARK_PYTHON`
+The solution: **bundle Python itself together with all required packages into a
+single zip**, ship it via `spark-submit --archives`, and tell Spark to use
+that bundled interpreter via `PYSPARK_PYTHON`.
 
----
+Two methods are available depending on what is installed in your CML session:
 
-## Prerequisites
+| Method | Tool | When to use |
+|---|---|---|
+| **A — venv-pack** | `pip install venv-pack` | You can create a venv inside CML (recommended) |
+| **B — conda-pack** | `conda pack` | Your CML runtime uses a conda environment |
 
-| Requirement | Notes |
-|---|---|
-| Python 3.10.x | Must match the Python version on cluster worker nodes |
-| `venv` module | Included in Python 3.3+ stdlib |
-| `pip` | Included with Python |
-| Network access to PyPI | Or a local mirror / Nexus repo |
-| `spark-submit` on PATH | Available on the Cloudera edge node |
-
-> **Important:** Build the virtual environment **on a Linux machine with the same
-> OS and Python version as the cluster workers.** A venv built on macOS will not
-> work on a Linux YARN cluster.
+Both produce a self-contained archive with Python + all packages + shared libs.
 
 ---
 
-## Step 1 — Create the Virtual Environment
+## Method A — venv-pack (recommended for CML pip-based runtimes)
+
+### A1 — Open a CML Terminal Session
+
+In the CML UI: **New Session → Terminal Access → Open Terminal**
+
+Check the Python version (must match YARN worker nodes):
 
 ```bash
-# Choose a name that reflects the job or project
-VENV_NAME="cis_etl_env"
+python3 --version        # e.g. Python 3.10.14
+which python3            # e.g. /usr/local/bin/python3
+```
 
-# Create venv (do NOT use --system-site-packages — keep it isolated)
-python3.10 -m venv ${VENV_NAME}
+### A2 — Create a Virtual Environment Inside CML
+
+```bash
+# Create venv in your CML home directory
+python3 -m venv ~/cis_etl_env
 
 # Activate it
-source ${VENV_NAME}/bin/activate
+source ~/cis_etl_env/bin/activate
+
+# Confirm
+which python     # ~/cis_etl_env/bin/python
+python --version
 ```
 
-Verify you are using the venv's Python:
-
-```bash
-which python   # should show /path/to/cis_etl_env/bin/python
-python --version   # Python 3.10.x
-```
-
----
-
-## Step 2 — Install Required Packages
-
-Install from the project `requirements.txt`, or install only the packages your
-Spark job actually needs (keep it lean — fewer packages = smaller zip = faster
-distribution to executors).
-
-### Option A — Full project requirements
+### A3 — Install All Required Packages
 
 ```bash
 pip install --upgrade pip
 
+# Core packages needed by the CIS ETL job
 pip install \
     PyHive==0.7.0 \
     thrift==0.16.0 \
@@ -69,78 +62,58 @@ pip install \
     pyarrow>=14.0.0 \
     openpyxl>=3.1.0 \
     chardet>=5.0.0 \
-    python-dotenv==1.0.1
-```
+    python-dotenv==1.0.1 \
+    impyla
 
-Or from file:
-
-```bash
-pip install -r requirements.txt
-```
-
-### Option B — Spark-job-only packages (recommended for lean bundles)
-
-```bash
-pip install --upgrade pip
-
-# Only what the ETL job imports
-pip install pyarrow impyla thrift thrift-sasl python-dotenv chardet openpyxl
-```
-
-### Verify installs
-
-```bash
+# Verify — no missing dependencies
+pip check
 pip list
-pip check    # flag any dependency conflicts before zipping
 ```
 
----
+### A4 — Install venv-pack
 
-## Step 3 — Deactivate and Zip the Virtual Environment
+`venv-pack` is the key tool. Unlike a plain `zip -r`, it:
+- Copies shared libraries (`.so` files) that stdlib modules like `_ssl`, `_lzma` depend on
+- Rewrites internal symlinks so the archive is relocatable on any node
+- Produces a `.tar.gz` that Spark can unpack natively
 
 ```bash
-# Deactivate first
+pip install venv-pack
+```
+
+### A5 — Pack the Virtual Environment
+
+```bash
+# Deactivate first — venv-pack must run from outside the venv
 deactivate
 
-# Zip the entire venv directory
-# Use zip -r, NOT tar.gz — Spark's --archives unpacks .zip natively
-zip -r ${VENV_NAME}.zip ${VENV_NAME}/
+# Pack into a tar.gz (Spark --archives supports both .zip and .tar.gz)
+venv-pack -p ~/cis_etl_env -o cis_etl_env.tar.gz
+
+# Check the output
+ls -lh cis_etl_env.tar.gz   # typically 80–400 MB depending on packages
 ```
 
-Verify the zip:
-
-```bash
-ls -lh ${VENV_NAME}.zip        # check size (typically 50 MB – 300 MB)
-unzip -l ${VENV_NAME}.zip | head -20   # spot-check contents
-```
-
-Expected structure inside the zip:
+The archive contains:
 
 ```
 cis_etl_env/
-cis_etl_env/bin/
-cis_etl_env/bin/python
-cis_etl_env/bin/python3.10
-cis_etl_env/lib/
-cis_etl_env/lib/python3.10/
-cis_etl_env/lib/python3.10/site-packages/
+cis_etl_env/bin/python3.10          ← actual interpreter binary
+cis_etl_env/bin/python              ← symlink
+cis_etl_env/lib/python3.10/        ← stdlib + installed packages
 cis_etl_env/lib/python3.10/site-packages/pyarrow/
+cis_etl_env/lib/python3.10/site-packages/thrift/
 ...
 ```
 
----
-
-## Step 4 — Copy the Zip to HDFS (optional but recommended)
-
-Putting the zip on HDFS avoids re-uploading it on every submission and lets all
-nodes fetch it from a shared location efficiently.
+### A6 — Upload to HDFS
 
 ```bash
-# Create a staging directory on HDFS
+# Create staging directory
 hdfs dfs -mkdir -p /mrw/cis/spark/venvs/
 
-# Upload the zip
-hdfs dfs -put -f ${VENV_NAME}.zip /mrw/cis/spark/venvs/${VENV_NAME}.zip
+# Upload
+hdfs dfs -put -f cis_etl_env.tar.gz /mrw/cis/spark/venvs/cis_etl_env.tar.gz
 
 # Verify
 hdfs dfs -ls /mrw/cis/spark/venvs/
@@ -148,7 +121,49 @@ hdfs dfs -ls /mrw/cis/spark/venvs/
 
 ---
 
-## Step 5 — spark-submit in Cluster Mode
+## Method B — conda-pack (for CML conda-based runtimes)
+
+Use this if your CML session is running inside a conda environment.
+
+### B1 — Check Conda Environment
+
+```bash
+conda info --envs       # list environments
+conda activate base     # or your named env
+python --version
+```
+
+### B2 — Install Packages into Conda Env
+
+```bash
+# Add packages to the current conda env
+conda install -y pyarrow openpyxl chardet
+pip install PyHive==0.7.0 thrift==0.16.0 thrift-sasl==0.4.3 python-dotenv impyla
+```
+
+### B3 — Pack the Conda Environment
+
+```bash
+conda install -y conda-pack   # install packer tool
+
+# Pack current active env
+conda pack -o cis_etl_env.tar.gz
+
+# Or pack by name
+conda pack -n your_env_name -o cis_etl_env.tar.gz
+```
+
+### B4 — Upload to HDFS
+
+```bash
+hdfs dfs -mkdir -p /mrw/cis/spark/venvs/
+hdfs dfs -put -f cis_etl_env.tar.gz /mrw/cis/spark/venvs/cis_etl_env.tar.gz
+hdfs dfs -ls /mrw/cis/spark/venvs/
+```
+
+---
+
+## spark-submit Command (same for both methods)
 
 ```bash
 spark-submit \
@@ -159,94 +174,150 @@ spark-submit \
   --executor-memory 4g \
   --driver-memory 2g \
   \
-  # Ship the venv zip to every node via YARN's distributed cache
-  --archives hdfs:///mrw/cis/spark/venvs/cis_etl_env.zip#cis_etl_env \
+  --archives hdfs:///mrw/cis/spark/venvs/cis_etl_env.tar.gz#cis_etl_env \
   \
-  # Tell Spark to use the bundled Python (path is relative to the unpacked archive)
   --conf spark.yarn.appMasterEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python \
   --conf spark.executorEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python \
   \
-  # Your PySpark script
   your_etl_job.py \
-  --arg1 value1 \
-  --arg2 value2
+  --arg1 value1
 ```
 
-### Key `--archives` Syntax
+### How `--archives` works
 
 ```
---archives <source>#<alias>
+--archives <hdfs-path>#<local-alias>
 ```
 
-| Part | Example | Meaning |
+| Part | Value | What happens |
 |---|---|---|
-| `<source>` | `hdfs:///mrw/cis/spark/venvs/cis_etl_env.zip` | Where YARN fetches the zip from |
-| `<alias>` | `cis_etl_env` | The local directory name after unpacking on each worker |
+| `hdfs-path` | `hdfs:///mrw/cis/spark/venvs/cis_etl_env.tar.gz` | YARN downloads this to every node |
+| `local-alias` | `cis_etl_env` | YARN unpacks the tar.gz into this directory name in the executor working dir |
+| `PYSPARK_PYTHON` | `./cis_etl_env/bin/python` | Spark uses this interpreter — relative to working dir |
 
-YARN unpacks the zip into `./cis_etl_env/` in the executor's working directory.
-`PYSPARK_PYTHON=./cis_etl_env/bin/python` then points at the bundled interpreter.
+---
 
-### Local file (no HDFS) — alternative
+## Submitting from CML (no terminal spark-submit)
 
-If you cannot use HDFS, pass a local path on the edge node. Spark will distribute
-it automatically, but this is slower for large zips:
+In CML, jobs can be submitted via **CML Jobs** or **cdsw-run**:
 
-```bash
---archives /home/your_user/cis_etl_env.zip#cis_etl_env \
+### Via CML Jobs UI
+
+1. **New Job** → Script: `your_etl_job.py`
+2. Engine: **Spark**
+3. **Spark Config** (add these):
+   ```
+   spark.archives=hdfs:///mrw/cis/spark/venvs/cis_etl_env.tar.gz#cis_etl_env
+   spark.yarn.appMasterEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python
+   spark.executorEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python
+   ```
+4. **File Dependencies**: *(not needed — archive is on HDFS)*
+
+### Via Python Script in CML Session
+
+```python
+import subprocess
+
+result = subprocess.run([
+    "spark-submit",
+    "--master", "yarn",
+    "--deploy-mode", "cluster",
+    "--archives", "hdfs:///mrw/cis/spark/venvs/cis_etl_env.tar.gz#cis_etl_env",
+    "--conf", "spark.yarn.appMasterEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python",
+    "--conf", "spark.executorEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python",
+    "your_etl_job.py",
+], capture_output=True, text=True)
+
+print(result.stdout)
+print(result.stderr)
 ```
 
 ---
 
-## Step 6 — Verify Inside the Job
+## Verify the Bundled Environment Works
 
-Add this to the top of your PySpark script to confirm the correct Python and
-packages are active on executors:
+Add this snippet to the top of your PySpark job to confirm the correct Python
+and packages are active on both the driver and executors:
 
 ```python
 import sys
-import pyspark
 from pyspark.sql import SparkSession
 
-spark = SparkSession.builder.appName("CIS_ETL").getOrCreate()
-sc    = spark.sparkContext
+spark = SparkSession.builder.appName("CIS_ETL_ENV_CHECK").getOrCreate()
+sc = spark.sparkContext
 
-def _check_env(_):
+# Check driver
+print(f"[DRIVER] Python: {sys.executable}")
+
+# Check executor
+def _check(_):
     import sys, pyarrow, thrift
-    return f"Python: {sys.executable} | pyarrow: {pyarrow.__version__} | thrift: {thrift.__version__}"
+    return (
+        f"Python: {sys.executable} | "
+        f"pyarrow: {pyarrow.__version__} | "
+        f"thrift: {thrift.__version__}"
+    )
 
-result = sc.parallelize([1], 1).map(_check_env).collect()
-print(result[0])
+results = sc.parallelize(range(4), 4).map(_check).collect()
+for r in results:
+    print(f"[EXECUTOR] {r}")
 ```
 
-Expected output on the driver log:
+Expected output in YARN driver logs:
 
 ```
-Python: ./cis_etl_env/bin/python | pyarrow: 14.0.2 | thrift: 0.16.0
+[DRIVER]   Python: ./cis_etl_env/bin/python
+[EXECUTOR] Python: ./cis_etl_env/bin/python | pyarrow: 14.0.2 | thrift: 0.16.0
+[EXECUTOR] Python: ./cis_etl_env/bin/python | pyarrow: 14.0.2 | thrift: 0.16.0
+[EXECUTOR] Python: ./cis_etl_env/bin/python | pyarrow: 14.0.2 | thrift: 0.16.0
+[EXECUTOR] Python: ./cis_etl_env/bin/python | pyarrow: 14.0.2 | thrift: 0.16.0
 ```
 
 ---
 
-## Quick Reference — Full Command Sequence
+## Quick Reference
 
 ```bash
-# 1. Build
-python3.10 -m venv cis_etl_env
-source cis_etl_env/bin/activate
+# ── Method A: venv-pack ─────────────────────────────────────────────────────
+
+# 1. Inside CML terminal — create venv and install packages
+python3 -m venv ~/cis_etl_env
+source ~/cis_etl_env/bin/activate
 pip install --upgrade pip
-pip install pyarrow thrift thrift-sasl impyla python-dotenv chardet openpyxl
+pip install PyHive==0.7.0 thrift==0.16.0 thrift-sasl==0.4.3 \
+            pyarrow openpyxl chardet python-dotenv impyla venv-pack
 deactivate
 
-# 2. Package
-zip -r cis_etl_env.zip cis_etl_env/
+# 2. Pack
+venv-pack -p ~/cis_etl_env -o cis_etl_env.tar.gz
 
 # 3. Upload to HDFS
-hdfs dfs -put -f cis_etl_env.zip /mrw/cis/spark/venvs/cis_etl_env.zip
+hdfs dfs -mkdir -p /mrw/cis/spark/venvs/
+hdfs dfs -put -f cis_etl_env.tar.gz /mrw/cis/spark/venvs/cis_etl_env.tar.gz
 
 # 4. Submit
 spark-submit \
-  --master yarn \
-  --deploy-mode cluster \
-  --archives hdfs:///mrw/cis/spark/venvs/cis_etl_env.zip#cis_etl_env \
+  --master yarn --deploy-mode cluster \
+  --archives hdfs:///mrw/cis/spark/venvs/cis_etl_env.tar.gz#cis_etl_env \
+  --conf spark.yarn.appMasterEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python \
+  --conf spark.executorEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python \
+  your_etl_job.py
+
+
+# ── Method B: conda-pack ─────────────────────────────────────────────────────
+
+# 1. Install packages into current conda env
+conda install -y pyarrow openpyxl chardet conda-pack
+pip install PyHive thrift thrift-sasl impyla python-dotenv
+
+# 2. Pack
+conda pack -o cis_etl_env.tar.gz
+
+# 3. Upload & submit (same as above)
+hdfs dfs -put -f cis_etl_env.tar.gz /mrw/cis/spark/venvs/cis_etl_env.tar.gz
+spark-submit \
+  --master yarn --deploy-mode cluster \
+  --archives hdfs:///mrw/cis/spark/venvs/cis_etl_env.tar.gz#cis_etl_env \
   --conf spark.yarn.appMasterEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python \
   --conf spark.executorEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python \
   your_etl_job.py
@@ -258,73 +329,74 @@ spark-submit \
 
 ### `No module named 'X'` on executors
 
-The package is missing from the venv zip.  
-**Fix:** Re-install, re-zip, re-upload.
+Package was not in the venv when it was packed.
 
 ```bash
-source cis_etl_env/bin/activate
+source ~/cis_etl_env/bin/activate
 pip install missing-package
 deactivate
-zip -r cis_etl_env.zip cis_etl_env/
-hdfs dfs -put -f cis_etl_env.zip /mrw/cis/spark/venvs/cis_etl_env.zip
+venv-pack -p ~/cis_etl_env -o cis_etl_env.tar.gz
+hdfs dfs -put -f cis_etl_env.tar.gz /mrw/cis/spark/venvs/cis_etl_env.tar.gz
 ```
 
-### `Cannot run program "./cis_etl_env/bin/python": Permission denied`
+### `Permission denied` on `./cis_etl_env/bin/python`
 
-The zip lost execute permissions.  
-**Fix:** Use `zip -r` (not a GUI tool). Re-create the zip on Linux.  
-Or restore permissions inside the unpacked archive:
+venv-pack sets correct permissions. If using plain `zip -r` instead, bits are
+lost. Always use `venv-pack` or `conda-pack` — they preserve execute bits.
+
+### `Python version mismatch`
+
+The Python in your CML session must match the Python on YARN worker nodes.
+Check both:
 
 ```bash
-# On the edge node, check:
-unzip -l cis_etl_env.zip | grep "bin/python"
-# Should show permission 755 or 100755
+# In CML terminal
+python3 --version
+
+# On a YARN worker (ask Cloudera admin or check CDP Manager)
+# Cloudera Manager → Hosts → any worker → Processes → check Python version
 ```
 
-### `PYTHON_VERSION mismatch`
+If they differ, ask your Cloudera admin to align them, or use a different CML
+runtime version that matches.
 
-The venv was built with Python 3.11 but workers have Python 3.10.  
-**Fix:** Build on a node with the **exact same Python version as the workers**.
+### `Error: Archive is not a valid zip/tar file`
+
+HDFS upload may have been corrupted or truncated. Re-upload and verify:
 
 ```bash
-# Check worker Python version
-yarn node -list -all   # find a worker hostname
-ssh worker-node "python3 --version"
+hdfs dfs -du -h /mrw/cis/spark/venvs/cis_etl_env.tar.gz
+# Compare with local:
+ls -lh cis_etl_env.tar.gz
 ```
 
-### `ModuleNotFoundError: No module named '_ssl'` or `_lzma`
-
-The venv copies the interpreter's shared libraries by reference. On Linux some
-stdlib extension modules need system `.so` files.  
-**Fix:** Use `venv-pack` (or `conda-pack` for conda envs) which handles shared
-library copying correctly:
+### Check YARN application logs
 
 ```bash
-pip install venv-pack
-venv-pack -o cis_etl_env.tar.gz
-# Then use --archives cis_etl_env.tar.gz#cis_etl_env with Spark
+# Get application ID from CML job logs, then:
+yarn logs -applicationId application_XXXXXXXXX_XXXX 2>&1 | \
+  grep -i "python\|PYSPARK\|error\|exception" | head -60
 ```
 
-### Job hangs at `PYSPARK_PYTHON` resolution
+### Re-pack after adding packages (versioning tip)
 
-Check YARN logs for the app:
+Tag the archive with a version to avoid stale caches on YARN nodes:
 
 ```bash
-yarn logs -applicationId application_XXXXXXXX_XXXX | grep -i "PYSPARK_PYTHON\|python\|error" | head -40
+venv-pack -p ~/cis_etl_env -o cis_etl_env_v1.2.tar.gz
+hdfs dfs -put cis_etl_env_v1.2.tar.gz /mrw/cis/spark/venvs/
+# Update --archives path in spark-submit accordingly
 ```
 
 ---
 
-## Notes for Cloudera CDP / CML
+## Ranger / Kerberos Notes (Cloudera CDP)
 
-- On **Cloudera CML**, Spark jobs run via the CML Jobs UI or `cml.run_job()`.
-  The `--archives` flag maps to the **File dependencies** field in the job config.
-- If **Ranger policies** restrict HDFS paths, ensure the service account running
-  `spark-submit` has READ on `/mrw/cis/spark/venvs/`.
-- For **Kerberos** clusters, kinit before submitting:
-  ```bash
-  kinit your_user@YOUR.REALM.COM
-  spark-submit ...
-  ```
-- The venv zip should be **rebuilt whenever `requirements.txt` changes**.
-  Tag it with a version: `cis_etl_env_v1.2.zip` to avoid cache confusion.
+```bash
+# If Kerberos is enabled, kinit before spark-submit
+kinit your_user@YOUR.REALM.COM
+klist    # verify ticket
+
+# Ranger: ensure the service account has READ on the venv HDFS path
+# Cloudera Ranger UI → HDFS policies → /mrw/cis/spark/venvs/ → READ for spark user
+```
