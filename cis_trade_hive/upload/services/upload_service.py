@@ -594,26 +594,41 @@ class FileValidationService:
         return 'STRING'
 
 
+def _fix_mojibake(s: str) -> str:
+    """
+    Recover UTF-8 text that was mis-decoded as Latin-1 (mojibake).
+    e.g. 'TÃ¼rkiye' → 'Türkiye', 'RÃ©union' → 'Réunion', 'CÃ´te' → 'Côte'.
+    Safe: if s is already valid UTF-8/ASCII the encode→decode round-trip raises
+    UnicodeDecodeError and we return s unchanged.
+    """
+    try:
+        return s.encode('latin-1').decode('utf-8')
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        return s
+
+
 def _normalize_country_key(name: str) -> str:
     """
-    Normalize a country full_name for safe SQL comparison.
+    Normalize a country full_name to a safe ASCII key for SQL comparison.
 
-    Steps (must mirror what _NORM_EXPR does in Impala):
-      1. Strip accents via Unicode NFKD decomposition (CÔTE → COTE, É → E, etc.)
-      2. Drop any remaining non-ASCII bytes
-      3. Upper-case
-      4. Punctuation → space  ( ) , . / : – — -
-      5. Apostrophe / double-quote / backslash → space
-      6. Collapse whitespace
+    Steps (must mirror what _build_norm_expr() does in Impala):
+      1. Fix mojibake — gmp_cis_sta_dly_country stores UTF-8 bytes as Latin-1
+         ('TÃ¼rkiye' → 'Türkiye', 'CÃ´te' → 'Côte', etc.)
+      2. Strip accents via NFKD decomposition (Ô→O, é→e, Ç→C, etc.)
+      3. Drop non-ASCII bytes
+      4. Upper-case
+      5. Punctuation ( ) , . / : – — - → space
+      6. Apostrophe / double-quote / backslash → space
+      7. Collapse whitespace
     """
     import re
     import unicodedata
-    # Decompose accented chars (é→e+combining, ô→o+combining) then drop combiners
-    s = unicodedata.normalize('NFKD', name)
+    s = _fix_mojibake(name)
+    s = unicodedata.normalize('NFKD', s)
     s = s.encode('ascii', errors='ignore').decode('ascii')
     s = s.upper()
-    s = re.sub(r"[().,/:–—-]+", ' ', s)   # punctuation → space
-    s = re.sub(r"['\"\\\\]+",   ' ', s)   # quotes / backslash → space
+    s = re.sub(r"[().,/:–—-]+", ' ', s)
+    s = re.sub(r"['\"\\\\]+",   ' ', s)
     s = re.sub(r'\s+',          ' ', s).strip()
     return s
 
