@@ -280,14 +280,36 @@ elif [[ "$action" == "file_format_check" ]]; then
 elif [[ "$action" == "equity_price_copy" ]]; then
     echo "Inside ${region} and equity_price_copy"
 
-    # Resolve processing_date: use -d param, else DATE.txt, else today
+    GMP_ALLDATES_FILE="/sftp/ftptsp/TSPSG/CIS/gmpcisalldates.txt"
+
+    # Resolve processing_date priority:
+    #   1. -d param passed explicitly
+    #   2. Read from gmpcisalldates.txt (line 2 = body, field index 2 = report_date)
+    #      File format (no header schema, | separator):
+    #        Line 1: Header  (skip)
+    #        Line 2: 20260713|20260715|20260713|   <- body: trade_date|settle_date|report_date|
+    #        Last  : Trailer (skip)
+    #   3. Fallback: today
     if [ -z "$processing_date" ]; then
-        if [ -f /sftp/ftptsp/TSPS8/MRA_PC/DATE.txt ]; then
-            processing_date=$(head -n 1 /sftp/ftptsp/TSPS8/MRA_PC/DATE.txt)
+        if [ -f "${GMP_ALLDATES_FILE}" ]; then
+            body_line=$(sed -n '2p' "${GMP_ALLDATES_FILE}")
+            processing_date=$(echo "${body_line}" | cut -d'|' -f3)
+            echo "processing_date read from gmpcisalldates.txt body line: [${body_line}]"
+            echo "report_date (field 3) extracted: ${processing_date}"
         else
+            echo "WARNING: ${GMP_ALLDATES_FILE} not found — falling back to today"
             processing_date=$(date +%Y%m%d)
         fi
+    else
+        echo "processing_date provided via -d param: ${processing_date}"
     fi
+
+    # Validate we have a date
+    if [ -z "${processing_date}" ]; then
+        echo "ERROR: Could not determine processing_date. Check ${GMP_ALLDATES_FILE}"
+        exit 1
+    fi
+
     echo "Equity price copy - processing_date: ${processing_date}"
 
     impala-shell -i ${IMPALA_DAEMON}:21050 \
