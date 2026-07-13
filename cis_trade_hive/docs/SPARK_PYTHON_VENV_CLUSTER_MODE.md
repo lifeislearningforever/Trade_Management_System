@@ -35,67 +35,43 @@ bundled interpreter via `PYSPARK_PYTHON`.
 
 ---
 
-## Step-by-Step — What We Did
+## Step-by-Step — What We Did (CML Terminal)
 
-### Step 1 — Open WSL 2 on Windows
+### Step 1 — Open CML Terminal Session
 
-```
-# In PowerShell or CMD:
-wsl
-```
-
-You will see a prompt like:
-```
-venh7u@DESKTOP-XXXXX:~$
-```
-
-You are now on Linux inside Windows.
-
-### Step 2 — Check Python 3.11 is Available in WSL
+In the CML UI: **New Session → Terminal Access → Open Terminal**
 
 ```bash
-python3.11 --version    # Python 3.11.x
+# Confirm Python version
+python3 --version       # e.g. Python 3.10.x
+which python3           # e.g. /usr/local/bin/python3
 ```
 
-If not found:
+### Step 2 — Create venv with `--copies` Flag (CRITICAL)
+
+> **Why `--copies`?**
+> Without this flag, `venv-pack` creates symlinks that point to the CML system
+> Python path (e.g. `/usr/local/bin/python3.10`). That path does not exist on
+> YARN worker nodes — so `python3`, `pip` etc. all show "No such file or
+> directory" after unpacking on the edge node. `--copies` forces real binary
+> copies that work on any node.
 
 ```bash
-sudo apt update
-sudo apt install -y python3.11 python3.11-venv python3.11-dev
-```
+# Remove any old venv
+rm -rf ~/cis_etl_env
 
-### Step 3 — Navigate to Your Working Folder
-
-Windows path `C:\Users\venh7u\CIS\cis\` maps to `/mnt/c/Users/venh7u/CIS/cis/` in WSL.
-
-```bash
-cd /mnt/c/Users/venh7u/CIS/cis/
-```
-
-If you hit NTFS permission issues, build in WSL home instead and copy over at the end:
-
-```bash
-cd ~
-```
-
-### Step 4 — Remove Any Old venv and Create a Fresh One
-
-```bash
-# Remove old Windows-built venv if it exists
-rm -rf gmp_cis
-
-# Create fresh Linux venv with Python 3.11
-python3.11 -m venv gmp_cis
+# Create fresh venv with --copies (real binaries, not symlinks)
+python3 -m venv --copies ~/cis_etl_env
 
 # Activate
-source gmp_cis/bin/activate
+source ~/cis_etl_env/bin/activate
 
 # Confirm
-which python      # .../gmp_cis/bin/python
-python --version  # Python 3.11.x
+which python
+python --version
 ```
 
-### Step 5 — Install All Required Packages
+### Step 3 — Install All Required Packages
 
 ```bash
 pip install --upgrade pip
@@ -116,28 +92,68 @@ pip check
 pip list
 ```
 
-### Step 6 — Pack the venv
+### Step 4 — Pack the venv
 
 ```bash
 # Deactivate BEFORE packing
 deactivate
 
 # Pack — produces a self-contained Linux tar.gz
-venv-pack -p gmp_cis -o gmp_cis.tar.gz
+venv-pack -p ~/cis_etl_env -o ~/cis_etl_env.tar.gz
 
-# Check output (typically 150–300 MB)
-ls -lh gmp_cis.tar.gz
+# Check output (typically 100–200 MB)
+ls -lh ~/cis_etl_env.tar.gz
 ```
 
-The archive contains:
+### Step 5 — Add `cis_etl_env/` Prefix to Archive (CRITICAL)
+
+> **Why this step?**
+> `venv-pack` always produces a **flat** archive — contents are at the root
+> (`bin/python3.10`, `lib/...`). When YARN unpacks `--archives file.tar.gz#alias`,
+> it creates a folder named `alias/` and puts the flat contents inside it.
+> So `PYSPARK_PYTHON=./alias/bin/python3.10` would look for
+> `alias/bin/python3.10` but actually finds `alias/bin/python3.10` only if
+> the archive already has the subfolder. To be safe and explicit, we wrap
+> the flat archive into a named subfolder so the path is unambiguous.
+
+```bash
+# Unpack flat archive into a named subfolder
+mkdir -p ~/cis_etl_env_wrap/cis_etl_env
+tar -xzf ~/cis_etl_env.tar.gz -C ~/cis_etl_env_wrap/cis_etl_env
+
+# Verify python3.10 is a REAL FILE not a symlink
+ls -la ~/cis_etl_env_wrap/cis_etl_env/bin/python*
+# Must show: -rwxr-xr-x (not lrwxrwxrwx)
+
+# Re-pack with cis_etl_env/ prefix
+cd ~/cis_etl_env_wrap
+tar -czf ~/cis_etl_env.tar.gz cis_etl_env/
+
+# Verify — must show cis_etl_env/bin/python3.10
+tar -tzf ~/cis_etl_env.tar.gz | grep "bin/python"
+
+# Clean up temp folder
+rm -rf ~/cis_etl_env_wrap
+cd ~
+```
+
+Expected output:
+```
+cis_etl_env/bin/python
+cis_etl_env/bin/python3
+cis_etl_env/bin/python3.10   ← must be present
+```
+
+The archive now contains:
 
 ```
-gmp_cis/
-gmp_cis/bin/python3.11          ← actual interpreter binary
-gmp_cis/bin/python              ← symlink
-gmp_cis/lib/python3.11/         ← stdlib + installed packages
-gmp_cis/lib/python3.11/site-packages/pyarrow/
-gmp_cis/lib/python3.11/site-packages/thrift/
+cis_etl_env/
+cis_etl_env/bin/python3.10      ← real binary (not symlink)
+cis_etl_env/bin/python3         ← real binary
+cis_etl_env/bin/python          ← real binary
+cis_etl_env/lib/python3.10/     ← stdlib + installed packages
+cis_etl_env/lib/python3.10/site-packages/pyarrow/
+cis_etl_env/lib/python3.10/site-packages/thrift/
 ...
 ```
 
@@ -341,18 +357,15 @@ Expected output in YARN driver logs:
 
 ## Quick Reference — Full Copy-Paste Sequence
 
-Open WSL (`wsl` in PowerShell/CMD) then paste:
+Run in **CML Terminal**:
 
 ```bash
-# 1. Navigate (or use ~ if /mnt/c/ has permission issues)
-cd /mnt/c/Users/venh7u/CIS/cis/
+# 1. Create venv with --copies (real binaries, not symlinks)
+rm -rf ~/cis_etl_env
+python3 -m venv --copies ~/cis_etl_env
+source ~/cis_etl_env/bin/activate
 
-# 2. Clean and create fresh Linux venv
-rm -rf gmp_cis
-python3.11 -m venv gmp_cis
-source gmp_cis/bin/activate
-
-# 3. Install packages
+# 2. Install packages
 pip install --upgrade pip
 pip install \
     PyHive==0.7.0 \
@@ -367,18 +380,31 @@ pip install \
 pip check
 deactivate
 
-# 4. Pack
-venv-pack -p gmp_cis -o gmp_cis.tar.gz
-ls -lh gmp_cis.tar.gz
+# 3. Pack
+venv-pack -p ~/cis_etl_env -o ~/cis_etl_env.tar.gz
+ls -lh ~/cis_etl_env.tar.gz
 
-# 4b. Verify all required packages are inside BEFORE copying to edge node
-tar -tzf gmp_cis.tar.gz \
+# 4. Verify all required packages are inside BEFORE copying to edge node
+tar -tzf ~/cis_etl_env.tar.gz \
   | grep -E "site-packages/(pyhive|PyHive|thrift|pyarrow|openpyxl|chardet|dotenv|impyla|sasl|thrift_sasl)" \
   | grep "\.dist-info/METADATA"
-# All 8 packages must appear — if any missing: re-activate, pip install, deactivate, re-pack
+# All 8 packages must appear
 
-# 5. SCP to edge node (only after verify passes)
-scp gmp_cis.tar.gz ownicisgw@lxmrwtsgv0w1:~/
+# 5. Wrap with cis_etl_env/ prefix (venv-pack always packs flat)
+mkdir -p ~/cis_etl_env_wrap/cis_etl_env
+tar -xzf ~/cis_etl_env.tar.gz -C ~/cis_etl_env_wrap/cis_etl_env
+ls -la ~/cis_etl_env_wrap/cis_etl_env/bin/python*  # must be -rwxr-xr-x not symlinks
+cd ~/cis_etl_env_wrap
+tar -czf ~/cis_etl_env.tar.gz cis_etl_env/
+cd ~
+rm -rf ~/cis_etl_env_wrap
+
+# 6. Verify prefix is correct
+tar -tzf ~/cis_etl_env.tar.gz | grep "bin/python"
+# Must show: cis_etl_env/bin/python3.10
+
+# 7. SCP to edge node (only after verify passes)
+scp ~/cis_etl_env.tar.gz ownicisgw@lxmrwtsgv0w1:~/
 ```
 
 On the edge node:
