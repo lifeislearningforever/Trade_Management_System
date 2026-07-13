@@ -54,12 +54,15 @@ LIMIT 30;
 -- =============================================================================
 -- STEP 2 — Preview: one latest record per security (before writing)
 -- =============================================================================
--- Shows what will be written for processing_date = ${processing_date_fmt}
+-- price_date is overwritten with processing_date (YYYY-MM-DD) so downstream
+-- always sees one record per security with today's date.
+-- original_price_date shows the actual date the price came from (carry-forward indicator).
 
 SELECT
     currency_code,
     security_label,
-    price_date,
+    '${processing_date_fmt}'                    AS price_date,
+    price_date                                  AS original_price_date,
     main_closing_price,
     src_system,
     price_timestamp
@@ -78,8 +81,6 @@ FROM (
         ) AS rn_latest
     FROM (
         -- Step A: deduplicate within each (security_label, price_date)
-        -- Multiple rows can exist if both GMP and CIS edited the same date.
-        -- Take the single latest by price_timestamp.
         SELECT
             currency_code,
             security_label,
@@ -121,7 +122,7 @@ PARTITION (processing_date='${processing_date}')
 SELECT
     currency_code,
     security_label,
-    price_date,          -- original price_date preserved (shows when price was set)
+    '${processing_date_fmt}' AS price_date,   -- always set to processing date (YYYY-MM-DD)
     isin,
     main_closing_price,
     price_timestamp,
@@ -194,19 +195,15 @@ ORDER BY src_system;
 
 
 -- =============================================================================
--- STEP 6 — Spot-check carry-forward: securities whose price_date < processing_date
+-- STEP 6 — Spot-check: verify price_date = processing_date for all rows
 -- =============================================================================
--- These are the ones that were gap-filled (no price for today, last known carried)
 
 SELECT
-    security_label,
-    currency_code,
-    price_date AS last_known_price_date,
-    main_closing_price,
-    src_system,
-    DATEDIFF(TO_DATE('${processing_date_fmt}'), TO_DATE(price_date)) AS days_carried_forward
+    price_date,
+    COUNT(*) AS securities,
+    MIN(main_closing_price) AS min_price,
+    MAX(main_closing_price) AS max_price
 FROM gmp_cis.hive_cis_equity_price
 WHERE processing_date = '${processing_date}'
-  AND price_date < '${processing_date_fmt}'
-ORDER BY days_carried_forward DESC, security_label
-LIMIT 30;
+GROUP BY price_date
+ORDER BY price_date;
