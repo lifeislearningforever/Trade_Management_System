@@ -64,36 +64,40 @@ SELECT
     src_system,
     price_timestamp
 FROM (
-    -- Step A: deduplicate within each (security_label, price_date)
-    -- Multiple rows can exist if both GMP and CIS edited the same date.
-    -- Take the single latest by price_timestamp.
+    -- Step B: among deduplicated rows, pick the most recent price_date per security
     SELECT
         currency_code,
         security_label,
         price_date,
-        isin,
         main_closing_price,
         price_timestamp,
         src_system,
-        is_active,
-        created_by,
-        created_at,
-        updated_by,
-        updated_at,
         ROW_NUMBER() OVER (
-            PARTITION BY security_label, price_date
-            ORDER BY price_timestamp DESC
-        ) AS rn_dedup
-    FROM gmp_cis.cis_equity_price
-    WHERE is_active = true
-      AND CAST(REPLACE(price_date, '-', '') AS INT) <= CAST('${processing_date}' AS INT)
-) deduped
-WHERE rn_dedup = 1
--- Step B: among deduplicated rows, pick the most recent price_date per security
-QUALIFY ROW_NUMBER() OVER (
-    PARTITION BY security_label
-    ORDER BY price_date DESC, price_timestamp DESC
-) = 1
+            PARTITION BY security_label
+            ORDER BY price_date DESC, price_timestamp DESC
+        ) AS rn_latest
+    FROM (
+        -- Step A: deduplicate within each (security_label, price_date)
+        -- Multiple rows can exist if both GMP and CIS edited the same date.
+        -- Take the single latest by price_timestamp.
+        SELECT
+            currency_code,
+            security_label,
+            price_date,
+            main_closing_price,
+            price_timestamp,
+            src_system,
+            ROW_NUMBER() OVER (
+                PARTITION BY security_label, price_date
+                ORDER BY price_timestamp DESC
+            ) AS rn_dedup
+        FROM gmp_cis.cis_equity_price
+        WHERE is_active = true
+          AND CAST(REPLACE(price_date, '-', '') AS INT) <= CAST('${processing_date}' AS INT)
+    ) deduped
+    WHERE rn_dedup = 1
+) latest
+WHERE rn_latest = 1
 ORDER BY security_label
 LIMIT 50;
 
@@ -128,7 +132,7 @@ SELECT
     updated_by,
     updated_at
 FROM (
-    -- Step A: deduplicate — one row per (security_label, price_date)
+    -- Step B: among deduplicated dates, pick the most recent per security (carry-forward)
     SELECT
         currency_code,
         security_label,
@@ -143,19 +147,35 @@ FROM (
         updated_by,
         updated_at,
         ROW_NUMBER() OVER (
-            PARTITION BY security_label, price_date
-            ORDER BY price_timestamp DESC
-        ) AS rn_dedup
-    FROM gmp_cis.cis_equity_price
-    WHERE is_active = true
-      AND CAST(REPLACE(price_date, '-', '') AS INT) <= CAST('${processing_date}' AS INT)
-) deduped
-WHERE rn_dedup = 1
--- Step B: among all deduplicated dates, pick the most recent per security (carry-forward)
-QUALIFY ROW_NUMBER() OVER (
-    PARTITION BY security_label
-    ORDER BY price_date DESC, price_timestamp DESC
-) = 1;
+            PARTITION BY security_label
+            ORDER BY price_date DESC, price_timestamp DESC
+        ) AS rn_latest
+    FROM (
+        -- Step A: deduplicate — one row per (security_label, price_date)
+        SELECT
+            currency_code,
+            security_label,
+            price_date,
+            isin,
+            main_closing_price,
+            price_timestamp,
+            src_system,
+            is_active,
+            created_by,
+            created_at,
+            updated_by,
+            updated_at,
+            ROW_NUMBER() OVER (
+                PARTITION BY security_label, price_date
+                ORDER BY price_timestamp DESC
+            ) AS rn_dedup
+        FROM gmp_cis.cis_equity_price
+        WHERE is_active = true
+          AND CAST(REPLACE(price_date, '-', '') AS INT) <= CAST('${processing_date}' AS INT)
+    ) deduped
+    WHERE rn_dedup = 1
+) latest
+WHERE rn_latest = 1;
 
 
 -- =============================================================================
