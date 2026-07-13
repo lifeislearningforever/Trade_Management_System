@@ -1,26 +1,34 @@
 # CIS EOD Control-M Scripts
 
-## Script Files
+## Script
 
-| Environment | Script | Host | Impala |
-|-------------|--------|------|--------|
-| SIT  | `scripts/cis_eod_sit.sh`  | lxmrwtsgv0w1 | lxmrwtsgv0w1:21050 |
-| UAT  | `scripts/cis_eod_uat.sh`  | lxmrwusgv0w1 | lxmrwusgv0w1:21050 |
-| PROD | `scripts/cis_eod_prod.sh` | lxmrwpsgv0w1 | lxmrwpsgv0w1:21050 |
-| DR   | `scripts/cis_eod_dr.sh`   | lxmrwrsgv0w1 | lxmrwrsgv0w1:21050 |
+Single script for all environments: `scripts/cis_eod.sh`
+
+Pass `--env` to select the environment.
 
 ---
 
-## Job Execution Order (all environments)
+## Environment Config
 
-| Step | Job | Source ID | Type | Trigger |
-|------|-----|-----------|------|---------|
-| 1 | Equity Price Copy | — | impala-shell | Daily |
-| 2 | Corporate Actions | `cis_corporate_actions` | spark-submit | Daily |
-| 3 | Cash Flow | `cis_cash_flow` | spark-submit | Daily |
-| 4 | EOD | `cis_eod` | spark-submit | Daily |
-| 5 | SOD | `cis_sod` | spark-submit | Daily (next contextual date) |
-| 6 | Correction | `cis_correction` | spark-submit | First week of month (day 1–7) only |
+| Env  | Host          | Impala Port | Keytab (PLACEHOLDER)       |
+|------|---------------|-------------|----------------------------|
+| SIT  | lxmrwtsgv0w1  | 21050       | `<SIT_KEYTAB>.keytab`      |
+| UAT  | lxmrwusgv0w1  | 21050       | `<UAT_KEYTAB>.keytab`      |
+| PROD | lxmrwpsgv0w1  | 21050       | `<PROD_KEYTAB>.keytab`     |
+| DR   | lxmrwrsgv0w1  | 21050       | `<DR_KEYTAB>.keytab`       |
+
+---
+
+## Job Execution Order
+
+| Step | Job | Command | Type | Schedule |
+|------|-----|---------|------|----------|
+| 1 | Equity Price Copy | `impala-shell equity_price_hive_copy_job.sql` | SQL | Daily |
+| 2 | Corporate Actions | `manage.py process_corporate_actions --run-type EOD` | Django | Daily |
+| 3 | Cash Flow | `manage.py process_approved_cashflows --run-type EOD` | Django | Daily |
+| 4 | EOD Settlements | `manage.py process_settlements` | Django | Daily |
+| 5 | SOD Snapshot | `manage.py create_sod_snapshot` | Django | Daily |
+| 6 | Correction | `manage.py process_corporate_actions --run-type CORR` + `process_approved_cashflows --run-type CORR` | Django | Days 1–7 of month only |
 
 ---
 
@@ -30,66 +38,62 @@ Source file: `/sftp/ftptsp/TSPSG/CIS/gmpcisalldates.txt`
 
 ```
 Line 1 : Header  — skip
-Line 2 : trade_date|settle_date|report_date|    ← body
-          field 1   field 2     field 3
+Line 2 : 20260713|20260715|20260713|    ← body
+          field 1   field 2   field 3
+          trade     settle    report_date
 Last   : Trailer — skip
 ```
 
-- `processing_date` = field 3 (`report_date`)
-- `sod_date`        = field 2 (`settle_date`) ← **PLACEHOLDER — confirm field index**
+| Variable | Source | Field |
+|----------|--------|-------|
+| `processing_date` | `report_date` | field 3 |
+| `sod_date` | `settle_date` | field 2 — **PLACEHOLDER, confirm** |
 
----
-
-## Re-run from Failed Step
-
-If step N fails, re-run from that step without repeating earlier steps:
-
-```bash
-# Re-run from step 3 (Cash Flow) onwards
-START_FROM=3 ./cis_eod_sit.sh
-
-# Re-run from step 3 with explicit date
-START_FROM=3 ./cis_eod_sit.sh -d 20260713
-```
-
-State file written on failure: `logs/cis_eod_<REGION>_state.txt`
-Cleared automatically on full success.
+Date is converted from `YYYYMMDD` → `YYYY-MM-DD` before passing to `manage.py`.
 
 ---
 
 ## Usage
 
 ```bash
-# Run full EOD (all steps, date from gmpcisalldates.txt)
-./cis_eod_sit.sh
-./cis_eod_uat.sh
-./cis_eod_prod.sh
-./cis_eod_dr.sh
+# Full EOD — date from gmpcisalldates.txt
+./cis_eod.sh --env SIT
+./cis_eod.sh --env UAT
+./cis_eod.sh --env PROD
+./cis_eod.sh --env DR
 
-# Run with explicit date override
-./cis_eod_sit.sh -d 20260713
+# Override date explicitly
+./cis_eod.sh --env SIT --date 20260713
 
-# Resume from specific step
-START_FROM=2 ./cis_eod_sit.sh
-START_FROM=4 ./cis_eod_prod.sh -d 20260713
+# Resume from failed step (e.g. step 3 failed)
+./cis_eod.sh --env SIT --start-from 3
+./cis_eod.sh --env PROD --date 20260713 --start-from 4
+
+# Environment variable form also works
+START_FROM=3 ./cis_eod.sh --env UAT
 ```
 
 ---
 
-## Keytab Placeholders (update before deploying)
+## Re-run from Failed Step
 
-| Environment | Keytab | Principal |
-|-------------|--------|-----------|
-| SIT  | `/app/prodlib/<SIT_KEYTAB>.keytab`  | `<SIT_PRINCIPAL>@SG.UOBNET.COM`  |
-| UAT  | `/app/prodlib/<UAT_KEYTAB>.keytab`  | `<UAT_PRINCIPAL>@SG.UOBNET.COM`  |
-| PROD | `/app/prodlib/<PROD_KEYTAB>.keytab` | `<PROD_PRINCIPAL>@SG.UOBNET.COM` |
-| DR   | `/app/prodlib/<DR_KEYTAB>.keytab`   | `<DR_PRINCIPAL>@SG.UOBNET.COM`   |
+On failure the script prints exactly what to run:
+
+```
+>>> FAILED at STEP 3 <<<
+>>> To re-run from this step:
+>>>   ./cis_eod.sh --env SIT --start-from 3
+>>> Or with explicit date:
+>>>   ./cis_eod.sh --env SIT --date 20260713 --start-from 3
+```
+
+State file written on failure: `logs/cis_eod_<ENV>_state.txt`
+Cleared automatically on full success.
 
 ---
 
 ## Log Files
 
-Written to `logs/` under the project base directory:
 ```
 logs/cis_eod_SIT_20260713_183200.log
 logs/cis_eod_UAT_20260713_183200.log
@@ -99,7 +103,30 @@ logs/cis_eod_DR_20260713_183200.log
 
 ---
 
-## Correction Job Schedule
+## Keytab Placeholders — Update Before Deploying
 
-Runs **only on days 1–7 of each month** (month-end correction window).
-Automatically skipped on all other days — no manual intervention needed.
+Edit `scripts/cis_eod.sh` and replace:
+
+| Env  | Replace | With |
+|------|---------|------|
+| SIT  | `<SIT_KEYTAB>` / `<SIT_PRINCIPAL>` | actual keytab filename / principal |
+| UAT  | `<UAT_KEYTAB>` / `<UAT_PRINCIPAL>` | actual keytab filename / principal |
+| PROD | `<PROD_KEYTAB>` / `<PROD_PRINCIPAL>` | actual keytab filename / principal |
+| DR   | `<DR_KEYTAB>` / `<DR_PRINCIPAL>` | actual keytab filename / principal |
+
+---
+
+## Correction Job
+
+- Runs **steps 2 and 3** with `--run-type CORR` (CA + Cash Flow correction)
+- Triggered automatically when `day_of_month` is **1–7**
+- No manual flag needed — the script checks the date itself
+- Skipped silently on all other days
+
+---
+
+## Pending
+
+- [ ] Confirm `sod_date` field index in `gmpcisalldates.txt` (currently field 2)
+- [ ] Fill in keytab filenames and principals for all 4 environments
+- [ ] Verify `create_sod_snapshot` should use `sod_date` not `processing_date`
