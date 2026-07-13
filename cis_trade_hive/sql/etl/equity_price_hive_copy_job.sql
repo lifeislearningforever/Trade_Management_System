@@ -22,13 +22,15 @@
 --      price_date preserved (so downstream knows when the price was set).
 --
 -- Parameters (replace before running):
---   ${processing_date}     — run date as YYYYMMDD, e.g. 20260430
---   ${processing_date_fmt} — same date as YYYY-MM-DD, e.g. 2026-04-30
+--   ${processing_date} — run date as YYYYMMDD, e.g. 20260430
+--
+--   YYYY-MM-DD is derived inside SQL:
+--   CONCAT(SUBSTR('${processing_date}',1,4),'-',SUBSTR('${processing_date}',5,2),'-',SUBSTR('${processing_date}',7,2))
+--   No second variable needed.
 --
 -- Usage:
 --   impala-shell -i <host>:21050 \
 --     --var=processing_date=20260430 \
---     --var=processing_date_fmt=2026-04-30 \
 --     -f sql/etl/equity_price_hive_copy_job.sql
 --
 -- =============================================================================
@@ -61,7 +63,7 @@ LIMIT 30;
 SELECT
     currency_code,
     security_label,
-    '${processing_date_fmt}'                    AS price_date,
+    CONCAT(SUBSTR('${processing_date}',1,4),'-',SUBSTR('${processing_date}',5,2),'-',SUBSTR('${processing_date}',7,2)) AS price_date,
     price_date                                  AS original_price_date,
     main_closing_price,
     src_system,
@@ -122,7 +124,7 @@ PARTITION (processing_date='${processing_date}')
 SELECT
     currency_code,
     security_label,
-    '${processing_date_fmt}' AS price_date,   -- always set to processing date (YYYY-MM-DD)
+    CONCAT(SUBSTR('${processing_date}',1,4),'-',SUBSTR('${processing_date}',5,2),'-',SUBSTR('${processing_date}',7,2)) AS price_date,  -- YYYY-MM-DD from processing_date
     isin,
     main_closing_price,
     price_timestamp,
