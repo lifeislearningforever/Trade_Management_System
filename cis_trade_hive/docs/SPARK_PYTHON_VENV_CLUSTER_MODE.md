@@ -140,6 +140,55 @@ gmp_cis/lib/python3.11/site-packages/thrift/
 ...
 ```
 
+### Step 6b — Verify All Required Packages Are Inside the Archive
+
+Run these checks **before** copying to the edge node. Do not proceed if any
+required package is missing — re-activate, pip install, deactivate, re-pack.
+
+```bash
+# 1. List every installed package (name + version) inside the archive
+tar -tzf cis_etl_env.tar.gz \
+  | grep "\.dist-info/METADATA" \
+  | sed 's|.*/site-packages/||' \
+  | sed 's|/METADATA||' \
+  | sort
+
+# 2. Confirm the specific packages we need are all present
+tar -tzf cis_etl_env.tar.gz \
+  | grep -E "site-packages/(pyhive|PyHive|thrift|pyarrow|openpyxl|chardet|dotenv|impyla|sasl|thrift_sasl)" \
+  | grep "\.dist-info/METADATA"
+
+# 3. Confirm the Python binary is inside and executable
+tar -tzvf cis_etl_env.tar.gz | grep "bin/python"
+
+# 4. Check archive size is reasonable (expect 100–300 MB)
+ls -lh cis_etl_env.tar.gz
+```
+
+Expected output for check 2 — all 8 lines must appear:
+
+```
+cis_etl_env/lib/python3.10/site-packages/PyHive-0.7.0.dist-info/METADATA
+cis_etl_env/lib/python3.10/site-packages/thrift-0.16.0.dist-info/METADATA
+cis_etl_env/lib/python3.10/site-packages/thrift_sasl-0.4.3.dist-info/METADATA
+cis_etl_env/lib/python3.10/site-packages/pyarrow-xx.x.x.dist-info/METADATA
+cis_etl_env/lib/python3.10/site-packages/openpyxl-x.x.x.dist-info/METADATA
+cis_etl_env/lib/python3.10/site-packages/chardet-x.x.x.dist-info/METADATA
+cis_etl_env/lib/python3.10/site-packages/python_dotenv-1.0.1.dist-info/METADATA
+cis_etl_env/lib/python3.10/site-packages/impyla-x.x.x.dist-info/METADATA
+```
+
+If any package is missing:
+
+```bash
+source cis_etl_env/bin/activate
+pip install <missing-package>
+deactivate
+venv-pack -p cis_etl_env -o cis_etl_env.tar.gz
+```
+
+---
+
 ### Step 7 — SCP to Cloudera Edge Node
 
 If you built in WSL home (`~`), first copy to the Windows-accessible path:
@@ -321,7 +370,13 @@ deactivate
 venv-pack -p gmp_cis -o gmp_cis.tar.gz
 ls -lh gmp_cis.tar.gz
 
-# 5. SCP to edge node
+# 4b. Verify all required packages are inside BEFORE copying to edge node
+tar -tzf gmp_cis.tar.gz \
+  | grep -E "site-packages/(pyhive|PyHive|thrift|pyarrow|openpyxl|chardet|dotenv|impyla|sasl|thrift_sasl)" \
+  | grep "\.dist-info/METADATA"
+# All 8 packages must appear — if any missing: re-activate, pip install, deactivate, re-pack
+
+# 5. SCP to edge node (only after verify passes)
 scp gmp_cis.tar.gz venh7u@<edge-node-hostname>:~/
 ```
 
