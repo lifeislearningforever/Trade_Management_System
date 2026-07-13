@@ -1,5 +1,26 @@
 # Bundling Python + Packages for Spark Cluster Mode on Cloudera CML
 
+## What Was Actually Done (Our Setup)
+
+| Item | Value |
+|---|---|
+| **Build machine** | Windows laptop (user: `venh7u`) using **WSL 2** |
+| **venv name** | `gmp_cis` |
+| **Python version** | 3.11 (built inside WSL 2) |
+| **Archive** | `gmp_cis.tar.gz` (produced by `venv-pack` inside WSL 2) |
+| **Transfer** | SCP from WSL → Cloudera **edge node** (`~/gmp_cis.tar.gz`) |
+| **HDFS path** | `/mrw/cis/spark/venvs/gmp_cis.tar.gz` |
+| **spark-submit alias** | `gmp_cis` (`--archives ...#gmp_cis`) |
+| **PYSPARK_PYTHON** | `./gmp_cis/bin/python3.11` |
+
+> **Why WSL 2 and not Windows CMD/PowerShell?**
+> `venv-pack` only works on Linux/macOS. Running it in Windows gives:
+> `FileNotFoundError: [WinError 2] The system cannot find the path specified`
+> WSL 2 provides a real Linux kernel so the packed archive contains correct
+> Linux binaries that run on YARN worker nodes.
+
+---
+
 ## The Problem
 
 On **Cloudera CML**, when a PySpark job runs in cluster mode, the driver and
@@ -8,53 +29,76 @@ by Cloudera — you cannot `pip install` into it, and there is no local venv to
 activate before submitting.
 
 The solution: **bundle Python itself together with all required packages into a
-single zip**, ship it via `spark-submit --archives`, and tell Spark to use
-that bundled interpreter via `PYSPARK_PYTHON`.
-
-Two methods are available depending on what is installed in your CML session:
-
-| Method | Tool | When to use |
-|---|---|---|
-| **A — venv-pack** | `pip install venv-pack` | You can create a venv inside CML (recommended) |
-| **B — conda-pack** | `conda pack` | Your CML runtime uses a conda environment |
-
-Both produce a self-contained archive with Python + all packages + shared libs.
+tar.gz**, ship it via `spark-submit --archives`, and tell Spark to use that
+bundled interpreter via `PYSPARK_PYTHON`.
 
 ---
 
-## Method A — venv-pack (recommended for CML pip-based runtimes)
+## Step-by-Step — What We Did
 
-### A1 — Open a CML Terminal Session
+### Step 1 — Open WSL 2 on Windows
 
-In the CML UI: **New Session → Terminal Access → Open Terminal**
-
-Check the Python version (must match YARN worker nodes):
-
-```bash
-python3 --version        # e.g. Python 3.10.14
-which python3            # e.g. /usr/local/bin/python3
+```
+# In PowerShell or CMD:
+wsl
 ```
 
-### A2 — Create a Virtual Environment Inside CML
+You will see a prompt like:
+```
+venh7u@DESKTOP-XXXXX:~$
+```
+
+You are now on Linux inside Windows.
+
+### Step 2 — Check Python 3.11 is Available in WSL
 
 ```bash
-# Create venv in your CML home directory
-python3 -m venv ~/cis_etl_env
+python3.11 --version    # Python 3.11.x
+```
 
-# Activate it
-source ~/cis_etl_env/bin/activate
+If not found:
+
+```bash
+sudo apt update
+sudo apt install -y python3.11 python3.11-venv python3.11-dev
+```
+
+### Step 3 — Navigate to Your Working Folder
+
+Windows path `C:\Users\venh7u\CIS\cis\` maps to `/mnt/c/Users/venh7u/CIS/cis/` in WSL.
+
+```bash
+cd /mnt/c/Users/venh7u/CIS/cis/
+```
+
+If you hit NTFS permission issues, build in WSL home instead and copy over at the end:
+
+```bash
+cd ~
+```
+
+### Step 4 — Remove Any Old venv and Create a Fresh One
+
+```bash
+# Remove old Windows-built venv if it exists
+rm -rf gmp_cis
+
+# Create fresh Linux venv with Python 3.11
+python3.11 -m venv gmp_cis
+
+# Activate
+source gmp_cis/bin/activate
 
 # Confirm
-which python     # ~/cis_etl_env/bin/python
-python --version
+which python      # .../gmp_cis/bin/python
+python --version  # Python 3.11.x
 ```
 
-### A3 — Install All Required Packages
+### Step 5 — Install All Required Packages
 
 ```bash
 pip install --upgrade pip
 
-# Core packages needed by the CIS ETL job
 pip install \
     PyHive==0.7.0 \
     thrift==0.16.0 \
@@ -63,57 +107,70 @@ pip install \
     openpyxl>=3.1.0 \
     chardet>=5.0.0 \
     python-dotenv==1.0.1 \
-    impyla
+    impyla \
+    venv-pack
 
-# Verify — no missing dependencies
+# Verify no broken dependencies
 pip check
 pip list
 ```
 
-### A4 — Install venv-pack
-
-`venv-pack` is the key tool. Unlike a plain `zip -r`, it:
-- Copies shared libraries (`.so` files) that stdlib modules like `_ssl`, `_lzma` depend on
-- Rewrites internal symlinks so the archive is relocatable on any node
-- Produces a `.tar.gz` that Spark can unpack natively
+### Step 6 — Pack the venv
 
 ```bash
-pip install venv-pack
-```
-
-### A5 — Pack the Virtual Environment
-
-```bash
-# Deactivate first — venv-pack must run from outside the venv
+# Deactivate BEFORE packing
 deactivate
 
-# Pack into a tar.gz (Spark --archives supports both .zip and .tar.gz)
-venv-pack -p ~/cis_etl_env -o cis_etl_env.tar.gz
+# Pack — produces a self-contained Linux tar.gz
+venv-pack -p gmp_cis -o gmp_cis.tar.gz
 
-# Check the output
-ls -lh cis_etl_env.tar.gz   # typically 80–400 MB depending on packages
+# Check output (typically 150–300 MB)
+ls -lh gmp_cis.tar.gz
 ```
 
 The archive contains:
 
 ```
-cis_etl_env/
-cis_etl_env/bin/python3.10          ← actual interpreter binary
-cis_etl_env/bin/python              ← symlink
-cis_etl_env/lib/python3.10/        ← stdlib + installed packages
-cis_etl_env/lib/python3.10/site-packages/pyarrow/
-cis_etl_env/lib/python3.10/site-packages/thrift/
+gmp_cis/
+gmp_cis/bin/python3.11          ← actual interpreter binary
+gmp_cis/bin/python              ← symlink
+gmp_cis/lib/python3.11/         ← stdlib + installed packages
+gmp_cis/lib/python3.11/site-packages/pyarrow/
+gmp_cis/lib/python3.11/site-packages/thrift/
 ...
 ```
 
-### A6 — Upload to HDFS
+### Step 7 — SCP to Cloudera Edge Node
+
+If you built in WSL home (`~`), first copy to the Windows-accessible path:
 
 ```bash
-# Create staging directory
+cp ~/gmp_cis.tar.gz /mnt/c/Users/venh7u/CIS/cis/gmp_cis.tar.gz
+```
+
+Then SCP to the edge node (run from WSL or Windows PowerShell):
+
+```bash
+scp /mnt/c/Users/venh7u/CIS/cis/gmp_cis.tar.gz \
+    venh7u@<edge-node-hostname>:~/
+```
+
+### Step 8 — Upload from Edge Node to HDFS
+
+SSH to the edge node:
+
+```bash
+ssh venh7u@<edge-node-hostname>
+```
+
+Then upload:
+
+```bash
+# Create staging directory (ignore error if already exists)
 hdfs dfs -mkdir -p /mrw/cis/spark/venvs/
 
 # Upload
-hdfs dfs -put -f cis_etl_env.tar.gz /mrw/cis/spark/venvs/cis_etl_env.tar.gz
+hdfs dfs -put -f ~/gmp_cis.tar.gz /mrw/cis/spark/venvs/gmp_cis.tar.gz
 
 # Verify
 hdfs dfs -ls /mrw/cis/spark/venvs/
@@ -121,49 +178,9 @@ hdfs dfs -ls /mrw/cis/spark/venvs/
 
 ---
 
-## Method B — conda-pack (for CML conda-based runtimes)
+## spark-submit Command
 
-Use this if your CML session is running inside a conda environment.
-
-### B1 — Check Conda Environment
-
-```bash
-conda info --envs       # list environments
-conda activate base     # or your named env
-python --version
-```
-
-### B2 — Install Packages into Conda Env
-
-```bash
-# Add packages to the current conda env
-conda install -y pyarrow openpyxl chardet
-pip install PyHive==0.7.0 thrift==0.16.0 thrift-sasl==0.4.3 python-dotenv impyla
-```
-
-### B3 — Pack the Conda Environment
-
-```bash
-conda install -y conda-pack   # install packer tool
-
-# Pack current active env
-conda pack -o cis_etl_env.tar.gz
-
-# Or pack by name
-conda pack -n your_env_name -o cis_etl_env.tar.gz
-```
-
-### B4 — Upload to HDFS
-
-```bash
-hdfs dfs -mkdir -p /mrw/cis/spark/venvs/
-hdfs dfs -put -f cis_etl_env.tar.gz /mrw/cis/spark/venvs/cis_etl_env.tar.gz
-hdfs dfs -ls /mrw/cis/spark/venvs/
-```
-
----
-
-## spark-submit Command (same for both methods)
+Run from the Cloudera **edge node** (SSH) or CML terminal:
 
 ```bash
 spark-submit \
@@ -174,10 +191,10 @@ spark-submit \
   --executor-memory 4g \
   --driver-memory 2g \
   \
-  --archives hdfs:///mrw/cis/spark/venvs/cis_etl_env.tar.gz#cis_etl_env \
+  --archives hdfs:///mrw/cis/spark/venvs/gmp_cis.tar.gz#gmp_cis \
   \
-  --conf spark.yarn.appMasterEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python \
-  --conf spark.executorEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python \
+  --conf spark.yarn.appMasterEnv.PYSPARK_PYTHON=./gmp_cis/bin/python3.11 \
+  --conf spark.executorEnv.PYSPARK_PYTHON=./gmp_cis/bin/python3.11 \
   \
   your_etl_job.py \
   --arg1 value1
@@ -191,15 +208,13 @@ spark-submit \
 
 | Part | Value | What happens |
 |---|---|---|
-| `hdfs-path` | `hdfs:///mrw/cis/spark/venvs/cis_etl_env.tar.gz` | YARN downloads this to every node |
-| `local-alias` | `cis_etl_env` | YARN unpacks the tar.gz into this directory name in the executor working dir |
-| `PYSPARK_PYTHON` | `./cis_etl_env/bin/python` | Spark uses this interpreter — relative to working dir |
+| `hdfs-path` | `hdfs:///mrw/cis/spark/venvs/gmp_cis.tar.gz` | YARN downloads this to every node |
+| `local-alias` | `gmp_cis` | YARN unpacks the tar.gz into this directory name in each executor's working dir |
+| `PYSPARK_PYTHON` | `./gmp_cis/bin/python3.11` | Spark uses this interpreter — relative to executor working dir |
 
 ---
 
 ## Submitting from CML (no terminal spark-submit)
-
-In CML, jobs can be submitted via **CML Jobs** or **cdsw-run**:
 
 ### Via CML Jobs UI
 
@@ -207,9 +222,9 @@ In CML, jobs can be submitted via **CML Jobs** or **cdsw-run**:
 2. Engine: **Spark**
 3. **Spark Config** (add these):
    ```
-   spark.archives=hdfs:///mrw/cis/spark/venvs/cis_etl_env.tar.gz#cis_etl_env
-   spark.yarn.appMasterEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python
-   spark.executorEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python
+   spark.archives=hdfs:///mrw/cis/spark/venvs/gmp_cis.tar.gz#gmp_cis
+   spark.yarn.appMasterEnv.PYSPARK_PYTHON=./gmp_cis/bin/python3.11
+   spark.executorEnv.PYSPARK_PYTHON=./gmp_cis/bin/python3.11
    ```
 4. **File Dependencies**: *(not needed — archive is on HDFS)*
 
@@ -222,9 +237,9 @@ result = subprocess.run([
     "spark-submit",
     "--master", "yarn",
     "--deploy-mode", "cluster",
-    "--archives", "hdfs:///mrw/cis/spark/venvs/cis_etl_env.tar.gz#cis_etl_env",
-    "--conf", "spark.yarn.appMasterEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python",
-    "--conf", "spark.executorEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python",
+    "--archives", "hdfs:///mrw/cis/spark/venvs/gmp_cis.tar.gz#gmp_cis",
+    "--conf", "spark.yarn.appMasterEnv.PYSPARK_PYTHON=./gmp_cis/bin/python3.11",
+    "--conf", "spark.executorEnv.PYSPARK_PYTHON=./gmp_cis/bin/python3.11",
     "your_etl_job.py",
 ], capture_output=True, text=True)
 
@@ -249,7 +264,7 @@ sc = spark.sparkContext
 # Check driver
 print(f"[DRIVER] Python: {sys.executable}")
 
-# Check executor
+# Check executors
 def _check(_):
     import sys, pyarrow, thrift
     return (
@@ -258,134 +273,165 @@ def _check(_):
         f"thrift: {thrift.__version__}"
     )
 
-results = sc.parallelize(range(4), 4).map(_check).collect()
-for r in results:
+for r in sc.parallelize(range(4), 4).map(_check).collect():
     print(f"[EXECUTOR] {r}")
 ```
 
 Expected output in YARN driver logs:
 
 ```
-[DRIVER]   Python: ./cis_etl_env/bin/python
-[EXECUTOR] Python: ./cis_etl_env/bin/python | pyarrow: 14.0.2 | thrift: 0.16.0
-[EXECUTOR] Python: ./cis_etl_env/bin/python | pyarrow: 14.0.2 | thrift: 0.16.0
-[EXECUTOR] Python: ./cis_etl_env/bin/python | pyarrow: 14.0.2 | thrift: 0.16.0
-[EXECUTOR] Python: ./cis_etl_env/bin/python | pyarrow: 14.0.2 | thrift: 0.16.0
+[DRIVER]   Python: ./gmp_cis/bin/python3.11
+[EXECUTOR] Python: ./gmp_cis/bin/python3.11 | pyarrow: 14.0.2 | thrift: 0.16.0
+[EXECUTOR] Python: ./gmp_cis/bin/python3.11 | pyarrow: 14.0.2 | thrift: 0.16.0
+[EXECUTOR] Python: ./gmp_cis/bin/python3.11 | pyarrow: 14.0.2 | thrift: 0.16.0
+[EXECUTOR] Python: ./gmp_cis/bin/python3.11 | pyarrow: 14.0.2 | thrift: 0.16.0
 ```
 
 ---
 
-## Quick Reference
+## Quick Reference — Full Copy-Paste Sequence
+
+Open WSL (`wsl` in PowerShell/CMD) then paste:
 
 ```bash
-# ── Method A: venv-pack ─────────────────────────────────────────────────────
+# 1. Navigate (or use ~ if /mnt/c/ has permission issues)
+cd /mnt/c/Users/venh7u/CIS/cis/
 
-# 1. Inside CML terminal — create venv and install packages
-python3 -m venv ~/cis_etl_env
-source ~/cis_etl_env/bin/activate
+# 2. Clean and create fresh Linux venv
+rm -rf gmp_cis
+python3.11 -m venv gmp_cis
+source gmp_cis/bin/activate
+
+# 3. Install packages
 pip install --upgrade pip
-pip install PyHive==0.7.0 thrift==0.16.0 thrift-sasl==0.4.3 \
-            pyarrow openpyxl chardet python-dotenv impyla venv-pack
+pip install \
+    PyHive==0.7.0 \
+    thrift==0.16.0 \
+    thrift-sasl==0.4.3 \
+    pyarrow>=14.0.0 \
+    openpyxl>=3.1.0 \
+    chardet>=5.0.0 \
+    python-dotenv==1.0.1 \
+    impyla \
+    venv-pack
+pip check
 deactivate
 
-# 2. Pack
-venv-pack -p ~/cis_etl_env -o cis_etl_env.tar.gz
+# 4. Pack
+venv-pack -p gmp_cis -o gmp_cis.tar.gz
+ls -lh gmp_cis.tar.gz
 
-# 3. Upload to HDFS
+# 5. SCP to edge node
+scp gmp_cis.tar.gz venh7u@<edge-node-hostname>:~/
+```
+
+On the edge node:
+
+```bash
+# 6. Upload to HDFS
 hdfs dfs -mkdir -p /mrw/cis/spark/venvs/
-hdfs dfs -put -f cis_etl_env.tar.gz /mrw/cis/spark/venvs/cis_etl_env.tar.gz
+hdfs dfs -put -f ~/gmp_cis.tar.gz /mrw/cis/spark/venvs/gmp_cis.tar.gz
+hdfs dfs -ls /mrw/cis/spark/venvs/
 
-# 4. Submit
+# 7. Submit
 spark-submit \
   --master yarn --deploy-mode cluster \
-  --archives hdfs:///mrw/cis/spark/venvs/cis_etl_env.tar.gz#cis_etl_env \
-  --conf spark.yarn.appMasterEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python \
-  --conf spark.executorEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python \
-  your_etl_job.py
-
-
-# ── Method B: conda-pack ─────────────────────────────────────────────────────
-
-# 1. Install packages into current conda env
-conda install -y pyarrow openpyxl chardet conda-pack
-pip install PyHive thrift thrift-sasl impyla python-dotenv
-
-# 2. Pack
-conda pack -o cis_etl_env.tar.gz
-
-# 3. Upload & submit (same as above)
-hdfs dfs -put -f cis_etl_env.tar.gz /mrw/cis/spark/venvs/cis_etl_env.tar.gz
-spark-submit \
-  --master yarn --deploy-mode cluster \
-  --archives hdfs:///mrw/cis/spark/venvs/cis_etl_env.tar.gz#cis_etl_env \
-  --conf spark.yarn.appMasterEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python \
-  --conf spark.executorEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python \
+  --archives hdfs:///mrw/cis/spark/venvs/gmp_cis.tar.gz#gmp_cis \
+  --conf spark.yarn.appMasterEnv.PYSPARK_PYTHON=./gmp_cis/bin/python3.11 \
+  --conf spark.executorEnv.PYSPARK_PYTHON=./gmp_cis/bin/python3.11 \
   your_etl_job.py
 ```
+
+---
+
+## Re-packing After Package Changes
+
+```bash
+# In WSL — activate, add/remove packages, re-pack with a version tag
+source gmp_cis/bin/activate
+pip install new-package==x.y.z
+deactivate
+
+venv-pack -p gmp_cis -o gmp_cis_v1.1.tar.gz
+
+# Upload new version
+scp gmp_cis_v1.1.tar.gz venh7u@<edge-node-hostname>:~/
+ssh venh7u@<edge-node-hostname>
+hdfs dfs -put -f ~/gmp_cis_v1.1.tar.gz /mrw/cis/spark/venvs/gmp_cis_v1.1.tar.gz
+```
+
+Update the `--archives` path in `spark-submit` to reference the new version.
 
 ---
 
 ## Troubleshooting
 
+### `FileNotFoundError: [WinError 2]` when running venv-pack
+
+You are running `venv-pack` in Windows CMD or PowerShell — it only works on Linux.
+Open WSL (`wsl`) and run all steps from there.
+
+### `exec format error` on executors
+
+The archive was built in Windows (not WSL/Docker). Windows binaries are PE format,
+not ELF — they cannot run on Linux YARN nodes. Rebuild inside WSL 2.
+
 ### `No module named 'X'` on executors
 
-Package was not in the venv when it was packed.
+The package was not installed before packing. Re-run from Step 4 (activate → pip install → deactivate → venv-pack → scp → hdfs put).
+
+### `Permission denied` on `./gmp_cis/bin/python3.11`
+
+`venv-pack` preserves execute bits correctly. If this happens, someone re-zipped
+the archive with a Windows tool (e.g. 7-Zip, Windows Explorer) that strips Unix
+permissions. Always transfer the original `gmp_cis.tar.gz` produced by `venv-pack`.
+
+### `Python version mismatch` in Spark logs
+
+The Python version inside the archive (3.11) must match what YARN worker nodes
+expect. If YARN workers run 3.8 or 3.9 as system Python, that is fine —
+`PYSPARK_PYTHON` overrides it entirely. The warning can be ignored as long as
+executor output shows `python3.11`.
+
+### Archive size mismatch after SCP (corruption check)
 
 ```bash
-source ~/cis_etl_env/bin/activate
-pip install missing-package
+# Local (WSL)
+ls -lh gmp_cis.tar.gz
+
+# On edge node after SCP
+ls -lh ~/gmp_cis.tar.gz
+
+# On HDFS after put
+hdfs dfs -du -h /mrw/cis/spark/venvs/gmp_cis.tar.gz
+```
+
+All three sizes should match. If not, re-SCP and re-upload.
+
+### `permission denied` writing to `/mnt/c/` in WSL
+
+Build in WSL home instead and copy the finished archive to Windows:
+
+```bash
+cd ~
+rm -rf gmp_cis
+python3.11 -m venv gmp_cis
+source gmp_cis/bin/activate
+pip install --upgrade pip
+pip install PyHive==0.7.0 thrift==0.16.0 thrift-sasl==0.4.3 \
+            pyarrow openpyxl chardet python-dotenv impyla venv-pack
 deactivate
-venv-pack -p ~/cis_etl_env -o cis_etl_env.tar.gz
-hdfs dfs -put -f cis_etl_env.tar.gz /mrw/cis/spark/venvs/cis_etl_env.tar.gz
-```
-
-### `Permission denied` on `./cis_etl_env/bin/python`
-
-venv-pack sets correct permissions. If using plain `zip -r` instead, bits are
-lost. Always use `venv-pack` or `conda-pack` — they preserve execute bits.
-
-### `Python version mismatch`
-
-The Python in your CML session must match the Python on YARN worker nodes.
-Check both:
-
-```bash
-# In CML terminal
-python3 --version
-
-# On a YARN worker (ask Cloudera admin or check CDP Manager)
-# Cloudera Manager → Hosts → any worker → Processes → check Python version
-```
-
-If they differ, ask your Cloudera admin to align them, or use a different CML
-runtime version that matches.
-
-### `Error: Archive is not a valid zip/tar file`
-
-HDFS upload may have been corrupted or truncated. Re-upload and verify:
-
-```bash
-hdfs dfs -du -h /mrw/cis/spark/venvs/cis_etl_env.tar.gz
-# Compare with local:
-ls -lh cis_etl_env.tar.gz
+venv-pack -p ~/gmp_cis -o ~/gmp_cis.tar.gz
+# Copy to Windows folder (optional)
+cp ~/gmp_cis.tar.gz /mnt/c/Users/venh7u/CIS/cis/gmp_cis.tar.gz
 ```
 
 ### Check YARN application logs
 
 ```bash
-# Get application ID from CML job logs, then:
+# Get applicationId from CML job output, then on edge node:
 yarn logs -applicationId application_XXXXXXXXX_XXXX 2>&1 | \
   grep -i "python\|PYSPARK\|error\|exception" | head -60
-```
-
-### Re-pack after adding packages (versioning tip)
-
-Tag the archive with a version to avoid stale caches on YARN nodes:
-
-```bash
-venv-pack -p ~/cis_etl_env -o cis_etl_env_v1.2.tar.gz
-hdfs dfs -put cis_etl_env_v1.2.tar.gz /mrw/cis/spark/venvs/
-# Update --archives path in spark-submit accordingly
 ```
 
 ---
@@ -394,9 +440,20 @@ hdfs dfs -put cis_etl_env_v1.2.tar.gz /mrw/cis/spark/venvs/
 
 ```bash
 # If Kerberos is enabled, kinit before spark-submit
-kinit your_user@YOUR.REALM.COM
-klist    # verify ticket
+kinit venh7u@YOUR.REALM.COM
+klist    # verify ticket is valid
 
 # Ranger: ensure the service account has READ on the venv HDFS path
 # Cloudera Ranger UI → HDFS policies → /mrw/cis/spark/venvs/ → READ for spark user
 ```
+
+---
+
+## Windows Path → WSL Path Reference
+
+| Windows | WSL |
+|---|---|
+| `C:\` | `/mnt/c/` |
+| `C:\Users\venh7u\` | `/mnt/c/Users/venh7u/` |
+| `C:\Users\venh7u\CIS\cis\` | `/mnt/c/Users/venh7u/CIS/cis/` |
+| `C:\Users\venh7u\CIS\cis\gmp_cis.tar.gz` | `/mnt/c/Users/venh7u/CIS/cis/gmp_cis.tar.gz` |
