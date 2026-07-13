@@ -4,14 +4,15 @@
 
 | Item | Value |
 |---|---|
-| **Build machine** | Windows laptop (user: `venh7u`) using **WSL 2** |
-| **venv name** | `gmp_cis` |
-| **Python version** | 3.11 (built inside WSL 2) |
-| **Archive** | `gmp_cis.tar.gz` (produced by `venv-pack` inside WSL 2) |
-| **Transfer** | SCP from WSL → Cloudera **edge node** (`~/gmp_cis.tar.gz`) |
-| **HDFS path** | `/mrw/cis/spark/venvs/gmp_cis.tar.gz` |
-| **spark-submit alias** | `gmp_cis` (`--archives ...#gmp_cis`) |
-| **PYSPARK_PYTHON** | `./gmp_cis/bin/python3.11` |
+| **Build machine** | Cloudera CML terminal (`cdsw@...`) |
+| **venv name** | `cis_etl_env` |
+| **Python version** | 3.10 (CML system Python) |
+| **Archive** | `cis_etl_env.tar.gz` (116 MB, produced by `venv-pack` on CML) |
+| **Transfer** | SCP from CML → Cloudera **edge node** `lxmrwtsgv0w1` |
+| **HDFS path** | `/cis/spark/venvs/cis_etl_env.tar.gz` |
+| **HDFS owner** | `ownicisgw` / supergroup |
+| **spark-submit alias** | `cis_etl_env` (`--archives ...#cis_etl_env`) |
+| **PYSPARK_PYTHON** | `./cis_etl_env/bin/python3.10` |
 
 > **Why WSL 2 and not Windows CMD/PowerShell?**
 > `venv-pack` only works on Linux/macOS. Running it in Windows gives:
@@ -201,7 +202,7 @@ Then SCP to the edge node (run from WSL or Windows PowerShell):
 
 ```bash
 scp /mnt/c/Users/venh7u/CIS/cis/gmp_cis.tar.gz \
-    venh7u@<edge-node-hostname>:~/
+    ownicisgw@lxmrwtsgv0w1:~/
 ```
 
 ### Step 8 — Upload from Edge Node to HDFS
@@ -209,20 +210,20 @@ scp /mnt/c/Users/venh7u/CIS/cis/gmp_cis.tar.gz \
 SSH to the edge node:
 
 ```bash
-ssh venh7u@<edge-node-hostname>
+ssh ownicisgw@lxmrwtsgv0w1
 ```
 
 Then upload:
 
 ```bash
 # Create staging directory (ignore error if already exists)
-hdfs dfs -mkdir -p /mrw/cis/spark/venvs/
+hdfs dfs -mkdir -p /cis/spark/venvs/
 
 # Upload
-hdfs dfs -put -f ~/gmp_cis.tar.gz /mrw/cis/spark/venvs/gmp_cis.tar.gz
+hdfs dfs -put -f ~/gmp_cis.tar.gz /cis/spark/venvs/gmp_cis.tar.gz
 
 # Verify
-hdfs dfs -ls /mrw/cis/spark/venvs/
+hdfs dfs -ls /cis/spark/venvs/
 ```
 
 ---
@@ -240,10 +241,10 @@ spark-submit \
   --executor-memory 4g \
   --driver-memory 2g \
   \
-  --archives hdfs:///mrw/cis/spark/venvs/gmp_cis.tar.gz#gmp_cis \
+  --archives hdfs:///cis/spark/venvs/cis_etl_env.tar.gz#cis_etl_env \
   \
-  --conf spark.yarn.appMasterEnv.PYSPARK_PYTHON=./gmp_cis/bin/python3.11 \
-  --conf spark.executorEnv.PYSPARK_PYTHON=./gmp_cis/bin/python3.11 \
+  --conf spark.yarn.appMasterEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python3.10 \
+  --conf spark.executorEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python3.10 \
   \
   your_etl_job.py \
   --arg1 value1
@@ -257,9 +258,9 @@ spark-submit \
 
 | Part | Value | What happens |
 |---|---|---|
-| `hdfs-path` | `hdfs:///mrw/cis/spark/venvs/gmp_cis.tar.gz` | YARN downloads this to every node |
+| `hdfs-path` | `hdfs:///cis/spark/venvs/gmp_cis.tar.gz` | YARN downloads this to every node |
 | `local-alias` | `gmp_cis` | YARN unpacks the tar.gz into this directory name in each executor's working dir |
-| `PYSPARK_PYTHON` | `./gmp_cis/bin/python3.11` | Spark uses this interpreter — relative to executor working dir |
+| `PYSPARK_PYTHON` | `./cis_etl_env/bin/python3.10` | Spark uses this interpreter — relative to executor working dir |
 
 ---
 
@@ -271,9 +272,9 @@ spark-submit \
 2. Engine: **Spark**
 3. **Spark Config** (add these):
    ```
-   spark.archives=hdfs:///mrw/cis/spark/venvs/gmp_cis.tar.gz#gmp_cis
-   spark.yarn.appMasterEnv.PYSPARK_PYTHON=./gmp_cis/bin/python3.11
-   spark.executorEnv.PYSPARK_PYTHON=./gmp_cis/bin/python3.11
+   spark.archives=hdfs:///cis/spark/venvs/cis_etl_env.tar.gz#cis_etl_env
+   spark.yarn.appMasterEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python3.10
+   spark.executorEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python3.10
    ```
 4. **File Dependencies**: *(not needed — archive is on HDFS)*
 
@@ -286,9 +287,9 @@ result = subprocess.run([
     "spark-submit",
     "--master", "yarn",
     "--deploy-mode", "cluster",
-    "--archives", "hdfs:///mrw/cis/spark/venvs/gmp_cis.tar.gz#gmp_cis",
-    "--conf", "spark.yarn.appMasterEnv.PYSPARK_PYTHON=./gmp_cis/bin/python3.11",
-    "--conf", "spark.executorEnv.PYSPARK_PYTHON=./gmp_cis/bin/python3.11",
+    "--archives", "hdfs:///cis/spark/venvs/cis_etl_env.tar.gz#cis_etl_env",
+    "--conf", "spark.yarn.appMasterEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python3.10",
+    "--conf", "spark.executorEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python3.10",
     "your_etl_job.py",
 ], capture_output=True, text=True)
 
@@ -329,11 +330,11 @@ for r in sc.parallelize(range(4), 4).map(_check).collect():
 Expected output in YARN driver logs:
 
 ```
-[DRIVER]   Python: ./gmp_cis/bin/python3.11
-[EXECUTOR] Python: ./gmp_cis/bin/python3.11 | pyarrow: 14.0.2 | thrift: 0.16.0
-[EXECUTOR] Python: ./gmp_cis/bin/python3.11 | pyarrow: 14.0.2 | thrift: 0.16.0
-[EXECUTOR] Python: ./gmp_cis/bin/python3.11 | pyarrow: 14.0.2 | thrift: 0.16.0
-[EXECUTOR] Python: ./gmp_cis/bin/python3.11 | pyarrow: 14.0.2 | thrift: 0.16.0
+[DRIVER]   Python: ./cis_etl_env/bin/python3.10
+[EXECUTOR] Python: ./cis_etl_env/bin/python3.10 | pyarrow: 14.0.2 | thrift: 0.16.0
+[EXECUTOR] Python: ./cis_etl_env/bin/python3.10 | pyarrow: 14.0.2 | thrift: 0.16.0
+[EXECUTOR] Python: ./cis_etl_env/bin/python3.10 | pyarrow: 14.0.2 | thrift: 0.16.0
+[EXECUTOR] Python: ./cis_etl_env/bin/python3.10 | pyarrow: 14.0.2 | thrift: 0.16.0
 ```
 
 ---
@@ -377,23 +378,23 @@ tar -tzf gmp_cis.tar.gz \
 # All 8 packages must appear — if any missing: re-activate, pip install, deactivate, re-pack
 
 # 5. SCP to edge node (only after verify passes)
-scp gmp_cis.tar.gz venh7u@<edge-node-hostname>:~/
+scp gmp_cis.tar.gz ownicisgw@lxmrwtsgv0w1:~/
 ```
 
 On the edge node:
 
 ```bash
 # 6. Upload to HDFS
-hdfs dfs -mkdir -p /mrw/cis/spark/venvs/
-hdfs dfs -put -f ~/gmp_cis.tar.gz /mrw/cis/spark/venvs/gmp_cis.tar.gz
-hdfs dfs -ls /mrw/cis/spark/venvs/
+hdfs dfs -mkdir -p /cis/spark/venvs/
+hdfs dfs -put -f ~/gmp_cis.tar.gz /cis/spark/venvs/gmp_cis.tar.gz
+hdfs dfs -ls /cis/spark/venvs/
 
 # 7. Submit
 spark-submit \
   --master yarn --deploy-mode cluster \
-  --archives hdfs:///mrw/cis/spark/venvs/gmp_cis.tar.gz#gmp_cis \
-  --conf spark.yarn.appMasterEnv.PYSPARK_PYTHON=./gmp_cis/bin/python3.11 \
-  --conf spark.executorEnv.PYSPARK_PYTHON=./gmp_cis/bin/python3.11 \
+  --archives hdfs:///cis/spark/venvs/cis_etl_env.tar.gz#cis_etl_env \
+  --conf spark.yarn.appMasterEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python3.10 \
+  --conf spark.executorEnv.PYSPARK_PYTHON=./cis_etl_env/bin/python3.10 \
   your_etl_job.py
 ```
 
@@ -410,9 +411,9 @@ deactivate
 venv-pack -p gmp_cis -o gmp_cis_v1.1.tar.gz
 
 # Upload new version
-scp gmp_cis_v1.1.tar.gz venh7u@<edge-node-hostname>:~/
-ssh venh7u@<edge-node-hostname>
-hdfs dfs -put -f ~/gmp_cis_v1.1.tar.gz /mrw/cis/spark/venvs/gmp_cis_v1.1.tar.gz
+scp gmp_cis_v1.1.tar.gz ownicisgw@lxmrwtsgv0w1:~/
+ssh ownicisgw@lxmrwtsgv0w1
+hdfs dfs -put -f ~/gmp_cis_v1.1.tar.gz /cis/spark/venvs/gmp_cis_v1.1.tar.gz
 ```
 
 Update the `--archives` path in `spark-submit` to reference the new version.
@@ -435,7 +436,7 @@ not ELF — they cannot run on Linux YARN nodes. Rebuild inside WSL 2.
 
 The package was not installed before packing. Re-run from Step 4 (activate → pip install → deactivate → venv-pack → scp → hdfs put).
 
-### `Permission denied` on `./gmp_cis/bin/python3.11`
+### `Permission denied` on `./cis_etl_env/bin/python3.10`
 
 `venv-pack` preserves execute bits correctly. If this happens, someone re-zipped
 the archive with a Windows tool (e.g. 7-Zip, Windows Explorer) that strips Unix
@@ -458,7 +459,7 @@ ls -lh gmp_cis.tar.gz
 ls -lh ~/gmp_cis.tar.gz
 
 # On HDFS after put
-hdfs dfs -du -h /mrw/cis/spark/venvs/gmp_cis.tar.gz
+hdfs dfs -du -h /cis/spark/venvs/gmp_cis.tar.gz
 ```
 
 All three sizes should match. If not, re-SCP and re-upload.
@@ -499,7 +500,7 @@ kinit venh7u@YOUR.REALM.COM
 klist    # verify ticket is valid
 
 # Ranger: ensure the service account has READ on the venv HDFS path
-# Cloudera Ranger UI → HDFS policies → /mrw/cis/spark/venvs/ → READ for spark user
+# Cloudera Ranger UI → HDFS policies → /cis/spark/venvs/ → READ for spark user
 ```
 
 ---
