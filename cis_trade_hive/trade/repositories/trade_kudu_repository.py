@@ -1018,6 +1018,8 @@ class TradeKuduRepository:
                 # LC amounts for NON-REVAL portfolios (user-entered values)
                 'total_amount_lc': str(trade_data.get('total_amount_lc', '') or ''),
                 'gross_amount_lc': str(trade_data.get('gross_amount_lc', '') or ''),
+                # FX rate stored on the trade (user may have overridden the API rate)
+                'open_fx_rate': str(trade_data.get('open_fx_rate', '') or ''),
             }
 
             # Queue HISTORY event
