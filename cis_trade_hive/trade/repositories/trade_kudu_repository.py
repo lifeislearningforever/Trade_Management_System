@@ -1015,6 +1015,9 @@ class TradeKuduRepository:
                 'portfolio_currency': portfolio_details.get('currency'),
                 'isin': security_details.get('isin'),
                 'security_name': security_details.get('security_name'),
+                # LC amounts for NON-REVAL portfolios (user-entered values)
+                'total_amount_lc': str(trade_data.get('total_amount_lc', '') or ''),
+                'gross_amount_lc': str(trade_data.get('gross_amount_lc', '') or ''),
             }
 
             # Queue HISTORY event

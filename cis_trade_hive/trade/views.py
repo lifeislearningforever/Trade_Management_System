@@ -1245,46 +1245,6 @@ def trade_settle(request, trade_id):
         if not success:
             raise Exception('Failed to settle trade')
 
-        # Queue position calculation now that trade is SETTLED (approved).
-        # This is the correct trigger point — queuing at INITIAL (creation) is premature
-        # because the trade may be rejected before reaching SETTLED.
-        try:
-            from trade.services.settlement_service import settlement_service
-            from decimal import Decimal
-
-            charges = (
-                Decimal(str(trade_data.get('commission', 0) or 0)) +
-                Decimal(str(trade_data.get('sec_fee', 0) or 0)) +
-                Decimal(str(trade_data.get('other_charges', 0) or 0))
-            )
-            _trade_lc_raw = trade_data.get('total_amount_lc')
-            _gross_lc_raw = trade_data.get('gross_amount_lc')
-            settlement_service.process_trade_settlement(
-                trade_id=trade_id,
-                portfolio_id=trade_data.get('portfolio_short_name', ''),
-                security_id=trade_data.get('security_label', ''),
-                trade_type=trade_data.get('trade_type', ''),
-                quantity=Decimal(str(trade_data.get('quantity', 0) or 0)),
-                price=Decimal(str(trade_data.get('price', 0) or 0)),
-                charges=charges,
-                trade_date=trade_data.get('trade_date', ''),
-                settle_date=trade_data.get('settle_date', ''),
-                updated_by=user_info['username'],
-                security_currency=trade_data.get('currency_code'),
-                portfolio_currency=trade_data.get('portfolio_currency'),
-                isin=trade_data.get('isin'),
-                security_name=trade_data.get('security_full_name'),
-                async_mode=False,  # sync: avoids duplicate queue writes producing stale rows
-                position_basis=None,  # dual: TRADED + SETTLED
-                trade_lc=Decimal(str(_trade_lc_raw)) if _trade_lc_raw else None,
-                gross_amount_lc=Decimal(str(_gross_lc_raw)) if _gross_lc_raw else None,
-            )
-            logger.info(f"Position calculation completed synchronously for settled trade {trade_id}")
-        except Exception as settle_err:
-            # Non-fatal: trade is already SETTLED, queue failure should not roll it back.
-            # Log the error so ops can manually re-trigger if needed.
-            logger.error(f"Failed to queue position for settled trade {trade_id}: {settle_err}")
-
         # Use async audit logging to avoid blocking UI
         audit_log_kudu_repository.log_action_async(
             user_id=user_info['user_id'],

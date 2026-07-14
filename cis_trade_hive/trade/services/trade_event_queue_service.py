@@ -379,19 +379,6 @@ class TradeEventQueueService:
             # Import here to avoid circular imports
             from trade.services.settlement_service import settlement_service
 
-            # Only process settlement for trades that are actually settled/validated.
-            # The SETTLEMENT event is queued at trade CREATE (INITIAL) so the worker
-            # may pick it up before the maker-checker approve step fires. The view
-            # calls process_trade_settlement again at the point of actual settlement,
-            # so processing here for an INITIAL trade would create duplicate position rows.
-            trade_status = (trade.get('trade_status') or trade.get('status') or '').upper()
-            if trade_status not in ('SETTLED', 'VALIDATED', 'MODIFIED'):
-                logger.info(
-                    f"Skipping SETTLEMENT event for trade {trade_id}: "
-                    f"status={trade_status} (not yet settled)"
-                )
-                return True
-
             # Extract data from event
             portfolio_id = event_data.get('portfolio_short_name', '')
             security_id = event_data.get('security_label', '')
@@ -416,6 +403,11 @@ class TradeEventQueueService:
             )
             total_charges = manual_charges + auto_charges
 
+            _raw_tlc = event_data.get('total_amount_lc')
+            _raw_glc = event_data.get('gross_amount_lc')
+            _trade_lc = Decimal(str(_raw_tlc)) if _raw_tlc else None
+            _gross_amount_lc = Decimal(str(_raw_glc)) if _raw_glc else None
+
             # Process settlement (synchronous within worker)
             success, msg, result = settlement_service.process_trade_settlement(
                 trade_id=trade_id,
@@ -434,6 +426,8 @@ class TradeEventQueueService:
                 security_name=event_data.get('security_name'),
                 custodian=event_data.get('custodian', ''),
                 sub_custodian=event_data.get('sub_custodian', ''),
+                trade_lc=_trade_lc,
+                gross_amount_lc=_gross_amount_lc,
                 async_mode=False  # Process synchronously within worker
             )
 
