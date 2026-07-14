@@ -435,7 +435,8 @@
                             <div class="col-md-3">
                                 <label class="form-label">Total Amount LC</label>
                                 <input type="number" class="form-control fw-bold" name="total_amount_lc" id="total_amount_lc"
-                                       step="0.01" value="{% if trade.total_amount_lc %}{{ trade.total_amount_lc }}{% endif %}">
+                                       step="0.01" value="{% if trade.total_amount_lc %}{{ trade.total_amount_lc }}{% endif %}"
+                                       data-user-edited="false">
                                 <small class="text-muted">FC × FX Rate (Portfolio CCY) — editable</small>
                             </div>
                         </div>
@@ -908,17 +909,16 @@ function calculateTotal() {
         totalFC = grossAmount + commission + secFee + otherCharges;
     }
 
-    // Calculate LC amount (FC × FX Rate)
-    const totalLC = totalFC * fxRate;
-
-    // Update both FC and LC fields
+    // Update FC field
     const totalFCField = document.getElementById('total_amount_fc');
-    const totalLCField = document.getElementById('total_amount_lc');
-
     if (totalFCField) {
         totalFCField.value = totalFC.toFixed(2);
     }
-    if (totalLCField) {
+
+    // Only overwrite LC if user has NOT manually edited it
+    const totalLCField = document.getElementById('total_amount_lc');
+    if (totalLCField && totalLCField.dataset.userEdited !== 'true') {
+        const totalLC = totalFC * fxRate;
         totalLCField.value = totalLC.toFixed(2);
     }
 }
@@ -959,6 +959,15 @@ var fxRateEl = document.getElementById('open_fx_rate');
 if (fxRateEl) {
     fxRateEl.addEventListener('input', calculateTotal);
     fxRateEl.addEventListener('change', calculateTotal);
+}
+
+// Mark total_amount_lc as user-edited when user types in it directly.
+// Prevents calculateTotal() from overwriting the user's manual LC entry.
+var lcField = document.getElementById('total_amount_lc');
+if (lcField) {
+    lcField.addEventListener('input', function() {
+        this.dataset.userEdited = 'true';
+    });
 }
 
 // Auto-calculate gross amount on quantity/price change
