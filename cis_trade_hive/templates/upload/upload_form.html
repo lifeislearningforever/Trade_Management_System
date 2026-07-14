@@ -304,7 +304,44 @@ $(document).ready(function() {
         resetForm();
     });
 
+    // Only CIS_External_upload_format_{1-5}_<anything>.csv files are accepted.
+    var CIS_FORMAT_PATTERN = /^CIS_External_upload_format_([1-5])_.*\.csv$/i;
+
+    function getFormatNumber(filename) {
+        var m = CIS_FORMAT_PATTERN.exec(filename);
+        return m ? m[1] : null;
+    }
+
     function handleFile(file) {
+        // Enforce filename pattern before anything else
+        if (!CIS_FORMAT_PATTERN.test(file.name)) {
+            dropZone.addClass('d-none');
+            filePreview.removeClass('d-none');
+            $('#fileName').text(file.name);
+            $('#fileSize').text(formatFileSize(file.size));
+            $('#fileType').text(getFileTypeLabel(file.name));
+            validationStatus.removeClass('d-none');
+            $('#validatingAlert').addClass('d-none');
+            $('#validationResult').removeClass('d-none').html(
+                '<div class="alert alert-danger">' +
+                '<i class="bi bi-x-circle-fill me-2"></i>' +
+                '<strong>Invalid filename.</strong> Only CIS position upload files are accepted.<br><br>' +
+                '<strong>Required format:</strong><br>' +
+                '<code>CIS_External_upload_format_{N}_{suffix}.csv</code><br>' +
+                'where <code>N</code> is a format number from <strong>1 to 5</strong> and ' +
+                '<code>{suffix}</code> is any descriptive text (date, region, etc.).<br><br>' +
+                '<strong>Valid examples:</strong><br>' +
+                '<code>CIS_External_upload_format_1_20260714.csv</code><br>' +
+                '<code>CIS_External_upload_format_2_SG.csv</code><br>' +
+                '<code>CIS_External_upload_format_3_Actual-16_1.csv</code><br>' +
+                '<code>CIS_External_upload_format_5_NTS31dly.csv</code>' +
+                '</div>'
+            );
+            validationDetails.addClass('d-none');
+            uploadBtn.prop('disabled', true);
+            return;
+        }
+
         // Show file preview
         $('#fileName').text(file.name);
         $('#fileSize').text(formatFileSize(file.size));
