@@ -862,26 +862,18 @@ $(document).ready(function() {
 // Position ETL confirmation dialog
 function confirmRunPosition() {
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    // etl_processing_date is extracted server-side from the upload description
+    // etl_processing_date is extracted server-side from the upload description (always YYYYMMDD).
+    // Never prompt the user to edit — use the date the file was actually ingested with.
     const serverDate = '{{ etl_processing_date }}';
-    const defaultDate = (serverDate && /^\d{8}$/.test(serverDate)) ? serverDate : today;
-    const dateInput = prompt(
-        'Enter processing date (YYYYMMDD).\nThis must match the date used when the file was ingested:',
-        defaultDate
-    );
-    if (dateInput === null) return; // user cancelled
-    const pd = (dateInput || '').trim() || defaultDate;
-    if (!/^\d{8}$/.test(pd)) {
-        alert('Invalid date format. Please use YYYYMMDD (e.g. ' + today + ')');
+    const pd = (serverDate && /^\d{8}$/.test(serverDate)) ? serverDate : today;
+    const pdDisplay = pd.slice(0,4) + '-' + pd.slice(4,6) + '-' + pd.slice(6,8);
+    if (!confirm('Run Position ETL for processing_date=' + pdDisplay + '?\n\nThis will:\n1. Validate all upload rows\n2. Upsert valid rows into cis_position\n3. Write PASS/FAIL report to position_upload_report')) {
         return;
     }
     // Set the date on both forms (header and sidebar)
     document.querySelectorAll('#etlProcessingDate, .etlDateInput').forEach(function(el) {
         el.value = pd;
     });
-    if (!confirm('Run Position ETL for processing_date=' + pd + '?\n\nThis will:\n1. Validate all upload rows\n2. Upsert valid rows into cis_position\n3. Write PASS/FAIL report to position_upload_report')) {
-        return;
-    }
     // Submit whichever form exists
     const form = document.getElementById('runPositionForm') || document.getElementById('runPositionFormSidebar');
     if (form) form.submit();
