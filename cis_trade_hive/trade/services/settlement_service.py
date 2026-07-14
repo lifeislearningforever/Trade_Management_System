@@ -329,7 +329,9 @@ class SettlementService:
                 use_db_queue=True,
                 chain_recalc_metadata=chain_recalc_metadata,
                 position_basis=position_basis,
-                position_date=position_date or settle_date
+                position_date=position_date or settle_date,
+                gross_amount_lc=kwargs.get('gross_amount_lc'),
+                total_amount_lc=kwargs.get('trade_lc'),
             )
 
             if success:

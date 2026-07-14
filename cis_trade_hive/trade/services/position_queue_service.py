@@ -91,7 +91,9 @@ class PositionQueueService:
         chain_recalc_metadata: str = None,
         position_basis: str = 'TRADED',
         position_date: str = None,
-        deal_number: str = ''
+        deal_number: str = '',
+        gross_amount_lc: Decimal = None,
+        total_amount_lc: Decimal = None,
     ) -> Tuple[bool, str, Optional[int]]:
         """
         Add trade to position calculation queue.
@@ -120,6 +122,21 @@ class PositionQueueService:
             # For SETTLED basis: position_date = settle_date (default)
             effective_position_date = position_date or settle_date
 
+            # Encode LC amounts into error_message field (STRING column reused for metadata).
+            # Format: "LC:<gross_lc>:<total_lc>" or prepend to CHAIN_RECALC string.
+            lc_meta = None
+            if gross_amount_lc is not None or total_amount_lc is not None:
+                _glc = float(gross_amount_lc) if gross_amount_lc else 0
+                _tlc = float(total_amount_lc) if total_amount_lc else 0
+                lc_meta = f"LC:{_glc}:{_tlc}"
+
+            if chain_recalc_metadata and lc_meta:
+                effective_error_message = f"{lc_meta}|{chain_recalc_metadata}"
+            elif lc_meta:
+                effective_error_message = lc_meta
+            else:
+                effective_error_message = chain_recalc_metadata
+
             queue_item = {
                 'queue_id': queue_id,
                 'trade_id': trade_id,
@@ -141,7 +158,10 @@ class PositionQueueService:
                 'retry_count': 0,
                 'queued_at': timestamp,
                 'queued_by': queued_by,
-                'error_message': chain_recalc_metadata  # CHAIN_RECALC metadata for backdated trades
+                'error_message': effective_error_message,
+                # In-memory LC amounts (available immediately to worker)
+                'gross_amount_lc': gross_amount_lc,
+                'total_amount_lc': total_amount_lc,
             }
 
             if use_db_queue:
@@ -345,7 +365,11 @@ class PositionQueueService:
             # 3. Combined: "Previous error. CHAIN_RECALC:..." or "Max retries exceeded. Last error: ..."
             error_message = item.get('error_message', '') or ''
             logger.info(f"Processing queue item: trade_id={trade_id}, error_message='{error_message}'")
-            chain_recalc_info = self._parse_chain_recalc_metadata(error_message)
+            # Strip LC prefix before parsing CHAIN_RECALC metadata
+            _chain_part = error_message
+            if error_message.startswith('LC:') and '|' in error_message:
+                _chain_part = error_message.split('|', 1)[1]
+            chain_recalc_info = self._parse_chain_recalc_metadata(_chain_part)
 
             # For BACKDATED trades: Skip individual calculation, let chain recalculation handle ALL trades
             # This avoids the issue of creating a position that gets immediately deleted
@@ -428,24 +452,39 @@ class PositionQueueService:
             position_basis = item.get('position_basis', 'TRADED')
             position_date = item.get('position_date') or item['settle_date']
 
-            # LC amounts are not stored in cis_position_queue — fetch from cis_trade.
-            # This is the authoritative source for total_amount_lc (user-edited LC field).
-            _gross_amount_lc = None
-            _trade_lc = None
-            try:
-                _trade_row = impala_manager.execute_query(
-                    f"SELECT total_amount_lc, gross_amount_lc "
-                    f"FROM {self.DATABASE}.cis_trade "
-                    f"WHERE trade_id = {trade_id} LIMIT 1",
-                    database=self.DATABASE,
-                )
-                if _trade_row:
-                    _raw_tlc = _trade_row[0].get('total_amount_lc')
-                    _raw_glc = _trade_row[0].get('gross_amount_lc')
-                    _trade_lc = Decimal(str(_raw_tlc)) if _raw_tlc else None
-                    _gross_amount_lc = Decimal(str(_raw_glc)) if _raw_glc else None
-            except Exception as _lc_ex:
-                logger.warning(f"Could not fetch LC amounts for trade {trade_id}: {_lc_ex}")
+            # LC amounts: read from queue item (in-memory path) or parse from error_message
+            # (DB path). Fall back to fetching from cis_trade only if both are missing.
+            _gross_amount_lc = item.get('gross_amount_lc')
+            _trade_lc = item.get('total_amount_lc')
+
+            if _gross_amount_lc is None and _trade_lc is None:
+                # Try to parse from error_message: "LC:<gross>:<total>" or "LC:<gross>:<total>|CHAIN_RECALC:..."
+                _err_msg = item.get('error_message') or ''
+                if _err_msg.startswith('LC:'):
+                    try:
+                        _lc_part = _err_msg.split('|')[0]  # strip any trailing CHAIN_RECALC
+                        _, _glc_str, _tlc_str = _lc_part.split(':')
+                        _gross_amount_lc = Decimal(_glc_str) if float(_glc_str) != 0 else None
+                        _trade_lc = Decimal(_tlc_str) if float(_tlc_str) != 0 else None
+                    except Exception as _parse_ex:
+                        logger.warning(f"Could not parse LC from error_message '{_err_msg}': {_parse_ex}")
+
+            if _gross_amount_lc is None and _trade_lc is None:
+                # Last resort: fetch from cis_trade (may have race condition on new trades)
+                try:
+                    _trade_row = impala_manager.execute_query(
+                        f"SELECT total_amount_lc, gross_amount_lc "
+                        f"FROM {self.DATABASE}.cis_trade "
+                        f"WHERE trade_id = {trade_id} LIMIT 1",
+                        database=self.DATABASE,
+                    )
+                    if _trade_row:
+                        _raw_tlc = _trade_row[0].get('total_amount_lc')
+                        _raw_glc = _trade_row[0].get('gross_amount_lc')
+                        _trade_lc = Decimal(str(_raw_tlc)) if _raw_tlc else None
+                        _gross_amount_lc = Decimal(str(_raw_glc)) if _raw_glc else None
+                except Exception as _lc_ex:
+                    logger.warning(f"Could not fetch LC amounts for trade {trade_id}: {_lc_ex}")
 
             success, message, position = self.position_service.calculate_position(
                 portfolio_id=item['portfolio_id'],
