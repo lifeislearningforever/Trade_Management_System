@@ -149,6 +149,102 @@ WHERE cash_flow_id = 123
 
 
 -- =============================================================================
+-- LC/FC POSITION DEBUG (NON-REVAL cost_lc investigation)
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- Q_LC1: Trade vs Position join — shows exactly what was stored in cis_trade
+--        (total_amount_lc, gross_amount_lc, open_fx_rate) vs what landed in
+--        cis_position (cost_fc, cost_lc, average_cost_fc, average_cost_lc).
+--
+--        Replace portfolio_short_name / security_label values as needed.
+--
+--        Key columns to check:
+--          t.gross_amount_fc   = qty × price (FC, no charges)  — should equal cost_fc for first BUY
+--          t.gross_amount_lc   = gross_fc × fx_rate at entry   — may be stale if user edited LC
+--          t.total_amount_lc   = user-entered LC amount (always correct)
+--          t.open_fx_rate      = FX rate stored on the trade
+--          implied_rate        = total_amount_lc / total_amount_fc (what rate the user implied)
+--          p.cost_fc           = position cost in security currency
+--          p.cost_lc           = position cost in portfolio currency  ← THIS is what we're checking
+--          p.average_cost_fc   = avg cost per unit in FC
+--          p.average_cost_lc   = avg cost per unit in LC
+-- -----------------------------------------------------------------------------
+SELECT
+    t.trade_id,
+    t.deal_number,
+    t.trade_type,
+    t.trade_date,
+    t.settle_date,
+    t.currency_code                                         AS security_ccy,
+    pf.currency                                             AS portfolio_ccy,
+    pf.revaluation_status,
+
+    -- Trade FC/LC amounts
+    t.quantity,
+    t.price,
+    t.quantity * t.price                                    AS gross_fc_calc,
+    t.gross_amount_fc                                       AS gross_amount_fc_stored,
+    t.gross_amount_lc                                       AS gross_amount_lc_stored,
+    t.total_amount_fc,
+    t.total_amount_lc,
+    t.open_fx_rate,
+
+    -- Implied FX rate from trade (what rate the user's LC entry implies)
+    CASE
+        WHEN t.total_amount_fc IS NOT NULL AND t.total_amount_fc != 0
+        THEN t.total_amount_lc / t.total_amount_fc
+        ELSE NULL
+    END                                                     AS implied_fx_rate,
+
+    -- Position result
+    p.position_basis,
+    p.position_date,
+    p.src_system,
+    p.cost_fc,
+    p.cost_lc,
+    p.average_cost_fc,
+    p.average_cost_lc,
+    p.market_value_fc,
+    p.market_value_lc,
+    p.processing_timestamp
+
+FROM gmp_cis.cis_trade t
+JOIN gmp_cis.cis_portfolio pf
+    ON t.portfolio_short_name = pf.name
+LEFT JOIN gmp_cis.cis_position p
+    ON  p.portfolio      = t.portfolio_short_name
+    AND p.security_label = t.security_label
+    AND p.src_system     = 'CIS'
+
+WHERE t.portfolio_short_name = 'UOBP INV_CRE_SUB'
+  AND t.security_label       = 'Test_Prakash'
+  AND (t.is_deleted = false OR t.is_deleted IS NULL)
+
+ORDER BY t.trade_date ASC, t.trade_id ASC, p.position_basis, p.position_date
+;
+
+
+-- -----------------------------------------------------------------------------
+-- Q_LC2: FX rate table lookup — what rate the position service would have used
+--        for a given currency pair and position date.
+--
+--        Replace ccy pair and date as needed.
+--        spot_rate_d is the direct pair rate (security_ccy → portfolio_ccy).
+-- -----------------------------------------------------------------------------
+SELECT
+    ref_quot_ccy,
+    date,
+    spot_rate_d
+FROM gmp_cis.gmp_cis_sta_dly_fx_rates
+WHERE ref_quot_ccy IN ('AOA-SGD', 'SGD-AOA', 'AOA-USD', 'USD-SGD', 'USD-AOA', 'SGD-USD')
+  AND date <= '2026-03-02'
+ORDER BY ref_quot_ccy, date DESC
+LIMIT 30
+;
+
+
+-- =============================================================================
 -- CA QUEUE DEBUG / MANUAL OPERATIONS
 -- =============================================================================
 
