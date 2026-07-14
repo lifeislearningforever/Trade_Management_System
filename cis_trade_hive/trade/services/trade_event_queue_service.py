@@ -379,6 +379,19 @@ class TradeEventQueueService:
             # Import here to avoid circular imports
             from trade.services.settlement_service import settlement_service
 
+            # Only process settlement for trades that are actually settled/validated.
+            # The SETTLEMENT event is queued at trade CREATE (INITIAL) so the worker
+            # may pick it up before the maker-checker approve step fires. The view
+            # calls process_trade_settlement again at the point of actual settlement,
+            # so processing here for an INITIAL trade would create duplicate position rows.
+            trade_status = (trade.get('trade_status') or trade.get('status') or '').upper()
+            if trade_status not in ('SETTLED', 'VALIDATED', 'MODIFIED'):
+                logger.info(
+                    f"Skipping SETTLEMENT event for trade {trade_id}: "
+                    f"status={trade_status} (not yet settled)"
+                )
+                return True
+
             # Extract data from event
             portfolio_id = event_data.get('portfolio_short_name', '')
             security_id = event_data.get('security_label', '')
