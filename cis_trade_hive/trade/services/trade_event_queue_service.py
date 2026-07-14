@@ -407,6 +407,7 @@ class TradeEventQueueService:
             _raw_glc = event_data.get('gross_amount_lc')
             _trade_lc = Decimal(str(_raw_tlc)) if _raw_tlc else None
             _gross_amount_lc = Decimal(str(_raw_glc)) if _raw_glc else None
+            logger.info(f"[DEBUG EVENT] trade_id={trade_id} event_data gross_amount_lc={_raw_glc!r} total_amount_lc={_raw_tlc!r} -> decimal gross={_gross_amount_lc} total={_trade_lc}")
 
             # Process settlement (synchronous within worker)
             success, msg, result = settlement_service.process_trade_settlement(

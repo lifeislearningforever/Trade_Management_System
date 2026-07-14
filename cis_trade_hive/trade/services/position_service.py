@@ -371,6 +371,7 @@ class PositionService:
 
         # Cost basis uses gross amounts (qty × price), never total (which includes charges).
         # gross_amount_lc is the user-editable LC equivalent of gross_amount_fc.
+        logger.info(f"[DEBUG POS] _process_buy trade_id={trade_id} gross_amount_lc={gross_amount_lc!r} trade_cost={trade_cost}")
         _effective_gross_lc = Decimal(str(gross_amount_lc)) if gross_amount_lc else None
 
         # Implied FX rate back-calculated from the trade's LC/FC amounts.

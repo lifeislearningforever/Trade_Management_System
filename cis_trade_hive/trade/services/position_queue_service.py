@@ -456,6 +456,7 @@ class PositionQueueService:
             # (DB path). Fall back to fetching from cis_trade only if both are missing.
             _gross_amount_lc = item.get('gross_amount_lc')
             _trade_lc = item.get('total_amount_lc')
+            logger.info(f"[DEBUG PQ] queue_id={queue_id} trade_id={trade_id} item gross_lc={_gross_amount_lc} total_lc={_trade_lc} error_message={item.get('error_message')!r}")
 
             if _gross_amount_lc is None and _trade_lc is None:
                 # Try to parse from error_message: "LC:<gross>:<total>" or "LC:<gross>:<total>|CHAIN_RECALC:..."
@@ -486,6 +487,7 @@ class PositionQueueService:
                 except Exception as _lc_ex:
                     logger.warning(f"Could not fetch LC amounts for trade {trade_id}: {_lc_ex}")
 
+            logger.info(f"[DEBUG PQ] trade_id={trade_id} FINAL gross_amount_lc={_gross_amount_lc} trade_lc={_trade_lc} -> calling calculate_position")
             success, message, position = self.position_service.calculate_position(
                 portfolio_id=item['portfolio_id'],
                 security_id=item['security_id'],
