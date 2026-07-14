@@ -763,6 +763,7 @@ def trade_create(request, trade_type=None):
             }
 
             # --- Compute gross amounts server-side (qty × price, no charges) ---
+            logger.info(f"[DEBUG CREATE] POST gross_amount_lc={request.POST.get('gross_amount_lc')} total_amount_lc={request.POST.get('total_amount_lc')} fx={request.POST.get('open_fx_rate')}")
             try:
                 _qty = Decimal(str(trade_data.get('quantity') or 0))
                 _price = Decimal(str(trade_data.get('price') or 0))
@@ -772,6 +773,7 @@ def trade_create(request, trade_type=None):
                 # gross_amount_lc comes from the form (user-editable).
                 # Fall back to gross_fc × fx_rate if not provided.
                 _gross_lc_raw = trade_data.get('gross_amount_lc')
+                logger.info(f"[DEBUG CREATE] _gross_lc_raw={_gross_lc_raw!r} gross_fc={_gross_fc}")
                 try:
                     _gross_lc = Decimal(str(_gross_lc_raw)) if _gross_lc_raw else None
                     if not _gross_lc or _gross_lc == Decimal('0'):
@@ -779,6 +781,7 @@ def trade_create(request, trade_type=None):
                 except Exception:
                     _gross_lc = (_gross_fc * _fx).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
                 trade_data['gross_amount_lc'] = float(_gross_lc)
+                logger.info(f"[DEBUG CREATE] final gross_amount_lc={trade_data['gross_amount_lc']}")
             except Exception as _e:
                 logger.warning(f"gross_amount computation failed: {_e}")
                 trade_data['gross_amount_fc'] = 0
