@@ -4367,8 +4367,18 @@ class UploadService:
             _s6_total = _count('position_upload_staging')
             logger.info(f"[position_etl] Step 6 complete — {_s6_total} rows in staging: {_s6_bd}")
             _s6_invalid = _count('position_upload_staging', "overall_status LIKE 'INVALID%'")
+            _s6_valid   = _count('position_upload_staging', "overall_status LIKE 'VALID%'")
             if _s6_invalid > 0:
                 _sample_fails('position_upload_staging', 'overall_status')
+            # Set pass/fail counts here from staging — this is the authoritative source.
+            # position_upload_staging is fresh and correct at this point.
+            # _s7b_pass from the report may be 0 if concurrent runs wipe the staging tables
+            # before Step 7B executes, so we lock these counts in now.
+            result.update({
+                'total':  max(_s6_total, 0),
+                'passed': max(_s6_valid, 0),
+                'failed': max(_s6_total - _s6_valid, 0),
+            })
             _t = _step_time("Step 6 (final staging)", _t)
 
             # Failed records table (for reporting — records that never made it to staging)
@@ -4585,15 +4595,11 @@ class UploadService:
             )
             if not ok:
                 return False, "Step 7A UPSERT INTO cis_position failed — check Impala logs for column/type mismatch", result
-            # Convert YYYYMMDD → YYYY-MM-DD for position_date comparison (stored as date string)
-            _pd_iso = f"{processing_date[:4]}-{processing_date[4:6]}-{processing_date[6:8]}"
-            # Count distinct position_id to get one count per source row, not per
-            # basis (TRADED/SETTLED) or carry-forward date.
+            # Count valid rows from staging — this is exactly the number of rows
+            # written to cis_position by this upload (before carry-forward adds more dates).
             _s7a_upserted = _count(
-                f'{db}.cis_position',
-                f"portfolio IN (SELECT DISTINCT portfolio FROM position_upload_staging) "
-                f"AND CAST(position_date AS STRING) = '{_pd_iso}' AND src_system = 'USER_UPLOAD' "
-                f"AND is_latest = true AND position_basis = 'TRADED'"
+                'position_upload_staging',
+                "overall_status LIKE 'VALID%'"
             )
             result['cis_position_rows'] = max(_s7a_upserted, 0)
             logger.info(f"[position_etl] Step 7A complete — {_s7a_upserted} is_latest=true rows in cis_position for this run")
@@ -4923,28 +4929,37 @@ class UploadService:
             _t = _step_time("Step 7B (report write)", _t)
 
             # ------------------------------------------------------------------
-            # Count totals from report
+            # Count totals — prefer _s7b_pass/_s7b_fail which were read directly
+            # from the report right after the INSERT (most reliable). Fall back to
+            # a fresh report query only if those counts look wrong (e.g. -1 on error).
             # ------------------------------------------------------------------
-            rows = impala_manager.execute_query(
-                f"""
-                SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN row_status = 'PASS' THEN 1 ELSE 0 END) AS passed,
-                    SUM(CASE WHEN row_status = 'FAIL' THEN 1 ELSE 0 END) AS failed
-                FROM {db}.position_upload_report
-                WHERE src_id = '{src_id}'
-                  AND processing_date = '{processing_date}'
-                """,
-                database=db
-            )
-            if rows:
+            if _s7b_total >= 0:
                 result.update({
-                    'total':  rows[0].get('total', 0),
-                    'passed': rows[0].get('passed', 0),
-                    'failed': rows[0].get('failed', 0),
+                    'total':  _s7b_total,
+                    'passed': _s7b_pass,
+                    'failed': _s7b_fail,
                 })
             else:
-                result.update({'total': 0, 'passed': 0, 'failed': 0})
+                rows = impala_manager.execute_query(
+                    f"""
+                    SELECT
+                        COUNT(*) AS total,
+                        SUM(CASE WHEN row_status = 'PASS' THEN 1 ELSE 0 END) AS passed,
+                        SUM(CASE WHEN row_status = 'FAIL' THEN 1 ELSE 0 END) AS failed
+                    FROM {db}.position_upload_report
+                    WHERE src_id = '{src_id}'
+                      AND processing_date = '{processing_date}'
+                    """,
+                    database=db
+                )
+                if rows:
+                    result.update({
+                        'total':  rows[0].get('total', 0),
+                        'passed': rows[0].get('passed', 0),
+                        'failed': rows[0].get('failed', 0),
+                    })
+                else:
+                    result.update({'total': 0, 'passed': 0, 'failed': 0})
 
             # Clean up intermediate staging tables (keep report + failed for UI)
             for tbl in [
