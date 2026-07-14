@@ -768,17 +768,12 @@ def trade_create(request, trade_type=None):
                 _fx = Decimal(str(trade_data.get('open_fx_rate') or 1))
                 _gross_fc = (_qty * _price).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
                 trade_data['gross_amount_fc'] = float(_gross_fc)
-                # If user has entered total_amount_lc (possibly edited), derive gross_amount_lc
-                # by scaling it: gross_lc = total_lc × (gross_fc / total_fc).
-                # When charges = 0, gross_fc == total_fc so gross_lc = total_lc exactly.
-                _total_lc_raw = trade_data.get('total_amount_lc')
-                _total_fc_raw = trade_data.get('total_amount_fc') or _gross_fc
+                # gross_amount_lc comes from the form (user-editable).
+                # Fall back to gross_fc × fx_rate if not provided.
+                _gross_lc_raw = trade_data.get('gross_amount_lc')
                 try:
-                    _total_lc = Decimal(str(_total_lc_raw)) if _total_lc_raw else None
-                    _total_fc = Decimal(str(_total_fc_raw)) if _total_fc_raw else _gross_fc
-                    if _total_lc and _total_lc != Decimal('0') and _total_fc and _total_fc != Decimal('0'):
-                        _gross_lc = (_total_lc * (_gross_fc / _total_fc)).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
-                    else:
+                    _gross_lc = Decimal(str(_gross_lc_raw)) if _gross_lc_raw else None
+                    if not _gross_lc or _gross_lc == Decimal('0'):
                         _gross_lc = (_gross_fc * _fx).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
                 except Exception:
                     _gross_lc = (_gross_fc * _fx).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
@@ -996,17 +991,12 @@ def trade_edit(request, trade_id):
                 _fx = Decimal(str(updated_data.get('open_fx_rate') or 1))
                 _gross_fc = (_qty * _price).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
                 updated_data['gross_amount_fc'] = float(_gross_fc)
-                # If user has entered total_amount_lc (possibly edited), derive gross_amount_lc
-                # by scaling it: gross_lc = total_lc × (gross_fc / total_fc).
-                # When charges = 0, gross_fc == total_fc so gross_lc = total_lc exactly.
-                _total_lc_raw = updated_data.get('total_amount_lc')
-                _total_fc_raw = updated_data.get('total_amount_fc') or _gross_fc
+                # gross_amount_lc comes from the form (user-editable).
+                # Fall back to gross_fc × fx_rate if not provided.
+                _gross_lc_raw = updated_data.get('gross_amount_lc')
                 try:
-                    _total_lc = Decimal(str(_total_lc_raw)) if _total_lc_raw else None
-                    _total_fc = Decimal(str(_total_fc_raw)) if _total_fc_raw else _gross_fc
-                    if _total_lc and _total_lc != Decimal('0') and _total_fc and _total_fc != Decimal('0'):
-                        _gross_lc = (_total_lc * (_gross_fc / _total_fc)).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
-                    else:
+                    _gross_lc = Decimal(str(_gross_lc_raw)) if _gross_lc_raw else None
+                    if not _gross_lc or _gross_lc == Decimal('0'):
                         _gross_lc = (_gross_fc * _fx).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
                 except Exception:
                     _gross_lc = (_gross_fc * _fx).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)

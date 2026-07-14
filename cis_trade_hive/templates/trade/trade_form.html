@@ -433,12 +433,13 @@
                                 <small class="text-muted">Gross + Fees (Security CCY)</small>
                             </div>
                             <div class="col-md-3">
-                                <label class="form-label">Total Amount LC</label>
-                                <input type="number" class="form-control fw-bold" name="total_amount_lc" id="total_amount_lc"
-                                       step="0.01" value="{% if trade.total_amount_lc %}{{ trade.total_amount_lc }}{% endif %}"
+                                <label class="form-label">Gross Amount LC</label>
+                                <input type="number" class="form-control fw-bold" name="gross_amount_lc" id="gross_amount_lc"
+                                       step="0.01" value="{% if trade.gross_amount_lc %}{{ trade.gross_amount_lc }}{% endif %}"
                                        data-user-edited="false">
-                                <small class="text-muted">FC × FX Rate (Portfolio CCY) — editable</small>
+                                <small class="text-muted">Gross × FX Rate (Portfolio CCY) — editable</small>
                             </div>
+                            <input type="hidden" name="total_amount_lc" id="total_amount_lc" value="{% if trade.total_amount_lc %}{{ trade.total_amount_lc }}{% endif %}">
                         </div>
                     </div>
                 </div>
@@ -909,17 +910,22 @@ function calculateTotal() {
         totalFC = grossAmount + commission + secFee + otherCharges;
     }
 
-    // Update FC field
+    // Update total FC field
     const totalFCField = document.getElementById('total_amount_fc');
     if (totalFCField) {
         totalFCField.value = totalFC.toFixed(2);
     }
 
-    // Only overwrite LC if user has NOT manually edited it
-    const totalLCField = document.getElementById('total_amount_lc');
-    if (totalLCField && totalLCField.dataset.userEdited !== 'true') {
-        const totalLC = totalFC * fxRate;
-        totalLCField.value = totalLC.toFixed(2);
+    // Update hidden total_amount_lc (total × fx — stored on trade but not used for position cost)
+    const totalLCHidden = document.getElementById('total_amount_lc');
+    if (totalLCHidden) {
+        totalLCHidden.value = (totalFC * fxRate).toFixed(2);
+    }
+
+    // Only overwrite gross_amount_lc if user has NOT manually edited it
+    const grossLCField = document.getElementById('gross_amount_lc');
+    if (grossLCField && grossLCField.dataset.userEdited !== 'true') {
+        grossLCField.value = (grossAmount * fxRate).toFixed(2);
     }
 }
 
@@ -961,9 +967,9 @@ if (fxRateEl) {
     fxRateEl.addEventListener('change', calculateTotal);
 }
 
-// Mark total_amount_lc as user-edited when user types in it directly.
+// Mark gross_amount_lc as user-edited when user types in it directly.
 // Prevents calculateTotal() from overwriting the user's manual LC entry.
-var lcField = document.getElementById('total_amount_lc');
+var lcField = document.getElementById('gross_amount_lc');
 if (lcField) {
     lcField.addEventListener('input', function() {
         this.dataset.userEdited = 'true';

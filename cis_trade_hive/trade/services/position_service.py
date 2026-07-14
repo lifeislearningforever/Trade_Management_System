@@ -369,21 +369,9 @@ class PositionService:
         else:
             unrealized_pnl = market_value - new_total_cost
 
-        # Derive effective gross_amount_lc from trade_lc when available.
-        # trade_lc (total_amount_lc) is always stored correctly from user input.
-        # gross_amount_lc may be stale (computed before user edited the LC field).
-        # When trade_lc is provided, recalculate gross_lc by stripping charges in LC:
-        #   gross_lc = trade_lc × (gross_fc / total_fc)  where total_fc = gross_fc + charges
-        # When charges = 0, gross_lc = trade_lc exactly.
-        _effective_gross_lc = None
-        _trade_lc_d = Decimal(str(trade_lc)) if trade_lc else None
-        _total_fc = trade_cost + (charges or Decimal('0'))
-        if _trade_lc_d and _trade_lc_d != Decimal('0') and _total_fc and _total_fc != Decimal('0'):
-            _effective_gross_lc = (_trade_lc_d * (trade_cost / _total_fc)).quantize(
-                self.AVP_PRECISION, rounding=ROUND_HALF_UP
-            )
-        elif gross_amount_lc:
-            _effective_gross_lc = Decimal(str(gross_amount_lc))
+        # Cost basis uses gross amounts (qty × price), never total (which includes charges).
+        # gross_amount_lc is the user-editable LC equivalent of gross_amount_fc.
+        _effective_gross_lc = Decimal(str(gross_amount_lc)) if gross_amount_lc else None
 
         # Implied FX rate back-calculated from the trade's LC/FC amounts.
         # This captures whatever rate the user had at entry time, including manual LC edits.
@@ -580,19 +568,9 @@ class PositionService:
         # Calculate new position
         new_qty = old_qty - quantity
 
-        # Implied FX rate back-calculated from trade LC/FC amounts (post user edits).
-        # Prefer trade_lc (total_amount_lc — always stored correctly) over gross_amount_lc.
-        # Used as fallback when the FX table has no data for the currency pair.
+        # Cost basis uses gross amounts (qty × price), never total (which includes charges).
         sell_fc = price * quantity
-        _sell_total_fc = sell_fc + (charges or Decimal('0'))
-        _trade_lc_d = Decimal(str(trade_lc)) if trade_lc else None
-        _effective_sell_lc = None
-        if _trade_lc_d and _trade_lc_d != Decimal('0') and _sell_total_fc and _sell_total_fc != Decimal('0'):
-            _effective_sell_lc = (_trade_lc_d * (sell_fc / _sell_total_fc)).quantize(
-                self.AVP_PRECISION, rounding=ROUND_HALF_UP
-            )
-        elif gross_amount_lc:
-            _effective_sell_lc = Decimal(str(gross_amount_lc))
+        _effective_sell_lc = Decimal(str(gross_amount_lc)) if gross_amount_lc else None
         implied_fx_rate = None
         if _effective_sell_lc and sell_fc and sell_fc != Decimal('0'):
             implied_fx_rate = _effective_sell_lc / sell_fc
