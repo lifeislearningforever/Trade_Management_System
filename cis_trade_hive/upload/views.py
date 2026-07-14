@@ -1146,7 +1146,7 @@ def upload_detail(request, upload_id: str):
         try:
             import re as _re2
             from core.repositories.impala_connection import impala_manager as _imp2
-            _tgt = upload.get('target_table_name', '').split('.')[-1]
+            _tgt = (upload.get('target_table_name', '') or '').lower().split('.')[-1]
             _desc2 = upload.get('description', '') or ''
             _dm2 = _re2.search(r'processing_date[=:\s]+(\d{8})', _desc2)
             _pd2 = _dm2.group(1) if _dm2 else None
@@ -1164,10 +1164,18 @@ def upload_detail(request, upload_id: str):
                 UploadKuduRepository.STATUS_ETL_RUNNING,
                 UploadKuduRepository.STATUS_FAILED,
             ]:
+                try:
+                    _imp2.execute_write(
+                        f"REFRESH gmp_cis.position_upload_report "
+                        f"PARTITION (processing_date='{_pd2}', src_id='{_tgt}')",
+                        database='gmp_cis'
+                    )
+                except Exception as _ref_ex:
+                    logger.warning(f"[detail] REFRESH position_upload_report failed: {_ref_ex}")
                 _rpt = _imp2.execute_query(
                     f"SELECT COUNT(*) AS total, "
-                    f"SUM(CASE WHEN row_status='PASS' THEN 1 ELSE 0 END) AS passed, "
-                    f"SUM(CASE WHEN row_status='FAIL' THEN 1 ELSE 0 END) AS failed "
+                    f"SUM(CASE WHEN UPPER(TRIM(row_status))='PASS' THEN 1 ELSE 0 END) AS passed, "
+                    f"SUM(CASE WHEN UPPER(TRIM(row_status))='FAIL' THEN 1 ELSE 0 END) AS failed "
                     f"FROM gmp_cis.position_upload_report "
                     f"WHERE src_id='{_tgt}' AND processing_date='{_pd2}'",
                     database='gmp_cis'
@@ -1485,7 +1493,7 @@ def run_position_etl(request, upload_id: str):
             _orig_desc = (_rec or {}).get('description', '') or ''
             # Strip any previous "Position ETL:" line so re-runs don't duplicate it
             import re as _re_etl
-            _orig_desc = _re_etl.sub(r'\nPosition ETL:[^\n]*', '', _orig_desc).strip()
+            _orig_desc = _re_etl.sub(r'\n?Position ETL:[^\n]*', '', _orig_desc).strip()
             _total   = result.get('total', 0)
             _passed  = result.get('passed', 0)
             _failed  = result.get('failed', 0)
