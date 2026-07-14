@@ -433,13 +433,26 @@
                                 <small class="text-muted">Gross + Fees (Security CCY)</small>
                             </div>
                             <div class="col-md-3">
+                                <label class="form-label">Total Amount LC</label>
+                                <input type="number" class="form-control fw-bold bg-light" name="total_amount_lc" id="total_amount_lc"
+                                       step="0.01" value="{% if trade.total_amount_lc %}{{ trade.total_amount_lc }}{% endif %}" readonly>
+                                <small class="text-muted">Total FC × FX Rate (Portfolio CCY)</small>
+                            </div>
+                        </div>
+                        <div class="row g-3 mt-1">
+                            <div class="col-md-3">
+                                <label class="form-label">Gross Amount FC</label>
+                                <input type="number" class="form-control bg-light" name="gross_amount_fc" id="gross_amount_fc"
+                                       step="0.01" value="{% if trade.gross_amount_fc %}{{ trade.gross_amount_fc }}{% endif %}" readonly>
+                                <small class="text-muted">Qty × Price (Security CCY)</small>
+                            </div>
+                            <div class="col-md-3">
                                 <label class="form-label">Gross Amount LC</label>
                                 <input type="number" class="form-control fw-bold" name="gross_amount_lc" id="gross_amount_lc"
                                        step="0.01" value="{% if trade.gross_amount_lc %}{{ trade.gross_amount_lc }}{% endif %}"
                                        data-user-edited="false">
                                 <small class="text-muted">Gross × FX Rate (Portfolio CCY) — editable</small>
                             </div>
-                            <input type="hidden" name="total_amount_lc" id="total_amount_lc" value="{% if trade.total_amount_lc %}{{ trade.total_amount_lc }}{% endif %}">
                         </div>
                     </div>
                 </div>
@@ -916,10 +929,16 @@ function calculateTotal() {
         totalFCField.value = totalFC.toFixed(2);
     }
 
-    // Update hidden total_amount_lc (total × fx — stored on trade but not used for position cost)
-    const totalLCHidden = document.getElementById('total_amount_lc');
-    if (totalLCHidden) {
-        totalLCHidden.value = (totalFC * fxRate).toFixed(2);
+    // Update total LC field (readonly display, total × fx)
+    const totalLCField = document.getElementById('total_amount_lc');
+    if (totalLCField) {
+        totalLCField.value = (totalFC * fxRate).toFixed(2);
+    }
+
+    // Update gross FC field (readonly display, qty × price)
+    const grossFCField = document.getElementById('gross_amount_fc');
+    if (grossFCField) {
+        grossFCField.value = grossAmount.toFixed(2);
     }
 
     // Only overwrite gross_amount_lc if user has NOT manually edited it
