@@ -190,10 +190,11 @@ SELECT
     t.total_amount_lc,
     t.open_fx_rate,
 
-    -- Implied FX rate from trade (what rate the user's LC entry implies)
+    -- Implied FX rate from trade (gross_amount_lc / gross_amount_fc, matching position_service logic)
     CASE
-        WHEN t.total_amount_fc IS NOT NULL AND t.total_amount_fc != 0
-        THEN t.total_amount_lc / t.total_amount_fc
+        WHEN t.gross_amount_fc IS NOT NULL AND t.gross_amount_fc != 0
+             AND t.gross_amount_lc IS NOT NULL AND t.gross_amount_lc != 0
+        THEN t.gross_amount_lc / t.gross_amount_fc
         ELSE NULL
     END                                                     AS implied_fx_rate,
 
