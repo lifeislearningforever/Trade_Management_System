@@ -1176,6 +1176,16 @@ def upload_detail(request, upload_id: str):
                     etl_total  = int(_rpt[0].get('total',  0) or 0)
                     etl_passed = int(_rpt[0].get('passed', 0) or 0)
                     etl_failed = int(_rpt[0].get('failed', 0) or 0)
+                # If position_upload_report has 0 rows (Step 7B wrote nothing),
+                # fall back to parsing cis_position row count from the description.
+                # Description has e.g. "Position ETL: 16/16 rows → cis_position"
+                # where the first number is rows written, second is total.
+                if etl_total == 0 and _desc2:
+                    _dm_etl = _re2.search(r'Position ETL:\s*(\d+)/(\d+)\s*rows', _desc2)
+                    if _dm_etl:
+                        etl_passed = int(_dm_etl.group(1))
+                        etl_total  = int(_dm_etl.group(2))
+                        etl_failed = etl_total - etl_passed
         except Exception as _hce:
             logger.warning(f"[detail] Could not count Hive rows: {_hce}")
 
