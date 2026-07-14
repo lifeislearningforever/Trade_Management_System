@@ -434,9 +434,10 @@
                             </div>
                             <div class="col-md-3">
                                 <label class="form-label">Total Amount LC</label>
-                                <input type="number" class="form-control fw-bold bg-light" name="total_amount_lc" id="total_amount_lc"
-                                       step="0.01" value="{% if trade.total_amount_lc %}{{ trade.total_amount_lc }}{% endif %}" readonly>
-                                <small class="text-muted">Total FC × FX Rate (Portfolio CCY)</small>
+                                <input type="number" class="form-control fw-bold" name="total_amount_lc" id="total_amount_lc"
+                                       step="0.01" value="{% if trade.total_amount_lc %}{{ trade.total_amount_lc }}{% endif %}"
+                                       data-user-edited="false">
+                                <small class="text-muted">Total FC × FX Rate (Portfolio CCY) — editable</small>
                             </div>
                         </div>
                         <div class="row g-3 mt-1">
@@ -929,23 +930,35 @@ function calculateTotal() {
         totalFCField.value = totalFC.toFixed(2);
     }
 
-    // Update total LC field (readonly display, total × fx)
-    const totalLCField = document.getElementById('total_amount_lc');
-    if (totalLCField) {
-        totalLCField.value = (totalFC * fxRate).toFixed(2);
-    }
-
     // Update gross FC field (readonly display, qty × price)
     const grossFCField = document.getElementById('gross_amount_fc');
     if (grossFCField) {
         grossFCField.value = grossAmount.toFixed(2);
     }
 
-    // Only overwrite gross_amount_lc if user has NOT manually edited it
     const grossLCField = document.getElementById('gross_amount_lc');
-    if (grossLCField && grossLCField.dataset.userEdited !== 'true') {
-        grossLCField.value = (grossAmount * fxRate).toFixed(2);
+    const totalLCField = document.getElementById('total_amount_lc');
+    const grossEdited = grossLCField && grossLCField.dataset.userEdited === 'true';
+    const totalEdited = totalLCField && totalLCField.dataset.userEdited === 'true';
+
+    if (!grossEdited && !totalEdited) {
+        // Neither edited — auto-compute both from FX rate
+        if (grossLCField) grossLCField.value = (grossAmount * fxRate).toFixed(2);
+        if (totalLCField) totalLCField.value = (totalFC * fxRate).toFixed(2);
+    } else if (grossEdited && !totalEdited) {
+        // User edited gross LC — derive total LC proportionally
+        const grossLC = parseFloat(grossLCField.value) || 0;
+        if (totalLCField && grossAmount > 0) {
+            totalLCField.value = (grossLC * totalFC / grossAmount).toFixed(2);
+        }
+    } else if (totalEdited && !grossEdited) {
+        // User edited total LC — derive gross LC proportionally
+        const totalLC = parseFloat(totalLCField.value) || 0;
+        if (grossLCField && totalFC > 0) {
+            grossLCField.value = (totalLC * grossAmount / totalFC).toFixed(2);
+        }
     }
+    // If both edited — leave both as-is (user has full control)
 }
 
 // Update total broker charges when individual charge fields change
@@ -986,14 +999,15 @@ if (fxRateEl) {
     fxRateEl.addEventListener('change', calculateTotal);
 }
 
-// Mark gross_amount_lc as user-edited when user types in it directly.
-// Prevents calculateTotal() from overwriting the user's manual LC entry.
-var lcField = document.getElementById('gross_amount_lc');
-if (lcField) {
-    lcField.addEventListener('input', function() {
-        this.dataset.userEdited = 'true';
-    });
-}
+// Mark LC fields as user-edited when typed directly — prevents auto-overwrite.
+['gross_amount_lc', 'total_amount_lc'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) {
+        el.addEventListener('input', function() {
+            this.dataset.userEdited = 'true';
+        });
+    }
+});
 
 // Auto-calculate gross amount on quantity/price change
 ['quantity', 'price'].forEach(function(fieldId) {
