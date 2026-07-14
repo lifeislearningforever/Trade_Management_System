@@ -247,13 +247,17 @@ def upload_create(request):
                         import re as _re
                         from datetime import datetime as _dt
 
-                        # Determine processing_date: always read from MRA_PC_DATE.txt first.
-                        # Fall back to description field, then today only as last resort.
-                        from upload.repositories.datasource_repository import datasource_repository as _dsr_pd
-                        _processing_date = _dsr_pd.get_processing_date_from_hdfs()
-                        if not _processing_date:
-                            _pd_match = _re.search(r'processing_date[=:\s]+(\d{8})', description or '')
-                            _processing_date = _pd_match.group(1) if _pd_match else _dt.now().strftime('%Y%m%d')
+                        # Determine processing_date from GMP system date (contextual_today
+                        # from gmp_cis_sta_dly_alldatesinfo). This is the business date
+                        # shown in the breadcrumb (e.g. 2026-03-02 → 20260302).
+                        # Fall back to today's calendar date only if alldates is unavailable.
+                        try:
+                            from core.services.system_date_service import system_date_service as _sds_pd
+                            _processing_date = _sds_pd.get_system_date_str('%Y%m%d')
+                            logger.warning(f"[upload:direct] processing_date={_processing_date} (from alldates system_date)")
+                        except Exception as _sds_err:
+                            logger.warning(f"[upload:direct] system_date_service failed ({_sds_err}), falling back to today")
+                            _processing_date = _dt.now().strftime('%Y%m%d')
                         logger.warning(f"[upload:direct] processing_date={_processing_date}")
 
                         # all_data is already fully parsed by validate_with_datasource_config.

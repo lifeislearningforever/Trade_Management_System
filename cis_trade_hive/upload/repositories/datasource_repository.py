@@ -188,22 +188,35 @@ class DatasourceRepository:
 
     def get_processing_date(self) -> str:
         """
-        Get processing date for ingestion.
-        First tries HDFS file, falls back to current date.
+        Get processing date for ingestion — GMP contextual/system date
+        (contextual_today from gmp_cis_sta_dly_alldatesinfo).
+
+        Falls back to HDFS MRA_PC_DATE.txt, then today's calendar date.
 
         Returns:
             Date string in YYYYMMDD format
         """
         from datetime import datetime
 
-        # Try to read from HDFS
+        # Primary: GMP system date (contextual_today from alldates)
+        try:
+            from core.services.system_date_service import system_date_service
+            gmp_date = system_date_service.get_system_date_str('%Y%m%d')
+            if gmp_date:
+                logger.info(f"processing_date from alldates system_date: {gmp_date}")
+                return gmp_date
+        except Exception as e:
+            logger.warning(f"system_date_service unavailable: {e}")
+
+        # Secondary: HDFS file
         hdfs_date = self.get_processing_date_from_hdfs()
         if hdfs_date:
+            logger.info(f"processing_date from HDFS: {hdfs_date}")
             return hdfs_date
 
-        # Fallback to current date
+        # Last resort: calendar today
         current_date = datetime.now().strftime('%Y%m%d')
-        logger.info(f"Using current date as processing date: {current_date}")
+        logger.info(f"processing_date fallback to calendar today: {current_date}")
         return current_date
 
     @staticmethod
