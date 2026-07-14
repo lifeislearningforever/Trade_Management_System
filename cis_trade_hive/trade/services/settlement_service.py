@@ -190,6 +190,19 @@ class SettlementService:
                         success, msg, result = self._queue_for_async_processing(**kwargs)
                 else:
                     # SYNC MODE (worker / EOD job)
+                    # Clear any stale cis_trade_position row for this trade_id+basis so the
+                    # idempotency guard in calculate_position does not skip recalculation.
+                    # This is safe: sync mode is only called on explicit re-settle.
+                    try:
+                        from core.repositories.impala_connection import impala_manager as _imp
+                        _imp.execute_write(
+                            f"DELETE FROM gmp_cis.cis_trade_position "
+                            f"WHERE trade_id = {trade_id} AND position_basis = '{basis}'",
+                            database='gmp_cis'
+                        )
+                        logger.info(f"Cleared stale cis_trade_position for trade_id={trade_id} basis={basis}")
+                    except Exception as _de:
+                        logger.warning(f"Could not clear stale position for trade {trade_id}: {_de}")
                     if settle_dt == today or basis == 'TRADED':
                         success, msg, result = self._process_immediate_settlement(
                             position_date=pos_date, **{
