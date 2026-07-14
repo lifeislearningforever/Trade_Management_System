@@ -798,7 +798,6 @@ class SettlementService:
                    t.trade_date, t.settle_date,
                    t.currency_code AS security_currency,
                    pf.currency     AS portfolio_currency,
-                   t.isin, t.security_name, t.custodian, t.sub_custodian,
                    t.total_amount_lc, t.gross_amount_lc
             FROM {self.DATABASE}.{self.TRADE_TABLE} t
             JOIN {self.DATABASE}.cis_portfolio pf
@@ -999,10 +998,6 @@ class SettlementService:
                             gross_amount_lc=gross_amount_lc,
                             security_currency=trade.get('security_currency'),
                             portfolio_currency=trade.get('portfolio_currency'),
-                            isin=trade.get('isin'),
-                            security_name=trade.get('security_name'),
-                            custodian=trade.get('custodian'),
-                            sub_custodian=trade.get('sub_custodian'),
                         )
                         if success:
                             counters['recalculated'] += 1
