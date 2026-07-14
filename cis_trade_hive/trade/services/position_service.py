@@ -369,12 +369,28 @@ class PositionService:
         else:
             unrealized_pnl = market_value - new_total_cost
 
+        # Derive effective gross_amount_lc from trade_lc when available.
+        # trade_lc (total_amount_lc) is always stored correctly from user input.
+        # gross_amount_lc may be stale (computed before user edited the LC field).
+        # When trade_lc is provided, recalculate gross_lc by stripping charges in LC:
+        #   gross_lc = trade_lc × (gross_fc / total_fc)  where total_fc = gross_fc + charges
+        # When charges = 0, gross_lc = trade_lc exactly.
+        _effective_gross_lc = None
+        _trade_lc_d = Decimal(str(trade_lc)) if trade_lc else None
+        _total_fc = trade_cost + (charges or Decimal('0'))
+        if _trade_lc_d and _trade_lc_d != Decimal('0') and _total_fc and _total_fc != Decimal('0'):
+            _effective_gross_lc = (_trade_lc_d * (trade_cost / _total_fc)).quantize(
+                self.AVP_PRECISION, rounding=ROUND_HALF_UP
+            )
+        elif gross_amount_lc:
+            _effective_gross_lc = Decimal(str(gross_amount_lc))
+
         # Implied FX rate back-calculated from the trade's LC/FC amounts.
         # This captures whatever rate the user had at entry time, including manual LC edits.
         # Used as fallback when the FX table has no data for the currency pair.
         implied_fx_rate = None
-        if gross_amount_lc and trade_cost and trade_cost != Decimal('0'):
-            implied_fx_rate = Decimal(str(gross_amount_lc)) / trade_cost
+        if _effective_gross_lc and trade_cost and trade_cost != Decimal('0'):
+            implied_fx_rate = _effective_gross_lc / trade_cost
 
         # FX rate from the table: latest date <= position_date, carry-forward if no exact
         # match. Falls back to implied_fx_rate only when the table has zero rows for the pair.
@@ -387,17 +403,15 @@ class PositionService:
             )
 
         # cost_lc rules (SA PORTIARP-8206):
-        #   NON-REVAL: use gross_amount_lc from trade directly (post user edits, no fx multiply)
+        #   NON-REVAL: use effective gross_lc from trade (derived from user-entered total_amount_lc)
         #   REVAL:     trade_cost × fx_rate (table rate, date-bound)
-        # In both cases trade_lc (total_amount_lc) is NOT used for cost basis — it includes
-        # charges which are a P&L item, not cost basis.
         reval_status = self._get_portfolio_revaluation_status(portfolio_id)
 
-        if reval_status == 'NON-REVALUED' and gross_amount_lc is not None:
+        if reval_status == 'NON-REVALUED' and _effective_gross_lc is not None:
             # NON-REVAL: cost LC comes directly from trade LC amounts (post user edits)
-            this_trade_cost_lc = Decimal(str(gross_amount_lc))
+            this_trade_cost_lc = _effective_gross_lc
         else:
-            # REVAL (or no gross_amount_lc supplied): derive from FX rate
+            # REVAL (or no LC amount supplied): derive from FX rate
             this_trade_cost_lc = trade_cost * fx_rate
 
         if current:
@@ -567,11 +581,21 @@ class PositionService:
         new_qty = old_qty - quantity
 
         # Implied FX rate back-calculated from trade LC/FC amounts (post user edits).
+        # Prefer trade_lc (total_amount_lc — always stored correctly) over gross_amount_lc.
         # Used as fallback when the FX table has no data for the currency pair.
         sell_fc = price * quantity
+        _sell_total_fc = sell_fc + (charges or Decimal('0'))
+        _trade_lc_d = Decimal(str(trade_lc)) if trade_lc else None
+        _effective_sell_lc = None
+        if _trade_lc_d and _trade_lc_d != Decimal('0') and _sell_total_fc and _sell_total_fc != Decimal('0'):
+            _effective_sell_lc = (_trade_lc_d * (sell_fc / _sell_total_fc)).quantize(
+                self.AVP_PRECISION, rounding=ROUND_HALF_UP
+            )
+        elif gross_amount_lc:
+            _effective_sell_lc = Decimal(str(gross_amount_lc))
         implied_fx_rate = None
-        if gross_amount_lc and sell_fc and sell_fc != Decimal('0'):
-            implied_fx_rate = Decimal(str(gross_amount_lc)) / sell_fc
+        if _effective_sell_lc and sell_fc and sell_fc != Decimal('0'):
+            implied_fx_rate = _effective_sell_lc / sell_fc
 
         # FX rate from table: latest date <= position_date, carry-forward if no exact match.
         fx_rate = Decimal('1')
