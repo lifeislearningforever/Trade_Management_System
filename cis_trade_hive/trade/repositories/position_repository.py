@@ -50,8 +50,9 @@ class PositionRepository:
         'uncall_fc':         'pos.uncall_fc',
         'uncall_lc':         'pos.uncall_lc',
         'pipeline_fc':       'pos.pipeline_fc',
-        'processing_date':   'pos.processing_date',
-        'revaluation_status': 'revaluation_status',
+        'processing_date':      'pos.processing_date',
+        'processing_timestamp': 'pos.processing_timestamp',
+        'revaluation_status':   'revaluation_status',
     }
 
     def _build_position_conditions(
@@ -146,6 +147,7 @@ class PositionRepository:
                     pos.pipeline_fc, pos.pipeline_lc,
                     pos.position_type,
                     pos.isin,
+                    pos.processing_timestamp,
                     COALESCE(p.revaluation_status, '') AS revaluation_status,
                     s.security_id AS security_id
                 FROM {DATABASE}.{TABLE} pos

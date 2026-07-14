@@ -521,6 +521,10 @@
                             style="min-width:100px;" onclick="sortBy('processing_date')">
                             Proc Date <span class="sort-icon"></span>
                         </th>
+                        <th class="sort-th {% if sb == 'processing_timestamp' %}sorted-{{ sd|lower }}{% endif %}"
+                            style="min-width:140px;" onclick="sortBy('processing_timestamp')">
+                            Proc Timestamp <span class="sort-icon"></span>
+                        </th>
                         {% endwith %}
                     </tr>
                 </thead>
@@ -610,6 +614,7 @@
                         <td class="text-end num">{{ p.uncall_lc|default:0|floatformat:2|intcomma }}</td>
                         <td class="text-end num">{{ p.pipeline_fc|default:0|floatformat:2|intcomma }}</td>
                         <td class="small text-muted">{{ p.processing_date|default:"-" }}</td>
+                        <td class="small text-muted" style="white-space:nowrap;">{{ p.processing_timestamp|default:"-" }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>

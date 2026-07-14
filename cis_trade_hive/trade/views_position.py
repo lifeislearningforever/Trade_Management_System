@@ -172,6 +172,7 @@ def _export_csv(positions):
         'Pipeline FC', 'Pipeline LC',
         'Reval Status',
         'Processing Date',
+        'Processing Timestamp',
     ])
 
     for p in positions:
@@ -206,6 +207,7 @@ def _export_csv(positions):
             fmt_num(p.get('pipeline_lc')),
             p.get('revaluation_status', ''),
             p.get('processing_date'),
+            p.get('processing_timestamp'),
         ])
 
     return response
