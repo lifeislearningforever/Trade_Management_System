@@ -304,9 +304,10 @@ $(document).ready(function() {
         resetForm();
     });
 
-    // Only CIS_External_upload_format_[1-5]<anything>.csv files are accepted.
-    // Allows: CIS_External_upload_format_2_SG.csv, CIS_External_upload_format_2 - Copy.csv, etc.
-    var CIS_FORMAT_PATTERN = /^CIS_External_upload_format_([1-5])[\s\S]*\.csv$/i;
+    // Only CIS_External_upload_format_[1-5]-<anything>.csv files are accepted.
+    // Requires a dash after the format number.
+    // e.g. CIS_External_upload_format_2-SG.csv, CIS_External_upload_format_5-NTS31dly.csv
+    var CIS_FORMAT_PATTERN = /^CIS_External_upload_format_([1-5])-.*\.csv$/i;
 
     function getFormatNumber(filename) {
         var m = CIS_FORMAT_PATTERN.exec(filename);
@@ -334,18 +335,18 @@ $(document).ready(function() {
                 '  <hr class="my-2">' +
                 '  <div class="mb-2">' +
                 '    <span class="text-muted small">Required format</span><br>' +
-                '    <code class="fs-6">CIS_External_upload_format_<em>N</em>_<em>suffix</em>.csv</code>' +
+                '    <code class="fs-6">CIS_External_upload_format_<em>N</em>-<em>anything</em>.csv</code>' +
                 '  </div>' +
                 '  <div class="mb-2 small text-muted">' +
-                '    where <strong>N</strong> = format number (1&ndash;5) &nbsp;|&nbsp; <strong>suffix</strong> = any text (date, region, etc.)' +
+                '    where <strong>N</strong> = format number (1&ndash;5) &nbsp;|&nbsp; dash <strong>-</strong> after the number &nbsp;|&nbsp; <strong>anything</strong> = any suffix' +
                 '  </div>' +
                 '  <div class="mt-2">' +
                 '    <span class="text-muted small">Valid examples</span>' +
                 '    <ul class="mb-0 mt-1 small">' +
-                '      <li><code>CIS_External_upload_format_1_20260714.csv</code></li>' +
-                '      <li><code>CIS_External_upload_format_2_SG.csv</code></li>' +
-                '      <li><code>CIS_External_upload_format_3_Actual-16_1.csv</code></li>' +
-                '      <li><code>CIS_External_upload_format_5_NTS31dly.csv</code></li>' +
+                '      <li><code>CIS_External_upload_format_1-20260714.csv</code></li>' +
+                '      <li><code>CIS_External_upload_format_2-SG.csv</code></li>' +
+                '      <li><code>CIS_External_upload_format_3-Actual16_1.csv</code></li>' +
+                '      <li><code>CIS_External_upload_format_5-NTS31dly.csv</code></li>' +
                 '    </ul>' +
                 '  </div>' +
                 '</div>'

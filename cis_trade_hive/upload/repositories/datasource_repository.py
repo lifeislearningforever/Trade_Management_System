@@ -51,12 +51,11 @@ class DatasourceRepository:
     #          CIS_External_upload_format_1_20260227.csv
     # Invalid: 20260227_CIS_External_upload_format_5.csv  (prefix not at start)
     #          Temp_CIS_External_upload_format_5.csv      (prefix not at start)
-    # Matches CIS_External_upload_format_N followed by anything, ending in .csv (case-insensitive).
-    # Allows underscore, space, dash, or any separator after the format number.
-    # e.g. CIS_External_upload_format_2_SG.csv  ✓
-    #      CIS_External_upload_format_2 - Copy.csv  ✓
+    # Matches CIS_External_upload_format_N-<anything>.csv (dash required after number).
+    # e.g. CIS_External_upload_format_2-SG.csv  ✓
+    #      CIS_External_upload_format_5-NTS31dly.csv  ✓
     _POSITION_FORMAT_RE = re.compile(
-        r'^CIS_External_upload_format_([1-5]).*\.csv$', re.IGNORECASE
+        r'^CIS_External_upload_format_([1-5])-.*\.csv$', re.IGNORECASE
     )
 
     @classmethod
