@@ -4587,10 +4587,13 @@ class UploadService:
                 return False, "Step 7A UPSERT INTO cis_position failed — check Impala logs for column/type mismatch", result
             # Convert YYYYMMDD → YYYY-MM-DD for position_date comparison (stored as date string)
             _pd_iso = f"{processing_date[:4]}-{processing_date[4:6]}-{processing_date[6:8]}"
+            # Count distinct position_id to get one count per source row, not per
+            # basis (TRADED/SETTLED) or carry-forward date.
             _s7a_upserted = _count(
                 f'{db}.cis_position',
                 f"portfolio IN (SELECT DISTINCT portfolio FROM position_upload_staging) "
-                f"AND CAST(position_date AS STRING) = '{_pd_iso}' AND src_system = 'USER_UPLOAD' AND is_latest = true"
+                f"AND CAST(position_date AS STRING) = '{_pd_iso}' AND src_system = 'USER_UPLOAD' "
+                f"AND is_latest = true AND position_basis = 'TRADED'"
             )
             result['cis_position_rows'] = max(_s7a_upserted, 0)
             logger.info(f"[position_etl] Step 7A complete — {_s7a_upserted} is_latest=true rows in cis_position for this run")
@@ -4807,86 +4810,84 @@ class UploadService:
             #          Only the (processing_date, src_id) partition is overwritten;
             #          all other partitions (other runs) are preserved.
             # ------------------------------------------------------------------
+            # Step 7B reads from position_upload_staging (which already contains all
+            # columns from pos_stage_1_base via b.* plus all status columns from the
+            # joins in Step 6). This avoids re-joining pos_stage_1_base here and
+            # ensures the report always has exactly the rows that reached final staging.
+            # Portfolio-fail / security-fail rows that were excluded from staging are
+            # captured in position_upload_failed and reported via fail_reason below.
             impala_manager.execute_write(
                 f"""
                 INSERT OVERWRITE {db}.position_upload_report
                 PARTITION (processing_date='{processing_date}', src_id='{src_id}')
 
-                -- One row per source row — LEFT JOIN all staging tables, pick status by priority:
-                -- portfolio fail > security fail > staging INVALID > staging VALID
-                -- Column order matches live table DDL: status cols after security_short_name, before isin.
+                -- Read from final staging table (already has all b.* columns + status cols)
+                -- Column order matches live table DDL.
                 SELECT
-                    b.portfolio,
-                    COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
-                    b.security_short_name,
+                    s.portfolio,
+                    COALESCE(s.security_full_name, s.security_short_name, s.isin) AS security_full_name,
+                    s.security_short_name,
                     CASE
-                        WHEN p2.portfolio_status LIKE 'FAIL%'  THEN 'FAIL'
-                        WHEN p4.security_status  LIKE 'FAIL%'  THEN 'FAIL'
-                        WHEN s.overall_status    LIKE 'INVALID%' THEN 'FAIL'
-                        WHEN s.overall_status    LIKE 'VALID%'   THEN 'PASS'
+                        WHEN s.overall_status LIKE 'INVALID%' THEN 'FAIL'
+                        WHEN s.overall_status LIKE 'VALID%'   THEN 'PASS'
                         ELSE 'FAIL'
                     END AS row_status,
                     CASE
-                        WHEN p2.portfolio_status LIKE 'FAIL%'    THEN 'Portfolio not found in cis_portfolio'
-                        WHEN p4.security_status  LIKE 'FAIL%'    THEN p4.security_status
-                        WHEN s.overall_status    LIKE 'INVALID%' THEN s.overall_status
+                        WHEN s.overall_status LIKE 'INVALID%' THEN s.overall_status
                         ELSE NULL
                     END AS fail_reason,
-                    COALESCE(p2.portfolio_status, s.portfolio_status) AS portfolio_status,
-                    COALESCE(p4.security_status,  s.security_status)  AS security_status,
+                    s.portfolio_status,
+                    s.security_status,
                     s.price_status,
                     s.quantity_status,
                     s.exchange_status,
                     CAST(s.final_security_id AS STRING) AS matched_security_id,
                     s.matched_security_name,
-                    b.isin,
-                    b.ticker,
-                    b.quantity,
-                    b.shares_outstanding,
-                    b.shares_issued,
-                    b.pct_holding,
-                    b.market_price,
-                    b.average_cost,
-                    b.cost_fc,
-                    b.market_value_fc,
-                    b.net_book_value_fc,
-                    b.unrealized_pnl_fc,
-                    b.provision_fc,
-                    b.cost_lc,
-                    b.market_value_lc,
-                    b.net_book_value_lc,
-                    b.unrealized_pnl_lc,
-                    b.provision_lc,
-                    b.product_type,
-                    b.security_type,
-                    b.quoted_unquoted,
-                    b.industry,
-                    b.fin_nonfin_co,
-                    b.issuer_type,
-                    b.reits_or_fund_y_n,
-                    b.`exchange`                                        AS `exchange`,
-                    b.country_of_exchange,
-                    b.country_of_incorporation,
-                    b.country_of_risk,
-                    b.country_of_operation,
-                    b.security_currency,
-                    b.corp_code,
-                    b.branch_code,
-                    b.cost_centre,
-                    b.cels,
-                    b.bwcif_sg,
-                    b.bwcif_ovs,
-                    b.mas_6d_code_sg,
-                    b.mas_6d_code_ovs,
-                    b.position_basis,
-                    b.reporting_date,
-                    b.maturity_date,
-                    b.src_system,
-                    b.source_table
-                FROM pos_stage_1_base b
-                LEFT JOIN pos_stage_2_portfolio       p2 ON b.row_id = p2.row_id
-                LEFT JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
-                LEFT JOIN position_upload_staging      s  ON b.row_id = s.row_id
+                    s.isin,
+                    s.ticker,
+                    s.quantity,
+                    s.shares_outstanding,
+                    s.shares_issued,
+                    s.pct_holding,
+                    s.market_price,
+                    s.average_cost,
+                    s.cost_fc,
+                    s.market_value_fc,
+                    s.net_book_value_fc,
+                    s.unrealized_pnl_fc,
+                    s.provision_fc,
+                    s.cost_lc,
+                    s.market_value_lc,
+                    s.net_book_value_lc,
+                    s.unrealized_pnl_lc,
+                    s.provision_lc,
+                    s.product_type,
+                    s.security_type,
+                    s.quoted_unquoted,
+                    s.industry,
+                    s.fin_nonfin_co,
+                    s.issuer_type,
+                    s.reits_or_fund_y_n,
+                    s.`exchange`                AS `exchange`,
+                    s.country_of_exchange,
+                    s.country_of_incorporation,
+                    s.country_of_risk,
+                    s.country_of_operation,
+                    s.security_currency,
+                    s.corp_code,
+                    s.branch_code,
+                    s.cost_centre,
+                    s.cels,
+                    s.bwcif_sg,
+                    s.bwcif_ovs,
+                    s.mas_6d_code_sg,
+                    s.mas_6d_code_ovs,
+                    s.position_basis,
+                    s.reporting_date,
+                    s.maturity_date,
+                    s.src_system,
+                    s.source_table
+                FROM position_upload_staging s
                 """,
                 database=db
             )
