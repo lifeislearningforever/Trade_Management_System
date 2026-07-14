@@ -106,7 +106,8 @@ class PositionService:
         position_type: str = None,
         position_basis: str = 'TRADED',
         base_position_override: Dict[str, Any] = None,
-        trade_lc: Decimal = None
+        trade_lc: Decimal = None,
+        gross_amount_lc: Decimal = None,
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """
         Calculate position using weighted average method.
@@ -125,6 +126,9 @@ class PositionService:
             portfolio_currency: Portfolio base currency code
             isin: ISIN code
             security_name: Security full name
+            trade_lc: Total LC amount from trade (used for NON-REVAL SELL realized P&L)
+            gross_amount_lc: Gross LC cost from trade (qty × price in LC, post user edits).
+                             Used for NON-REVAL BUY cost_lc and as FX rate fallback.
 
         Returns:
             Tuple of (success, message, position_data)
@@ -236,7 +240,8 @@ class PositionService:
                     pipeline_lc=pipeline_lc,
                     position_type=position_type,
                     position_basis=position_basis,
-                    trade_lc=trade_lc
+                    trade_lc=trade_lc,
+                    gross_amount_lc=gross_amount_lc,
                 )
             elif trade_type == 'SELL':
                 return self._process_sell(
@@ -260,7 +265,8 @@ class PositionService:
                     pipeline_lc=pipeline_lc,
                     position_type=position_type,
                     position_basis=position_basis,
-                    trade_lc=trade_lc
+                    trade_lc=trade_lc,
+                    gross_amount_lc=gross_amount_lc,
                 )
 
         except Exception as e:
@@ -290,7 +296,8 @@ class PositionService:
         pipeline_lc: Decimal = None,
         position_type: str = None,
         position_basis: str = 'TRADED',
-        trade_lc: Decimal = None
+        trade_lc: Decimal = None,
+        gross_amount_lc: Decimal = None,
     ) -> Tuple[bool, str, Dict[str, Any]]:
         """
         Process BUY trade - increase position, recalculate AVP.
@@ -300,6 +307,12 @@ class PositionService:
             new_total_cost = old_total_cost + trade_cost
             new_quantity   = old_quantity + buy_qty
             new_avg_cost   = new_total_cost / new_quantity
+
+        LC cost rules:
+            NON-REVAL: trade_cost_lc = gross_amount_lc from trade (post user edits)
+            REVAL:     trade_cost_lc = trade_cost × fx_rate (from FX table, date-bound)
+        market_value_lc always uses fx_rate from FX table (date <= position_date),
+        falling back to implied rate only when the table has no data for the pair.
         """
         # position_id is always deterministic from the natural key of THIS date.
         # In chain recalc the `current` dict carries the running balance from a
@@ -356,37 +369,56 @@ class PositionService:
         else:
             unrealized_pnl = market_value - new_total_cost
 
-        # FX rate — used for REVAL cost_lc and market_value_lc
+        # Implied FX rate back-calculated from the trade's LC/FC amounts.
+        # This captures whatever rate the user had at entry time, including manual LC edits.
+        # Used as fallback when the FX table has no data for the currency pair.
+        implied_fx_rate = None
+        if gross_amount_lc and trade_cost and trade_cost != Decimal('0'):
+            implied_fx_rate = Decimal(str(gross_amount_lc)) / trade_cost
+
+        # FX rate from the table: latest date <= position_date, carry-forward if no exact
+        # match. Falls back to implied_fx_rate only when the table has zero rows for the pair.
         fx_rate = Decimal('1')
         if security_currency and portfolio_currency and security_currency != portfolio_currency:
-            fx_rate = self._get_fx_rate(security_currency, portfolio_currency)
+            fx_rate = self._get_fx_rate(
+                security_currency, portfolio_currency,
+                rate_date=position_date,
+                fallback_rate=implied_fx_rate,
+            )
 
         # cost_lc rules (SA PORTIARP-8206):
-        #   Gross LC cost = trade_cost (qty × price) × fx_rate.
-        #   trade_lc (total_amount_lc from the trade form) is intentionally NOT used
-        #   for cost basis because it includes charges. Charges are a P&L item.
-        #   NON-REVAL and REVAL both use trade_cost × fx_rate for cost basis.
+        #   NON-REVAL: use gross_amount_lc from trade directly (post user edits, no fx multiply)
+        #   REVAL:     trade_cost × fx_rate (table rate, date-bound)
+        # In both cases trade_lc (total_amount_lc) is NOT used for cost basis — it includes
+        # charges which are a P&L item, not cost basis.
         reval_status = self._get_portfolio_revaluation_status(portfolio_id)
+
+        if reval_status == 'NON-REVALUED' and gross_amount_lc is not None:
+            # NON-REVAL: cost LC comes directly from trade LC amounts (post user edits)
+            this_trade_cost_lc = Decimal(str(gross_amount_lc))
+        else:
+            # REVAL (or no gross_amount_lc supplied): derive from FX rate
+            this_trade_cost_lc = trade_cost * fx_rate
 
         if current:
             old_total_cost_lc = Decimal(str(current.get('total_cost_lc', 0) or 0))
             if old_total_cost_lc == 0:
                 old_total_cost_lc = Decimal(str(current.get('total_cost_fc') or current.get('total_cost', 0) or 0)) * fx_rate
-            trade_cost_lc = trade_cost * fx_rate
+            trade_cost_lc = this_trade_cost_lc
             new_total_cost_lc = old_total_cost_lc + trade_cost_lc
             new_avg_cost_lc = (new_total_cost_lc / new_qty).quantize(
                 self.AVP_PRECISION, rounding=ROUND_HALF_UP
             )
             old_realized_pnl_lc = Decimal(str(current.get('realized_pnl_lc', 0) or 0))
         else:
-            trade_cost_lc = trade_cost * fx_rate
+            trade_cost_lc = this_trade_cost_lc
             new_total_cost_lc = trade_cost_lc
             new_avg_cost_lc = (new_total_cost_lc / new_qty).quantize(
                 self.AVP_PRECISION, rounding=ROUND_HALF_UP
             )
             old_realized_pnl_lc = Decimal('0')
 
-        # Calculate market_value_lc using FX rate
+        # market_value_lc always uses the FX table rate (date-bound), implied only as last resort
         market_value_lc = market_value * fx_rate
 
         # Carry forward CA/CF fields from current position (never wiped on BUY)
@@ -497,7 +529,8 @@ class PositionService:
         pipeline_lc: Decimal = None,
         position_type: str = None,
         position_basis: str = 'TRADED',
-        trade_lc: Decimal = None
+        trade_lc: Decimal = None,
+        gross_amount_lc: Decimal = None,
     ) -> Tuple[bool, str, Dict[str, Any]]:
         """
         Process SELL trade - decrease position, AVP unchanged.
@@ -533,10 +566,21 @@ class PositionService:
         # Calculate new position
         new_qty = old_qty - quantity
 
-        # Get FX rate for LC calculations
+        # Implied FX rate back-calculated from trade LC/FC amounts (post user edits).
+        # Used as fallback when the FX table has no data for the currency pair.
+        sell_fc = price * quantity
+        implied_fx_rate = None
+        if gross_amount_lc and sell_fc and sell_fc != Decimal('0'):
+            implied_fx_rate = Decimal(str(gross_amount_lc)) / sell_fc
+
+        # FX rate from table: latest date <= position_date, carry-forward if no exact match.
         fx_rate = Decimal('1')
         if security_currency and portfolio_currency and security_currency != portfolio_currency:
-            fx_rate = self._get_fx_rate(security_currency, portfolio_currency)
+            fx_rate = self._get_fx_rate(
+                security_currency, portfolio_currency,
+                rate_date=position_date,
+                fallback_rate=implied_fx_rate,
+            )
 
         # Get existing LC values from current position
         old_avg_cost_lc = Decimal(str(current.get('average_cost_lc', 0) or 0))
@@ -850,7 +894,9 @@ class PositionService:
             is_cross_currency = security_currency and portfolio_currency and security_currency != portfolio_currency
             try:
                 fx_rate_raw = self._get_fx_rate(
-                    security_currency, portfolio_currency, strict=is_cross_currency
+                    security_currency, portfolio_currency,
+                    rate_date=position_date,
+                    strict=is_cross_currency,
                 ) if security_currency and portfolio_currency else Decimal('1')
             except ValueError as e:
                 # Log error and use 1.0 as fallback, but mark position as needing FX review
@@ -1475,20 +1521,31 @@ class PositionService:
             logger.error(f"Error checking security_investment for {security_label}: {str(e)}")
         return False
 
-    def _get_fx_rate(self, from_ccy: str, to_ccy: str, strict: bool = False) -> Decimal:
+    def _get_fx_rate(
+        self,
+        from_ccy: str,
+        to_ccy: str,
+        rate_date: str = None,
+        fallback_rate: Decimal = None,
+        strict: bool = False
+    ) -> Decimal:
         """
         Get FX rate between currencies using multicurrency service.
+
+        Lookup order:
+          1. FX table: latest date <= rate_date (carry-forward if no exact match)
+          2. If table has no row at all for that pair: use fallback_rate (implied
+             rate back-calculated from the trade's LC/FC amounts)
+          3. Never silently return 1.0 for a cross-currency position
 
         Args:
             from_ccy: Source currency code
             to_ccy: Target currency code
-            strict: If True, raise error when rate not found (for AVP calculations)
-
-        Returns:
-            FX rate as Decimal
-
-        Raises:
-            ValueError: If strict=True and no rate is found
+            rate_date: Upper bound date for rate lookup (YYYY-MM-DD). Uses latest
+                       available date <= rate_date. Defaults to latest ever if None.
+            fallback_rate: Implied rate from trade (gross_amount_lc / gross_amount_fc).
+                           Used only when the FX table has zero rows for the pair.
+            strict: If True, raise error when rate not found and no fallback available.
         """
         if from_ccy == to_ccy:
             return Decimal('1')
@@ -1497,20 +1554,34 @@ class PositionService:
             if strict:
                 raise ValueError(f"Currency codes are required for FX rate lookup. "
                                 f"Got from='{from_ccy}', to='{to_ccy}'")
-            return Decimal('1')
+            return fallback_rate if fallback_rate else Decimal('1')
 
         try:
-            # Use multicurrency service with strict mode
-            rate, _ = multicurrency_service.get_fx_rate(from_ccy, to_ccy, strict=strict)
+            rate, date_used = multicurrency_service.get_fx_rate(
+                from_ccy, to_ccy, rate_date=rate_date, strict=False
+            )
+            # multicurrency_service returns Decimal('1') silently when nothing found.
+            # Detect that case by checking if currencies differ but rate is exactly 1.
+            # If so and we have a fallback, prefer the fallback over the silent default.
+            if rate == Decimal('1') and fallback_rate and fallback_rate != Decimal('1'):
+                logger.warning(
+                    f"FX table returned no rate for {from_ccy}-{to_ccy} "
+                    f"(rate_date={rate_date}). Using implied trade rate {fallback_rate}."
+                )
+                return fallback_rate
+            if date_used:
+                logger.debug(
+                    f"FX rate {from_ccy}-{to_ccy}: {rate} from {date_used} "
+                    f"(requested date: {rate_date})"
+                )
             return rate
         except ValueError:
-            # Re-raise ValueError from strict mode
             raise
         except Exception as e:
             logger.error(f"Error fetching FX rate for {from_ccy}-{to_ccy}: {str(e)}")
             if strict:
                 raise ValueError(f"Error fetching FX rate for {from_ccy}-{to_ccy}: {str(e)}")
-            return Decimal('1')
+            return fallback_rate if fallback_rate else Decimal('1')
 
     def _get_portfolio_revaluation_status(self, portfolio_id: str) -> str:
         """

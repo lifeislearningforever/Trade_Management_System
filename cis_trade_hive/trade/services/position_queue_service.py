@@ -427,6 +427,11 @@ class PositionQueueService:
             position_basis = item.get('position_basis', 'TRADED')
             position_date = item.get('position_date') or item['settle_date']
 
+            _raw_gross_lc = item.get('gross_amount_lc')
+            _gross_amount_lc = Decimal(str(_raw_gross_lc)) if _raw_gross_lc else None
+            _raw_trade_lc = item.get('total_amount_lc')
+            _trade_lc = Decimal(str(_raw_trade_lc)) if _raw_trade_lc else None
+
             success, message, position = self.position_service.calculate_position(
                 portfolio_id=item['portfolio_id'],
                 security_id=item['security_id'],
@@ -441,7 +446,9 @@ class PositionQueueService:
                 portfolio_currency=item.get('portfolio_currency'),
                 isin=item.get('isin'),
                 security_name=item.get('security_name'),
-                position_basis=position_basis
+                position_basis=position_basis,
+                trade_lc=_trade_lc,
+                gross_amount_lc=_gross_amount_lc,
             )
 
             if success:
@@ -695,6 +702,10 @@ class PositionQueueService:
                             )
                             continue
                         try:
+                            _raw_glc = trade.get('gross_amount_lc')
+                            _glc = Decimal(str(_raw_glc)) if _raw_glc else None
+                            _raw_tlc = trade.get('total_amount_lc')
+                            _tlc = Decimal(str(_raw_tlc)) if _raw_tlc else None
                             success, msg, result = self.position_service.calculate_position(
                                 portfolio_id=portfolio_id,
                                 security_id=security_id,
@@ -713,7 +724,9 @@ class PositionQueueService:
                                 sub_custodian=trade.get('sub_custodian'),
                                 is_chain_recalc=True,
                                 position_basis=basis,
-                                base_position_override=last_position_by_basis.get(basis)
+                                base_position_override=last_position_by_basis.get(basis),
+                                trade_lc=_tlc,
+                                gross_amount_lc=_glc,
                             )
 
                             if success:
@@ -1087,6 +1100,11 @@ class PositionQueueService:
         Process position calculation immediately (synchronous).
         Use this when you need immediate results.
         """
+        _raw_gross_lc = kwargs.get('gross_amount_lc')
+        _gross_amount_lc = Decimal(str(_raw_gross_lc)) if _raw_gross_lc else None
+        _raw_trade_lc = kwargs.get('total_amount_lc') or kwargs.get('trade_lc')
+        _trade_lc = Decimal(str(_raw_trade_lc)) if _raw_trade_lc else None
+
         return self.position_service.calculate_position(
             portfolio_id=portfolio_id,
             security_id=security_id,
@@ -1101,7 +1119,9 @@ class PositionQueueService:
             portfolio_currency=kwargs.get('portfolio_currency'),
             isin=kwargs.get('isin'),
             security_name=kwargs.get('security_name'),
-            position_basis=position_basis
+            position_basis=position_basis,
+            trade_lc=_trade_lc,
+            gross_amount_lc=_gross_amount_lc,
         )
 
     # =========================================================================

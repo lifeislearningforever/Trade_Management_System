@@ -383,6 +383,11 @@ class SettlementService:
         """Process immediate settlement - position calculated now."""
         logger.info(f"Processing immediate settlement for trade {trade_id}")
 
+        # Derive implied FX rate from trade LC/FC amounts (captures any user edits to LC)
+        _gross_fc = kwargs.get('gross_amount_fc') or (float(quantity) * float(price))
+        _gross_lc = kwargs.get('gross_amount_lc')
+        _gross_amount_lc = Decimal(str(_gross_lc)) if _gross_lc else None
+
         success, message, position = self.position_service.calculate_position(
             portfolio_id=portfolio_id,
             security_id=security_id,
@@ -399,7 +404,9 @@ class SettlementService:
             security_name=kwargs.get('security_name'),
             custodian=kwargs.get('custodian'),
             sub_custodian=kwargs.get('sub_custodian'),
-            position_basis=kwargs.get('position_basis', 'TRADED')
+            position_basis=kwargs.get('position_basis', 'TRADED'),
+            trade_lc=kwargs.get('trade_lc'),
+            gross_amount_lc=_gross_amount_lc,
         )
 
         if success:
@@ -678,6 +685,9 @@ class SettlementService:
         )
 
         # Step 1: Calculate position for the backdated date
+        _gross_lc_bd = kwargs.get('gross_amount_lc')
+        _gross_amount_lc_bd = Decimal(str(_gross_lc_bd)) if _gross_lc_bd else None
+
         success, message, position = self.position_service.calculate_position(
             portfolio_id=portfolio_id,
             security_id=security_id,
@@ -694,7 +704,9 @@ class SettlementService:
             security_name=kwargs.get('security_name'),
             custodian=kwargs.get('custodian'),
             sub_custodian=kwargs.get('sub_custodian'),
-            position_basis=position_basis
+            position_basis=position_basis,
+            trade_lc=kwargs.get('trade_lc'),
+            gross_amount_lc=_gross_amount_lc_bd,
         )
 
         if not success:
@@ -944,6 +956,8 @@ class SettlementService:
                         base = last_position_by_basis.get(basis)  # {} = fresh start, dict = prior
                         raw_lc = trade.get('total_amount_lc')
                         trade_lc = Decimal(str(raw_lc)) if raw_lc else None
+                        raw_gross_lc = trade.get('gross_amount_lc')
+                        gross_amount_lc = Decimal(str(raw_gross_lc)) if raw_gross_lc else None
                         success, msg, result = self.position_service.calculate_position(
                             portfolio_id=portfolio_id,
                             security_id=security_id,
@@ -957,7 +971,8 @@ class SettlementService:
                             is_chain_recalc=True,
                             position_basis=basis,
                             base_position_override=base,
-                            trade_lc=trade_lc
+                            trade_lc=trade_lc,
+                            gross_amount_lc=gross_amount_lc,
                         )
                         if success:
                             counters['recalculated'] += 1
