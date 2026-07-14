@@ -169,9 +169,9 @@ class PositionQueueService:
             processing_date = item['queued_at'].strftime('%Y%m%d')
 
             # Cast decimal values to avoid precision errors
-            quantity = f"CAST({item['quantity']} AS DECIMAL(30,8))"
-            price = f"CAST({item['price']} AS DECIMAL(30,8))"
-            charges = f"CAST({item['charges']} AS DECIMAL(30,8))"
+            quantity = f"CAST({item['quantity']} AS DECIMAL(20,8))"
+            price = f"CAST({item['price']} AS DECIMAL(20,8))"
+            charges = f"CAST({item['charges']} AS DECIMAL(20,8))"
 
             # Include error_message for CHAIN_RECALC metadata (for backdated trades)
             error_message = item.get('error_message')

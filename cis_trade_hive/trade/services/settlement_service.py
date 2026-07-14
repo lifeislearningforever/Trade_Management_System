@@ -459,9 +459,9 @@ class SettlementService:
             effective_position_date = position_date or settle_date
 
             # Cast decimal values to avoid precision errors
-            qty_cast = f"CAST({float(quantity)} AS DECIMAL(30,8))"
-            price_cast = f"CAST({float(price)} AS DECIMAL(30,8))"
-            charges_cast = f"CAST({float(charges)} AS DECIMAL(30,8))"
+            qty_cast = f"CAST({float(quantity)} AS DECIMAL(20,8))"
+            price_cast = f"CAST({float(price)} AS DECIMAL(20,8))"
+            charges_cast = f"CAST({float(charges)} AS DECIMAL(20,8))"
 
             # Insert into settlement queue (position_basis + position_date stored for worker)
             query = f"""
@@ -821,7 +821,7 @@ class SettlementService:
                     f"No active trades from {from_date} — zeroing positions for "
                     f"{portfolio_id}/{security_id}"
                 )
-                _z = 'CAST(0 AS DECIMAL(30,8))'
+                _z = 'CAST(0 AS DECIMAL(20,8))'
                 try:
                     impala_manager.execute_write(
                         f"""
@@ -910,7 +910,7 @@ class SettlementService:
             # position) from remaining visible when no active trade covers that date.
             # The replay loop below will re-create rows only for dates with active trades;
             # carry-forward will then fill gaps from the last active position.
-            _z = 'CAST(0 AS DECIMAL(30,8))'
+            _z = 'CAST(0 AS DECIMAL(20,8))'
             for _tbl, _port_col in [
                 ('cis_trade_position', 'portfolio_short_name'),
                 ('cis_position',       'portfolio'),
