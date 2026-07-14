@@ -11,6 +11,7 @@ Used for metadata-driven file ingestion to Hive external tables.
 """
 
 import logging
+import re
 from typing import Dict, List, Optional, Any
 
 from core.repositories.impala_connection import impala_manager
@@ -50,30 +51,28 @@ class DatasourceRepository:
     #          CIS_External_upload_format_1_20260227.csv
     # Invalid: 20260227_CIS_External_upload_format_5.csv  (prefix not at start)
     #          Temp_CIS_External_upload_format_5.csv      (prefix not at start)
-    _POSITION_PREFIXES = [
-        f'CIS_External_upload_format_{n}_' for n in range(1, 6)
-    ]
+    # Matches CIS_External_upload_format_N followed by anything, ending in .csv (case-insensitive).
+    # Allows underscore, space, dash, or any separator after the format number.
+    # e.g. CIS_External_upload_format_2_SG.csv  ✓
+    #      CIS_External_upload_format_2 - Copy.csv  ✓
+    _POSITION_FORMAT_RE = re.compile(
+        r'^CIS_External_upload_format_([1-5]).*\.csv$', re.IGNORECASE
+    )
 
     @classmethod
     def _resolve_position_source_name(cls, file_name: str) -> Optional[str]:
         """
-        If file_name matches CIS_External_upload_format_{1-5}_*.csv,
+        If file_name matches CIS_External_upload_format_{1-5}<anything>.csv,
         return the canonical source_name stored in cis_datasource_mng
         (e.g. 'CIS_External_upload_format_1.csv').
 
-        Rules:
-        - Must start with the prefix (case-sensitive)
-        - Must end with .csv
-        - Anything between the prefix and .csv is allowed
+        The separator after the format number is flexible (_, space, dash, etc.).
         Returns None if no prefix matches.
         """
-        if not file_name.lower().endswith('.csv'):
-            return None
-        for prefix in cls._POSITION_PREFIXES:
-            if file_name.startswith(prefix):
-                # Extract the format number from the prefix, e.g. '5'
-                n = prefix.split('_')[4]  # 'CIS_External_upload_format_{N}_'
-                return f'CIS_External_upload_format_{n}.csv'
+        m = cls._POSITION_FORMAT_RE.match(file_name)
+        if m:
+            n = m.group(1)
+            return f'CIS_External_upload_format_{n}.csv'
         return None
 
     def get_datasource_by_name(self, source_name: str) -> Optional[Dict[str, Any]]:

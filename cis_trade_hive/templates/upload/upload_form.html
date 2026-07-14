@@ -304,8 +304,9 @@ $(document).ready(function() {
         resetForm();
     });
 
-    // Only CIS_External_upload_format_[1-5]_<anything>.csv files are accepted.
-    var CIS_FORMAT_PATTERN = /^CIS_External_upload_format_([1-5])_.*\.csv$/i;
+    // Only CIS_External_upload_format_[1-5]<anything>.csv files are accepted.
+    // Allows: CIS_External_upload_format_2_SG.csv, CIS_External_upload_format_2 - Copy.csv, etc.
+    var CIS_FORMAT_PATTERN = /^CIS_External_upload_format_([1-5])[\s\S]*\.csv$/i;
 
     function getFormatNumber(filename) {
         var m = CIS_FORMAT_PATTERN.exec(filename);
