@@ -18,6 +18,7 @@ from calendar import monthrange
 import uuid
 
 from core.repositories.impala_connection import impala_manager
+from core.services.system_date_service import system_date_service
 from trade.services.position_service import position_service, PositionService
 
 logger = logging.getLogger(__name__)
@@ -108,7 +109,7 @@ class SettlementService:
             Tuple of (success, message, result_data)
         """
         try:
-            today = datetime.now().date()
+            today = system_date_service.get_system_date()
             settle_dt = self._parse_date(settle_date)
             trade_dt = self._parse_date(trade_date)
 
@@ -286,8 +287,7 @@ class SettlementService:
                 # Check if any backdated position exists for this security (position_date < today).
                 # If so, this T+0 trade must also use chain recalc to accumulate correctly.
                 try:
-                    from datetime import date as _date
-                    today_str = _date.today().isoformat()
+                    today_str = system_date_service.get_system_date().isoformat()
                     prior_check = impala_manager.execute_query(
                         f"""
                         SELECT 1 FROM {self.DATABASE}.cis_trade_position
@@ -762,7 +762,7 @@ class SettlementService:
         counters = {'recalculated': 0, 'errors': 0}
 
         try:
-            today = datetime.now().date()
+            today = system_date_service.get_system_date()
             today_str = today.strftime("%Y-%m-%d")
 
             # Drain any pending queue items for this portfolio/security before recalculating.

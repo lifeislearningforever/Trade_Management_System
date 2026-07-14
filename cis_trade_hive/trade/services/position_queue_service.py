@@ -21,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 import uuid
 
 from core.repositories.impala_connection import impala_manager
+from core.services.system_date_service import system_date_service
 from trade.services.position_service import position_service, PositionService
 from core.notifications import notify_user, notify_admins
 from core.notifications.constants import (
@@ -539,7 +540,7 @@ class PositionQueueService:
             portfolio_id = chain_info['portfolio_id']
             security_id = chain_info['security_id']
             from_date_raw = chain_info['from_date']
-            today = datetime.now().date()
+            today = system_date_service.get_system_date()
 
             # Normalize from_date to YYYY-MM-DD format
             # Handle various formats: YYYY-MM-DD, YYYYMMDD, or datetime string
