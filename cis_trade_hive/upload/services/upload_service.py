@@ -4585,11 +4585,14 @@ class UploadService:
             )
             if not ok:
                 return False, "Step 7A UPSERT INTO cis_position failed — check Impala logs for column/type mismatch", result
+            # Convert YYYYMMDD → YYYY-MM-DD for position_date comparison (stored as date string)
+            _pd_iso = f"{processing_date[:4]}-{processing_date[4:6]}-{processing_date[6:8]}"
             _s7a_upserted = _count(
                 f'{db}.cis_position',
                 f"portfolio IN (SELECT DISTINCT portfolio FROM position_upload_staging) "
-                f"AND position_date = '{processing_date}' AND src_system = 'USER_UPLOAD' AND is_latest = true"
+                f"AND CAST(position_date AS STRING) = '{_pd_iso}' AND src_system = 'USER_UPLOAD' AND is_latest = true"
             )
+            result['cis_position_rows'] = max(_s7a_upserted, 0)
             logger.info(f"[position_etl] Step 7A complete — {_s7a_upserted} is_latest=true rows in cis_position for this run")
             _t = _step_time("Step 7A (cis_position upsert)", _t)
 

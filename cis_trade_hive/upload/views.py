@@ -1469,12 +1469,18 @@ def run_position_etl(request, upload_id: str):
             # Read current record to preserve user's original description
             _rec = upload_service.repository.get_upload_by_id(upload_id)
             _orig_desc = (_rec or {}).get('description', '') or ''
+            # Strip any previous "Position ETL:" line so re-runs don't duplicate it
+            import re as _re_etl
+            _orig_desc = _re_etl.sub(r'\nPosition ETL:[^\n]*', '', _orig_desc).strip()
             _total   = result.get('total', 0)
             _passed  = result.get('passed', 0)
             _failed  = result.get('failed', 0)
+            # Use actual rows written to cis_position (from Step 7A count) as the primary count;
+            # fall back to validation-pass count from the report table.
+            _cis_rows = result.get('cis_position_rows', _passed)
             if ok:
                 _etl_note = (
-                    f"Position ETL: {_passed}/{_total} rows → cis_position"
+                    f"Position ETL: {_cis_rows}/{_total} rows → cis_position"
                     + (f" | {_failed} failed validation (see Download Report)" if _failed else "")
                 )
                 _new_desc = f"{_orig_desc}\n{_etl_note}".strip() if _orig_desc else _etl_note
