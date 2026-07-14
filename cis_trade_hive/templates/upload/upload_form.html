@@ -323,18 +323,30 @@ $(document).ready(function() {
             validationStatus.removeClass('d-none');
             $('#validatingAlert').addClass('d-none');
             $('#validationResult').removeClass('d-none').html(
-                '<div class="alert alert-danger">' +
-                '<i class="bi bi-x-circle-fill me-2"></i>' +
-                '<strong>Invalid filename.</strong> Only CIS position upload files are accepted.<br><br>' +
-                '<strong>Required format:</strong><br>' +
-                '<code>CIS_External_upload_format_[N]_[suffix].csv</code><br>' +
-                'where <code>N</code> is a format number from <strong>1 to 5</strong> and ' +
-                '<code>[suffix]</code> is any descriptive text (date, region, etc.).<br><br>' +
-                '<strong>Valid examples:</strong><br>' +
-                '<code>CIS_External_upload_format_1_20260714.csv</code><br>' +
-                '<code>CIS_External_upload_format_2_SG.csv</code><br>' +
-                '<code>CIS_External_upload_format_3_Actual-16_1.csv</code><br>' +
-                '<code>CIS_External_upload_format_5_NTS31dly.csv</code>' +
+                '<div class="alert alert-danger mb-0">' +
+                '  <div class="d-flex align-items-start mb-2">' +
+                '    <i class="bi bi-x-octagon-fill text-danger me-2 mt-1" style="font-size:1.2rem;flex-shrink:0;"></i>' +
+                '    <div>' +
+                '      <strong>Invalid filename</strong> &mdash; Only CIS position upload files are accepted.' +
+                '    </div>' +
+                '  </div>' +
+                '  <hr class="my-2">' +
+                '  <div class="mb-2">' +
+                '    <span class="text-muted small">Required format</span><br>' +
+                '    <code class="fs-6">CIS_External_upload_format_<em>N</em>_<em>suffix</em>.csv</code>' +
+                '  </div>' +
+                '  <div class="mb-2 small text-muted">' +
+                '    where <strong>N</strong> = format number (1&ndash;5) &nbsp;|&nbsp; <strong>suffix</strong> = any text (date, region, etc.)' +
+                '  </div>' +
+                '  <div class="mt-2">' +
+                '    <span class="text-muted small">Valid examples</span>' +
+                '    <ul class="mb-0 mt-1 small">' +
+                '      <li><code>CIS_External_upload_format_1_20260714.csv</code></li>' +
+                '      <li><code>CIS_External_upload_format_2_SG.csv</code></li>' +
+                '      <li><code>CIS_External_upload_format_3_Actual-16_1.csv</code></li>' +
+                '      <li><code>CIS_External_upload_format_5_NTS31dly.csv</code></li>' +
+                '    </ul>' +
+                '  </div>' +
                 '</div>'
             );
             validationDetails.addClass('d-none');
