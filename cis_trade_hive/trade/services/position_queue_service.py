@@ -427,10 +427,24 @@ class PositionQueueService:
             position_basis = item.get('position_basis', 'TRADED')
             position_date = item.get('position_date') or item['settle_date']
 
-            _raw_gross_lc = item.get('gross_amount_lc')
-            _gross_amount_lc = Decimal(str(_raw_gross_lc)) if _raw_gross_lc else None
-            _raw_trade_lc = item.get('total_amount_lc')
-            _trade_lc = Decimal(str(_raw_trade_lc)) if _raw_trade_lc else None
+            # LC amounts are not stored in cis_position_queue — fetch from cis_trade.
+            # This is the authoritative source for total_amount_lc (user-edited LC field).
+            _gross_amount_lc = None
+            _trade_lc = None
+            try:
+                _trade_row = impala_manager.execute_query(
+                    f"SELECT total_amount_lc, gross_amount_lc "
+                    f"FROM {self.DATABASE}.cis_trade "
+                    f"WHERE trade_id = {trade_id} LIMIT 1",
+                    database=self.DATABASE,
+                )
+                if _trade_row:
+                    _raw_tlc = _trade_row[0].get('total_amount_lc')
+                    _raw_glc = _trade_row[0].get('gross_amount_lc')
+                    _trade_lc = Decimal(str(_raw_tlc)) if _raw_tlc else None
+                    _gross_amount_lc = Decimal(str(_raw_glc)) if _raw_glc else None
+            except Exception as _lc_ex:
+                logger.warning(f"Could not fetch LC amounts for trade {trade_id}: {_lc_ex}")
 
             success, message, position = self.position_service.calculate_position(
                 portfolio_id=item['portfolio_id'],

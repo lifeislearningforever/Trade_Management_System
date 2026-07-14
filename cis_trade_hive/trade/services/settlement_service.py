@@ -791,18 +791,25 @@ class SettlementService:
 
             # Include the from_date itself (>=) so the reversed/modified trade is
             # replayed, and fetch trade_date so TRADED basis uses the right position_date.
+            # Also fetch currency + LC amount fields for NON-REVAL portfolios.
             query = f"""
-            SELECT trade_id, trade_type, quantity, price,
-                   COALESCE(commission, 0) + COALESCE(sec_fee, 0) + COALESCE(other_charges, 0) as charges,
-                   trade_date, settle_date
-            FROM {self.DATABASE}.{self.TRADE_TABLE}
-            WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
-              AND security_label = '{self._escape(security_id)}'
-              AND (trade_date >= '{from_date}' OR settle_date >= '{from_date}')
-              AND settle_date <= '{today_str}'
-              AND (trade_status IN ('INITIAL', 'MODIFIED', 'VALIDATED', 'SETTLED') OR status IN ('INITIAL', 'MODIFIED', 'VALIDATED', 'SETTLED'))
-              AND (is_deleted = false OR is_deleted IS NULL)
-            ORDER BY trade_date ASC, settle_date ASC, trade_id ASC
+            SELECT t.trade_id, t.trade_type, t.quantity, t.price,
+                   COALESCE(t.commission, 0) + COALESCE(t.sec_fee, 0) + COALESCE(t.other_charges, 0) as charges,
+                   t.trade_date, t.settle_date,
+                   t.currency_code AS security_currency,
+                   pf.currency     AS portfolio_currency,
+                   t.isin, t.security_name, t.custodian, t.sub_custodian,
+                   t.total_amount_lc, t.gross_amount_lc
+            FROM {self.DATABASE}.{self.TRADE_TABLE} t
+            JOIN {self.DATABASE}.cis_portfolio pf
+                ON t.portfolio_short_name = pf.name
+            WHERE t.portfolio_short_name = '{self._escape(portfolio_id)}'
+              AND t.security_label = '{self._escape(security_id)}'
+              AND (t.trade_date >= '{from_date}' OR t.settle_date >= '{from_date}')
+              AND t.settle_date <= '{today_str}'
+              AND (t.trade_status IN ('INITIAL', 'MODIFIED', 'VALIDATED', 'SETTLED') OR t.status IN ('INITIAL', 'MODIFIED', 'VALIDATED', 'SETTLED'))
+              AND (t.is_deleted = false OR t.is_deleted IS NULL)
+            ORDER BY t.trade_date ASC, t.settle_date ASC, t.trade_id ASC
             """
 
             trades = impala_manager.execute_query(query, database=self.DATABASE)
@@ -990,6 +997,12 @@ class SettlementService:
                             base_position_override=base,
                             trade_lc=trade_lc,
                             gross_amount_lc=gross_amount_lc,
+                            security_currency=trade.get('security_currency'),
+                            portfolio_currency=trade.get('portfolio_currency'),
+                            isin=trade.get('isin'),
+                            security_name=trade.get('security_name'),
+                            custodian=trade.get('custodian'),
+                            sub_custodian=trade.get('sub_custodian'),
                         )
                         if success:
                             counters['recalculated'] += 1

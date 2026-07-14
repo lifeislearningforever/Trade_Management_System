@@ -975,9 +975,16 @@ class PositionService:
                 # Unrealized P&L LC = market_value_lc - total_cost_lc
                 unrealized_pnl_lc = market_value_lc - total_cost_lc
 
+                # For NON-REVAL, override fx_rate stored in cis_trade_position with the
+                # implied rate derived from LC cost so carry-forward rows inherit it correctly.
+                # Implied rate = total_cost_lc / total_cost_fc (avoids FX table 1.0 fallback).
+                if total_cost > 0 and total_cost_lc and total_cost_lc != 0:
+                    fx_rate = total_cost_lc / total_cost
+
                 logger.info(
                     f"NON-REVALUED position {portfolio_id}/{security_id}: "
                     f"cost_lc={total_cost_lc:.2f} (historical), "
+                    f"implied_fx={fx_rate:.8f}, "
                     f"market_lc={market_value_lc:.2f} (current FX), "
                     f"unrealized_lc={unrealized_pnl_lc:.2f}"
                 )
