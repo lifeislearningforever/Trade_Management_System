@@ -1220,8 +1220,10 @@ class TradeKuduRepository:
             settle_date = updated_data.get('settle_date') or current_trade.get('settle_date', '')
             trade_date = updated_data.get('trade_date') or current_trade.get('trade_date', '')
 
+            _tlc = updated_data.get('total_amount_lc') or current_trade.get('total_amount_lc')
+            _glc = updated_data.get('gross_amount_lc') or current_trade.get('gross_amount_lc')
             # Queue via settlement service (handles T+0, T+1/T+2, backdated)
-            success, message, details = settlement_service.queue_settlement_async(
+            success, message, details = settlement_service.process_trade_settlement(
                 trade_id=trade_id,
                 portfolio_id=current_trade.get('portfolio_short_name', ''),
                 security_id=current_trade.get('security_label', ''),
@@ -1235,7 +1237,9 @@ class TradeKuduRepository:
                 security_currency=current_trade.get('currency_code', ''),
                 portfolio_currency=current_trade.get('portfolio_currency', ''),
                 isin=current_trade.get('isin', ''),
-                security_name=current_trade.get('security_full_name', '')
+                security_name=current_trade.get('security_full_name', ''),
+                trade_lc=Decimal(str(_tlc)) if _tlc else None,
+                gross_amount_lc=Decimal(str(_glc)) if _glc else None,
             )
 
             if success:

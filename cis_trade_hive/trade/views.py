@@ -1257,6 +1257,8 @@ def trade_settle(request, trade_id):
                 Decimal(str(trade_data.get('sec_fee', 0) or 0)) +
                 Decimal(str(trade_data.get('other_charges', 0) or 0))
             )
+            _trade_lc_raw = trade_data.get('total_amount_lc')
+            _gross_lc_raw = trade_data.get('gross_amount_lc')
             settlement_service.process_trade_settlement(
                 trade_id=trade_id,
                 portfolio_id=trade_data.get('portfolio_short_name', ''),
@@ -1274,6 +1276,8 @@ def trade_settle(request, trade_id):
                 security_name=trade_data.get('security_full_name'),
                 async_mode=False,  # sync: avoids duplicate queue writes producing stale rows
                 position_basis=None,  # dual: TRADED + SETTLED
+                trade_lc=Decimal(str(_trade_lc_raw)) if _trade_lc_raw else None,
+                gross_amount_lc=Decimal(str(_gross_lc_raw)) if _gross_lc_raw else None,
             )
             logger.info(f"Position calculation completed synchronously for settled trade {trade_id}")
         except Exception as settle_err:

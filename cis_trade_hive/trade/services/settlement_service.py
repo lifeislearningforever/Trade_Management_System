@@ -80,7 +80,9 @@ class SettlementService:
         custodian: str = None,
         sub_custodian: str = None,
         async_mode: bool = True,
-        position_basis: str = None  # None = dual (both bases). 'TRADED' or 'SETTLED' = single.
+        position_basis: str = None,  # None = dual (both bases). 'TRADED' or 'SETTLED' = single.
+        trade_lc: Decimal = None,
+        gross_amount_lc: Decimal = None,
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """
         Process trade settlement based on settlement date.
@@ -174,7 +176,9 @@ class SettlementService:
                     sub_custodian=sub_custodian,
                     position_basis=basis,
                     position_date=pos_date,
-                    settlement_type=settlement_type
+                    settlement_type=settlement_type,
+                    trade_lc=trade_lc,
+                    gross_amount_lc=gross_amount_lc,
                 )
 
                 if async_mode:
