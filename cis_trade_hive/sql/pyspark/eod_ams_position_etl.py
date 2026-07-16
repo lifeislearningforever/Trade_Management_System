@@ -1020,10 +1020,18 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                 ON existing_isin.is_active = true
                 AND b.isin IS NOT NULL AND TRIM(b.isin) != ''
                 AND UPPER(TRIM(existing_isin.isin)) = UPPER(TRIM(b.isin))
+            -- Dedup guard 3: skip if a security with the same ticker already exists
+            --   (GMP uses m_security_code as both ISIN and ticker e.g. "ANET UN";
+            --    the real CIS security has isin=US04... but ticker="ANET UN")
+            LEFT JOIN {DB}.cis_security existing_ticker
+                ON existing_ticker.is_active = true
+                AND b.isin IS NOT NULL AND TRIM(b.isin) != ''
+                AND UPPER(TRIM(existing_ticker.ticker)) = UPPER(TRIM(b.isin))
             WHERE p4.security_status = 'NOT_FOUND: Create new security'
               AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
               AND existing.security_id IS NULL
               AND existing_isin.security_id IS NULL
+              AND existing_ticker.security_id IS NULL
         )
         SELECT
             (UNIX_TIMESTAMP() * 1000) + row_id AS security_id,
