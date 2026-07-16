@@ -235,7 +235,10 @@ class Command(BaseCommand):
                     continue
 
                 try:
-                    ok, msg, _ = settlement_service.process_trade_settlement(
+                    # Call _queue_for_settlement directly — bypasses date routing in
+                    # process_trade_settlement which would redirect past-date trades to
+                    # the async position queue instead of cis_settlement_queue.
+                    ok, msg, _ = settlement_service._queue_for_settlement(
                         trade_id=int(trade_id),
                         portfolio_id=portfolio,
                         security_id=security,
@@ -246,12 +249,11 @@ class Command(BaseCommand):
                         trade_date=trade_date,
                         settle_date=settle_dt,
                         updated_by=run_by,
+                        position_basis='SETTLED',
                         security_currency=row.get('currency_code'),
                         portfolio_currency=row.get('portfolio_currency'),
                         isin=row.get('isin'),
                         security_name=row.get('security_full_name') or security,
-                        async_mode=True,
-                        position_basis='SETTLED',
                     )
                     if ok:
                         queued += 1
