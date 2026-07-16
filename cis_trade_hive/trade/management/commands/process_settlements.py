@@ -168,7 +168,7 @@ class Command(BaseCommand):
             FROM gmp_cis.cis_trade t
             WHERE t.trade_type IN ('BUY', 'SELL')
               AND t.status IN ('SETTLED', 'VALIDATED')
-              AND t.settle_date > '{today}'
+              AND t.settle_date >= '{today}'
               AND (t.is_deleted = false OR t.is_deleted IS NULL)
               AND NOT EXISTS (
                   SELECT 1 FROM gmp_cis.cis_settlement_queue q
