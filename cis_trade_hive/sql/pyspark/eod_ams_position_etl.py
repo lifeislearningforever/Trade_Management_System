@@ -707,6 +707,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                 ROW_NUMBER() OVER (
                     PARTITION BY b.row_id
                     ORDER BY
+                        CASE WHEN s.is_active = true THEN 0 ELSE 1 END,
                         CASE
                             WHEN b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
                              AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
@@ -719,8 +720,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             JOIN pos_stage_2_portfolio p2
                 ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
             LEFT JOIN {DB}.cis_security s
-                ON  s.is_active = true
-                AND b.isin IS NOT NULL AND TRIM(b.isin) != ''
+                ON  b.isin IS NOT NULL AND TRIM(b.isin) != ''
                 AND UPPER(TRIM(b.isin)) NOT IN ('NA', 'N/A', 'NIL', 'NONE', '-', 'N.A.', 'NAP')
                 AND b.isin = s.isin
         )
@@ -797,6 +797,9 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             FROM pos_stage_3_security s3
         ),
         -- Tier 1: short_name match (GMP)
+        -- Includes inactive securities so that deactivated/merged GMP records
+        -- (e.g. "ANET UN" with is_active=false) are matched rather than re-created.
+        -- Priority: active first, then lowest security_id as stable tiebreak.
         tier1 AS (
             SELECT
                 b.row_id,
@@ -806,13 +809,15 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                 sn.exchange_code,
                 sn.country_of_exchange,
                 sn.currency_code,
-                ROW_NUMBER() OVER (PARTITION BY b.row_id ORDER BY sn.security_id) AS rn
+                ROW_NUMBER() OVER (
+                    PARTITION BY b.row_id
+                    ORDER BY CASE WHEN sn.is_active = true THEN 0 ELSE 1 END, sn.security_id
+                ) AS rn
             FROM base_with_prefix b
             JOIN {DB}.cis_security sn
                 ON  b.match_type IN ('ISIN_NO_MATCH', 'NO_ISIN')
                 AND b.security_short_name IS NOT NULL
                 AND TRIM(b.security_short_name) != ''
-                AND sn.is_active = true
                 AND UPPER(TRIM(sn.security_name)) = UPPER(TRIM(b.security_short_name))
         ),
         -- Tier 2: ticker match (AMS + GMP)
@@ -831,13 +836,15 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                 sn.exchange_code,
                 sn.country_of_exchange,
                 sn.currency_code,
-                ROW_NUMBER() OVER (PARTITION BY b.row_id ORDER BY sn.security_id) AS rn
+                ROW_NUMBER() OVER (
+                    PARTITION BY b.row_id
+                    ORDER BY CASE WHEN sn.is_active = true THEN 0 ELSE 1 END, sn.security_id
+                ) AS rn
             FROM base_with_prefix b
             JOIN {DB}.cis_security sn
                 ON  b.match_type IN ('ISIN_NO_MATCH', 'NO_ISIN')
                 AND b.ticker IS NOT NULL
                 AND TRIM(b.ticker) != ''
-                AND sn.is_active = true
                 AND (
                     UPPER(TRIM(sn.ticker)) = UPPER(TRIM(b.ticker))
                     OR UPPER(TRIM(sn.ticker)) LIKE CONCAT(UPPER(TRIM(b.ticker)), ' %')
@@ -853,13 +860,15 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                 sn.exchange_code,
                 sn.country_of_exchange,
                 sn.currency_code,
-                ROW_NUMBER() OVER (PARTITION BY b.row_id ORDER BY sn.security_id) AS rn
+                ROW_NUMBER() OVER (
+                    PARTITION BY b.row_id
+                    ORDER BY CASE WHEN sn.is_active = true THEN 0 ELSE 1 END, sn.security_id
+                ) AS rn
             FROM base_with_prefix b
             JOIN {DB}.cis_security sn
                 ON  b.match_type IN ('ISIN_NO_MATCH', 'NO_ISIN')
                 AND b.desc_prefix IS NOT NULL
                 AND TRIM(b.desc_prefix) != ''
-                AND sn.is_active = true
                 AND UPPER(TRIM(sn.security_name)) = UPPER(TRIM(b.desc_prefix))
         )
         SELECT
@@ -1012,27 +1021,24 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             JOIN pos_stage_2_portfolio p2
                 ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
             -- Dedup guard 1: skip if a security with the same name already exists
+            --   NOTE: intentionally includes inactive securities (is_active = false)
+            --   to avoid re-creating securities that were deactivated/merged.
             LEFT JOIN {DB}.cis_security existing
-                ON existing.is_active = true
-                AND UPPER(TRIM(existing.security_name)) = UPPER(TRIM(COALESCE(
+                ON UPPER(TRIM(existing.security_name)) = UPPER(TRIM(COALESCE(
                     p4.desc_prefix,
                     b.security_short_name,
                     TRIM(regexp_replace(b.security_full_name, '(?i)\\s*COMMON\\s+(STOCK|STICK).*$', '')),
                     b.isin
                 )))
             -- Dedup guard 2: skip if a security with the same ISIN already exists
-            --   (catches name mismatches like "ANET UN" vs "ARISTA NETWORKS, INC.")
             LEFT JOIN {DB}.cis_security existing_isin
-                ON existing_isin.is_active = true
-                AND b.isin IS NOT NULL AND TRIM(b.isin) != ''
+                ON b.isin IS NOT NULL AND TRIM(b.isin) != ''
                 AND UPPER(TRIM(existing_isin.isin)) = UPPER(TRIM(b.isin))
             -- Dedup guard 3: skip if a security with the same ticker already exists
-            --   (GMP uses m_security_code as both ISIN and ticker e.g. "ANET UN";
-            --    the real CIS security has isin=US04... but ticker="ANET UN")
+            --   (GMP m_security_code mapped to ticker field, e.g. "ANET UN")
             LEFT JOIN {DB}.cis_security existing_ticker
-                ON existing_ticker.is_active = true
-                AND b.isin IS NOT NULL AND TRIM(b.isin) != ''
-                AND UPPER(TRIM(existing_ticker.ticker)) = UPPER(TRIM(b.isin))
+                ON b.ticker IS NOT NULL AND TRIM(b.ticker) != ''
+                AND UPPER(TRIM(existing_ticker.ticker)) = UPPER(TRIM(b.ticker))
             WHERE p4.security_status = 'NOT_FOUND: Create new security'
               AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
               AND existing.security_id IS NULL
