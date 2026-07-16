@@ -350,7 +350,7 @@ SELECT
         'MISSING'
     )                      AS resolved_currency
 FROM gmp_cis.cis_equity_price ep
-LEFT JOIN gmp_cis.cis_security_kudu s
+LEFT JOIN gmp_cis.cis_security s
     ON ep.security_label = s.security_name
 WHERE ep.security_label LIKE '%YNSMK%'
   AND (ep.is_active = true OR ep.is_active IS NULL)
@@ -371,7 +371,7 @@ SELECT
     currency_code,
     isin,
     src_system
-FROM gmp_cis.cis_security_kudu
+FROM gmp_cis.cis_security
 WHERE UPPER(security_name) LIKE '%YNSMK%'
    OR UPPER(security_description) LIKE '%YNSMK%'
 ORDER BY security_name
@@ -432,7 +432,7 @@ FROM gmp_cis.gmp_cis_sta_dly_equity_prices eq
 LEFT JOIN gmp_cis.gmp_cis_sta_dly_security seu
     ON  eq.security          = seu.security_label
     AND eq.processing_date   = seu.processing_date   -- prevent fan-out across dates
-LEFT JOIN gmp_cis.cis_security_kudu s
+LEFT JOIN gmp_cis.cis_security s
     ON eq.security = s.security_name                 -- join on full name to get currency
 WHERE eq.processing_date = '20260302'
   AND eq.security NOT LIKE '%LOG DEL%'
@@ -551,11 +551,12 @@ ORDER BY t.portfolio_short_name
 -- -----------------------------------------------------------------------------
 SELECT security_id, security_name, isin, exchange_code, currency_code,
        src_system, created_by, created_at
-FROM gmp_cis.cis_security_kudu
+FROM gmp_cis.cis_security
 WHERE created_by = 'EOD_AMS_ETL'
-  AND is_active = true
+  AND is_active  = true
+  AND CAST(created_at AS DATE) = CAST(NOW() AS DATE)
 ORDER BY created_at DESC
-LIMIT 100
+LIMIT 200
 ;
 
 
@@ -570,8 +571,8 @@ SELECT
     existing.security_name AS existing_name,
     existing.security_id   AS existing_id,
     existing.src_system
-FROM gmp_cis.cis_security_kudu new
-JOIN gmp_cis.cis_security_kudu existing
+FROM gmp_cis.cis_security new
+JOIN gmp_cis.cis_security existing
     ON  new.isin IS NOT NULL
     AND UPPER(TRIM(new.isin)) = UPPER(TRIM(existing.isin))
     AND new.security_id != existing.security_id
@@ -604,7 +605,7 @@ SELECT
     p.src_system, p.processing_date,
     s.security_name, s.isin, s.created_by AS sec_created_by
 FROM gmp_cis.cis_position p
-JOIN gmp_cis.cis_security_kudu s
+JOIN gmp_cis.cis_security s
     ON  UPPER(TRIM(p.security_label)) = UPPER(TRIM(s.security_name))
     AND s.created_by = 'EOD_AMS_ETL'
     AND s.is_active  = true
@@ -617,13 +618,13 @@ ORDER BY p.portfolio, p.security_label
 -- Q_ETL5: Delete ISIN-duplicate securities created by ETL
 --         (run Q_ETL2 first to confirm which ones to delete)
 -- -----------------------------------------------------------------------------
--- DELETE FROM gmp_cis.cis_security_kudu
+-- DELETE FROM gmp_cis.cis_security
 -- WHERE created_by = 'EOD_AMS_ETL'
 --   AND is_active  = true
 --   AND isin IN (
 --       SELECT new.isin
---       FROM gmp_cis.cis_security_kudu new
---       JOIN gmp_cis.cis_security_kudu existing
+--       FROM gmp_cis.cis_security new
+--       JOIN gmp_cis.cis_security existing
 --           ON  UPPER(TRIM(new.isin)) = UPPER(TRIM(existing.isin))
 --           AND new.security_id != existing.security_id
 --           AND existing.is_active = true
