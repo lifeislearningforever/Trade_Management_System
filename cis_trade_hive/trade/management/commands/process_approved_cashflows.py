@@ -82,6 +82,7 @@ GOLDEN_TABLE   = 'cis_position'         # golden copy (all sources)
 CASH_FLOW_TABLE = 'cis_cash_flow'
 PRECISION = Decimal('0.00000001')
 DEFAULT_DP = 2
+AVP_PRECISION = 8  # average cost is price-per-unit, not an amount
 
 
 def _escape(value: str) -> str:
@@ -573,11 +574,11 @@ class Command(BaseCommand):
         old_avp_fc = Decimal(str(position.get('average_cost_fc', 0) or 0))
         old_avp_lc = Decimal(str(position.get('average_cost_lc', 0) or 0))
 
-        per_share_fc = round(amount_fc / qty, fc_dp)
-        per_share_lc = round(amount_lc / qty, lc_dp)
+        per_share_fc = round(amount_fc / qty, AVP_PRECISION)
+        per_share_lc = round(amount_lc / qty, AVP_PRECISION)
 
-        new_avp_fc = max(Decimal('0'), round(old_avp_fc - per_share_fc, fc_dp))
-        new_avp_lc = max(Decimal('0'), round(old_avp_lc - per_share_lc, lc_dp))
+        new_avp_fc = max(Decimal('0'), round(old_avp_fc - per_share_fc, AVP_PRECISION))
+        new_avp_lc = max(Decimal('0'), round(old_avp_lc - per_share_lc, AVP_PRECISION))
         new_total_cost_fc = round(new_avp_fc * qty, fc_dp)
         new_total_cost_lc = round(new_avp_lc * qty, lc_dp)
 
