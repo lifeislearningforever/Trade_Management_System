@@ -319,3 +319,60 @@ UPSERT INTO gmp_cis.cis_ca_cash_flow_queue (
     'SYSTEM'                                   -- created_by
 )
 ;
+
+
+-- =============================================================================
+-- EQUITY PRICE CURRENCY DEBUG
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- Q_EP1: Equity price vs security master — check currency resolution
+--        Shows current stored currency_code, what security master has, and
+--        what resolved_currency WILL BE after next sync run.
+--
+--        Replace '%YNSMK%' with the security name you are investigating.
+--        resolved_currency = 'MISSING' means security is not in master yet.
+-- -----------------------------------------------------------------------------
+SELECT
+    ep.currency_code,
+    ep.security_label,
+    ep.isin,
+    ep.price_date,
+    ep.main_closing_price,
+    ep.src_system,
+    ep.is_active,
+    s.security_name        AS sec_name_match,
+    s.currency_code        AS sec_currency_code,
+    COALESCE(
+        CASE WHEN ep.currency_code IS NOT NULL AND TRIM(ep.currency_code) != ''
+             THEN ep.currency_code ELSE NULL END,
+        s.currency_code,
+        'MISSING'
+    )                      AS resolved_currency
+FROM gmp_cis.cis_equity_price ep
+LEFT JOIN gmp_cis.cis_security_kudu s
+    ON ep.security_label = s.security_name
+WHERE ep.security_label LIKE '%YNSMK%'
+  AND (ep.is_active = true OR ep.is_active IS NULL)
+ORDER BY ep.security_label, ep.price_date DESC
+;
+
+
+-- -----------------------------------------------------------------------------
+-- Q_EP2: Security master name lookup — confirm exact security_name stored
+--        so the equity price join will match correctly.
+--
+--        If sec_name_match is NULL in Q_EP1, run this to find the correct name.
+--        Replace '%YNSMK%' with your security search term.
+-- -----------------------------------------------------------------------------
+SELECT
+    security_name,
+    security_description,
+    currency_code,
+    isin,
+    src_system
+FROM gmp_cis.cis_security_kudu
+WHERE UPPER(security_name) LIKE '%YNSMK%'
+   OR UPPER(security_description) LIKE '%YNSMK%'
+ORDER BY security_name
+;
