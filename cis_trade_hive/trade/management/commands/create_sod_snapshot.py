@@ -53,6 +53,14 @@ class Command(BaseCommand):
             '--source', type=str, choices=ALL_SOURCES,
             help='Limit to one source system: CIS, GMP, AMSICEQ, USER_UPLOAD (default: all)'
         )
+        parser.add_argument(
+            '--sod-date', type=str, default=None,
+            help='Override SOD position_date (YYYY-MM-DD). Default: alldatesinfo.contextual_today'
+        )
+        parser.add_argument(
+            '--eod-date', type=str, default=None,
+            help='Override source EOD date to copy from (YYYY-MM-DD). Default: alldatesinfo.prev_day'
+        )
 
     def handle(self, *args, **options):
         dry_run          = options.get('dry_run', False)
@@ -66,22 +74,31 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING('DRY RUN — no changes will be written'))
         self.stdout.write('')
 
-        # ── 1. Get business dates from reference table ──────────────────────
+        # ── 1. Get business dates (alldatesinfo or manual override) ─────────
         today_yyyymmdd, prev_yyyymmdd = self._get_business_dates()
-        if not today_yyyymmdd or not prev_yyyymmdd:
-            raise CommandError(
-                'Could not read business dates from gmp_cis_sta_dly_alldatesinfo'
-            )
 
-        sod_date  = self._to_iso(today_yyyymmdd)   # SOD position_date  e.g. 2026-03-02
-        eod_date  = self._to_iso(prev_yyyymmdd)    # source EOD date    e.g. 2026-02-26
-        proc_date = today_yyyymmdd                  # processing_date stays YYYYMMDD
+        if options.get('sod_date') or options.get('eod_date'):
+            # Manual override — at least one date was supplied
+            sod_date  = options['sod_date'] or self._to_iso(today_yyyymmdd)
+            eod_date  = options['eod_date'] or self._to_iso(prev_yyyymmdd)
+            proc_date = sod_date.replace('-', '')
+            date_source = 'manual override'
+        else:
+            if not today_yyyymmdd or not prev_yyyymmdd:
+                raise CommandError(
+                    'Could not read business dates from gmp_cis_sta_dly_alldatesinfo. '
+                    'Use --sod-date and --eod-date to override.'
+                )
+            sod_date  = self._to_iso(today_yyyymmdd)   # SOD position_date  e.g. 2026-03-02
+            eod_date  = self._to_iso(prev_yyyymmdd)    # source EOD date    e.g. 2026-02-26
+            proc_date = today_yyyymmdd
+            date_source = 'alldatesinfo'
 
         self.stdout.write(
-            f"Business date (contextual_today) : {today_yyyymmdd}  →  SOD position_date = {sod_date}"
+            f"Business date (contextual_today) : {today_yyyymmdd}  →  SOD position_date = {sod_date}  (from {date_source})"
         )
         self.stdout.write(
-            f"Previous day  (prev_day)         : {prev_yyyymmdd}  →  source EOD date   = {eod_date}"
+            f"Previous day  (prev_day)         : {prev_yyyymmdd}  →  source EOD date   = {eod_date}  (from {date_source})"
         )
         self.stdout.write('')
 
