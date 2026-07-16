@@ -84,7 +84,7 @@ ALL_SOURCES = {
     'gmp_cis_sta_dly_ams_multi_dis_cif': {
         'position_basis': 'TRADED',
         'src_system':     'AMS_STREET',
-        'position_type':  'EOD',
+        'position_type':  'INT',
         'description':    'AMS Multi Discretionary Fund',
     },
     # gmp_cis_sta_dly_ams_multi_hold is used only as an ISIN lookup for
@@ -92,25 +92,25 @@ ALL_SOURCES = {
     'gmp_cis_sta_dly_stat_street_ams_iceq': {
         'position_basis': 'TRADED',
         'src_system':     'AMS_STREET',
-        'position_type':  'EOD',
+        'position_type':  'INT',
         'description':    'AMS ICEQ Daily',
     },
     'gmp_cis_sta_mthly_stat_street_ams_iceq_end': {
         'position_basis': 'SETTLED',
         'src_system':     'AMS_STREET',
-        'position_type':  'EOD',
+        'position_type':  'INT',
         'description':    'AMS ICEQ Month End',
     },
     'gmp_cis_sta_dly_stat_street_ams_daily_limit': {
         'position_basis': 'TRADED',
         'src_system':     'AMS_STREET',
-        'position_type':  'EOD',
+        'position_type':  'INT',
         'description':    'AMS S31 UOI Daily Limit',
     },
     'gmp_cis_sta_dly_position': {
         'position_basis': None,        # derived from `line` column in source
         'src_system':     'GMP',
-        'position_type':  'INT',       # GMP positions are intraday/intermediate
+        'position_type':  'INT',
         'description':    'GMP Daily Position (m_* columns)',
     },
 }
