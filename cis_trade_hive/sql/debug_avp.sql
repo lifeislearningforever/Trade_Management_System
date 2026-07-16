@@ -379,24 +379,24 @@ ORDER BY security_name
 
 
 -- -----------------------------------------------------------------------------
--- Q_EP3: Manual UPSERT — fix blank currency_code for a specific equity price row.
+-- Q_EP3: Manual UPSERT — load equity price from GMP staging into cis_equity_price
+--        with correct currency_code enriched from cis_security_kudu.
 --
 --        Use this when:
---          - Q_EP1 shows resolved_currency = MYR (or correct value)
---          - But cis_equity_price still has blank currency_code from old sync run
+--          - cis_equity_price has blank currency_code (staging SQL joined wrong column)
 --          - You want to fix it immediately without waiting for next PySpark sync
+--
+--        Source: gmp_cis_sta_dly_equity_prices (GMP staging)
+--                joined to cis_security_kudu on security_name = security full name
 --
 --        Steps:
 --          1. Run Q_EP2 to confirm the correct currency_code and security_name
---          2. Run Q_EP1 to get exact security_label and price_date values
---          3. Replace placeholder values below and run
+--          2. Replace processing_date and security names below
+--          3. Run — UPSERT will update existing blank-currency rows by PK match
 --
 --        Replace:
---          '<CURRENCY>'       e.g. 'MYR'
---          '<SECURITY_LABEL>' e.g. 'YNSMK 7 1/2 PERP'
---          '<PRICE_DATE>'     e.g. '2026-03-02'
---          '<PRICE>'          e.g. 1.059060  (from Q_EP1 main_closing_price)
---          '<ISIN>'           e.g. 'MYYNSMK001' or NULL if not available
+--          '20260302'             → target processing_date (YYYYMMDD)
+--          'YNSMK 7 1/2 PERP'    → actual security name(s) from GMP staging
 -- -----------------------------------------------------------------------------
 UPSERT INTO gmp_cis.cis_equity_price (
     currency_code,
@@ -413,23 +413,27 @@ UPSERT INTO gmp_cis.cis_equity_price (
     updated_at
 )
 SELECT
-    s.currency_code                         AS currency_code,
-    ep.security_label,
-    ep.price_date,
-    ep.isin,
-    ep.main_closing_price,
-    ep.price_timestamp,
-    ep.src_system,
-    ep.is_active,
-    ep.created_by,
-    ep.created_at,
-    'MANUAL_FIX'                            AS updated_by,
-    FROM_UNIXTIME(UNIX_TIMESTAMP())         AS updated_at
-FROM gmp_cis.cis_equity_price ep
-JOIN gmp_cis.cis_security_kudu s
-    ON ep.security_label = s.security_name
-WHERE ep.security_label IN ('YNSMK 7 1/2 PERP', 'YNSMK 7.5 050673')
-  AND ep.price_date = '2026-03-02'
-  AND (ep.currency_code IS NULL OR TRIM(ep.currency_code) = '')
-  AND (s.currency_code IS NOT NULL AND TRIM(s.currency_code) != '')
+    COALESCE(s.currency_code, '')                       AS currency_code,
+    eq.security                                         AS security_label,
+    FROM_UNIXTIME(
+        UNIX_TIMESTAMP(CAST(eq.`date` AS STRING), 'yyyyMMdd'),
+        'yyyy-MM-dd'
+    )                                                   AS price_date,
+    seu.isin                                            AS isin,
+    CAST(eq.main_closing_price AS DECIMAL(18,6))        AS main_closing_price,
+    FROM_UNIXTIME(UNIX_TIMESTAMP())                     AS price_timestamp,
+    'GMP'                                               AS src_system,
+    TRUE                                                AS is_active,
+    'MANUAL_FIX'                                        AS created_by,
+    FROM_UNIXTIME(UNIX_TIMESTAMP())                     AS created_at,
+    'MANUAL_FIX'                                        AS updated_by,
+    FROM_UNIXTIME(UNIX_TIMESTAMP())                     AS updated_at
+FROM gmp_cis.gmp_cis_sta_dly_equity_prices eq
+LEFT JOIN gmp_cis.gmp_cis_sta_dly_security seu
+    ON eq.security = seu.security_label
+LEFT JOIN gmp_cis.cis_security_kudu s
+    ON eq.security = s.security_name          -- join on full name to get currency
+WHERE eq.processing_date = '20260302'
+  AND eq.security NOT LIKE '%LOG DEL%'
+  AND eq.security IN ('YNSMK 7 1/2 PERP', 'YNSMK 7.5 050673')
 ;
