@@ -44,7 +44,7 @@ class Command(BaseCommand):
             help='Show what would be processed without executing'
         )
         parser.add_argument(
-            '-v', '--verbose',
+            '--verbose',
             action='store_true',
             help='Enable verbose output'
         )
