@@ -376,3 +376,60 @@ WHERE UPPER(security_name) LIKE '%YNSMK%'
    OR UPPER(security_description) LIKE '%YNSMK%'
 ORDER BY security_name
 ;
+
+
+-- -----------------------------------------------------------------------------
+-- Q_EP3: Manual UPSERT — fix blank currency_code for a specific equity price row.
+--
+--        Use this when:
+--          - Q_EP1 shows resolved_currency = MYR (or correct value)
+--          - But cis_equity_price still has blank currency_code from old sync run
+--          - You want to fix it immediately without waiting for next PySpark sync
+--
+--        Steps:
+--          1. Run Q_EP2 to confirm the correct currency_code and security_name
+--          2. Run Q_EP1 to get exact security_label and price_date values
+--          3. Replace placeholder values below and run
+--
+--        Replace:
+--          '<CURRENCY>'       e.g. 'MYR'
+--          '<SECURITY_LABEL>' e.g. 'YNSMK 7 1/2 PERP'
+--          '<PRICE_DATE>'     e.g. '2026-03-02'
+--          '<PRICE>'          e.g. 1.059060  (from Q_EP1 main_closing_price)
+--          '<ISIN>'           e.g. 'MYYNSMK001' or NULL if not available
+-- -----------------------------------------------------------------------------
+UPSERT INTO gmp_cis.cis_equity_price (
+    currency_code,
+    security_label,
+    price_date,
+    isin,
+    main_closing_price,
+    price_timestamp,
+    src_system,
+    is_active,
+    created_by,
+    created_at,
+    updated_by,
+    updated_at
+)
+SELECT
+    s.currency_code                         AS currency_code,
+    ep.security_label,
+    ep.price_date,
+    ep.isin,
+    ep.main_closing_price,
+    ep.price_timestamp,
+    ep.src_system,
+    ep.is_active,
+    ep.created_by,
+    ep.created_at,
+    'MANUAL_FIX'                            AS updated_by,
+    FROM_UNIXTIME(UNIX_TIMESTAMP())         AS updated_at
+FROM gmp_cis.cis_equity_price ep
+JOIN gmp_cis.cis_security_kudu s
+    ON ep.security_label = s.security_name
+WHERE ep.security_label IN ('YNSMK 7 1/2 PERP', 'YNSMK 7.5 050673')
+  AND ep.price_date = '2026-03-02'
+  AND (ep.currency_code IS NULL OR TRIM(ep.currency_code) = '')
+  AND (s.currency_code IS NOT NULL AND TRIM(s.currency_code) != '')
+;
