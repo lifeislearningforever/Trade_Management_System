@@ -438,3 +438,102 @@ WHERE eq.processing_date = '20260302'
   AND eq.security NOT LIKE '%LOG DEL%'
   AND eq.security IN ('YNSMK 7 1/2 PERP', 'YNSMK 7.5 050673')
 ;
+
+
+-- =============================================================================
+-- Settlement Queue Debug Queries (2026-03-02)
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- Q_SQ1: All trades with settle_date = 2026-03-02 and their queue status
+--        Use this to identify which trades are missing from the settlement queue
+-- -----------------------------------------------------------------------------
+SELECT
+    t.trade_id,
+    t.trade_type,
+    t.deal_number,
+    t.portfolio_short_name,
+    t.security_label,
+    t.status          AS trade_status,
+    t.quantity,
+    t.price,
+    t.settle_date,
+    q.queue_id,
+    q.status          AS queue_status
+FROM gmp_cis.cis_trade t
+LEFT JOIN gmp_cis.cis_settlement_queue q
+    ON q.trade_id = t.trade_id
+   AND q.position_basis = 'SETTLED'
+WHERE t.settle_date = '2026-03-02'
+  AND t.trade_type IN ('BUY', 'SELL')
+  AND (t.is_deleted = false OR t.is_deleted IS NULL)
+ORDER BY t.status, t.portfolio_short_name, t.trade_id
+;
+
+
+-- -----------------------------------------------------------------------------
+-- Q_SQ2: Trades missing from settlement queue (excludes CANCELLED)
+--        These are the ones --backfill-queue will insert
+-- -----------------------------------------------------------------------------
+SELECT
+    t.trade_id,
+    t.trade_type,
+    t.deal_number,
+    t.portfolio_short_name,
+    t.security_label,
+    t.status,
+    t.quantity,
+    t.price,
+    t.settle_date
+FROM gmp_cis.cis_trade t
+WHERE t.trade_type IN ('BUY', 'SELL')
+  AND t.status IN ('SETTLED', 'VALIDATED')
+  AND t.settle_date = '2026-03-02'
+  AND (t.is_deleted = false OR t.is_deleted IS NULL)
+  AND NOT EXISTS (
+      SELECT 1 FROM gmp_cis.cis_settlement_queue q
+      WHERE q.trade_id      = t.trade_id
+        AND q.position_basis = 'SETTLED'
+  )
+ORDER BY t.portfolio_short_name, t.trade_id
+;
+
+
+-- -----------------------------------------------------------------------------
+-- Q_SQ3: Settlement queue entries for 2026-03-02 (all statuses)
+-- -----------------------------------------------------------------------------
+SELECT
+    q.queue_id,
+    q.trade_id,
+    q.portfolio_id,
+    q.security_id,
+    q.trade_type,
+    q.quantity,
+    q.price,
+    q.settle_date,
+    q.status,
+    q.queued_at,
+    q.processed_at
+FROM gmp_cis.cis_settlement_queue q
+WHERE q.settle_date = '2026-03-02'
+ORDER BY q.status, q.queued_at
+;
+
+
+-- -----------------------------------------------------------------------------
+-- Q_SQ4: Cancelled trades for 2026-03-02 — confirm these are excluded
+-- -----------------------------------------------------------------------------
+SELECT
+    t.trade_id,
+    t.trade_type,
+    t.deal_number,
+    t.portfolio_short_name,
+    t.security_label,
+    t.status,
+    t.settle_date
+FROM gmp_cis.cis_trade t
+WHERE t.settle_date = '2026-03-02'
+  AND t.status = 'CANCELLED'
+  AND (t.is_deleted = false OR t.is_deleted IS NULL)
+ORDER BY t.portfolio_short_name
+;
