@@ -457,15 +457,18 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
 
     if table == 'gmp_cis_sta_dly_position':
         # GMP daily position — columns have m_* prefix.
-        # position_basis is read from the `line` column (TRADED / SETTLED).
-        # m_security_code maps to isin (GMP uses security code as the ISIN identifier).
+        # m_security_code is GMP's short Bloomberg-style code (e.g. "ANET UN").
+        # It is NOT a real ISIN — map it to BOTH isin AND ticker so that:
+        #   Step 3 tries isin match (will fail for non-ISIN codes, harmless)
+        #   Step 4 Tier 2 tries ticker match (will find existing CIS security
+        #     whose ticker = "ANET UN" and avoid creating a duplicate)
         return f"""
             SELECT
                 m_cis_pfolio                                            AS portfolio,
                 m_security_full_name                                    AS security_full_name,
                 m_security_display_label                                AS security_short_name,
                 m_security_code                                         AS isin,
-                NULL                                                    AS ticker,
+                m_security_code                                         AS ticker,
                 {safe_decimal('m_quantity', 'DECIMAL(30,8)')}          AS quantity,
                 {safe_decimal('m_outstanding_shares', 'DECIMAL(30,8)')} AS shares_outstanding,
                 CAST(NULL AS DECIMAL(30,8))                             AS shares_issued,
@@ -812,10 +815,13 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                 AND sn.is_active = true
                 AND UPPER(TRIM(sn.security_name)) = UPPER(TRIM(b.security_short_name))
         ),
-        -- Tier 2: ticker match (AMS)
-        -- AMS ticker is a short code (e.g. "AAREIT SP"); GMP stores the full Bloomberg
-        -- ticker (e.g. "AAREIT SP Equity"). Match if cis_security.ticker equals the
-        -- upload ticker exactly OR starts with it followed by a space.
+        -- Tier 2: ticker match (AMS + GMP)
+        -- AMS ticker is a short code (e.g. "AAREIT SP").
+        -- GMP: m_security_code (e.g. "ANET UN") is now mapped to both isin and ticker
+        --   in the source query, so this tier catches GMP codes that match
+        --   cis_security.ticker and prevents Step 5B creating duplicate securities.
+        -- Match if cis_security.ticker equals the upload ticker exactly OR starts
+        -- with it followed by a space (handles "AAREIT SP" vs "AAREIT SP Equity").
         tier2 AS (
             SELECT
                 b.row_id,
