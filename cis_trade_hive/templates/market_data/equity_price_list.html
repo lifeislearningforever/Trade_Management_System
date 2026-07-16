@@ -172,6 +172,7 @@
                                 </td>
                                 <td style="position: sticky; right: 0; background-color: {% if not price.is_active %}#f8f9fa{% else %}white{% endif %}; z-index: 4;">
                                     <div class="btn-group btn-group-sm" role="group">
+                                        {% if price.currency_code and price.price_date %}
                                         <a href="{% url 'market_data:equity_price_detail' price.currency_code price.price_date %}?security_label={{ price.security_label|urlencode:'' }}"
                                            class="btn btn-sm btn-outline-info" title="View Details">
                                             <i class="bi bi-eye"></i>
@@ -181,6 +182,11 @@
                                                class="btn btn-sm btn-outline-warning" title="Edit">
                                                 <i class="bi bi-pencil"></i>
                                             </a>
+                                        {% endif %}
+                                        {% else %}
+                                        <span class="btn btn-sm btn-outline-secondary disabled" title="No currency code">
+                                            <i class="bi bi-eye-slash"></i>
+                                        </span>
                                         {% endif %}
                                     </div>
                                 </td>
