@@ -537,3 +537,96 @@ WHERE t.settle_date = '2026-03-02'
   AND (t.is_deleted = false OR t.is_deleted IS NULL)
 ORDER BY t.portfolio_short_name
 ;
+
+
+-- =============================================================================
+-- EOD AMS/GMP Position ETL Debug Queries
+-- For investigating auto-created securities and positions from eod_ams_position_etl.py
+-- Replace '20260302' with the processing_date under investigation.
+-- =============================================================================
+
+
+-- -----------------------------------------------------------------------------
+-- Q_ETL1: All securities auto-created by EOD AMS ETL (most recent first)
+-- -----------------------------------------------------------------------------
+SELECT security_id, security_name, isin, exchange_code, currency_code,
+       src_system, created_by, created_at
+FROM gmp_cis.cis_security_kudu
+WHERE created_by = 'EOD_AMS_ETL'
+  AND is_active = true
+ORDER BY created_at DESC
+LIMIT 100
+;
+
+
+-- -----------------------------------------------------------------------------
+-- Q_ETL2: ISIN duplicate check — auto-created securities whose ISIN already
+--         exists in another active cis_security row (should be 0 after fix)
+-- -----------------------------------------------------------------------------
+SELECT
+    new.security_name    AS new_name,
+    new.security_id      AS new_id,
+    new.isin,
+    existing.security_name AS existing_name,
+    existing.security_id   AS existing_id,
+    existing.src_system
+FROM gmp_cis.cis_security_kudu new
+JOIN gmp_cis.cis_security_kudu existing
+    ON  new.isin IS NOT NULL
+    AND UPPER(TRIM(new.isin)) = UPPER(TRIM(existing.isin))
+    AND new.security_id != existing.security_id
+    AND existing.is_active = true
+WHERE new.created_by = 'EOD_AMS_ETL'
+  AND new.is_active  = true
+ORDER BY new.isin
+;
+
+
+-- -----------------------------------------------------------------------------
+-- Q_ETL3: Positions written by GMP ETL for a given processing_date
+-- -----------------------------------------------------------------------------
+SELECT COUNT(*) AS cnt, src_system, position_type, position_date
+FROM gmp_cis.cis_position
+WHERE source_table    = 'gmp_cis_sta_dly_position'
+  AND processing_date = '20260302'
+GROUP BY src_system, position_type, position_date
+ORDER BY position_date
+;
+
+
+-- -----------------------------------------------------------------------------
+-- Q_ETL4: Positions linked to ETL-created securities (potential orphans if
+--         the security is later deleted as a duplicate)
+-- -----------------------------------------------------------------------------
+SELECT
+    p.position_id, p.portfolio, p.security_label,
+    p.position_basis, p.position_date, p.quantity,
+    p.src_system, p.processing_date,
+    s.security_name, s.isin, s.created_by AS sec_created_by
+FROM gmp_cis.cis_position p
+JOIN gmp_cis.cis_security_kudu s
+    ON  UPPER(TRIM(p.security_label)) = UPPER(TRIM(s.security_name))
+    AND s.created_by = 'EOD_AMS_ETL'
+    AND s.is_active  = true
+WHERE p.processing_date = '20260302'
+ORDER BY p.portfolio, p.security_label
+;
+
+
+-- -----------------------------------------------------------------------------
+-- Q_ETL5: Delete ISIN-duplicate securities created by ETL
+--         (run Q_ETL2 first to confirm which ones to delete)
+-- -----------------------------------------------------------------------------
+-- DELETE FROM gmp_cis.cis_security_kudu
+-- WHERE created_by = 'EOD_AMS_ETL'
+--   AND is_active  = true
+--   AND isin IN (
+--       SELECT new.isin
+--       FROM gmp_cis.cis_security_kudu new
+--       JOIN gmp_cis.cis_security_kudu existing
+--           ON  UPPER(TRIM(new.isin)) = UPPER(TRIM(existing.isin))
+--           AND new.security_id != existing.security_id
+--           AND existing.is_active = true
+--       WHERE new.created_by = 'EOD_AMS_ETL'
+--   )
+-- ;
