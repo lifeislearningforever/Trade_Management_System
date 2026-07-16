@@ -84,6 +84,7 @@ ALL_SOURCES = {
     'gmp_cis_sta_dly_ams_multi_dis_cif': {
         'position_basis': 'TRADED',
         'src_system':     'AMS_STREET',
+        'position_type':  'EOD',
         'description':    'AMS Multi Discretionary Fund',
     },
     # gmp_cis_sta_dly_ams_multi_hold is used only as an ISIN lookup for
@@ -91,21 +92,25 @@ ALL_SOURCES = {
     'gmp_cis_sta_dly_stat_street_ams_iceq': {
         'position_basis': 'TRADED',
         'src_system':     'AMS_STREET',
+        'position_type':  'EOD',
         'description':    'AMS ICEQ Daily',
     },
     'gmp_cis_sta_mthly_stat_street_ams_iceq_end': {
         'position_basis': 'SETTLED',
         'src_system':     'AMS_STREET',
+        'position_type':  'EOD',
         'description':    'AMS ICEQ Month End',
     },
     'gmp_cis_sta_dly_stat_street_ams_daily_limit': {
         'position_basis': 'TRADED',
         'src_system':     'AMS_STREET',
+        'position_type':  'EOD',
         'description':    'AMS S31 UOI Daily Limit',
     },
     'gmp_cis_sta_dly_position': {
         'position_basis': None,        # derived from `line` column in source
         'src_system':     'GMP',
+        'position_type':  'INT',       # GMP positions are intraday/intermediate
         'description':    'GMP Daily Position (m_* columns)',
     },
 }
@@ -531,10 +536,11 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
     result = {'table': table, 'src_id': src_id, 'processing_date': processing_date,
               'total': 0, 'passed': 0, 'failed': 0, 'ok': False}
 
-    pos_basis_label = ALL_SOURCES[table]['position_basis'] or 'from source row'
+    pos_basis_label  = ALL_SOURCES[table]['position_basis'] or 'from source row'
+    position_type    = ALL_SOURCES[table].get('position_type', 'EOD')
     print(f"\n{'='*70}")
     print(f"  {ALL_SOURCES[table]['description']} ({table})")
-    print(f"  processing_date={processing_date}  position_basis={pos_basis_label}")
+    print(f"  processing_date={processing_date}  position_basis={pos_basis_label}  position_type={position_type}")
     print(f"{'='*70}")
 
     # ---- Step 0: check source has data for this partition ----
@@ -1167,7 +1173,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             CAST(0 AS DECIMAL(30,8))                        AS uncall_lc,
             CAST(0 AS DECIMAL(30,8))                        AS pipeline_fc,
             CAST(0 AS DECIMAL(30,8))                        AS pipeline_lc,
-            'EOD'                                           AS position_type
+            '{position_type}'                               AS position_type
         FROM position_upload_staging
         WHERE overall_status LIKE 'VALID%'
         """,
