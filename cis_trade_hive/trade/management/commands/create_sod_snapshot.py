@@ -307,15 +307,7 @@ class Command(BaseCommand):
     # ── EOD row fetch ─────────────────────────────────────────────────────────
 
     def _get_eod_rows(self, eod_date, sources, portfolio_filter):
-        """
-        Fetch the source rows for a given date to copy as SOD.
-
-        Priority per (portfolio, security_label, position_basis, src_system):
-          1. EOD  — written by refresh_positions (preferred — fully priced)
-          2. INT  — written by the ETL (fallback when refresh hasn't run yet)
-
-        When both exist for the same key the EOD row wins via ROW_NUMBER.
-        """
+        """Fetch EOD rows from cis_position for the given date (written by refresh_positions)."""
         src_list    = ', '.join(f"'{self._escape(s)}'" for s in sources)
         port_clause = (
             f"AND portfolio = '{self._escape(portfolio_filter)}'"
@@ -341,24 +333,16 @@ class Command(BaseCommand):
                     uncall_fc, uncall_lc,
                     pipeline_fc, pipeline_lc,
                     position_type, isin, source_table, processing_timestamp
-                FROM (
-                    SELECT *,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY portfolio, security_label, position_basis, src_system
-                            ORDER BY CASE WHEN position_type = 'EOD' THEN 0 ELSE 1 END
-                        ) AS rn
-                    FROM {DATABASE}.cis_position
-                    WHERE position_type IN ('EOD', 'INT')
-                      AND position_date  = '{eod_date}'
-                      AND src_system IN ({src_list})
-                      {port_clause}
-                ) ranked
-                WHERE rn = 1
+                FROM {DATABASE}.cis_position
+                WHERE position_type = 'EOD'
+                  AND position_date  = '{eod_date}'
+                  AND src_system IN ({src_list})
+                  {port_clause}
                 """,
                 database=DATABASE
             ) or []
         except Exception as e:
-            logger.error(f'Error fetching EOD/INT rows for {eod_date}: {e}')
+            logger.error(f'Error fetching EOD rows for {eod_date}: {e}')
             raise
 
     # ── Settlement queue fetch ────────────────────────────────────────────────
