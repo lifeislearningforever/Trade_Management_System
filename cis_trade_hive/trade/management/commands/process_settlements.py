@@ -72,18 +72,25 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         """Main entry point for the command."""
-        settle_date = options['date'] or datetime.now().strftime('%Y-%m-%d')
         dry_run = options['dry_run']
         verbose = options['verbose']
         run_by = options['user']
         batch_size = options['batch_size']
         backfill_queue = options['backfill_queue']
 
+        # Use explicit --date if supplied, otherwise read contextual_today from alldatesinfo
+        if options['date']:
+            settle_date = options['date']
+            date_source = '--date flag'
+        else:
+            settle_date = self._get_contextual_today()
+            date_source = 'alldatesinfo.contextual_today'
+
         self.stdout.write(self.style.HTTP_INFO('=' * 70))
         self.stdout.write(self.style.HTTP_INFO('  CIS Trade Hive - EOD Settlement Processing'))
         self.stdout.write(self.style.HTTP_INFO('=' * 70))
         self.stdout.write(f'\nStarted: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
-        self.stdout.write(f'Settlement Date: {settle_date}')
+        self.stdout.write(f'Settlement Date: {settle_date}  (from {date_source})')
         self.stdout.write(f'Run By: {run_by}')
         self.stdout.write(f'Dry Run: {dry_run}')
         self.stdout.write('')
@@ -93,7 +100,7 @@ class Command(BaseCommand):
             if backfill_queue:
                 self.stdout.write(self.style.HTTP_INFO('\n--- Backfilling Settlement Queue ---'))
                 queued, skipped, failed = self._backfill_settlement_queue(
-                    run_by=run_by, dry_run=dry_run
+                    settle_date=settle_date, run_by=run_by, dry_run=dry_run
                 )
                 self.stdout.write(
                     self.style.SUCCESS(f'  Queued  : {queued}') if queued else f'  Queued  : {queued}'
@@ -143,16 +150,35 @@ class Command(BaseCommand):
             logger.exception('EOD settlement processing failed')
             raise CommandError(f'EOD settlement processing failed: {str(e)}')
 
+    def _get_contextual_today(self) -> str:
+        """Return contextual_today from alldatesinfo, falling back to system date."""
+        try:
+            rows = impala_manager.execute_query(
+                "SELECT contextual_today FROM gmp_cis_sta_dly_alldatesinfo LIMIT 1",
+                database='gmp_cis',
+            )
+            if rows:
+                val = rows[0].get('contextual_today')
+                if val:
+                    return str(val)
+        except Exception as e:
+            logger.warning(f'Could not read alldatesinfo.contextual_today: {e}')
+        fallback = datetime.now().strftime('%Y-%m-%d')
+        self.stdout.write(self.style.WARNING(
+            f'  alldatesinfo unavailable — falling back to system date {fallback}'
+        ))
+        return fallback
+
     def _backfill_settlement_queue(
-        self, run_by: str, dry_run: bool
+        self, settle_date: str, run_by: str, dry_run: bool
     ) -> Tuple[int, int, int]:
         """
-        Find SETTLED/VALIDATED BUY/SELL trades in cis_trade with settle_date > today
-        that have no entry in cis_settlement_queue (PENDING or COMPLETED), and queue them.
+        Find SETTLED/VALIDATED BUY/SELL trades in cis_trade with
+        settle_date >= settle_date that have no entry in cis_settlement_queue,
+        and queue them.
 
         Returns (queued, skipped, failed).
         """
-        today = datetime.now().strftime('%Y-%m-%d')
         queued = skipped = failed = 0
 
         try:
@@ -168,7 +194,7 @@ class Command(BaseCommand):
             FROM gmp_cis.cis_trade t
             WHERE t.trade_type IN ('BUY', 'SELL')
               AND t.status IN ('SETTLED', 'VALIDATED')
-              AND t.settle_date >= '{today}'
+              AND t.settle_date >= '{settle_date}'
               AND (t.is_deleted = false OR t.is_deleted IS NULL)
               AND NOT EXISTS (
                   SELECT 1 FROM gmp_cis.cis_settlement_queue q
@@ -182,7 +208,7 @@ class Command(BaseCommand):
                 self.stdout.write('  No unqueued future-settle trades found.')
                 return 0, 0, 0
 
-            self.stdout.write(f'  Found {len(rows)} trade(s) with future settle_date not in queue')
+            self.stdout.write(f'  Found {len(rows)} trade(s) with settle_date >= {settle_date} not in queue')
 
             for row in rows:
                 trade_id = row.get('trade_id')
