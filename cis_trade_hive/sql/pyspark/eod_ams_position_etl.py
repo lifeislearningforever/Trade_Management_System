@@ -1005,7 +1005,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             -- Only create security when portfolio also matched — prevents orphan securities
             JOIN pos_stage_2_portfolio p2
                 ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
-            -- Dedup guard: skip if a security with the same name already exists in cis_security
+            -- Dedup guard 1: skip if a security with the same name already exists
             LEFT JOIN {DB}.cis_security existing
                 ON existing.is_active = true
                 AND UPPER(TRIM(existing.security_name)) = UPPER(TRIM(COALESCE(
@@ -1014,9 +1014,16 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                     TRIM(regexp_replace(b.security_full_name, '(?i)\\s*COMMON\\s+(STOCK|STICK).*$', '')),
                     b.isin
                 )))
+            -- Dedup guard 2: skip if a security with the same ISIN already exists
+            --   (catches name mismatches like "ANET UN" vs "ARISTA NETWORKS, INC.")
+            LEFT JOIN {DB}.cis_security existing_isin
+                ON existing_isin.is_active = true
+                AND b.isin IS NOT NULL AND TRIM(b.isin) != ''
+                AND UPPER(TRIM(existing_isin.isin)) = UPPER(TRIM(b.isin))
             WHERE p4.security_status = 'NOT_FOUND: Create new security'
               AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
               AND existing.security_id IS NULL
+              AND existing_isin.security_id IS NULL
         )
         SELECT
             (UNIX_TIMESTAMP() * 1000) + row_id AS security_id,
