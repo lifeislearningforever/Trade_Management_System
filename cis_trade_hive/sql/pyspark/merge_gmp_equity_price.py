@@ -44,6 +44,7 @@ STAGING_TABLE = f"{DATABASE}.stg_gmp_equity_price"
 TARGET_TABLE = f"{DATABASE}.cis_equity_price"
 IMPALA_STAGING_TABLE = f"impala::{DATABASE}.stg_gmp_equity_price_kudu"
 IMPALA_TARGET_TABLE = f"impala::{DATABASE}.cis_equity_price_kudu"
+IMPALA_SECURITY_TABLE = f"impala::{DATABASE}.cis_security_kudu"
 
 
 def parse_args():
@@ -83,6 +84,15 @@ def merge_equity_prices(spark, kudu_master, batch_id=None, dry_run=False):
     Since cis_equity_price uses a natural composite PK
     (currency_code, security_label, price_date), there is no ID gap.
     GMP provides all PK fields, so this is a straightforward UPSERT.
+
+    currency_code enrichment:
+      GMP does not always send currency_code in the equity price feed.
+      When it is blank/null we enrich from cis_security_kudu.currency_code
+      (matched on security_name = security_label).  If the security is also
+      not yet in the security master the row is still written with
+      currency_code = '' so it is not silently dropped, but it will show
+      as a disabled row on the equity price list page until the security sync
+      populates the master and the next equity price sync run enriches it.
     """
 
     now_ms = int(datetime.now().timestamp() * 1000)
@@ -106,13 +116,50 @@ def merge_equity_prices(spark, kudu_master, batch_id=None, dry_run=False):
         print("[INFO] No staging records found. Nothing to merge.")
         return
 
-    # Step 2: Build target records
-    # Map staging columns to target table schema
-    target_df = (
-        stg_df
+    # Step 1b: Read security master for currency enrichment
+    sec_df = (
+        spark.read
+        .format("kudu")
+        .option("kudu.master", kudu_master)
+        .option("kudu.table", IMPALA_SECURITY_TABLE)
+        .load()
         .select(
-            # PK fields (natural composite key)
-            F.col("currency_code"),
+            F.col("security_name").alias("sec_security_name"),
+            F.col("currency_code").alias("sec_currency_code"),
+        )
+    )
+    print(f"[INFO] Security master records for currency lookup: {sec_df.count()}")
+
+    # Step 2: LEFT JOIN security master to fill missing currency_code
+    # COALESCE: use GMP-provided currency first; fall back to security master;
+    # leave as empty string if neither is available (page will show disabled icon).
+    enriched_df = (
+        stg_df
+        .join(sec_df, stg_df["security_label"] == sec_df["sec_security_name"], how="left")
+        .withColumn(
+            "resolved_currency_code",
+            F.when(
+                F.col("currency_code").isNotNull() & (F.trim(F.col("currency_code")) != ""),
+                F.col("currency_code")
+            ).otherwise(
+                F.coalesce(F.col("sec_currency_code"), F.lit(""))
+            )
+        )
+    )
+
+    missing_ccy = enriched_df.filter(
+        F.col("resolved_currency_code").isNull() | (F.trim(F.col("resolved_currency_code")) == "")
+    ).count()
+    if missing_ccy > 0:
+        print(f"[WARN] {missing_ccy} equity price records have no currency_code "
+              f"(not in GMP feed and not in security master) — written with blank currency.")
+
+    # Step 3: Build target records
+    target_df = (
+        enriched_df
+        .select(
+            # PK fields — use enriched currency_code
+            F.col("resolved_currency_code").alias("currency_code"),
             F.col("security_label"),
             F.col("price_date"),
             # Business fields
@@ -128,7 +175,7 @@ def merge_equity_prices(spark, kudu_master, batch_id=None, dry_run=False):
         .withColumn("updated_at", F.lit(now_ms))
     )
 
-    print(f"[INFO] Records to UPSERT: {target_df.count()}")
+    print(f"[INFO] Records to UPSERT: {target_df.count()} (missing_ccy={missing_ccy})")
 
     if dry_run:
         print("[DRY RUN] Preview of records to write:")
