@@ -796,9 +796,6 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             FROM pos_stage_3_security s3
         ),
         -- Tier 1: short_name match (GMP)
-        -- Includes inactive securities so that deactivated/merged GMP records
-        -- (e.g. "ANET UN" with is_active=false) are matched rather than re-created.
-        -- Priority: active first, then lowest security_id as stable tiebreak.
         tier1 AS (
             SELECT
                 b.row_id,
@@ -808,15 +805,13 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                 sn.exchange_code,
                 sn.country_of_exchange,
                 sn.currency_code,
-                ROW_NUMBER() OVER (
-                    PARTITION BY b.row_id
-                    ORDER BY CASE WHEN sn.is_active = true THEN 0 ELSE 1 END, sn.security_id
-                ) AS rn
+                ROW_NUMBER() OVER (PARTITION BY b.row_id ORDER BY sn.security_id) AS rn
             FROM base_with_prefix b
             JOIN {DB}.cis_security sn
                 ON  b.match_type IN ('ISIN_NO_MATCH', 'NO_ISIN')
                 AND b.security_short_name IS NOT NULL
                 AND TRIM(b.security_short_name) != ''
+                AND sn.is_active = true
                 AND UPPER(TRIM(sn.security_name)) = UPPER(TRIM(b.security_short_name))
         ),
         -- Tier 2: ticker match (AMS + GMP)
@@ -835,15 +830,13 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                 sn.exchange_code,
                 sn.country_of_exchange,
                 sn.currency_code,
-                ROW_NUMBER() OVER (
-                    PARTITION BY b.row_id
-                    ORDER BY CASE WHEN sn.is_active = true THEN 0 ELSE 1 END, sn.security_id
-                ) AS rn
+                ROW_NUMBER() OVER (PARTITION BY b.row_id ORDER BY sn.security_id) AS rn
             FROM base_with_prefix b
             JOIN {DB}.cis_security sn
                 ON  b.match_type IN ('ISIN_NO_MATCH', 'NO_ISIN')
                 AND b.ticker IS NOT NULL
                 AND TRIM(b.ticker) != ''
+                AND sn.is_active = true
                 AND (
                     UPPER(TRIM(sn.ticker)) = UPPER(TRIM(b.ticker))
                     OR UPPER(TRIM(sn.ticker)) LIKE CONCAT(UPPER(TRIM(b.ticker)), ' %')
@@ -859,15 +852,13 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                 sn.exchange_code,
                 sn.country_of_exchange,
                 sn.currency_code,
-                ROW_NUMBER() OVER (
-                    PARTITION BY b.row_id
-                    ORDER BY CASE WHEN sn.is_active = true THEN 0 ELSE 1 END, sn.security_id
-                ) AS rn
+                ROW_NUMBER() OVER (PARTITION BY b.row_id ORDER BY sn.security_id) AS rn
             FROM base_with_prefix b
             JOIN {DB}.cis_security sn
                 ON  b.match_type IN ('ISIN_NO_MATCH', 'NO_ISIN')
                 AND b.desc_prefix IS NOT NULL
                 AND TRIM(b.desc_prefix) != ''
+                AND sn.is_active = true
                 AND UPPER(TRIM(sn.security_name)) = UPPER(TRIM(b.desc_prefix))
         )
         SELECT
