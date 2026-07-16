@@ -448,6 +448,62 @@ Update the `--archives` path in `spark-submit` to reference the new version.
 
 ## Troubleshooting
 
+### `libpython3.10.so.1.0: cannot open shared object file: No such file or directory`
+
+**Symptom:** Python binary runs on CML but fails on the edge node or YARN workers:
+```
+error while loading shared libraries: libpython3.10.so.1.0: cannot open shared object file: No such file or directory
+```
+
+**Cause:** Even with `--copies`, the Python binary is **dynamically linked** — it needs
+`libpython3.10.so.1.0` at runtime. The `.so` exists on the CML build machine but is
+missing on the edge node (because the edge node has no Python 3.10 installed).
+
+**Fix: copy the `.so` from CML into the venv's `lib/` folder before packing.**
+
+Run on **CML terminal**:
+
+```bash
+# Step 1: Find where the .so lives on CML
+find / -name "libpython3.10.so.1.0" 2>/dev/null
+# Typically: /usr/local/lib/libpython3.10.so.1.0
+
+# Step 2: Verify the python binary is linked to it
+ldd /usr/local/bin/python3.10 | grep python
+# Expected: libpython3.10.so.1.0 => /usr/local/lib/libpython3.10.so.1.0
+
+# Step 3: Copy .so into the venv lib folder
+cp /usr/local/lib/libpython3.10.so.1.0 ~/cis_etl_env/lib/
+
+# Step 4: Repack (deactivate first if still active)
+deactivate
+venv-pack -p ~/cis_etl_env -o ~/cis_etl_env.tar.gz
+
+# Step 5: Verify .so is inside the archive
+tar -tzf ~/cis_etl_env.tar.gz | grep "libpython"
+# Must show: cis_etl_env/lib/libpython3.10.so.1.0
+```
+
+Then add these two `--conf` lines to your `spark-submit`:
+
+```bash
+--conf "spark.executorEnv.LD_LIBRARY_PATH=./cis_etl_env/lib" \
+--conf "spark.yarn.appMasterEnv.LD_LIBRARY_PATH=./cis_etl_env/lib" \
+```
+
+**Quick test on the edge node after unpacking:**
+```bash
+cd /path/to/unpacked/
+LD_LIBRARY_PATH=./cis_etl_env/lib ./cis_etl_env/bin/python3.10 --version
+# Must print: Python 3.10.x  (not "No such file or directory")
+```
+
+> **Why not rebuild on the edge node?**
+> The edge node does not have Python 3.10 installed, so a venv cannot be created
+> there. The CML-built venv + bundled `.so` is the correct approach.
+
+---
+
 ### `FileNotFoundError: [WinError 2]` when running venv-pack
 
 You are running `venv-pack` in Windows CMD or PowerShell — it only works on Linux.
