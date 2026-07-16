@@ -1211,7 +1211,7 @@ class SettlementService:
             if val is None:
                 return 'NULL'
             try:
-                return f"CAST({float(val)} AS DECIMAL(30,8))"
+                return f"CAST({float(val)} AS DECIMAL(20,8))"
             except (ValueError, TypeError):
                 return 'NULL'
 
