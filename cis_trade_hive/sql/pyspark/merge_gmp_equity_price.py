@@ -116,7 +116,17 @@ def merge_equity_prices(spark, kudu_master, batch_id=None, dry_run=False):
         print("[INFO] No staging records found. Nothing to merge.")
         return
 
-    # Step 1b: Read security master for currency enrichment
+    # Step 1b: Read security master for currency enrichment + canonical name dedup
+    #
+    # GMP sends the same security under multiple name aliases (e.g. "YNSMK 7.5 050673"
+    # and "YNSMK 7 1/2 PERP" are the same bond).  Without dedup, both land in
+    # cis_equity_price as separate rows for the same date, doubling the records.
+    #
+    # Dedup strategy (in priority order per ISIN + price_date):
+    #   1. Keep the row whose security_label exactly matches cis_security_kudu.security_name
+    #      (canonical name from security master)
+    #   2. If no match, keep the row with the longest security_label (most descriptive)
+    #   3. Rows with no ISIN are never deduplicated against each other
     sec_df = (
         spark.read
         .format("kudu")
@@ -126,16 +136,22 @@ def merge_equity_prices(spark, kudu_master, batch_id=None, dry_run=False):
         .select(
             F.col("security_name").alias("sec_security_name"),
             F.col("currency_code").alias("sec_currency_code"),
+            F.col("isin").alias("sec_isin"),
         )
     )
-    print(f"[INFO] Security master records for currency lookup: {sec_df.count()}")
+    print(f"[INFO] Security master records for currency/dedup lookup: {sec_df.count()}")
 
-    # Step 2: LEFT JOIN security master to fill missing currency_code
-    # COALESCE: use GMP-provided currency first; fall back to security master;
-    # leave as empty string if neither is available (page will show disabled icon).
+    # Step 2: LEFT JOIN security master on security_label = security_name
+    # This gives us:
+    #   - is_canonical = 1 if this label is the canonical name in security master
+    #   - sec_currency_code for enrichment
     enriched_df = (
         stg_df
         .join(sec_df, stg_df["security_label"] == sec_df["sec_security_name"], how="left")
+        .withColumn(
+            "is_canonical",
+            F.when(F.col("sec_security_name").isNotNull(), F.lit(1)).otherwise(F.lit(0))
+        )
         .withColumn(
             "resolved_currency_code",
             F.when(
@@ -146,6 +162,38 @@ def merge_equity_prices(spark, kudu_master, batch_id=None, dry_run=False):
             )
         )
     )
+
+    # Step 2b: Dedup — for rows sharing the same (isin, price_date), keep only
+    # the canonical name. For rows with no ISIN, pass through unchanged.
+    from pyspark.sql.window import Window
+
+    # Only dedup rows that have a non-null, non-empty ISIN
+    has_isin = enriched_df.filter(
+        F.col("isin").isNotNull() & (F.trim(F.col("isin")) != "")
+    )
+    no_isin = enriched_df.filter(
+        F.col("isin").isNull() | (F.trim(F.col("isin")) == "")
+    )
+
+    # Within each (isin, price_date) group rank: canonical first, then longest label
+    isin_window = Window.partitionBy("isin", "price_date").orderBy(
+        F.col("is_canonical").desc(),
+        F.length(F.col("security_label")).desc()
+    )
+    deduped_isin = (
+        has_isin
+        .withColumn("_rank", F.row_number().over(isin_window))
+        .filter(F.col("_rank") == 1)
+        .drop("_rank")
+    )
+
+    before_dedup = has_isin.count()
+    after_dedup = deduped_isin.count()
+    if before_dedup != after_dedup:
+        print(f"[INFO] Dedup removed {before_dedup - after_dedup} duplicate alias rows "
+              f"(same ISIN + date, non-canonical security name)")
+
+    enriched_df = deduped_isin.union(no_isin)
 
     missing_ccy = enriched_df.filter(
         F.col("resolved_currency_code").isNull() | (F.trim(F.col("resolved_currency_code")) == "")
