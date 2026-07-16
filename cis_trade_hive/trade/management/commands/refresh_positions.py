@@ -650,7 +650,8 @@ class Command(BaseCommand):
                         dividend_fc, dividend_lc,
                         uncall_fc, uncall_lc,
                         pipeline_fc, pipeline_lc,
-                        position_type, isin, source_table, is_latest
+                        position_type, isin, source_table, is_latest,
+                        processing_timestamp
                     ) VALUES (
                         {pid}, {vid},
                         '{port}', '{sec}', '{basis}', '{pos_date}',
@@ -665,7 +666,8 @@ class Command(BaseCommand):
                         {_fv(row.get('dividend_fc'))}, {_fv(row.get('dividend_lc'))},
                         {_fv(row.get('uncall_fc'))}, {_fv(row.get('uncall_lc'))},
                         {_fv(row.get('pipeline_fc'))}, {_fv(row.get('pipeline_lc'))},
-                        '{ptype}', {isin_val}, {src_tbl}, false
+                        '{ptype}', {isin_val}, {src_tbl}, false,
+                        {f"'{self._escape(row['processing_timestamp'])}'" if row.get('processing_timestamp') else 'NULL'}
                     )
                     """,
                     database=DATABASE
@@ -737,7 +739,8 @@ class Command(BaseCommand):
                 f"{fc(position.get('dividend_fc'))}, {lc(position.get('dividend_lc'))}, "
                 f"{fc(position.get('uncall_fc'))}, {lc(position.get('uncall_lc'))}, "
                 f"{fc(position.get('pipeline_fc'))}, {lc(position.get('pipeline_lc'))}, "
-                f"'{position_type}', {isin_val}, {src_tbl}, true)"
+                f"'{position_type}', {isin_val}, {src_tbl}, true, "
+                f"'{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}')"
             )
 
         col_list = """(
@@ -755,7 +758,7 @@ class Command(BaseCommand):
             dividend_fc, dividend_lc,
             uncall_fc, uncall_lc,
             pipeline_fc, pipeline_lc,
-            position_type, isin, source_table, is_latest
+            position_type, isin, source_table, is_latest, processing_timestamp
         )"""
 
         # Delete any existing EOD/CORR rows for the same natural keys before inserting.
@@ -856,7 +859,7 @@ class Command(BaseCommand):
                     uncall_fc, uncall_lc,
                     pipeline_fc, pipeline_lc,
                     position_type,
-                    isin, source_table
+                    isin, source_table, processing_timestamp
                 ) VALUES (
                     {new_position_id}, {version_id},
                     '{portfolio}',
@@ -878,7 +881,8 @@ class Command(BaseCommand):
                     {_fc(position.get('pipeline_fc'))}, {_lc(position.get('pipeline_lc'))},
                     'EOD',
                     {f"'{self._escape(position['isin'])}'" if position.get('isin') else 'NULL'},
-                    {f"'{self._escape(position['source_table'])}'" if position.get('source_table') else 'NULL'}
+                    {f"'{self._escape(position['source_table'])}'" if position.get('source_table') else 'NULL'},
+                    '{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}'
                 )
             """
 

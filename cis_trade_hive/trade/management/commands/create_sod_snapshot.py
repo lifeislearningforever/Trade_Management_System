@@ -332,7 +332,7 @@ class Command(BaseCommand):
                     dividend_fc, dividend_lc,
                     uncall_fc, uncall_lc,
                     pipeline_fc, pipeline_lc,
-                    position_type, isin, source_table
+                    position_type, isin, source_table, processing_timestamp
                 FROM {DATABASE}.cis_position
                 WHERE position_type = 'EOD'
                   AND position_date  = '{eod_date}'
@@ -615,7 +615,8 @@ class Command(BaseCommand):
                         dividend_fc, dividend_lc,
                         uncall_fc, uncall_lc,
                         pipeline_fc, pipeline_lc,
-                        position_type, isin, source_table, is_latest
+                        position_type, isin, source_table, is_latest,
+                        processing_timestamp
                     ) VALUES (
                         {pid}, {vid},
                         '{port}', '{sec}', '{basis}', '{pos_date}',
@@ -630,7 +631,8 @@ class Command(BaseCommand):
                         {_fv(row.get('dividend_fc'))}, {_fv(row.get('dividend_lc'))},
                         {_fv(row.get('uncall_fc'))}, {_fv(row.get('uncall_lc'))},
                         {_fv(row.get('pipeline_fc'))}, {_fv(row.get('pipeline_lc'))},
-                        '{ptype}', {isin_val}, {src_tbl}, false
+                        '{ptype}', {isin_val}, {src_tbl}, false,
+                        {f"'{self._escape(row['processing_timestamp'])}'" if row.get('processing_timestamp') else 'NULL'}
                     )
                     """,
                     database=DATABASE
@@ -700,7 +702,7 @@ class Command(BaseCommand):
             dividend_fc, dividend_lc,
             uncall_fc, uncall_lc,
             pipeline_fc, pipeline_lc,
-            position_type, isin, source_table, is_latest
+            position_type, isin, source_table, is_latest, processing_timestamp
         )"""
 
         def _val(v, default=0):
@@ -755,7 +757,7 @@ class Command(BaseCommand):
                 f"{_val(row.get('dividend_fc'))}, {_val(row.get('dividend_lc'))}, "
                 f"{_val(row.get('uncall_fc'))}, {_val(row.get('uncall_lc'))}, "
                 f"{_val(row.get('pipeline_fc'))}, {_val(row.get('pipeline_lc'))}, "
-                f"'SOD', {isin_val}, {src_tbl}, true)"
+                f"'SOD', {isin_val}, {src_tbl}, true, '{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}')"
             )
 
         total = 0
