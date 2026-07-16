@@ -63,6 +63,8 @@ DATABASE = 'gmp_cis'
 
 ALL_SOURCES = ['CIS', 'GMP', 'AMSICEQ', 'USER_UPLOAD']
 
+AVP_PRECISION = 8  # average cost is price-per-unit, not an amount — always 8 dp
+
 
 class Command(BaseCommand):
     help = 'EOD revaluation: refresh market values for all positions in cis_position (golden copy)'
@@ -402,7 +404,7 @@ class Command(BaseCommand):
 
             if fx_rate_date and pos_date_str and fx_rate_date >= pos_date_str:
                 # Latest FX rate is as-of or after the trade date — use it
-                average_cost_lc = round(average_cost_fc * fx_rate, lc_dp)
+                average_cost_lc = round(average_cost_fc * fx_rate, AVP_PRECISION)
                 cost_lc_write   = round(cost_fc_dec * fx_rate, lc_dp)
             else:
                 # Latest FX rate predates the trade — keep as-traded LC
@@ -725,8 +727,8 @@ class Command(BaseCommand):
                 f"'{portfolio}', '{security}', '{pos_basis}', '{pos_date}', "
                 f"'{src_sys}', '{proc_date}', "
                 f"{float(position.get('quantity') or 0)}, "
-                f"{fc(position.get('average_cost_fc'))}, {fc(position.get('cost_fc'))}, "
-                f"{float(round(avg_cost_lc, lc_dp))}, {float(round(cost_lc_write, lc_dp))}, "
+                f"{float(round(Decimal(str(position.get('average_cost_fc') or 0)), AVP_PRECISION))}, {fc(position.get('cost_fc'))}, "
+                f"{float(round(avg_cost_lc, AVP_PRECISION))}, {float(round(cost_lc_write, lc_dp))}, "
                 f"{float(round(mkt_fc, fc_dp))}, {float(round(mkt_lc, lc_dp))}, "
                 f"{float(round(nbv_fc, fc_dp))}, {float(round(nbv_lc, lc_dp))}, "
                 f"{float(round(upnl_fc, fc_dp))}, {float(round(upnl_lc, lc_dp))}, "
@@ -864,8 +866,8 @@ class Command(BaseCommand):
                     '{self._escape(position.get('src_system', 'CIS'))}',
                     '{processing_date}',
                     {float(position.get('quantity') or 0)},
-                    {_fc(position.get('average_cost_fc'))}, {_fc(position.get('cost_fc'))},
-                    {float(round(average_cost_lc, lc_dp))}, {float(round(cost_lc_write, lc_dp))},
+                    {float(round(Decimal(str(position.get('average_cost_fc') or 0)), AVP_PRECISION))}, {_fc(position.get('cost_fc'))},
+                    {float(round(average_cost_lc, AVP_PRECISION))}, {float(round(cost_lc_write, lc_dp))},
                     {float(round(market_value_fc, fc_dp))}, {float(round(market_value_lc, lc_dp))},
                     {float(round(nbv_fc, fc_dp))}, {float(round(nbv_lc, lc_dp))},
                     {float(round(unrealized_pnl_fc, fc_dp))}, {float(round(unrealized_pnl_lc, lc_dp))},
