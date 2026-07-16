@@ -227,9 +227,57 @@ def merge_securities(spark, kudu_master: str, batch_id=None, dry_run=False):
     new_df   = joined.filter(F.col("reg.security_id").isNull())
 
     known_count = known_df.count()
-    new_count   = new_df.count()
     print(f"[INFO] Known (registry hit):  {known_count}")
-    print(f"[INFO] New   (no registry entry): {new_count}")
+    print(f"[INFO] New   (no registry entry, pre-dedup): {new_df.count()}")
+
+    # ------------------------------------------------------------------
+    # 4b. ISIN dedup: for GMP "new" rows that have an ISIN, check whether
+    #     cis_security_kudu already has a CIS row with the same ISIN.
+    #     If so, skip — we do NOT create a duplicate GMP security record.
+    #     The trade label (e.g. "ANET UN") resolves to the CIS security
+    #     via the counterparty/security label mapping, not via a duplicate row.
+    # ------------------------------------------------------------------
+    existing_cis = kudu_read(spark, kudu_master, KUDU_SECURITY) \
+        .filter(F.col("src_system") == "CIS") \
+        .filter(F.col("isin").isNotNull() & (F.trim(F.col("isin")) != "")) \
+        .select(F.upper(F.trim(F.col("isin"))).alias("cis_isin")) \
+        .distinct() \
+        .cache()
+
+    cis_isin_count = existing_cis.count()
+    print(f"[INFO] Existing CIS securities with ISIN: {cis_isin_count}")
+
+    new_with_isin    = new_df.filter(
+        F.col("stg.isin").isNotNull() & (F.trim(F.col("stg.isin")) != "")
+    )
+    new_without_isin = new_df.filter(
+        F.col("stg.isin").isNull() | (F.trim(F.col("stg.isin")) == "")
+    )
+
+    # Anti-join: keep only GMP new rows whose ISIN does NOT exist in CIS
+    new_isin_not_in_cis = new_with_isin.alias("gmp").join(
+        existing_cis.alias("cis"),
+        F.upper(F.trim(F.col("gmp.stg.isin"))) == F.col("cis.cis_isin"),
+        "left_anti"
+    )
+
+    # GMP rows that duplicate a CIS ISIN — log and skip
+    new_isin_duplicate_cis = new_with_isin.alias("gmp").join(
+        existing_cis.alias("cis"),
+        F.upper(F.trim(F.col("gmp.stg.isin"))) == F.col("cis.cis_isin"),
+        "inner"
+    )
+    dup_count = new_isin_duplicate_cis.count()
+    if dup_count > 0:
+        print(f"[INFO] Skipping {dup_count} GMP security(ies) — ISIN already exists in CIS:")
+        new_isin_duplicate_cis.select(
+            F.col("stg.security_name"), F.col("stg.isin"), F.col("stg.exchange_code")
+        ).show(50, truncate=False)
+
+    # Recombine: truly-new = no ISIN match in CIS + records without ISIN
+    new_df    = new_isin_not_in_cis.unionByName(new_without_isin)
+    new_count = new_df.count()
+    print(f"[INFO] New   (after CIS ISIN dedup): {new_count}")
 
     # ------------------------------------------------------------------
     # 5. Allocate IDs for new records
