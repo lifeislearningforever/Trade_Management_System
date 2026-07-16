@@ -430,9 +430,10 @@ SELECT
     FROM_UNIXTIME(UNIX_TIMESTAMP())                     AS updated_at
 FROM gmp_cis.gmp_cis_sta_dly_equity_prices eq
 LEFT JOIN gmp_cis.gmp_cis_sta_dly_security seu
-    ON eq.security = seu.security_label
+    ON  eq.security          = seu.security_label
+    AND eq.processing_date   = seu.processing_date   -- prevent fan-out across dates
 LEFT JOIN gmp_cis.cis_security_kudu s
-    ON eq.security = s.security_name          -- join on full name to get currency
+    ON eq.security = s.security_name                 -- join on full name to get currency
 WHERE eq.processing_date = '20260302'
   AND eq.security NOT LIKE '%LOG DEL%'
   AND eq.security IN ('YNSMK 7 1/2 PERP', 'YNSMK 7.5 050673')
