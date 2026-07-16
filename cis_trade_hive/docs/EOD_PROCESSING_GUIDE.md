@@ -1,24 +1,30 @@
 # CIS Trade Hive — EOD Processing Guide
 
-**Version:** 1.1  
-**Updated:** 2026-06-10  
+**Version:** 1.2  
+**Updated:** 2026-07-16  
 **Database:** `gmp_cis` (Apache Kudu via Impala)
 
 ---
 
 ## Overview
 
-The EOD (End of Day) process runs in four sequential stages every business day:
+The EOD (End of Day) process runs in six sequential stages every business day:
 
 ```
-Stage 0: GMP CA Sync     → pull corporate actions from GMP source table into CIS
-Stage 1: CA Processing   → generate cash flows from queued CA events
-Stage 2: Cash Flow Apply → apply approved cash flows to positions
-Stage 3: Position Reval  → refresh market values in cis_position (golden copy)
+Stage 0: GMP CA Sync        → pull corporate actions from GMP source table into CIS
+Stage 1: CA Processing      → generate cash flows from queued CA events
+Stage 2: Cash Flow Apply    → apply approved cash flows to positions
+Stage 3: Trade Settlement   → process T+1/T+2 trades settling today into cis_trade_position
+Stage 4: Position Reval     → refresh market values in cis_position (golden copy)
+Stage 5: SOD Snapshot       → copy today's EOD rows forward as tomorrow's start-of-day
 ```
 
 Each stage must complete successfully before the next begins.  
 All stages support `--dry-run` for safe preview before writing.
+
+> **Date note:** Stages 2, 3, 4 and 5 infer the target date from `gmp_cis_sta_dly_alldatesinfo`
+> when no date is supplied. For backdated / manual runs always pass the date flag explicitly
+> (see [Manual / Backdated EOD Run](#manual--backdated-eod-run)).
 
 ### Full pipeline
 
@@ -34,8 +40,12 @@ cis_ca_cash_flow_queue                    status='PENDING'
 cis_cash_flow                             one entry per portfolio holding the security
     ↓  process_approved_cashflows
 cis_trade_position                        new version row per cash flow applied
+    ↓  process_settlements
+cis_trade_position                        T+1/T+2 settled trades applied to CIS ledger
     ↓  refresh_positions
 cis_position  (golden copy)               position_type='EOD', all sources revalued
+    ↓  create_sod_snapshot
+cis_position                              position_type='SOD', ready for next business day
 ```
 
 ---
@@ -342,7 +352,75 @@ GROUP BY trade_type;
 
 ---
 
-## Stage 3 — Position Revaluation (`refresh_positions`)
+## Stage 3 — Trade Settlement (`process_settlements`)
+
+### What it does
+
+Processes pending entries from `cis_settlement_queue` for trades that have reached their settlement date (T+1 / T+2 trades booked earlier). For each pending entry it calls `settlement_service.process_pending_settlements` which applies the trade's BUY/SELL effect to `cis_trade_position` (CIS working ledger) — the same AVP formula used at trade creation.
+
+This is separate from the SOD settlement mechanism in `create_sod_snapshot`. `process_settlements` writes the CIS ledger (`cis_trade_position`); the SOD snapshot folds those results into the golden copy (`cis_position`) the next morning.
+
+### Queue status flow
+
+```
+PENDING → COMPLETED
+        → FAILED  (logged, queue entry stays for investigation)
+```
+
+### Command
+
+```bash
+# Preview — show pending settlements for today
+python manage.py process_settlements --dry-run
+
+# Standard run — process all pending settlements for today
+python manage.py process_settlements
+
+# Process settlements for a specific date (backdated run)
+python manage.py process_settlements --date 2026-03-02
+
+# Verbose output (shows each settlement as it is processed)
+python manage.py process_settlements --verbose
+
+# Backfill: repair missing queue entries from migrated trades
+python manage.py process_settlements --backfill-queue
+
+# Control batch size (default: 100)
+python manage.py process_settlements --batch-size 200
+```
+
+> **Date flag:** uses `--date` (not `--position-date`). Default: today's date (`datetime.now()`).
+> It does **not** read from `alldatesinfo` — always defaults to today unless you pass `--date`.
+
+### Tables touched
+
+| Table | Operation |
+|---|---|
+| `cis_settlement_queue` | READ (PENDING entries for settle_date), UPDATE status → `COMPLETED` / `FAILED` |
+| `cis_trade` | READ (to get `total_amount_lc` for NON-REVAL portfolios) |
+| `cis_trade_position` | UPSERT (new AVP position version per settled trade) |
+
+### Verify
+
+```sql
+-- Pending settlements remaining after run (should be 0)
+SELECT status, COUNT(*) AS cnt
+FROM gmp_cis.cis_settlement_queue
+WHERE settle_date = '2026-03-02'
+GROUP BY status;
+
+-- Positions written by settlement today
+SELECT portfolio_short_name, security_label, quantity, average_cost_fc, position_date
+FROM gmp_cis.cis_trade_position
+WHERE updated_by = 'SYSTEM'
+  AND position_date = '2026-03-02'
+ORDER BY updated_at DESC
+LIMIT 20;
+```
+
+---
+
+## Stage 4 — Position Revaluation (`refresh_positions`)
 
 ### What it does
 
@@ -449,6 +527,81 @@ WHERE s.security_investment IN ('ASSOC', 'SUBSI')
 
 ---
 
+## Stage 5 — SOD Snapshot (`create_sod_snapshot`)
+
+### What it does
+
+Creates Start-of-Day (SOD) position rows in `cis_position` for the **next business day** by:
+
+1. Reading today's `EOD` rows from `cis_position` (the golden copy written by `refresh_positions`)
+2. Applying any `PENDING` entries in `cis_settlement_queue` whose `settle_date = contextual_today` — so the SOD already reflects T+1/T+2 trades settling today (avoiding a separate INT position pass the next morning)
+3. Writing the merged result as `position_type='SOD'` with the next business day as `position_date`
+4. Marking the processed settlement queue entries as `COMPLETED`
+
+> **Run order:** `create_sod_snapshot` must run **after** `refresh_positions`. It reads the EOD rows
+> written by Stage 4. Running it before Stage 4 will snapshot stale INT/SOD rows instead.
+
+### Date logic
+
+Dates are read from `gmp_cis_sta_dly_alldatesinfo` (no date flag available):
+
+| Field | Source column | Example | Meaning |
+|---|---|---|---|
+| `eod_date` (source) | `prev_day` | `20260226` | Previous business day — where EOD rows come from |
+| `sod_date` (target) | `contextual_today` | `20260302` | Next business day — SOD rows written here |
+
+There is **no `--date` flag** on this command. To run for a non-standard date you must update `alldatesinfo` or run it on the correct calendar day.
+
+### Idempotency
+
+The command deletes any existing SOD rows for `sod_date` before inserting, so it is safe to re-run.
+
+### Command
+
+```bash
+# Preview — show what would be written (no DB changes)
+python manage.py create_sod_snapshot --dry-run
+
+# Standard run — copy EOD → SOD for next business day
+python manage.py create_sod_snapshot
+
+# Limit to one portfolio
+python manage.py create_sod_snapshot --portfolio UOB-SG-TRADING
+
+# Limit to one source system
+python manage.py create_sod_snapshot --source CIS
+python manage.py create_sod_snapshot --source GMP
+```
+
+### Tables touched
+
+| Table | Operation |
+|---|---|
+| `gmp_cis_sta_dly_alldatesinfo` | READ (`contextual_today`, `prev_day`) |
+| `cis_position` | READ (EOD rows for `prev_day`), DELETE (existing SOD for `sod_date`), UPSERT (new SOD rows) |
+| `cis_settlement_queue` | READ (PENDING entries for `sod_date`), UPDATE → `COMPLETED` / `FAILED` |
+| `cis_trade` | READ (join for `total_amount_lc` — NON-REVAL portfolios) |
+| `cis_portfolio` | READ (`revaluation_status` — REVALUED vs NON-REVALUED) |
+
+### Verify
+
+```sql
+-- SOD rows written for next business day
+SELECT src_system, COUNT(*) AS rows, SUM(quantity) AS total_qty
+FROM gmp_cis.cis_position
+WHERE position_type = 'SOD'
+  AND position_date = '2026-03-02'   -- replace with sod_date
+GROUP BY src_system;
+
+-- Settlement queue entries processed by SOD run
+SELECT status, COUNT(*)
+FROM gmp_cis.cis_settlement_queue
+WHERE settle_date = '2026-03-02'
+GROUP BY status;
+```
+
+---
+
 ## Full EOD Run — Step by Step
 
 ```bash
@@ -492,14 +645,79 @@ python manage.py process_approved_cashflows --dry-run
 # 2b. Run
 python manage.py process_approved_cashflows
 
-# ── STAGE 3: Position Revaluation ───────────────────────────────────────────
+# ── STAGE 3: Trade Settlement ────────────────────────────────────────────────
 
-# 3a. Preview
-python manage.py refresh_positions --dry-run
+# 3a. Preview — show pending T+1/T+2 settlements settling today
+python manage.py process_settlements --dry-run
 
 # 3b. Run
+python manage.py process_settlements
+
+# ── STAGE 4: Position Revaluation ───────────────────────────────────────────
+
+# 4a. Preview
+python manage.py refresh_positions --dry-run
+
+# 4b. Run
 python manage.py refresh_positions
+
+# ── STAGE 5: SOD Snapshot ───────────────────────────────────────────────────
+
+# 5a. Preview — show what EOD rows would be copied as SOD
+python manage.py create_sod_snapshot --dry-run
+
+# 5b. Run — copies today's EOD rows as tomorrow's SOD baseline
+python manage.py create_sod_snapshot
 ```
+
+---
+
+## Manual / Backdated EOD Run
+
+Use this when you need to run EOD for a past date (e.g. 2026-03-02) while `alldatesinfo` still
+reflects a different date. Always pass the date explicitly on every stage.
+
+> **Why explicit dates matter:** Stages 2, 4, and the CA commands read `alldatesinfo.reporting_date`
+> when no date is supplied. If that table still shows 2026-02-27, every command will default to
+> 27th Feb — wrong positions, wrong cutoffs.
+> `process_settlements` defaults to today's calendar date (not alldatesinfo), so pass `--date` there too.
+> `create_sod_snapshot` has **no date flag** — it always reads from `alldatesinfo`.
+
+```bash
+export TARGET=2026-03-02   # the date you are running for
+
+# ── STAGE 0: GMP CA Sync ────────────────────────────────────────────────────
+python manage.py sync_gmp_corporate_actions --date $TARGET
+
+# ── STAGE 1: CA Cash Flow Processing ────────────────────────────────────────
+python manage.py process_corporate_actions --date $TARGET
+
+# ── STAGE 2: Cash Flow Application ──────────────────────────────────────────
+python manage.py process_approved_cashflows --position-date $TARGET
+
+# ── STAGE 3: Trade Settlement ────────────────────────────────────────────────
+python manage.py process_settlements --date $TARGET
+
+# ── STAGE 4: Position Revaluation ───────────────────────────────────────────
+python manage.py refresh_positions --position-date $TARGET
+
+# ── STAGE 5: SOD Snapshot ───────────────────────────────────────────────────
+# No date flag — update alldatesinfo to have contextual_today=$TARGET first,
+# or run create_sod_snapshot on the correct calendar day.
+python manage.py create_sod_snapshot --dry-run   # verify before running live
+python manage.py create_sod_snapshot
+```
+
+### Date flags quick reference
+
+| Command | Date flag | Default when omitted |
+|---|---|---|
+| `sync_gmp_corporate_actions` | `--date YYYY-MM-DD` | Latest `processing_date` in GMP source |
+| `process_corporate_actions` | `--date YYYY-MM-DD` | All PENDING entries (no date filter) |
+| `process_approved_cashflows` | `--position-date YYYY-MM-DD` | `alldatesinfo.reporting_date` (T-1) |
+| `process_settlements` | `--date YYYY-MM-DD` | Today's calendar date |
+| `refresh_positions` | `--position-date YYYY-MM-DD` | `alldatesinfo.reporting_date` (T-1) |
+| `create_sod_snapshot` | *(no flag)* | Always reads `alldatesinfo` |
 
 ---
 
@@ -533,7 +751,7 @@ python manage.py refresh_positions --source AMSICEQ
 ### Backdate cash flow processing
 
 ```bash
-python manage.py process_approved_cashflows --date 2026-06-01
+python manage.py process_approved_cashflows --position-date 2026-06-01
 ```
 
 ### Re-process already-applied cash flows (corrections)
@@ -546,6 +764,27 @@ python manage.py process_approved_cashflows --reprocess --portfolio UOB-SG-TRADI
 
 ```bash
 python manage.py process_corporate_actions --retry-failed
+```
+
+### Re-process settlements for a specific date
+
+```bash
+python manage.py process_settlements --date 2026-03-02 --dry-run
+python manage.py process_settlements --date 2026-03-02
+```
+
+### Backfill missing settlement queue entries (after bulk trade migration)
+
+```bash
+python manage.py process_settlements --backfill-queue --dry-run
+python manage.py process_settlements --backfill-queue
+```
+
+### Re-run SOD snapshot for one portfolio
+
+```bash
+python manage.py create_sod_snapshot --portfolio UOB-SG-TRADING --dry-run
+python manage.py create_sod_snapshot --portfolio UOB-SG-TRADING
 ```
 
 ---
@@ -561,9 +800,14 @@ python manage.py process_corporate_actions --retry-failed
 | Stage 1: entries stuck in `PROCESSING` | Previous run crashed mid-flight | Run `--reset-stuck` then re-run |
 | Stage 1: CA inserted but not queued | CA type not in cash-flow or position-adjustment list | Check `ca_cash_flow_service.CASH_FLOW_CA_TYPES` — add the type if it should generate cash flows |
 | Stage 2: `No open SETTLE_DATE position for X/Y` | Trade not yet settled or wrong position_basis | `SELECT * FROM cis_trade_position WHERE portfolio_short_name='X' AND security_label='Y' AND position_basis='SETTLE_DATE' AND status='OPEN'` |
-| Stage 2: cash flow applied twice | `--reprocess` used unintentionally | Check `position_updated` flag; do not use `--reprocess` in normal EOD |
-| Stage 3: position skipped (no price) | Missing entry in `cis_equity_price` | Load price via market data feed; check `cis_security_kudu.price` as fallback |
-| Stage 3: ASSOC/SUBSI showing non-zero P&L | `security_investment` not set on security master | `UPDATE cis_security_kudu SET security_investment='ASSOC' WHERE security_label='X'` |
+| Stage 2: cash flow applied twice | `--reprocess` used unintentionally | Check `cf_processed` flag; do not use `--reprocess` in normal EOD |
+| Stage 2/4 using wrong date (e.g. 27th Feb instead of 2nd Mar) | `alldatesinfo.reporting_date` not updated yet | Always pass `--position-date YYYY-MM-DD` explicitly for manual/backdated runs |
+| Stage 3: `No pending settlements found` | No T+1/T+2 trades settling on that date | Expected — skip Stage 3 if settlement queue is empty for the target date |
+| Stage 3: settlement queue entry stuck as PENDING | `process_settlements` didn't run or failed | Check logs; re-run `python manage.py process_settlements --date YYYY-MM-DD` |
+| Stage 4: position skipped (no price) | Missing entry in `cis_equity_price` | Load price via market data feed; check `cis_security_kudu.price` as fallback |
+| Stage 4: ASSOC/SUBSI showing non-zero P&L | `security_investment` not set on security master | `UPDATE cis_security_kudu SET security_investment='ASSOC' WHERE security_label='X'` |
+| Stage 5: `No EOD rows found for position_date=X` | `refresh_positions` (Stage 4) not yet run | Run Stage 4 first; SOD reads `position_type='EOD'` rows |
+| Stage 5: SOD date wrong (e.g. still 27th Feb) | `alldatesinfo.contextual_today` not updated | SOD has no date flag — update `alldatesinfo` or run on the correct calendar day |
 | Impala connection fails | Docker container stopped (local dev) | `docker start kudu-impala && python manage.py test_hive` |
 
 ---
@@ -576,8 +820,9 @@ python manage.py process_corporate_actions --retry-failed
 | `cis_corporate_actions` | CA master — all sources | `sync_gmp_corporate_actions` (GMP), CIS UI (manual) |
 | `cis_ca_cash_flow_queue` | CA processing queue | `sync_gmp_corporate_actions`, `ca_cash_flow_service` |
 | `cis_cash_flow` | Cash flow ledger (CA + manual) | `process_corporate_actions` (CA), UI (manual) |
-| `cis_trade_position` | CIS trade working ledger (versioned) | `position_service`, `process_approved_cashflows` |
-| `cis_position` | **Golden copy — all sources** | `refresh_positions` (EOD), upload jobs |
+| `cis_trade_position` | CIS trade working ledger (versioned) | `position_service`, `process_approved_cashflows`, `process_settlements` |
+| `cis_settlement_queue` | T+1/T+2 trade settlement queue | `position_service` (at trade booking), `process_settlements`, `create_sod_snapshot` |
+| `cis_position` | **Golden copy — all sources** | `refresh_positions` (EOD), `create_sod_snapshot` (SOD), upload jobs |
 | `cis_equity_price` | Market price feed | Market data load jobs |
 | `cis_security_kudu` | Security master (incl. `security_investment`) | Security module |
 
@@ -592,7 +837,10 @@ python manage.py process_corporate_actions --retry-failed
 | `COMMITTED` | Upload / manual | PE/VC committed capital |
 | `PIPELINE` | Upload / manual | Pending / pipeline position |
 | `HEDGE` | Upload / manual | Hedging position |
-| `EOD` | `refresh_positions` | Position after EOD revaluation |
+| `INT` | `process_approved_cashflows` | Intra-day position version after cash flow applied |
+| `EOD` | `refresh_positions` | Position after EOD market revaluation |
+| `SOD` | `create_sod_snapshot` | Start-of-day baseline for next business day |
+| `CORR` | `refresh_positions --run-type CORR` | Month-end correction run position |
 
 ---
 
