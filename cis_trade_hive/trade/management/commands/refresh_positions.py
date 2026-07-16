@@ -1012,4 +1012,4 @@ class Command(BaseCommand):
     def _escape(self, value):
         if value is None:
             return ''
-        return str(value).replace("\\", "\\\\").replace("'", "\\'")
+        return str(value).replace("'", "''")

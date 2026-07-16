@@ -713,11 +713,11 @@ class Command(BaseCommand):
             INT, EOD, SOD for the same natural key share the same position_id
             and coexist via the composite PK (position_id, position_type).
             """
-            p = portfolio.replace("'", "\\'")
-            s = security.replace("'", "\\'")
-            b = basis.replace("'", "\\'")
+            p = portfolio.replace("'", "''")
+            s = security.replace("'", "''")
+            b = basis.replace("'", "''")
             d = date
-            sy = src.replace("'", "\\'")
+            sy = src.replace("'", "''")
             return (
                 f"ABS(CAST(fnv_hash(CONCAT_WS('|', "
                 f"'{p}', '{s}', '{b}', '{d}', '{sy}'"
@@ -839,7 +839,7 @@ class Command(BaseCommand):
     def _escape(value):
         if value is None:
             return ''
-        return str(value).replace('\\', '\\\\').replace("'", "\\'")
+        return str(value).replace("'", "''")
 
     @staticmethod
     def _to_iso(yyyymmdd):

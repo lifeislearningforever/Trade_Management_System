@@ -88,7 +88,7 @@ AVP_PRECISION = 8  # average cost is price-per-unit, not an amount
 def _escape(value: str) -> str:
     if value is None:
         return ''
-    return str(value).replace("\\", "\\\\").replace("'", "\\'")
+    return str(value).replace("'", "''")
 
 
 def _sign(send_receive: str, cf_number: str) -> Decimal:
