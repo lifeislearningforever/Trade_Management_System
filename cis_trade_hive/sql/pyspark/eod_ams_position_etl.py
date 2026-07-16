@@ -457,18 +457,17 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
 
     if table == 'gmp_cis_sta_dly_position':
         # GMP daily position — columns have m_* prefix.
-        # m_security_code is GMP's short Bloomberg-style code (e.g. "ANET UN").
-        # It is NOT a real ISIN — map it to BOTH isin AND ticker so that:
-        #   Step 3 tries isin match (will fail for non-ISIN codes, harmless)
-        #   Step 4 Tier 2 tries ticker match (will find existing CIS security
-        #     whose ticker = "ANET UN" and avoid creating a duplicate)
+        # m_security_code  = real ISIN (e.g. "US0404132054") — used for Step 3 ISIN match.
+        # m_security_display_label = Bloomberg short code (e.g. "ANET UN") — used for
+        #   Step 4 Tier 1 short_name match against cis_security.security_name.
+        # No ticker column — Step 4 Tier 2 is not used for GMP.
         return f"""
             SELECT
                 m_cis_pfolio                                            AS portfolio,
                 m_security_full_name                                    AS security_full_name,
                 m_security_display_label                                AS security_short_name,
                 m_security_code                                         AS isin,
-                m_security_code                                         AS ticker,
+                NULL                                                    AS ticker,
                 {safe_decimal('m_quantity', 'DECIMAL(30,8)')}          AS quantity,
                 {safe_decimal('m_outstanding_shares', 'DECIMAL(30,8)')} AS shares_outstanding,
                 CAST(NULL AS DECIMAL(30,8))                             AS shares_issued,
