@@ -594,7 +594,7 @@
                             {% endif %}
                         </td>
                         <td class="text-end num">{{ p.quantity|default:0|floatformat:4|intcomma }}</td>
-                        <td class="text-end num">{{ p.average_cost_fc|default:0|floatformat:4|intcomma }}</td>
+                        <td class="text-end num">{{ p.average_cost_fc|default:0|floatformat:8|intcomma }}</td>
                         <td class="text-end num">{{ p.cost_fc|default:0|floatformat:2|intcomma }}</td>
                         <td class="text-end num">{{ p.cost_lc|default:0|floatformat:2|intcomma }}</td>
                         <td class="text-end num fw-semibold">{{ p.market_value_fc|default:0|floatformat:2|intcomma }}</td>

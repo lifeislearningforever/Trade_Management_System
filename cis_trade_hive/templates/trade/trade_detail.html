@@ -220,7 +220,7 @@
                         </div>
                         <div class="col-md-3 mb-3">
                             <label class="form-label text-muted">Price</label>
-                            <div class="fw-bold fs-5">{{ trade.price|floatformat:4|default:"0.0000" }}</div>
+                            <div class="fw-bold fs-5">{{ trade.price|floatformat:8|default:"0.00000000" }}</div>
                         </div>
                     </div>
                     <hr>
@@ -618,7 +618,7 @@
             </div>
             <div class="col-md-2">
                 <label class="form-label text-muted small">Avg Cost</label>
-                <div class="fw-bold">{{ position.average_cost|floatformat:4 }}</div>
+                <div class="fw-bold">{{ position.average_cost|floatformat:8 }}</div>
             </div>
             <div class="col-md-2">
                 <label class="form-label text-muted small">Total Cost</label>
