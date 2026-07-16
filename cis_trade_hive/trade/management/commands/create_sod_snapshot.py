@@ -235,13 +235,13 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING('\nDRY RUN — no changes written'))
             return
 
-        # ── 4. Mark previous EOD rows as is_latest=false ────────────────────
+        # ── 4. EOD rows are NOT touched — is_latest stays as-is ─────────────
         #
-        # SOD moves to a new position_date, so it gets a NEW position_id.
-        # The EOD row from prev_day retains its own position_id and stays in
-        # the table, but is no longer the "current" view — mark it false so
-        # queries filtering is_latest=true skip it in favour of today's SOD.
-        self._mark_eod_not_latest(eod_rows)
+        # EOD is the latest record for its own date (eod_date). SOD is a new
+        # record for sod_date (a different position_date) with its own
+        # position_id. The two rows coexist independently — EOD retains
+        # is_latest=true for eod_date, SOD is inserted with is_latest=true
+        # for sod_date. No need to touch the EOD rows at all.
 
         # ── 5. Delete any existing SOD rows for sod_date (idempotent re-run) ─
         self._delete_existing_sod(sod_date, sources, portfolio_filter)
@@ -307,8 +307,16 @@ class Command(BaseCommand):
     # ── EOD row fetch ─────────────────────────────────────────────────────────
 
     def _get_eod_rows(self, eod_date, sources, portfolio_filter):
-        """Fetch all EOD rows from cis_position for the given date."""
-        src_list   = ', '.join(f"'{self._escape(s)}'" for s in sources)
+        """
+        Fetch the source rows for a given date to copy as SOD.
+
+        Priority per (portfolio, security_label, position_basis, src_system):
+          1. EOD  — written by refresh_positions (preferred — fully priced)
+          2. INT  — written by the ETL (fallback when refresh hasn't run yet)
+
+        When both exist for the same key the EOD row wins via ROW_NUMBER.
+        """
+        src_list    = ', '.join(f"'{self._escape(s)}'" for s in sources)
         port_clause = (
             f"AND portfolio = '{self._escape(portfolio_filter)}'"
             if portfolio_filter else ''
@@ -333,16 +341,24 @@ class Command(BaseCommand):
                     uncall_fc, uncall_lc,
                     pipeline_fc, pipeline_lc,
                     position_type, isin, source_table, processing_timestamp
-                FROM {DATABASE}.cis_position
-                WHERE position_type = 'EOD'
-                  AND position_date  = '{eod_date}'
-                  AND src_system IN ({src_list})
-                  {port_clause}
+                FROM (
+                    SELECT *,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY portfolio, security_label, position_basis, src_system
+                            ORDER BY CASE WHEN position_type = 'EOD' THEN 0 ELSE 1 END
+                        ) AS rn
+                    FROM {DATABASE}.cis_position
+                    WHERE position_type IN ('EOD', 'INT')
+                      AND position_date  = '{eod_date}'
+                      AND src_system IN ({src_list})
+                      {port_clause}
+                ) ranked
+                WHERE rn = 1
                 """,
                 database=DATABASE
             ) or []
         except Exception as e:
-            logger.error(f'Error fetching EOD rows for {eod_date}: {e}')
+            logger.error(f'Error fetching EOD/INT rows for {eod_date}: {e}')
             raise
 
     # ── Settlement queue fetch ────────────────────────────────────────────────
@@ -565,80 +581,6 @@ class Command(BaseCommand):
                 f"for queue_id — skipped"
             )
             return None
-
-    # ── Mark previous EOD rows as is_latest=false ───────────────────────────
-
-    def _mark_eod_not_latest(self, eod_rows: list):
-        """
-        Set is_latest=false on the EOD rows from prev_day.
-
-        SOD introduces a new position_date and therefore a new position_id.
-        The prev_day EOD rows are retained in full for history, but they are
-        no longer the authoritative "current" state — today's SOD rows are.
-
-        Kudu cannot UPDATE in-place, so we re-UPSERT each row with is_latest=false
-        (UPSERT by position_id, the Kudu primary key).
-        """
-        if not eod_rows:
-            return
-        for row in eod_rows:
-            pid      = row.get('position_id')
-            vid      = row.get('version_id')
-            if pid is None:
-                continue
-            port     = self._escape(row.get('portfolio', ''))
-            sec      = self._escape(row.get('security_label', ''))
-            basis    = self._escape(row.get('position_basis', 'TRADED'))
-            pos_date = row.get('position_date', '')
-            src_sys  = self._escape(row.get('src_system', ''))
-            proc_dt  = self._escape(str(row.get('processing_date', '')))
-            isin_val = f"'{self._escape(row['isin'])}'" if row.get('isin') else 'NULL'
-            src_tbl  = f"'{self._escape(row['source_table'])}'" if row.get('source_table') else 'NULL'
-            ptype    = self._escape(row.get('position_type', 'EOD'))
-
-            def _fv(v):
-                return float(v) if v is not None else 0.0
-
-            try:
-                impala_manager.execute_write(
-                    f"""
-                    UPSERT INTO {DATABASE}.cis_position (
-                        position_id, version_id,
-                        portfolio, security_label, position_basis, position_date,
-                        src_system, processing_date, quantity,
-                        average_cost_fc, cost_fc, average_cost_lc, cost_lc,
-                        market_value_fc, market_value_lc,
-                        net_book_value_fc, net_book_value_lc,
-                        unrealized_pnl_fc, unrealized_pnl_lc,
-                        realized_pnl_fc, realized_pnl_lc,
-                        provision_fc, provision_lc,
-                        dividend_fc, dividend_lc,
-                        uncall_fc, uncall_lc,
-                        pipeline_fc, pipeline_lc,
-                        position_type, isin, source_table, is_latest,
-                        processing_timestamp
-                    ) VALUES (
-                        {pid}, {vid},
-                        '{port}', '{sec}', '{basis}', '{pos_date}',
-                        '{src_sys}', '{proc_dt}', {_fv(row.get('quantity'))},
-                        {_fv(row.get('average_cost_fc'))}, {_fv(row.get('cost_fc'))},
-                        {_fv(row.get('average_cost_lc'))}, {_fv(row.get('cost_lc'))},
-                        {_fv(row.get('market_value_fc'))}, {_fv(row.get('market_value_lc'))},
-                        {_fv(row.get('net_book_value_fc'))}, {_fv(row.get('net_book_value_lc'))},
-                        {_fv(row.get('unrealized_pnl_fc'))}, {_fv(row.get('unrealized_pnl_lc'))},
-                        {_fv(row.get('realized_pnl_fc'))}, {_fv(row.get('realized_pnl_lc'))},
-                        {_fv(row.get('provision_fc'))}, {_fv(row.get('provision_lc'))},
-                        {_fv(row.get('dividend_fc'))}, {_fv(row.get('dividend_lc'))},
-                        {_fv(row.get('uncall_fc'))}, {_fv(row.get('uncall_lc'))},
-                        {_fv(row.get('pipeline_fc'))}, {_fv(row.get('pipeline_lc'))},
-                        '{ptype}', {isin_val}, {src_tbl}, false,
-                        {f"'{self._escape(row['processing_timestamp'])}'" if row.get('processing_timestamp') else 'NULL'}
-                    )
-                    """,
-                    database=DATABASE
-                )
-            except Exception as e:
-                logger.error(f'[SOD] Failed to mark EOD position_id={pid} as is_latest=false: {e}')
 
     # ── Delete existing SOD rows ─────────────────────────────────────────────
 
