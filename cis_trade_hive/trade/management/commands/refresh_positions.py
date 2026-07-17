@@ -89,6 +89,12 @@ class Command(BaseCommand):
                  'EOD default: reporting_date from alldatesinfo. '
                  'CORR default: last calendar day of previous month.'
         )
+        parser.add_argument(
+            '--fill-gaps', action='store_true', default=False,
+            dest='fill_gaps',
+            help='Only process positions that have NO existing EOD row for the date. '
+                 'Keeps existing EOD rows untouched; only fills missing ones from SOD/INT.'
+        )
 
     def handle(self, *args, **options):
         portfolio_filter = options.get('portfolio')
@@ -97,6 +103,7 @@ class Command(BaseCommand):
         dry_run          = options.get('dry_run', False)
         run_type         = options.get('run_type', 'EOD')
         position_date    = options.get('position_date')
+        fill_gaps        = options.get('fill_gaps', False)
         today            = datetime.now().strftime('%Y-%m-%d')
 
         # Infer position_date from alldatesinfo when not explicitly supplied
@@ -125,6 +132,10 @@ class Command(BaseCommand):
         self.stdout.write(f"Run date   : {today}  (processing_date stamped on output)")
         self.stdout.write(f"Pos date   : {position_date}  (positions on this date revalued)")
         self.stdout.write(f"Sources    : {', '.join(sources)}")
+        if fill_gaps:
+            self.stdout.write(self.style.WARNING(
+                'Fill-gaps  : ON — only positions with no existing EOD row will be processed'
+            ))
         if portfolio_filter:
             self.stdout.write(f"Portfolio  : {portfolio_filter}")
         if security_filter:
@@ -134,7 +145,9 @@ class Command(BaseCommand):
         processed = updated = skipped = errors = 0
 
         try:
-            positions = self._get_open_positions(portfolio_filter, sources, position_date, security_filter)
+            positions = self._get_open_positions(
+                portfolio_filter, sources, position_date, security_filter, fill_gaps=fill_gaps
+            )
 
             if not positions:
                 self.stdout.write(self.style.WARNING('No positions found'))
@@ -294,7 +307,8 @@ class Command(BaseCommand):
     # Data fetching
     # -------------------------------------------------------------------------
 
-    def _get_open_positions(self, portfolio_filter, sources, position_date=None, security_filter=None):
+    def _get_open_positions(self, portfolio_filter, sources, position_date=None,
+                            security_filter=None, fill_gaps=False):
         """
         Fetch the single best source row per (portfolio, security_label, position_basis).
 
@@ -303,6 +317,9 @@ class Command(BaseCommand):
         - INT missing → fall back to SOD (no new trades today; SOD carries forward yesterday's
           closing position and must still be revalued and published to cis_position_rep).
         - EOD/CORR are never used as source (they are outputs, not inputs).
+
+        fill_gaps=True: excludes natural keys that already have an EOD row for position_date.
+                        Use this to top-up missing EOD rows without touching existing ones.
 
         CORR run: restricts to rows whose position_date equals the supplied month-end date.
         """
@@ -320,6 +337,26 @@ class Command(BaseCommand):
                 f"AND position_date = '{self._escape(position_date)}'"
                 if position_date else ""
             )
+
+            # --fill-gaps: exclude keys that already have an EOD row for this date
+            fill_gaps_join  = ""
+            fill_gaps_where = ""
+            if fill_gaps and position_date:
+                escaped_date = self._escape(position_date)
+                fill_gaps_join = f"""
+                LEFT JOIN (
+                    SELECT DISTINCT portfolio, security_label, position_basis
+                    FROM {DATABASE}.cis_position
+                    WHERE position_type = 'EOD'
+                      AND is_latest     = true
+                      AND position_date = '{escaped_date}'
+                      AND src_system    IN ('{src_list}')
+                ) existing_eod
+                  ON p.portfolio      = existing_eod.portfolio
+                 AND p.security_label = existing_eod.security_label
+                 AND p.position_basis = existing_eod.position_basis
+                """
+                fill_gaps_where = "WHERE existing_eod.portfolio IS NULL"
 
             query = f"""
                 SELECT
@@ -362,6 +399,8 @@ class Command(BaseCommand):
                  AND p.security_label  = latest.security_label
                  AND p.position_basis  = latest.position_basis
                  AND p.position_id     = latest.best_position_id
+                {fill_gaps_join}
+                {fill_gaps_where}
             """
             return impala_manager.execute_query(query, database=DATABASE) or []
         except Exception as e:
