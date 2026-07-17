@@ -709,18 +709,26 @@ class Command(BaseCommand):
             )
 
         def _build_row(idx, row):
-            portfolio = self._escape(row.get('portfolio', ''))
-            security  = self._escape(row.get('security_label', ''))
-            pos_basis = self._escape(row.get('position_basis', 'TRADED'))
-            src_sys   = self._escape(row.get('src_system', 'CIS'))
+            # Raw values for fnv_hash (escape happens inside _fnv_hash_expr)
+            raw_portfolio = str(row.get('portfolio', '') or '')
+            raw_security  = str(row.get('security_label', '') or '')
+            raw_basis     = str(row.get('position_basis', 'TRADED') or 'TRADED')
+            raw_src       = str(row.get('src_system', 'CIS') or 'CIS')
+
+            # Escaped values for SQL VALUES clause
+            portfolio = self._escape(raw_portfolio)
+            security  = self._escape(raw_security)
+            pos_basis = self._escape(raw_basis)
+            src_sys   = self._escape(raw_src)
             isin_val  = f"'{self._escape(row['isin'])}'" if row.get('isin') else 'NULL'
             src_tbl   = f"'{self._escape(row['source_table'])}'" if row.get('source_table') else 'NULL'
 
             version_id = now_ms + idx   # new: records when SOD ran
 
             # position_id: deterministic for uploads, random for CIS sources
+            # Pass RAW values to _fnv_hash_expr — it does its own escaping internally
             if row.get('src_system', '') in UPLOAD_SOURCES:
-                position_id_expr = _fnv_hash_expr(portfolio, security, pos_basis, sod_date, src_sys)
+                position_id_expr = _fnv_hash_expr(raw_portfolio, raw_security, raw_basis, sod_date, raw_src)
             else:
                 position_id_expr = str(now_ms + idx + 1_000_000)  # offset avoids collision with version_id
 
@@ -823,12 +831,7 @@ class Command(BaseCommand):
     def _escape(value):
         if value is None:
             return ''
-        # Normalise first: unescape any already-doubled quotes from Kudu round-trip,
-        # then re-escape cleanly. Prevents MOODY'S CORP → MOODY''''S CORP when the
-        # value was previously stored via an escaped write and returned as-is by Kudu.
-        s = str(value)
-        s = s.replace("''", "'")   # undo any prior escaping
-        return s.replace("'", "''")
+        return str(value).replace("'", "''")
 
     @staticmethod
     def _to_iso(yyyymmdd):
