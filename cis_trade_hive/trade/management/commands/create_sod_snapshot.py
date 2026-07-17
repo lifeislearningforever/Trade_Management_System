@@ -750,14 +750,40 @@ class Command(BaseCommand):
                 f"'SOD', {isin_val}, {src_tbl}, true, '{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}')"
             )
 
+        def _has_special_chars(row):
+            """Return True if any string field contains a single quote."""
+            for field in ('portfolio', 'security_label', 'position_basis', 'src_system',
+                          'isin', 'source_table'):
+                v = row.get(field) or ''
+                if "'" in str(v):
+                    return True
+            return False
+
         total = 0
         for i in range(0, len(sod_rows), BATCH):
-            chunk  = sod_rows[i: i + BATCH]
-            values = ',\n'.join(_build_row(i + j, r) for j, r in enumerate(chunk))
-            impala_manager.execute_write(
-                f"UPSERT INTO {DATABASE}.cis_position {col_list} VALUES {values}",
-                database=DATABASE
-            )
+            chunk = sod_rows[i: i + BATCH]
+
+            # Split chunk: rows with special chars get inserted one-by-one to avoid
+            # PyHive batch-VALUES parsing issues with '' in large statements.
+            normal_rows  = [(j, r) for j, r in enumerate(chunk) if not _has_special_chars(r)]
+            special_rows = [(j, r) for j, r in enumerate(chunk) if _has_special_chars(r)]
+
+            # Batch insert normal rows
+            if normal_rows:
+                values = ',\n'.join(_build_row(i + j, r) for j, r in normal_rows)
+                impala_manager.execute_write(
+                    f"UPSERT INTO {DATABASE}.cis_position {col_list} VALUES {values}",
+                    database=DATABASE
+                )
+
+            # Insert special-char rows one at a time
+            for j, r in special_rows:
+                value = _build_row(i + j, r)
+                impala_manager.execute_write(
+                    f"UPSERT INTO {DATABASE}.cis_position {col_list} VALUES {value}",
+                    database=DATABASE
+                )
+
             total += len(chunk)
             self.stdout.write(f'  Inserted rows {i + 1}–{i + len(chunk)}')
 
