@@ -364,7 +364,6 @@ class Command(BaseCommand):
                     WHERE position_type = 'EOD'
                       AND is_latest     = true
                       AND position_date = '{escaped_date}'
-                      AND src_system    IN ('{src_list}')
                 ) existing_eod
                   ON p.portfolio      = existing_eod.portfolio
                  AND p.security_label = existing_eod.security_label

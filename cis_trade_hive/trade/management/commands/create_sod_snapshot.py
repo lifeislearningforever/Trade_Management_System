@@ -360,7 +360,6 @@ class Command(BaseCommand):
                 WHERE position_type = 'SOD'
                   AND is_latest     = true
                   AND position_date = '{escaped_sod}'
-                  AND src_system    IN ({src_list})
             ) existing_sod
               ON p.portfolio      = existing_sod.portfolio
              AND p.security_label = existing_sod.security_label
