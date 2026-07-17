@@ -685,21 +685,22 @@ class Command(BaseCommand):
 
             for row in existing:
                 # Re-UPSERT same row with is_latest=false (position_id is PK → overwrites)
+                # Values come directly from Kudu (already clean) — escape only for SQL embedding.
                 pid      = row.get('position_id')
                 vid      = row.get('version_id')
-                port     = self._escape(row.get('portfolio', ''))
-                sec      = self._escape(row.get('security_label', ''))
-                basis    = self._escape(row.get('position_basis', 'TRADED'))
+                port     = str(row.get('portfolio', '') or '').replace("'", "''")
+                sec      = str(row.get('security_label', '') or '').replace("'", "''")
+                basis    = str(row.get('position_basis', 'TRADED') or 'TRADED').replace("'", "''")
                 pos_date = row.get('position_date', '')
-                src_sys  = self._escape(row.get('src_system', ''))
-                proc_dt  = self._escape(row.get('processing_date', ''))
+                src_sys  = str(row.get('src_system', '') or '').replace("'", "''")
+                proc_dt  = str(row.get('processing_date', '') or '').replace("'", "''")
 
                 def _fv(v):
                     return float(v) if v is not None else 0.0
 
-                isin_val = f"'{self._escape(row['isin'])}'" if row.get('isin') else 'NULL'
-                src_tbl  = f"'{self._escape(row['source_table'])}'" if row.get('source_table') else 'NULL'
-                ptype    = self._escape(row.get('position_type', ''))
+                isin_val = f"'{str(row[\"isin\"]).replace(chr(39), chr(39)*2)}'" if row.get('isin') else 'NULL'
+                src_tbl  = f"'{str(row[\"source_table\"]).replace(chr(39), chr(39)*2)}'" if row.get('source_table') else 'NULL'
+                ptype    = str(row.get('position_type', '') or '').replace("'", "''")
 
                 impala_manager.execute_write(
                     f"""
@@ -733,7 +734,7 @@ class Command(BaseCommand):
                         {_fv(row.get('uncall_fc'))}, {_fv(row.get('uncall_lc'))},
                         {_fv(row.get('pipeline_fc'))}, {_fv(row.get('pipeline_lc'))},
                         '{ptype}', {isin_val}, {src_tbl}, false,
-                        {f"'{self._escape(row['processing_timestamp'])}'" if row.get('processing_timestamp') else 'NULL'}
+                        {f"'{str(row[\"processing_timestamp\"]).replace(chr(39), chr(39)*2)}'" if row.get('processing_timestamp') else 'NULL'}
                     )
                     """,
                     database=DATABASE
@@ -783,12 +784,15 @@ class Command(BaseCommand):
                 val = Decimal(str(v)) if v is not None else Decimal(str(default))
                 return float(round(val, lc_dp))
 
-            portfolio = self._escape(position.get('portfolio', ''))
-            security  = self._escape(position.get('security_label', ''))
-            pos_basis = self._escape(position.get('position_basis', 'TRADED'))
-            src_sys   = self._escape(position.get('src_system', 'CIS'))
-            isin_val  = f"'{self._escape(position['isin'])}'" if position.get('isin') else 'NULL'
-            src_tbl   = f"'{self._escape(position['source_table'])}'" if position.get('source_table') else 'NULL'
+            def _sq(v):
+                return str(v or '').replace("'", "''")
+
+            portfolio = _sq(position.get('portfolio', ''))
+            security  = _sq(position.get('security_label', ''))
+            pos_basis = _sq(position.get('position_basis', 'TRADED'))
+            src_sys   = _sq(position.get('src_system', 'CIS'))
+            isin_val  = f"'{_sq(position['isin'])}'" if position.get('isin') else 'NULL'
+            src_tbl   = f"'{_sq(position['source_table'])}'" if position.get('source_table') else 'NULL'
 
             return (
                 f"({src_position_id}, {version_id}, "
