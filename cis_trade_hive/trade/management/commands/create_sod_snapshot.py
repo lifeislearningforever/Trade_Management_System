@@ -696,6 +696,9 @@ class Command(BaseCommand):
             Uses the same 5-component natural key as all other writers —
             INT, EOD, SOD for the same natural key share the same position_id
             and coexist via the composite PK (position_id, position_type).
+
+            NOTE: Only call this for values that contain no single quotes.
+            For values with single quotes, use _py_fnv_hash instead.
             """
             p = portfolio.replace("'", "''")
             s = security.replace("'", "''")
@@ -708,7 +711,28 @@ class Command(BaseCommand):
                 f")) AS BIGINT))"
             )
 
-        def _build_row(idx, row):
+        def _py_fnv_hash(portfolio, security, basis, date, src):
+            """
+            Python-side FNV-1a 64-bit hash matching Impala's fnv_hash(CONCAT_WS('|', ...)).
+            Used for rows with special chars (e.g. single quotes) to avoid SQL escaping issues.
+            Returns ABS value as int (same as ABS(CAST(fnv_hash(...) AS BIGINT))).
+            """
+            FNV_PRIME    = 0x00000100000001B3
+            FNV_OFFSET   = 0xCBF29CE484222325
+            MASK_64      = 0xFFFFFFFFFFFFFFFF
+            INT64_MAX    = 0x7FFFFFFFFFFFFFFF
+
+            concatenated = '|'.join([portfolio, security, basis, date, src])
+            encoded = concatenated.encode('utf-8')
+            h = FNV_OFFSET
+            for byte in encoded:
+                h ^= byte
+                h  = (h * FNV_PRIME) & MASK_64
+            # Convert to signed int64 then take abs
+            signed = h if h <= INT64_MAX else h - (1 << 64)
+            return abs(signed)
+
+        def _build_row(idx, row, force_py_hash=False):
             # Raw values for fnv_hash (escape happens inside _fnv_hash_expr)
             raw_portfolio = str(row.get('portfolio', '') or '')
             raw_security  = str(row.get('security_label', '') or '')
@@ -725,12 +749,20 @@ class Command(BaseCommand):
 
             version_id = now_ms + idx   # new: records when SOD ran
 
-            # position_id: deterministic for uploads, random for CIS sources
-            # Pass RAW values to _fnv_hash_expr — it does its own escaping internally
+            # position_id: deterministic for uploads, random for CIS sources.
+            # When force_py_hash=True (special-char rows), compute hash in Python
+            # to avoid embedding escaped quotes inside fnv_hash() SQL expression.
             if row.get('src_system', '') in UPLOAD_SOURCES:
-                position_id_expr = _fnv_hash_expr(raw_portfolio, raw_security, raw_basis, sod_date, raw_src)
+                if force_py_hash:
+                    position_id_expr = str(_py_fnv_hash(
+                        raw_portfolio, raw_security, raw_basis, sod_date, raw_src
+                    ))
+                else:
+                    position_id_expr = _fnv_hash_expr(
+                        raw_portfolio, raw_security, raw_basis, sod_date, raw_src
+                    )
             else:
-                position_id_expr = str(now_ms + idx + 1_000_000)  # offset avoids collision with version_id
+                position_id_expr = str(now_ms + idx + 1_000_000)
 
             return (
                 f"({position_id_expr}, {version_id}, "
@@ -763,12 +795,14 @@ class Command(BaseCommand):
         for i in range(0, len(sod_rows), BATCH):
             chunk = sod_rows[i: i + BATCH]
 
-            # Split chunk: rows with special chars get inserted one-by-one to avoid
-            # PyHive batch-VALUES parsing issues with '' in large statements.
+            # Split chunk: rows with special chars (single quotes) are inserted
+            # one-by-one using force_py_hash=True so the fnv_hash SQL expression
+            # is replaced with a pre-computed integer — avoiding PyHive's parser
+            # bug where '' inside fnv_hash(CONCAT_WS(...)) triggers a ParseException.
             normal_rows  = [(j, r) for j, r in enumerate(chunk) if not _has_special_chars(r)]
             special_rows = [(j, r) for j, r in enumerate(chunk) if _has_special_chars(r)]
 
-            # Batch insert normal rows
+            # Batch insert normal rows (no special chars — safe for batching)
             if normal_rows:
                 values = ',\n'.join(_build_row(i + j, r) for j, r in normal_rows)
                 impala_manager.execute_write(
@@ -776,9 +810,9 @@ class Command(BaseCommand):
                     database=DATABASE
                 )
 
-            # Insert special-char rows one at a time
+            # Insert special-char rows one at a time with py-computed position_id
             for j, r in special_rows:
-                value = _build_row(i + j, r)
+                value = _build_row(i + j, r, force_py_hash=True)
                 impala_manager.execute_write(
                     f"UPSERT INTO {DATABASE}.cis_position {col_list} VALUES {value}",
                     database=DATABASE
