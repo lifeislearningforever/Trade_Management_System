@@ -182,6 +182,14 @@ class Command(BaseCommand):
                 self._batch_mark_source_not_latest(insert_rows)
                 self._batch_upsert_eod(insert_rows, today, position_type)
 
+                # Publish EOD rows to cis_position_rep datamart (EOD only, not CORR)
+                if position_type == 'EOD':
+                    self.stdout.write(f'Publishing {position_date} to cis_position_rep...')
+                    rep_count = self._publish_position_rep(position_date, sources)
+                    self.stdout.write(self.style.SUCCESS(
+                        f'  Published {rep_count} rows to cis_position_rep for {position_date}'
+                    ))
+
             self.stdout.write('')
             self.stdout.write(self.style.MIGRATE_HEADING('=' * 80))
             self.stdout.write(self.style.MIGRATE_HEADING('Summary'))
@@ -894,6 +902,65 @@ class Command(BaseCommand):
         except Exception as e:
             logger.error(f"Error inserting EOD position {position.get('position_id')}: {str(e)}")
             return False
+
+    # -------------------------------------------------------------------------
+    # Publish EOD snapshot to cis_position_rep datamart
+    # -------------------------------------------------------------------------
+
+    def _publish_position_rep(self, position_date: str, sources: list) -> int:
+        """
+        Overwrite the cis_position_rep partition for position_date with the latest
+        EOD rows from cis_position (is_latest=true, position_type='EOD').
+
+        Hive external table — INSERT OVERWRITE replaces just the target partition,
+        leaving all other dates' partitions untouched. Safe to call on every EOD run
+        (idempotent: re-running the same date overwrites with the same or newer data).
+
+        Returns the number of rows written.
+        """
+        src_list = "', '".join(self._escape(s) for s in sources)
+        escaped_date = self._escape(position_date)
+
+        # INSERT OVERWRITE replaces just the partition for this date — atomic and idempotent.
+        # cis_position_rep is a Hive external Parquet table (not Kudu), so INSERT OVERWRITE
+        # PARTITION is the correct idiom; DELETE is not supported on Hive external tables.
+        impala_manager.execute_write(
+            f"""
+            INSERT OVERWRITE {DATABASE}.cis_position_rep
+            PARTITION (position_date = '{escaped_date}')
+            SELECT
+                position_id, version_id,
+                portfolio, security_label, position_basis,
+                src_system, processing_date, processing_timestamp,
+                isin, source_table,
+                quantity,
+                average_cost_fc, cost_fc,
+                market_value_fc, net_book_value_fc,
+                unrealized_pnl_fc, realized_pnl_fc,
+                provision_fc, dividend_fc, uncall_fc, pipeline_fc,
+                average_cost_lc, cost_lc,
+                market_value_lc, net_book_value_lc,
+                unrealized_pnl_lc, realized_pnl_lc,
+                provision_lc, dividend_lc, uncall_lc, pipeline_lc
+            FROM {DATABASE}.cis_position
+            WHERE position_type = 'EOD'
+              AND is_latest      = true
+              AND position_date  = '{escaped_date}'
+              AND src_system     IN ('{src_list}')
+            """,
+            database=DATABASE
+        )
+
+        # Step 3: Count what we just wrote
+        count_rows = impala_manager.execute_query(
+            f"""
+            SELECT COUNT(*) AS cnt
+            FROM {DATABASE}.cis_position_rep
+            WHERE position_date = '{escaped_date}'
+            """,
+            database=DATABASE
+        )
+        return int((count_rows[0].get('cnt') or 0)) if count_rows else 0
 
     # -------------------------------------------------------------------------
     # Helpers
