@@ -296,16 +296,15 @@ class Command(BaseCommand):
 
     def _get_open_positions(self, portfolio_filter, sources, position_date=None, security_filter=None):
         """
-        Fetch the single latest INT row per portfolio/security/position_basis from cis_position.
+        Fetch the single best source row per (portfolio, security_label, position_basis).
 
-        INT is the authoritative running position — it is updated by every trade and CA.
-        EOD/SOD/CORR are derived snapshots and must NOT be used as the quantity source,
-        because they lag behind CA updates (e.g. after a STOCK_SPLIT the INT qty is correct
-        but the old EOD row still has the pre-split quantity).
+        Priority: INT > SOD.
+        - INT exists  → use it (authoritative running position, updated by every trade/CA).
+        - INT missing → fall back to SOD (no new trades today; SOD carries forward yesterday's
+          closing position and must still be revalued and published to cis_position_rep).
+        - EOD/CORR are never used as source (they are outputs, not inputs).
 
-        EOD  (position_date=None): picks up the latest INT row across all dates.
-        CORR (position_date=YYYY-MM-DD): restricts to INT rows whose position_date equals
-             the supplied month-end date.
+        CORR run: restricts to rows whose position_date equals the supplied month-end date.
         """
         try:
             src_list = "', '".join(self._escape(s) for s in sources)
@@ -341,11 +340,18 @@ class Command(BaseCommand):
                     p.position_type, p.isin, p.source_table
                 FROM {DATABASE}.cis_position p
                 INNER JOIN (
-                    SELECT portfolio, security_label, position_basis,
-                           MAX(position_id) AS max_position_id
+                    -- For each natural key pick INT if it exists, else fall back to SOD.
+                    -- INT has priority=2, SOD has priority=1; COALESCE picks INT first.
+                    SELECT
+                        portfolio, security_label, position_basis,
+                        COALESCE(
+                            MAX(CASE WHEN position_type = 'INT' THEN position_id END),
+                            MAX(CASE WHEN position_type = 'SOD' THEN position_id END)
+                        ) AS best_position_id
                     FROM {DATABASE}.cis_position
                     WHERE src_system IN ('{src_list}')
-                      AND position_type = 'INT'
+                      AND position_type IN ('INT', 'SOD')
+                      AND is_latest = true
                       AND quantity > 0
                       {portfolio_clause}
                       {security_clause}
@@ -355,7 +361,7 @@ class Command(BaseCommand):
                   ON p.portfolio       = latest.portfolio
                  AND p.security_label  = latest.security_label
                  AND p.position_basis  = latest.position_basis
-                 AND p.position_id     = latest.max_position_id
+                 AND p.position_id     = latest.best_position_id
             """
             return impala_manager.execute_query(query, database=DATABASE) or []
         except Exception as e:
