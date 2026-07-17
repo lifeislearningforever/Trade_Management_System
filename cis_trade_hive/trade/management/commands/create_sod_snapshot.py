@@ -823,7 +823,12 @@ class Command(BaseCommand):
     def _escape(value):
         if value is None:
             return ''
-        return str(value).replace("'", "''")
+        # Normalise first: unescape any already-doubled quotes from Kudu round-trip,
+        # then re-escape cleanly. Prevents MOODY'S CORP → MOODY''''S CORP when the
+        # value was previously stored via an escaped write and returned as-is by Kudu.
+        s = str(value)
+        s = s.replace("''", "'")   # undo any prior escaping
+        return s.replace("'", "''")
 
     @staticmethod
     def _to_iso(yyyymmdd):
