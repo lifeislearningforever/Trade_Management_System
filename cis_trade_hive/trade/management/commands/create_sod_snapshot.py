@@ -61,11 +61,18 @@ class Command(BaseCommand):
             '--eod-date', type=str, default=None,
             help='Override source EOD date to copy from (YYYY-MM-DD). Default: alldatesinfo.prev_day'
         )
+        parser.add_argument(
+            '--fill-gaps', action='store_true', default=False,
+            dest='fill_gaps',
+            help='Only create SOD rows for positions that have NO existing SOD row for sod_date. '
+                 'Keeps existing SOD rows untouched; only fills missing ones from EOD.'
+        )
 
     def handle(self, *args, **options):
         dry_run          = options.get('dry_run', False)
         portfolio_filter = options.get('portfolio')
         source_filter    = options.get('source')
+        fill_gaps        = options.get('fill_gaps', False)
 
         self.stdout.write(self.style.MIGRATE_HEADING('=' * 80))
         self.stdout.write(self.style.MIGRATE_HEADING('SOD Snapshot — cis_position'))
@@ -102,9 +109,16 @@ class Command(BaseCommand):
         )
         self.stdout.write('')
 
+        if fill_gaps:
+            self.stdout.write(self.style.WARNING(
+                'Fill-gaps  : ON — only positions with no existing SOD row for '
+                f'{sod_date} will be created'
+            ))
+
         # ── 2. Fetch EOD rows for prev_day ───────────────────────────────────
         sources   = [source_filter] if source_filter else ALL_SOURCES
-        eod_rows  = self._get_eod_rows(eod_date, sources, portfolio_filter)
+        eod_rows  = self._get_eod_rows(eod_date, sources, portfolio_filter,
+                                        fill_gaps=fill_gaps, sod_date=sod_date)
 
         if not eod_rows:
             self.stdout.write(self.style.WARNING(
@@ -244,7 +258,9 @@ class Command(BaseCommand):
         # for sod_date. No need to touch the EOD rows at all.
 
         # ── 5. Delete any existing SOD rows for sod_date (idempotent re-run) ─
-        self._delete_existing_sod(sod_date, sources, portfolio_filter)
+        # Skip when --fill-gaps: existing SOD rows must be preserved.
+        if not fill_gaps:
+            self._delete_existing_sod(sod_date, sources, portfolio_filter)
 
         # ── 6. Batch-insert SOD rows with is_latest=true ─────────────────────
         inserted = self._batch_insert_sod(sod_rows, sod_date, proc_date)
@@ -306,38 +322,67 @@ class Command(BaseCommand):
 
     # ── EOD row fetch ─────────────────────────────────────────────────────────
 
-    def _get_eod_rows(self, eod_date, sources, portfolio_filter):
-        """Fetch EOD rows from cis_position for the given date (written by refresh_positions)."""
+    def _get_eod_rows(self, eod_date, sources, portfolio_filter,
+                      fill_gaps=False, sod_date=None):
+        """
+        Fetch EOD rows from cis_position for the given date (written by refresh_positions).
+
+        fill_gaps=True: excludes natural keys that already have a SOD row for sod_date,
+                        so only positions missing a SOD row are returned.
+        """
         src_list    = ', '.join(f"'{self._escape(s)}'" for s in sources)
         port_clause = (
             f"AND portfolio = '{self._escape(portfolio_filter)}'"
             if portfolio_filter else ''
         )
+
+        # --fill-gaps: LEFT JOIN existing SOD rows and exclude matches
+        fill_gaps_join  = ""
+        fill_gaps_where = ""
+        if fill_gaps and sod_date:
+            escaped_sod = self._escape(sod_date)
+            fill_gaps_join = f"""
+            LEFT JOIN (
+                SELECT DISTINCT portfolio, security_label, position_basis
+                FROM {DATABASE}.cis_position
+                WHERE position_type = 'SOD'
+                  AND is_latest     = true
+                  AND position_date = '{escaped_sod}'
+                  AND src_system    IN ({src_list})
+            ) existing_sod
+              ON p.portfolio      = existing_sod.portfolio
+             AND p.security_label = existing_sod.security_label
+             AND p.position_basis = existing_sod.position_basis
+            """
+            fill_gaps_where = "AND existing_sod.portfolio IS NULL"
+
         try:
             return impala_manager.execute_query(
                 f"""
                 SELECT
-                    position_id, version_id,
-                    portfolio, security_label,
-                    position_basis, position_date,
-                    src_system, processing_date,
-                    quantity,
-                    average_cost_fc, cost_fc,
-                    average_cost_lc, cost_lc,
-                    market_value_fc, market_value_lc,
-                    net_book_value_fc, net_book_value_lc,
-                    unrealized_pnl_fc, unrealized_pnl_lc,
-                    realized_pnl_fc, realized_pnl_lc,
-                    provision_fc, provision_lc,
-                    dividend_fc, dividend_lc,
-                    uncall_fc, uncall_lc,
-                    pipeline_fc, pipeline_lc,
-                    position_type, isin, source_table, processing_timestamp
-                FROM {DATABASE}.cis_position
-                WHERE position_type = 'EOD'
-                  AND position_date  = '{eod_date}'
-                  AND src_system IN ({src_list})
+                    p.position_id, p.version_id,
+                    p.portfolio, p.security_label,
+                    p.position_basis, p.position_date,
+                    p.src_system, p.processing_date,
+                    p.quantity,
+                    p.average_cost_fc, p.cost_fc,
+                    p.average_cost_lc, p.cost_lc,
+                    p.market_value_fc, p.market_value_lc,
+                    p.net_book_value_fc, p.net_book_value_lc,
+                    p.unrealized_pnl_fc, p.unrealized_pnl_lc,
+                    p.realized_pnl_fc, p.realized_pnl_lc,
+                    p.provision_fc, p.provision_lc,
+                    p.dividend_fc, p.dividend_lc,
+                    p.uncall_fc, p.uncall_lc,
+                    p.pipeline_fc, p.pipeline_lc,
+                    p.position_type, p.isin, p.source_table, p.processing_timestamp
+                FROM {DATABASE}.cis_position p
+                {fill_gaps_join}
+                WHERE p.position_type = 'EOD'
+                  AND p.position_date  = '{eod_date}'
+                  AND p.src_system IN ({src_list})
                   {port_clause}
+                  {fill_gaps_where}
                 """,
                 database=DATABASE
             ) or []
