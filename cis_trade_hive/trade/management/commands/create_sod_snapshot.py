@@ -20,10 +20,22 @@ Dates in the reference table are YYYYMMDD strings; converted to YYYY-MM-DD
 for cis_position.
 
 Usage:
+    # Normal SOD — dates inferred from alldatesinfo
     python manage.py create_sod_snapshot
     python manage.py create_sod_snapshot --dry-run
     python manage.py create_sod_snapshot --portfolio UOB-SG-TRADING
     python manage.py create_sod_snapshot --source CIS
+
+    # Override dates manually
+    python manage.py create_sod_snapshot --eod-date 2026-03-02 --sod-date 2026-03-03
+    python manage.py create_sod_snapshot --eod-date 2026-03-02 --sod-date 2026-03-03 --source GMP
+
+    # Fill-gaps mode — keep existing SOD rows, only create missing ones from EOD
+    # Use when SOD run was partially completed and you want to top-up without
+    # replacing the SOD rows that were already written correctly.
+    python manage.py create_sod_snapshot --eod-date 2026-03-02 --sod-date 2026-03-03 --fill-gaps
+    python manage.py create_sod_snapshot --eod-date 2026-03-02 --sod-date 2026-03-03 --source CIS --fill-gaps
+    python manage.py create_sod_snapshot --eod-date 2026-03-02 --sod-date 2026-03-03 --fill-gaps --dry-run
 """
 
 import logging

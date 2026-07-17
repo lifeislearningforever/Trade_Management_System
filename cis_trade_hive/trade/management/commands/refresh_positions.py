@@ -28,6 +28,13 @@ Run types
 
   In both cases processing_date = today (the actual run date).
 
+Source priority
+---------------
+  For each natural key (portfolio, security_label, position_basis):
+    INT exists  → use INT (authoritative running position, updated by every trade/CA)
+    INT missing → fall back to SOD (no new trades today; SOD carries yesterday's closing
+                  position and must still be revalued and published to cis_position_rep)
+
 Usage:
     # Normal EOD — position_date inferred from alldatesinfo reporting_date
     python manage.py refresh_positions
@@ -45,6 +52,13 @@ Usage:
     # Override inferred date explicitly (both run types)
     python manage.py refresh_positions --position-date 2026-06-27
     python manage.py refresh_positions --run-type CORR --position-date 2026-05-31
+
+    # Fill-gaps mode — keep existing EOD rows, only create missing ones from SOD/INT
+    # Use when EOD run was partially completed and you want to top-up without
+    # replacing the EOD rows that were already written correctly.
+    python manage.py refresh_positions --position-date 2026-03-02 --fill-gaps
+    python manage.py refresh_positions --position-date 2026-03-02 --source GMP --fill-gaps
+    python manage.py refresh_positions --position-date 2026-03-02 --fill-gaps --dry-run
 """
 
 import logging
