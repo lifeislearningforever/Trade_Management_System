@@ -192,6 +192,14 @@ class TradeKuduRepository:
                 except (ValueError, TypeError):
                     errors.append("Price must be a valid number")
 
+            if trade_data.get('open_fx_rate') not in (None, ''):
+                try:
+                    fx_rate = float(trade_data.get('open_fx_rate'))
+                    if fx_rate <= 0:
+                        errors.append("FX rate must be greater than zero")
+                except (ValueError, TypeError):
+                    errors.append("FX rate must be a valid number")
+
         if trade_type == self.TRADE_TYPE_SELL:
             # Check trade details exists with sufficient quantity
             trade_detail = self.get_trade_detail(
