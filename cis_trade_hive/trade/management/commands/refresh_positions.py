@@ -70,6 +70,7 @@ from django.core.management.base import BaseCommand
 
 from core.repositories.impala_connection import impala_manager
 from trade.services.multicurrency_service import multicurrency_service
+from trade.services import position_id_service
 
 logger = logging.getLogger(__name__)
 
@@ -749,12 +750,17 @@ class Command(BaseCommand):
 
     def _batch_upsert_eod(self, insert_rows, run_date, position_type='EOD'):
         """
-        INSERT EOD or CORR rows into cis_position in batches of 500.
+        UPSERT EOD or CORR rows into cis_position in batches of 500.
 
-        position_id: always NEW random — EOD/CORR coexists with INT and SOD on the
-                     same position_date as separate rows (distinguished by
-                     position_type). The source row is left intact with
-                     is_latest=false; the new row gets its own position_id.
+        position_id: deterministic hash of the natural key (portfolio,
+                     security_label, position_basis, position_date, src_system)
+                     via position_id_service.position_id() — same natural key
+                     always produces the same position_id (see DDL 67). EOD/CORR
+                     coexist with INT/SOD on the same position_date as separate
+                     rows, distinguished by position_type in the composite PK
+                     (position_id, position_type). Re-running this command for
+                     the same inputs is idempotent via Kudu UPSERT — no DELETE
+                     step, so no window where both an old and new row exist.
         version_id:  timestamp-based, records when this run executed.
         is_latest:   true — this row is now the authoritative state.
         position_type: 'EOD' for normal end-of-day; 'CORR' for month-end correction.
@@ -775,13 +781,19 @@ class Command(BaseCommand):
             nbv_fc        = row['nbv_fc']
             nbv_lc        = row['nbv_lc']
 
-            # New position_id — EOD coexists with INT/SOD as a separate row
-            src_position_id = now_ms + idx + 2_000_000   # offset avoids collision with version_id
-            version_id      = now_ms + idx                # records when EOD ran
-
             raw_pos_date = position.get('position_date')
             pos_date  = str(raw_pos_date)[:10] if raw_pos_date else run_date
             proc_date = run_date.replace('-', '')  # YYYYMMDD — always the actual run date, not position_date
+
+            # Deterministic position_id — same natural key always UPSERTs the same row
+            src_position_id = position_id_service.position_id(
+                position.get('portfolio', ''),
+                position.get('security_label', ''),
+                position.get('position_basis', 'TRADED'),
+                pos_date,
+                position.get('src_system', 'CIS'),
+            )
+            version_id = now_ms + idx  # records when this run executed
 
             def fc(v, default=0):
                 val = Decimal(str(v)) if v is not None else Decimal(str(default))
@@ -838,40 +850,19 @@ class Command(BaseCommand):
             position_type, isin, source_table, is_latest, processing_timestamp
         )"""
 
-        # Delete any existing EOD/CORR rows for the same natural keys before inserting.
-        # Without this, re-running the same run-type on the same date creates duplicates.
+        # UPSERT on the deterministic (position_id, position_type) composite PK —
+        # re-running for the same natural key atomically replaces the existing
+        # row in Kudu. No DELETE step, so no window where both an old and new
+        # row can exist with is_latest=true simultaneously.
         for i in range(0, len(insert_rows), BATCH):
             chunk = insert_rows[i: i + BATCH]
 
-            # Build a set of (portfolio, security_label, position_basis, position_date) tuples
-            # and delete matching rows of this position_type in one pass per batch.
-            key_clauses = []
-            for r in chunk:
-                p = r['position']
-                port     = self._escape(p.get('portfolio', ''))
-                sec      = self._escape(p.get('security_label', ''))
-                basis    = self._escape(p.get('position_basis', 'TRADED'))
-                raw_date = p.get('position_date')
-                pos_date = str(raw_date)[:10] if raw_date else run_date
-                key_clauses.append(
-                    f"(portfolio = '{port}' AND security_label = '{sec}' "
-                    f"AND position_basis = '{basis}' AND position_date = '{pos_date}')"
-                )
-
-            if key_clauses:
-                delete_sql = (
-                    f"DELETE FROM {DATABASE}.cis_position "
-                    f"WHERE position_type = '{position_type}' "
-                    f"AND ({' OR '.join(key_clauses)})"
-                )
-                impala_manager.execute_write(delete_sql, database=DATABASE)
-
             values = ',\n'.join(_build_value(i + j, r) for j, r in enumerate(chunk))
             impala_manager.execute_write(
-                f"INSERT INTO {DATABASE}.cis_position {col_list} VALUES {values}",
+                f"UPSERT INTO {DATABASE}.cis_position {col_list} VALUES {values}",
                 database=DATABASE
             )
-            self.stdout.write(f"  Inserted {position_type} rows {i + 1}–{i + len(chunk)}")
+            self.stdout.write(f"  Upserted {position_type} rows {i + 1}–{i + len(chunk)}")
 
     # -------------------------------------------------------------------------
     # INSERT new EOD row into cis_position (legacy single-row path, kept for reference)
