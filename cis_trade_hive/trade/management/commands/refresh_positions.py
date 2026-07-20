@@ -543,16 +543,19 @@ class Command(BaseCommand):
         if not securities and not portfolios:
             return ref
 
-        def _in_list(items):
-            escaped = [f"'{self._escape(i)}'" for i in items]
-            return ', '.join(escaped)
+        def _placeholders(items):
+            return ', '.join(['%s'] * len(items))
 
         # 1. Securities: currency_code + security_investment
+        # Bound as query params (not string-interpolated) — security names can
+        # contain apostrophes (e.g. "CD INT'L ENT"), and PyHive's SQL parser
+        # rejects escaped '' quotes inside long IN (...) literal lists.
         if securities:
             rows = impala_manager.execute_query(
                 f"SELECT security_name, currency_code, security_investment "
                 f"FROM {DATABASE}.cis_security "
-                f"WHERE security_name IN ({_in_list(securities)})",
+                f"WHERE security_name IN ({_placeholders(securities)})",
+                securities,
                 database=DATABASE
             ) or []
             for r in rows:
@@ -566,7 +569,8 @@ class Command(BaseCommand):
             rows = impala_manager.execute_query(
                 f"SELECT name, currency, revaluation_status "
                 f"FROM {DATABASE}.cis_portfolio "
-                f"WHERE name IN ({_in_list(portfolios)})",
+                f"WHERE name IN ({_placeholders(portfolios)})",
+                portfolios,
                 database=DATABASE
             ) or []
             for r in rows:
@@ -584,13 +588,14 @@ class Command(BaseCommand):
                 INNER JOIN (
                     SELECT security_label, MAX(price_date) AS max_date
                     FROM {DATABASE}.cis_equity_price
-                    WHERE security_label IN ({_in_list(securities)}) AND is_active = true
+                    WHERE security_label IN ({_placeholders(securities)}) AND is_active = true
                     GROUP BY security_label
                 ) latest
                   ON ep.security_label = latest.security_label
                  AND ep.price_date      = latest.max_date
                 WHERE ep.is_active = true
                 """,
+                securities,
                 database=DATABASE
             ) or []
             for r in rows:
@@ -631,9 +636,11 @@ class Command(BaseCommand):
                 all_ccys.add(c)
 
         if all_ccys:
+            ccy_list = list(all_ccys)
             rows = impala_manager.execute_query(
                 f"SELECT iso_code, precision FROM {DATABASE}.gmp_cis_sta_dly_currency "
-                f"WHERE iso_code IN ({_in_list(list(all_ccys))})",
+                f"WHERE iso_code IN ({_placeholders(ccy_list)})",
+                ccy_list,
                 database=DATABASE
             ) or []
             for r in rows:
