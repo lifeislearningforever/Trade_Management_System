@@ -199,6 +199,16 @@ class TradeKuduRepository:
                         errors.append("FX rate must be greater than zero")
                 except (ValueError, TypeError):
                     errors.append("FX rate must be a valid number")
+            else:
+                # Cross-currency trades must supply an explicit FX rate — leaving it
+                # blank silently defaults to 1.0 downstream and corrupts gross_amount_lc.
+                security_ccy = (entity_details.get('security') or {}).get('currency_code')
+                portfolio_ccy = (entity_details.get('portfolio') or {}).get('currency')
+                if security_ccy and portfolio_ccy and security_ccy != portfolio_ccy:
+                    errors.append(
+                        "FX rate is required when security currency "
+                        f"({security_ccy}) differs from portfolio currency ({portfolio_ccy})"
+                    )
 
         if trade_type == self.TRADE_TYPE_SELL:
             # Check trade details exists with sufficient quantity

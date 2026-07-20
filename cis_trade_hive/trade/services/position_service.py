@@ -372,19 +372,29 @@ class PositionService:
         # Cost basis uses gross amounts (qty × price), never total (which includes charges).
         # gross_amount_lc is the user-editable LC equivalent of gross_amount_fc.
         logger.info(f"[DEBUG POS] _process_buy trade_id={trade_id} gross_amount_lc={gross_amount_lc!r} trade_cost={trade_cost}")
-        _effective_gross_lc = Decimal(str(gross_amount_lc)) if gross_amount_lc else None
+        is_cross_currency = bool(
+            security_currency and portfolio_currency and security_currency != portfolio_currency
+        )
+        _effective_gross_lc = (
+            Decimal(str(gross_amount_lc)) if gross_amount_lc and is_cross_currency else None
+        )
+
+        reval_status = self._get_portfolio_revaluation_status(portfolio_id)
 
         # Implied FX rate back-calculated from the trade's LC/FC amounts.
         # This captures whatever rate the user had at entry time, including manual LC edits.
-        # Used as fallback when the FX table has no data for the currency pair.
+        # Used as fallback only for NON-REVAL — REVAL must always trust the FX table
+        # (SA PORTIARP-8206) even when the table has no data for the pair.
         implied_fx_rate = None
-        if _effective_gross_lc and trade_cost and trade_cost != Decimal('0'):
+        if (reval_status == 'NON-REVALUED' and _effective_gross_lc
+                and trade_cost and trade_cost != Decimal('0')):
             implied_fx_rate = _effective_gross_lc / trade_cost
 
         # FX rate from the table: latest date <= position_date, carry-forward if no exact
-        # match. Falls back to implied_fx_rate only when the table has zero rows for the pair.
+        # match. Falls back to implied_fx_rate only for NON-REVAL when the table has zero
+        # rows for the pair.
         fx_rate = Decimal('1')
-        if security_currency and portfolio_currency and security_currency != portfolio_currency:
+        if is_cross_currency:
             fx_rate = self._get_fx_rate(
                 security_currency, portfolio_currency,
                 rate_date=position_date,
@@ -394,13 +404,11 @@ class PositionService:
         # cost_lc rules (SA PORTIARP-8206):
         #   NON-REVAL: use effective gross_lc from trade (derived from user-entered total_amount_lc)
         #   REVAL:     trade_cost × fx_rate (table rate, date-bound)
-        reval_status = self._get_portfolio_revaluation_status(portfolio_id)
-
         if reval_status == 'NON-REVALUED' and _effective_gross_lc is not None:
             # NON-REVAL: cost LC comes directly from trade LC amounts (post user edits)
             this_trade_cost_lc = _effective_gross_lc
         else:
-            # REVAL (or no LC amount supplied): derive from FX rate
+            # REVAL (or no LC amount supplied, or same-currency): derive from FX rate
             this_trade_cost_lc = trade_cost * fx_rate
 
         if current:
@@ -571,14 +579,24 @@ class PositionService:
 
         # Cost basis uses gross amounts (qty × price), never total (which includes charges).
         sell_fc = price * quantity
-        _effective_sell_lc = Decimal(str(gross_amount_lc)) if gross_amount_lc else None
+        is_cross_currency = bool(
+            security_currency and portfolio_currency and security_currency != portfolio_currency
+        )
+        reval_status = self._get_portfolio_revaluation_status(portfolio_id)
+
+        _effective_sell_lc = (
+            Decimal(str(gross_amount_lc)) if gross_amount_lc and is_cross_currency else None
+        )
+        # Implied rate fallback only for NON-REVAL — REVAL must always trust the FX
+        # table (SA PORTIARP-8206) even when the table has no data for the pair.
         implied_fx_rate = None
-        if _effective_sell_lc and sell_fc and sell_fc != Decimal('0'):
+        if (reval_status == 'NON-REVALUED' and _effective_sell_lc
+                and sell_fc and sell_fc != Decimal('0')):
             implied_fx_rate = _effective_sell_lc / sell_fc
 
         # FX rate from table: latest date <= position_date, carry-forward if no exact match.
         fx_rate = Decimal('1')
-        if security_currency and portfolio_currency and security_currency != portfolio_currency:
+        if is_cross_currency:
             fx_rate = self._get_fx_rate(
                 security_currency, portfolio_currency,
                 rate_date=position_date,
@@ -596,11 +614,10 @@ class PositionService:
             old_total_cost_lc = old_qty * old_avg_cost_lc
 
         # Realized P&L in LC (SA rule):
-        #   NON-REVAL: sell proceeds LC = user-entered trade_lc (total_amount_lc from form).
-        #              Fallback to price × fx_rate if trade_lc not supplied.
+        #   NON-REVAL: sell proceeds LC = user-entered trade_lc (total_amount_lc from form),
+        #              only for cross-currency trades. Fallback to price × fx_rate otherwise.
         #   REVAL:     sell proceeds LC = price × latest system fx_rate.
-        reval_status = self._get_portfolio_revaluation_status(portfolio_id)
-        if reval_status == 'NON-REVALUED' and trade_lc is not None:
+        if reval_status == 'NON-REVALUED' and trade_lc is not None and is_cross_currency:
             sell_proceeds_lc = Decimal(str(trade_lc))
             sell_lc_per_unit = sell_proceeds_lc / quantity if quantity else Decimal('0')
             realized_pnl_this_trade_lc = (sell_lc_per_unit - old_avg_cost_lc) * quantity
