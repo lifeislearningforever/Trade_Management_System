@@ -410,6 +410,14 @@ class PositionService:
         # cost_lc rules (SA PORTIARP-8206):
         #   NON-REVAL: use effective gross_lc from trade (derived from user-entered total_amount_lc)
         #   REVAL:     trade_cost × fx_rate (table rate, date-bound)
+        logger.info(
+            f"[COST_LC DECISION] trade_id={trade_id} portfolio_id={portfolio_id!r} "
+            f"security_currency={security_currency!r} portfolio_currency={portfolio_currency!r} "
+            f"is_cross_currency={is_cross_currency} reval_status={reval_status!r} "
+            f"gross_amount_lc_param={gross_amount_lc!r} _effective_gross_lc={_effective_gross_lc!r} "
+            f"trade_cost={trade_cost} fx_rate={fx_rate} "
+            f"will_use_override={reval_status == 'NON-REVALUED' and _effective_gross_lc is not None}"
+        )
         if reval_status == 'NON-REVALUED' and _effective_gross_lc is not None:
             # NON-REVAL: cost LC comes directly from trade LC amounts (post user edits)
             this_trade_cost_lc = _effective_gross_lc
