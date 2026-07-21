@@ -705,9 +705,15 @@ def start_trade_event_worker():
                             # Store processing_started_at on event dict for mark_completed/mark_failed
                             event['processing_started_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-                            event_type = event.get('event_type')
+                            event_type_raw = event.get('event_type')
+                            # Normalize before matching — whitespace/case variants (or a JSON
+                            # round-trip artifact) previously fell through to the `else` branch
+                            # below, which incorrectly marked the event COMPLETED without ever
+                            # running its handler. Matches trade_event_queue_service.py's own
+                            # normalization for the same comparison.
+                            event_type = (event_type_raw or '').strip().upper()
                             event_data = json.loads(event.get('event_data', '{}'))
-                            print(f"==> DISPATCH event_id={event_id} event_type={event_type!r} trade_id={event.get('trade_id')}", flush=True)
+                            print(f"==> DISPATCH event_id={event_id} event_type={event_type_raw!r} trade_id={event.get('trade_id')}", flush=True)
 
                             if event_type == 'HISTORY':
                                 process_history_event(event, event_data)
@@ -718,7 +724,11 @@ def start_trade_event_worker():
                             elif event_type == 'POSITION_CANCEL':
                                 process_position_cancel_event(event, event_data)
                             else:
-                                print(f"==> Trade Event Worker: Unknown event type: {event_type}")
+                                # Previously fell through to mark_completed() below without
+                                # running any handler — silently dropping the event. Now a
+                                # genuine failure so it retries / surfaces in dead-letter
+                                # instead of vanishing.
+                                raise ValueError(f"Unknown event_type: {event_type_raw!r}")
 
                             print(f"==> DISPATCH event_id={event_id} completed handler OK, marking COMPLETED", flush=True)
                             mark_completed(event_id, event)
