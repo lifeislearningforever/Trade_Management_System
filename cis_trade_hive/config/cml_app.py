@@ -663,21 +663,23 @@ def start_trade_event_worker():
                 ORDER BY created_at
                 LIMIT {TRADE_EVENT_WORKER_BATCH_SIZE}
                 """
-                # DIAGNOSTIC: measure poll query latency and result count so we
-                # can correlate against real trade-creation timestamps if an
-                # event is ever reported as "not processing" — helps determine
-                # whether this is a Kudu read-after-write propagation delay or
-                # something else. Remove once root-caused.
+                # DIAGNOSTIC: measure poll query latency so we can correlate
+                # against real trade-creation timestamps if an event is ever
+                # reported as "not processing" — helps determine whether this
+                # is a Kudu read-after-write propagation delay or something
+                # else. Only logs when events are actually found — silent,
+                # empty polls (the overwhelming majority in production) are
+                # not logged to avoid flooding Application Logs every 5s.
+                # Remove once root-caused.
                 _poll_started = time.time()
                 events = impala_manager.execute_query(query, database=DATABASE)
-                _poll_elapsed_ms = (time.time() - _poll_started) * 1000
-                print(
-                    f"==> POLL {datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} "
-                    f"found={len(events) if events else 0} query_ms={_poll_elapsed_ms:.0f}",
-                    flush=True
-                )
-
                 if events:
+                    _poll_elapsed_ms = (time.time() - _poll_started) * 1000
+                    print(
+                        f"==> POLL {datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} "
+                        f"found={len(events)} query_ms={_poll_elapsed_ms:.0f}",
+                        flush=True
+                    )
                     print(f"==> Trade Event Worker: Processing {len(events)} events...", flush=True)
                     for event in events:
                         if _shutdown_requested:
