@@ -303,6 +303,7 @@ def start_trade_event_worker():
 
         def process_settlement_event(event, event_data):
             """Process a SETTLEMENT event - trigger settlement/AVP calculation."""
+            print(f"==> ENTERED process_settlement_event trade_id={event_data.get('trade_id')}", flush=True)
             from trade.services.settlement_service import settlement_service
 
             trade_id = event_data.get('trade_id')
@@ -665,7 +666,7 @@ def start_trade_event_worker():
                 events = impala_manager.execute_query(query, database=DATABASE)
 
                 if events:
-                    print(f"==> Trade Event Worker: Processing {len(events)} events...")
+                    print(f"==> Trade Event Worker: Processing {len(events)} events...", flush=True)
                     for event in events:
                         if _shutdown_requested:
                             break
@@ -678,6 +679,7 @@ def start_trade_event_worker():
 
                             event_type = event.get('event_type')
                             event_data = json.loads(event.get('event_data', '{}'))
+                            print(f"==> DISPATCH event_id={event_id} event_type={event_type!r} trade_id={event.get('trade_id')}", flush=True)
 
                             if event_type == 'HISTORY':
                                 process_history_event(event, event_data)
@@ -690,17 +692,22 @@ def start_trade_event_worker():
                             else:
                                 print(f"==> Trade Event Worker: Unknown event type: {event_type}")
 
+                            print(f"==> DISPATCH event_id={event_id} completed handler OK, marking COMPLETED", flush=True)
                             mark_completed(event_id, event)
 
                         except Exception as e:
-                            print(f"==> Trade Event Worker: Error processing event {event_id}: {e}")
+                            import traceback
+                            print(f"==> Trade Event Worker: Error processing event {event_id}: {e}", flush=True)
+                            traceback.print_exc()
                             mark_failed(event_id, event, str(e), event.get('retry_count', 0))
                 else:
                     # No events, sleep
                     time.sleep(TRADE_EVENT_WORKER_POLL_INTERVAL)
 
             except Exception as e:
-                print(f"==> Trade Event Worker: Error in loop: {e}")
+                import traceback
+                print(f"==> Trade Event Worker: Error in loop: {e}", flush=True)
+                traceback.print_exc()
                 time.sleep(TRADE_EVENT_WORKER_POLL_INTERVAL)
 
         print("==> Trade Event Worker: Stopped")
