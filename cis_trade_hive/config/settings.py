@@ -436,6 +436,21 @@ LOGGING = {
             'level': 'INFO',
             'propagate': False,
         },
+        'trade': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'market_data': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'security': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
         'channels': {
             'handlers': ['console', 'file'],
             'level': 'INFO',
@@ -464,6 +479,14 @@ LOGGING = {
             'level': 'WARNING',
             'propagate': False,
         },
+    },
+    # Safety net: any app logger not explicitly listed above (e.g. a new app,
+    # or one added without updating this file) still reaches the log file
+    # instead of being silently dropped — this is what caused prior debug
+    # logging from trade/services/* to appear to "never fire".
+    'root': {
+        'handlers': ['console', 'file'],
+        'level': 'INFO',
     },
 }
 
