@@ -4929,11 +4929,22 @@ class UploadService:
             _t = _step_time("Step 7B (report write)", _t)
 
             # ------------------------------------------------------------------
-            # Count totals — prefer _s7b_pass/_s7b_fail which were read directly
-            # from the report right after the INSERT (most reliable). Fall back to
-            # a fresh report query only if those counts look wrong (e.g. -1 on error).
+            # Count totals — Step 6 already locked in the authoritative
+            # total/passed/failed from position_upload_staging (see comment
+            # above that assignment). Do NOT let Step 7B's re-count overwrite
+            # it: position_upload_report is a shared partition that a
+            # concurrent second ETL run for the same src_id/processing_date
+            # can rewrite between Step 6 and here, which previously caused
+            # this run's correct Step 6 counts to be silently replaced with
+            # the other run's numbers (or zeros), producing a description
+            # ("750/751 → cis_position") that disagreed with the live upload
+            # detail page's stat panel (re-queries position_upload_report at
+            # view time and would show whichever run's data landed last).
+            # Only use Step 7B's numbers as a fallback if Step 6 never ran.
             # ------------------------------------------------------------------
-            if _s7b_total >= 0:
+            if result.get('total') is not None:
+                pass  # Step 6 already set total/passed/failed — keep it authoritative
+            elif _s7b_total >= 0:
                 result.update({
                     'total':  _s7b_total,
                     'passed': _s7b_pass,
