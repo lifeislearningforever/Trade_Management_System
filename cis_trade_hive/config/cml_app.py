@@ -644,8 +644,22 @@ def start_trade_event_worker():
         STALE_PROCESSING_TIMEOUT_SECONDS = 300  # 5 minutes
         from datetime import timedelta as _timedelta
 
+        # Heartbeat so the poll loop's liveness is visible in Application Logs
+        # even during long stretches of empty polls (which are intentionally
+        # silent — see the DIAGNOSTIC comment below). Without this, a hung or
+        # dead loop looks identical to a healthy-but-idle one from the logs.
+        _last_heartbeat = time.time()
+        _HEARTBEAT_INTERVAL_SECONDS = 60
+
         while not _shutdown_requested:
             try:
+                if time.time() - _last_heartbeat >= _HEARTBEAT_INTERVAL_SECONDS:
+                    print(
+                        f"==> Trade Event Worker: heartbeat {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} "
+                        f"(alive, polling every {TRADE_EVENT_WORKER_POLL_INTERVAL}s)",
+                        flush=True
+                    )
+                    _last_heartbeat = time.time()
                 # Compute stale-PROCESSING threshold (events running > 5 min are re-fetched)
                 stale_threshold = (
                     datetime.now() - _timedelta(seconds=STALE_PROCESSING_TIMEOUT_SECONDS)
