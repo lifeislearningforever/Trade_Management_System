@@ -518,7 +518,16 @@ class PositionService:
             'pipeline_fc': carried_pipeline_fc,
             'pipeline_lc': carried_pipeline_lc,
             'position_type': position_type or 'INT',
-            'position_basis': position_basis
+            'position_basis': position_basis,
+            # Thread through the reval_status already resolved above so
+            # _save_position doesn't re-query it independently — see
+            # _save_position's reval_status parameter docstring for why a
+            # second, separate query here was a real bug (not just a
+            # theoretical race): two calls to _get_portfolio_revaluation_status
+            # for the same trade could disagree, and _save_position's own
+            # answer silently overwrote this function's correct NON-REVAL
+            # cost_lc with a REVAL (market-rate) recomputation.
+            '_reval_status': reval_status,
         }
 
         # Save to cis_trade_position
@@ -702,7 +711,8 @@ class PositionService:
                 'pipeline_fc': float(pipeline_fc) if pipeline_fc is not None else float(current.get('pipeline_fc', 0) or 0),
                 'pipeline_lc': float(pipeline_lc) if pipeline_lc is not None else float(current.get('pipeline_lc', 0) or 0),
                 'position_type': position_type or 'INT',
-                'position_basis': position_basis
+                'position_basis': position_basis,
+                '_reval_status': reval_status,
             }
             logger.info(f"Position {position_id} fully closed. Total realized P&L: {new_realized_pnl}, LC: {new_realized_pnl_lc}")
         else:
@@ -767,7 +777,8 @@ class PositionService:
                 'pipeline_fc': float(pipeline_fc) if pipeline_fc is not None else float(current.get('pipeline_fc', 0) or 0),
                 'pipeline_lc': float(pipeline_lc) if pipeline_lc is not None else float(current.get('pipeline_lc', 0) or 0),
                 'position_type': position_type or current.get('position_type') or 'INT',
-                'position_basis': position_basis
+                'position_basis': position_basis,
+                '_reval_status': reval_status,
             }
 
         # Save to cis_trade_position
@@ -957,8 +968,19 @@ class PositionService:
             unrealized_pnl = float(position_data.get('unrealized_pnl_fc') or position_data.get('unrealized_pnl', 0) or 0)
             market_value = float(position_data.get('market_value_fc') or position_data.get('market_value', 0) or 0)
 
-            # Get portfolio revaluation status
-            revaluation_status = self._get_portfolio_revaluation_status(portfolio_id)
+            # Get portfolio revaluation status — prefer the value the caller
+            # already resolved (_process_buy/_process_sell compute this once
+            # and pass it through as position_data['_reval_status']). Re-
+            # querying independently here was a real bug: if this second,
+            # separate call to _get_portfolio_revaluation_status ever
+            # disagreed with the caller's earlier answer for the same trade,
+            # it silently overwrote a correct NON-REVAL cost_lc (computed
+            # upstream in _process_buy/_process_sell) with a REVAL market-
+            # rate recomputation — with no error, no log trace at the
+            # decision point, since this function has no reason to think
+            # anything is wrong.
+            revaluation_status = position_data.get('_reval_status') or \
+                self._get_portfolio_revaluation_status(portfolio_id)
             logger.debug(f"Portfolio {portfolio_id} revaluation_status: {revaluation_status}")
 
             # LC calculations based on revaluation_status
