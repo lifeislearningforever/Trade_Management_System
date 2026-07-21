@@ -18,6 +18,7 @@ Workflow:
 import json
 import logging
 import hashlib
+from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from django.shortcuts import render, redirect
 from django.contrib import messages
@@ -2238,31 +2239,33 @@ def api_trade_event_reprocess_all_failed(request):
 @require_http_methods(["POST"])
 def api_trade_event_worker_start(request):
     """
-    API: Start the trade event queue worker.
+    API: Disabled.
 
     POST /trade/api/event-worker-start/
 
-    Note: In production, use the management command instead.
+    The only supported trade-event consumer in this deployment is the
+    embedded worker thread started by config/cml_app.py's post_fork hook
+    (one per gunicorn worker process). Calling trade_event_queue_service
+    .start_worker() here would spin up a SECOND, independent consumer
+    thread inside the same process that polls and processes the same
+    cis_trade_event_queue rows — the two are structurally unaware of each
+    other, so they race for events with no coordination. This previously
+    caused intermittent duplicate/skipped settlement processing that was
+    very difficult to diagnose (the second thread's logging goes through
+    trade_event_queue_service's own logger, not cml_app.py's print-based
+    Application Log output, making it invisible in the usual place people
+    check). Disabled rather than fixed-and-kept because there is no valid
+    reason to run a second consumer in this deployment.
     """
-    try:
-        from trade.services.trade_event_queue_service import trade_event_queue_service
-
-        started = trade_event_queue_service.start_worker()
-
-        return JsonResponse({
-            'status': 'ok',
-            'started': started,
-            'message': 'Worker started' if started else 'Worker already running',
-            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        })
-
-    except Exception as e:
-        logger.error(f"Start worker error: {str(e)}")
-        return JsonResponse({
-            'status': 'error',
-            'error': str(e),
-            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        }, status=500)
+    return JsonResponse({
+        'status': 'error',
+        'error': (
+            'Disabled: a second trade event worker must not be started in this '
+            'deployment. config/cml_app.py already runs the only supported '
+            'consumer via its post_fork hook.'
+        ),
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    }, status=409)
 
 
 @require_http_methods(["POST"])
