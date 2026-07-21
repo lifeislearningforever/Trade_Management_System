@@ -1631,25 +1631,49 @@ class PositionService:
             portfolio_id: Portfolio short name
 
         Returns:
-            'REVALUED' or 'NON-REVALUED' (defaults to 'REVALUED' if not found)
+            'REVALUED' or 'NON-REVALUED' (defaults to 'REVALUED' if genuinely
+            not found in cis_portfolio after retrying transient errors)
+
+        IMPORTANT: a transient connection error here (e.g. Kudu/Impala
+        TTransportException on a stale pooled connection) used to be
+        silently swallowed and treated as "default to REVALUED" — exactly
+        as if the portfolio were genuinely REVALUED. For a NON-REVALUED
+        portfolio, that silently skips the cost_lc override in
+        _process_buy/_process_sell and falls back to the market FX rate,
+        with only a logger.error line (easy to miss) and no other symptom.
+        This caused intermittent wrong cost_lc with no reproducible pattern.
+        Now retries once before giving up, and raises on repeated failure
+        so the caller's trade genuinely fails/retries instead of silently
+        computing against the wrong revaluation basis.
         """
-        try:
-            query = f"""
-            SELECT revaluation_status
-            FROM {self.DATABASE}.cis_portfolio
-            WHERE name = '{self._escape(portfolio_id)}'
-            LIMIT 1
-            """
-            results = impala_manager.execute_query(query, database=self.DATABASE)
-            if results and results[0].get('revaluation_status'):
-                status = results[0]['revaluation_status'].upper()
-                if status in ('REVALUED', 'NON-REVALUED'):
-                    return status
-            # Default to REVALUED if not found or invalid
-            return 'REVALUED'
-        except Exception as e:
-            logger.error(f"Error fetching revaluation status for {portfolio_id}: {str(e)}")
-            return 'REVALUED'  # Default to REVALUED on error
+        query = f"""
+        SELECT revaluation_status
+        FROM {self.DATABASE}.cis_portfolio
+        WHERE name = '{self._escape(portfolio_id)}'
+        LIMIT 1
+        """
+        last_error = None
+        for attempt in range(2):
+            try:
+                results = impala_manager.execute_query(query, database=self.DATABASE)
+                if results and results[0].get('revaluation_status'):
+                    status = results[0]['revaluation_status'].upper()
+                    if status in ('REVALUED', 'NON-REVALUED'):
+                        return status
+                # Query succeeded but portfolio genuinely has no/invalid
+                # revaluation_status — that's a real "not found", not a
+                # transient error, so defaulting to REVALUED is correct here.
+                return 'REVALUED'
+            except Exception as e:
+                last_error = e
+                logger.error(
+                    f"Error fetching revaluation status for {portfolio_id} "
+                    f"(attempt {attempt + 1}/2): {str(e)}"
+                )
+        raise RuntimeError(
+            f"Could not determine revaluation_status for portfolio {portfolio_id} "
+            f"after 2 attempts: {last_error}"
+        )
 
     def _resolve_currencies(
         self, portfolio_id: str, security_id: str,
