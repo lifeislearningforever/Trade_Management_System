@@ -108,6 +108,7 @@ class SettlementService:
         Returns:
             Tuple of (success, message, result_data)
         """
+        print(f"==> ENTERED process_trade_settlement trade_id={trade_id} settle_date={settle_date!r} trade_date={trade_date!r}", flush=True)
         try:
             today = system_date_service.get_system_date()
             settle_dt = self._parse_date(settle_date)
