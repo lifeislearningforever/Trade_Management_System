@@ -663,7 +663,19 @@ def start_trade_event_worker():
                 ORDER BY created_at
                 LIMIT {TRADE_EVENT_WORKER_BATCH_SIZE}
                 """
+                # DIAGNOSTIC: measure poll query latency and result count so we
+                # can correlate against real trade-creation timestamps if an
+                # event is ever reported as "not processing" — helps determine
+                # whether this is a Kudu read-after-write propagation delay or
+                # something else. Remove once root-caused.
+                _poll_started = time.time()
                 events = impala_manager.execute_query(query, database=DATABASE)
+                _poll_elapsed_ms = (time.time() - _poll_started) * 1000
+                print(
+                    f"==> POLL {datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} "
+                    f"found={len(events) if events else 0} query_ms={_poll_elapsed_ms:.0f}",
+                    flush=True
+                )
 
                 if events:
                     print(f"==> Trade Event Worker: Processing {len(events)} events...", flush=True)
@@ -832,6 +844,44 @@ def start_worker_health_monitor():
                         start_position_worker()
                     else:
                         print("==> WorkerHealthMonitor: PositionWorker OK")
+
+                # ── cis_trade_event_queue SLA check (visibility only) ───────
+                # Alerts if an event has been PENDING longer than a few poll
+                # cycles should ever allow — this does NOT reprocess the event
+                # itself (that would mean a second copy of dispatch logic,
+                # which is what caused the cml_app.py / trade_event_queue_service
+                # duplication bug in the first place). It's purely an early
+                # warning so a stuck event is visible in logs immediately
+                # instead of only being noticed when a user reports it.
+                try:
+                    from core.repositories.impala_connection import impala_manager as _health_impala
+                    from datetime import datetime as _dt, timedelta as _health_td
+                    _stale_evt_threshold = (
+                        _dt.now() - _health_td(seconds=TRADE_EVENT_WORKER_POLL_INTERVAL * 6)
+                    ).strftime('%Y-%m-%d %H:%M:%S')
+                    _oldest_pending = _health_impala.execute_query(
+                        f"""
+                        SELECT event_id, trade_id, event_type, created_at,
+                               unix_timestamp(now()) - unix_timestamp(created_at) AS age_seconds
+                        FROM gmp_cis.cis_trade_event_queue
+                        WHERE status = 'PENDING' AND created_at < '{_stale_evt_threshold}'
+                        ORDER BY created_at ASC
+                        LIMIT 1
+                        """,
+                        database='gmp_cis'
+                    )
+                    if _oldest_pending:
+                        _age = _oldest_pending[0].get('age_seconds', 0)
+                        print(
+                            f"==> WorkerHealthMonitor: WARNING — event_id={_oldest_pending[0]['event_id']} "
+                            f"trade_id={_oldest_pending[0]['trade_id']} type={_oldest_pending[0]['event_type']} "
+                            f"has been PENDING for {_age}s (SLA: {TRADE_EVENT_WORKER_POLL_INTERVAL * 6}s) — "
+                            f"TradeEventWorker may not be picking up new events. Investigate."
+                        )
+                    else:
+                        print("==> WorkerHealthMonitor: cis_trade_event_queue OK (no stale PENDING events)")
+                except Exception as _qe:
+                    print(f"==> WorkerHealthMonitor: cis_trade_event_queue check failed: {_qe}")
 
                 # ── HTTP health endpoint ────────────────────────────────────
                 try:
