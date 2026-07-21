@@ -699,9 +699,11 @@ def start_trade_event_worker():
                         if _shutdown_requested:
                             break
                         event_id = event['event_id']
+                        print(f"==> LOOP-START event_id={event_id} trade_id={event.get('trade_id')} event_type={event.get('event_type')!r}", flush=True)
                         try:
                             # Mark as PROCESSING first — prevents other workers/threads picking same event
                             mark_processing(event_id, event)
+                            print(f"==> AFTER mark_processing event_id={event_id}", flush=True)
                             # Store processing_started_at on event dict for mark_completed/mark_failed
                             event['processing_started_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
