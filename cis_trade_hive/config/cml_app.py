@@ -651,6 +651,24 @@ def start_trade_event_worker():
         _last_heartbeat = time.time()
         _HEARTBEAT_INTERVAL_SECONDS = 60
 
+        # Root cause of intermittent "trade created but never dispatched": the
+        # worker's own heartbeat went silent for 60-90s stretches, proving the
+        # poll loop itself was blocked — not an application logic bug. Most
+        # likely a slow/contended Impala connection under concurrent web +
+        # worker load (execute_query has no query-level timeout; only a 20s
+        # connection-acquisition timeout, which doesn't cover a query that's
+        # already running slowly on an acquired connection). PyHive/Impala's
+        # Python driver has no clean way to cancel a query mid-flight from
+        # another thread, so this wraps ONLY the poll query in a wall-clock
+        # timeout via a persistent single worker thread: if the query hasn't
+        # returned within POLL_QUERY_TIMEOUT_SECONDS, log it loudly and let
+        # the loop continue to its next 5s cycle instead of blocking
+        # indefinitely. The abandoned query keeps running in the background
+        # thread and its result is discarded when it eventually completes.
+        import concurrent.futures as _cf
+        _poll_executor = _cf.ThreadPoolExecutor(max_workers=1, thread_name_prefix="TradeEventPollQuery")
+        POLL_QUERY_TIMEOUT_SECONDS = 15
+
         while not _shutdown_requested:
             try:
                 if time.time() - _last_heartbeat >= _HEARTBEAT_INTERVAL_SECONDS:
@@ -686,7 +704,18 @@ def start_trade_event_worker():
                 # not logged to avoid flooding Application Logs every 5s.
                 # Remove once root-caused.
                 _poll_started = time.time()
-                events = impala_manager.execute_query(query, database=DATABASE)
+                try:
+                    _poll_future = _poll_executor.submit(impala_manager.execute_query, query, database=DATABASE)
+                    events = _poll_future.result(timeout=POLL_QUERY_TIMEOUT_SECONDS)
+                except _cf.TimeoutError:
+                    print(
+                        f"==> Trade Event Worker: WARNING poll query exceeded "
+                        f"{POLL_QUERY_TIMEOUT_SECONDS}s (elapsed={time.time() - _poll_started:.1f}s) — "
+                        f"abandoning this cycle, continuing to next poll. Likely Impala/Kudu "
+                        f"connection contention under concurrent load.",
+                        flush=True
+                    )
+                    events = None
                 if events:
                     _poll_elapsed_ms = (time.time() - _poll_started) * 1000
                     print(
