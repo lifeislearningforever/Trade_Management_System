@@ -321,6 +321,12 @@ class PositionService:
             portfolio_id, security_id, position_basis, position_date, 'CIS'
         )
 
+        # Defensive: resolve currencies fresh if the caller's event_data payload
+        # was missing either one — see _resolve_currencies docstring.
+        security_currency, portfolio_currency = self._resolve_currencies(
+            portfolio_id, security_id, security_currency, portfolio_currency
+        )
+
         if current:
             # Existing position - add to it
             old_qty = Decimal(str(current.get('quantity', 0) or 0))
@@ -554,6 +560,12 @@ class PositionService:
         # Validate: cannot sell without position
         if not current:
             return False, f"No position found for {security_id} in portfolio {portfolio_id}", None
+
+        # Defensive: resolve currencies fresh if the caller's event_data payload
+        # was missing either one — see _resolve_currencies docstring.
+        security_currency, portfolio_currency = self._resolve_currencies(
+            portfolio_id, security_id, security_currency, portfolio_currency
+        )
 
         old_qty = Decimal(str(current.get('quantity', 0) or 0))
         # Use new column name average_cost_fc (fallback to average_cost for backward compat)
@@ -1638,6 +1650,54 @@ class PositionService:
         except Exception as e:
             logger.error(f"Error fetching revaluation status for {portfolio_id}: {str(e)}")
             return 'REVALUED'  # Default to REVALUED on error
+
+    def _resolve_currencies(
+        self, portfolio_id: str, security_id: str,
+        security_currency: str = None, portfolio_currency: str = None
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Fall back to a fresh DB lookup when the caller's security_currency/
+        portfolio_currency are missing.
+
+        These are normally threaded through from the trade's event_data
+        (populated at trade-entry time). If that payload was ever incomplete
+        (e.g. security/portfolio lookup returned no currency_code at queue
+        time), _process_buy/_process_sell would silently treat the trade as
+        same-currency and skip the NON-REVAL cost_lc override entirely —
+        falling back to the FX-table market rate with no error or log trace.
+        This makes that failure mode impossible: missing currency is always
+        resolved fresh rather than silently defaulting to "no FX difference".
+        """
+        if security_currency and portfolio_currency:
+            return security_currency, portfolio_currency
+        try:
+            if not security_currency:
+                rows = impala_manager.execute_query(
+                    f"SELECT currency_code FROM {self.DATABASE}.cis_security "
+                    f"WHERE security_name = '{self._escape(security_id)}' LIMIT 1",
+                    database=self.DATABASE
+                )
+                if rows and rows[0].get('currency_code'):
+                    security_currency = rows[0]['currency_code']
+                    logger.warning(
+                        f"security_currency missing from caller for {security_id} — "
+                        f"resolved fresh from cis_security: {security_currency}"
+                    )
+            if not portfolio_currency:
+                rows = impala_manager.execute_query(
+                    f"SELECT currency FROM {self.DATABASE}.cis_portfolio "
+                    f"WHERE name = '{self._escape(portfolio_id)}' LIMIT 1",
+                    database=self.DATABASE
+                )
+                if rows and rows[0].get('currency'):
+                    portfolio_currency = rows[0]['currency']
+                    logger.warning(
+                        f"portfolio_currency missing from caller for {portfolio_id} — "
+                        f"resolved fresh from cis_portfolio: {portfolio_currency}"
+                    )
+        except Exception as e:
+            logger.error(f"Error resolving fallback currencies for {portfolio_id}/{security_id}: {str(e)}")
+        return security_currency, portfolio_currency
 
     # =========================================================================
     # VALIDATION
