@@ -106,7 +106,8 @@
                 </div>
             </div>
 
-            <!-- Subscription Period Card -->
+            <!-- Subscription Period Card (Only for Rights/Warrant Entitlement) -->
+            {% if corporate_action.ca_type == 'RIGHTS_ENTITLEMENT' or corporate_action.ca_type == 'WARRANT_ENTITLEMENT' %}
             <div class="card mb-4">
                 <div class="card-header">
                     <h5 class="card-title mb-0">
@@ -126,6 +127,7 @@
                     </div>
                 </div>
             </div>
+            {% endif %}
 
             <!-- Price Information Card -->
             <div class="card mb-4">
