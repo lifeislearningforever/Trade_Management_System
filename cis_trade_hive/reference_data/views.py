@@ -17,6 +17,7 @@ from django.views.decorators.http import require_http_methods
 from core.models import AuditLog
 from core.audit.audit_kudu_repository import audit_log_kudu_repository
 from core.views.auth_views import require_login, require_permission
+from core.utils.list_sort import sort_list
 from .services.reference_data_service import (
     currency_service,
     country_service,
@@ -406,14 +407,18 @@ def mascode_list(request):
         if industry_group_filter:
             mascodes = [m for m in mascodes if m.get('industry_group') == industry_group_filter]
 
-        # Server-side sorting
-        reverse_order = sort_order == 'desc'
+        # Server-side sorting (mas_code tiebreaker keeps pagination boundaries
+        # deterministic when sorting by industry_group, since multiple rows
+        # share the same group — see core.utils.list_sort for why this matters)
         sort_key_map = {
             'mas_code': lambda x: (x.get('mas_code') or '').lower(),
             'industry_group': lambda x: (x.get('industry_group') or '').lower(),
         }
-        sort_func = sort_key_map.get(sort_by, sort_key_map['mas_code'])
-        mascodes = sorted(mascodes, key=sort_func, reverse=reverse_order)
+        mascodes = sort_list(
+            mascodes, sort_key_map, sort_by, sort_order,
+            default_key='mas_code',
+            tiebreaker=lambda x: (x.get('mas_code') or '').lower(),
+        )
 
         # Get distinct industry groups for filter dropdown
         industry_groups = mascode_service.get_distinct_industry_groups()
