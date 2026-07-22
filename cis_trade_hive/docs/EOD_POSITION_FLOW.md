@@ -65,7 +65,7 @@ For each pending CA in the queue whose `payment_date <= today`:
 **Input:** `cis_cash_flow` — records with `status=APPROVED` or `status=VALIDATED`, `payment_date <= run_date`  
 **Output:** Updated rows in `cis_trade_position` (CIS) and `cis_position` (golden copy)
 
-**Position basis affected:** `SETTLE_DATE` only
+**Position basis affected:** `SETTLED` only
 
 ### Cash flow type processing rules
 
@@ -92,7 +92,7 @@ For each pending CA in the queue whose `payment_date <= today`:
 
 After updating `cis_trade_position`, a new row is inserted into `cis_position` with:
 - `position_type = 'INT'`
-- `position_basis = 'SETTLE_DATE'`
+- `position_basis = 'SETTLED'`
 - All accumulated CF fields carried forward
 - `position_date` = the cash flow `payment_date`
 
@@ -181,7 +181,7 @@ For each source position processed:
 - **INSERT** new `cis_position` row with:
   - `position_type = 'EOD'`
   - `position_date` = source position's own `position_date`
-  - `position_basis` = same as source (`TRADE_DATE` or `SETTLE_DATE`)
+  - `position_basis` = same as source (`TRADED` or `SETTLED`)
   - All accumulated CF fields (`dividend_fc`, `uncall_fc`, `provision_fc`, `pipeline_fc`, `realized_pnl_fc`) **carried forward unchanged** from the source row
 
 ---
@@ -210,7 +210,7 @@ ORDER BY ca_id;
 ### Post Step 2 (Cash Flows → Positions)
 
 ```sql
--- Verify INT rows created today (SETTLE_DATE basis)
+-- Verify INT rows created today (SETTLED basis)
 SELECT portfolio, security_label, position_basis, position_date,
        position_type, dividend_fc, uncall_fc, provision_fc, pipeline_fc, realized_pnl_fc
 FROM gmp_cis.cis_position
@@ -302,6 +302,6 @@ WHERE cp.position_type = 'EOD'
 
 | `position_type` | Written By | Basis | Description |
 |---|---|---|---|
-| `INT` | Trade creation, cashflow processing, CA processing | TRADE_DATE + SETTLE_DATE | Intraday working position |
-| `EOD` | `refresh_positions` command | TRADE_DATE + SETTLE_DATE | End-of-day revalued snapshot |
-| `SOD` | SOD snapshot job (future) | TRADE_DATE + SETTLE_DATE | Start-of-day snapshot |
+| `INT` | Trade creation, cashflow processing, CA processing | TRADED + SETTLED | Intraday working position |
+| `EOD` | `refresh_positions` command | TRADED + SETTLED | End-of-day revalued snapshot |
+| `SOD` | SOD snapshot job (future) | TRADED + SETTLED | Start-of-day snapshot |

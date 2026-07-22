@@ -22,8 +22,8 @@ All date comparisons use `contextual_today` from this table (via `system_date_se
 ## 2. Trade Capture — Date Scenarios
 
 Every trade creates **two positions** simultaneously:
-- `position_basis = TRADE_DATE` → `position_date = trade_date`
-- `position_basis = SETTLE_DATE` → `position_date = settle_date`
+- `position_basis = TRADED` → `position_date = trade_date`
+- `position_basis = SETTLED` → `position_date = settle_date`
 
 ### 2A. Same-day Trade (trade_date == settle_date == today)
 
@@ -35,8 +35,8 @@ contextual_today = 2026-07-01
 
 | Basis | position_date | position_type | Processing |
 |-------|--------------|---------------|------------|
-| TRADE_DATE | 2026-07-01 | INT | Queued → async position worker |
-| SETTLE_DATE | 2026-07-01 | INT | Queued → async position worker |
+| TRADED | 2026-07-01 | INT | Queued → async position worker |
+| SETTLED | 2026-07-01 | INT | Queued → async position worker |
 
 Both bases go to `cis_position_queue` immediately. Worker runs AVP calculation and writes to `cis_position`.
 
@@ -52,11 +52,11 @@ contextual_today = 2026-07-01
 
 | Basis | position_date | position_type | Processing |
 |-------|--------------|---------------|------------|
-| TRADE_DATE | 2026-07-01 | INT | Queued → async position worker (immediate) |
-| SETTLE_DATE | 2026-07-03 | INT | Queued → `cis_settlement_queue` (processed on settle date) |
+| TRADED | 2026-07-01 | INT | Queued → async position worker (immediate) |
+| SETTLED | 2026-07-03 | INT | Queued → `cis_settlement_queue` (processed on settle date) |
 
-- TRADE_DATE position created today with full AVP
-- SETTLE_DATE position **held in settlement queue** (status = PENDING) until 2026-07-03 becomes `contextual_today`, at which point the SOD job applies its AVP effect to the previous day's EOD row and writes it as SOD — no separate INT is created
+- TRADED position created today with full AVP
+- SETTLED position **held in settlement queue** (status = PENDING) until 2026-07-03 becomes `contextual_today`, at which point the SOD job applies its AVP effect to the previous day's EOD row and writes it as SOD — no separate INT is created
 
 ---
 
@@ -70,8 +70,8 @@ contextual_today = 2026-07-01
 
 | Basis | position_date | position_type | Processing |
 |-------|--------------|---------------|------------|
-| TRADE_DATE | 2026-06-15 | **INT** | Chain recalculation from 2026-06-15 → today |
-| SETTLE_DATE | 2026-06-17 | **INT** | Chain recalculation from 2026-06-17 → today |
+| TRADED | 2026-06-15 | **INT** | Chain recalculation from 2026-06-15 → today |
+| SETTLED | 2026-06-17 | **INT** | Chain recalculation from 2026-06-17 → today |
 
 > **Rule:** Backdated trades always produce `INT` — not `BACK`, not `CORR`.
 
@@ -180,7 +180,7 @@ Corporate actions and cash flows during the day update specific fields on the la
 - `realized_pnl_fc/lc`, `provision_fc/lc`
 - `dividend_fc/lc`, `uncall_fc/lc`, `pipeline_fc/lc` (accumulated from CAs/CFs)
 
-**Output:** New row inserted with `position_type = 'EOD'` for each position (both TRADE_DATE and SETTLE_DATE basis). Never overwrites — always inserts a new versioned row.
+**Output:** New row inserted with `position_type = 'EOD'` for each position (both TRADED and SETTLED basis). Never overwrites — always inserts a new versioned row.
 
 ---
 
@@ -251,7 +251,7 @@ SOD represents the **opening position** for the new day — carrying all accumul
           (async settlement worker skips COMPLETED entries)
 
 During day
-       ├─ New trades create INT positions (TRADE_DATE + SETTLE_DATE basis)
+       ├─ New trades create INT positions (TRADED + SETTLED basis)
        ├─ Backdated trades create INT positions + trigger chain recalc
        ├─ T+1/T+2 settle legs held in cis_settlement_queue (PENDING)
        ├─ Corporate actions update dividend_fc, quantity, avg_cost

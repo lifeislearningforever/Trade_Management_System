@@ -67,7 +67,7 @@ else:
 - Fetches latest position per portfolio/security/position_basis
 - Revalues with latest market price
 - Inserts new rows with `position_type='EOD'`
-- Creates EOD for both `TRADE_DATE` and `SETTLE_DATE` basis
+- Creates EOD for both `TRADED` and `SETTLED` basis
 
 ### SOD Generation
 **File:** `trade/management/commands/create_sod_snapshot.py`
@@ -86,8 +86,8 @@ else:
 ### Dual Position Logic
 **File:** `trade/services/settlement_service.py`
 - Every trade creates TWO positions:
-  - `position_basis='TRADE_DATE'`, `position_date=trade_date`
-  - `position_basis='SETTLE_DATE'`, `position_date=settle_date`
+  - `position_basis='TRADED'`, `position_date=trade_date`
+  - `position_basis='SETTLED'`, `position_date=settle_date`
 - Each basis chain is scoped independently (no cross-contamination of AVP)
 
 ---
@@ -101,7 +101,7 @@ else:
 | **EOD** nightly generation | `refresh_positions` command revalues and inserts EOD rows |
 | **SOD** morning generation | `create_sod_snapshot` copies previous EOD to today as SOD |
 | **Future date blocked** | Trade date > today rejected in `validate_settlement_date()` with UI popup |
-| **Dual positions** | TRADE_DATE + SETTLE_DATE basis both created per trade |
+| **Dual positions** | TRADED + SETTLED basis both created per trade |
 | **Backdated chain recalc** | Re-processes all trades from backdated date to today via versioning |
 
 ---
@@ -156,13 +156,13 @@ If a `CORR` position is created for a past date **after** EOD already ran for th
 
 ---
 
-### 2. SETTLE_DATE position blocked for T+1/T+2 trades
-`_derive_position_type()` blocks any `position_date > today`. For a trade with `settle_date = T+2`, the SETTLE_DATE basis position will fail silently because the settlement date is in the future.
+### 2. SETTLED position blocked for T+1/T+2 trades
+`_derive_position_type()` blocks any `position_date > today`. For a trade with `settle_date = T+2`, the SETTLED basis position will fail silently because the settlement date is in the future.
 
-**Risk:** T+1/T+2 settlement trades never get a SETTLE_DATE position created.
+**Risk:** T+1/T+2 settlement trades never get a SETTLED position created.
 
 **Files affected:**
-- `trade/services/position_service.py` — `_derive_position_type()` needs a separate code path for SETTLE_DATE basis (allow future settle dates, queue them)
+- `trade/services/position_service.py` — `_derive_position_type()` needs a separate code path for SETTLED basis (allow future settle dates, queue them)
 - `trade/services/settlement_service.py` — `cis_settlement_queue` exists for this but may not be wired end-to-end
 
 ---

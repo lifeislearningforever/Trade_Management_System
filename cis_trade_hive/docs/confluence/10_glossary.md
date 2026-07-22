@@ -11,7 +11,7 @@
 | **Audit Log** | A permanent record of everything that happened in CIS — who did what, when, with before/after values. Stored in `cis_audit_log`. |
 | **BA** | Business Analyst. Writes requirements and works between business and tech. |
 | **Backdated trade** | A trade entered in CIS with a trade date in the past. Triggers recalculation of all positions from that date forward. |
-| **Basis (position)** | TRADE_DATE or SETTLE_DATE — the date basis on which a position is calculated. CIS tracks both. |
+| **Basis (position)** | TRADED or SETTLED — the date basis on which a position is calculated. CIS tracks both. |
 | **BUY** | Trade type — purchase of securities. Increases position quantity and recalculates average cost. |
 | **CA** | Corporate Action. An event by a company affecting its securities (dividend, split, rights issue, etc.). |
 | **Cash Flow** | A money movement linked to a portfolio — from dividends, trade settlements, corporate actions, etc. |

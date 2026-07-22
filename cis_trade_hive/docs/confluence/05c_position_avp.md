@@ -121,7 +121,7 @@ SLA: < 5 minutes from settlement to position update
 | `average_cost` | Weighted average cost after this trade (DECIMAL 20,8) |
 | `total_cost` | `quantity × average_cost` |
 | `realized_pnl` | Realised P&L from this trade (SELL only) |
-| `trade_basis` | TRADE_DATE or SETTLE_DATE basis |
+| `trade_basis` | TRADED or SETTLED basis |
 | `version` | Incremented each time position is updated |
 | `status` | OPEN or CLOSED |
 
@@ -133,8 +133,8 @@ Each settled trade creates **two position records**:
 
 | Basis | Description |
 |-------|-------------|
-| `TRADE_DATE` | Position as of the trade execution date |
-| `SETTLE_DATE` | Position as of the actual settlement date |
+| `TRADED` | Position as of the trade execution date |
+| `SETTLED` | Position as of the actual settlement date |
 
 This matters for T+1 / T+2 trades: the position exists on trade date but cash doesn't move until settle date.
 

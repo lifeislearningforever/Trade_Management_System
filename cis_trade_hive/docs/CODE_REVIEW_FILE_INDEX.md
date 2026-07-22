@@ -640,7 +640,7 @@ User-Defined Fields — extensible metadata system for any entity type.
 | `sql/ddl/60_query_builder_kudu.sql` | Query builder saved reports table |
 | `sql/ddl/64_security_id_registry.sql` | Security ID registry |
 | `sql/ddl/68_cis_notification_kudu.sql` | In-app notification table |
-| `sql/ddl/22_position_queue_add_basis_columns.sql` | Add TRADE_DATE/SETTLE_DATE basis columns to position queue |
+| `sql/ddl/22_position_queue_add_basis_columns.sql` | Add TRADED/SETTLED basis columns to position queue |
 
 ### Security & Reference DDL
 

@@ -44,11 +44,11 @@ sequenceDiagram
 
     Note over GMP,PRC: WAVE 3a - Cash Flow Application 18:30
     CF->>CF: SELECT APPROVED where payment_date <= T-1 and position_updated=false
-    CF->>CTP: lookup open SETTLE_DATE position (is_latest=true)
+    CF->>CTP: lookup open SETTLED position (is_latest=true)
     CTP-->>CF: current qty, avg_cost, accumulated fields
     CF->>CTP: mark old version is_latest=false
     CF->>CTP: UPSERT new version, accumulate dividend, uncall, pipeline, provision
-    CF->>CP: UPSERT INT row (basis=SETTLE_DATE, position_date=payment_date)
+    CF->>CP: UPSERT INT row (basis=SETTLED, position_date=payment_date)
     CF->>CF: UPDATE position_updated=true
 
     Note over GMP,PRC: WAVE 3b - Settlement Processing 18:30 parallel
@@ -116,7 +116,7 @@ sequenceDiagram
     end
 
     CF->>CF: SELECT APPROVED where payment_date <= last_month_end and position_updated=false
-    CF->>CTP: lookup open SETTLE_DATE position for last_month_end
+    CF->>CTP: lookup open SETTLED position for last_month_end
     CTP-->>CF: current qty, avg_cost, accumulated fields
     CF->>CTP: mark old version is_latest=false
     CF->>CTP: UPSERT new version with accumulated CF fields
@@ -145,10 +145,10 @@ flowchart TD
         direction TB
 
         T1["Trade booked via CIS UI\nor backdated entry"]
-        TD_INT["cis_position\nposition_type = INT\nposition_basis = TRADE_DATE\nposition_date = trade_date"]
+        TD_INT["cis_position\nposition_type = INT\nposition_basis = TRADED\nposition_date = trade_date"]
         SD_Q{"settle_date\nvs today?"}
 
-        SD_TODAY["cis_position\nposition_type = INT\nposition_basis = SETTLE_DATE\nposition_date = settle_date\n(immediate)"]
+        SD_TODAY["cis_position\nposition_type = INT\nposition_basis = SETTLED\nposition_date = settle_date\n(immediate)"]
         SD_QUEUE["cis_settlement_queue\nstatus = PENDING\n(held until settle_date)"]
 
         UPL["Position Upload\n(USER_UPLOAD / AMSICEQ)"]

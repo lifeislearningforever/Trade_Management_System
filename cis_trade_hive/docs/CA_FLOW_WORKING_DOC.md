@@ -60,7 +60,7 @@ A brand-new `cis_trade_position` row is created for the rights/warrant security 
 ---
 
 ### 2C. CF Position Overwrite Types
-No cash flow record. Overwrites a specific field on the current SETTLE_DATE position version.
+No cash flow record. Overwrites a specific field on the current SETTLED position version.
 
 | CA Type | Field Overwritten |
 |---|---|
@@ -202,7 +202,7 @@ WHERE p.quantity > 0
   AND p.is_active = true
 ```
 
-**Important:** The query does NOT filter by `position_basis`. It picks the latest version across both TRADE_DATE and SETTLE_DATE. However, `_get_current_position()` (used when writing the new position version) always targets `SETTLE_DATE`.
+**Important:** The query does NOT filter by `position_basis`. It picks the latest version across both TRADED and SETTLED. However, `_get_current_position()` (used when writing the new position version) always targets `SETTLED`.
 
 **If no holdings are found:** The queue entry is marked `COMPLETED` with `cash_flows_created = 0`. This is intentional — the CA is considered processed even if no portfolios held the security on the ex_date.
 
@@ -216,7 +216,7 @@ Every CA event writes a **new version** to `cis_trade_position` (append-only ver
 2. New row inserted with `is_latest = true`, same `position_id`, new `version_id` (epoch ms)
 
 All new CA position rows:
-- `position_basis = 'SETTLE_DATE'`
+- `position_basis = 'SETTLED'`
 - `position_date = ex_date`
 - `trade_type = 'CA_<ca_type>'` (e.g. `CA_DIVIDEND`)
 - `last_ca_id`, `last_ca_number`, `last_ca_type`, `last_ca_date` populated
@@ -376,7 +376,7 @@ ORDER BY portfolio_short_name, position_basis;
 | GMP-sourced CA | Read-only in CIS UI; cannot be edited or deleted |
 | Queue entry stuck in PROCESSING | Use `--reset-stuck` flag; or manually UPDATE status to PENDING |
 | Max retries exceeded (3) | Entry stays FAILED; no longer returned by `get_pending()`; use `--retry-failed` to reset counter |
-| position_basis on holdings query | `get_holdings_for_ca()` does not filter by basis — picks latest across both bases. Position writes always target SETTLE_DATE |
+| position_basis on holdings query | `get_holdings_for_ca()` does not filter by basis — picks latest across both bases. Position writes always target SETTLED |
 | CF-COMMITMENT / CF-PROVISION | Require DDL 24 to be run first (`commit_fc/lc`, `provision_fc/lc` columns) |
 
 ---

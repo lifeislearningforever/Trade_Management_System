@@ -268,7 +268,7 @@ GROUP BY ca_type, src_system;
 
 ### What it does
 
-Reads APPROVED cash flows from `cis_cash_flow` (where `payment_date <= run_date` and `position_updated = false`) and applies them to the current open SETTLE_DATE position in `cis_trade_position` by writing a new version row.
+Reads APPROVED cash flows from `cis_cash_flow` (where `payment_date <= run_date` and `position_updated = false`) and applies them to the current open SETTLED position in `cis_trade_position` by writing a new version row.
 
 ### Cash flow type → position field mapping
 
@@ -799,7 +799,7 @@ python manage.py create_sod_snapshot --portfolio UOB-SG-TRADING
 | Stage 1: `No pending corporate actions found` | Stage 0 not run, or all already processed | Run Stage 0 first; check queue with `--status` |
 | Stage 1: entries stuck in `PROCESSING` | Previous run crashed mid-flight | Run `--reset-stuck` then re-run |
 | Stage 1: CA inserted but not queued | CA type not in cash-flow or position-adjustment list | Check `ca_cash_flow_service.CASH_FLOW_CA_TYPES` — add the type if it should generate cash flows |
-| Stage 2: `No open SETTLE_DATE position for X/Y` | Trade not yet settled or wrong position_basis | `SELECT * FROM cis_trade_position WHERE portfolio_short_name='X' AND security_label='Y' AND position_basis='SETTLE_DATE' AND status='OPEN'` |
+| Stage 2: `No open SETTLED position for X/Y` | Trade not yet settled or wrong position_basis | `SELECT * FROM cis_trade_position WHERE portfolio_short_name='X' AND security_label='Y' AND position_basis='SETTLED' AND status='OPEN'` |
 | Stage 2: cash flow applied twice | `--reprocess` used unintentionally | Check `cf_processed` flag; do not use `--reprocess` in normal EOD |
 | Stage 2/4 using wrong date (e.g. 27th Feb instead of 2nd Mar) | `alldatesinfo.reporting_date` not updated yet | Always pass `--position-date YYYY-MM-DD` explicitly for manual/backdated runs |
 | Stage 3: `No pending settlements found` | No T+1/T+2 trades settling on that date | Expected — skip Stage 3 if settlement queue is empty for the target date |
