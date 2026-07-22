@@ -14,6 +14,7 @@ Based on SA Team Questionnaire Feedback (2026-03-04).
 """
 
 import logging
+import time
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, date
@@ -820,6 +821,18 @@ class PositionService:
             logger.error(f"Error getting current position: {str(e)}")
             return None
 
+    # Retry a "no prior position found" result before trusting it — guards against
+    # a Kudu/Impala read-after-write race where a just-committed row from a
+    # previous trade on the same portfolio/security/basis hasn't yet propagated
+    # to the connection this query lands on. Without this, the query silently
+    # returns empty, the caller treats it as "first trade for this date" and
+    # creates a brand-new position instead of adding to the existing one —
+    # observed 2026-07-22: a second same-day BUY on TRADED basis overwrote a
+    # qty=10 position with qty=20 instead of accumulating to 30, while the
+    # SETTLED-basis lookup for the identical trade succeeded moments later.
+    _STALE_READ_RETRY_ATTEMPTS = 2
+    _STALE_READ_RETRY_DELAY_SECONDS = 0.5
+
     def _get_position_as_of_date(
         self,
         portfolio_id: str,
@@ -847,31 +860,49 @@ class PositionService:
                               so a trade does not use its own just-written row as its base)
 
         Returns the latest version (is_latest=true) with position_date <= or < as_of_date.
+        A "not found" result is retried a couple of times with a short delay before
+        being trusted — see _STALE_READ_RETRY_ATTEMPTS docstring above.
         """
-        try:
-            date_operator = '<=' if include_same_date else '<'
+        date_operator = '<=' if include_same_date else '<'
 
-            exclude_clause = ''
-            if exclude_trade_id is not None:
-                exclude_clause = f'AND (trade_id != {exclude_trade_id} OR trade_id IS NULL)'
+        exclude_clause = ''
+        if exclude_trade_id is not None:
+            exclude_clause = f'AND (trade_id != {exclude_trade_id} OR trade_id IS NULL)'
 
-            query = f"""
-            SELECT *
-            FROM {self.DATABASE}.{self.POSITION_TABLE}
-            WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
-              AND security_label = '{self._escape(security_id)}'
-              AND position_date {date_operator} '{as_of_date}'
-              AND position_basis = '{position_basis}'
-              AND (is_latest = true OR is_latest IS NULL)
-              {exclude_clause}
-            ORDER BY position_date DESC, version_id DESC
-            LIMIT 1
-            """
-            results = impala_manager.execute_query(query, database=self.DATABASE)
-            return results[0] if results else None
-        except Exception as e:
-            logger.error(f"Error getting position as of {as_of_date}: {str(e)}")
-            return None
+        query = f"""
+        SELECT *
+        FROM {self.DATABASE}.{self.POSITION_TABLE}
+        WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
+          AND security_label = '{self._escape(security_id)}'
+          AND position_date {date_operator} '{as_of_date}'
+          AND position_basis = '{position_basis}'
+          AND (is_latest = true OR is_latest IS NULL)
+          {exclude_clause}
+        ORDER BY position_date DESC, version_id DESC
+        LIMIT 1
+        """
+
+        for attempt in range(1 + self._STALE_READ_RETRY_ATTEMPTS):
+            try:
+                results = impala_manager.execute_query(query, database=self.DATABASE)
+                if results:
+                    return results[0]
+            except Exception as e:
+                logger.error(f"Error getting position as of {as_of_date}: {str(e)}")
+                return None
+
+            if attempt < self._STALE_READ_RETRY_ATTEMPTS:
+                logger.warning(
+                    f"_get_position_as_of_date found nothing for "
+                    f"{portfolio_id}/{security_id} basis={position_basis} "
+                    f"as_of={as_of_date} (attempt {attempt + 1}/"
+                    f"{1 + self._STALE_READ_RETRY_ATTEMPTS}) — retrying in "
+                    f"{self._STALE_READ_RETRY_DELAY_SECONDS}s in case of a "
+                    f"Kudu read-after-write propagation delay"
+                )
+                time.sleep(self._STALE_READ_RETRY_DELAY_SECONDS)
+
+        return None
 
     def get_position(self, portfolio_id: str, security_id: str) -> Optional[Dict[str, Any]]:
         """Public method to get current position."""
