@@ -31,6 +31,7 @@ import csv
 logger = logging.getLogger(__name__)
 
 from core.audit.audit_kudu_repository import audit_log_kudu_repository
+from core.views.auth_views import require_login
 from trade.repositories.trade_kudu_repository import trade_kudu_repository, TradeKuduRepository
 from trade.repositories.trade_validation_repository import trade_validation_repository
 from trade.services.trade_dropdown_service import trade_dropdown_service
