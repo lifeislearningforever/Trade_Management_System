@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load static %}
+{% load core_filters %}
 
 {% block title %}MAS Codes - CisTrade{% endblock %}
 
@@ -71,7 +72,7 @@
                 MAS Code List
                 <span class="badge badge-primary ms-2">{{ total_count }} records</span>
             </h5>
-            <a href="?export=csv&{{ request.GET.urlencode }}" class="btn btn-sm btn-success">
+            <a href="?{% querystring export='csv' %}" class="btn btn-sm btn-success">
                 <i class="bi bi-download"></i> Download CSV
             </a>
         </div>
@@ -82,7 +83,7 @@
                         <thead>
                             <tr>
                                 <th style="width: 30%;">
-                                    <a href="?sort=mas_code&order={% if sort_by == 'mas_code' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if selected_industry_group %}&industry_group={{ selected_industry_group }}{% endif %}" class="text-decoration-none text-dark">
+                                    <a href="?{% sort_querystring 'mas_code' %}" class="text-decoration-none text-dark">
                                         MAS Code
                                         {% if sort_by == 'mas_code' %}
                                             <i class="bi bi-caret-{% if sort_order == 'asc' %}up{% else %}down{% endif %}-fill"></i>
@@ -92,7 +93,7 @@
                                     </a>
                                 </th>
                                 <th style="width: 70%;">
-                                    <a href="?sort=industry_group&order={% if sort_by == 'industry_group' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search %}&search={{ search }}{% endif %}{% if selected_industry_group %}&industry_group={{ selected_industry_group }}{% endif %}" class="text-decoration-none text-dark">
+                                    <a href="?{% sort_querystring 'industry_group' %}" class="text-decoration-none text-dark">
                                         Industry Group
                                         {% if sort_by == 'industry_group' %}
                                             <i class="bi bi-caret-{% if sort_order == 'asc' %}up{% else %}down{% endif %}-fill"></i>
@@ -123,12 +124,12 @@
                         <ul class="pagination justify-content-center mb-0">
                             {% if mascodes.has_previous %}
                                 <li class="page-item">
-                                    <a class="page-link" href="?page=1{% if search %}&search={{ search }}{% endif %}{% if selected_industry_group %}&industry_group={{ selected_industry_group }}{% endif %}{% if sort_by %}&sort={{ sort_by }}&order={{ sort_order }}{% endif %}" aria-label="First">
+                                    <a class="page-link" href="?{% page_querystring 1 %}" aria-label="First">
                                         <span aria-hidden="true">&laquo;&laquo;</span>
                                     </a>
                                 </li>
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ mascodes.previous_page_number }}{% if search %}&search={{ search }}{% endif %}{% if selected_industry_group %}&industry_group={{ selected_industry_group }}{% endif %}{% if sort_by %}&sort={{ sort_by }}&order={{ sort_order }}{% endif %}" aria-label="Previous">
+                                    <a class="page-link" href="?{% page_querystring mascodes.previous_page_number %}" aria-label="Previous">
                                         <span aria-hidden="true">&laquo;</span>
                                     </a>
                                 </li>
@@ -148,19 +149,19 @@
                                     </li>
                                 {% elif num > mascodes.number|add:'-3' and num < mascodes.number|add:'3' %}
                                     <li class="page-item">
-                                        <a class="page-link" href="?page={{ num }}{% if search %}&search={{ search }}{% endif %}{% if selected_industry_group %}&industry_group={{ selected_industry_group }}{% endif %}{% if sort_by %}&sort={{ sort_by }}&order={{ sort_order }}{% endif %}">{{ num }}</a>
+                                        <a class="page-link" href="?{% page_querystring num %}">{{ num }}</a>
                                     </li>
                                 {% endif %}
                             {% endfor %}
 
                             {% if mascodes.has_next %}
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ mascodes.next_page_number }}{% if search %}&search={{ search }}{% endif %}{% if selected_industry_group %}&industry_group={{ selected_industry_group }}{% endif %}{% if sort_by %}&sort={{ sort_by }}&order={{ sort_order }}{% endif %}" aria-label="Next">
+                                    <a class="page-link" href="?{% page_querystring mascodes.next_page_number %}" aria-label="Next">
                                         <span aria-hidden="true">&raquo;</span>
                                     </a>
                                 </li>
                                 <li class="page-item">
-                                    <a class="page-link" href="?page={{ mascodes.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}{% if selected_industry_group %}&industry_group={{ selected_industry_group }}{% endif %}{% if sort_by %}&sort={{ sort_by }}&order={{ sort_order }}{% endif %}" aria-label="Last">
+                                    <a class="page-link" href="?{% page_querystring mascodes.paginator.num_pages %}" aria-label="Last">
                                         <span aria-hidden="true">&raquo;&raquo;</span>
                                     </a>
                                 </li>

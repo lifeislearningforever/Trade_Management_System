@@ -3,6 +3,7 @@ Custom template filters and tags for the core app.
 """
 
 from django import template
+from django.http import QueryDict
 
 register = template.Library()
 
@@ -36,6 +37,98 @@ def get_item(dictionary, key):
         return getattr(dictionary, key, None)
     except (TypeError, AttributeError):
         return None
+
+
+# ============================================================================
+# querystring — application-level fix for list-page sort/filter/pagination
+# ============================================================================
+# Every list page (mascode, calendar, currency, party, ...) needs to preserve
+# search/filter/sort state across pagination links and column-sort links.
+# Building that query string by hand in each template — e.g.
+#   ?page={{ n }}{% if search %}&search={{ search }}{% endif %}...
+# — was error-prone (values weren't urlencoded, so filter values containing
+# '&' or spaces silently truncated the query string and dropped sort/page
+# state) and had to be repeated on every <a> tag on every list page.
+#
+# This tag replaces all of that: it starts from request.GET, applies the
+# given overrides (a value of '' or None removes the key), and returns a
+# single properly-encoded query string.
+#
+# Usage in any list template (no view changes needed — reads request.GET):
+#
+#   {% load core_filters %}
+#
+#   <a href="?{% querystring page=1 %}">First</a>
+#   <a href="?{% querystring page=mascodes.next_page_number %}">Next</a>
+#   <a href="?{% querystring sort='mas_code' order=toggle_order %}">MAS Code</a>
+#   <a href="?{% querystring export='csv' %}">Download CSV</a>
+#
+# Any key not passed as an override is carried over unchanged from the
+# current request (e.g. search, industry_group, status, country, ...) —
+# so pages don't need to enumerate every filter field they support.
+@register.simple_tag(takes_context=True)
+def querystring(context, **overrides):
+    """
+    Build a URL query string from the current request.GET, applying overrides.
+
+    Pass a keyword arg with value '' or None to remove that key entirely
+    (e.g. querystring page=None when changing the sort so pagination
+    resets to page 1).
+    """
+    request = context.get('request')
+    query = request.GET.copy() if request is not None else QueryDict(mutable=True)
+
+    for key, value in overrides.items():
+        if value is None or value == '':
+            query.pop(key, None)
+        else:
+            query[key] = value
+
+    return query.urlencode()
+
+
+@register.simple_tag(takes_context=True)
+def sort_querystring(context, field, sort_param='sort', order_param='order'):
+    """
+    Build the query string for a sortable column header link.
+
+    Toggles order (asc <-> desc) if the column is already the active sort,
+    otherwise starts at 'asc'. Always resets 'page' to 1 since the result
+    set order changed. All other current filters (search, industry_group,
+    country, status, ...) are preserved automatically from request.GET.
+
+    Usage:
+        <a href="?{% sort_querystring 'mas_code' %}">MAS Code</a>
+        <a href="?{% sort_querystring 'calendar_label' %}">Calendar</a>
+    """
+    request = context.get('request')
+    query = request.GET.copy() if request is not None else QueryDict(mutable=True)
+
+    current_sort = query.get(sort_param, '')
+    current_order = query.get(order_param, 'asc')
+    next_order = 'desc' if (current_sort == field and current_order == 'asc') else 'asc'
+
+    query[sort_param] = field
+    query[order_param] = next_order
+    query.pop('page', None)
+
+    return query.urlencode()
+
+
+@register.simple_tag(takes_context=True)
+def page_querystring(context, page_number):
+    """
+    Build the query string for a pagination link, preserving every current
+    filter/sort param from request.GET and overriding only 'page'.
+
+    Usage:
+        <a href="?{% page_querystring 1 %}">First</a>
+        <a href="?{% page_querystring mascodes.next_page_number %}">Next</a>
+    """
+    request = context.get('request')
+    query = request.GET.copy() if request is not None else QueryDict(mutable=True)
+    query['page'] = page_number
+    return query.urlencode()
 
 
 # ============================================================================
