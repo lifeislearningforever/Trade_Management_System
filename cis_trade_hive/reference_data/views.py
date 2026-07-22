@@ -1211,6 +1211,7 @@ def party_list(request):
                 'Primary Contact', 'Primary Number', 'Other Contact', 'Other Number',
                 'Fax Number', 'Telex Number',
                 'Is Bank', 'Is Broker', 'Is Custodian', 'Is Issuer', 'Is Corporate', 'Is Subsidiary',
+                'Is Other', 'Is Financial Institute',
                 'Status', 'Source System'
             ])
 
@@ -1246,6 +1247,8 @@ def party_list(request):
                     'Yes' if party.get('is_issuer') else 'No',
                     'Yes' if party.get('is_corporate') else 'No',
                     'Yes' if party.get('is_subsidiary') else 'No',
+                    'Yes' if party.get('is_other') else 'No',
+                    'Yes' if party.get('is_financial_institute') else 'No',
                     'Active' if party.get('is_active') else 'Inactive',
                     party.get('src_system', ''),
                 ])
@@ -1388,6 +1391,8 @@ def party_create(request):
                 'is_issuer': request.POST.get('is_issuer') == 'on',
                 'is_corporate': request.POST.get('is_corporate') == 'on',
                 'is_subsidiary': request.POST.get('is_subsidiary') == 'on',
+                'is_other': request.POST.get('is_other') == 'on',
+                'is_financial_institute': request.POST.get('is_financial_institute') == 'on',
             }
 
             user_info = {'username': username, 'user_id': user_id, 'user_email': user_email}
@@ -1505,6 +1510,8 @@ def party_edit(request, short_name):
                 'is_issuer': request.POST.get('is_issuer') == 'on',
                 'is_corporate': request.POST.get('is_corporate') == 'on',
                 'is_subsidiary': request.POST.get('is_subsidiary') == 'on',
+                'is_other': request.POST.get('is_other') == 'on',
+                'is_financial_institute': request.POST.get('is_financial_institute') == 'on',
             }
 
             user_info = {'username': username, 'user_id': user_id, 'user_email': user_email}
@@ -1541,7 +1548,7 @@ def party_edit(request, short_name):
                                    'postal_code', 'primary_contact', 'primary_number', 'industry',
                                    'cels_code', 'party_grandparent', 'party_parent',
                                    'is_bank', 'is_broker', 'is_custodian', 'is_issuer',
-                                   'is_corporate', 'is_subsidiary']
+                                   'is_corporate', 'is_subsidiary', 'is_other', 'is_financial_institute']
 
                 for field in trackable_fields:
                     old_val = party.get(field, '')

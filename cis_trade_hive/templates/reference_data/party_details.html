@@ -304,6 +304,26 @@
                         {% endif %}
                     </p>
                 </div>
+                <div class="col-md-2">
+                    <h6 class="text-muted mb-2">Is Other</h6>
+                    <p>
+                        {% if party.is_other %}
+                            <i class="bi bi-check-circle-fill text-success fs-5"></i> Yes
+                        {% else %}
+                            <i class="bi bi-x-circle-fill text-secondary fs-5"></i> No
+                        {% endif %}
+                    </p>
+                </div>
+                <div class="col-md-2">
+                    <h6 class="text-muted mb-2">Is Financial Institute</h6>
+                    <p>
+                        {% if party.is_financial_institute %}
+                            <i class="bi bi-check-circle-fill text-success fs-5"></i> Yes
+                        {% else %}
+                            <i class="bi bi-x-circle-fill text-secondary fs-5"></i> No
+                        {% endif %}
+                    </p>
+                </div>
             </div>
         </div>
     </div>

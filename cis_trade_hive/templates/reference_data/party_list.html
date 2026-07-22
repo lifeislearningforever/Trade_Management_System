@@ -132,6 +132,8 @@
                                 <th style="width: 80px;">Custodian</th>
                                 <th style="width: 80px;">Issuer</th>
                                 <th style="width: 80px;">Corporate</th>
+                                <th style="width: 80px;">Other</th>
+                                <th style="width: 100px;">Financial Institute</th>
                                 <th style="width: 80px;">Status</th>
                                 <th style="width: 100px;">Workflow</th>
                                 <th style="width: 220px; position: sticky; right: 0; background-color: #f8f9fa; z-index: 11; border-left: 2px solid #dee2e6;">Actions</th>
@@ -203,6 +205,20 @@
                                 </td>
                                 <td>
                                     {% if party.is_corporate %}
+                                        <span class="badge badge-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">No</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if party.is_other %}
+                                        <span class="badge badge-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">No</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if party.is_financial_institute %}
                                         <span class="badge badge-success">Yes</span>
                                     {% else %}
                                         <span class="badge badge-secondary">No</span>

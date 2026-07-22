@@ -124,7 +124,8 @@ class PartyRepository(ImpalaReferenceRepository):
         # Boolean fields
         boolean_fields = [
             'is_broker', 'is_custodian', 'is_issuer', 'is_bank',
-            'is_subsidiary', 'is_corporate', 'is_active', 'is_deleted'
+            'is_subsidiary', 'is_corporate', 'is_other', 'is_financial_institute',
+            'is_active', 'is_deleted'
         ]
 
         for field in boolean_fields:

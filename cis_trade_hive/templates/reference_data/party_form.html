@@ -427,6 +427,32 @@
                                 </label>
                             </div>
                         </div>
+
+                        <div class="col-md-2">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="is_other"
+                                       name="is_other"
+                                       {% if party.is_other %}checked{% endif %}>
+                                <label class="form-check-label" for="is_other">
+                                    Is Other
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="col-md-2">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="is_financial_institute"
+                                       name="is_financial_institute"
+                                       {% if party.is_financial_institute %}checked{% endif %}>
+                                <label class="form-check-label" for="is_financial_institute">
+                                    Is Financial Institute
+                                </label>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
