@@ -298,6 +298,55 @@ class CalendarRepository(ImpalaReferenceRepository):
         return self.list_all(calendar_label=calendar_label)
 
 
+class MascodeRepository(ImpalaReferenceRepository):
+    """Repository for MAS Code / Industry Group data"""
+
+    TABLE_NAME = 'gmp_cis_sta_dly_mascode'
+
+    def _get_max_processing_date_subquery(self) -> str:
+        """Get subquery for max processing_date filter"""
+        return f"(SELECT MAX(processing_date) FROM {self.TABLE_NAME})"
+
+    def list_all(self, search: Optional[str] = None) -> List[Dict]:
+        """
+        Fetch all MAS codes from Kudu/Impala for the latest processing_date.
+
+        Args:
+            search: Optional search term for mas_code or industry_group
+
+        Returns:
+            List of mascode dictionaries
+        """
+        # Filter by max(processing_date) to get only latest data
+        query = f"""
+        SELECT * FROM {self.TABLE_NAME}
+        WHERE processing_date = {self._get_max_processing_date_subquery()}
+        """
+
+        if search:
+            search_escaped = search.replace("'", "''").lower()
+            query += f""" AND (
+                LOWER(mas_code) LIKE '%{search_escaped}%'
+                OR LOWER(industry_group) LIKE '%{search_escaped}%'
+            )"""
+
+        query += " ORDER BY mas_code"
+
+        return self._execute_query(query)
+
+    def get_distinct_industry_groups(self) -> List[str]:
+        """Get list of distinct industry groups for the latest processing_date"""
+        query = f"""
+        SELECT DISTINCT industry_group FROM {self.TABLE_NAME}
+        WHERE processing_date = {self._get_max_processing_date_subquery()}
+          AND industry_group IS NOT NULL AND industry_group != ''
+        """
+
+        results = self._execute_query(query)
+        groups = [r.get('industry_group') for r in results if r.get('industry_group')]
+        return sorted(groups)
+
+
 class CounterpartyRepository(ImpalaReferenceRepository):
     """Repository for Counterparty data - Now using Kudu table with stable primary key"""
 
@@ -517,4 +566,5 @@ class CounterpartyRepository(ImpalaReferenceRepository):
 currency_repository = CurrencyRepository()
 country_repository = CountryRepository()
 calendar_repository = CalendarRepository()
+mascode_repository = MascodeRepository()
 counterparty_repository = CounterpartyRepository()

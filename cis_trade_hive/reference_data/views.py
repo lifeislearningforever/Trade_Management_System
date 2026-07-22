@@ -21,6 +21,7 @@ from .services.reference_data_service import (
     currency_service,
     country_service,
     calendar_service,
+    mascode_service,
     counterparty_service
 )
 from .services.counterparty_cif_service import counterparty_cif_service
@@ -376,6 +377,107 @@ def calendar_list(request):
         return render(request, 'reference_data/calendar_list.html', {
             'calendars': [],
             'calendar_labels': [],
+            'search': search,
+            'sort_by': sort_by,
+            'sort_order': sort_order,
+        })
+
+
+@require_login
+def mascode_list(request):
+    """
+    MAS Code / Industry Group list view with filtering and CSV export.
+    Reads from gmp_cis_sta_dly_mascode (Hive external table).
+    Requires: Authentication
+    """
+    industry_group_filter = request.GET.get('industry_group', '').strip()
+    search = request.GET.get('search', '').strip()
+    export = request.GET.get('export') == 'csv'
+    page_number = request.GET.get('page', 1)
+    sort_by = request.GET.get('sort', 'mas_code')  # Default sort by mas_code
+    sort_order = request.GET.get('order', 'asc')  # Default ascending
+
+    try:
+        # Fetch data
+        mascodes = mascode_service.list_all(search=search if search else None)
+
+        # Filter by industry group (client-side, matches Calendar pattern where
+        # the repository doesn't support this filter directly)
+        if industry_group_filter:
+            mascodes = [m for m in mascodes if m.get('industry_group') == industry_group_filter]
+
+        # Server-side sorting
+        reverse_order = sort_order == 'desc'
+        sort_key_map = {
+            'mas_code': lambda x: (x.get('mas_code') or '').lower(),
+            'industry_group': lambda x: (x.get('industry_group') or '').lower(),
+        }
+        sort_func = sort_key_map.get(sort_by, sort_key_map['mas_code'])
+        mascodes = sorted(mascodes, key=sort_func, reverse=reverse_order)
+
+        # Get distinct industry groups for filter dropdown
+        industry_groups = mascode_service.get_distinct_industry_groups()
+
+        # Get user info from session (ACL authentication)
+        username = request.session.get('user_login', 'anonymous')
+        user_id = str(request.session.get('user_id', ''))
+        user_email = request.session.get('user_email', '')
+
+        # CSV Export
+        if export:
+            response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
+            response['Content-Disposition'] = f'attachment; filename="mascodes_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv"'
+
+            writer = csv.writer(response)
+            writer.writerow(['MAS Code', 'Industry Group'])
+
+            for mascode in mascodes:
+                writer.writerow([
+                    mascode.get('mas_code', ''),
+                    mascode.get('industry_group', ''),
+                ])
+
+            # Log EXPORT action to Kudu
+            audit_log_kudu_repository.log_action(
+                user_id=user_id,
+                username=username,
+                user_email=user_email,
+                action_type='EXPORT',
+                entity_type='REFERENCE_DATA',
+                entity_name='Mascode',
+                entity_id='MASCODE_EXPORT',
+                action_description=f'Exported {len(mascodes)} MAS codes to CSV',
+                request_method=request.method,
+                request_path=request.path,
+                ip_address=get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                status='SUCCESS'
+            )
+
+            return response
+
+        # Pagination
+        paginator = Paginator(mascodes, 25)
+        page_obj = paginator.get_page(page_number)
+
+        context = {
+            'mascodes': page_obj,
+            'industry_groups': industry_groups,
+            'selected_industry_group': industry_group_filter,
+            'search': search,
+            'total_count': len(mascodes),
+            'sort_by': sort_by,
+            'sort_order': sort_order,
+        }
+
+        return render(request, 'reference_data/mascode_list.html', context)
+
+    except Exception as e:
+        logger.error(f"Error in mascode_list: {str(e)}")
+        messages.error(request, f"Error loading MAS codes: {str(e)}")
+        return render(request, 'reference_data/mascode_list.html', {
+            'mascodes': [],
+            'industry_groups': [],
             'search': search,
             'sort_by': sort_by,
             'sort_order': sort_order,

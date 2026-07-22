@@ -189,7 +189,7 @@
         {% endif %}
 
         <!-- Reference Data Section -->
-        {% if sidebar_currencies_view or sidebar_countries_view or sidebar_calendars_view or sidebar_parties_view or sidebar_securities_view or sidebar_corp_actions_view %}
+        {% if sidebar_currencies_view or sidebar_countries_view or sidebar_calendars_view or sidebar_mascodes_view or sidebar_parties_view or sidebar_securities_view or sidebar_corp_actions_view %}
         <div class="nav-section-title">Reference Data</div>
         <ul class="nav flex-column">
             {% if sidebar_currencies_view %}
@@ -213,6 +213,14 @@
                 <a class="nav-link {% if 'calendar' in request.path %}active{% endif %}" href="{% url 'reference_data:calendar_list' %}">
                     <i class="bi bi-calendar3"></i>
                     <span>Calendars</span>
+                </a>
+            </li>
+            {% endif %}
+            {% if sidebar_mascodes_view %}
+            <li class="nav-item">
+                <a class="nav-link {% if 'mascode' in request.path %}active{% endif %}" href="{% url 'reference_data:mascode_list' %}">
+                    <i class="bi bi-tags"></i>
+                    <span>MAS Codes</span>
                 </a>
             </li>
             {% endif %}

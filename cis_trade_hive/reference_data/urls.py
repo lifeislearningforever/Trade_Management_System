@@ -17,6 +17,9 @@ urlpatterns = [
     # Calendar URLs
     path('calendar/', views.calendar_list, name='calendar_list'),
 
+    # Mascode URLs
+    path('mascode/', views.mascode_list, name='mascode_list'),
+
     # Counterparty URLs (legacy - kept for backward compatibility)
     path('counterparty/', views.counterparty_list, name='counterparty_list'),
     path('counterparty/create/', views.counterparty_create, name='counterparty_create'),

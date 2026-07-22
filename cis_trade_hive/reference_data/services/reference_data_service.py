@@ -13,6 +13,7 @@ from reference_data.repositories import (
     currency_repository,
     country_repository,
     calendar_repository,
+    mascode_repository,
     counterparty_repository,
 )
 
@@ -143,6 +144,29 @@ class CalendarService:
     def get_holidays_for_calendar(self, calendar_label: str) -> List[Dict]:
         """Get all holidays for a specific calendar"""
         return self.repository.get_holidays_for_calendar(calendar_label)
+
+
+class MascodeService:
+    """Service for MAS Code / Industry Group reference data"""
+
+    def __init__(self):
+        self.repository = mascode_repository
+
+    def list_all(self, search: Optional[str] = None) -> List[Dict]:
+        """
+        Fetch all MAS codes from Hive
+
+        Args:
+            search: Optional search term for mas_code or industry_group
+
+        Returns:
+            List of mascode dictionaries
+        """
+        return self.repository.list_all(search=search)
+
+    def get_distinct_industry_groups(self) -> List[str]:
+        """Get list of distinct industry groups for dropdown filter"""
+        return self.repository.get_distinct_industry_groups()
 
 
 class CounterpartyService:
@@ -392,4 +416,5 @@ class CounterpartyService:
 currency_service = CurrencyService()
 country_service = CountryService()
 calendar_service = CalendarService()
+mascode_service = MascodeService()
 counterparty_service = CounterpartyService()
