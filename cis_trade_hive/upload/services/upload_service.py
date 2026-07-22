@@ -4734,7 +4734,42 @@ class UploadService:
                         # No existing row — carry the most recent position forward to this date
                         _carry_ok = impala_manager.execute_write(
                             f"""
-                            UPSERT INTO {db}.cis_position
+                            UPSERT INTO {db}.cis_position (
+                                position_id,
+                                version_id,
+                                portfolio,
+                                security_label,
+                                position_basis,
+                                position_date,
+                                src_system,
+                                processing_date,
+                                quantity,
+                                average_cost_fc,
+                                cost_fc,
+                                market_value_fc,
+                                net_book_value_fc,
+                                unrealized_pnl_fc,
+                                cost_lc,
+                                market_value_lc,
+                                net_book_value_lc,
+                                unrealized_pnl_lc,
+                                provision_lc,
+                                provision_fc,
+                                dividend_fc,
+                                dividend_lc,
+                                realized_pnl_fc,
+                                realized_pnl_lc,
+                                isin,
+                                average_cost_lc,
+                                source_table,
+                                processing_timestamp,
+                                uncall_fc,
+                                uncall_lc,
+                                pipeline_fc,
+                                pipeline_lc,
+                                position_type,
+                                is_latest
+                            )
                             SELECT
                                 ABS(CAST(fnv_hash(CONCAT_WS('|',
                                     COALESCE(portfolio, ''),
