@@ -4860,7 +4860,6 @@ class UploadService:
             impala_manager.execute_write(
                 f"""
                 INSERT OVERWRITE {db}.position_upload_report
-                PARTITION (processing_date='{processing_date}', src_id='{src_id}')
                 (
                     portfolio,
                     security_full_name,
@@ -4919,6 +4918,7 @@ class UploadService:
                     src_system,
                     source_table
                 )
+                PARTITION (processing_date='{processing_date}', src_id='{src_id}')
                 -- Explicit column list above maps each SELECT expression by name
                 -- to its target column, immune to the SELECT's isin position
                 -- (after matched_security_name, not after security_short_name)
