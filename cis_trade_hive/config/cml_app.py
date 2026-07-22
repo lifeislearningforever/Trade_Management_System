@@ -366,6 +366,8 @@ def start_trade_event_worker():
             else:
                 print(f"==> Trade Event Worker: SETTLEMENT warning for trade {trade_id}: {msg}")
                 if 'queued' in msg.lower() or 'future' in msg.lower():
+                    # Not a failure — SETTLED basis was legitimately deferred to
+                    # cis_settlement_queue for a future settle_date.
                     notify_user(created_by, EVT_AVP_COMPLETED, {
                         'trade_id': trade_id,
                         'message': f'Trade {trade_id} queued for settlement date',
@@ -375,6 +377,11 @@ def start_trade_event_worker():
                         'trade_id': trade_id,
                         'message': f'AVP failed for trade {trade_id}: {msg}',
                     })
+                    # Propagate failure to the dispatch loop so this event is
+                    # marked FAILED (and retried/dead-lettered) instead of
+                    # being marked COMPLETED despite process_trade_settlement
+                    # having failed — see mark_completed() call site.
+                    raise RuntimeError(f"SETTLEMENT processing failed for trade {trade_id}: {msg}")
 
         def process_position_modify_event(event, event_data):
             """Process a POSITION_MODIFY event - update position when trade is modified.
@@ -502,6 +509,9 @@ def start_trade_event_worker():
                     'trade_id': trade_id,
                     'message': f'Position update failed for trade {trade_id}: {msg}',
                 })
+                # Propagate failure so the dispatch loop marks this event FAILED
+                # instead of COMPLETED — see mark_completed() call site.
+                raise RuntimeError(f"POSITION_MODIFY processing failed for trade {trade_id}: {msg}")
 
         def process_position_cancel_event(event, event_data):
             """Process a POSITION_CANCEL event - reverse position when trade is cancelled.
@@ -562,6 +572,9 @@ def start_trade_event_worker():
                     'trade_id': trade_id,
                     'message': f'Position reversal failed for trade {trade_id}: {msg}',
                 })
+                # Propagate failure so the dispatch loop marks this event FAILED
+                # instead of COMPLETED — see mark_completed() call site.
+                raise RuntimeError(f"POSITION_CANCEL processing failed for trade {trade_id}: {msg}")
 
         def mark_processing(event_id, event):
             """Mark event as PROCESSING before starting work (prevents double-processing)."""
