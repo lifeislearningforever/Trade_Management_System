@@ -1425,6 +1425,18 @@ def run_position_etl(request, upload_id: str):
         messages.error(request, 'This upload is not a position file — ETL not applicable')
         return redirect('upload:detail', upload_id=upload_id)
 
+    # Guard against a second overlapping ETL run for the same upload (double
+    # click, page refresh re-POSTing the form, retried request, etc.). The
+    # ETL's staging tables (pos_stage_1_base, pos_stage_4_security_fallback,
+    # ...) are shared global names, not scoped per-run — if two runs overlap,
+    # the second run's Step 1 "DROP TABLE IF EXISTS pos_stage_1_base" can
+    # delete the table out from under the first run's later steps, producing
+    # a confusing "Could not resolve table reference" failure with no
+    # indication that a second run was ever triggered.
+    if upload.get('status') == UploadKuduRepository.STATUS_ETL_RUNNING:
+        messages.warning(request, 'Position ETL is already running for this upload — please wait for it to finish.')
+        return redirect('upload:detail', upload_id=upload_id)
+
     # Derive src_id and processing_date
     src_id = (upload.get('target_table_name') or '').lower().split('.')[-1]
     processing_date = request.POST.get('processing_date', '').strip()
