@@ -4861,9 +4861,73 @@ class UploadService:
                 f"""
                 INSERT OVERWRITE {db}.position_upload_report
                 PARTITION (processing_date='{processing_date}', src_id='{src_id}')
-
-                -- Read from final staging table (already has all b.* columns + status cols)
-                -- Column order matches live table DDL.
+                (
+                    portfolio,
+                    security_full_name,
+                    security_short_name,
+                    row_status,
+                    fail_reason,
+                    portfolio_status,
+                    security_status,
+                    price_status,
+                    quantity_status,
+                    exchange_status,
+                    matched_security_id,
+                    matched_security_name,
+                    isin,
+                    ticker,
+                    quantity,
+                    shares_outstanding,
+                    shares_issued,
+                    pct_holding,
+                    market_price,
+                    average_cost,
+                    cost_fc,
+                    market_value_fc,
+                    net_book_value_fc,
+                    unrealized_pnl_fc,
+                    provision_fc,
+                    cost_lc,
+                    market_value_lc,
+                    net_book_value_lc,
+                    unrealized_pnl_lc,
+                    provision_lc,
+                    product_type,
+                    security_type,
+                    quoted_unquoted,
+                    industry,
+                    fin_nonfin_co,
+                    issuer_type,
+                    reits_or_fund_y_n,
+                    `exchange`,
+                    country_of_exchange,
+                    country_of_incorporation,
+                    country_of_risk,
+                    country_of_operation,
+                    security_currency,
+                    corp_code,
+                    branch_code,
+                    cost_centre,
+                    cels,
+                    bwcif_sg,
+                    bwcif_ovs,
+                    mas_6d_code_sg,
+                    mas_6d_code_ovs,
+                    position_basis,
+                    reporting_date,
+                    maturity_date,
+                    src_system,
+                    source_table
+                )
+                -- Explicit column list above maps each SELECT expression by name
+                -- to its target column, immune to the SELECT's isin position
+                -- (after matched_security_name, not after security_short_name)
+                -- not matching the live table's physical column order (isin
+                -- right after security_short_name, per DDL 81). Without this
+                -- list, INSERT OVERWRITE mapped positionally against the table
+                -- schema and silently shifted every column from isin through
+                -- ticker by one slot — e.g. fail_reason's value (NULL for a
+                -- PASS row) landed in the row_status column.
                 SELECT
                     s.portfolio,
                     COALESCE(s.security_full_name, s.security_short_name, s.isin) AS security_full_name,
