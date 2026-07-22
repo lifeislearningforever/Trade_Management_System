@@ -25,6 +25,7 @@ Usage:
     python manage.py create_sod_snapshot --dry-run
     python manage.py create_sod_snapshot --portfolio UOB-SG-TRADING
     python manage.py create_sod_snapshot --source CIS
+    python manage.py create_sod_snapshot --security AAPL_US
 
     # Override dates manually
     python manage.py create_sod_snapshot --eod-date 2026-03-02 --sod-date 2026-03-03
@@ -61,6 +62,8 @@ class Command(BaseCommand):
                             help='Show what would be written without making changes')
         parser.add_argument('--portfolio', type=str,
                             help='Limit to a single portfolio (optional)')
+        parser.add_argument('--security', type=str,
+                            help='Limit to a single security_label (optional)')
         parser.add_argument(
             '--source', type=str, choices=ALL_SOURCES,
             help='Limit to one source system: CIS, GMP, AMSICEQ, USER_UPLOAD (default: all)'
@@ -83,6 +86,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         dry_run          = options.get('dry_run', False)
         portfolio_filter = options.get('portfolio')
+        security_filter  = options.get('security')
         source_filter    = options.get('source')
         fill_gaps        = options.get('fill_gaps', False)
 
@@ -130,6 +134,7 @@ class Command(BaseCommand):
         # ── 2. Fetch EOD rows for prev_day ───────────────────────────────────
         sources   = [source_filter] if source_filter else ALL_SOURCES
         eod_rows  = self._get_eod_rows(eod_date, sources, portfolio_filter,
+                                        security_filter=security_filter,
                                         fill_gaps=fill_gaps, sod_date=sod_date)
 
         if not eod_rows:
@@ -272,7 +277,7 @@ class Command(BaseCommand):
         # ── 5. Delete any existing SOD rows for sod_date (idempotent re-run) ─
         # Skip when --fill-gaps: existing SOD rows must be preserved.
         if not fill_gaps:
-            self._delete_existing_sod(sod_date, sources, portfolio_filter)
+            self._delete_existing_sod(sod_date, sources, portfolio_filter, security_filter)
 
         # ── 6. Batch-insert SOD rows with is_latest=true ─────────────────────
         inserted = self._batch_insert_sod(sod_rows, sod_date, proc_date)
@@ -335,7 +340,7 @@ class Command(BaseCommand):
     # ── EOD row fetch ─────────────────────────────────────────────────────────
 
     def _get_eod_rows(self, eod_date, sources, portfolio_filter,
-                      fill_gaps=False, sod_date=None):
+                      security_filter=None, fill_gaps=False, sod_date=None):
         """
         Fetch EOD rows from cis_position for the given date (written by refresh_positions).
 
@@ -346,6 +351,10 @@ class Command(BaseCommand):
         port_clause = (
             f"AND portfolio = '{self._escape(portfolio_filter)}'"
             if portfolio_filter else ''
+        )
+        security_clause = (
+            f"AND p.security_label = '{self._escape(security_filter)}'"
+            if security_filter else ''
         )
 
         # --fill-gaps: LEFT JOIN existing SOD rows and exclude matches
@@ -393,6 +402,7 @@ class Command(BaseCommand):
                   AND p.position_date  = '{eod_date}'
                   AND p.src_system IN ({src_list})
                   {port_clause}
+                  {security_clause}
                   {fill_gaps_where}
                 """,
                 database=DATABASE
@@ -624,12 +634,16 @@ class Command(BaseCommand):
 
     # ── Delete existing SOD rows ─────────────────────────────────────────────
 
-    def _delete_existing_sod(self, sod_date, sources, portfolio_filter):
+    def _delete_existing_sod(self, sod_date, sources, portfolio_filter, security_filter=None):
         """Remove any SOD rows already written for sod_date (idempotent re-run)."""
         src_list   = ', '.join(f"'{self._escape(s)}'" for s in sources)
         port_clause = (
             f"AND portfolio = '{self._escape(portfolio_filter)}'"
             if portfolio_filter else ''
+        )
+        security_clause = (
+            f"AND security_label = '{self._escape(security_filter)}'"
+            if security_filter else ''
         )
         try:
             impala_manager.execute_write(
@@ -639,6 +653,7 @@ class Command(BaseCommand):
                   AND position_date  = '{sod_date}'
                   AND src_system IN ({src_list})
                   {port_clause}
+                  {security_clause}
                 """,
                 database=DATABASE
             )
