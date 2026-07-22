@@ -4360,6 +4360,43 @@ class UploadService:
                     ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
                 JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
                 LEFT JOIN pos_stage_5_price p5 ON b.row_id = p5.row_id
+
+                UNION ALL
+
+                -- Portfolio-failed rows never reach pos_stage_3/4/5 (those steps
+                -- INNER JOIN on portfolio_status='PASS' by design — matching a
+                -- security/price for a row whose portfolio doesn't exist is
+                -- meaningless work). Without this branch these rows silently
+                -- vanished from position_upload_staging and therefore from the
+                -- Step 7B report entirely — every ingested row must appear in
+                -- the report with a PASS/FAIL status and reason, regardless of
+                -- whether it made it into cis_position.
+                SELECT
+                    b.*,
+                    p2.valid_portfolio,
+                    p2.portfolio_currency,
+                    p2.portfolio_status,
+                    CAST(NULL AS BIGINT)          AS final_security_id,
+                    CAST(NULL AS STRING)          AS matched_security_name,
+                    CAST(NULL AS STRING)          AS final_isin,
+                    CAST(NULL AS STRING)          AS country_resolved,
+                    CAST(NULL AS STRING)          AS security_currency_resolved,
+                    CAST(NULL AS STRING)          AS security_status,
+                    CAST(NULL AS DECIMAL(30,8))   AS final_market_price,
+                    CAST(NULL AS STRING)          AS price_status,
+                    CAST(NULL AS DECIMAL(30,8))   AS final_quantity,
+                    CAST(NULL AS STRING)          AS quantity_status,
+                    CAST(NULL AS DECIMAL(30,8))   AS final_shares_issued,
+                    CAST(NULL AS STRING)          AS exchange_status,
+                    CAST(NULL AS DECIMAL(30,8))   AS final_market_value_fc,
+                    CAST(NULL AS DECIMAL(30,8))   AS final_net_book_value_fc,
+                    CONCAT(
+                        'INVALID: ',
+                        regexp_replace(p2.portfolio_status, '^FAIL: ', '')
+                    ) AS overall_status
+                FROM pos_stage_1_base b
+                JOIN pos_stage_2_portfolio p2
+                    ON b.row_id = p2.row_id AND p2.portfolio_status != 'PASS'
                 """,
                 database=db
             )
