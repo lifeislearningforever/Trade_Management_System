@@ -903,7 +903,7 @@ class Command(BaseCommand):
                 provision_fc, provision_lc,
                 uncall_fc, uncall_lc,
                 pipeline_fc, pipeline_lc,
-                position_type,
+                position_type, is_latest,
                 processing_timestamp,
                 isin, source_table
             ) VALUES (
@@ -922,7 +922,7 @@ class Command(BaseCommand):
                 {provision_fc_val}, {provision_lc_val},
                 {_gfc('uncall_fc')}, {_glc('uncall_lc')},
                 {_gfc('pipeline_fc')}, {_glc('pipeline_lc')},
-                'INT',
+                'INT', true,
                 '{processing_timestamp}',
                 {f"'{_escape(isin)}'" if isin else 'NULL'},
                 {f"'{_escape(source_table)}'" if source_table else 'NULL'}

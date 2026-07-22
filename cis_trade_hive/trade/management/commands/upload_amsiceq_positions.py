@@ -485,13 +485,24 @@ class Command(BaseCommand):
             return default
 
     def _insert_position(self, data: Dict[str, Any]) -> bool:
-        """Insert position record into cis_trade_position."""
+        """
+        Insert position record into cis_trade_position.
+
+        position_id/version_id here are timestamp+random (not a deterministic
+        natural-key hash), so re-uploading the same portfolio/security/date
+        always creates a brand-new PK row. Without explicitly retiring the
+        prior is_latest=true row for this natural key first, a reupload would
+        leave two simultaneous is_latest=true rows for the same position.
+        """
         try:
+            self._retire_prior_latest(
+                data['portfolio_short_name'], data['security_label'], data['position_date']
+            )
             query = f"""
                 UPSERT INTO {DATABASE}.cis_trade_position
                 (version_id, position_id, position_date, portfolio_short_name, security_label,
                  quantity, average_cost, total_cost, realized_pnl, current_price, market_value, unrealized_pnl,
-                 trade_id, trade_type, status, is_active, created_by, created_at,
+                 trade_id, trade_type, status, is_active, is_latest, created_by, created_at,
                  src_system, security_currency, portfolio_currency, pct_ratio, isin,
                  country, asset_class, listing_status,
                  cost_value_local, cost_value_base, market_value_local, market_value_base,
@@ -504,7 +515,7 @@ class Command(BaseCommand):
                     {data['quantity']}, {data['average_cost']}, {data['total_cost']},
                     {data['realized_pnl']}, {data['current_price']}, {data['market_value']}, {data['unrealized_pnl']},
                     {data['trade_id']}, '{data['trade_type']}',
-                    '{data['status']}', {str(data['is_active']).lower()},
+                    '{data['status']}', {str(data['is_active']).lower()}, true,
                     '{data['created_by']}', '{data['created_at']}',
                     {self._format_nullable_string(data.get('src_system'))},
                     {self._format_nullable_string(data.get('security_currency'))},
@@ -528,6 +539,23 @@ class Command(BaseCommand):
         except Exception as e:
             logger.error(f'Error inserting position: {str(e)}')
             return False
+
+    def _retire_prior_latest(self, portfolio_short_name: str, security_label: str, position_date: str) -> None:
+        """Mark any existing is_latest=true row for this natural key+date as false before inserting."""
+        try:
+            impala_manager.execute_write(
+                f"""
+                UPDATE {DATABASE}.cis_trade_position
+                SET is_latest = false
+                WHERE portfolio_short_name = '{self._escape_string(portfolio_short_name)}'
+                  AND security_label       = '{self._escape_string(security_label)}'
+                  AND position_date        = '{self._escape_string(position_date)}'
+                  AND is_latest = true
+                """,
+                database=DATABASE
+            )
+        except Exception as e:
+            logger.warning(f'Could not retire prior is_latest row (non-fatal): {str(e)}')
 
     def _insert_position_history(self, data: Dict[str, Any]) -> bool:
         """Insert position history record into cis_trade_position_history."""

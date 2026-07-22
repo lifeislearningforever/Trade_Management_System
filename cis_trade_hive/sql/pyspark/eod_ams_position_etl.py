@@ -1132,7 +1132,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             provision_lc, provision_fc,
             dividend_fc, dividend_lc, realized_pnl_fc, realized_pnl_lc,
             isin, average_cost_lc, source_table, processing_timestamp,
-            uncall_fc, uncall_lc, pipeline_fc, pipeline_lc, position_type
+            uncall_fc, uncall_lc, pipeline_fc, pipeline_lc, position_type, is_latest
         )
         SELECT
             ABS(CAST(fnv_hash(CONCAT_WS('|',
@@ -1173,7 +1173,8 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             CAST(0 AS DECIMAL(30,8))                        AS uncall_lc,
             CAST(0 AS DECIMAL(30,8))                        AS pipeline_fc,
             CAST(0 AS DECIMAL(30,8))                        AS pipeline_lc,
-            '{position_type}'                               AS position_type
+            '{position_type}'                               AS position_type,
+            true                                             AS is_latest
         FROM position_upload_staging
         WHERE overall_status LIKE 'VALID%'
         """,

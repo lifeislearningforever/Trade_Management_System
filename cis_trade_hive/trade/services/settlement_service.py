@@ -1279,6 +1279,92 @@ class SettlementService:
         """
         impala_manager.execute_write(query, database=self.DATABASE)
 
+        # Sync to cis_position (gold/master table) — mirrors _sync_to_cis_position in
+        # position_service.py. Without this, a carry-forward gap date never gets an
+        # is_latest=true row in cis_position at all, since only cis_trade_position was
+        # written above. position_id is date-inclusive (see position_id_service.py), so
+        # this UPSERT only ever targets this exact date's row for this position_type —
+        # it cannot collide with or clear EOD/SOD/CORR rows for the same date.
+        self._sync_carry_forward_to_cis_position(
+            source=source, basis=basis, position_date=position_date,
+            portfolio_id=portfolio_id, security_id=security_id,
+            position_id=position_id, updated_by=updated_by, timestamp=timestamp,
+        )
+
+    def _sync_carry_forward_to_cis_position(
+        self,
+        source: Dict[str, Any],
+        basis: str,
+        position_date: str,
+        portfolio_id: str,
+        security_id: str,
+        position_id: int,
+        updated_by: str,
+        timestamp: str,
+    ) -> None:
+        """
+        Sync a carry-forward position to cis_position (gold/master table).
+
+        Scoped to the exact (position_id, position_type) PK for this date — never
+        touches other dates or other position_types (EOD/SOD/CORR) for this key.
+        """
+        position_type = source.get('position_type') or 'INT'
+
+        def _f(val):
+            if val is None:
+                return 'NULL'
+            try:
+                return f"CAST({float(val)} AS DECIMAL(30,8))"
+            except (ValueError, TypeError):
+                return 'NULL'
+
+        try:
+            query = f"""
+            UPSERT INTO {self.DATABASE}.cis_position
+            (position_id, version_id, portfolio, security_label, position_basis,
+             position_date, src_system, processing_date, quantity,
+             average_cost_fc, cost_fc, market_value_fc, unrealized_pnl_fc,
+             average_cost_lc, cost_lc, market_value_lc, unrealized_pnl_lc,
+             provision_fc, provision_lc, dividend_fc, dividend_lc,
+             realized_pnl_fc, realized_pnl_lc,
+             uncall_fc, uncall_lc, pipeline_fc, pipeline_lc,
+             source_table, processing_timestamp, position_type, is_latest)
+            VALUES (
+             {position_id},
+             '{str(uuid.uuid4()).replace('-', '')[:32]}',
+             '{self._escape(portfolio_id)}',
+             '{self._escape(security_id)}',
+             '{basis}',
+             '{position_date}',
+             'CIS',
+             '{position_date}',
+             {_f(source.get('quantity'))},
+             {_f(source.get('average_cost_fc'))}, {_f(source.get('total_cost_fc'))},
+             {_f(source.get('market_value_fc'))}, {_f(source.get('unrealized_pnl_fc'))},
+             {_f(source.get('average_cost_lc'))}, {_f(source.get('total_cost_lc'))},
+             {_f(source.get('market_value_lc'))}, {_f(source.get('unrealized_pnl_lc'))},
+             {_f(source.get('provision_fc'))}, {_f(source.get('provision_lc'))},
+             {_f(source.get('dividend_fc'))}, {_f(source.get('dividend_lc'))},
+             {_f(source.get('realized_pnl_fc'))}, {_f(source.get('realized_pnl_lc'))},
+             {_f(source.get('uncall_fc'))}, {_f(source.get('uncall_lc'))},
+             {_f(source.get('pipeline_fc'))}, {_f(source.get('pipeline_lc'))},
+             'cis_trade_position_carry_forward',
+             '{timestamp}',
+             '{position_type}',
+             true
+            )
+            """
+            impala_manager.execute_write(query, database=self.DATABASE)
+            logger.info(
+                f"Carry-forward synced to cis_position: {portfolio_id}/{security_id} "
+                f"basis={basis} date={position_date} type={position_type}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Carry-forward cis_position sync failed (non-fatal) for "
+                f"{portfolio_id}/{security_id} date={position_date}: {e}"
+            )
+
     def _mark_old_versions_not_latest_in_settlement(
         self,
         portfolio_id: str,
