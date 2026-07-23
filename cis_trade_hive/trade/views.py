@@ -2253,11 +2253,12 @@ def api_trade_event_worker_diagnostic(request):
         # so if the live position still used the market rate, these files being
         # stale on this server (like cml_app.py was) is the leading suspect.
         try:
-            import trade.services.position_service as _ps_mod
-            import trade.services.settlement_service as _ss_mod
+            import sys as _sys_mod
+            import trade.services.position_service  # noqa: F401 — ensure it's in sys.modules
+            import trade.services.settlement_service  # noqa: F401
             _checks = {}
-            for _name, _mod in (('position_service', _ps_mod), ('settlement_service', _ss_mod)):
-                _p = _mod.__file__
+            for _name in ('trade.services.position_service', 'trade.services.settlement_service'):
+                _p = _sys_mod.modules[_name].__file__
                 with open(_p, 'r') as _f:
                     _c = _f.read()
                 _checks[_name] = {
