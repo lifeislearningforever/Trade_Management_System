@@ -2137,12 +2137,32 @@ def api_trade_event_worker_diagnostic(request):
     try:
         from trade.services.trade_event_queue_service import trade_event_queue_service
 
-        return JsonResponse({
+        result = {
             'status': 'ok',
-            'is_running': trade_event_queue_service.is_running(),
-            'stats': trade_event_queue_service.get_stats(),
+            'second_worker_service': {
+                'is_running': trade_event_queue_service.is_running(),
+                'stats': trade_event_queue_service.get_stats(),
+            },
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        })
+        }
+
+        # Also check the ACTUAL cml_app.py embedded worker thread — the one
+        # that should be processing SETTLEMENT events in normal operation.
+        # trade_event_queue_service.is_running() only tells us the second,
+        # normally-unused consumer's state; this checks the real one.
+        try:
+            import config.cml_app as _cml_app
+            thread = getattr(_cml_app, '_trade_event_worker_thread', None)
+            result['cml_app_worker_thread'] = {
+                'thread_object_exists': thread is not None,
+                'is_alive': thread.is_alive() if thread is not None else None,
+                'thread_name': thread.name if thread is not None else None,
+                'shutdown_requested': getattr(_cml_app, '_shutdown_requested', None),
+            }
+        except Exception as _ie:
+            result['cml_app_worker_thread'] = {'error': str(_ie)}
+
+        return JsonResponse(result)
 
     except Exception as e:
         logger.error(f"Event worker diagnostic error: {str(e)}")
