@@ -682,6 +682,30 @@ def start_trade_event_worker():
         _poll_executor = _cf.ThreadPoolExecutor(max_workers=1, thread_name_prefix="TradeEventPollQuery")
         POLL_QUERY_TIMEOUT_SECONDS = 15
 
+        # Same root cause as the poll-query timeout above, applied to event
+        # PROCESSING itself: settlement_service/position_service make several
+        # execute_query/execute_write calls per event with no query-level
+        # timeout of their own. Previously, a single event landing on a slow/
+        # contended connection would block this thread for however long that
+        # query took — up to the full STALE_PROCESSING_TIMEOUT_SECONDS (5 min)
+        # before the stale-PROCESSING reclaim on a LATER poll cycle could even
+        # pick it back up, during which every other queued event sat waiting
+        # behind it. Wrapping the dispatch call the same way bounds the worst
+        # case to EVENT_PROCESSING_TIMEOUT_SECONDS and immediately marks the
+        # event FAILED (→ retried on the normal PENDING path) instead of
+        # leaving it silently stuck in PROCESSING with no log output.
+        #
+        # IMPORTANT: unlike the poll query's single shared _poll_executor, this
+        # must create a FRESH single-use executor per event, not one shared
+        # long-lived worker. A shared max_workers=1 executor's one thread stays
+        # occupied by the abandoned (still-running) handler after a timeout, so
+        # the very next event's submit() would queue behind it and block for
+        # however long the FIRST hang takes to finally return — defeating the
+        # whole point of the timeout. A throwaway executor per event lets the
+        # abandoned thread run to completion in the background (result
+        # discarded) without blocking anything that comes after it.
+        EVENT_PROCESSING_TIMEOUT_SECONDS = 60
+
         while not _shutdown_requested:
             try:
                 if time.time() - _last_heartbeat >= _HEARTBEAT_INTERVAL_SECONDS:
@@ -760,19 +784,45 @@ def start_trade_event_worker():
                             print(f"==> DISPATCH event_id={event_id} event_type={event_type_raw!r} trade_id={event.get('trade_id')}", flush=True)
 
                             if event_type == 'HISTORY':
-                                process_history_event(event, event_data)
+                                _handler = process_history_event
                             elif event_type == 'SETTLEMENT':
-                                process_settlement_event(event, event_data)
+                                _handler = process_settlement_event
                             elif event_type == 'POSITION_MODIFY':
-                                process_position_modify_event(event, event_data)
+                                _handler = process_position_modify_event
                             elif event_type == 'POSITION_CANCEL':
-                                process_position_cancel_event(event, event_data)
+                                _handler = process_position_cancel_event
                             else:
                                 # Previously fell through to mark_completed() below without
                                 # running any handler — silently dropping the event. Now a
                                 # genuine failure so it retries / surfaces in dead-letter
                                 # instead of vanishing.
                                 raise ValueError(f"Unknown event_type: {event_type_raw!r}")
+
+                            _proc_started = time.time()
+                            try:
+                                # Fresh executor per event — see comment above on why this
+                                # must not be a shared/reused worker pool.
+                                _proc_executor = _cf.ThreadPoolExecutor(
+                                    max_workers=1, thread_name_prefix=f"TradeEventProc-{event_id}"
+                                )
+                                _proc_future = _proc_executor.submit(_handler, event, event_data)
+                                _proc_future.result(timeout=EVENT_PROCESSING_TIMEOUT_SECONDS)
+                            except _cf.TimeoutError:
+                                _elapsed = time.time() - _proc_started
+                                print(
+                                    f"==> Trade Event Worker: WARNING event_id={event_id} "
+                                    f"event_type={event_type_raw!r} exceeded "
+                                    f"{EVENT_PROCESSING_TIMEOUT_SECONDS}s (elapsed={_elapsed:.1f}s) — "
+                                    f"marking FAILED for retry, moving to next event. Likely "
+                                    f"Impala/Kudu connection contention under concurrent load. "
+                                    f"The abandoned handler keeps running in the background and "
+                                    f"its result is discarded when it eventually completes.",
+                                    flush=True
+                                )
+                                raise TimeoutError(
+                                    f"{event_type_raw} processing exceeded "
+                                    f"{EVENT_PROCESSING_TIMEOUT_SECONDS}s (elapsed={_elapsed:.1f}s)"
+                                )
 
                             print(f"==> DISPATCH event_id={event_id} completed handler OK, marking COMPLETED", flush=True)
                             mark_completed(event_id, event)
