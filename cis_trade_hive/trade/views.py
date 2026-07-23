@@ -18,6 +18,7 @@ Workflow:
 import json
 import logging
 import hashlib
+import os
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from django.shortcuts import render, redirect
@@ -2161,6 +2162,33 @@ def api_trade_event_worker_diagnostic(request):
             }
         except Exception as _ie:
             result['cml_app_worker_thread'] = {'error': str(_ie)}
+
+        # Process identity + WORKERS env var + lock-file holder — if WORKERS>1,
+        # this HTTP request may be served by a different gunicorn worker
+        # process than the one that won the flock and actually runs the
+        # background thread (only one process ever starts it — see
+        # start_trade_event_worker()'s /tmp/cis_trade_event_worker.lock).
+        # That would explain thread_object_exists=false here even though the
+        # worker is genuinely running and processing events in a sibling
+        # process with its own separate stdout.
+        try:
+            result['process_info'] = {
+                'this_process_pid': os.getpid(),
+                'workers_env_var': os.environ.get('WORKERS'),
+                'redis_url_set': bool(os.environ.get('REDIS_URL')),
+                'trade_event_worker_enabled_env': os.environ.get('TRADE_EVENT_WORKER_ENABLED'),
+            }
+            _lock_path = '/tmp/cis_trade_event_worker.lock'
+            if os.path.exists(_lock_path):
+                with open(_lock_path, 'r') as _lf:
+                    result['process_info']['lock_file_pid'] = _lf.read().strip()
+                result['process_info']['lock_file_mtime'] = datetime.fromtimestamp(
+                    os.path.getmtime(_lock_path)
+                ).strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                result['process_info']['lock_file_pid'] = None
+        except Exception as _pe:
+            result['process_info'] = {'error': str(_pe)}
 
         return JsonResponse(result)
 
