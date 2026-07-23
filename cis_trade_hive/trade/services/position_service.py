@@ -134,6 +134,28 @@ class PositionService:
         Returns:
             Tuple of (success, message, position_data)
         """
+        # ENTRY-POINT TRACE (unconditional, print+logger, cannot be silently
+        # skipped or filtered) — prints every raw argument exactly as this
+        # function received it, before any processing. Added to settle
+        # whether an open_fx_rate override is being lost before reaching
+        # this function or lost inside it — every downstream hop has
+        # individually checked out correct on paper, so this is the one
+        # ground-truth point not yet directly observed at runtime.
+        print(
+            f"==> [CALC_POSITION ENTRY] trade_id={trade_id} portfolio_id={portfolio_id!r} "
+            f"security_id={security_id!r} trade_type={trade_type!r} position_basis={position_basis!r} "
+            f"security_currency={security_currency!r} portfolio_currency={portfolio_currency!r} "
+            f"gross_amount_lc={gross_amount_lc!r} (type={type(gross_amount_lc).__name__}) "
+            f"trade_lc={trade_lc!r} is_chain_recalc={is_chain_recalc!r}",
+            flush=True
+        )
+        logger.info(
+            f"[CALC_POSITION ENTRY] trade_id={trade_id} portfolio_id={portfolio_id!r} "
+            f"security_id={security_id!r} trade_type={trade_type!r} position_basis={position_basis!r} "
+            f"security_currency={security_currency!r} portfolio_currency={portfolio_currency!r} "
+            f"gross_amount_lc={gross_amount_lc!r} (type={type(gross_amount_lc).__name__}) "
+            f"trade_lc={trade_lc!r} is_chain_recalc={is_chain_recalc!r}"
+        )
         try:
             # Validate trade type
             if trade_type not in self.POSITION_AFFECTING_TYPES:
@@ -157,6 +179,12 @@ class PositionService:
                     database=self.DATABASE
                 )
                 if existing_check:
+                    print(
+                        f"==> [CALC_POSITION] IDEMPOTENCY GUARD HIT: trade_id={trade_id} "
+                        f"basis={position_basis} version={existing_check[0].get('version_id')} "
+                        f"— returning existing row, _process_buy/_process_sell NOT called",
+                        flush=True
+                    )
                     logger.warning(
                         f"IDEMPOTENCY: trade_id={trade_id} basis={position_basis} already processed "
                         f"(version={existing_check[0].get('version_id')}). Skipping recalculation."
