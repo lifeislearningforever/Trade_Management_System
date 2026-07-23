@@ -79,6 +79,8 @@ urlpatterns = [
     # =========================================================================
     # Trade Event Queue Management APIs (for async processing recovery)
     # =========================================================================
+    # TEMPORARY — delete this line and its view once the investigation is done.
+    path('api/event-worker-diagnostic/', views.api_trade_event_worker_diagnostic, name='api_trade_event_worker_diagnostic'),
     path('api/event-queue/health/', views.api_trade_event_queue_health, name='api_trade_event_queue_health'),
     path('api/event-queue/failed/', views.api_trade_event_queue_failed, name='api_trade_event_queue_failed'),
     path('api/event-queue/reprocess/<int:event_id>/', views.api_trade_event_reprocess, name='api_trade_event_reprocess'),

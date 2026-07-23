@@ -2116,6 +2116,44 @@ def api_worker_health(request):
 # ==========================================================================
 
 @require_http_methods(["GET"])
+def api_trade_event_worker_diagnostic(request):
+    """
+    TEMPORARY diagnostic — delete after use.
+
+    Checks whether trade_event_queue_service's background worker thread
+    (the SECOND, normally-unused event consumer alongside config/cml_app.py's
+    embedded worker) is actually running in THIS process. Added 2026-07-23
+    to investigate a trade whose SETTLEMENT event was marked COMPLETED with
+    zero corresponding log lines in cml_app.py's worker output, despite a
+    position row genuinely existing — suggesting a second consumer processed
+    it instead. Since this runs as a CML Application (no shell access to the
+    live gunicorn worker process), this endpoint is the only way to check
+    in-process state on the actual environment where the symptom occurred.
+
+    GET /trade/api/event-worker-diagnostic/
+
+    DELETE THIS VIEW AND ITS URL ROUTE once the investigation is done.
+    """
+    try:
+        from trade.services.trade_event_queue_service import trade_event_queue_service
+
+        return JsonResponse({
+            'status': 'ok',
+            'is_running': trade_event_queue_service.is_running(),
+            'stats': trade_event_queue_service.get_stats(),
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+
+    except Exception as e:
+        logger.error(f"Event worker diagnostic error: {str(e)}")
+        return JsonResponse({
+            'status': 'error',
+            'error': str(e),
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }, status=500)
+
+
+@require_http_methods(["GET"])
 def api_trade_event_queue_health(request):
     """
     API: Get trade event queue health status.
