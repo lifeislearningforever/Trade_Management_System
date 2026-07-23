@@ -2190,6 +2190,34 @@ def api_trade_event_worker_diagnostic(request):
         except Exception as _pe:
             result['process_info'] = {'error': str(_pe)}
 
+        # Check the GENERATED gunicorn config file on disk — main() only
+        # rewrites this when the whole CML Application entrypoint (main())
+        # re-runs, NOT on every gunicorn worker refork. If the Application
+        # was restarted in a way that reforked gunicorn workers without
+        # main() itself re-running, this file can still hold OLD post_fork
+        # code (from a previous deploy) even though config/cml_app.py's
+        # source on disk is fully current — explaining a runtime post_fork
+        # print that doesn't match the current source.
+        try:
+            _conf_path = '/tmp/cis_gunicorn.conf.py'
+            if os.path.exists(_conf_path):
+                with open(_conf_path, 'r') as _cf:
+                    _conf_content = _cf.read()
+                result['gunicorn_conf_file'] = {
+                    'exists': True,
+                    'mtime': datetime.fromtimestamp(
+                        os.path.getmtime(_conf_path)
+                    ).strftime('%Y-%m-%d %H:%M:%S'),
+                    'size_bytes': len(_conf_content),
+                    'has_new_split_post_fork': 'start_trade_event_worker() returned OK' in _conf_content,
+                    'has_old_combined_post_fork': 'workers started in gunicorn worker pid' in _conf_content,
+                    'post_fork_section': _conf_content[_conf_content.find('def post_fork'):][:1500],
+                }
+            else:
+                result['gunicorn_conf_file'] = {'exists': False}
+        except Exception as _ge:
+            result['gunicorn_conf_file'] = {'error': str(_ge)}
+
         return JsonResponse(result)
 
     except Exception as e:
