@@ -227,7 +227,7 @@ def start_trade_event_worker():
     global _trade_event_worker_thread, _shutdown_requested, _worker_lock_fd
 
     if not TRADE_EVENT_WORKER_ENABLED:
-        print("==> Trade Event Worker: DISABLED (TRADE_EVENT_WORKER_ENABLED=0)")
+        print("==> Trade Event Worker: DISABLED (TRADE_EVENT_WORKER_ENABLED=0)", flush=True)
         return
 
     # --- Process-level lock: only ONE gunicorn worker runs the background thread ---
@@ -238,15 +238,15 @@ def start_trade_event_worker():
         _fcntl.flock(_worker_lock_fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
         _worker_lock_fd.write(str(os.getpid()))
         _worker_lock_fd.flush()
-        print(f"==> Trade Event Worker: Acquired process lock (pid={os.getpid()})")
+        print(f"==> Trade Event Worker: Acquired process lock (pid={os.getpid()})", flush=True)
     except BlockingIOError:
-        print(f"==> Trade Event Worker: Another gunicorn worker already holds the lock — skipping thread start (pid={os.getpid()})")
+        print(f"==> Trade Event Worker: Another gunicorn worker already holds the lock — skipping thread start (pid={os.getpid()})", flush=True)
         return
     # ---------------------------------------------------------------------------
 
-    print("==> Starting Trade Event Worker...")
-    print(f"    Poll Interval: {TRADE_EVENT_WORKER_POLL_INTERVAL}s")
-    print(f"    Batch Size: {TRADE_EVENT_WORKER_BATCH_SIZE}")
+    print("==> Starting Trade Event Worker...", flush=True)
+    print(f"    Poll Interval: {TRADE_EVENT_WORKER_POLL_INTERVAL}s", flush=True)
+    print(f"    Batch Size: {TRADE_EVENT_WORKER_BATCH_SIZE}", flush=True)
 
     def _worker_loop():
         """Main worker loop - runs in background thread."""
@@ -267,7 +267,7 @@ def start_trade_event_worker():
         EVENT_QUEUE_TABLE = 'cis_trade_event_queue'
         HISTORY_TABLE = 'cis_trade_history'
 
-        print("==> Trade Event Worker: Started")
+        print("==> Trade Event Worker: Started", flush=True)
 
         def process_history_event(event, event_data):
             """Process a HISTORY event - insert trade history record."""
@@ -842,11 +842,15 @@ def start_trade_event_worker():
                 traceback.print_exc()
                 time.sleep(TRADE_EVENT_WORKER_POLL_INTERVAL)
 
-        print("==> Trade Event Worker: Stopped")
+        print("==> Trade Event Worker: Stopped", flush=True)
 
     _trade_event_worker_thread = threading.Thread(target=_worker_loop, daemon=True, name="TradeEventWorker")
     _trade_event_worker_thread.start()
-    print("==> Trade Event Worker: Thread started")
+    print(
+        f"==> Trade Event Worker: Thread started "
+        f"(alive={_trade_event_worker_thread.is_alive()}, name={_trade_event_worker_thread.name})",
+        flush=True
+    )
 
 
 def start_position_worker():
@@ -1228,13 +1232,21 @@ def main():
         "    import sys as _sys",
         f"    _root2 = {repr(WORKDIR)}",
         "    if _root2 not in _sys.path: _sys.path.insert(0, _root2)",
+        "    import config.cml_app as _cml",
         "    try:",
-        "        import config.cml_app as _cml",
         "        _cml.start_trade_event_worker()",
-        "        _cml.start_position_worker()",
-        "        print(f'==> post_fork: workers started in gunicorn worker pid={worker.pid}')",
+        "        print(f'==> post_fork: start_trade_event_worker() returned OK, pid={worker.pid}', flush=True)",
         "    except Exception as _e:",
-        "        print(f'==> post_fork: worker start failed: {_e}')",
+        "        import traceback as _tb",
+        "        print(f'==> post_fork: start_trade_event_worker() FAILED: {_e}', flush=True)",
+        "        _tb.print_exc()",
+        "    try:",
+        "        _cml.start_position_worker()",
+        "        print(f'==> post_fork: start_position_worker() returned OK, pid={worker.pid}', flush=True)",
+        "    except Exception as _e:",
+        "        import traceback as _tb",
+        "        print(f'==> post_fork: start_position_worker() FAILED: {_e}', flush=True)",
+        "        _tb.print_exc()",
     ]
     with open(gunicorn_conf, "w") as _f:
         _f.write("\n".join(gunicorn_conf_lines) + "\n")
