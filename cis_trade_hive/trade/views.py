@@ -2218,6 +2218,30 @@ def api_trade_event_worker_diagnostic(request):
         except Exception as _ge:
             result['gunicorn_conf_file'] = {'error': str(_ge)}
 
+        # Check the SOURCE file config/cml_app.py itself, as loaded by THIS
+        # running process (via its actual __file__ path, not an assumption)
+        # — settles whether config/cml_app.py on disk matches what's on
+        # GitHub at commit af69779/a292d77 (which has 25 occurrences of
+        # "flush=True"). A different count means the checkout on this CML
+        # server's filesystem itself is not in sync with git, independent
+        # of the generated /tmp/cis_gunicorn.conf.py question above.
+        try:
+            import config.cml_app as _cml_app2
+            _src_path = _cml_app2.__file__
+            with open(_src_path, 'r') as _sf:
+                _src_content = _sf.read()
+            result['cml_app_source_file'] = {
+                'path': _src_path,
+                'mtime': datetime.fromtimestamp(
+                    os.path.getmtime(_src_path)
+                ).strftime('%Y-%m-%d %H:%M:%S'),
+                'size_bytes': len(_src_content),
+                'flush_true_count': _src_content.count('flush=True'),
+                'has_new_split_post_fork_in_source': "start_trade_event_worker() returned OK" in _src_content,
+            }
+        except Exception as _se:
+            result['cml_app_source_file'] = {'error': str(_se)}
+
         return JsonResponse(result)
 
     except Exception as e:
