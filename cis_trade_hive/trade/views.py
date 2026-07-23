@@ -2242,6 +2242,36 @@ def api_trade_event_worker_diagnostic(request):
         except Exception as _se:
             result['cml_app_source_file'] = {'error': str(_se)}
 
+        # CRITICAL CHECK: position_service.py and settlement_service.py are the
+        # files that actually decide whether open_fx_rate overrides get applied
+        # (the NON-REVAL branch in _process_buy/_process_sell). We already found
+        # config/cml_app.py stale on this server independent of GitHub — these
+        # two files were never checked the same way. A local simulation with
+        # today's confirmed real trade values (security_currency=AOA,
+        # portfolio_currency=SGD, gross_amount_lc=60.0, reval_status=
+        # NON-REVALUED) proves will_use_override=True with the CURRENT source —
+        # so if the live position still used the market rate, these files being
+        # stale on this server (like cml_app.py was) is the leading suspect.
+        try:
+            import trade.services.position_service as _ps_mod
+            import trade.services.settlement_service as _ss_mod
+            _checks = {}
+            for _name, _mod in (('position_service', _ps_mod), ('settlement_service', _ss_mod)):
+                _p = _mod.__file__
+                with open(_p, 'r') as _f:
+                    _c = _f.read()
+                _checks[_name] = {
+                    'path': _p,
+                    'mtime': datetime.fromtimestamp(os.path.getmtime(_p)).strftime('%Y-%m-%d %H:%M:%S'),
+                    'size_bytes': len(_c),
+                    'has_cost_lc_decision_log': '[COST_LC DECISION]' in _c,
+                    'has_will_use_override_log': 'will_use_override' in _c,
+                    'has_reval_status_race_fix': "_reval_status" in _c,
+                }
+            result['position_and_settlement_source_files'] = _checks
+        except Exception as _pse:
+            result['position_and_settlement_source_files'] = {'error': str(_pse)}
+
         return JsonResponse(result)
 
     except Exception as e:
