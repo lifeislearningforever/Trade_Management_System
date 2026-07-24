@@ -50,7 +50,7 @@ from core.repositories.impala_connection import impala_manager
 logger = logging.getLogger(__name__)
 
 DATABASE = 'gmp_cis'
-ALL_SOURCES = ['CIS', 'GMP', 'AMSICEQ', 'USER_UPLOAD']
+ALL_SOURCES = ['CIS', 'GMP', 'AMS_STREET', 'USER_UPLOAD']
 AVP_PRECISION = Decimal('0.00000001')
 
 
@@ -66,7 +66,7 @@ class Command(BaseCommand):
                             help='Limit to a single security_label (optional)')
         parser.add_argument(
             '--source', type=str, choices=ALL_SOURCES,
-            help='Limit to one source system: CIS, GMP, AMSICEQ, USER_UPLOAD (default: all)'
+            help='Limit to one source system: CIS, GMP, AMS_STREET, USER_UPLOAD (default: all)'
         )
         parser.add_argument(
             '--sod-date', type=str, default=None,
@@ -669,7 +669,7 @@ class Command(BaseCommand):
         UPSERT SOD rows into cis_position in batches of 500.
 
         SOD is a new position_date, so every row gets a NEW position_id:
-          - CIS / GMP / AMSICEQ : random (timestamp-based sequential)
+          - CIS / GMP / AMS_STREET : random (timestamp-based sequential)
           - USER_UPLOAD          : deterministic fnv_hash of the natural key
                                    (portfolio|security_label|position_basis|
                                     sod_date|src_system)

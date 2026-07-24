@@ -2,7 +2,7 @@
 EOD / CORR Position Revaluation
 
 Refreshes market values for all open positions in cis_position (the golden copy),
-covering all source systems: CIS, GMP, AMS/AMSICEQ, USER_UPLOAD.
+covering all source systems: CIS, GMP, AMS_STREET, USER_UPLOAD.
 
 For each position:
   1. Fetch latest price from cis_equity_price (always used; REVALUED and NON-REVALUED)
@@ -59,6 +59,17 @@ Usage:
     python manage.py refresh_positions --position-date 2026-03-02 --fill-gaps
     python manage.py refresh_positions --position-date 2026-03-02 --source GMP --fill-gaps
     python manage.py refresh_positions --position-date 2026-03-02 --fill-gaps --dry-run
+
+    # AMS_STREET no-reval mode — for AMS_STREET/SETTLED positions only, copy the
+    # prior position's market value / unrealized P&L / cost forward to the new
+    # EOD row UNCHANGED instead of recalculating with latest FX rates and latest
+    # equity prices. Every other position (any other source, or AMS_STREET/TRADED)
+    # still goes through normal recalculation. Intended usage: run WITHOUT this
+    # flag from month-start through the 20th (full recalculation), then WITH it
+    # from the 20th through month-end (AMS_STREET/SETTLED frozen, everything
+    # else still recalculated normally).
+    python manage.py refresh_positions --ams-no-reval
+    python manage.py refresh_positions --ams-no-reval --dry-run
 """
 
 import logging
@@ -76,7 +87,7 @@ logger = logging.getLogger(__name__)
 
 DATABASE = 'gmp_cis'
 
-ALL_SOURCES = ['CIS', 'GMP', 'AMSICEQ', 'USER_UPLOAD']
+ALL_SOURCES = ['CIS', 'GMP', 'AMS_STREET', 'USER_UPLOAD']
 
 AVP_PRECISION = 8  # average cost is price-per-unit, not an amount — always 8 dp
 
@@ -89,7 +100,7 @@ class Command(BaseCommand):
         parser.add_argument('--security', type=str, help='Filter by security label (optional)')
         parser.add_argument(
             '--source', type=str, choices=ALL_SOURCES,
-            help='Filter by source system: CIS, GMP, AMSICEQ, USER_UPLOAD (default: all)'
+            help='Filter by source system: CIS, GMP, AMS_STREET, USER_UPLOAD (default: all)'
         )
         parser.add_argument('--dry-run', action='store_true',
                             help='Show what would be updated without writing to database')
@@ -110,6 +121,15 @@ class Command(BaseCommand):
             help='Only process positions that have NO existing EOD row for the date. '
                  'Keeps existing EOD rows untouched; only fills missing ones from SOD/INT.'
         )
+        parser.add_argument(
+            '--ams-no-reval', action='store_true', default=False,
+            dest='ams_no_reval',
+            help='For AMS_STREET/SETTLED positions only: copy the prior position '
+                 'forward to the new EOD row unchanged (market value, unrealized '
+                 'P&L, cost) instead of recalculating with latest FX rates and '
+                 'latest equity prices. All other positions (any other source, '
+                 'or AMS_STREET/TRADED) are unaffected and still recalculated normally.'
+        )
 
     def handle(self, *args, **options):
         portfolio_filter = options.get('portfolio')
@@ -119,6 +139,7 @@ class Command(BaseCommand):
         run_type         = options.get('run_type', 'EOD')
         position_date    = options.get('position_date')
         fill_gaps        = options.get('fill_gaps', False)
+        ams_no_reval     = options.get('ams_no_reval', False)
         today            = datetime.now().strftime('%Y-%m-%d')
 
         # Infer position_date from alldatesinfo when not explicitly supplied
@@ -150,6 +171,11 @@ class Command(BaseCommand):
         if fill_gaps:
             self.stdout.write(self.style.WARNING(
                 'Fill-gaps  : ON — only positions with no existing EOD row will be processed'
+            ))
+        if ams_no_reval:
+            self.stdout.write(self.style.WARNING(
+                'AMS no-reval: ON — AMS_STREET/SETTLED positions copied forward unchanged, '
+                'no FX/price recalculation. All other positions unaffected.'
             ))
         if portfolio_filter:
             self.stdout.write(f"Portfolio  : {portfolio_filter}")
@@ -187,7 +213,7 @@ class Command(BaseCommand):
                     self.stdout.write(f"Processing {idx}/{total}...")
 
                 try:
-                    result = self._process_position(position, dry_run, today, ref, insert_rows)
+                    result = self._process_position(position, dry_run, today, ref, insert_rows, ams_no_reval=ams_no_reval)
                     if result == 'updated':
                         updated += 1
                     elif result == 'skipped':
@@ -382,6 +408,7 @@ class Command(BaseCommand):
                     p.average_cost_fc, p.cost_fc,
                     p.average_cost_lc, p.cost_lc,
                     p.market_value_fc, p.market_value_lc,
+                    p.net_book_value_fc, p.net_book_value_lc,
                     p.unrealized_pnl_fc, p.unrealized_pnl_lc,
                     p.realized_pnl_fc, p.realized_pnl_lc,
                     p.provision_fc, p.provision_lc,
@@ -425,7 +452,7 @@ class Command(BaseCommand):
     # Per-position processing
     # -------------------------------------------------------------------------
 
-    def _process_position(self, position, dry_run, run_date, ref, insert_rows):
+    def _process_position(self, position, dry_run, run_date, ref, insert_rows, ams_no_reval=False):
         position_id = position.get('position_id')
         portfolio   = position.get('portfolio')
         security    = position.get('security_label')
@@ -433,6 +460,14 @@ class Command(BaseCommand):
 
         if not quantity:
             return 'skipped'
+
+        # AMS no-reval mode: for AMS_STREET/SETTLED positions only, copy the
+        # prior position forward unchanged instead of recalculating. Every
+        # other position (any other source, or AMS_STREET/TRADED) falls
+        # through to the normal recalculation logic below, untouched.
+        if ams_no_reval and position.get('src_system') == 'AMS_STREET' \
+                and position.get('position_basis') == 'SETTLED':
+            return self._copy_position_unchanged(position, dry_run, ref, insert_rows)
 
         qty          = Decimal(str(quantity))
         cost_fc_dec  = Decimal(str(position.get('cost_fc') or 0))
@@ -508,6 +543,48 @@ class Command(BaseCommand):
                 'unrealized_pnl_fc': unrealized_pnl_fc, 'unrealized_pnl_lc': unrealized_pnl_lc,
                 'nbv_fc': nbv_fc, 'nbv_lc': nbv_lc,
                 'average_cost_lc': average_cost_lc, 'cost_lc_write': cost_lc_write,
+                'fc_dp': fc_dp, 'lc_dp': lc_dp,
+            })
+
+        return 'updated'
+
+    def _copy_position_unchanged(self, position, dry_run, ref, insert_rows):
+        """
+        AMS no-reval mode: carry the prior AMS_STREET/SETTLED position forward
+        to the new EOD row exactly as stored — no FX rate or equity price
+        recalculation. Still produces a real new EOD row (is_latest=true,
+        deterministic position_id) via the same _batch_upsert_eod pipeline
+        as every other position; only the VALUES are copied rather than
+        recomputed.
+
+        price_dec is derived the same fallback way _process_position already
+        does when no fresh price is available (market_value_fc / quantity),
+        for consistency rather than introducing a new derivation.
+        """
+        portfolio = position.get('portfolio')
+        security  = position.get('security_label')
+        qty       = Decimal(str(position.get('quantity') or 0))
+
+        sec_ccy  = ref['sec_ccy'].get(security)
+        port_ccy = ref['port_info'].get(portfolio, {}).get('currency')
+        fc_dp    = ref['currency_dp'].get(sec_ccy, 2)
+        lc_dp    = ref['currency_dp'].get(port_ccy, 2)
+
+        market_value_fc = Decimal(str(position.get('market_value_fc') or 0))
+        price_dec = (market_value_fc / qty) if qty else Decimal('0')
+
+        if not dry_run:
+            insert_rows.append({
+                'position': position,
+                'price_dec': price_dec,
+                'market_value_fc': market_value_fc,
+                'market_value_lc': Decimal(str(position.get('market_value_lc') or 0)),
+                'unrealized_pnl_fc': Decimal(str(position.get('unrealized_pnl_fc') or 0)),
+                'unrealized_pnl_lc': Decimal(str(position.get('unrealized_pnl_lc') or 0)),
+                'nbv_fc': Decimal(str(position.get('net_book_value_fc') or 0)),
+                'nbv_lc': Decimal(str(position.get('net_book_value_lc') or 0)),
+                'average_cost_lc': Decimal(str(position.get('average_cost_lc') or 0)),
+                'cost_lc_write': Decimal(str(position.get('cost_lc') or 0)),
                 'fc_dp': fc_dp, 'lc_dp': lc_dp,
             })
 
@@ -706,8 +783,8 @@ class Command(BaseCommand):
                 def _fv(v):
                     return float(v) if v is not None else 0.0
 
-                isin_val = f"'{str(row[\"isin\"]).replace(chr(39), chr(39)*2)}'" if row.get('isin') else 'NULL'
-                src_tbl  = f"'{str(row[\"source_table\"]).replace(chr(39), chr(39)*2)}'" if row.get('source_table') else 'NULL'
+                isin_val = f"'{str(row.get('isin')).replace(chr(39), chr(39)*2)}'" if row.get('isin') else 'NULL'
+                src_tbl  = f"'{str(row.get('source_table')).replace(chr(39), chr(39)*2)}'" if row.get('source_table') else 'NULL'
                 ptype    = str(row.get('position_type', '') or '').replace("'", "''")
 
                 impala_manager.execute_write(
@@ -742,7 +819,7 @@ class Command(BaseCommand):
                         {_fv(row.get('uncall_fc'))}, {_fv(row.get('uncall_lc'))},
                         {_fv(row.get('pipeline_fc'))}, {_fv(row.get('pipeline_lc'))},
                         '{ptype}', {isin_val}, {src_tbl}, false,
-                        {f"'{str(row[\"processing_timestamp\"]).replace(chr(39), chr(39)*2)}'" if row.get('processing_timestamp') else 'NULL'}
+                        {f"'{str(row.get('processing_timestamp')).replace(chr(39), chr(39)*2)}'" if row.get('processing_timestamp') else 'NULL'}
                     )
                     """,
                     database=DATABASE
