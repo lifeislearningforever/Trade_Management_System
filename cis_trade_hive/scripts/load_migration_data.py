@@ -10,6 +10,12 @@ Usage:
     python scripts/load_migration_data.py --table trade      --file /path/to/trade.csv
     python scripts/load_migration_data.py --table portfolio  --file /path/to/portfolio.csv
 
+    # Generic loader for any cis_*_lookup / cis_*_lut table — no per-table
+    # Python needed, CSV header names map straight to column names:
+    python scripts/load_migration_data.py --table lut --file /path/to/lut.csv \\
+        --lut-table cis_delivery_type_lookup --lut-pk delivery_type_code \\
+        --lut-bool-cols is_active --lut-int-cols display_order
+
 Options:
     --dry-run                  Parse + validate only, no writes to Kudu
     --delimiter ","            CSV delimiter (default comma)
@@ -1475,6 +1481,92 @@ def load_cash_flow(rows: List[Dict], status: str, dry_run: bool, processing_date
 
 
 # ---------------------------------------------------------------------------
+# generic LUT (lookup table) loader
+# ---------------------------------------------------------------------------
+# Unlike the loaders above (party/security/trade/...), this one has no
+# hardcoded column alias map. It targets the common shape shared by every
+# cis_*_lookup table (see sql/ddl/08_trade_lookup_tables_kudu.sql):
+#   <pk_code> STRING NOT NULL PRIMARY KEY, ...STRING columns..., is_active
+#   BOOLEAN, display_order INT
+# CSV header names are taken as-is (normalised the same way as every other
+# loader) and UPSERTed straight into whichever table --lut-table names, so
+# one implementation works for any of them without new Python per table.
+
+def load_lut(
+    rows: List[Dict],
+    dry_run: bool,
+    lut_table: str,
+    pk_column: str,
+    bool_columns: Optional[List[str]] = None,
+    int_columns: Optional[List[str]] = None,
+) -> Tuple[int, int, List[str]]:
+    """
+    Generic loader for cis_*_lookup / cis_*_lut tables.
+
+    Args:
+        rows: parsed CSV rows (headers already normalised by _read_csv)
+        dry_run: parse/validate only, no writes
+        lut_table: target table name, e.g. 'cis_delivery_type_lookup'
+                   (bare name — DATABASE prefix is added automatically)
+        pk_column: CSV column that holds the primary key (e.g. 'delivery_type_code')
+        bool_columns: CSV columns to coerce with _bool() (e.g. ['is_active'])
+        int_columns: CSV columns to coerce with _bigint() (e.g. ['display_order'])
+
+    Returns:
+        (ok, fail, errors)
+    """
+    ok = fail = 0
+    errors: List[str] = []
+    bool_cols = set(bool_columns or [])
+    int_cols = set(int_columns or [])
+
+    for i, raw in enumerate(rows, 1):
+        pk_val = str(raw.get(pk_column, '') or '').strip()
+        if not pk_val:
+            msg = f"Row {i}: missing {pk_column} — skipped"
+            logger.warning(msg)
+            errors.append(msg)
+            fail += 1
+            continue
+
+        # Drop columns with no header value at all (blank trailing columns etc.)
+        mapped = {col: val for col, val in raw.items() if col}
+
+        # is_active defaults to true when the CSV doesn't supply it — matches
+        # every seeded lookup table, which is always active-by-default.
+        if 'is_active' in bool_cols:
+            mapped.setdefault('is_active', True)
+
+        if dry_run:
+            logger.info("[DRY-RUN] %s row %d: %s=%s", lut_table, i, pk_column, pk_val)
+            ok += 1
+            continue
+
+        col_names = []
+        col_vals = []
+        for col, val in mapped.items():
+            col_names.append(col)
+            if col in bool_cols:
+                col_vals.append(_bool(val))
+            elif col in int_cols:
+                col_vals.append(_bigint(val))
+            else:
+                col_vals.append(_escape(val))
+
+        sql = f"UPSERT INTO {DATABASE}.{lut_table} ({', '.join(col_names)}) VALUES ({', '.join(col_vals)})"
+        try:
+            impala_manager.execute_write(sql, database=DATABASE)
+            ok += 1
+        except Exception as exc:
+            msg = f"Row {i} ({pk_val}): {exc}"
+            logger.error(msg)
+            errors.append(msg)
+            fail += 1
+
+    return ok, fail, errors
+
+
+# ---------------------------------------------------------------------------
 # error report
 # ---------------------------------------------------------------------------
 
@@ -1514,7 +1606,7 @@ DEFAULT_STATUS = {
     'cash_flow':  'VALIDATED',
 }
 
-ALL_TABLES = list(LOADERS) + ['position']
+ALL_TABLES = list(LOADERS) + ['position', 'lut']
 
 
 def main():
@@ -1567,6 +1659,19 @@ Examples:
 
   # Dry-run: see what would be processed without writing
   python scripts/load_migration_data.py --table position --basis SETTLED --dry-run
+
+  # Load ANY lookup table generically — CSV header names are used as-is,
+  # no per-table Python needed. Column names must match the target table.
+  python scripts/load_migration_data.py --table lut \\
+      --lut-table cis_delivery_type_lookup --lut-pk delivery_type_code \\
+      --lut-bool-cols is_active --lut-int-cols display_order \\
+      --file delivery_types.csv
+
+  # Dry-run a LUT load
+  python scripts/load_migration_data.py --table lut \\
+      --lut-table cis_broker_lookup --lut-pk broker_code \\
+      --lut-bool-cols is_active --lut-int-cols display_order \\
+      --file brokers.csv --dry-run
 """)
     parser.add_argument('--table',           required=True, choices=ALL_TABLES,
                         help='Target table. Use "position" to backfill positions from existing cis_trade rows.')
@@ -1593,6 +1698,16 @@ Examples:
                         help='(--table position) Lower bound on trade_date (YYYY-MM-DD)')
     parser.add_argument('--trade-date-to',   default='',
                         help='(--table position) Upper bound on trade_date (YYYY-MM-DD, default: today)')
+    # Generic LUT loader options
+    parser.add_argument('--lut-table',       default='',
+                        help='(--table lut) Target table name, e.g. cis_delivery_type_lookup')
+    parser.add_argument('--lut-pk',          default='',
+                        help='(--table lut) CSV column holding the primary key, e.g. delivery_type_code')
+    parser.add_argument('--lut-bool-cols',   default='',
+                        help='(--table lut) Comma-separated CSV columns to treat as boolean, e.g. is_active')
+    parser.add_argument('--lut-int-cols',    default='',
+                        help='(--table lut) Comma-separated CSV columns to treat as integer, e.g. display_order')
+
     parser.add_argument('--basis',           default='BOTH',
                         choices=['BOTH', 'TRADED', 'SETTLED'],
                         help='Which position basis to create. '
@@ -1635,6 +1750,63 @@ Examples:
         print("=" * 55)
         if errors:
             err_file = _write_error_csv('position', errors)
+            if err_file:
+                print(f"  Errors  → {err_file}")
+        sys.exit(0 if fail == 0 else 1)
+
+    # ------------------------------------------------------------------ #
+    # --table lut: generic lookup-table loader                           #
+    # ------------------------------------------------------------------ #
+    if args.table == 'lut':
+        if not args.lut_table:
+            parser.error('--lut-table is required for --table lut')
+        if not args.lut_pk:
+            parser.error('--lut-pk is required for --table lut')
+        if not args.file:
+            parser.error('--file is required for --table lut')
+        if not os.path.isfile(args.file):
+            logger.error("File not found: %s", args.file)
+            sys.exit(1)
+
+        bool_cols = [c.strip() for c in args.lut_bool_cols.split(',') if c.strip()]
+        int_cols = [c.strip() for c in args.lut_int_cols.split(',') if c.strip()]
+
+        logger.info(
+            "Loading LUT %s from %s (pk=%s bool_cols=%s int_cols=%s dry_run=%s)",
+            args.lut_table, args.file, args.lut_pk, bool_cols, int_cols, args.dry_run
+        )
+        headers, rows = _read_csv(args.file, args.delimiter)
+        logger.info("Read %d rows, columns: %s", len(rows), headers)
+
+        if args.lut_pk not in headers:
+            logger.error(
+                "--lut-pk %r not found in CSV headers %s", args.lut_pk, headers
+            )
+            sys.exit(1)
+
+        ok, fail, errors = load_lut(
+            rows,
+            dry_run=args.dry_run,
+            lut_table=args.lut_table,
+            pk_column=args.lut_pk,
+            bool_columns=bool_cols,
+            int_columns=int_cols,
+        )
+        print()
+        print("=" * 55)
+        print(f"  Table            : {DATABASE}.{args.lut_table}")
+        print(f"  File             : {args.file}")
+        print(f"  PK column        : {args.lut_pk}")
+        print(f"  Total rows       : {len(rows)}")
+        if args.dry_run:
+            print("  Mode             : DRY RUN — no data written")
+            print(f"  Would process    : {ok}")
+        else:
+            print(f"  Loaded           : {ok}")
+        print(f"  Failed/Skipped   : {fail}")
+        print("=" * 55)
+        if errors:
+            err_file = _write_error_csv(args.lut_table, errors)
             if err_file:
                 print(f"  Errors  → {err_file}")
         sys.exit(0 if fail == 0 else 1)
