@@ -2,8 +2,23 @@
 
 Live-Kudu regression suite for the AVP (Average Price Position) engine. Unlike
 `trade/tests/test_avp_scenarios.py` (mocked, single-currency), this suite hits
-a real Kudu/Impala database using the real `position_service`/
-`settlement_service` code paths — no mocking.
+a real Kudu/Impala database — no mocking.
+
+**UI-driven, not direct DB writes.** Trade actions (create/amend/cancel) go
+through the REAL views (`trade_create`, `trade_edit`, `trade_cancel`) via
+Django's test Client — simulating a real user filling the form and clicking
+submit. The suite never writes to `cis_trade`/`cis_trade_position` directly.
+That means the real async pipeline (event queue → trade event worker →
+position queue → position worker — both persistent background threads
+started from `config/cml_app.py`'s gunicorn post_fork hook, running in your
+actual deployed app, entirely separate from this test process) is what
+actually produces the position rows. The suite only *reads* the DB
+afterward — polling with a timeout — to check what the real pipeline
+produced and decide pass/fail.
+
+Only reference/master data (portfolio, security, counterparty) is still set
+up directly via UPSERT — these are environment fixtures the trade views
+expect to already exist, not the thing under test.
 
 Files:
 
@@ -17,6 +32,14 @@ Files:
 
 - A working Kudu/Impala connection (`python manage.py test_hive` should succeed)
 - Dependencies installed (`pip install -r requirements.txt -r requirements-dev.txt`)
+- **The real background workers must be running** — trade event worker and
+  position worker, started via `config/cml_app.py`'s gunicorn post_fork hook
+  (or `scripts/position_worker_daemon.sh` for the position worker standalone).
+  Without them, trades created through the UI just sit `PENDING` in
+  `cis_trade_event_queue`/`cis_position_queue` forever and every test will
+  time out waiting for a position that never gets calculated. If your SIT/UAT
+  app is deployed normally (not just `manage.py runserver`), these should
+  already be running continuously.
 
 ## Running it
 
@@ -38,6 +61,13 @@ RUN_LIVE_AVP_TESTS=1 pytest trade/tests/test_avp_live_scenarios.py -v -k sod_eod
 — that's the one-click pass/fail report. No separate report to generate or
 read; a nonzero exit code means something failed (useful for CI/scripting:
 `echo $?` after the run).
+
+**Expect this to take longer than the old mocked suite.** Every trade
+creation waits on the real background workers (poll every 5s for the trade
+event worker, 10s for the position worker — see `config/cml_app.py`), so each
+scenario that books a trade can take anywhere from a few seconds to
+`avp_live_fixtures.POLL_TIMEOUT_SECONDS` (90s) if something's slow or stuck.
+30 scenarios end-to-end could reasonably take several minutes, not seconds.
 
 ## What it covers (30 scenarios)
 
@@ -95,6 +125,15 @@ Safe to run any time, including when there's nothing to clean up.
   run (e.g. if `cis_equity_price`'s real column shape differs slightly from
   what's assumed, or portfolio/security `status` values differ from what's
   used here).
+- `ui_create_trade`/`ui_amend_trade` build the full POST payload
+  `trade_create`/`trade_edit` expect based on reading `trade/views.py`'s field
+  list directly — if that view's required fields change, the payload builder
+  in `avp_live_fixtures._trade_post_payload` needs updating too.
+- Authentication is a synthetic session (`get_authenticated_client()` sets
+  `user_login`/`user_permissions` directly in the test Client's session,
+  bypassing the real `/login/` flow) — this satisfies
+  `core.middleware.permission_middleware` but doesn't exercise the actual
+  login view/ACL lookup.
 - FX rate assertions don't hardcode QA-supplied historical rates (27-Feb/2-Mar)
   since the suite's dates are computed relative to whatever
   `system_date_service.get_system_date()` returns at run time, which won't

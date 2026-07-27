@@ -3,13 +3,21 @@ Live-Kudu AVP Scenario Suite
 ============================
 
 Runs the AVP (Average Price Position) engine end-to-end against a REAL Kudu
-database — no mocking of impala_manager — using the real position_service /
-settlement_service code paths (calculate_position, process_trade_settlement,
-_recalculate_position_chain). This is the live counterpart to
-test_avp_scenarios.py (which mocks Kudu and is single-currency only); this
-file additionally covers cross-currency REVALUED / NON-REVALUED / equity-
-method scenarios, and is the regression suite for the Scenario 1/3/5/6 fixes
-made against DEAL-20260724-8334.
+database. Trade actions (create/amend/cancel) are driven through the REAL
+views via Django's test Client (django.test.Client) — simulating a real user
+filling the trade form and clicking submit — NOT by writing directly to
+cis_trade/cis_trade_position. That means the real async pipeline (event
+queue -> trade event worker -> position queue -> position worker, both
+persistent background threads started from config/cml_app.py's gunicorn
+post_fork hook, running in your actual deployed app entirely separate from
+this test process) is what actually produces the position rows. This suite
+only reads the DB afterward — polling with a timeout — to check what the
+real pipeline produced and decide pass/fail.
+
+This is the live counterpart to test_avp_scenarios.py (which mocks Kudu and
+is single-currency only); this file additionally covers cross-currency
+REVALUED / NON-REVALUED / equity-method scenarios, and is the regression
+suite for the Scenario 1/3/5/6 fixes made against DEAL-20260724-8334.
 
 Two tiers of test data (see avp_live_fixtures.py docstring for full detail):
 - Generic 'AVPTEST-*' sandbox entities, fully owned/created/deleted by this
@@ -52,31 +60,40 @@ import pytest
 from django.core.management import call_command
 
 from trade.services.position_service import PositionService
-from trade.services.settlement_service import SettlementService
 from core.repositories.impala_connection import impala_manager
 
 from trade.tests.avp_live_fixtures import (
-    TEST_MARKER,
+    DATABASE,
     SIT_UAT_PAIRS,
     KNOWN_EQUITY_PRICES,
     ensure_test_master_data,
     ensure_test_security,
     ensure_sit_uat_master_data,
+    ensure_test_counterparty,
     cleanup_test_data,
-    next_test_trade_id,
-    insert_test_trade,
-    amend_test_trade_quantity,
-    cancel_test_trade,
+    get_authenticated_client,
+    ui_create_trade,
+    ui_amend_trade,
+    ui_cancel_trade,
     set_test_market_price,
     get_latest_position,
     get_cis_position,
 )
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get('RUN_LIVE_AVP_TESTS') != '1',
-    reason="Live-Kudu AVP suite is opt-in — set RUN_LIVE_AVP_TESTS=1 to run "
-           "it against your work env's real database.",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        os.environ.get('RUN_LIVE_AVP_TESTS') != '1',
+        reason="Live-Kudu AVP suite is opt-in — set RUN_LIVE_AVP_TESTS=1 to run "
+               "it against your work env's real database.",
+    ),
+    # django.test.Client.session is backed by Django's configured DATABASES
+    # (SQLite here) via django.contrib.sessions — nothing to do with Kudu —
+    # so pytest-django needs this marker to allow that DB access. Kudu writes
+    # (the actual AVP data this suite cares about) are on a separate
+    # connection entirely and are NOT part of Django's test-transaction
+    # rollback, so they persist as real data exactly as intended.
+    pytest.mark.django_db,
+]
 
 SAME_CCY_PORTFOLIO = 'AVPTEST-SAMECCY'
 XCCY_REVAL_PORTFOLIO = 'AVPTEST-XCCY-REVAL'
@@ -85,17 +102,32 @@ EQUITY_SECURITY = 'AVPTEST-SEC-EQUITY'
 SUBSI_SECURITY = 'AVPTEST-SEC-SUBSI'
 
 position_service = PositionService()
-settlement_service = SettlementService()
+
+_client = None
+
+
+def _get_client():
+    """Lazily create the authenticated test Client on first use — module-level
+    creation would touch the (DB-backed) session store at import/collection
+    time, before pytest-django's django_db marker is active."""
+    global _client
+    if _client is None:
+        _client = get_authenticated_client()
+    return _client
 
 
 def setup_module(module):
-    """Runs once before any test in this file: ensure both tiers' master data exists."""
+    """Runs once before any test in this file: ensure all reference/master
+    data exists (portfolios, securities, counterparty) — NOT trade data,
+    which every test creates itself through the real UI."""
     ensure_test_master_data()
     ensure_sit_uat_master_data()
+    ensure_test_counterparty()
 
 
 def teardown_module(module):
-    """Runs once after all tests in this file, pass or fail: wipe sandbox data."""
+    """Runs once after all tests in this file, pass or fail: wipe this
+    suite's transactional footprint (trades/positions/queues)."""
     cleanup_test_data()
 
 
@@ -107,34 +139,35 @@ def _today() -> date:
     return system_date_service.get_system_date()
 
 
-def _settle_trade(trade_id, portfolio_id, security_id, trade_type, quantity, price,
+def _settle_trade(portfolio_id, security_id, trade_type, quantity, price,
                    trade_date, settle_date, portfolio_currency, security_currency,
                    commission=Decimal('0'), sec_fee=Decimal('0'), other_charges=Decimal('0'),
                    gross_amount_lc=None, total_amount_lc=None, open_fx_rate=None):
-    """Insert a real cis_trade row, then drive it through settlement_service
-    synchronously (async_mode=False) — the same real code path production
-    uses, minus the async event-queue hop, so results are available
-    immediately and deterministically for assertion."""
-    insert_test_trade(
-        trade_id=trade_id, portfolio_id=portfolio_id, security_id=security_id,
+    """
+    Simulate a user submitting the trade-create form via the real trade_create
+    view (Django test Client POST), then poll cis_trade_position for the
+    TRADED-basis row produced by the real async pipeline (event queue ->
+    trade event worker -> position queue -> position worker).
+
+    Returns the real trade_id (assigned live by insert_trade_fast() inside
+    the view, read back from cis_trade — not pre-generated by this suite).
+    """
+    trade_id = ui_create_trade(
+        _get_client(), portfolio_id=portfolio_id, security_id=security_id,
         trade_type=trade_type, quantity=quantity, price=price,
         trade_date=trade_date, settle_date=settle_date,
-        portfolio_currency=portfolio_currency, security_currency=security_currency,
+        currency_code=security_currency,
         commission=commission, sec_fee=sec_fee, other_charges=other_charges,
         gross_amount_lc=gross_amount_lc, total_amount_lc=total_amount_lc,
         open_fx_rate=open_fx_rate,
     )
-    success, message, result = settlement_service.process_trade_settlement(
-        trade_id=trade_id, portfolio_id=portfolio_id, security_id=security_id,
-        trade_type=trade_type, quantity=quantity, price=price,
-        charges=commission + sec_fee + other_charges,
-        trade_date=trade_date, settle_date=settle_date,
-        updated_by=TEST_MARKER, async_mode=False,
-        security_currency=security_currency, portfolio_currency=portfolio_currency,
-        trade_lc=total_amount_lc, gross_amount_lc=gross_amount_lc,
+    pos = get_latest_position(portfolio_id, security_id, 'TRADED', trade_date)
+    assert pos is not None, (
+        f"No TRADED position appeared for trade {trade_id} "
+        f"({portfolio_id}/{security_id}) within the poll timeout — check "
+        f"whether the trade event/position worker threads are running"
     )
-    assert success, f"process_trade_settlement failed for trade {trade_id}: {message}"
-    return result
+    return trade_id
 
 
 # =============================================================================
@@ -142,10 +175,9 @@ def _settle_trade(trade_id, portfolio_id, security_id, trade_type, quantity, pri
 # =============================================================================
 
 def test_same_ccy_fresh_buy():
-    trade_id = next_test_trade_id()
     today_str = _today().isoformat()
     _settle_trade(
-        trade_id, SAME_CCY_PORTFOLIO, EQUITY_SECURITY, 'BUY',
+        SAME_CCY_PORTFOLIO, EQUITY_SECURITY, 'BUY',
         Decimal('100'), Decimal('50'), today_str, today_str, 'USD', 'USD',
     )
     pos = get_latest_position(SAME_CCY_PORTFOLIO, EQUITY_SECURITY, 'TRADED', today_str)
@@ -155,10 +187,9 @@ def test_same_ccy_fresh_buy():
 
 
 def test_same_ccy_buy_accumulates():
-    trade_id = next_test_trade_id()
     today_str = _today().isoformat()
     _settle_trade(
-        trade_id, SAME_CCY_PORTFOLIO, EQUITY_SECURITY, 'BUY',
+        SAME_CCY_PORTFOLIO, EQUITY_SECURITY, 'BUY',
         Decimal('50'), Decimal('60'), today_str, today_str, 'USD', 'USD',
     )
     pos = get_latest_position(SAME_CCY_PORTFOLIO, EQUITY_SECURITY, 'TRADED', today_str)
@@ -169,7 +200,6 @@ def test_same_ccy_buy_accumulates():
 
 
 def test_same_ccy_sell_realizes_pnl():
-    trade_id = next_test_trade_id()
     today_str = _today().isoformat()
     pos_before = get_latest_position(SAME_CCY_PORTFOLIO, EQUITY_SECURITY, 'TRADED', today_str)
     assert pos_before is not None, "Need an existing position to sell from"
@@ -177,7 +207,7 @@ def test_same_ccy_sell_realizes_pnl():
     sell_qty = Decimal('10')
 
     _settle_trade(
-        trade_id, SAME_CCY_PORTFOLIO, EQUITY_SECURITY, 'SELL',
+        SAME_CCY_PORTFOLIO, EQUITY_SECURITY, 'SELL',
         sell_qty, Decimal('70'), today_str, today_str, 'USD', 'USD',
     )
     pos = get_latest_position(SAME_CCY_PORTFOLIO, EQUITY_SECURITY, 'TRADED', today_str)
@@ -190,7 +220,6 @@ def test_same_ccy_backdated_buy_backfills_every_day():
     """Regression for Scenario 1: a backdated fresh position must produce a
     TRADED row for every business day between trade_date and today, not just
     trade_date itself."""
-    trade_id = next_test_trade_id()
     today = _today()
     backdated = today - timedelta(days=5)
     security = 'AVPTEST-SEC-BACKDATE'  # isolated security so this test doesn't
@@ -199,7 +228,7 @@ def test_same_ccy_backdated_buy_backfills_every_day():
     ensure_test_security(security, 'USD')
 
     _settle_trade(
-        trade_id, SAME_CCY_PORTFOLIO, security, 'BUY',
+        SAME_CCY_PORTFOLIO, security, 'BUY',
         Decimal('100'), Decimal('50'), backdated.isoformat(), today.isoformat(),
         'USD', 'USD',
     )
@@ -224,27 +253,23 @@ def test_same_ccy_amend_does_not_double_count_earlier_date():
     early_date = (today - timedelta(days=3)).isoformat()
     ensure_test_security(security, 'USD')
 
-    early_trade_id = next_test_trade_id()
     _settle_trade(
-        early_trade_id, SAME_CCY_PORTFOLIO, security, 'BUY',
+        SAME_CCY_PORTFOLIO, security, 'BUY',
         Decimal('1000'), Decimal('10'), early_date, early_date, 'USD', 'USD',
     )
     early_pos_before = get_latest_position(SAME_CCY_PORTFOLIO, security, 'TRADED', early_date)
     assert early_pos_before is not None
     early_qty_before = Decimal(str(early_pos_before['quantity']))
 
-    later_trade_id = next_test_trade_id()
-    _settle_trade(
-        later_trade_id, SAME_CCY_PORTFOLIO, security, 'BUY',
+    later_trade_id = _settle_trade(
+        SAME_CCY_PORTFOLIO, security, 'BUY',
         Decimal('300'), Decimal('12'), today.isoformat(), today.isoformat(), 'USD', 'USD',
     )
 
-    # Amend the later trade's quantity 300 -> 350 (mirrors trade_edit's flow)
-    amend_test_trade_quantity(later_trade_id, Decimal('350'))
-    settlement_service._recalculate_position_chain(
-        portfolio_id=SAME_CCY_PORTFOLIO, security_id=security,
-        from_date=today.isoformat(), updated_by=TEST_MARKER,
-    )
+    # Amend the later trade's quantity 300 -> 350 via the real trade_edit view
+    # (mirrors trade_edit's flow) — its own save path drives chain
+    # recalculation synchronously, no separate call needed here.
+    ui_amend_trade(_get_client(), later_trade_id, new_quantity=Decimal('350'))
 
     early_pos_after = get_latest_position(SAME_CCY_PORTFOLIO, security, 'TRADED', early_date)
     assert Decimal(str(early_pos_after['quantity'])) == early_qty_before, (
@@ -264,24 +289,19 @@ def test_same_ccy_cancel_restores_quantity():
     today = _today()
     ensure_test_security(security, 'USD')
 
-    buy_id = next_test_trade_id()
     _settle_trade(
-        buy_id, SAME_CCY_PORTFOLIO, security, 'BUY',
+        SAME_CCY_PORTFOLIO, security, 'BUY',
         Decimal('500'), Decimal('10'), today.isoformat(), today.isoformat(), 'USD', 'USD',
     )
-    sell_id = next_test_trade_id()
-    _settle_trade(
-        sell_id, SAME_CCY_PORTFOLIO, security, 'SELL',
+    sell_id = _settle_trade(
+        SAME_CCY_PORTFOLIO, security, 'SELL',
         Decimal('200'), Decimal('12'), today.isoformat(), today.isoformat(), 'USD', 'USD',
     )
     pos_after_sell = get_latest_position(SAME_CCY_PORTFOLIO, security, 'TRADED', today.isoformat())
     assert Decimal(str(pos_after_sell['quantity'])) == Decimal('300')
 
-    cancel_test_trade(sell_id)
-    settlement_service._recalculate_position_chain(
-        portfolio_id=SAME_CCY_PORTFOLIO, security_id=security,
-        from_date=today.isoformat(), updated_by=TEST_MARKER,
-    )
+    # trade_cancel's own save path drives chain recalculation synchronously.
+    ui_cancel_trade(_get_client(), sell_id)
 
     pos_after_cancel = get_latest_position(SAME_CCY_PORTFOLIO, security, 'TRADED', today.isoformat())
     assert Decimal(str(pos_after_cancel['quantity'])) == Decimal('500'), (
@@ -295,12 +315,11 @@ def test_same_ccy_cancel_restores_quantity():
 # =============================================================================
 
 def test_cross_ccy_revalued_fresh_buy_uses_fx_table():
-    trade_id = next_test_trade_id()
     today_str = _today().isoformat()
     quantity = Decimal('100')
     price = Decimal('50')
     _settle_trade(
-        trade_id, XCCY_REVAL_PORTFOLIO, EQUITY_SECURITY, 'BUY',
+        XCCY_REVAL_PORTFOLIO, EQUITY_SECURITY, 'BUY',
         quantity, price, today_str, today_str,
         portfolio_currency='SGD', security_currency='USD',
     )
@@ -332,14 +351,13 @@ def test_cross_ccy_nonrevalued_fresh_buy_uses_open_fx_override():
     """NON-REVALUED cross-currency cost_lc must come from the trade's own
     entered LC amount (gross_amount_lc), not the FX table — this is the
     open_fx_rate override at the center of the original 3-day bug hunt."""
-    trade_id = next_test_trade_id()
     today_str = _today().isoformat()
     quantity = Decimal('10')
     price = Decimal('100')
     gross_amount_lc = Decimal('1350')  # user-entered LC amount, e.g. 1.35 rate
 
     _settle_trade(
-        trade_id, XCCY_NONREVAL_PORTFOLIO, EQUITY_SECURITY, 'BUY',
+        XCCY_NONREVAL_PORTFOLIO, EQUITY_SECURITY, 'BUY',
         quantity, price, today_str, today_str,
         portfolio_currency='SGD', security_currency='USD',
         gross_amount_lc=gross_amount_lc, total_amount_lc=gross_amount_lc,
@@ -357,7 +375,6 @@ def test_equity_method_security_has_zero_unrealized_pnl_both_ccy():
     """Regression for Scenario 5: Subsi/Assoc (equity-method) securities must
     show unrealized_pnl == 0 in BOTH FC and LC, even when market price differs
     from trade price."""
-    trade_id = next_test_trade_id()
     today_str = _today().isoformat()
     quantity = Decimal('100')
     trade_price = Decimal('50')
@@ -366,7 +383,7 @@ def test_equity_method_security_has_zero_unrealized_pnl_both_ccy():
     set_test_market_price(SUBSI_SECURITY, 'USD', market_price, today_str)
 
     _settle_trade(
-        trade_id, XCCY_REVAL_PORTFOLIO, SUBSI_SECURITY, 'BUY',
+        XCCY_REVAL_PORTFOLIO, SUBSI_SECURITY, 'BUY',
         quantity, trade_price, today_str, today_str,
         portfolio_currency='SGD', security_currency='USD',
     )
@@ -411,9 +428,8 @@ def test_sit_uat_fresh_buy_both_bases(label):
     qty_before_traded = _qty_or_zero(portfolio, security, 'TRADED', today_str)
     qty_before_settled = _qty_or_zero(portfolio, security, 'SETTLED', today_str)
 
-    trade_id = next_test_trade_id()
     _settle_trade(
-        trade_id, portfolio, security, 'BUY', Decimal('20'), Decimal('40'),
+        portfolio, security, 'BUY', Decimal('20'), Decimal('40'),
         today_str, today_str, portfolio_currency=port_ccy, security_currency=sec_ccy,
     )
 
@@ -436,9 +452,8 @@ def test_sit_uat_future_settlement_queues_settled_basis(label):
     future_settle_str = (today + timedelta(days=7)).isoformat()
     qty_before_traded = _qty_or_zero(portfolio, security, 'TRADED', today_str)
 
-    trade_id = next_test_trade_id()
-    _settle_trade(
-        trade_id, portfolio, security, 'BUY', Decimal('15'), Decimal('45'),
+    trade_id = _settle_trade(
+        portfolio, security, 'BUY', Decimal('15'), Decimal('45'),
         today_str, future_settle_str, portfolio_currency=port_ccy, security_currency=sec_ccy,
     )
 
@@ -452,8 +467,6 @@ def test_sit_uat_future_settlement_queues_settled_basis(label):
         f"yet — it's queued for processing on {future_settle_str}, not calculated now"
     )
 
-    from trade.tests.avp_live_fixtures import DATABASE
-    from core.repositories.impala_connection import impala_manager
     queued = impala_manager.execute_query(
         f"SELECT 1 FROM {DATABASE}.cis_settlement_queue "
         f"WHERE trade_id = {trade_id} AND position_basis = 'SETTLED' LIMIT 1",
@@ -469,9 +482,8 @@ def test_sit_uat_backdated_buy_backfills_every_day(label):
     today = _today()
     backdated = today - timedelta(days=15)  # dedicated anchor, unused by any other scenario
 
-    trade_id = next_test_trade_id()
     _settle_trade(
-        trade_id, portfolio, security, 'BUY', Decimal('30'), Decimal('20'),
+        portfolio, security, 'BUY', Decimal('30'), Decimal('20'),
         backdated.isoformat(), today.isoformat(), portfolio_currency=port_ccy, security_currency=sec_ccy,
     )
 
@@ -494,20 +506,15 @@ def test_sit_uat_backdated_amendment(label):
     today = _today()
     backdated = today - timedelta(days=10)  # dedicated anchor
 
-    trade_id = next_test_trade_id()
-    _settle_trade(
-        trade_id, portfolio, security, 'BUY', Decimal('40'), Decimal('25'),
+    trade_id = _settle_trade(
+        portfolio, security, 'BUY', Decimal('40'), Decimal('25'),
         backdated.isoformat(), backdated.isoformat(), portfolio_currency=port_ccy, security_currency=sec_ccy,
     )
     before = get_latest_position(portfolio, security, 'TRADED', backdated.isoformat())
     assert before is not None
     assert Decimal(str(before['quantity'])) == Decimal('40')
 
-    amend_test_trade_quantity(trade_id, Decimal('55'))
-    settlement_service._recalculate_position_chain(
-        portfolio_id=portfolio, security_id=security,
-        from_date=backdated.isoformat(), updated_by=TEST_MARKER,
-    )
+    ui_amend_trade(_get_client(), trade_id, new_quantity=Decimal('55'))
 
     after = get_latest_position(portfolio, security, 'TRADED', backdated.isoformat())
     assert after is not None
@@ -527,24 +534,18 @@ def test_sit_uat_today_cancellation(label):
     today_str = _today().isoformat()
     qty_before = _qty_or_zero(portfolio, security, 'TRADED', today_str)
 
-    buy_id = next_test_trade_id()
     _settle_trade(
-        buy_id, portfolio, security, 'BUY', Decimal('25'), Decimal('30'),
+        portfolio, security, 'BUY', Decimal('25'), Decimal('30'),
         today_str, today_str, portfolio_currency=port_ccy, security_currency=sec_ccy,
     )
-    sell_id = next_test_trade_id()
-    _settle_trade(
-        sell_id, portfolio, security, 'SELL', Decimal('10'), Decimal('35'),
+    sell_id = _settle_trade(
+        portfolio, security, 'SELL', Decimal('10'), Decimal('35'),
         today_str, today_str, portfolio_currency=port_ccy, security_currency=sec_ccy,
     )
     after_sell = get_latest_position(portfolio, security, 'TRADED', today_str)
     assert Decimal(str(after_sell['quantity'])) == qty_before + Decimal('15')
 
-    cancel_test_trade(sell_id)
-    settlement_service._recalculate_position_chain(
-        portfolio_id=portfolio, security_id=security,
-        from_date=today_str, updated_by=TEST_MARKER,
-    )
+    ui_cancel_trade(_get_client(), sell_id)
 
     after_cancel = get_latest_position(portfolio, security, 'TRADED', today_str)
     assert Decimal(str(after_cancel['quantity'])) == qty_before + Decimal('25'), (
@@ -561,24 +562,18 @@ def test_sit_uat_backdated_cancellation(label):
     today = _today()
     backdated = today - timedelta(days=6)  # dedicated anchor
 
-    buy_id = next_test_trade_id()
     _settle_trade(
-        buy_id, portfolio, security, 'BUY', Decimal('60'), Decimal('15'),
+        portfolio, security, 'BUY', Decimal('60'), Decimal('15'),
         backdated.isoformat(), backdated.isoformat(), portfolio_currency=port_ccy, security_currency=sec_ccy,
     )
-    sell_id = next_test_trade_id()
-    _settle_trade(
-        sell_id, portfolio, security, 'SELL', Decimal('20'), Decimal('18'),
+    sell_id = _settle_trade(
+        portfolio, security, 'SELL', Decimal('20'), Decimal('18'),
         backdated.isoformat(), backdated.isoformat(), portfolio_currency=port_ccy, security_currency=sec_ccy,
     )
     after_sell = get_latest_position(portfolio, security, 'TRADED', backdated.isoformat())
     assert Decimal(str(after_sell['quantity'])) == Decimal('40')
 
-    cancel_test_trade(sell_id)
-    settlement_service._recalculate_position_chain(
-        portfolio_id=portfolio, security_id=security,
-        from_date=backdated.isoformat(), updated_by=TEST_MARKER,
-    )
+    ui_cancel_trade(_get_client(), sell_id)
 
     after_cancel = get_latest_position(portfolio, security, 'TRADED', backdated.isoformat())
     assert Decimal(str(after_cancel['quantity'])) == Decimal('60'), (
@@ -610,9 +605,8 @@ def test_sit_uat_non_reval_subsidiary_zero_unrealized_pnl():
 
     set_test_market_price(security, sec_ccy, market_price, today_str)
 
-    trade_id = next_test_trade_id()
     _settle_trade(
-        trade_id, portfolio, security, 'BUY', quantity, trade_price,
+        portfolio, security, 'BUY', quantity, trade_price,
         today_str, today_str, portfolio_currency=port_ccy, security_currency=sec_ccy,
         gross_amount_lc=gross_amount_lc, total_amount_lc=gross_amount_lc,
     )
@@ -661,9 +655,8 @@ def test_int_to_eod_to_sod_lifecycle():
     quantity = Decimal('100')
     set_test_market_price(SOD_EOD_SECURITY, 'USD', market_price, today_str)
 
-    trade_id = next_test_trade_id()
     _settle_trade(
-        trade_id, SAME_CCY_PORTFOLIO, SOD_EOD_SECURITY, 'BUY',
+        SAME_CCY_PORTFOLIO, SOD_EOD_SECURITY, 'BUY',
         quantity, trade_price, today_str, today_str, 'USD', 'USD',
     )
 
@@ -721,9 +714,8 @@ def test_sod_snapshot_folds_in_pending_settlement():
 
     quantity = Decimal('75')
     price = Decimal('22')
-    trade_id = next_test_trade_id()
-    _settle_trade(
-        trade_id, SAME_CCY_PORTFOLIO, SOD_EOD_SETTLEMENT_SECURITY, 'BUY',
+    trade_id = _settle_trade(
+        SAME_CCY_PORTFOLIO, SOD_EOD_SETTLEMENT_SECURITY, 'BUY',
         quantity, price, today_str, settle_str, 'USD', 'USD',
     )
 

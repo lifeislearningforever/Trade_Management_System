@@ -32,6 +32,22 @@ tier at a portfolio/security with other real activity you care about.
 
 Every row this suite writes is additionally tagged created_by/updated_by =
 TEST_MARKER (or queued_by, for the queue tables) as defense-in-depth.
+
+UI-DRIVEN, NOT DIRECT DB WRITES
+-------------------------------
+Trade actions (create/amend/cancel) go through the REAL views via Django's
+test Client (see ui_create_trade/ui_amend_trade/ui_cancel_trade below) —
+this suite never UPSERTs into cis_trade/cis_trade_position directly. That
+means the real async pipeline (event queue -> trade event worker -> position
+queue -> position worker, both started from config/cml_app.py's gunicorn
+post_fork hook and running as persistent background threads in your actual
+deployed app, entirely separate from this test process) is what actually
+creates the position rows. This suite only READS the DB afterward, polling
+with a timeout, to check what the real pipeline produced.
+
+Only reference/master data (portfolio, security, counterparty) is still
+UPSERTed directly — these are environment fixtures the trade views expect to
+already exist, not the thing under test.
 """
 
 import time
@@ -39,9 +55,34 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
+from django.test import Client
+from django.urls import reverse
+
 from core.repositories.impala_connection import impala_manager
 
 DATABASE = 'gmp_cis'
+
+# How long to poll after a UI action before giving up. The real background
+# workers poll every 5s (trade event) / 10s (position) — see config/cml_app.py
+# — so a few polls at 5s spacing comfortably covers one full round-trip
+# without waiting anywhere near the documented 5-minute SLA.
+POLL_INTERVAL_SECONDS = 5
+POLL_TIMEOUT_SECONDS = 90
+
+# Counterparty required by trade_create's validation (trade_validation_repository
+# .validate_counterparty -> cis_party.party_short_name, is_active=true,
+# is_deleted=false — confirmed against the live schema, not just the code).
+TEST_COUNTERPARTY = 'AVPTEST-CPTY'
+
+# Session permissions needed to pass core.middleware.permission_middleware for
+# the trade endpoints this suite uses (core/permissions_map.py).
+_TEST_USER_PERMISSIONS = {
+    'trade-list': 'WRITE',
+    'trade-view': 'WRITE',
+    'trade-create': 'WRITE',
+    'trade-edit': 'WRITE',
+    'trade-approval': 'WRITE',
+}
 
 # Distinctive, greppable marker — every row this suite ever writes carries this.
 TEST_MARKER = 'AVP_AUTOTEST'
@@ -83,7 +124,6 @@ TEST_SECURITIES = {
 }
 
 _QUEUE_TABLES = ['cis_position_queue', 'cis_settlement_queue']
-_POSITION_TABLES = ['cis_trade_position', 'cis_position']
 
 # =============================================================================
 # SIT/UAT execution pack — real, named reference entities (per QA request),
@@ -235,8 +275,121 @@ def ensure_test_security(security_name: str, currency_code: str = 'USD',
     impala_manager.execute_write(query, database=DATABASE)
 
 
-def insert_test_trade(
-    trade_id: int,
+def ensure_test_counterparty() -> None:
+    """
+    UPSERT the dedicated test counterparty into cis_party (idempotent) —
+    required by trade_create's validation (trade_validation_repository
+    .validate_counterparty checks cis_party.party_short_name, is_active=true,
+    is_deleted=false). Confirmed against the live schema, not just the code.
+    """
+    query = f"""
+    UPSERT INTO {DATABASE}.cis_party
+    (party_short_name, party_full_name, record_type, is_active, is_deleted,
+     src_system)
+    VALUES (
+        '{TEST_COUNTERPARTY}', 'AVP Autotest Counterparty', 'COUNTERPARTY',
+        true, false, 'CIS'
+    )
+    """
+    impala_manager.execute_write(query, database=DATABASE)
+
+
+def get_authenticated_client() -> Client:
+    """
+    A Django test Client with a session that passes
+    core.middleware.permission_middleware for the trade endpoints this suite
+    uses (login check + trade-create/trade-edit/trade-approval permissions).
+    """
+    client = Client()
+    session = client.session
+    session['user_login'] = TEST_MARKER
+    session['user_id'] = 1
+    session['user_email'] = 'avp-autotest@example.com'
+    session['user_permissions'] = dict(_TEST_USER_PERMISSIONS)
+    session.save()
+    return client
+
+
+def _trade_post_payload(
+    trade_type: str,
+    portfolio_id: str,
+    security_id: str,
+    currency_code: str,
+    quantity: Decimal,
+    price: Decimal,
+    trade_date: str,
+    settle_date: str,
+    counterparty: str = TEST_COUNTERPARTY,
+    commission: Decimal = Decimal('0'),
+    sec_fee: Decimal = Decimal('0'),
+    other_charges: Decimal = Decimal('0'),
+    gross_amount_lc: Optional[Decimal] = None,
+    total_amount_lc: Optional[Decimal] = None,
+    open_fx_rate: Optional[Decimal] = None,
+) -> dict:
+    """
+    Build the full POST body trade_create/trade_edit expect (see
+    trade/views.py's trade_create, ~line 703-766) — every field the view
+    reads via request.POST.get(...), even ones this suite doesn't otherwise
+    care about, so nothing unexpectedly resolves to an empty/zero default.
+    """
+    return {
+        'trade_type': trade_type,
+        'portfolio_short_name': portfolio_id,
+        'currency_code': currency_code,
+        'security_label': security_id,
+        'trade_status': '',
+        'trade_date': trade_date,
+        'settle_date': settle_date,
+        'quantity': str(quantity),
+        'face_value': '0',
+        'lot': '0',
+        'price': str(price),
+        'commission': str(commission),
+        'sec_fee': str(sec_fee),
+        'other_charges': str(other_charges),
+        'total_amount': '0',
+        'total_amount_fc': '0',
+        'total_amount_lc': str(total_amount_lc) if total_amount_lc is not None else '0',
+        'gross_amount_lc': str(gross_amount_lc) if gross_amount_lc is not None else '0',
+        'open_close_position': '',
+        'extension': '',
+        'brokers': '',
+        'broker_name': '',
+        'gl_fund_type': '',
+        'gl_cost_centre': '',
+        'gl_account_code': '',
+        'contract_ref': '',
+        'fd_receipt': '',
+        'org_pur_date': '',
+        'open_fx_rate': str(open_fx_rate) if open_fx_rate is not None else '1',
+        'curr_dealing': '0',
+        'open_dealing': '0',
+        'input_tax_oth': '0',
+        'qty_entitled': '0',
+        'selling_rule': '',
+        'cash_balance': '0',
+        'custodian': '',
+        'amor_accr_method': '',
+        'remarks': TEST_MARKER,
+        'counterparty': counterparty,
+        'charge_fee_type': '',
+        'charge_exchange': '',
+        'charge_country': '',
+        'charge_fee_rule': '',
+        'charge_fee_value': '0',
+        'calculated_commission': '0',
+        'calculated_clearing_fee': '0',
+        'calculated_trading_fee': '0',
+        'calculated_gst': '0',
+        'calculated_other_fees': '0',
+        'total_calculated_charges': '0',
+        'charges_auto_calculated': 'false',
+    }
+
+
+def ui_create_trade(
+    client: Client,
     portfolio_id: str,
     security_id: str,
     trade_type: str,
@@ -244,76 +397,112 @@ def insert_test_trade(
     price: Decimal,
     trade_date: str,
     settle_date: str,
-    portfolio_currency: str,
-    security_currency: str,
+    currency_code: str,
+    counterparty: str = TEST_COUNTERPARTY,
     commission: Decimal = Decimal('0'),
     sec_fee: Decimal = Decimal('0'),
     other_charges: Decimal = Decimal('0'),
     gross_amount_lc: Optional[Decimal] = None,
     total_amount_lc: Optional[Decimal] = None,
     open_fx_rate: Optional[Decimal] = None,
-) -> None:
+) -> int:
     """
-    Insert a real cis_trade row for one of the dedicated sandbox portfolios,
-    tagged created_by/updated_by = TEST_MARKER.
+    POST to the real trade_create view via Django's test Client — simulates a
+    user filling the trade form and clicking submit. Returns the new
+    trade_id, found by reading (not writing) cis_trade for the newest row
+    matching this exact booking right after a successful (redirect) response.
 
-    Only populates the columns the AVP/chain-recalc code path actually reads
-    (settlement_service._recalculate_position_chain's trade-selection query,
-    position_service._process_buy/_process_sell). Deliberately bypasses
-    validate_trade_data/insert_trade_fast (which additionally require a valid
-    counterparty and drive the full async event-queue pipeline) so this suite
-    stays fast and deterministic.
+    Raises AssertionError if the view didn't redirect (i.e. validation
+    failed and it re-rendered the form) or if the new row can't be found.
     """
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    deal_number = f"{TEST_MARKER}-{trade_id}"
-
-    def _dec(v):
-        return f"CAST({float(v)} AS DECIMAL(30,8))" if v is not None else 'NULL'
-
-    query = f"""
-    UPSERT INTO {DATABASE}.cis_trade
-    (trade_id, trade_type, deal_number, portfolio_short_name, security_label,
-     currency_code, portfolio_currency, trade_status, status,
-     trade_date, settle_date, quantity, price,
-     commission, sec_fee, other_charges,
-     gross_amount_fc, gross_amount_lc, total_amount_fc, total_amount_lc,
-     open_fx_rate, is_active, is_deleted, src_system,
-     created_by, created_at, updated_by, updated_at)
-    VALUES (
-        {trade_id}, '{trade_type}', '{deal_number}',
-        '{portfolio_id}', '{security_id}',
-        '{security_currency}', '{portfolio_currency}', 'VALIDATED', 'VALIDATED',
-        '{trade_date}', '{settle_date}',
-        {_dec(quantity)}, {_dec(price)},
-        {_dec(commission)}, {_dec(sec_fee)}, {_dec(other_charges)},
-        {_dec(quantity * price)}, {_dec(gross_amount_lc)},
-        {_dec(quantity * price + commission + sec_fee + other_charges)},
-        {_dec(total_amount_lc)},
-        {_dec(open_fx_rate)},
-        true, false, 'CIS',
-        '{TEST_MARKER}', '{timestamp}', '{TEST_MARKER}', '{timestamp}'
+    payload = _trade_post_payload(
+        trade_type=trade_type, portfolio_id=portfolio_id, security_id=security_id,
+        currency_code=currency_code, quantity=quantity, price=price,
+        trade_date=trade_date, settle_date=settle_date, counterparty=counterparty,
+        commission=commission, sec_fee=sec_fee, other_charges=other_charges,
+        gross_amount_lc=gross_amount_lc, total_amount_lc=total_amount_lc,
+        open_fx_rate=open_fx_rate,
     )
-    """
-    success = impala_manager.execute_write(query, database=DATABASE)
-    if not success:
-        raise RuntimeError(f"Failed to insert test trade {trade_id}")
-
-
-def amend_test_trade_quantity(trade_id: int, new_quantity: Decimal) -> None:
-    """Amend a test trade's quantity in place (mirrors trade_edit's UPDATE)."""
-    impala_manager.execute_write(
-        f"UPDATE {DATABASE}.cis_trade SET quantity = CAST({float(new_quantity)} AS DECIMAL(20,6)), "
-        f"status = 'MODIFIED', updated_by = '{TEST_MARKER}' WHERE trade_id = {trade_id}",
-        database=DATABASE,
+    response = client.post(reverse('trade:create'), data=payload)
+    assert response.status_code == 302, (
+        f"trade_create didn't redirect (expected success) — got "
+        f"{response.status_code}. Response content (form re-rendered with "
+        f"errors likely): {getattr(response, 'content', b'')[:2000]}"
     )
 
-
-def cancel_test_trade(trade_id: int) -> None:
-    """Soft-delete a test trade (mirrors trade_cancel's is_deleted flag)."""
-    impala_manager.execute_write(
-        f"UPDATE {DATABASE}.cis_trade SET is_deleted = true, status = 'MODIFIED', "
-        f"updated_by = '{TEST_MARKER}' WHERE trade_id = {trade_id}",
+    rows = impala_manager.execute_query(
+        f"""
+        SELECT trade_id FROM {DATABASE}.cis_trade
+        WHERE portfolio_short_name = '{portfolio_id}'
+          AND security_label = '{security_id}'
+          AND trade_type = '{trade_type}'
+          AND trade_date = '{trade_date}'
+          AND settle_date = '{settle_date}'
+          AND quantity = CAST({float(quantity)} AS DECIMAL(20,6))
+          AND price = CAST({float(price)} AS DECIMAL(20,6))
+          AND created_by = '{TEST_MARKER}'
+          AND (is_deleted = false OR is_deleted IS NULL)
+        ORDER BY trade_id DESC
+        LIMIT 1
+        """,
         database=DATABASE,
+    )
+    assert rows, (
+        f"trade_create redirected (apparent success) but no matching cis_trade "
+        f"row was found for {portfolio_id}/{security_id} {trade_type} "
+        f"{quantity}@{price} on {trade_date}"
+    )
+    return rows[0]['trade_id']
+
+
+def ui_amend_trade(client: Client, trade_id: int, new_quantity: Optional[Decimal] = None,
+                    new_price: Optional[Decimal] = None) -> None:
+    """
+    POST to the real trade_edit view. trade_edit does NOT re-validate
+    portfolio/security/counterparty and does NOT re-run chain recalculation
+    itself as a separate step this suite needs to trigger — the view's own
+    save path already drives that synchronously, so no extra call is needed
+    after this returns.
+
+    Reads (not writes) the current trade row first so every other field gets
+    resubmitted unchanged — trade_edit's POST handling has no fallback to the
+    existing DB value for a field that's simply absent from the POST body.
+    """
+    current = impala_manager.execute_query(
+        f"SELECT * FROM {DATABASE}.cis_trade WHERE trade_id = {trade_id} LIMIT 1",
+        database=DATABASE,
+    )
+    assert current, f"Cannot amend trade {trade_id} — not found"
+    row = current[0]
+
+    payload = _trade_post_payload(
+        trade_type=row['trade_type'], portfolio_id=row['portfolio_short_name'],
+        security_id=row['security_label'], currency_code=row.get('currency_code') or '',
+        quantity=new_quantity if new_quantity is not None else Decimal(str(row['quantity'])),
+        price=new_price if new_price is not None else Decimal(str(row['price'])),
+        trade_date=row['trade_date'], settle_date=row['settle_date'],
+        counterparty=row.get('counterparty') or TEST_COUNTERPARTY,
+        commission=Decimal(str(row.get('commission') or 0)),
+        sec_fee=Decimal(str(row.get('sec_fee') or 0)),
+        other_charges=Decimal(str(row.get('other_charges') or 0)),
+        gross_amount_lc=Decimal(str(row['gross_amount_lc'])) if row.get('gross_amount_lc') else None,
+        total_amount_lc=Decimal(str(row['total_amount_lc'])) if row.get('total_amount_lc') else None,
+        open_fx_rate=Decimal(str(row['open_fx_rate'])) if row.get('open_fx_rate') else None,
+    )
+    response = client.post(reverse('trade:edit', args=[trade_id]), data=payload)
+    assert response.status_code == 302, (
+        f"trade_edit didn't redirect (expected success) for trade {trade_id} — "
+        f"got {response.status_code}. Content: {getattr(response, 'content', b'')[:2000]}"
+    )
+
+
+def ui_cancel_trade(client: Client, trade_id: int, reason: str = 'AVP_AUTOTEST cancellation') -> None:
+    """POST to the real trade_cancel view. Like trade_edit, this view's own
+    save path drives chain recalculation synchronously — no extra step needed."""
+    response = client.post(reverse('trade:cancel', args=[trade_id]), data={'reason': reason})
+    assert response.status_code == 302, (
+        f"trade_cancel didn't redirect (expected success) for trade {trade_id} — "
+        f"got {response.status_code}. Content: {getattr(response, 'content', b'')[:2000]}"
     )
 
 
@@ -371,12 +560,14 @@ def get_cis_position(
     ORDER BY version_id DESC
     LIMIT 1
     """
-    for attempt in range(3):
+    deadline = time.time() + POLL_TIMEOUT_SECONDS
+    while True:
         results = impala_manager.execute_query(query, database=DATABASE)
         if results:
             return results[0]
-        time.sleep(0.5)
-    return None
+        if time.time() >= deadline:
+            return None
+        time.sleep(POLL_INTERVAL_SECONDS)
 
 
 def get_latest_position(
@@ -385,9 +576,9 @@ def get_latest_position(
     position_basis: str = 'TRADED',
     position_date: Optional[str] = None,
 ) -> Optional[dict]:
-    """Fetch the current is_latest=true row for assertions, with a short
-    retry — the same stale-read class of issue documented in
-    position_service._get_position_as_of_date can surface here too."""
+    """Fetch the current is_latest=true row for assertions, polling for up to
+    POLL_TIMEOUT_SECONDS — the real background workers (trade event + position
+    queue) process this asynchronously, entirely outside this test process."""
     date_clause = f"AND position_date = '{position_date}'" if position_date else ""
     query = f"""
     SELECT * FROM {DATABASE}.cis_trade_position
@@ -399,12 +590,14 @@ def get_latest_position(
     ORDER BY position_date DESC, version_id DESC
     LIMIT 1
     """
-    for attempt in range(3):
+    deadline = time.time() + POLL_TIMEOUT_SECONDS
+    while True:
         results = impala_manager.execute_query(query, database=DATABASE)
         if results:
             return results[0]
-        time.sleep(0.5)
-    return None
+        if time.time() >= deadline:
+            return None
+        time.sleep(POLL_INTERVAL_SECONDS)
 
 
 def cleanup_test_data(verbose: bool = True) -> dict:
@@ -457,6 +650,11 @@ def cleanup_test_data(verbose: bool = True) -> dict:
         f"WHERE portfolio_short_name IN ('{portfolio_list}') "
         f"OR created_by = '{TEST_MARKER}'",
     )
+    _run(
+        'cis_trade_event_queue',
+        f"DELETE FROM {DATABASE}.cis_trade_event_queue "
+        f"WHERE created_by = '{TEST_MARKER}'",
+    )
     for queue_table in _QUEUE_TABLES:
         _run(
             queue_table,
@@ -485,6 +683,13 @@ def cleanup_test_data(verbose: bool = True) -> dict:
         'cis_security (sandbox master data)',
         f"DELETE FROM {DATABASE}.cis_security "
         f"WHERE created_by = '{TEST_MARKER}' AND security_name LIKE 'AVPTEST-%'",
+    )
+    # cis_party has no created_by column (confirmed against the live schema) —
+    # scoped by the dedicated name instead, which is exclusive to this suite.
+    _run(
+        'cis_party (test counterparty)',
+        f"DELETE FROM {DATABASE}.cis_party "
+        f"WHERE party_short_name = '{TEST_COUNTERPARTY}'",
     )
 
     if verbose:
