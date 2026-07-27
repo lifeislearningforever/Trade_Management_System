@@ -19,23 +19,30 @@ is single-currency only); this file additionally covers cross-currency
 REVALUED / NON-REVALUED / equity-method scenarios, and is the regression
 suite for the Scenario 1/3/5/6 fixes made against DEAL-20260724-8334.
 
-Two tiers of test data (see avp_live_fixtures.py docstring for full detail):
-- Generic 'AVPTEST-*' sandbox entities, fully owned/created/deleted by this
-  suite.
+This suite does NOT create any reference/master data — portfolios, securities,
+and counterparties are all assumed to already exist in your environment (see
+avp_live_fixtures.py's verify_* functions, which only read/assert). Two tiers
+of reference data it expects to find:
+- Generic 'AVPTEST-*' sandbox entity names, for isolated/safe testing.
 - SIT_UAT_PAIRS — real, named SIT/UAT reference entities supplied by QA
   (UOBS_BCHAIN_FVE/"UOB THAI (F) UQ" = Non-Reval Quoted, UOBS_CIU_FVE_OLT/
   AAPL UQ = Reval, UOBT_SHF_SUB/UOI SP = Non-Reval Subsidiary), confirmed to
-  have no other trade history — this suite's transactional footprint on them
-  is cleaned up, but the portfolio/security master rows themselves are not
-  (they're shared reference data, not owned by this suite).
+  have no other trade history. This suite's transactional footprint on them
+  (trades/positions/queue entries it creates) is cleaned up automatically;
+  the portfolio/security master rows themselves are never touched.
+
+Counterparty is derived automatically per security (matching the security's
+`issuer` field to a cis_party.party_short_name — see
+avp_live_fixtures.get_counterparty_for_security, which mirrors
+trade_form.html's client-side auto-select logic), never created or supplied.
 
 SAFETY
 ------
-This suite writes real rows to a real database. It only ever touches the
-entities listed above — never point either tier at a real, actively-traded
-portfolio (backdated/amend/cancel scenarios drive chain recalculation, which
-rewrites is_latest flags across that portfolio+security's ENTIRE position
-history for the affected date range).
+This suite writes real trade/position rows to a real database. It only ever
+touches the entities listed above — never point either tier at a real,
+actively-traded portfolio (backdated/amend/cancel scenarios drive chain
+recalculation, which rewrites is_latest flags across that portfolio+
+security's ENTIRE position history for the affected date range).
 
 Disabled by default. To run against your work env's Kudu:
 
@@ -66,10 +73,9 @@ from trade.tests.avp_live_fixtures import (
     DATABASE,
     SIT_UAT_PAIRS,
     KNOWN_EQUITY_PRICES,
-    ensure_test_master_data,
-    ensure_test_security,
-    ensure_sit_uat_master_data,
-    ensure_test_counterparty,
+    verify_test_master_data,
+    verify_test_security,
+    verify_sit_uat_master_data,
     cleanup_test_data,
     get_authenticated_client,
     ui_create_trade,
@@ -117,12 +123,11 @@ def _get_client():
 
 
 def setup_module(module):
-    """Runs once before any test in this file: ensure all reference/master
-    data exists (portfolios, securities, counterparty) — NOT trade data,
-    which every test creates itself through the real UI."""
-    ensure_test_master_data()
-    ensure_sit_uat_master_data()
-    ensure_test_counterparty()
+    """Runs once before any test in this file: verify all reference/master
+    data already exists (portfolios, securities) — this suite does not
+    create reference data, only trade data, and only through the real UI."""
+    verify_test_master_data()
+    verify_sit_uat_master_data()
 
 
 def teardown_module(module):
@@ -225,7 +230,7 @@ def test_same_ccy_backdated_buy_backfills_every_day():
     security = 'AVPTEST-SEC-BACKDATE'  # isolated security so this test doesn't
                                        # collide with other same-ccy scenarios'
                                        # existing position history
-    ensure_test_security(security, 'USD')
+    verify_test_security(security)
 
     _settle_trade(
         SAME_CCY_PORTFOLIO, security, 'BUY',
@@ -251,7 +256,7 @@ def test_same_ccy_amend_does_not_double_count_earlier_date():
     security = 'AVPTEST-SEC-AMEND'
     today = _today()
     early_date = (today - timedelta(days=3)).isoformat()
-    ensure_test_security(security, 'USD')
+    verify_test_security(security)
 
     _settle_trade(
         SAME_CCY_PORTFOLIO, security, 'BUY',
@@ -287,7 +292,7 @@ def test_same_ccy_cancel_restores_quantity():
     quantity via the same chain-recalc machinery amend uses."""
     security = 'AVPTEST-SEC-CANCEL'
     today = _today()
-    ensure_test_security(security, 'USD')
+    verify_test_security(security)
 
     _settle_trade(
         SAME_CCY_PORTFOLIO, security, 'BUY',
@@ -645,7 +650,7 @@ SOD_EOD_SETTLEMENT_SECURITY = 'AVPTEST-SEC-SODEOD-SETTLE'
 
 def test_int_to_eod_to_sod_lifecycle():
     """Full INT -> EOD -> SOD chain for one fresh position."""
-    ensure_test_security(SOD_EOD_SECURITY, 'USD')
+    verify_test_security(SOD_EOD_SECURITY)
     today = _today()
     tomorrow = today + timedelta(days=1)
     today_str, tomorrow_str = today.isoformat(), tomorrow.isoformat()
@@ -707,7 +712,7 @@ def test_sod_snapshot_folds_in_pending_settlement():
     its own until settle_date arrives). Running create_sod_snapshot for that
     settle_date must apply it — creating a brand-new SOD row (this security
     has no prior EOD row at all) and marking the queue entry COMPLETED."""
-    ensure_test_security(SOD_EOD_SETTLEMENT_SECURITY, 'USD')
+    verify_test_security(SOD_EOD_SETTLEMENT_SECURITY)
     today = _today()
     settle_date = today + timedelta(days=1)
     today_str, settle_str = today.isoformat(), settle_date.isoformat()

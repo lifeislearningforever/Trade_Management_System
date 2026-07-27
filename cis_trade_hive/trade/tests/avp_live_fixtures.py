@@ -7,22 +7,28 @@ lives in exactly one place.
 
 Design
 ------
-Two tiers of test data:
+This suite does NOT create any reference/master data (portfolios, securities,
+counterparties) — all of that is assumed to already exist in your environment.
+The verify_* functions below only READ and assert existence/expected fields,
+raising a clear error naming exactly what's missing rather than silently
+creating placeholder data.
 
-1. TEST_PORTFOLIOS / TEST_SECURITIES — generic 'AVPTEST-*' sandbox entities
-   fully OWNED by this suite: created if missing, and fully deleted (including
-   the cis_portfolio/cis_security master rows themselves) by cleanup_test_data.
-   Safe by construction — nothing else ever uses these names.
+Two tiers of reference data:
+
+1. TEST_PORTFOLIOS / TEST_SECURITIES — generic 'AVPTEST-*' sandbox entity
+   names this suite expects to already exist for isolated, safe testing
+   (backdated/amend/cancel scenarios, which rewrite a portfolio+security's
+   entire position history for the affected date range — see below).
 
 2. SIT_UAT_PAIRS — real, named SIT/UAT reference entities (e.g.
    UOBS_BCHAIN_FVE / "UOB THAI (F) UQ") supplied by QA for a specific
    SIT/UAT execution pack, one per investment-category combination (Non-Reval
-   Quoted, Reval, Non-Reval Subsidiary). These are confirmed to have no other
-   trade history as of when this suite was written — cleanup_test_data only
-   deletes this suite's OWN transactional rows (cis_trade, cis_trade_position,
-   cis_position, queue tables) for them, scoped by created_by=TEST_MARKER, and
-   never touches the cis_portfolio/cis_security rows themselves (shared
-   reference data, not owned by this suite).
+   Quoted, Reval, Non-Reval Subsidiary). Confirmed to have no other trade
+   history as of when this suite was written.
+
+cleanup_test_data() only deletes this suite's OWN transactional rows (trades,
+positions, queue entries) — never the portfolio/security master rows
+themselves, for either tier.
 
 Both tiers carry the same risk: backdated/amend/cancel scenarios drive real
 chain recalculation (settlement_service._recalculate_position_chain), which
@@ -45,9 +51,10 @@ deployed app, entirely separate from this test process) is what actually
 creates the position rows. This suite only READS the DB afterward, polling
 with a timeout, to check what the real pipeline produced.
 
-Only reference/master data (portfolio, security, counterparty) is still
-UPSERTed directly — these are environment fixtures the trade views expect to
-already exist, not the thing under test.
+Counterparty is derived automatically per security, not supplied — see
+get_counterparty_for_security(), which mirrors trade_form.html's
+autoSelectCounterpartyFromSecurity() JS (matches the security's `issuer`
+field to a cis_party.party_short_name).
 """
 
 import time
@@ -68,11 +75,6 @@ DATABASE = 'gmp_cis'
 # without waiting anywhere near the documented 5-minute SLA.
 POLL_INTERVAL_SECONDS = 5
 POLL_TIMEOUT_SECONDS = 90
-
-# Counterparty required by trade_create's validation (trade_validation_repository
-# .validate_counterparty -> cis_party.party_short_name, is_active=true,
-# is_deleted=false — confirmed against the live schema, not just the code).
-TEST_COUNTERPARTY = 'AVPTEST-CPTY'
 
 # Session permissions needed to pass core.middleware.permission_middleware for
 # the trade endpoints this suite uses (core/permissions_map.py).
@@ -179,119 +181,92 @@ KNOWN_FX_RATES = {
 }
 
 
-def ensure_sit_uat_master_data() -> None:
+def verify_sit_uat_master_data() -> None:
     """
-    UPSERT the SIT/UAT reference portfolios/securities' currency/
-    revaluation_status/investment_type fields (idempotent — Kudu UPSERT only
-    touches the columns listed, so any other fields already configured on
-    these rows, e.g. manager/cost-centre, are left untouched). Does NOT
-    delete these rows — see cleanup_test_data.
+    Verify the SIT/UAT reference portfolios/securities already exist with the
+    expected currency/revaluation_status/investment_type — this suite does
+    NOT create or modify reference data, only reads it.
     """
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    seen_portfolios, seen_securities = set(), set()
-
     for (portfolio, port_ccy, reval_status, security, sec_ccy, inv_type) in SIT_UAT_PAIRS.values():
-        if portfolio not in seen_portfolios:
-            impala_manager.execute_write(
-                f"""
-                UPSERT INTO {DATABASE}.cis_portfolio
-                (name, currency, revaluation_status, status, is_active,
-                 created_by, created_at, updated_by, updated_at)
-                VALUES (
-                    '{portfolio}', '{port_ccy}', '{reval_status}', 'VALIDATED', true,
-                    '{TEST_MARKER}', '{timestamp}', '{TEST_MARKER}', '{timestamp}'
-                )
-                """,
-                database=DATABASE,
-            )
-            seen_portfolios.add(portfolio)
-        if security not in seen_securities:
-            impala_manager.execute_write(
-                f"""
-                UPSERT INTO {DATABASE}.cis_security
-                (security_id, security_name, currency_code, investment_type,
-                 security_investment, security_type, status,
-                 created_by, created_at, updated_by, updated_at)
-                VALUES (
-                    {abs(hash(security)) % 1_000_000_000}, '{security}',
-                    '{sec_ccy}', '{inv_type or "EQUITY"}', '{inv_type}',
-                    'EQUITY', 'VALIDATED',
-                    '{TEST_MARKER}', '{timestamp}', '{TEST_MARKER}', '{timestamp}'
-                )
-                """,
-                database=DATABASE,
-            )
-            seen_securities.add(security)
-
-
-def ensure_test_master_data() -> None:
-    """
-    UPSERT the dedicated sandbox portfolios/securities if they don't already
-    exist. Idempotent — safe to call at the start of every test run.
-    """
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-    for name, (currency, reval_status) in TEST_PORTFOLIOS.items():
-        query = f"""
-        UPSERT INTO {DATABASE}.cis_portfolio
-        (name, currency, revaluation_status, src_system, status, is_active,
-         created_by, created_at, updated_by, updated_at)
-        VALUES (
-            '{name}', '{currency}', '{reval_status}', 'CIS', 'VALIDATED', true,
-            '{TEST_MARKER}', '{timestamp}', '{TEST_MARKER}', '{timestamp}'
+        rows = impala_manager.execute_query(
+            f"SELECT currency, revaluation_status FROM {DATABASE}.cis_portfolio "
+            f"WHERE name = '{portfolio}' LIMIT 1",
+            database=DATABASE,
         )
-        """
-        impala_manager.execute_write(query, database=DATABASE)
+        assert rows, (
+            f"Portfolio '{portfolio}' not found in cis_portfolio — this suite "
+            f"does not create reference data, it must already exist"
+        )
+        actual_reval = (rows[0].get('revaluation_status') or '').upper()
+        assert actual_reval == reval_status, (
+            f"Portfolio '{portfolio}' has revaluation_status={actual_reval!r}, "
+            f"expected {reval_status!r}"
+        )
+        verify_test_security(security)
 
-    for security_name, (currency_code, investment_type) in TEST_SECURITIES.items():
-        ensure_test_security(security_name, currency_code, investment_type)
+
+def verify_test_master_data() -> None:
+    """Verify the dedicated sandbox portfolios/securities already exist."""
+    for name in TEST_PORTFOLIOS:
+        rows = impala_manager.execute_query(
+            f"SELECT 1 FROM {DATABASE}.cis_portfolio WHERE name = '{name}' LIMIT 1",
+            database=DATABASE,
+        )
+        assert rows, (
+            f"Portfolio '{name}' not found in cis_portfolio — this suite does "
+            f"not create reference data, it must already exist"
+        )
+    for security_name in TEST_SECURITIES:
+        verify_test_security(security_name)
 
 
-def ensure_test_security(security_name: str, currency_code: str = 'USD',
-                          investment_type: str = '') -> None:
+def verify_test_security(security_name: str) -> None:
     """
-    UPSERT one dedicated sandbox security (idempotent). Used both by
-    ensure_test_master_data() for the fixed TEST_SECURITIES set, and directly
-    by scenario tests that need an isolated security not shared with other
-    scenarios (e.g. the backdated/amend/cancel regression tests, so their
-    position history doesn't collide with the lifecycle group's).
-
-    Any security created this way is still covered by cleanup_test_data()'s
-    created_by = TEST_MARKER filter, even if its name isn't in TEST_SECURITIES.
+    Verify a security already exists in cis_security. Used both for the fixed
+    TEST_SECURITIES set and for scenario tests that use an isolated security
+    not shared with other scenarios (so their position history doesn't
+    collide with the lifecycle group's) — those must also already exist.
     """
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    query = f"""
-    UPSERT INTO {DATABASE}.cis_security
-    (security_id, security_name, currency_code, investment_type,
-     security_investment, security_type, status,
-     created_by, created_at, updated_by, updated_at)
-    VALUES (
-        {abs(hash(security_name)) % 1_000_000_000}, '{security_name}',
-        '{currency_code}', '{investment_type or "EQUITY"}', '{investment_type}',
-        'EQUITY', 'VALIDATED',
-        '{TEST_MARKER}', '{timestamp}', '{TEST_MARKER}', '{timestamp}'
+    rows = impala_manager.execute_query(
+        f"SELECT 1 FROM {DATABASE}.cis_security WHERE security_name = '{security_name}' LIMIT 1",
+        database=DATABASE,
     )
-    """
-    impala_manager.execute_write(query, database=DATABASE)
-
-
-def ensure_test_counterparty() -> None:
-    """
-    UPSERT the dedicated test counterparty into cis_party (idempotent) —
-    required by trade_create's validation (trade_validation_repository
-    .validate_counterparty checks cis_party.party_short_name, is_active=true,
-    is_deleted=false). Confirmed against the live schema, not just the code.
-    """
-    query = f"""
-    UPSERT INTO {DATABASE}.cis_party
-    (party_short_name, party_full_name, record_type, is_active, is_deleted,
-     src_system)
-    VALUES (
-        '{TEST_COUNTERPARTY}', 'AVP Autotest Counterparty', 'COUNTERPARTY',
-        true, false, 'CIS'
+    assert rows, (
+        f"Security '{security_name}' not found in cis_security — this suite "
+        f"does not create reference data, it must already exist"
     )
+
+
+def get_counterparty_for_security(security_id: str) -> str:
     """
-    impala_manager.execute_write(query, database=DATABASE)
+    Mirror trade_form.html's autoSelectCounterpartyFromSecurity() JS: the real
+    UI auto-selects the counterparty whose party_short_name matches the
+    selected security's issuer field (case-insensitive). This suite drives
+    the view directly (no JS), so this replicates that lookup as a read —
+    no counterparty is ever created by this suite.
+    """
+    sec_rows = impala_manager.execute_query(
+        f"SELECT issuer FROM {DATABASE}.cis_security WHERE security_name = '{security_id}' LIMIT 1",
+        database=DATABASE,
+    )
+    assert sec_rows and sec_rows[0].get('issuer'), (
+        f"Security '{security_id}' has no issuer set in cis_security — cannot "
+        f"auto-derive its counterparty the way the real UI does"
+    )
+    issuer = sec_rows[0]['issuer'].strip()
+
+    party_rows = impala_manager.execute_query(
+        f"SELECT party_short_name FROM {DATABASE}.cis_party "
+        f"WHERE LOWER(party_short_name) = LOWER('{issuer}') LIMIT 1",
+        database=DATABASE,
+    )
+    assert party_rows, (
+        f"Security '{security_id}''s issuer '{issuer}' has no matching "
+        f"cis_party.party_short_name — the real UI would show this security's "
+        f"counterparty as 'not found' too, so this security can't be traded "
+        f"until that's fixed in the reference data"
+    )
+    return party_rows[0]['party_short_name']
 
 
 def get_authenticated_client() -> Client:
@@ -319,7 +294,7 @@ def _trade_post_payload(
     price: Decimal,
     trade_date: str,
     settle_date: str,
-    counterparty: str = TEST_COUNTERPARTY,
+    counterparty: str,
     commission: Decimal = Decimal('0'),
     sec_fee: Decimal = Decimal('0'),
     other_charges: Decimal = Decimal('0'),
@@ -398,7 +373,6 @@ def ui_create_trade(
     trade_date: str,
     settle_date: str,
     currency_code: str,
-    counterparty: str = TEST_COUNTERPARTY,
     commission: Decimal = Decimal('0'),
     sec_fee: Decimal = Decimal('0'),
     other_charges: Decimal = Decimal('0'),
@@ -412,9 +386,13 @@ def ui_create_trade(
     trade_id, found by reading (not writing) cis_trade for the newest row
     matching this exact booking right after a successful (redirect) response.
 
+    Counterparty is derived automatically from the security (see
+    get_counterparty_for_security) — never supplied or created by this suite.
+
     Raises AssertionError if the view didn't redirect (i.e. validation
     failed and it re-rendered the form) or if the new row can't be found.
     """
+    counterparty = get_counterparty_for_security(security_id)
     payload = _trade_post_payload(
         trade_type=trade_type, portfolio_id=portfolio_id, security_id=security_id,
         currency_code=currency_code, quantity=quantity, price=price,
@@ -474,6 +452,10 @@ def ui_amend_trade(client: Client, trade_id: int, new_quantity: Optional[Decimal
     )
     assert current, f"Cannot amend trade {trade_id} — not found"
     row = current[0]
+    assert row.get('counterparty'), (
+        f"Trade {trade_id} has no counterparty stored — cannot resubmit "
+        f"trade_edit's form without it"
+    )
 
     payload = _trade_post_payload(
         trade_type=row['trade_type'], portfolio_id=row['portfolio_short_name'],
@@ -481,7 +463,7 @@ def ui_amend_trade(client: Client, trade_id: int, new_quantity: Optional[Decimal
         quantity=new_quantity if new_quantity is not None else Decimal(str(row['quantity'])),
         price=new_price if new_price is not None else Decimal(str(row['price'])),
         trade_date=row['trade_date'], settle_date=row['settle_date'],
-        counterparty=row.get('counterparty') or TEST_COUNTERPARTY,
+        counterparty=row['counterparty'],
         commission=Decimal(str(row.get('commission') or 0)),
         sec_fee=Decimal(str(row.get('sec_fee') or 0)),
         other_charges=Decimal(str(row.get('other_charges') or 0)),
@@ -602,17 +584,13 @@ def get_latest_position(
 
 def cleanup_test_data(verbose: bool = True) -> dict:
     """
-    Delete every row this suite could have written.
+    Delete this suite's own transactional footprint — trades, positions, and
+    queue entries — for both reference-data tiers (sandbox TEST_PORTFOLIOS/
+    TEST_SECURITIES and the SIT_UAT_PAIRS entities).
 
-    Transactional tables (cis_trade, cis_trade_position, cis_position, queue
-    tables, cis_equity_price) are cleaned for BOTH tiers — the sandbox
-    TEST_PORTFOLIOS/TEST_SECURITIES and the SIT_UAT_PAIRS reference entities —
-    since this suite owns everything IT wrote against either.
-
-    Master-data tables (cis_portfolio, cis_security) are only ever deleted for
-    the sandbox 'AVPTEST-%' names — SIT/UAT reference entities are shared data
-    this suite doesn't own and must survive (the WHERE clause's 'AVPTEST-%'
-    pattern naturally excludes them, since none of the SIT/UAT names match it).
+    Never touches cis_portfolio/cis_security/cis_party — this suite doesn't
+    create reference/master data, so it has nothing of its own to delete
+    there either.
 
     Returns a dict of {table: rows_deleted_or_None} for reporting. Kudu's
     execute_write doesn't return affected-row counts, so this reports success/
@@ -667,29 +645,6 @@ def cleanup_test_data(verbose: bool = True) -> dict:
         f"DELETE FROM {DATABASE}.cis_equity_price "
         f"WHERE security_label IN ('{security_list}') "
         f"OR created_by = '{TEST_MARKER}'",
-    )
-    # Scoped by created_by=TEST_MARKER AND the 'AVPTEST-' naming convention
-    # (not just the fixed TEST_PORTFOLIOS/TEST_SECURITIES lists) so ad-hoc
-    # securities scenario tests create on the fly (e.g. AVPTEST-SEC-AMEND,
-    # AVPTEST-SEC-CANCEL — isolated per scenario so their position history
-    # doesn't collide) get cleaned up too, without having to enumerate every
-    # one here.
-    _run(
-        'cis_portfolio (sandbox master data)',
-        f"DELETE FROM {DATABASE}.cis_portfolio "
-        f"WHERE created_by = '{TEST_MARKER}' AND name LIKE 'AVPTEST-%'",
-    )
-    _run(
-        'cis_security (sandbox master data)',
-        f"DELETE FROM {DATABASE}.cis_security "
-        f"WHERE created_by = '{TEST_MARKER}' AND security_name LIKE 'AVPTEST-%'",
-    )
-    # cis_party has no created_by column (confirmed against the live schema) —
-    # scoped by the dedicated name instead, which is exclusive to this suite.
-    _run(
-        'cis_party (test counterparty)',
-        f"DELETE FROM {DATABASE}.cis_party "
-        f"WHERE party_short_name = '{TEST_COUNTERPARTY}'",
     )
 
     if verbose:

@@ -16,9 +16,12 @@ actually produces the position rows. The suite only *reads* the DB
 afterward — polling with a timeout — to check what the real pipeline
 produced and decide pass/fail.
 
-Only reference/master data (portfolio, security, counterparty) is still set
-up directly via UPSERT — these are environment fixtures the trade views
-expect to already exist, not the thing under test.
+**No reference/master data is created either.** Portfolios, securities, and
+counterparties are all assumed to already exist in your environment. At the
+start of the run the suite only *verifies* they exist (`verify_test_master_
+data`/`verify_sit_uat_master_data`/`verify_test_security` — reads, not
+writes) and raises a clear error naming exactly what's missing if not.
+Counterparty is derived automatically per security — see "Counterparty" below.
 
 Files:
 
@@ -84,15 +87,27 @@ equity-method LC gate).
 
 ## Test data — what's safe, what isn't
 
-Two tiers, see `avp_live_fixtures.py`'s module docstring for full detail:
+Two tiers of reference data this suite expects to already exist (nothing here
+is created — see `avp_live_fixtures.py`'s module docstring for full detail):
 
-1. **`AVPTEST-*` sandbox** — generic names, fully owned and created/deleted by
-   this suite. Safe by construction.
+1. **`AVPTEST-*` sandbox** — generic entity names for isolated/safe testing.
+   Includes several ad-hoc securities individual scenarios use to keep their
+   position history isolated (`AVPTEST-SEC-AMEND`, `AVPTEST-SEC-CANCEL`,
+   `AVPTEST-SEC-BACKDATE`, `AVPTEST-SEC-SODEOD`, `AVPTEST-SEC-SODEOD-SETTLE`)
+   — these must exist too, not just the two in `TEST_SECURITIES`.
 2. **`SIT_UAT_PAIRS`** — real, named entities (`UOBS_BCHAIN_FVE`/`UOB THAI (F) UQ`,
    `UOBS_CIU_FVE_OLT`/`AAPL UQ`, `UOBT_SHF_SUB`/`UOI SP`) confirmed to have no
-   other trade history as of when this suite was written. Cleanup only deletes
-   this suite's own transactional rows for them — never the portfolio/security
-   master rows themselves.
+   other trade history as of when this suite was written.
+
+Cleanup only deletes this suite's own transactional rows (trades, positions,
+queue entries) for either tier — never the portfolio/security master rows.
+
+**Counterparty** is never created or hardcoded — `get_counterparty_for_
+security()` reads the security's `issuer` field and matches it (case-
+insensitive) to a `cis_party.party_short_name`, exactly mirroring
+`trade_form.html`'s client-side `autoSelectCounterpartyFromSecurity()` JS. If
+a security's issuer has no matching counterparty, that's surfaced as a clear
+assertion error — same as the real UI would show "not found" for it.
 
 **Do not repoint either tier at a real, actively-traded portfolio.**
 Backdated/amend/cancel scenarios drive real chain recalculation
@@ -123,8 +138,10 @@ Safe to run any time, including when there's nothing to clean up.
   been verified for syntax, collection, and safe default-skip behavior, but
   **not run against a real cluster**. Expect to need small fixes on first live
   run (e.g. if `cis_equity_price`'s real column shape differs slightly from
-  what's assumed, or portfolio/security `status` values differ from what's
-  used here).
+  what's assumed).
+- The ad-hoc `AVPTEST-SEC-*` securities listed above must exist before running —
+  if any are missing, `setup_module`/the individual test will fail with a
+  clear "not found" assertion rather than silently creating one.
 - `ui_create_trade`/`ui_amend_trade` build the full POST payload
   `trade_create`/`trade_edit` expect based on reading `trade/views.py`'s field
   list directly — if that view's required fields change, the payload builder
