@@ -2,11 +2,12 @@
 """
 Cleanup for the live AVP test suite (trade/tests/test_avp_live_scenarios.py).
 
-Deletes every row that suite could have written — scoped to the dedicated
-sandbox portfolio/security names (never real, actively-traded ones) plus the
-'AVP_AUTOTEST' created_by marker as defense-in-depth — across cis_trade,
-cis_trade_position, cis_position, cis_position_queue, cis_settlement_queue,
-cis_equity_price, cis_portfolio, and cis_security.
+Deletes every row that suite could have written — scoped to the 3 SIT/UAT
+reference portfolio/security pairs plus the 'AVP_AUTOTEST' created_by marker
+as defense-in-depth — across cis_trade, cis_trade_position, cis_position,
+cis_position_queue, cis_settlement_queue, and cis_equity_price. Never touches
+cis_portfolio/cis_security/cis_party — this suite doesn't create reference
+data, so it has nothing of its own to delete there.
 
 The test suite already runs this automatically at the end of every run
 (pass or fail). Run it manually after a crashed/interrupted run, or any time
@@ -30,16 +31,17 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 import django
 django.setup()
 
-from trade.tests.avp_live_fixtures import cleanup_test_data, TEST_PORTFOLIOS, TEST_SECURITIES
+from trade.tests.avp_live_fixtures import cleanup_test_data, SIT_UAT_PAIRS
 
 
 def main():
     print("=" * 70)
     print("AVP Test Data Cleanup")
     print("=" * 70)
-    print(f"Sandbox portfolios: {list(TEST_PORTFOLIOS.keys())}")
-    print(f"Sandbox securities: {list(TEST_SECURITIES.keys())} (+ any ad-hoc")
-    print("  AVPTEST-SEC-* securities individual scenarios created)")
+    portfolios = [p[0] for p in SIT_UAT_PAIRS.values()]
+    securities = [p[3] for p in SIT_UAT_PAIRS.values()]
+    print(f"SIT/UAT portfolios: {portfolios}")
+    print(f"SIT/UAT securities: {securities}")
     print("-" * 70)
 
     results = cleanup_test_data(verbose=True)

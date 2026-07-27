@@ -13,28 +13,24 @@ The verify_* functions below only READ and assert existence/expected fields,
 raising a clear error naming exactly what's missing rather than silently
 creating placeholder data.
 
-Two tiers of reference data:
-
-1. TEST_PORTFOLIOS / TEST_SECURITIES — generic 'AVPTEST-*' sandbox entity
-   names this suite expects to already exist for isolated, safe testing
-   (backdated/amend/cancel scenarios, which rewrite a portfolio+security's
-   entire position history for the affected date range — see below).
-
-2. SIT_UAT_PAIRS — real, named SIT/UAT reference entities (e.g.
-   UOBS_BCHAIN_FVE / "UOB THAI (F) UQ") supplied by QA for a specific
-   SIT/UAT execution pack, one per investment-category combination (Non-Reval
-   Quoted, Reval, Non-Reval Subsidiary). Confirmed to have no other trade
-   history as of when this suite was written.
+All scenarios run against SIT_UAT_PAIRS — 3 real, named reference entities
+(e.g. UOBS_BCHAIN_FVE / "UOB THAI (F) UQ") supplied by QA for a specific
+SIT/UAT execution pack, one per investment-category combination (Non-Reval
+Quoted, Reval, Non-Reval Subsidiary). Confirmed to have no other trade
+history as of when this suite was written. Since there are only 3 pairs and
+many scenario types, tests that need an exact-value (not delta) check on a
+fresh position use non-overlapping trade_date anchors on the same pair — see
+test_avp_live_scenarios.py's "date-anchor registry" comment.
 
 cleanup_test_data() only deletes this suite's OWN transactional rows (trades,
-positions, queue entries) — never the portfolio/security master rows
-themselves, for either tier.
+positions, queue entries) for these pairs — never the portfolio/security
+master rows themselves.
 
-Both tiers carry the same risk: backdated/amend/cancel scenarios drive real
-chain recalculation (settlement_service._recalculate_position_chain), which
-pre-invalidates and rewrites is_latest flags across a portfolio+security's
-ENTIRE position history for the affected date range. Do not repoint either
-tier at a portfolio/security with other real activity you care about.
+Backdated/amend/cancel scenarios drive real chain recalculation
+(settlement_service._recalculate_position_chain), which pre-invalidates and
+rewrites is_latest flags across a portfolio+security's ENTIRE position
+history for the affected date range. Do not repoint SIT_UAT_PAIRS at a
+portfolio/security with other real activity you care about.
 
 Every row this suite writes is additionally tagged created_by/updated_by =
 TEST_MARKER (or queued_by, for the queue tables) as defense-in-depth.
@@ -88,42 +84,6 @@ _TEST_USER_PERMISSIONS = {
 
 # Distinctive, greppable marker — every row this suite ever writes carries this.
 TEST_MARKER = 'AVP_AUTOTEST'
-
-# Reserved trade_id band, well clear of real trade_ids (get_next_id() produces
-# ~13-digit timestamp-based ids in the 1.7xx-trillion range this decade).
-# Kept as a monotonically increasing counter for the lifetime of one process.
-_TRADE_ID_BASE = 999_950_000_000
-_trade_id_counter = None
-
-
-def next_test_trade_id() -> int:
-    """Return a fresh, reserved-band trade_id, unique within this process."""
-    global _trade_id_counter
-    if _trade_id_counter is None:
-        _trade_id_counter = _TRADE_ID_BASE
-    _trade_id_counter += 1
-    return _trade_id_counter
-
-
-# =============================================================================
-# Dedicated sandbox master data — owned entirely by this test suite.
-# =============================================================================
-
-# name -> (currency, revaluation_status)
-TEST_PORTFOLIOS = {
-    'AVPTEST-SAMECCY':        ('USD', 'REVALUED'),
-    'AVPTEST-XCCY-REVAL':     ('SGD', 'REVALUED'),
-    'AVPTEST-XCCY-NONREVAL':  ('SGD', 'NON-REVALUED'),
-}
-
-# security_name -> (currency_code, security_investment)
-# security_investment '' means an ordinary equity (mark-to-market);
-# 'SUBSI' is an equity-method security (carried at cost, no MTM) — see
-# Scenario 5's regression test (unrealized_pnl_lc gate).
-TEST_SECURITIES = {
-    'AVPTEST-SEC-EQUITY': ('USD', ''),
-    'AVPTEST-SEC-SUBSI':  ('USD', 'SUBSI'),
-}
 
 _QUEUE_TABLES = ['cis_position_queue', 'cis_settlement_queue']
 
@@ -205,28 +165,9 @@ def verify_sit_uat_master_data() -> None:
         verify_test_security(security)
 
 
-def verify_test_master_data() -> None:
-    """Verify the dedicated sandbox portfolios/securities already exist."""
-    for name in TEST_PORTFOLIOS:
-        rows = impala_manager.execute_query(
-            f"SELECT 1 FROM {DATABASE}.cis_portfolio WHERE name = '{name}' LIMIT 1",
-            database=DATABASE,
-        )
-        assert rows, (
-            f"Portfolio '{name}' not found in cis_portfolio — this suite does "
-            f"not create reference data, it must already exist"
-        )
-    for security_name in TEST_SECURITIES:
-        verify_test_security(security_name)
-
-
 def verify_test_security(security_name: str) -> None:
-    """
-    Verify a security already exists in cis_security. Used both for the fixed
-    TEST_SECURITIES set and for scenario tests that use an isolated security
-    not shared with other scenarios (so their position history doesn't
-    collide with the lifecycle group's) — those must also already exist.
-    """
+    """Verify a security already exists in cis_security — this suite does
+    not create reference data, only reads it."""
     rows = impala_manager.execute_query(
         f"SELECT 1 FROM {DATABASE}.cis_security WHERE security_name = '{security_name}' LIMIT 1",
         database=DATABASE,
@@ -585,8 +526,7 @@ def get_latest_position(
 def cleanup_test_data(verbose: bool = True) -> dict:
     """
     Delete this suite's own transactional footprint — trades, positions, and
-    queue entries — for both reference-data tiers (sandbox TEST_PORTFOLIOS/
-    TEST_SECURITIES and the SIT_UAT_PAIRS entities).
+    queue entries — for the SIT_UAT_PAIRS entities.
 
     Never touches cis_portfolio/cis_security/cis_party — this suite doesn't
     create reference/master data, so it has nothing of its own to delete
@@ -598,8 +538,8 @@ def cleanup_test_data(verbose: bool = True) -> dict:
     """
     sit_uat_portfolios = [p[0] for p in SIT_UAT_PAIRS.values()]
     sit_uat_securities = [p[3] for p in SIT_UAT_PAIRS.values()]
-    portfolio_list = "', '".join(list(TEST_PORTFOLIOS.keys()) + sit_uat_portfolios)
-    security_list = "', '".join(list(TEST_SECURITIES.keys()) + sit_uat_securities)
+    portfolio_list = "', '".join(sit_uat_portfolios)
+    security_list = "', '".join(sit_uat_securities)
     results = {}
 
     def _run(label, query):
@@ -609,7 +549,7 @@ def cleanup_test_data(verbose: bool = True) -> dict:
             print(f"  {'OK' if ok else 'FAILED'}: {label}")
 
     if verbose:
-        print(f"Cleaning up AVP test data for portfolios: {list(TEST_PORTFOLIOS.keys())}")
+        print(f"Cleaning up AVP test data for portfolios: {sit_uat_portfolios}")
 
     _run(
         'cis_trade_position',

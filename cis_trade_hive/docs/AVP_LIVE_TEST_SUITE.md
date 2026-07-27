@@ -18,8 +18,8 @@ produced and decide pass/fail.
 
 **No reference/master data is created either.** Portfolios, securities, and
 counterparties are all assumed to already exist in your environment. At the
-start of the run the suite only *verifies* they exist (`verify_test_master_
-data`/`verify_sit_uat_master_data`/`verify_test_security` — reads, not
+start of the run the suite only *verifies* the 3 SIT/UAT pairs exist with the
+expected `revaluation_status` (`verify_sit_uat_master_data` — reads, not
 writes) and raises a clear error naming exactly what's missing if not.
 Counterparty is derived automatically per security — see "Counterparty" below.
 
@@ -27,8 +27,8 @@ Files:
 
 | File | Purpose |
 |---|---|
-| `trade/tests/avp_live_fixtures.py` | Shared helpers: test data setup, cleanup, position lookups |
-| `trade/tests/test_avp_live_scenarios.py` | The 30 scenarios |
+| `trade/tests/avp_live_fixtures.py` | Shared helpers: verification, cleanup, position lookups, UI-driven trade actions |
+| `trade/tests/test_avp_live_scenarios.py` | The 23 scenarios |
 | `scripts/cleanup_avp_test_data.py` | Standalone cleanup (same logic the suite runs automatically) |
 
 ## Prerequisites
@@ -43,6 +43,8 @@ Files:
   time out waiting for a position that never gets calculated. If your SIT/UAT
   app is deployed normally (not just `manage.py runserver`), these should
   already be running continuously.
+- The 3 SIT/UAT reference pairs below must already exist (portfolio +
+  security + a counterparty matching the security's `issuer` field).
 
 ## Running it
 
@@ -70,37 +72,58 @@ creation waits on the real background workers (poll every 5s for the trade
 event worker, 10s for the position worker — see `config/cml_app.py`), so each
 scenario that books a trade can take anywhere from a few seconds to
 `avp_live_fixtures.POLL_TIMEOUT_SECONDS` (90s) if something's slow or stuck.
-30 scenarios end-to-end could reasonably take several minutes, not seconds.
+23 scenarios end-to-end could reasonably take several minutes, not seconds.
 
-## What it covers (30 scenarios)
+## What it covers (23 scenarios)
+
+All scenarios run against the 3 real SIT/UAT reference pairs QA supplied —
+there is no separate "sandbox" tier anymore:
+
+| Pair | Portfolio | Security | Currency shape |
+|---|---|---|---|
+| `non_reval_quoted` | `UOBS_BCHAIN_FVE` (SGD, NON-REVALUED) | `UOB THAI (F) UQ` (THB) | cross-currency |
+| `reval` | `UOBS_CIU_FVE_OLT` (SGD, REVALUED) | `AAPL UQ` (USD) | cross-currency |
+| `non_reval_subsidiary` | `UOBT_SHF_SUB` (THB, NON-REVALUED) | `UOI SP` (SGD, Subsidiary) | cross-currency, equity-method |
 
 | Group | Count | Covers |
 |---|---|---|
-| Same-currency lifecycle | 6 | Fresh buy, accumulate, sell, backdated buy, amend, cancel — sandbox `AVPTEST-*` entities |
-| Cross-currency | 3 | REVALUED (FX-table cost), NON-REVALUED (`open_fx_rate` override), equity-method (Subsi) |
-| SIT/UAT reference pairs | 19 | Full lifecycle (same-day, future settlement, new/existing position, backdated buy/amend/cancel, Traded vs Settled basis) × 3 QA-named pairs, plus the Non-Reval+Subsidiary combination |
-| SOD/INT/EOD | 2 | Full `INT → EOD → SOD` chain via `refresh_positions`/`create_sod_snapshot`, and SOD folding in a pending future settlement |
+| FX / cost exact-value checks | 2 | REVALUED cost_lc vs. live FX table (`reval` pair), NON-REVALUED cost_lc vs. `open_fx_rate` override (`non_reval_quoted` pair) |
+| SIT/UAT full lifecycle | 19 | Same-day, future settlement, new/existing position, backdated buy/amend/cancel, Traded vs Settled basis — × all 3 pairs, plus the Non-Reval+Subsidiary unrealized-P&L combination |
+| SOD/INT/EOD | 2 | Full `INT → EOD → SOD` chain via `refresh_positions`/`create_sod_snapshot` (`reval` pair), and SOD folding in a pending future settlement (`non_reval_quoted` pair) |
 
 These are the regression tests for the fixes made against `DEAL-20260724-8334`
 (Scenarios 1, 3, 5, 6 — backdated backfill, chain-recalc double-counting,
 equity-method LC gate).
 
+### Date-anchor registry
+
+Since every test shares only 3 real pairs, tests needing an *exact-value*
+check on a fresh position (rather than a before/after delta) use dedicated,
+non-overlapping `trade_date` offsets from "today" so they don't collide with
+other tests' cumulative state on the same pair:
+
+| Offset from today | Used by |
+|---|---|
+| `0` (today) | SIT/UAT same-day fresh buy, future settlement, today cancellation |
+| `-6` | SIT/UAT backdated cancellation |
+| `-10` | SIT/UAT backdated amendment |
+| `-15` | SIT/UAT backdated buy |
+| `-20` | FX/cost check — `reval` pair |
+| `-21` | FX/cost check — `non_reval_quoted` pair |
+| `-23` / `-22` | SOD/EOD pending-settlement fold — `non_reval_quoted` pair |
+| `-25` / `-24` | SOD/EOD full lifecycle — `reval` pair |
+
+Keep this updated when adding a new exact-value test (also documented as a
+comment in `test_avp_live_scenarios.py`).
+
 ## Test data — what's safe, what isn't
 
-Two tiers of reference data this suite expects to already exist (nothing here
-is created — see `avp_live_fixtures.py`'s module docstring for full detail):
-
-1. **`AVPTEST-*` sandbox** — generic entity names for isolated/safe testing.
-   Includes several ad-hoc securities individual scenarios use to keep their
-   position history isolated (`AVPTEST-SEC-AMEND`, `AVPTEST-SEC-CANCEL`,
-   `AVPTEST-SEC-BACKDATE`, `AVPTEST-SEC-SODEOD`, `AVPTEST-SEC-SODEOD-SETTLE`)
-   — these must exist too, not just the two in `TEST_SECURITIES`.
-2. **`SIT_UAT_PAIRS`** — real, named entities (`UOBS_BCHAIN_FVE`/`UOB THAI (F) UQ`,
-   `UOBS_CIU_FVE_OLT`/`AAPL UQ`, `UOBT_SHF_SUB`/`UOI SP`) confirmed to have no
-   other trade history as of when this suite was written.
+Nothing is created by this suite — see `avp_live_fixtures.py`'s module
+docstring for full detail. The 3 SIT/UAT pairs (table above) are confirmed to
+have no other trade history as of when this suite was written.
 
 Cleanup only deletes this suite's own transactional rows (trades, positions,
-queue entries) for either tier — never the portfolio/security master rows.
+queue entries) for these pairs — never the portfolio/security master rows.
 
 **Counterparty** is never created or hardcoded — `get_counterparty_for_
 security()` reads the security's `issuer` field and matches it (case-
@@ -109,22 +132,22 @@ insensitive) to a `cis_party.party_short_name`, exactly mirroring
 a security's issuer has no matching counterparty, that's surfaced as a clear
 assertion error — same as the real UI would show "not found" for it.
 
-**Do not repoint either tier at a real, actively-traded portfolio.**
+**Do not repoint SIT_UAT_PAIRS at a real, actively-traded portfolio.**
 Backdated/amend/cancel scenarios drive real chain recalculation
 (`settlement_service._recalculate_position_chain`), which pre-invalidates and
 rewrites `is_latest` flags across that portfolio+security's *entire* position
 history for the affected date range — not just the rows this suite wrote.
 
-If the `SIT_UAT_PAIRS` entities ever pick up real trading activity, either
-swap them for a fresh dedicated set, or restrict those specific tests to
-non-destructive scenarios only (fresh buy/sell, no chain recalc) — see the
-conversation history / commit message for the original safety discussion.
+If these entities ever pick up real trading activity, either swap them for a
+fresh dedicated set, or restrict tests to non-destructive scenarios only
+(fresh buy/sell, no chain recalc) — see the conversation history / commit
+messages for the original safety discussion.
 
 ## Cleanup
 
 Runs automatically at the end of the test module, pass or fail. To clean up
-manually (e.g. after a crashed/interrupted run, or just to confirm the
-sandbox is clean):
+manually (e.g. after a crashed/interrupted run, or just to confirm things are
+clean):
 
 ```bash
 python scripts/cleanup_avp_test_data.py
@@ -139,9 +162,6 @@ Safe to run any time, including when there's nothing to clean up.
   **not run against a real cluster**. Expect to need small fixes on first live
   run (e.g. if `cis_equity_price`'s real column shape differs slightly from
   what's assumed).
-- The ad-hoc `AVPTEST-SEC-*` securities listed above must exist before running —
-  if any are missing, `setup_module`/the individual test will fail with a
-  clear "not found" assertion rather than silently creating one.
 - `ui_create_trade`/`ui_amend_trade` build the full POST payload
   `trade_create`/`trade_edit` expect based on reading `trade/views.py`'s field
   list directly — if that view's required fields change, the payload builder
@@ -162,3 +182,8 @@ Safe to run any time, including when there's nothing to clean up.
 - `refresh_positions.py`'s `--fill-gaps` and `--ams-no-reval` modes, and
   `create_sod_snapshot.py`'s `--fill-gaps` mode, aren't exercised — only the
   default full-recalc path.
+- With only 3 pairs shared across 23 scenarios, running the suite repeatedly
+  without cleanup in between will build up cumulative quantity on the shared
+  `today`-anchored tests (delta-checked, so this doesn't break assertions,
+  but worth knowing if you're inspecting `cis_trade_position` manually
+  mid-run).
