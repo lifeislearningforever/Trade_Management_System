@@ -1298,7 +1298,9 @@ class SettlementService:
         """
         from trade.services.position_id_service import position_id as _calc_position_id
 
-        version_id = str(uuid.uuid4()).replace('-', '')[:32]
+        # version_id is a BIGINT column (cis_trade_position/cis_position) — must be a
+        # bare numeric literal, not a quoted hex-string UUID.
+        version_id = self._generate_id()
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         position_id = _calc_position_id(
             portfolio_id, security_id, basis, position_date, 'CIS'
@@ -1343,8 +1345,8 @@ class SettlementService:
          position_type,
          created_by, created_at, updated_by, updated_at)
         VALUES (
-         '{version_id}',
-         '{position_id}',
+         {version_id},
+         {position_id},
          '{position_date}',
          '{basis}',
          '{self._escape(portfolio_id)}',
@@ -1427,7 +1429,7 @@ class SettlementService:
              source_table, processing_timestamp, position_type, is_latest)
             VALUES (
              {position_id},
-             '{str(uuid.uuid4()).replace('-', '')[:32]}',
+             {self._generate_id()},
              '{self._escape(portfolio_id)}',
              '{self._escape(security_id)}',
              '{basis}',
