@@ -1096,25 +1096,47 @@ class SettlementService:
         """
         try:
             # 1. Fetch all valid business dates in [from_date, to_date] from alldatesinfo.
-            biz_day_rows = impala_manager.execute_query(
-                f"""
-                SELECT contextual_today AS biz_date
-                FROM {self.DATABASE}.gmp_cis_sta_dly_alldatesinfo
-                WHERE src_system = 'gmp'
-                  AND sub_system  = 'cis'
-                  AND data_frq    = 'dly'
-                  AND record_type = 'D'
-                  AND contextual_today >= '{from_date}'
-                  AND contextual_today <= '{to_date}'
-                ORDER BY contextual_today ASC
-                """,
-                database=self.DATABASE,
-            )
-            if not biz_day_rows:
-                logger.info("carry-forward: no business days found in alldatesinfo for range")
-                return
+            # Falls back to calendar days (excluding weekends) if the table has no rows
+            # for this range — without this fallback, a from_date/to_date span not yet
+            # populated in alldatesinfo (e.g. a backdated trade whose trade_date is far
+            # enough in the past, or a range this reference table simply doesn't cover)
+            # silently produces ZERO carry-forward rows: the direct trade-replay writes
+            # (the backdated date itself, and the settle date) still happen, but every
+            # gap date in between is never backfilled. This was found by comparing
+            # against position_queue_service._get_business_dates_between, which already
+            # has this exact fallback for the same query shape.
+            biz_dates = []
+            try:
+                biz_day_rows = impala_manager.execute_query(
+                    f"""
+                    SELECT contextual_today AS biz_date
+                    FROM {self.DATABASE}.gmp_cis_sta_dly_alldatesinfo
+                    WHERE src_system = 'gmp'
+                      AND sub_system  = 'cis'
+                      AND data_frq    = 'dly'
+                      AND record_type = 'D'
+                      AND contextual_today >= '{from_date}'
+                      AND contextual_today <= '{to_date}'
+                    ORDER BY contextual_today ASC
+                    """,
+                    database=self.DATABASE,
+                )
+                if biz_day_rows:
+                    biz_dates = [str(r['biz_date'])[:10] for r in biz_day_rows if r.get('biz_date')]
+            except Exception as e:
+                logger.warning(f"Could not fetch business dates from alldatesinfo: {e}. Falling back to calendar days.")
 
-            biz_dates = [str(r['biz_date'])[:10] for r in biz_day_rows if r.get('biz_date')]
+            if not biz_dates:
+                logger.info(
+                    "carry-forward: no business days found in alldatesinfo for "
+                    f"{from_date}..{to_date} — falling back to calendar days (excl. weekends)"
+                )
+                cur = date.fromisoformat(from_date)
+                end = date.fromisoformat(to_date)
+                while cur <= end:
+                    if cur.weekday() < 5:  # Mon-Fri
+                        biz_dates.append(cur.isoformat())
+                    cur += timedelta(days=1)
 
             # 2. Fetch all position_dates that already have is_latest=true in this range.
             existing_rows = impala_manager.execute_query(
