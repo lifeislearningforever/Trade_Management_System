@@ -1504,15 +1504,22 @@ class PositionService:
             if not existing and expect_prior_version:
                 # Caller confirmed a row should exist — this is very likely a stale
                 # read on a different pooled connection, not a genuine absence.
-                # Retry once after a short delay before trusting the empty result.
-                logger.warning(
-                    f"_mark_old_versions_not_latest found no rows for "
-                    f"{portfolio_id}/{security_id} {position_basis}/{position_date} "
-                    f"despite expect_prior_version=True — retrying once (suspected "
-                    f"stale read on pooled connection)"
-                )
-                time.sleep(1)
-                existing = impala_manager.execute_query(query, database=self.DATABASE)
+                # Reuses the same retry budget as _get_position_as_of_date's
+                # stale-read guard (_STALE_READ_RETRY_ATTEMPTS/_DELAY_SECONDS)
+                # rather than a one-off sleep, so both workarounds for this class
+                # of issue stay tunable from one place.
+                for attempt in range(self._STALE_READ_RETRY_ATTEMPTS):
+                    logger.warning(
+                        f"_mark_old_versions_not_latest found no rows for "
+                        f"{portfolio_id}/{security_id} {position_basis}/{position_date} "
+                        f"despite expect_prior_version=True — retrying "
+                        f"({attempt + 1}/{self._STALE_READ_RETRY_ATTEMPTS}, suspected "
+                        f"stale read on pooled connection)"
+                    )
+                    time.sleep(self._STALE_READ_RETRY_DELAY_SECONDS)
+                    existing = impala_manager.execute_query(query, database=self.DATABASE)
+                    if existing:
+                        break
 
             if not existing:
                 # No existing versions to update
