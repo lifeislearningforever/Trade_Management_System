@@ -1273,15 +1273,15 @@ class SettlementService:
                     # Gap day — carry forward if we have a prior position.
                     if last_known:
                         try:
-                            self._write_carry_forward_position(
+                            written_row = self._write_carry_forward_position(
                                 last_known, basis, biz_date,
                                 portfolio_id, security_id, updated_by,
                                 isin=cf_isin,
                             )
                             counters['recalculated'] += 1
-                            # Update last_known so the next gap day chains correctly.
-                            last_known = dict(last_known)
-                            last_known['position_date'] = biz_date
+                            # Chain from the re-priced row, not the stale seed, so the
+                            # NEXT gap day recomputes on top of this date's real fx_rate.
+                            last_known = written_row or last_known
                             existing_by_basis[basis].add(biz_date)
                             logger.info(
                                 f"Carry-forward: wrote {basis} position for {biz_date} "
@@ -1304,12 +1304,16 @@ class SettlementService:
         security_id: str,
         updated_by: str,
         isin: str = None,
-    ) -> None:
+    ) -> Dict[str, Any]:
         """
-        Write a single carry-forward position row for `position_date`, copying
-        all financial values from `source` (the preceding position dict).
+        Write a single carry-forward position row for `position_date`, re-pricing
+        LC values from `source` (the preceding position dict) using this date's
+        own FX rate rather than copying them verbatim.
         Uses the same versioned UPSERT pattern as _save_position:
         mark old versions not-latest, then insert new version with is_latest=true.
+
+        Returns the row as actually written, so callers can chain the next gap
+        day's carry-forward from the re-priced values instead of the stale seed.
         """
         from trade.services.position_id_service import position_id as _calc_position_id
 
@@ -1320,6 +1324,35 @@ class SettlementService:
         position_id = _calc_position_id(
             portfolio_id, security_id, basis, position_date, 'CIS'
         )
+
+        # Re-derive LC values for THIS gap day rather than copying `source` verbatim.
+        # Without this, a carry-forward row's cost_lc/market_value_lc stay frozen at
+        # whatever fx_rate was in effect on the last actual trade day, so a TRADED
+        # carry-forward row and a same-date SETTLED row (computed fresh via
+        # _save_position) end up with different cost_lc for the identical date —
+        # exactly the mismatch seen live between TRADED and SETTLED on 2026-03-03.
+        # Mirrors _save_position's REVALUED/NON-REVALUED branching exactly.
+        security_currency = source.get('security_currency')
+        portfolio_currency = source.get('portfolio_currency')
+        average_cost_fc = source.get('average_cost_fc')
+        total_cost_fc = source.get('total_cost_fc')
+        market_value_fc = source.get('market_value_fc')
+        fx_rate = self.position_service._get_fx_rate(
+            security_currency, portfolio_currency, rate_date=position_date,
+            fallback_rate=Decimal(str(source.get('fx_rate'))) if source.get('fx_rate') else None,
+        ) if security_currency and portfolio_currency else Decimal(str(source.get('fx_rate') or 1))
+
+        reval_status = self.position_service._get_portfolio_revaluation_status(portfolio_id)
+        is_equity_method = self.position_service._is_equity_method_security(security_id)
+
+        market_value_lc = float(market_value_fc or 0) * float(fx_rate)
+        if reval_status == 'NON-REVALUED':
+            average_cost_lc = source.get('average_cost_lc')
+            total_cost_lc = source.get('total_cost_lc')
+        else:
+            average_cost_lc = float(average_cost_fc or 0) * float(fx_rate)
+            total_cost_lc = float(total_cost_fc or 0) * float(fx_rate)
+        unrealized_pnl_lc = 0.0 if is_equity_method else (market_value_lc - float(total_cost_lc or 0))
 
         def _f(val):
             if val is None:
@@ -1367,19 +1400,19 @@ class SettlementService:
          '{self._escape(portfolio_id)}',
          '{self._escape(security_id)}',
          {_f(source.get('quantity'))},
-         {_f(source.get('average_cost_fc'))}, {_f(source.get('total_cost_fc'))},
-         {_f(source.get('average_cost_lc'))}, {_f(source.get('total_cost_lc'))},
+         {_f(average_cost_fc)}, {_f(total_cost_fc)},
+         {_f(average_cost_lc)}, {_f(total_cost_lc)},
          {_f(source.get('realized_pnl_fc'))}, {_f(source.get('unrealized_pnl_fc'))},
-         {_f(source.get('realized_pnl_lc'))}, {_f(source.get('unrealized_pnl_lc'))},
+         {_f(source.get('realized_pnl_lc'))}, {_f(unrealized_pnl_lc)},
          {_f(source.get('market_price'))},
-         {_f(source.get('market_value_fc'))}, {_f(source.get('market_value_lc'))},
+         {_f(market_value_fc)}, {_f(market_value_lc)},
          {_f(source.get('dividend_fc'))}, {_f(source.get('dividend_lc'))},
          {source['trade_id'] if source.get('trade_id') else 'NULL'},
          {_s(source.get('trade_type'))},
          NULL, NULL, NULL,
          {_s(source.get('security_currency'))},
          {_s(source.get('portfolio_currency'))},
-         {_f(source.get('fx_rate'))},
+         {_f(fx_rate)},
          {_s(source.get('status') or 'OPEN')},
          true, true,
          {_f(source.get('uncall_fc'))}, {_f(source.get('uncall_lc'))},
@@ -1392,6 +1425,24 @@ class SettlementService:
         """
         impala_manager.execute_write(query, database=self.DATABASE)
 
+        # Reflects what was actually written above (re-priced LC values), not the
+        # stale `source` — used both for the cis_position sync below and returned
+        # to the caller so the NEXT gap day's carry-forward chains from the
+        # correctly re-priced row instead of re-copying yesterday's fx_rate again.
+        updated_row = dict(source)
+        updated_row.update({
+            'average_cost_fc': average_cost_fc,
+            'total_cost_fc': total_cost_fc,
+            'average_cost_lc': average_cost_lc,
+            'total_cost_lc': total_cost_lc,
+            'market_value_fc': market_value_fc,
+            'market_value_lc': market_value_lc,
+            'unrealized_pnl_lc': unrealized_pnl_lc,
+            'fx_rate': float(fx_rate),
+            'position_date': position_date,
+            'isin': isin,
+        })
+
         # Sync to cis_position (gold/master table) — mirrors _sync_to_cis_position in
         # position_service.py. Without this, a carry-forward gap date never gets an
         # is_latest=true row in cis_position at all, since only cis_trade_position was
@@ -1399,11 +1450,13 @@ class SettlementService:
         # this UPSERT only ever targets this exact date's row for this position_type —
         # it cannot collide with or clear EOD/SOD/CORR rows for the same date.
         self._sync_carry_forward_to_cis_position(
-            source=source, basis=basis, position_date=position_date,
+            source=updated_row, basis=basis, position_date=position_date,
             portfolio_id=portfolio_id, security_id=security_id,
             position_id=position_id, updated_by=updated_by, timestamp=timestamp,
             isin=isin,
         )
+
+        return updated_row
 
     def _sync_carry_forward_to_cis_position(
         self,
