@@ -16,7 +16,7 @@ geventhttpclient==2.3.1  # For better Locust performance
 django-debug-toolbar==4.4.6
 django-silk==5.3.0  # Request profiling
 memory-profiler==0.61.0
-psutil==6.1.1  # System monitoring
+psutil==6.0.0  # System monitoring
 
 # Code Quality
 black==24.10.0  # Code formatter

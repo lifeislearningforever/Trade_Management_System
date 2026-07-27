@@ -79,7 +79,7 @@ cis_trade_hive/
 - **Repositories:** Data access (`*_kudu_repository.py`)
 
 ### Four-Eyes Principle (Maker-Checker)
-Status flow: `DRAFT → PENDING_APPROVAL → APPROVED/REJECTED → ACTIVE → INACTIVE → CLOSED`
+Status flow (portfolio and trade, Kudu-backed): `INITIAL → MODIFIED → PENDING_VALIDATION → VALIDATED/CANCELLED → SETTLED` (trade also has `PENDING_CANCELLATION`)
 
 ## Common Commands
 
@@ -263,7 +263,7 @@ pytest -v --tb=short
 - djangorestframework 3.16.1
 
 **Testing:**
-- pytest 9.0.1
+- pytest 8.3.4
 - pytest-cov 7.0.0
 
 **Frontend:**
