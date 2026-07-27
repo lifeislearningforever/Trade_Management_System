@@ -821,6 +821,18 @@ class SettlementService:
             # Include the from_date itself (>=) so the reversed/modified trade is
             # replayed, and fetch trade_date so TRADED basis uses the right position_date.
             # Also fetch currency + LC amount fields for NON-REVAL portfolios.
+            #
+            # Upper bound is trade_date <= today, NOT settle_date <= today. A trade
+            # with a future settle_date (queued to cis_settlement_queue) must still be
+            # replayed here for its TRADED basis, which is keyed by trade_date and is
+            # visible immediately regardless of settlement timing. Filtering on
+            # settle_date <= today excluded such trades entirely — confirmed live:
+            # amending a same-day BUY with a future settle_date, alongside another
+            # trade with a future settle_date, caused chain recalc to drop both
+            # trades' TRADED-basis contribution and collapse the position back to
+            # only the trades that had already settled. The per-basis loop below
+            # already skips SETTLED for any pos_date > today (future), so relaxing
+            # this bound doesn't risk creating a future-dated SETTLED row.
             query = f"""
             SELECT t.trade_id, t.trade_type, t.quantity, t.price,
                    COALESCE(t.commission, 0) + COALESCE(t.sec_fee, 0) + COALESCE(t.other_charges, 0) as charges,
@@ -834,7 +846,7 @@ class SettlementService:
             WHERE t.portfolio_short_name = '{self._escape(portfolio_id)}'
               AND t.security_label = '{self._escape(security_id)}'
               AND (t.trade_date >= '{from_date}' OR t.settle_date >= '{from_date}')
-              AND t.settle_date <= '{today_str}'
+              AND t.trade_date <= '{today_str}'
               AND (t.trade_status IN ('INITIAL', 'MODIFIED', 'VALIDATED', 'SETTLED') OR t.status IN ('INITIAL', 'MODIFIED', 'VALIDATED', 'SETTLED'))
               AND (t.is_deleted = false OR t.is_deleted IS NULL)
             ORDER BY t.trade_date ASC, t.settle_date ASC, t.trade_id ASC
@@ -1024,6 +1036,19 @@ class SettlementService:
                         logger.debug(
                             f"Skipping {basis} for trade {trade.get('trade_id')}: "
                             f"pos_date={pos_date} < from_date={from_date} (already in seed)"
+                        )
+                        continue
+                    if pos_date > today_str:
+                        # settle_date in the future (relaxing the query's upper bound to
+                        # trade_date <= today, above, now lets such trades through so their
+                        # TRADED basis gets replayed) — SETTLED must NOT be computed yet;
+                        # it's already queued in cis_settlement_queue for its own settle_date.
+                        # calculate_position would reject this anyway via
+                        # _derive_position_type's future-date check, but as a hard error
+                        # rather than the expected no-op this is.
+                        logger.debug(
+                            f"Skipping {basis} for trade {trade.get('trade_id')}: "
+                            f"pos_date={pos_date} > today={today_str} (future settlement, queued separately)"
                         )
                         continue
                     try:
