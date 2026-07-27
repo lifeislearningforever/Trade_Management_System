@@ -398,8 +398,13 @@ class PositionService:
         market_price_raw = self._get_market_price(security_id)
         market_price = Decimal(str(market_price_raw)) if market_price_raw else price
         market_value = new_qty * market_price
-        # Associates/subsidiaries are carried at cost (equity method) — no MTM
-        if self._is_equity_method_security(security_id):
+        # Associates/subsidiaries are carried at cost (equity method) — no MTM.
+        # Computed once and threaded through position_data as '_is_equity_method' so
+        # _save_position doesn't need its own query to gate unrealized_pnl_lc — see
+        # the '_reval_status' passthrough above for why a second, independent query
+        # for the same fact is a real bug class here, not just theoretical.
+        is_equity_method = self._is_equity_method_security(security_id)
+        if is_equity_method:
             unrealized_pnl = Decimal('0')
         else:
             unrealized_pnl = market_value - new_total_cost
@@ -557,6 +562,8 @@ class PositionService:
             # answer silently overwrote this function's correct NON-REVAL
             # cost_lc with a REVAL (market-rate) recomputation.
             '_reval_status': reval_status,
+            '_is_equity_method': is_equity_method,
+            '_expect_prior_version': current is not None,
         }
 
         # Save to cis_trade_position
@@ -641,6 +648,11 @@ class PositionService:
             security_currency and portfolio_currency and security_currency != portfolio_currency
         )
         reval_status = self._get_portfolio_revaluation_status(portfolio_id)
+        # Associates/subsidiaries are carried at cost (equity method) — no MTM.
+        # Computed once here (not per-branch) and threaded through position_data as
+        # '_is_equity_method' so _save_position doesn't need its own query to gate
+        # unrealized_pnl_lc.
+        is_equity_method = self._is_equity_method_security(security_id)
 
         _effective_sell_lc = (
             Decimal(str(gross_amount_lc)) if gross_amount_lc and is_cross_currency else None
@@ -742,6 +754,8 @@ class PositionService:
                 'position_type': position_type or 'INT',
                 'position_basis': position_basis,
                 '_reval_status': reval_status,
+                '_is_equity_method': is_equity_method,
+                '_expect_prior_version': current is not None,
             }
             logger.info(f"Position {position_id} fully closed. Total realized P&L: {new_realized_pnl}, LC: {new_realized_pnl_lc}")
         else:
@@ -754,7 +768,7 @@ class PositionService:
             market_value = new_qty * market_price
             market_value_lc = market_value * fx_rate  # Calculate market_value_lc
             # Associates/subsidiaries are carried at cost (equity method) — no MTM
-            if self._is_equity_method_security(security_id):
+            if is_equity_method:
                 unrealized_pnl = Decimal('0')
             else:
                 unrealized_pnl = market_value - new_total_cost
@@ -808,6 +822,8 @@ class PositionService:
                 'position_type': position_type or current.get('position_type') or 'INT',
                 'position_basis': position_basis,
                 '_reval_status': reval_status,
+                '_is_equity_method': is_equity_method,
+                '_expect_prior_version': current is not None,
             }
 
         # Save to cis_trade_position
@@ -995,7 +1011,10 @@ class PositionService:
             # Step 1: Mark existing versions for this date as is_latest=false
             # This is done via UPSERT with the same version_id but is_latest=false
             position_basis = position_data.get('position_basis', 'TRADED')
-            self._mark_old_versions_not_latest(portfolio_id, security_id, position_date, position_basis)
+            self._mark_old_versions_not_latest(
+                portfolio_id, security_id, position_date, position_basis,
+                expect_prior_version=bool(position_data.get('_expect_prior_version'))
+            )
 
             # Get FX rate for multi-currency calculations
             # Use strict=True for cross-currency positions to ensure accurate AVP
@@ -1042,6 +1061,18 @@ class PositionService:
                 self._get_portfolio_revaluation_status(portfolio_id)
             logger.debug(f"Portfolio {portfolio_id} revaluation_status: {revaluation_status}")
 
+            # Equity-method securities (ASSOC/SUBSI) are carried at cost — no MTM.
+            # _process_buy/_process_sell already zero out unrealized_pnl_fc for these
+            # via _is_equity_method_security() and thread the answer through as
+            # '_is_equity_method' (same passthrough pattern as '_reval_status' above,
+            # for the same reason: a second independent query here could disagree).
+            # Without this gate, unrealized_pnl_lc below is computed fresh from
+            # market_value_lc regardless of investment type, so it comes out non-zero
+            # for equity-method securities even though unrealized_pnl_fc is correctly 0.
+            is_equity_method = position_data.get('_is_equity_method')
+            if is_equity_method is None:
+                is_equity_method = self._is_equity_method_security(security_id)
+
             # LC calculations based on revaluation_status
             # fx_rate = security_currency -> portfolio_currency (e.g., USD/SGD = 1.35)
             if revaluation_status == 'NON-REVALUED':
@@ -1070,7 +1101,9 @@ class PositionService:
                 market_value_lc = market_value * fx_rate if fx_rate else market_value
 
                 # Unrealized P&L LC = market_value_lc - total_cost_lc
-                unrealized_pnl_lc = market_value_lc - total_cost_lc
+                # (0 for equity-method securities — carried at cost, no MTM, mirrors
+                # unrealized_pnl_fc which _process_buy/_process_sell already zeroed)
+                unrealized_pnl_lc = 0.0 if is_equity_method else market_value_lc - total_cost_lc
 
                 # Override fx_rate stored in cis_trade_position with the implied rate
                 # derived from LC cost so carry-forward rows inherit the correct rate.
@@ -1093,7 +1126,8 @@ class PositionService:
                     total_cost_lc = total_cost * fx_rate
                     realized_pnl_lc = realized_pnl * fx_rate
                     market_value_lc = market_value * fx_rate
-                    unrealized_pnl_lc = market_value_lc - total_cost_lc
+                    # 0 for equity-method securities — carried at cost, no MTM.
+                    unrealized_pnl_lc = 0.0 if is_equity_method else market_value_lc - total_cost_lc
                 else:
                     average_cost_lc = average_cost
                     total_cost_lc = total_cost
@@ -1416,7 +1450,8 @@ class PositionService:
         portfolio_id: str,
         security_id: str,
         position_date: str,
-        position_basis: str = 'TRADED'
+        position_basis: str = 'TRADED',
+        expect_prior_version: bool = False
     ) -> bool:
         """
         Mark existing versions for a position_date+basis as is_latest=false.
@@ -1427,6 +1462,18 @@ class PositionService:
         Note: Kudu doesn't support UPDATE with complex WHERE, so we need to:
         1. Query existing versions for this date+basis
         2. Re-insert each with is_latest=false
+
+        expect_prior_version: True when the caller already confirmed (moments earlier,
+        in the same calculate_position() call) that a position row exists for this
+        date+basis — e.g. it was read back as `current` before this trade was applied.
+        If the SELECT below comes back empty despite that, it's very likely a stale
+        read on a different pooled connection (Kudu/Impala doesn't guarantee
+        read-your-writes across connections — the same class of issue already worked
+        around with a sleep in position_queue_service._process_chain_recalculation),
+        not evidence the row doesn't exist. One short retry resolves it without
+        adding latency to the common cases (truly-fresh positions correctly find
+        nothing on the first try and never retry; existing positions usually find
+        the row on the first try too).
         """
         try:
             query = f"""
@@ -1453,6 +1500,19 @@ class PositionService:
             """
 
             existing = impala_manager.execute_query(query, database=self.DATABASE)
+
+            if not existing and expect_prior_version:
+                # Caller confirmed a row should exist — this is very likely a stale
+                # read on a different pooled connection, not a genuine absence.
+                # Retry once after a short delay before trusting the empty result.
+                logger.warning(
+                    f"_mark_old_versions_not_latest found no rows for "
+                    f"{portfolio_id}/{security_id} {position_basis}/{position_date} "
+                    f"despite expect_prior_version=True — retrying once (suspected "
+                    f"stale read on pooled connection)"
+                )
+                time.sleep(1)
+                existing = impala_manager.execute_query(query, database=self.DATABASE)
 
             if not existing:
                 # No existing versions to update

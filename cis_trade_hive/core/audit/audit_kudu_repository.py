@@ -192,7 +192,6 @@ class AuditLogKuduRepository:
                 'audit_date': audit_date
             }
 
-            # Log to Kudu (placeholder for now)
             success = ImpalaAuditConnection.insert_audit_log(
                 AuditLogKuduRepository.GENERAL_AUDIT_TABLE,
                 audit_data
@@ -204,7 +203,7 @@ class AuditLogKuduRepository:
                 f"{f'#{entity_id}' if entity_id else ''} - {action_description}"
             )
 
-            return True  # Return True even if Kudu write is not implemented
+            return success
 
         except Exception as e:
             logger.error(f"Error creating audit log: {str(e)}")
@@ -383,7 +382,7 @@ class AuditLogKuduRepository:
             }
 
             # Log to Kudu UDF audit table
-            ImpalaAuditConnection.insert_audit_log(
+            success = ImpalaAuditConnection.insert_audit_log(
                 AuditLogKuduRepository.UDF_AUDIT_TABLE,
                 audit_data
             )
@@ -392,7 +391,7 @@ class AuditLogKuduRepository:
                 f"UDF AUDIT: [{status}] {username} - {action_type} UDF '{field_name}' ({label}) for {entity_type}"
             )
 
-            return True
+            return success
 
         except Exception as e:
             logger.error(f"Error creating UDF audit log: {str(e)}")
@@ -462,7 +461,7 @@ class AuditLogKuduRepository:
             }
 
             # Log to Kudu UDF value audit table
-            ImpalaAuditConnection.insert_audit_log(
+            success = ImpalaAuditConnection.insert_audit_log(
                 AuditLogKuduRepository.UDF_VALUE_AUDIT_TABLE,
                 audit_data
             )
@@ -472,7 +471,7 @@ class AuditLogKuduRepository:
                 f"'{new_value}' for {entity_type}#{entity_id} (was: '{old_value}')"
             )
 
-            return True
+            return success
 
         except Exception as e:
             logger.error(f"Error creating UDF value audit log: {str(e)}")

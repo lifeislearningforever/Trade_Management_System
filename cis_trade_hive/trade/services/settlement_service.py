@@ -158,6 +158,27 @@ class SettlementService:
                 # For TRADED basis: position_date = trade_date
                 # For SETTLED basis: position_date = settle_date
                 pos_date = trade_date if basis == 'TRADED' else settle_date
+                pos_dt = trade_dt if basis == 'TRADED' else settle_dt
+
+                # Settlement type must be evaluated per-basis using THIS basis's own
+                # effective date, not the settle_date-based `settlement_type` computed
+                # above. Otherwise a trade with a backdated trade_date but settle_date
+                # == today (a very common shape: backdated trade settling today) gets
+                # its TRADED basis misclassified as T+0 too, since T+0/FUTURE/BACKDATED
+                # was decided once from settle_dt alone. A T+0-classified item only
+                # gets chain-recalc treatment if a PRIOR backdated position already
+                # exists (see the T+0 branch below) — for a brand-new position there
+                # is nothing to find, so it silently runs as a single-day calculation
+                # and never backfills the intermediate business days between the
+                # backdated trade_date and today.
+                if pos_dt is None:
+                    basis_settlement_type = settlement_type
+                elif pos_dt == today:
+                    basis_settlement_type = 'T+0'
+                elif pos_dt > today:
+                    basis_settlement_type = 'FUTURE'
+                else:
+                    basis_settlement_type = 'BACKDATED'
 
                 kwargs = dict(
                     trade_id=trade_id,
@@ -178,7 +199,7 @@ class SettlementService:
                     sub_custodian=sub_custodian,
                     position_basis=basis,
                     position_date=pos_date,
-                    settlement_type=settlement_type,
+                    settlement_type=basis_settlement_type,
                     trade_lc=trade_lc,
                     gross_amount_lc=gross_amount_lc,
                 )
@@ -205,14 +226,19 @@ class SettlementService:
                         logger.info(f"Cleared stale cis_trade_position for trade_id={trade_id} basis={basis}")
                     except Exception as _de:
                         logger.warning(f"Could not clear stale position for trade {trade_id}: {_de}")
-                    if settle_dt == today or basis == 'TRADED':
+                    # Use basis_settlement_type (per-basis effective date), not the raw
+                    # settle_dt/`basis == 'TRADED'` shortcut — the latter sent every
+                    # TRADED basis through immediate settlement even when trade_date
+                    # was backdated, skipping chain recalculation for sync-mode callers
+                    # (EOD job / explicit re-settle) just like the async path did.
+                    if basis_settlement_type == 'T+0':
                         success, msg, result = self._process_immediate_settlement(
                             position_date=pos_date, **{
                                 k: v for k, v in kwargs.items()
                                 if k not in ('settle_date', 'settlement_type', 'position_date')
                             }
                         )
-                    elif settle_dt > today:
+                    elif basis_settlement_type == 'FUTURE':
                         success, msg, result = self._queue_for_settlement(**kwargs)
                     else:
                         success, msg, result = self._process_backdated_settlement(**kwargs)
@@ -976,6 +1002,21 @@ class SettlementService:
                         logger.warning(
                             f"Skipping {basis} for trade {trade.get('trade_id')}: "
                             f"pos_date empty (trade_date={trade_date!r}, settle_date={settle_date!r})"
+                        )
+                        continue
+                    if pos_date < from_date:
+                        # This trade qualified for the candidate list via the OTHER
+                        # basis's date (the query above is an OR across trade_date/
+                        # settle_date so it can serve both bases), but for THIS basis
+                        # its own effective date is before from_date — meaning it's
+                        # already reflected in this basis's seed position (seeded
+                        # above from the last position_date < from_date row). Replaying
+                        # it here would double-count it on top of that seed. This was
+                        # the root cause of amend/cancel operations inflating an
+                        # earlier date's quantity that the operation never touched.
+                        logger.debug(
+                            f"Skipping {basis} for trade {trade.get('trade_id')}: "
+                            f"pos_date={pos_date} < from_date={from_date} (already in seed)"
                         )
                         continue
                     try:
