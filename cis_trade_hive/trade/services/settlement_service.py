@@ -993,6 +993,13 @@ class SettlementService:
                         f"avg={seed_rows[0].get('average_cost_fc')} before {from_date}"
                     )
 
+            # isin/security_name aren't stored on cis_trade — they're only ever
+            # resolved from cis_security at trade-entry time and threaded through
+            # as a kwarg. This replay loop reconstructs positions long after entry
+            # time, so it must re-resolve them itself instead of passing None
+            # (which is what silently drops isin from every chain-recalc'd row).
+            sec_isin, sec_name = self._get_security_isin_and_name(security_id)
+
             for trade in trades:
                 settle_date = trade.get('settle_date') or ''
                 trade_date = trade.get('trade_date') or settle_date
@@ -1042,6 +1049,8 @@ class SettlementService:
                             gross_amount_lc=gross_amount_lc,
                             security_currency=trade.get('security_currency'),
                             portfolio_currency=trade.get('portfolio_currency'),
+                            isin=sec_isin,
+                            security_name=sec_name,
                         )
                         if success:
                             counters['recalculated'] += 1
@@ -1158,6 +1167,10 @@ class SettlementService:
 
             biz_dates = sorted(set(biz_dates_from_table) | set(calendar_weekdays))
 
+            # cis_trade_position doesn't carry isin, so the carried-forward `source`
+            # row never has it to copy — must be resolved fresh, same as chain recalc.
+            cf_isin, _cf_sec_name = self._get_security_isin_and_name(security_id)
+
             missing_from_table = set(calendar_weekdays) - set(biz_dates_from_table)
             if not biz_dates_from_table:
                 logger.info(
@@ -1263,6 +1276,7 @@ class SettlementService:
                             self._write_carry_forward_position(
                                 last_known, basis, biz_date,
                                 portfolio_id, security_id, updated_by,
+                                isin=cf_isin,
                             )
                             counters['recalculated'] += 1
                             # Update last_known so the next gap day chains correctly.
@@ -1289,6 +1303,7 @@ class SettlementService:
         portfolio_id: str,
         security_id: str,
         updated_by: str,
+        isin: str = None,
     ) -> None:
         """
         Write a single carry-forward position row for `position_date`, copying
@@ -1387,6 +1402,7 @@ class SettlementService:
             source=source, basis=basis, position_date=position_date,
             portfolio_id=portfolio_id, security_id=security_id,
             position_id=position_id, updated_by=updated_by, timestamp=timestamp,
+            isin=isin,
         )
 
     def _sync_carry_forward_to_cis_position(
@@ -1399,6 +1415,7 @@ class SettlementService:
         position_id: int,
         updated_by: str,
         timestamp: str,
+        isin: str = None,
     ) -> None:
         """
         Sync a carry-forward position to cis_position (gold/master table).
@@ -1416,17 +1433,30 @@ class SettlementService:
             except (ValueError, TypeError):
                 return 'NULL'
 
+        # net_book_value = cost + unrealized_pnl - provision — same formula
+        # _process_buy/_process_sell use. cis_trade_position (source of `source`)
+        # has no net_book_value column of its own, so it must be recomputed here
+        # rather than copied — this UPSERT previously omitted these two columns
+        # entirely, which silently defaulted every carry-forward row's NBV to 0
+        # in cis_position regardless of its actual cost/market value.
+        nbv_fc = (float(source.get('total_cost_fc') or 0)
+                  + float(source.get('unrealized_pnl_fc') or 0)
+                  - float(source.get('provision_fc') or 0))
+        nbv_lc = (float(source.get('total_cost_lc') or 0)
+                  + float(source.get('unrealized_pnl_lc') or 0)
+                  - float(source.get('provision_lc') or 0))
+
         try:
             query = f"""
             UPSERT INTO {self.DATABASE}.cis_position
             (position_id, version_id, portfolio, security_label, position_basis,
              position_date, src_system, processing_date, quantity,
-             average_cost_fc, cost_fc, market_value_fc, unrealized_pnl_fc,
-             average_cost_lc, cost_lc, market_value_lc, unrealized_pnl_lc,
+             average_cost_fc, cost_fc, market_value_fc, net_book_value_fc, unrealized_pnl_fc,
+             average_cost_lc, cost_lc, market_value_lc, net_book_value_lc, unrealized_pnl_lc,
              provision_fc, provision_lc, dividend_fc, dividend_lc,
              realized_pnl_fc, realized_pnl_lc,
              uncall_fc, uncall_lc, pipeline_fc, pipeline_lc,
-             source_table, processing_timestamp, position_type, is_latest)
+             isin, source_table, processing_timestamp, position_type, is_latest)
             VALUES (
              {position_id},
              {self._generate_id()},
@@ -1438,14 +1468,15 @@ class SettlementService:
              '{position_date}',
              {_f(source.get('quantity'))},
              {_f(source.get('average_cost_fc'))}, {_f(source.get('total_cost_fc'))},
-             {_f(source.get('market_value_fc'))}, {_f(source.get('unrealized_pnl_fc'))},
+             {_f(source.get('market_value_fc'))}, {_f(nbv_fc)}, {_f(source.get('unrealized_pnl_fc'))},
              {_f(source.get('average_cost_lc'))}, {_f(source.get('total_cost_lc'))},
-             {_f(source.get('market_value_lc'))}, {_f(source.get('unrealized_pnl_lc'))},
+             {_f(source.get('market_value_lc'))}, {_f(nbv_lc)}, {_f(source.get('unrealized_pnl_lc'))},
              {_f(source.get('provision_fc'))}, {_f(source.get('provision_lc'))},
              {_f(source.get('dividend_fc'))}, {_f(source.get('dividend_lc'))},
              {_f(source.get('realized_pnl_fc'))}, {_f(source.get('realized_pnl_lc'))},
              {_f(source.get('uncall_fc'))}, {_f(source.get('uncall_lc'))},
              {_f(source.get('pipeline_fc'))}, {_f(source.get('pipeline_lc'))},
+             {f"'{self._escape(isin)}'" if isin else 'NULL'},
              'cis_trade_position_carry_forward',
              '{timestamp}',
              '{position_type}',
@@ -1580,6 +1611,32 @@ class SettlementService:
     def _generate_id(self) -> int:
         """Generate unique ID."""
         return int(datetime.now().timestamp() * 1000) + (uuid.uuid4().int % 1000)
+
+    def _get_security_isin_and_name(self, security_id: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Fetch (isin, security_name) for a security from cis_security.
+
+        cis_trade doesn't store isin — it's only ever resolved from cis_security
+        at trade-entry time and threaded through as a calculate_position() kwarg.
+        Chain recalc and carry-forward both replay/derive positions long after
+        entry time and have no other way to get it, so they need this same
+        lookup rather than silently passing isin=None.
+        """
+        try:
+            rows = impala_manager.execute_query(
+                f"""
+                SELECT isin, security_name
+                FROM {self.DATABASE}.cis_security
+                WHERE security_name = '{self._escape(security_id)}'
+                LIMIT 1
+                """,
+                database=self.DATABASE,
+            )
+            if rows:
+                return rows[0].get('isin'), rows[0].get('security_name')
+        except Exception as e:
+            logger.warning(f"Could not fetch isin/security_name for {security_id}: {e}")
+        return None, None
 
     def _escape(self, value: str) -> str:
         """Escape string value for SQL."""
