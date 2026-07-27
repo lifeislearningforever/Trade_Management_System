@@ -840,6 +840,12 @@ class PositionQueueService:
         Falls back to calendar days if the table is unavailable.
         """
         try:
+            # contextual_today is stored as YYYYMMDD (no dashes) — see
+            # system_date_repository.py's docstring ("business date T, YYYYMMDD").
+            # from_date/to_date arrive as dashed YYYY-MM-DD, so bounds must be
+            # converted to YYYYMMDD too, or the comparison never matches a real row.
+            from_date_key = from_date.replace('-', '')
+            to_date_key = to_date.replace('-', '')
             query = f"""
             SELECT DISTINCT CAST(contextual_today AS STRING) AS biz_date
             FROM gmp_cis.gmp_cis_sta_dly_alldatesinfo
@@ -847,13 +853,21 @@ class PositionQueueService:
               AND sub_system = 'cis'
               AND data_frq   = 'dly'
               AND record_type = 'D'
-              AND CAST(contextual_today AS STRING) > '{from_date}'
-              AND CAST(contextual_today AS STRING) <= '{to_date}'
+              AND CAST(contextual_today AS STRING) > '{from_date_key}'
+              AND CAST(contextual_today AS STRING) <= '{to_date_key}'
             ORDER BY biz_date ASC
             """
             rows = impala_manager.execute_query(query, database='gmp_cis')
             if rows:
-                return [r['biz_date'] for r in rows if r.get('biz_date')]
+                result = []
+                for r in rows:
+                    raw = str(r.get('biz_date') or '')
+                    if len(raw) == 8 and raw.isdigit():
+                        result.append(f"{raw[:4]}-{raw[4:6]}-{raw[6:]}")
+                    elif raw:
+                        result.append(raw[:10])
+                if result:
+                    return result
         except Exception as e:
             logger.warning(f"Could not fetch business dates from alldatesinfo: {e}. Falling back to calendar days.")
 

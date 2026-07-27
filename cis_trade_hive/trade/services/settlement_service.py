@@ -1105,7 +1105,15 @@ class SettlementService:
             # gap date in between is never backfilled. This was found by comparing
             # against position_queue_service._get_business_dates_between, which already
             # has this exact fallback for the same query shape.
-            biz_dates = []
+            # contextual_today is stored as YYYYMMDD (no dashes) — see
+            # system_date_repository.py's docstring ("business date T, YYYYMMDD").
+            # Comparing it against dashed YYYY-MM-DD literals never matches any
+            # real row here, which is the actual reason gap days were being missed
+            # — not sparse table coverage. Convert both bounds to YYYYMMDD for the
+            # query, then normalize results back to YYYY-MM-DD to match position_date.
+            from_date_key = from_date.replace('-', '')
+            to_date_key = to_date.replace('-', '')
+            biz_dates_from_table = []
             try:
                 biz_day_rows = impala_manager.execute_query(
                     f"""
@@ -1115,28 +1123,53 @@ class SettlementService:
                       AND sub_system  = 'cis'
                       AND data_frq    = 'dly'
                       AND record_type = 'D'
-                      AND contextual_today >= '{from_date}'
-                      AND contextual_today <= '{to_date}'
+                      AND contextual_today >= '{from_date_key}'
+                      AND contextual_today <= '{to_date_key}'
                     ORDER BY contextual_today ASC
                     """,
                     database=self.DATABASE,
                 )
                 if biz_day_rows:
-                    biz_dates = [str(r['biz_date'])[:10] for r in biz_day_rows if r.get('biz_date')]
+                    for r in biz_day_rows:
+                        raw = str(r.get('biz_date') or '')
+                        if len(raw) == 8 and raw.isdigit():
+                            biz_dates_from_table.append(f"{raw[:4]}-{raw[4:6]}-{raw[6:]}")
+                        elif raw:
+                            biz_dates_from_table.append(raw[:10])
             except Exception as e:
                 logger.warning(f"Could not fetch business dates from alldatesinfo: {e}. Falling back to calendar days.")
 
-            if not biz_dates:
+            # Always compute the calendar-weekday range too, and union it with whatever
+            # alldatesinfo returned. alldatesinfo has been observed to be only PARTIALLY
+            # populated for some ranges — e.g. it may have rows for the trade date and
+            # settle date but be silently missing a weekday in between. Falling back to
+            # calendar days only when the table returns ZERO rows (the original fix)
+            # misses exactly that gap: biz_dates isn't empty, it's just missing one day,
+            # so no carry-forward row ever gets written for it. Union guarantees every
+            # weekday in [from_date, to_date] is considered, regardless of how sparse
+            # alldatesinfo's coverage of that range is.
+            cur = date.fromisoformat(from_date)
+            end = date.fromisoformat(to_date)
+            calendar_weekdays = []
+            while cur <= end:
+                if cur.weekday() < 5:  # Mon-Fri
+                    calendar_weekdays.append(cur.isoformat())
+                cur += timedelta(days=1)
+
+            biz_dates = sorted(set(biz_dates_from_table) | set(calendar_weekdays))
+
+            missing_from_table = set(calendar_weekdays) - set(biz_dates_from_table)
+            if not biz_dates_from_table:
                 logger.info(
                     "carry-forward: no business days found in alldatesinfo for "
-                    f"{from_date}..{to_date} — falling back to calendar days (excl. weekends)"
+                    f"{from_date}..{to_date} — using calendar days (excl. weekends)"
                 )
-                cur = date.fromisoformat(from_date)
-                end = date.fromisoformat(to_date)
-                while cur <= end:
-                    if cur.weekday() < 5:  # Mon-Fri
-                        biz_dates.append(cur.isoformat())
-                    cur += timedelta(days=1)
+            elif missing_from_table:
+                logger.info(
+                    f"carry-forward: alldatesinfo missing {len(missing_from_table)} "
+                    f"weekday(s) in {from_date}..{to_date} ({sorted(missing_from_table)}) — "
+                    "filled via calendar fallback"
+                )
 
             # 2. Fetch all position_dates that already have is_latest=true in this range.
             existing_rows = impala_manager.execute_query(
