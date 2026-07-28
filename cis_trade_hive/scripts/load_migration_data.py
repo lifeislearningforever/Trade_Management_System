@@ -1494,7 +1494,12 @@ def load_cash_flow(rows: List[Dict], status: str, dry_run: bool, processing_date
 CA_ALIASES: Dict[str, str] = {
     'ca_number':                 'ca_number',
     'number':                    'ca_number',
-    'ca_id':                     'ca_number',
+    # ca_id is the source system's own reference — kept distinct from
+    # ca_number (confirmed via a real migration CSV that carries both as
+    # separate, independently-populated columns). It isn't written anywhere
+    # today (corporate_action_repository.insert() generates its own internal
+    # ca_id), so it's mapped through for visibility/logging only.
+    'ca_id':                     'source_ca_id',
 
     'ca_type':                   'ca_type',
     'type':                      'ca_type',
@@ -1565,13 +1570,15 @@ def load_corporate_action(
             if db_col:
                 mapped[db_col] = raw_val
 
+        # ca_number: use CSV value if present, otherwise auto-generate — same
+        # fallback load_trade uses for a missing trade_id. Confirmed via a
+        # real migration CSV that ca_number (and ca_id) can arrive blank for
+        # every row, so skipping on missing ca_number silently dropped the
+        # entire file.
         ca_number = str(mapped.get('ca_number', '') or '').strip()
         if not ca_number:
-            msg = f"Row {i}: missing ca_number — skipped"
-            logger.warning(msg)
-            errors.append(msg)
-            fail += 1
-            continue
+            ca_number = f"CIS-CA-{_timestamp_ms() + i}"
+            logger.debug("Row %d: ca_number not in CSV, auto-generated %s", i, ca_number)
 
         security_name = str(mapped.get('security_name', '') or '').strip()
         if not security_name:
