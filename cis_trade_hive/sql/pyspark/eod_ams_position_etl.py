@@ -761,10 +761,18 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
     print("[Step 3] Security ISIN match complete")
 
     # ---- Step 4: security fallback matching (short_name / ticker / desc_prefix) ----
-    # Three fallback tiers tried in order when ISIN match fails (ISIN_NO_MATCH or NO_ISIN):
+    # Priority order (applies to every row, regardless of source):
     #
-    #   Tier 1 — short_name:   cis_security.security_name = security_short_name
-    #             (GMP-specific: m_security_display_label e.g. "775 HK")
+    #   Tier 1 — short_name:   cis_security.security_name = security_short_name.
+    #             Checked FIRST, independent of whether ISIN already matched —
+    #             if the upload row carries a short_name and it exists in
+    #             cis_security, that match wins outright.
+    #             (GMP-specific data example: m_security_display_label e.g. "775 HK",
+    #             but this tier applies to any source, not just GMP.)
+    #
+    #   Tier 1.5 — ISIN match from Step 3 (b.matched_security_id) — only used
+    #             when short_name didn't match (absent, or no cis_security row
+    #             with that name).
     #
     #   Tier 2 — ticker:       cis_security.ticker = upload ticker
     #             (AMS daily-limit rows always carry a ticker, rarely an ISIN)
@@ -801,7 +809,8 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                 ) AS desc_prefix
             FROM pos_stage_3_security s3
         ),
-        -- Tier 1: short_name match (GMP)
+        -- Tier 1: short_name match — tried regardless of ISIN status (no
+        -- b.match_type gate here), since short_name now takes priority over ISIN.
         tier1 AS (
             SELECT
                 b.row_id,
@@ -814,8 +823,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                 ROW_NUMBER() OVER (PARTITION BY b.row_id ORDER BY sn.security_id) AS rn
             FROM base_with_prefix b
             JOIN {DB}.cis_security sn
-                ON  b.match_type IN ('ISIN_NO_MATCH', 'NO_ISIN')
-                AND b.security_short_name IS NOT NULL
+                ON  b.security_short_name IS NOT NULL
                 AND TRIM(b.security_short_name) != ''
                 AND sn.is_active = true
                 AND UPPER(TRIM(sn.security_name)) = UPPER(TRIM(b.security_short_name))
@@ -876,54 +884,56 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             b.upload_exchange,
             b.portfolio_status,
             b.match_type AS isin_match_type,
-            -- Cascade: ISIN → short_name → ticker → desc_prefix
+            -- Cascade: short_name → ISIN → ticker → desc_prefix.
+            -- t1 (short_name) is listed first in every COALESCE so it wins
+            -- outright whenever it matches, even if ISIN also matched.
             COALESCE(
-                b.matched_security_id,
                 CASE WHEN t1.rn = 1 THEN t1.security_id   ELSE NULL END,
+                b.matched_security_id,
                 CASE WHEN t2.rn = 1 THEN t2.security_id   ELSE NULL END,
                 CASE WHEN t3.rn = 1 THEN t3.security_id   ELSE NULL END
             ) AS final_security_id,
             COALESCE(
-                b.matched_security_name,
                 CASE WHEN t1.rn = 1 THEN t1.security_name ELSE NULL END,
+                b.matched_security_name,
                 CASE WHEN t2.rn = 1 THEN t2.security_name ELSE NULL END,
                 CASE WHEN t3.rn = 1 THEN t3.security_name ELSE NULL END
             ) AS final_security_name,
             COALESCE(
-                b.matched_isin,
                 CASE WHEN t1.rn = 1 THEN t1.isin          ELSE NULL END,
+                b.matched_isin,
                 CASE WHEN t2.rn = 1 THEN t2.isin          ELSE NULL END,
                 CASE WHEN t3.rn = 1 THEN t3.isin          ELSE NULL END
             ) AS final_isin,
             COALESCE(
-                b.matched_exchange,
                 CASE WHEN t1.rn = 1 THEN t1.exchange_code ELSE NULL END,
+                b.matched_exchange,
                 CASE WHEN t2.rn = 1 THEN t2.exchange_code ELSE NULL END,
                 CASE WHEN t3.rn = 1 THEN t3.exchange_code ELSE NULL END
             ) AS final_exchange,
             COALESCE(
-                b.matched_country,
                 CASE WHEN t1.rn = 1 THEN t1.country_of_exchange ELSE NULL END,
+                b.matched_country,
                 CASE WHEN t2.rn = 1 THEN t2.country_of_exchange ELSE NULL END,
                 CASE WHEN t3.rn = 1 THEN t3.country_of_exchange ELSE NULL END
             ) AS final_country,
             COALESCE(
-                b.matched_currency,
                 CASE WHEN t1.rn = 1 THEN t1.currency_code ELSE NULL END,
+                b.matched_currency,
                 CASE WHEN t2.rn = 1 THEN t2.currency_code ELSE NULL END,
                 CASE WHEN t3.rn = 1 THEN t3.currency_code ELSE NULL END
             ) AS final_currency,
             CASE
-                WHEN b.match_type = 'ISIN_MATCH'           THEN 'ISIN_ONLY'
                 WHEN t1.rn = 1 AND t1.security_id IS NOT NULL THEN 'SHORT_NAME'
+                WHEN b.match_type = 'ISIN_MATCH'           THEN 'ISIN_ONLY'
                 WHEN t2.rn = 1 AND t2.security_id IS NOT NULL THEN 'TICKER'
                 WHEN t3.rn = 1 AND t3.security_id IS NOT NULL THEN 'DESC_PREFIX'
                 ELSE                                             'NONE'
             END AS match_method,
             CASE
+                WHEN t1.rn = 1 AND t1.security_id IS NOT NULL          THEN 'SHORT_NAME_MATCH'
                 WHEN b.match_type = 'FAIL: Multiple securities found'  THEN 'FAIL: Multiple securities found'
                 WHEN b.match_type = 'ISIN_MATCH'                       THEN 'ISIN_MATCH'
-                WHEN t1.rn = 1 AND t1.security_id IS NOT NULL          THEN 'SHORT_NAME_MATCH'
                 WHEN t2.rn = 1 AND t2.security_id IS NOT NULL          THEN 'TICKER_MATCH'
                 WHEN t3.rn = 1 AND t3.security_id IS NOT NULL          THEN 'DESC_PREFIX_MATCH'
                 ELSE                                                         'NOT_FOUND: Create new security'
