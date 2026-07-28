@@ -13,8 +13,13 @@ Logic per cash_flow_type (ALL types accumulate — SA confirmed 2026-06-09):
   DIVIDEND            → accumulate dividend_fc / dividend_lc
   CASH_DIVIDEND       → accumulate dividend_fc / dividend_lc
   INCOME_DISTRIBUTION → accumulate realized_pnl_fc / realized_pnl_lc
-  CAPITAL_DISTRIBUTION→ AVP reduction: avp_new = avp_old - (amount_fc / qty)
-  RETURN_OF_CAPITAL   → AVP reduction: avp_new = avp_old - (amount_fc / qty)
+  CAPITAL_DISTRIBUTION→ AVP reduction: avp_fc_new = avp_fc_old - (amount_fc / qty).
+                        avp_lc_new: NON-REVALUED uses the cash flow's own
+                        amount_lc the same way; REVALUED instead re-derives
+                        avp_lc_new = avp_fc_new x current FX rate.
+                        unrealized_pnl_fc/lc (and therefore net_book_value)
+                        are recalculated against the new cost basis.
+  RETURN_OF_CAPITAL   → same as CAPITAL_DISTRIBUTION (see above)
   OTHER               → skip (log warning)
 
 send_receive sign convention (global):
@@ -572,9 +577,26 @@ class Command(BaseCommand):
         pos_src: str = 'CIS',
     ) -> Tuple[bool, str]:
         """
-        AVP reduction: avp_new = avp_old - (amount_fc / qty)
-        Total cost recalculated from new AVP.
+        AVP reduction: avp_fc_new = avp_fc_old - (amount_fc / qty) -- always,
+        driven directly by the cash flow's own FC amount.
+
+        avp_lc_new:
+          NON-REVALUED: avp_lc_old - (amount_lc / qty) -- trusts the cash
+            flow's own LC amount, same as FC.
+          REVALUED: avp_fc_new x current FX rate -- re-derived fresh rather
+            than reduced by the cash flow's raw LC amount, matching the AVP
+            engine's general REVAL rule (cost_lc always mirrors cost_fc x
+            current FX rate; see position_service._save_position).
+
+        unrealized_pnl_fc/lc are recalculated against the new (reduced) total
+        cost -- previously left stale from the prior position version, which
+        understated the unrealized gain a capital return actually produces.
+        net_book_value_fc/lc then follows automatically in
+        _write_new_position_version's own nbv formula, since it reads
+        unrealized_pnl_fc/lc through the same overrides dict.
         """
+        from trade.services.position_service import position_service
+
         qty = Decimal(str(position.get('quantity', 0) or 0))
         if qty <= 0:
             return False, f'{cf_type}: quantity is 0, cannot reduce AVP'
@@ -583,17 +605,33 @@ class Command(BaseCommand):
         old_avp_lc = Decimal(str(position.get('average_cost_lc', 0) or 0))
 
         per_share_fc = round(amount_fc / qty, AVP_PRECISION)
-        per_share_lc = round(amount_lc / qty, AVP_PRECISION)
-
         new_avp_fc = max(Decimal('0'), round(old_avp_fc - per_share_fc, AVP_PRECISION))
-        new_avp_lc = max(Decimal('0'), round(old_avp_lc - per_share_lc, AVP_PRECISION))
         new_total_cost_fc = round(new_avp_fc * qty, fc_dp)
-        new_total_cost_lc = round(new_avp_lc * qty, lc_dp)
+
+        reval_status = position_service._get_portfolio_revaluation_status(portfolio)
+        if reval_status == 'NON-REVALUED':
+            per_share_lc = round(amount_lc / qty, AVP_PRECISION)
+            new_avp_lc = max(Decimal('0'), round(old_avp_lc - per_share_lc, AVP_PRECISION))
+            new_total_cost_lc = round(new_avp_lc * qty, lc_dp)
+            fx_rate = None
+        else:
+            sec_ccy = self._get_security_currency(security)
+            port_ccy = self._get_portfolio_currency(portfolio)
+            fx_rate = position_service._get_fx_rate(sec_ccy, port_ccy, rate_date=position_date)
+            new_avp_lc = round(new_avp_fc * fx_rate, AVP_PRECISION)
+            new_total_cost_lc = round(new_total_cost_fc * fx_rate, lc_dp)
+
+        is_equity_method = position_service._is_equity_method_security(security)
+        market_value_fc = Decimal(str(position.get('market_value_fc', 0) or 0))
+        market_value_lc = Decimal(str(position.get('market_value_lc', 0) or 0))
+        new_unrealized_pnl_fc = Decimal('0') if is_equity_method else round(market_value_fc - new_total_cost_fc, fc_dp)
+        new_unrealized_pnl_lc = Decimal('0') if is_equity_method else round(market_value_lc - new_total_cost_lc, lc_dp)
 
         if dry_run:
             return True, (
-                f'[DRY RUN] {cf_type}: avp_fc {old_avp_fc} - {per_share_fc} = {new_avp_fc} | '
-                f'total_cost_fc → {new_total_cost_fc}'
+                f'[DRY RUN] {cf_type} ({reval_status}{f", fx={fx_rate}" if fx_rate else ""}): '
+                f'avp_fc {old_avp_fc} - {per_share_fc} = {new_avp_fc} | avp_lc {old_avp_lc} → {new_avp_lc} | '
+                f'unrealized_pnl_fc → {new_unrealized_pnl_fc} | unrealized_pnl_lc → {new_unrealized_pnl_lc}'
             )
 
         overrides = {
@@ -601,6 +639,8 @@ class Command(BaseCommand):
             'average_cost_lc': float(new_avp_lc),
             'total_cost_fc': float(new_total_cost_fc),
             'total_cost_lc': float(new_total_cost_lc),
+            'unrealized_pnl_fc': float(new_unrealized_pnl_fc),
+            'unrealized_pnl_lc': float(new_unrealized_pnl_lc),
         }
         success = self._write_new_position_version(
             position, portfolio, security, position_date, cf_type, overrides,
@@ -609,7 +649,7 @@ class Command(BaseCommand):
             fc_dp=fc_dp, lc_dp=lc_dp, pos_src=pos_src,
         )
         if success:
-            return True, f'{cf_type}: avp_fc {old_avp_fc} → {new_avp_fc}'
+            return True, f'{cf_type} ({reval_status}): avp_fc {old_avp_fc} → {new_avp_fc}, avp_lc {old_avp_lc} → {new_avp_lc}'
         return False, f'{cf_type}: failed to write position version'
 
     # =========================================================================
