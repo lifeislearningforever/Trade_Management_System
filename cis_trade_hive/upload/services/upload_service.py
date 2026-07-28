@@ -3650,7 +3650,7 @@ class UploadService:
                         ON  s.is_active = true
                         AND b.isin IS NOT NULL AND TRIM(b.isin) != ''
                         AND UPPER(TRIM(b.isin)) NOT IN ('NA', 'N/A', 'NIL', 'NONE', '-', 'N.A.', 'NAP')
-                        AND b.isin = s.isin
+                        AND UPPER(TRIM(CAST(b.isin AS STRING))) = UPPER(TRIM(CAST(s.isin AS STRING)))
                     LEFT JOIN lut_dedup lut
                         ON UPPER(TRIM(b.`exchange`)) = lut.exchange_name
                 ),
