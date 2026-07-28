@@ -1,14 +1,17 @@
 #!/usr/bin/env python
 """
-Migration Data Loader — cis_party, cis_party_cif, cis_security, cis_trade, cis_portfolio
+Migration Data Loader — cis_party, cis_party_cif, cis_security, cis_trade,
+cis_portfolio, cis_cash_flow, cis_corporate_actions
 Loads records from CSV files with src_system = 'CIS'.
 
 Usage:
-    python scripts/load_migration_data.py --table party      --file /path/to/party.csv
-    python scripts/load_migration_data.py --table party_cif  --file /path/to/party_cif.csv
-    python scripts/load_migration_data.py --table security   --file /path/to/security.csv
-    python scripts/load_migration_data.py --table trade      --file /path/to/trade.csv
-    python scripts/load_migration_data.py --table portfolio  --file /path/to/portfolio.csv
+    python scripts/load_migration_data.py --table party             --file /path/to/party.csv
+    python scripts/load_migration_data.py --table party_cif         --file /path/to/party_cif.csv
+    python scripts/load_migration_data.py --table security          --file /path/to/security.csv
+    python scripts/load_migration_data.py --table trade             --file /path/to/trade.csv
+    python scripts/load_migration_data.py --table portfolio         --file /path/to/portfolio.csv
+    python scripts/load_migration_data.py --table cash_flow         --file /path/to/cashflows.csv
+    python scripts/load_migration_data.py --table corporate_action  --file /path/to/corporate_actions.csv
 
     # Generic loader for any cis_*_lookup / cis_*_lut table — no per-table
     # Python needed, CSV header names map straight to column names:
@@ -1481,6 +1484,185 @@ def load_cash_flow(rows: List[Dict], status: str, dry_run: bool, processing_date
 
 
 # ---------------------------------------------------------------------------
+# cis_corporate_actions
+# ---------------------------------------------------------------------------
+# Mirrors reference_data/management/commands/sync_gmp_corporate_actions.py —
+# same target table (cis_corporate_actions), same ca_type normalisation
+# (GMP_CA_TYPE_MAP) and date/price parsing, reused directly from that module
+# rather than duplicated here, so the two stay in sync.
+
+CA_ALIASES: Dict[str, str] = {
+    'ca_number':                 'ca_number',
+    'number':                    'ca_number',
+    'ca_id':                     'ca_number',
+
+    'ca_type':                   'ca_type',
+    'type':                      'ca_type',
+
+    'security_name':             'security_name',
+    'security':                  'security_name',
+    'security_label':            'security_name',
+
+    'announcement_date':         'announcement_date',
+    'ex_date':                   'ex_date',
+    'record_date':               'record_date',
+    'payment_date':              'payment_date',
+    'pay_date':                  'payment_date',
+    'effective_date':            'effective_date',
+    'subscription_start_date':   'subscription_start_date',
+    'subscription_end_date':     'subscription_end_date',
+
+    'price':                     'price',
+    'rate':                      'price',
+
+    'currency':                  'currency',
+    'currency_code':             'currency',
+
+    'status':                    'status',
+    'is_deleted':                'is_deleted',
+}
+
+CA_DATE_FIELDS = (
+    'announcement_date', 'ex_date', 'record_date', 'payment_date',
+    'effective_date', 'subscription_start_date', 'subscription_end_date',
+)
+
+
+def load_corporate_action(
+    rows: List[Dict],
+    status: str,
+    dry_run: bool,
+    processing_date: str = '',
+    with_queue: bool = False,
+) -> Tuple[int, int, List[str]]:
+    """
+    Load corporate actions from CSV into cis_corporate_actions, same target
+    table and ca_type/date/price normalisation as sync_gmp_corporate_actions.py
+    (that command syncs from the GMP source table; this loads from a
+    migration CSV instead — both funnel through the same
+    corporate_action_repository.insert()).
+
+    with_queue: if True, also queue each inserted CA for cash flow processing
+    via ca_cash_flow_service.queue_ca_for_processing() — same as the UI/GMP
+    sync path. Leave off (default) for historical migration rows that should
+    NOT trigger new cash flow generation (use --table cash_flow to load the
+    already-known historical cash flows directly instead).
+    """
+    from reference_data.repositories.corporate_action_repository import corporate_action_repository
+    from reference_data.management.commands.sync_gmp_corporate_actions import (
+        map_gmp_ca_type, parse_gmp_date, parse_gmp_price, GMP_CA_TYPE_MAP,
+    )
+
+    KNOWN_CA_TYPES = set(GMP_CA_TYPE_MAP.values())
+
+    ok = fail = queued = 0
+    errors: List[str] = []
+
+    for i, raw in enumerate(rows, 1):
+        mapped: Dict[str, Any] = {}
+        for raw_col, raw_val in raw.items():
+            db_col = CA_ALIASES.get(raw_col)
+            if db_col:
+                mapped[db_col] = raw_val
+
+        ca_number = str(mapped.get('ca_number', '') or '').strip()
+        if not ca_number:
+            msg = f"Row {i}: missing ca_number — skipped"
+            logger.warning(msg)
+            errors.append(msg)
+            fail += 1
+            continue
+
+        security_name = str(mapped.get('security_name', '') or '').strip()
+        if not security_name:
+            msg = f"Row {i} (ca_number={ca_number}): missing security_name — skipped"
+            logger.warning(msg)
+            errors.append(msg)
+            fail += 1
+            continue
+
+        # ca_type: accept an already-canonical CIS type as-is (case-insensitive),
+        # otherwise fall back to the same GMP_CA_TYPE_MAP sync_gmp_corporate_actions.py
+        # uses, so a migration CSV can carry either form.
+        raw_type = str(mapped.get('ca_type', '') or '').strip()
+        cis_type = raw_type.upper() if raw_type.upper() in KNOWN_CA_TYPES else map_gmp_ca_type(raw_type)
+        if not cis_type:
+            msg = (f"Row {i} (ca_number={ca_number}): unrecognised ca_type={raw_type!r} — "
+                   f"not a known CIS type and not in GMP_CA_TYPE_MAP — skipped")
+            logger.warning(msg)
+            errors.append(msg)
+            fail += 1
+            continue
+
+        # Normalise date columns — parse_gmp_date handles DD/MM/YYYY, YYYYMMDD,
+        # YYYY-MM-DD etc; keep the raw value if it can't be parsed rather than
+        # dropping the row (matches load_trade's _normalise_date behaviour).
+        for dcol in CA_DATE_FIELDS:
+            if mapped.get(dcol):
+                mapped[dcol] = parse_gmp_date(mapped[dcol]) or mapped[dcol]
+
+        price = parse_gmp_price(mapped.get('price')) if mapped.get('price') else None
+
+        ca_data = {
+            'ca_number':          ca_number,
+            'ca_type':            cis_type,
+            'security_name':      security_name,
+            'announcement_date':  mapped.get('announcement_date'),
+            'ex_date':            mapped.get('ex_date'),
+            'record_date':        mapped.get('record_date'),
+            'payment_date':       mapped.get('payment_date'),
+            'effective_date':     mapped.get('effective_date'),
+            'subscription_start_date': mapped.get('subscription_start_date'),
+            'subscription_end_date':   mapped.get('subscription_end_date'),
+            'price':              price,
+            'currency':           mapped.get('currency'),
+            'src_system':         SRC_SYSTEM,
+            'status':             str(mapped.get('status', '') or '').strip() or status,
+        }
+
+        if dry_run:
+            logger.info("[DRY-RUN] CA row %d: ca_number=%s type=%s security=%s",
+                        i, ca_number, cis_type, security_name)
+            ok += 1
+            continue
+
+        try:
+            success, ca_id = corporate_action_repository.insert(ca_data, created_by=SRC_SYSTEM)
+        except Exception as exc:
+            msg = f"Row {i} (ca_number={ca_number}): {exc}"
+            logger.error(msg)
+            errors.append(msg)
+            fail += 1
+            continue
+
+        if not success:
+            msg = f"Row {i} (ca_number={ca_number}): insert failed"
+            logger.error(msg)
+            errors.append(msg)
+            fail += 1
+            continue
+
+        ok += 1
+        logger.info("Loaded CA row %d: ca_number=%s type=%s security=%s", i, ca_number, cis_type, security_name)
+
+        if with_queue:
+            try:
+                from reference_data.services.ca_cash_flow_service import ca_cash_flow_service
+                q_success, queue_id = ca_cash_flow_service.queue_ca_for_processing(
+                    ca_id=ca_id, ca_data=ca_data, username=SRC_SYSTEM,
+                )
+                if q_success:
+                    queued += 1
+                    logger.info("  → Queued ca_number=%s (queue_id=%s)", ca_number, queue_id)
+            except Exception as exc:
+                logger.warning("Queue error for %s: %s", ca_number, exc)
+
+    if with_queue:
+        logger.info("Cash flow queue results: queued=%d", queued)
+    return ok, fail, errors
+
+
+# ---------------------------------------------------------------------------
 # generic LUT (lookup table) loader
 # ---------------------------------------------------------------------------
 # Unlike the loaders above (party/security/trade/...), this one has no
@@ -1588,22 +1770,24 @@ def _write_error_csv(table: str, errors: List[str]) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 LOADERS = {
-    'party':      load_party,
-    'party_cif':  load_party_cif,
-    'security':   load_security,
-    'trade':      load_trade,
-    'portfolio':  load_portfolio,
-    'cash_flow':  load_cash_flow,
+    'party':             load_party,
+    'party_cif':          load_party_cif,
+    'security':           load_security,
+    'trade':              load_trade,
+    'portfolio':          load_portfolio,
+    'cash_flow':          load_cash_flow,
+    'corporate_action':   load_corporate_action,
 }
 
 # Default status per table (can be overridden with --status)
 DEFAULT_STATUS = {
-    'party':      'ACTIVE',
-    'party_cif':  'ACTIVE',
-    'security':   'ACTIVE',
-    'trade':      'SETTLED',
-    'portfolio':  'SETTLED',
-    'cash_flow':  'VALIDATED',
+    'party':             'ACTIVE',
+    'party_cif':          'ACTIVE',
+    'security':           'ACTIVE',
+    'trade':              'SETTLED',
+    'portfolio':          'SETTLED',
+    'cash_flow':          'VALIDATED',
+    'corporate_action':   'VALIDATED',
 }
 
 ALL_TABLES = list(LOADERS) + ['position', 'lut']
@@ -1641,6 +1825,19 @@ Examples:
 
   # Dry-run: validate cash flow CSV without writing
   python scripts/load_migration_data.py --table cash_flow --file cashflows.csv --dry-run
+
+  # Load corporate actions from CSV (into cis_corporate_actions, src_system=CIS)
+  # ca_type accepts either a canonical CIS type (DIVIDEND, BONUS_ISSUE, ...) or
+  # a raw GMP-style code (Cash dividend, CLAS SP, ...) via GMP_CA_TYPE_MAP.
+  python scripts/load_migration_data.py --table corporate_action --file corporate_actions.csv
+
+  # Load corporate actions AND queue each one for cash flow processing
+  # (same as the UI/GMP sync path — use only if these CAs' cash flows have
+  # NOT already been migrated separately via --table cash_flow)
+  python scripts/load_migration_data.py --table corporate_action --file corporate_actions.csv --queue-cashflow
+
+  # Dry-run: validate corporate action CSV without writing
+  python scripts/load_migration_data.py --table corporate_action --file corporate_actions.csv --dry-run
 
   # Backfill BOTH positions for all trades already in cis_trade
   python scripts/load_migration_data.py --table position
@@ -1688,6 +1885,13 @@ Examples:
     # Trade-specific: generate positions after loading
     parser.add_argument('--positions',       action='store_true',
                         help='(--table trade only) Also trigger position calculation for each loaded trade')
+
+    # Corporate-action-specific: queue for cash flow generation after loading
+    parser.add_argument('--queue-cashflow',  action='store_true',
+                        help='(--table corporate_action only) Also queue each loaded CA for cash flow '
+                             'processing via ca_cash_flow_service (same as the UI/GMP sync path). '
+                             'Leave off for historical CAs whose cash flows are being migrated '
+                             'directly via --table cash_flow instead.')
 
     # Position backfill filters
     parser.add_argument('--portfolio',       default='',
@@ -1843,13 +2047,20 @@ Examples:
             with_positions=args.positions,
             position_basis=args.basis,
         )
+    elif args.table == 'corporate_action':
+        ok, fail, errors = load_corporate_action(
+            rows, effective_status, args.dry_run, proc_date,
+            with_queue=args.queue_cashflow,
+        )
     else:
         loader = LOADERS[args.table]
         ok, fail, errors = loader(rows, effective_status, args.dry_run, proc_date)
 
+    # cis_corporate_actions is the one target table that doesn't match cis_<table> (singular)
+    display_table = 'cis_corporate_actions' if args.table == 'corporate_action' else f'cis_{args.table}'
     print()
     print("=" * 55)
-    print(f"  Table            : {DATABASE}.cis_{args.table}")
+    print(f"  Table            : {DATABASE}.{display_table}")
     print(f"  File             : {args.file}")
     print(f"  processing_date  : {proc_date}")
     print(f"  Total rows       : {len(rows)}")
@@ -1865,6 +2076,8 @@ Examples:
     print(f"  Failed/Skipped   : {fail}")
     if args.table == 'trade' and args.positions:
         print(f"  Positions        : triggered alongside each trade")
+    if args.table == 'corporate_action' and args.queue_cashflow:
+        print(f"  Cash flow queue  : triggered alongside each CA")
     print("=" * 55)
 
     if errors:
