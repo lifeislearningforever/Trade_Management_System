@@ -479,11 +479,18 @@ class Command(BaseCommand):
                 )
 
             elif cf_type in ('RETURN_OF_CAPITAL', 'CAPITAL_DISTRIBUTION'):
+                # common already carries amount_fc/amount_lc (the raw, unsigned
+                # amounts) -- _reduce_avp wants the SIGNED amounts under those
+                # same names, with the raw ones passed separately as
+                # raw_amount_fc/raw_amount_lc. Spreading **common unfiltered
+                # collided with the explicit amount_fc=/amount_lc= below
+                # ("got multiple values for keyword argument 'amount_fc'").
+                common_no_amount = {k: v for k, v in common.items() if k not in ('amount_fc', 'amount_lc')}
                 ok, msg = self._reduce_avp(
                     position, portfolio, security, payment_date,
                     amount_fc=signed_fc, amount_lc=signed_lc,
                     raw_amount_fc=amount_fc, raw_amount_lc=amount_lc,
-                    **common
+                    **common_no_amount
                 )
 
             else:
