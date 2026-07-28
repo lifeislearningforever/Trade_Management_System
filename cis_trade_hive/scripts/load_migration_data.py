@@ -159,6 +159,26 @@ def _normalise_header(raw: str) -> str:
 
 
 def _read_csv(path: str, delimiter: str) -> Tuple[List[str], List[Dict[str, str]]]:
+    # Auto-detect: if the given/default delimiter doesn't split the header at
+    # all but another common delimiter clearly would, switch to it instead of
+    # silently parsing the whole file as one giant column. Confirmed live:
+    # a pipe-delimited corporate_actions.csv run with the default ','
+    # produced a single "column" containing the entire header text joined by
+    # '|', so ca_number/security_name never matched any alias and every row
+    # failed mandatory-field checks with no indication the delimiter was wrong.
+    with open(path, newline='', encoding='utf-8-sig') as fh:
+        first_line = fh.readline()
+    if delimiter and first_line.count(delimiter) == 0:
+        for candidate in ('|', '\t', ';', ','):
+            if candidate != delimiter and first_line.count(candidate) > 0:
+                logger.warning(
+                    "Delimiter %r produced a single header column — auto-switching to %r "
+                    "(detected in the header line). Pass --delimiter explicitly to override.",
+                    delimiter, candidate,
+                )
+                delimiter = candidate
+                break
+
     rows = []
     with open(path, newline='', encoding='utf-8-sig') as fh:
         reader = csv.DictReader(fh, delimiter=delimiter)
