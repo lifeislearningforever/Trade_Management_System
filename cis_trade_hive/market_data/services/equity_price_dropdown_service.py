@@ -82,7 +82,7 @@ class EquityPriceDropdownService:
             ]
 
             if currency_code:
-                escaped_currency = currency_code.replace("'", "''")
+                escaped_currency = currency_code.replace('\\', '\\\\').replace("'", "\\'")
                 where_clauses.append(f"currency_code = '{escaped_currency}'")
 
             where_clause = " AND ".join(where_clauses)
@@ -136,7 +136,7 @@ class EquityPriceDropdownService:
             if security_id:
                 where_clauses.append(f"security_id = {security_id}")
             elif security_name:
-                escaped_name = security_name.replace("'", "''")
+                escaped_name = security_name.replace('\\', '\\\\').replace("'", "\\'")
                 where_clauses.append(f"security_name = '{escaped_name}'")
             else:
                 logger.warning("No security_id or security_name provided")

@@ -667,10 +667,10 @@ class TradeEventQueueService:
             return False
 
     def _escape(self, value: str) -> str:
-        """Escape single quotes for SQL."""
+        """Escape single quotes for SQL. Impala uses C-style \\' escaping, not doubled quotes."""
         if value is None:
             return ''
-        return str(value).replace("'", "''")
+        return str(value).replace('\\', '\\\\').replace("'", "\\'")
 
     # =========================================================================
     # RECOVERY & MONITORING

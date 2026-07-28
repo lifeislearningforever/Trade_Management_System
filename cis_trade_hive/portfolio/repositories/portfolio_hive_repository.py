@@ -42,11 +42,12 @@ class PortfolioHiveRepository:
 
     @staticmethod
     def escape_value(val):
-        """Escape value for SQL query."""
+        """Escape value for SQL query. Impala uses C-style \\' escaping, not doubled quotes."""
         if val is None:
             return 'NULL'
         if isinstance(val, str):
-            return f"'{val.replace(chr(39), chr(39)+chr(39))}'"
+            s = val.replace('\\', '\\\\').replace(chr(39), '\\' + chr(39))
+            return f"'{s}'"
         if isinstance(val, bool):
             return str(val).lower()
         return str(val)
@@ -66,15 +67,15 @@ class PortfolioHiveRepository:
             where_clauses = []
 
             if status:
-                status_escaped = status.replace("'", "''")
+                status_escaped = status.replace('\\', '\\\\').replace("'", "\\'")
                 where_clauses.append(f"`status` = '{status_escaped}'")
 
             if currency:
-                currency_escaped = currency.replace("'", "''")
+                currency_escaped = currency.replace('\\', '\\\\').replace("'", "\\'")
                 where_clauses.append(f"`currency` = '{currency_escaped}'")
 
             if search:
-                search_term = search.replace("'", "''")
+                search_term = search.replace('\\', '\\\\').replace("'", "\\'")
                 # Case-insensitive search using LOWER() function
                 where_clauses.append(
                     f"(LOWER(`name`) LIKE LOWER('%{search_term}%') OR "
@@ -227,7 +228,7 @@ class PortfolioHiveRepository:
     def get_portfolio_by_code(portfolio_code: str) -> Optional[Dict[str, Any]]:
         """Get portfolio by code/name from Kudu."""
         try:
-            portfolio_code_escaped = portfolio_code.replace("'", "''")
+            portfolio_code_escaped = portfolio_code.replace('\\', '\\\\').replace("'", "\\'")
             query = f"""
             SELECT *
             FROM {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
@@ -244,7 +245,7 @@ class PortfolioHiveRepository:
     def get_portfolio_by_code_case_insensitive(portfolio_code: str) -> Optional[Dict[str, Any]]:
         """Get portfolio by code/name from Kudu (case-insensitive match)."""
         try:
-            portfolio_code_escaped = portfolio_code.replace("'", "''")
+            portfolio_code_escaped = portfolio_code.replace('\\', '\\\\').replace("'", "\\'")
             query = f"""
             SELECT *
             FROM {PortfolioHiveRepository.DATABASE}.{PortfolioHiveRepository.TABLE_NAME}
@@ -570,7 +571,7 @@ class PortfolioHiveRepository:
             created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             escape = PortfolioHiveRepository.escape_value
 
-            changes_json = json.dumps(changes).replace("'", "''")
+            changes_json = json.dumps(changes).replace('\\', '\\\\').replace("'", "\\'")
 
             query = f"""
             UPSERT INTO {PortfolioHiveRepository.DATABASE}.cis_portfolio_history

@@ -255,7 +255,7 @@ class ImpalaShellExtractor:
 
         # String types
         if 'string' in col_type_lower or 'varchar' in col_type_lower or 'char' in col_type_lower:
-            escaped = str(value).replace("'", "''")
+            escaped = str(value).replace('\\', '\\\\').replace("'", "\\'")
             return f"'{escaped}'"
 
         # Numeric types
@@ -271,7 +271,7 @@ class ImpalaShellExtractor:
             return f"'{value}'"
 
         # Default: treat as string
-        escaped = str(value).replace("'", "''")
+        escaped = str(value).replace('\\', '\\\\').replace("'", "\\'")
         return f"'{escaped}'"
 
     def generate_insert_statements(
@@ -449,7 +449,7 @@ class PyHiveExtractor:
         col_type_lower = col_type.lower()
 
         if 'string' in col_type_lower or 'varchar' in col_type_lower or 'char' in col_type_lower:
-            escaped = str(value).replace("'", "''")
+            escaped = str(value).replace('\\', '\\\\').replace("'", "\\'")
             return f"'{escaped}'"
 
         if any(t in col_type_lower for t in ['int', 'bigint', 'smallint', 'tinyint', 'decimal', 'double', 'float']):
@@ -461,7 +461,7 @@ class PyHiveExtractor:
         if 'timestamp' in col_type_lower or 'date' in col_type_lower:
             return f"'{value}'"
 
-        escaped = str(value).replace("'", "''")
+        escaped = str(value).replace('\\', '\\\\').replace("'", "\\'")
         return f"'{escaped}'"
 
     def generate_insert_statements(

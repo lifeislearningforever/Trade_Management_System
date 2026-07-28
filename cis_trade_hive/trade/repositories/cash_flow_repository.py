@@ -38,11 +38,12 @@ class CashFlowRepository:
 
     @staticmethod
     def escape_value(val: Any) -> str:
-        """Escape value for SQL query."""
+        """Escape value for SQL query. Impala uses C-style \\' escaping, not doubled quotes."""
         if val is None or val == '':
             return 'NULL'
         if isinstance(val, str):
-            return f"'{val.replace(chr(39), chr(39)+chr(39))}'"
+            s = val.replace('\\', '\\\\').replace(chr(39), '\\' + chr(39))
+            return f"'{s}'"
         if isinstance(val, bool):
             return 'true' if val else 'false'
         return str(val)

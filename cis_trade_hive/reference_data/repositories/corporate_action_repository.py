@@ -25,7 +25,7 @@ class CorporateActionRepository:
 
     @staticmethod
     def escape_value(value: Any) -> str:
-        """Escape value for Impala SQL. Impala uses doubled single quotes, not backslash."""
+        """Escape value for Impala SQL. Impala uses C-style \\' escaping, not doubled quotes."""
         if value is None or value == '':
             return 'NULL'
         if isinstance(value, bool):
@@ -43,7 +43,7 @@ class CorporateActionRepository:
         s = str(value).strip()
         if s and s.lstrip('-').replace('.', '', 1).isdigit():
             return s
-        escaped = s.replace("'", "''")
+        escaped = s.replace('\\', '\\\\').replace("'", "\\'")
         return f"'{escaped}'"
 
     @staticmethod

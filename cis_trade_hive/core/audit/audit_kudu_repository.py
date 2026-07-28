@@ -524,7 +524,7 @@ class AuditLogKuduRepository:
                 where_clauses.append(f"audit_date <= '{date_to}'")
 
             if search:
-                search_term = search.replace("'", "''")
+                search_term = search.replace('\\', '\\\\').replace("'", "\\'")
                 where_clauses.append(
                     f"(action_description LIKE '%{search_term}%' OR "
                     f"entity_name LIKE '%{search_term}%' OR "

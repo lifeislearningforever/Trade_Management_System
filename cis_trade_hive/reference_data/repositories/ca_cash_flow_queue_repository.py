@@ -33,14 +33,14 @@ class CACashFlowQueueRepository:
 
     @staticmethod
     def escape_value(value: Any) -> str:
-        """Escape value for Impala SQL. Impala uses doubled single quotes, not backslash."""
+        """Escape value for Impala SQL. Impala uses C-style \\' escaping, not doubled quotes."""
         if value is None or value == '':
             return 'NULL'
         if isinstance(value, bool):
             return 'true' if value else 'false'
         if isinstance(value, (int, float, Decimal)):
             return str(value)
-        escaped = str(value).replace("'", "''")
+        escaped = str(value).replace('\\', '\\\\').replace("'", "\\'")
         return f"'{escaped}'"
 
     @staticmethod

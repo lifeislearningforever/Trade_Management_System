@@ -34,7 +34,7 @@ def escape_string(value: str) -> str:
     """Escape single quotes for SQL"""
     if not value:
         return ''
-    return value.replace("'", "''")
+    return value.replace('\\', '\\\\').replace("'", "\\'")
 
 def format_value(value: str, is_boolean: bool = False) -> str:
     """Format value for SQL INSERT"""

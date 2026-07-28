@@ -588,7 +588,7 @@ def start_trade_event_worker():
                 {event['trade_id']},
                 '{event['deal_number']}',
                 '{event['event_type']}',
-                '{event['event_data'].replace("'", "''")}',
+                '{event['event_data'].replace('\\', '\\\\').replace("'", "\\'")}',
                 'PROCESSING',
                 {event.get('retry_count', 0)},
                 NULL,
@@ -613,7 +613,7 @@ def start_trade_event_worker():
                 {event['trade_id']},
                 '{event['deal_number']}',
                 '{event['event_type']}',
-                '{event['event_data'].replace("'", "''")}',
+                '{event['event_data'].replace('\\', '\\\\').replace("'", "\\'")}',
                 'COMPLETED',
                 {event.get('retry_count', 0)},
                 NULL,
@@ -630,7 +630,7 @@ def start_trade_event_worker():
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             new_retry_count = retry_count + 1
             status = 'FAILED' if new_retry_count >= 3 else 'PENDING'
-            error_escaped = error_message.replace("'", "''")[:500]
+            error_escaped = error_message.replace('\\', '\\\\').replace("'", "\\'")[:500]
             processing_started_at = event.get('processing_started_at') or timestamp
 
             upsert_query = f"""
@@ -642,7 +642,7 @@ def start_trade_event_worker():
                 {event['trade_id']},
                 '{event['deal_number']}',
                 '{event['event_type']}',
-                '{event['event_data'].replace("'", "''")}',
+                '{event['event_data'].replace('\\', '\\\\').replace("'", "\\'")}',
                 '{status}',
                 {new_retry_count},
                 '{error_escaped}',

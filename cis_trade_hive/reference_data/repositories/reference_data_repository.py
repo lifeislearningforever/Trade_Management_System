@@ -62,10 +62,10 @@ class ImpalaReferenceRepository:
             raise
 
     def _escape_sql(self, value: str) -> str:
-        """Escape single quotes in SQL values"""
+        """Escape single quotes in SQL values. Impala uses C-style \\' escaping, not doubled quotes."""
         if value is None:
             return ''
-        return str(value).replace("'", "''")
+        return str(value).replace('\\', '\\\\').replace("'", "\\'")
 
 
 class CurrencyRepository(ImpalaReferenceRepository):
@@ -109,7 +109,7 @@ class CurrencyRepository(ImpalaReferenceRepository):
         """
 
         if search:
-            search_escaped = search.replace("'", "''").lower()
+            search_escaped = search.replace('\\', '\\\\').replace("'", "\\'").lower()
             query += f""" AND (
                 LOWER(iso_code) LIKE '%{search_escaped}%'
                 OR LOWER(name) LIKE '%{search_escaped}%'
@@ -125,7 +125,7 @@ class CurrencyRepository(ImpalaReferenceRepository):
 
     def get_by_code(self, code: str) -> Optional[Dict]:
         """Get specific currency by ISO code for the latest processing_date"""
-        code_escaped = code.replace("'", "''")
+        code_escaped = code.replace('\\', '\\\\').replace("'", "\\'")
         query = f"""
         SELECT * FROM {self.TABLE_NAME}
         WHERE iso_code = '{code_escaped}'
@@ -191,7 +191,7 @@ class CountryRepository(ImpalaReferenceRepository):
             pass
 
         if search:
-            search_escaped = search.replace("'", "''").lower()
+            search_escaped = search.replace('\\', '\\\\').replace("'", "\\'").lower()
             conditions.append(f"(LOWER(label) LIKE '%{search_escaped}%' OR LOWER(full_name) LIKE '%{search_escaped}%')")
 
         if conditions:
@@ -205,7 +205,7 @@ class CountryRepository(ImpalaReferenceRepository):
 
     def get_by_code(self, code: str) -> Optional[Dict]:
         """Get specific country by code (using max processing_date to avoid duplicates)"""
-        code_escaped = code.replace("'", "''")
+        code_escaped = code.replace('\\', '\\\\').replace("'", "\\'")
 
         # Try with max processing_date filter first (production)
         try:
@@ -267,11 +267,11 @@ class CalendarRepository(ImpalaReferenceRepository):
         """
 
         if calendar_label:
-            calendar_label_escaped = calendar_label.replace("'", "''")
+            calendar_label_escaped = calendar_label.replace('\\', '\\\\').replace("'", "\\'")
             query += f" AND calendar_label = '{calendar_label_escaped}'"
 
         if search:
-            search_escaped = search.replace("'", "''").lower()
+            search_escaped = search.replace('\\', '\\\\').replace("'", "\\'").lower()
             query += f""" AND (
                 LOWER(calendar_label) LIKE '%{search_escaped}%'
                 OR LOWER(calendar_description) LIKE '%{search_escaped}%'
@@ -324,7 +324,7 @@ class MascodeRepository(ImpalaReferenceRepository):
         """
 
         if search:
-            search_escaped = search.replace("'", "''").lower()
+            search_escaped = search.replace('\\', '\\\\').replace("'", "\\'").lower()
             query += f""" AND (
                 LOWER(mas_code) LIKE '%{search_escaped}%'
                 OR LOWER(industry_group) LIKE '%{search_escaped}%'
@@ -372,11 +372,11 @@ class CounterpartyRepository(ImpalaReferenceRepository):
         query = f"SELECT * FROM {self.TABLE_NAME} WHERE 1=1"
 
         if search:
-            search_escaped = search.replace("'", "''")
+            search_escaped = search.replace('\\', '\\\\').replace("'", "\\'")
             query += f" AND (LOWER(counterparty_short_name) LIKE '%{search_escaped.lower()}%' OR LOWER(counterparty_full_name) LIKE '%{search_escaped.lower()}%')"
 
         if country:
-            country_escaped = country.replace("'", "''")
+            country_escaped = country.replace('\\', '\\\\').replace("'", "\\'")
             query += f" AND country = '{country_escaped}'"
 
         if is_active is not None:
@@ -390,7 +390,7 @@ class CounterpartyRepository(ImpalaReferenceRepository):
 
     def get_by_short_name(self, short_name: str) -> Optional[Dict]:
         """Get specific counterparty by short name (primary key)"""
-        short_name_escaped = short_name.replace("'", "''")
+        short_name_escaped = short_name.replace('\\', '\\\\').replace("'", "\\'")
         query = f"SELECT * FROM {self.TABLE_NAME} WHERE counterparty_short_name = '{short_name_escaped}' LIMIT 1"
 
         results = self._execute_query(query)
@@ -502,8 +502,8 @@ class CounterpartyRepository(ImpalaReferenceRepository):
         Returns:
             True if successful, False otherwise
         """
-        short_name_escaped = short_name.replace("'", "''")
-        updated_by_escaped = updated_by.replace("'", "''")
+        short_name_escaped = short_name.replace('\\', '\\\\').replace("'", "\\'")
+        updated_by_escaped = updated_by.replace('\\', '\\\\').replace("'", "\\'")
 
         query = f"""
         UPSERT INTO {self.TABLE_NAME} (
@@ -537,8 +537,8 @@ class CounterpartyRepository(ImpalaReferenceRepository):
         Returns:
             True if successful, False otherwise
         """
-        short_name_escaped = short_name.replace("'", "''")
-        updated_by_escaped = updated_by.replace("'", "''")
+        short_name_escaped = short_name.replace('\\', '\\\\').replace("'", "\\'")
+        updated_by_escaped = updated_by.replace('\\', '\\\\').replace("'", "\\'")
 
         query = f"""
         UPSERT INTO {self.TABLE_NAME} (

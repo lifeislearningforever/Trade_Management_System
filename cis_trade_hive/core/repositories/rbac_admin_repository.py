@@ -38,9 +38,10 @@ class RBACAdminRepository:
 
     @staticmethod
     def _escape(v) -> str:
+        # Impala uses C-style \' escaping, not doubled quotes.
         if v is None:
             return ''
-        return str(v).replace("'", "''")
+        return str(v).replace('\\', '\\\\').replace("'", "\\'")
 
     @staticmethod
     def _now() -> str:

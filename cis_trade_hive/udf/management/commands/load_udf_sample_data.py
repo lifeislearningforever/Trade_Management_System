@@ -181,7 +181,7 @@ class Command(BaseCommand):
                 self.stdout.write(f'\n  Loading options for UDF ID {udf_id}...')
                 for idx, option_value in enumerate(options):
                     # Escape single quotes in option value
-                    escaped_value = option_value.replace("'", "''")
+                    escaped_value = option_value.replace('\\', '\\\\').replace("'", "\\'")
 
                     query = f"""
                     UPSERT INTO gmp_cis.cis_udf_option

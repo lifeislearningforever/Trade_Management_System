@@ -90,7 +90,7 @@ class PortfolioDropdownRepository:
             List of dicts with field_value (the actual dropdown values, excluding definition record)
         """
         try:
-            escaped_field = field_name.replace("'", "''")
+            escaped_field = field_name.replace('\\', '\\\\').replace("'", "\\'")
             # Only get VALUE records (where field_value is NOT empty)
             query = f"""
             SELECT field_name, field_value, is_active

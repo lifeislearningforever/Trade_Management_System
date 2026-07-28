@@ -59,7 +59,7 @@ class HiveBaseRepository(ABC):
             return "NULL"
         elif isinstance(value, str):
             # Escape single quotes
-            escaped = value.replace("'", "''")
+            escaped = value.replace('\\', '\\\\').replace("'", "\\'")
             return f"'{escaped}'"
         elif isinstance(value, datetime):
             return f"'{value.strftime('%Y-%m-%d %H:%M:%S')}'"

@@ -177,7 +177,7 @@ class ACLRepositoryV2:
             ...     print(f"Found user: {user['name']}")
         """
         try:
-            login_escaped = login.replace("'", "''").upper()
+            login_escaped = login.replace('\\', '\\\\').replace("'", "\\'").upper()
 
             query = f"""
                 SELECT user_id, login, email, name, default_entity, last_login,
@@ -189,7 +189,7 @@ class ACLRepositoryV2:
             """
 
             if entity:
-                entity_escaped = entity.replace("'", "''").upper()
+                entity_escaped = entity.replace('\\', '\\\\').replace("'", "\\'").upper()
                 query += f" AND UPPER(default_entity) = '{entity_escaped}'"
 
             query += " LIMIT 1"
@@ -222,7 +222,7 @@ class ACLRepositoryV2:
             >>> user = repo.get_user_by_id('1773384561790')
         """
         try:
-            user_id_escaped = str(user_id).replace("'", "''")
+            user_id_escaped = str(user_id).replace('\\', '\\\\').replace("'", "\\'")
 
             query = f"""
                 SELECT user_id, login, email, name, default_entity, last_login,
@@ -268,7 +268,7 @@ class ACLRepositoryV2:
             ...     print(f"Group: {g['group_name']}")
         """
         try:
-            user_id_escaped = str(user_id).replace("'", "''")
+            user_id_escaped = str(user_id).replace('\\', '\\\\').replace("'", "\\'")
 
             query = f"""
                 SELECT ugm.user_group_mapping_id as mapping_id,
@@ -285,7 +285,7 @@ class ACLRepositoryV2:
             """
 
             if entity:
-                entity_escaped = entity.replace("'", "''").upper()
+                entity_escaped = entity.replace('\\', '\\\\').replace("'", "\\'").upper()
                 query += f" AND UPPER(ugm.entity) = '{entity_escaped}'"
 
             query += " ORDER BY ugm.group_name"
@@ -324,7 +324,7 @@ class ACLRepositoryV2:
             ...     print(f"{p['permission_name']}: {p['mode']}")
         """
         try:
-            group_escaped = group_name.replace("'", "''")
+            group_escaped = group_name.replace('\\', '\\\\').replace("'", "\\'")
 
             query = f"""
                 SELECT permission_name, mode, description
@@ -335,7 +335,7 @@ class ACLRepositoryV2:
             """
 
             if entity:
-                entity_escaped = entity.replace("'", "''").upper()
+                entity_escaped = entity.replace('\\', '\\\\').replace("'", "\\'").upper()
                 query += f" AND UPPER(entity) = '{entity_escaped}'"
 
             query += " ORDER BY permission_name"
@@ -602,7 +602,7 @@ class ACLRepositoryV2:
                 query += " AND is_active = true"
 
             if entity:
-                entity_escaped = entity.replace("'", "''").upper()
+                entity_escaped = entity.replace('\\', '\\\\').replace("'", "\\'").upper()
                 query += f" AND UPPER(default_entity) = '{entity_escaped}'"
 
             query += " ORDER BY name"
@@ -638,7 +638,7 @@ class ACLRepositoryV2:
             """
 
             if entity:
-                entity_escaped = entity.replace("'", "''").upper()
+                entity_escaped = entity.replace('\\', '\\\\').replace("'", "\\'").upper()
                 query += f" AND UPPER(entity) = '{entity_escaped}'"
 
             query += " ORDER BY group_name"
@@ -673,7 +673,7 @@ class ACLRepositoryV2:
             """
 
             if entity:
-                entity_escaped = entity.replace("'", "''").upper()
+                entity_escaped = entity.replace('\\', '\\\\').replace("'", "\\'").upper()
                 query += f" AND UPPER(entity) = '{entity_escaped}'"
 
             query += " ORDER BY permission_name"
@@ -706,7 +706,7 @@ class ACLRepositoryV2:
                 return False
 
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            esc = lambda v: str(v).replace("'", "''") if v is not None else ''
+            esc = lambda v: str(v).replace('\\', '\\\\').replace("'", "\\'") if v is not None else ''
 
             upsert_sql = f"""
                 UPSERT INTO {self.database}.{self.TABLE_USER}

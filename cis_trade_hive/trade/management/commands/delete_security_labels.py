@@ -40,7 +40,7 @@ _HEADER_VALUES = {
 
 
 def _esc(val: str) -> str:
-    return val.replace('\x00', '').replace("'", "''")
+    return val.replace('\x00', '').replace('\\', '\\\\').replace("'", "\\'")
 
 
 class TeeWriter:

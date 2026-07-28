@@ -824,7 +824,7 @@ class TradeDropdownService:
             return []
 
         try:
-            escaped_broker = broker.replace("'", "''")
+            escaped_broker = broker.replace('\\', '\\\\').replace("'", "\\'")
             base_broker = escaped_broker.replace('*', '%').replace('?', '_')
             exchange_filter = f"AND exchange = '{exchange}'" if exchange else ""
 
@@ -964,7 +964,7 @@ class TradeDropdownService:
         if not broker:
             return []
         try:
-            escaped_broker = broker.replace("'", "''")
+            escaped_broker = broker.replace('\\', '\\\\').replace("'", "\\'")
             base_broker = escaped_broker.replace('*', '%').replace('?', '_')
             query = f"""
             SELECT DISTINCT exchange, country_of_exchange

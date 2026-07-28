@@ -120,7 +120,7 @@ class Command(BaseCommand):
 
                     # All fields in Kudu table are string type
                     # Escape single quotes for SQL
-                    escaped_value = value.replace("'", "''")
+                    escaped_value = value.replace('\\', '\\\\').replace("'", "\\'")
                     values.append(f"'{escaped_value}'")
 
             # Build UPSERT statement

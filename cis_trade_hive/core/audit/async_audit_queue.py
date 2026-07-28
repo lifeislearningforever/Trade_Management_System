@@ -383,7 +383,7 @@ class AsyncAuditQueue:
                 return 'NULL'
             val_str = str(val)
             # Escape single quotes for Impala (doubled, not backslash)
-            val_str = val_str.replace("'", "''")
+            val_str = val_str.replace('\\', '\\\\').replace("'", "\\'")
             # Truncate long values
             if len(val_str) > 4000:
                 val_str = val_str[:4000] + '...[truncated]'

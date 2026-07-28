@@ -42,7 +42,7 @@ def _esc(val: str) -> str:
     Escape a string for safe embedding in Impala SQL literals.
     Doubles single quotes and removes any NULL bytes.
     """
-    return val.replace('\x00', '').replace("'", "''")
+    return val.replace('\x00', '').replace('\\', '\\\\').replace("'", "\\'")
 
 
 class TeeWriter:

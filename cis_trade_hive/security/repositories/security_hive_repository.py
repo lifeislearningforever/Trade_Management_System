@@ -35,7 +35,7 @@ class SecurityHiveRepository:
         if isinstance(value, (int, float)):
             return str(value)
         # String - Impala uses doubled single quotes (not backslash) for escaping
-        escaped = str(value).replace("'", "''")
+        escaped = str(value).replace('\\', '\\\\').replace("'", "\\'")
         return f"'{escaped}'"
 
     @staticmethod

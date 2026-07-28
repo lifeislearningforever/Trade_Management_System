@@ -18,7 +18,7 @@ def escape_sql(value):
     """Escape single quotes in SQL values"""
     if value is None:
         return ''
-    return str(value).replace("'", "''")
+    return str(value).replace('\\', '\\\\').replace("'", "\\'")
 
 def load_cif_data(file_path, batch_size=100):
     """Load CIF data from pipe-delimited file"""

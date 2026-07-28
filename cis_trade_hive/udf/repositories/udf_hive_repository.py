@@ -117,7 +117,7 @@ class UDFDefinitionRepository:
                 if value is not None:
                     columns.append(f"`{key}`")
                     if isinstance(value, str):
-                        escaped_value = value.replace("'", "''")
+                        escaped_value = value.replace('\\', '\\\\').replace("'", "\\'")
                         values.append(f"'{escaped_value}'")
                     elif isinstance(value, bool):
                         values.append('true' if value else 'false')

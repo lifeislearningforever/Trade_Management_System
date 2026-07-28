@@ -182,7 +182,7 @@ def load_report_definition(spark, extraction_id: str) -> Optional[Dict[str, Any]
             output_format,
             description
         FROM {REPORT_DEF_TABLE}
-        WHERE extraction_id = '{extraction_id.replace("'", "''")}'
+        WHERE extraction_id = '{extraction_id.replace('\\', '\\\\').replace("'", "\\'")}'
           AND is_active = TRUE
         LIMIT 1
     """
@@ -241,7 +241,7 @@ def substitute_params(sql_query: str, params: Dict[str, str]) -> str:
         result = "SELECT * FROM cis_trade WHERE portfolio_short_name = 'O''Brien Fund'"
     """
     for key, value in params.items():
-        escaped = str(value).replace("'", "''")
+        escaped = str(value).replace('\\', '\\\\').replace("'", "\\'")
         sql_query = sql_query.replace(f'{{{key}}}', f"'{escaped}'")
 
     # Detect any unreplaced placeholders

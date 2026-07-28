@@ -1203,10 +1203,10 @@ class PositionQueueService:
         return int(datetime.now().timestamp() * 1000) + (uuid.uuid4().int % 1000)
 
     def _escape(self, value: str) -> str:
-        """Escape string for SQL."""
+        """Escape string for SQL. Impala uses C-style \\' escaping, not doubled quotes."""
         if value is None:
             return ''
-        return str(value).replace("'", "''")
+        return str(value).replace('\\', '\\\\').replace("'", "\\'")
 
     def _null_or_str(self, value: str) -> str:
         """Return NULL or quoted string."""

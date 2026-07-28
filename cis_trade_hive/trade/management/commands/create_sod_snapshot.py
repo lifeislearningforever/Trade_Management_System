@@ -715,11 +715,11 @@ class Command(BaseCommand):
             NOTE: Only call this for values that contain no single quotes.
             For values with single quotes, use _py_fnv_hash instead.
             """
-            p = portfolio.replace("'", "''")
-            s = security.replace("'", "''")
-            b = basis.replace("'", "''")
+            p = portfolio.replace('\\', '\\\\').replace("'", "\\'")
+            s = security.replace('\\', '\\\\').replace("'", "\\'")
+            b = basis.replace('\\', '\\\\').replace("'", "\\'")
             d = date
-            sy = src.replace("'", "''")
+            sy = src.replace('\\', '\\\\').replace("'", "\\'")
             return (
                 f"ABS(CAST(fnv_hash(CONCAT_WS('|', "
                 f"'{p}', '{s}', '{b}', '{d}', '{sy}'"
@@ -904,9 +904,10 @@ class Command(BaseCommand):
 
     @staticmethod
     def _escape(value):
+        # Impala uses C-style \' escaping, not doubled quotes.
         if value is None:
             return ''
-        return str(value).replace("'", "''")
+        return str(value).replace('\\', '\\\\').replace("'", "\\'")
 
     @staticmethod
     def _to_iso(yyyymmdd):

@@ -1931,10 +1931,20 @@ class PositionService:
         return int(datetime.now().timestamp() * 1000) + (uuid.uuid4().int % 1000)
 
     def _escape(self, value: str) -> str:
-        """Escape string value for SQL."""
+        """Escape string value for SQL.
+
+        Impala uses C-style escaping (\\' for a single quote), NOT the ANSI/
+        Postgres/MySQL doubled-quote convention (''). Names containing an
+        apostrophe (e.g. security "CD INT'L ENT") produced a ParseException
+        wherever this was used to build a WHERE/VALUES clause with '' instead
+        of \\'.
+        """
         if value is None:
             return ''
-        return str(value).replace("'", "''")
+        s = str(value)
+        s = s.replace('\\', '\\\\')  # backslash first
+        s = s.replace("'", "\\'")
+        return s
 
 
 # Singleton instance

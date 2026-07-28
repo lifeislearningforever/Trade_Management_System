@@ -149,7 +149,7 @@ class Command(BaseCommand):
         """
         where_extra = ''
         if portfolio_filter:
-            safe_pf = portfolio_filter.replace("'", "''")
+            safe_pf = portfolio_filter.replace('\\', '\\\\').replace("'", "\\'")
             where_extra += f" AND t.portfolio_short_name = '{safe_pf}'"
         if trade_id_filter:
             where_extra += f" AND t.trade_id = {int(trade_id_filter)}"

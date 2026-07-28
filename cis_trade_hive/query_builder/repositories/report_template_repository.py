@@ -26,7 +26,7 @@ class ReportTemplateRepository:
 
     @staticmethod
     def _esc(val: str) -> str:
-        return str(val or '').replace("'", "''")
+        return str(val or '').replace('\\', '\\\\').replace("'", "\\'")
 
     @staticmethod
     def _now() -> str:

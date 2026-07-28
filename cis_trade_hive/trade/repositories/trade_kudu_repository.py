@@ -68,11 +68,12 @@ class TradeKuduRepository:
 
     @staticmethod
     def escape_value(val: Any) -> str:
-        """Escape value for SQL query."""
+        """Escape value for SQL query. Impala uses C-style \\' escaping, not doubled quotes."""
         if val is None:
             return 'NULL'
         if isinstance(val, str):
-            return f"'{val.replace(chr(39), chr(39)+chr(39))}'"
+            s = val.replace('\\', '\\\\').replace(chr(39), '\\' + chr(39))
+            return f"'{s}'"
         if isinstance(val, bool):
             return str(val).lower()
         return str(val)
@@ -326,7 +327,7 @@ class TradeKuduRepository:
                     where_clauses.append(f"t.security_label IN ({security_values})")
 
             if search:
-                search_escaped = search.replace("'", "''")
+                search_escaped = search.replace('\\', '\\\\').replace("'", "\\'")
                 where_clauses.append(
                     f"(t.deal_number LIKE '%{search_escaped}%' OR "
                     f"t.security_label LIKE '%{search_escaped}%' OR "
@@ -631,7 +632,7 @@ class TradeKuduRepository:
                 try:
                     query = f"""
                     SELECT currency FROM {self.DATABASE}.cis_portfolio
-                    WHERE name = '{portfolio_name.replace("'", "''")}'
+                    WHERE name = '{portfolio_name.replace('\\', '\\\\').replace("'", "\\'")}'
                     LIMIT 1
                     """
                     logger.info(f"Querying portfolio currency for: {portfolio_name}")
@@ -2442,7 +2443,7 @@ class TradeKuduRepository:
             history_id = self.get_next_id('trade_history_id')
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             # Use default=str to handle Decimal and other non-JSON-serializable types
-            changes_json = json.dumps(changes, default=str).replace("'", "''") if changes else '{}'
+            changes_json = json.dumps(changes, default=str).replace('\\', '\\\\').replace("'", "\\'") if changes else '{}'
 
             query = f"""
             UPSERT INTO {self.DATABASE}.{self.HISTORY_TABLE}

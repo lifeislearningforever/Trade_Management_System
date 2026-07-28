@@ -52,7 +52,7 @@ class SecurityDropdownRepository:
             List of option dictionaries with 'value' key
         """
         try:
-            escaped_field = field_name.replace("'", "''")
+            escaped_field = field_name.replace('\\', '\\\\').replace("'", "\\'")
             # Query from cis_udf_field table - get field_value where field_name matches
             query = f"""
             SELECT DISTINCT field_value

@@ -56,11 +56,12 @@ class TradeValidationRepository:
 
     @staticmethod
     def escape_value(val: Any) -> str:
-        """Escape value for SQL query."""
+        """Escape value for SQL query. Impala uses C-style \\' escaping, not doubled quotes."""
         if val is None:
             return 'NULL'
         if isinstance(val, str):
-            return f"'{val.replace(chr(39), chr(39)+chr(39))}'"
+            s = val.replace('\\', '\\\\').replace(chr(39), '\\' + chr(39))
+            return f"'{s}'"
         if isinstance(val, bool):
             return str(val).lower()
         return str(val)
@@ -100,7 +101,8 @@ class TradeValidationRepository:
                 logger.debug(f"Cache hit for portfolio validation: {portfolio_name}")
                 return cached
 
-            portfolio_name_escaped = portfolio_name.replace("'", "''")
+            # Impala uses C-style \' escaping, not doubled quotes.
+            portfolio_name_escaped = portfolio_name.replace('\\', '\\\\').replace("'", "\\'")
             status_list = ", ".join([f"'{s}'" for s in self.PORTFOLIO_VALID_STATUSES])
 
             query = f"""
@@ -207,7 +209,8 @@ class TradeValidationRepository:
             """
 
             if search:
-                search_escaped = search.replace("'", "''")
+                # Impala uses C-style \' escaping, not doubled quotes.
+                search_escaped = search.replace('\\', '\\\\').replace("'", "\\'")
                 query += f" AND (LOWER(name) LIKE '%{search_escaped.lower()}%')"
 
             query += f" ORDER BY name LIMIT {limit}"
@@ -257,7 +260,8 @@ class TradeValidationRepository:
                 logger.debug(f"Cache hit for security validation: {security_name}")
                 return cached
 
-            security_name_escaped = security_name.replace("'", "''")
+            # Impala uses C-style \' escaping, not doubled quotes.
+            security_name_escaped = security_name.replace('\\', '\\\\').replace("'", "\\'")
             status_list = ", ".join([f"'{s}'" for s in self.SECURITY_VALID_STATUSES])
 
             query = f"""
@@ -381,7 +385,8 @@ class TradeValidationRepository:
             """
 
             if search:
-                search_escaped = search.replace("'", "''")
+                # Impala uses C-style \' escaping, not doubled quotes.
+                search_escaped = search.replace('\\', '\\\\').replace("'", "\\'")
                 query += f"""
                 AND (LOWER(security_name) LIKE '%{search_escaped.lower()}%'
                      OR LOWER(isin) LIKE '%{search_escaped.lower()}%'
@@ -430,7 +435,8 @@ class TradeValidationRepository:
                     message='Counterparty is optional'
                 )
 
-            counterparty_escaped = counterparty_name.replace("'", "''")
+            # Impala uses C-style \' escaping, not doubled quotes.
+            counterparty_escaped = counterparty_name.replace('\\', '\\\\').replace("'", "\\'")
 
             query = f"""
             SELECT party_short_name, party_full_name,
@@ -521,7 +527,8 @@ class TradeValidationRepository:
             """
 
             if search:
-                search_escaped = search.replace("'", "''")
+                # Impala uses C-style \' escaping, not doubled quotes.
+                search_escaped = search.replace('\\', '\\\\').replace("'", "\\'")
                 query += f"""
                 AND (LOWER(party_short_name) LIKE '%{search_escaped.lower()}%'
                      OR LOWER(party_full_name) LIKE '%{search_escaped.lower()}%')

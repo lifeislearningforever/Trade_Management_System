@@ -722,8 +722,10 @@ def _inject_country_case_when(std_select: str, country_map: dict, db: str) -> st
         """
         # Normalise all curly/fancy apostrophes to ASCII first
         s = s.replace('’', "'").replace('‘', "'").replace('ʼ', "'")
-        # Now escape ASCII apostrophe and backslash
-        return s.replace("'", "''").replace("\\", "\\\\")
+        # Impala uses C-style \' escaping, not doubled quotes — backslash first
+        # so the backslash just introduced by the quote-escape isn't re-escaped.
+        s = s.replace("\\", "\\\\")
+        return s.replace("'", "\\'")
 
     def _case_expr(col: str) -> str:
         """
@@ -4218,9 +4220,11 @@ class UploadService:
             import time as _time
 
             def _sql_str(v):
+                # Impala uses C-style \' escaping, not doubled quotes.
                 if v in (None, ''):
                     return 'NULL'
-                return "'" + str(v).replace("'", "''") + "'"
+                s = str(v).replace('\\', '\\\\').replace("'", "\\'")
+                return "'" + s + "'"
 
             def _sql_bigint(v):
                 try:
@@ -4733,6 +4737,11 @@ class UploadService:
                     _sec   = row.get('security_label', '')
                     _basis = row.get('position_basis', 'TRADED')
                     _upload_date = (row.get('upload_date') or '')[:10]
+                    # Impala uses C-style \' escaping, not doubled quotes — security
+                    # names with an apostrophe (e.g. "CD INT'L ENT") produced a
+                    # ParseException when escaped with '' below.
+                    _ptf_esc = _ptf.replace('\\', '\\\\').replace("'", "\\'")
+                    _sec_esc = _sec.replace('\\', '\\\\').replace("'", "\\'")
                     logger.info(
                         f"[position_etl] Step 7A2: carry-forward start — "
                         f"portfolio={_ptf} security={_sec} basis={_basis} from={_upload_date}"
@@ -4750,8 +4759,8 @@ class UploadService:
                             f"""
                             SELECT COUNT(*) AS cnt
                             FROM {db}.cis_position
-                            WHERE portfolio       = '{_ptf.replace("'", "''")}'
-                              AND security_label  = '{_sec.replace("'", "''")}'
+                            WHERE portfolio       = '{_ptf_esc}'
+                              AND security_label  = '{_sec_esc}'
                               AND position_basis  = '{_basis}'
                               AND src_system      = 'USER_UPLOAD'
                               AND CAST(position_date AS STRING) = '{_biz_date}'
@@ -4849,8 +4858,8 @@ class UploadService:
                                 'INT'                                   AS position_type,
                                 true                                    AS is_latest
                             FROM {db}.cis_position
-                            WHERE portfolio       = '{_ptf.replace("'", "''")}'
-                              AND security_label  = '{_sec.replace("'", "''")}'
+                            WHERE portfolio       = '{_ptf_esc}'
+                              AND security_label  = '{_sec_esc}'
                               AND position_basis  = '{_basis}'
                               AND src_system      = 'USER_UPLOAD'
                               AND CAST(position_date AS STRING) < '{_biz_date}'

@@ -251,15 +251,15 @@ class UploadKuduRepository:
                 where_clauses.append("(is_deleted = false OR is_deleted IS NULL)")
 
             if status:
-                status_escaped = status.replace("'", "''")
+                status_escaped = status.replace('\\', '\\\\').replace("'", "\\'")
                 where_clauses.append(f"`status` = '{status_escaped}'")
 
             if file_type:
-                file_type_escaped = file_type.replace("'", "''")
+                file_type_escaped = file_type.replace('\\', '\\\\').replace("'", "\\'")
                 where_clauses.append(f"`file_type` = '{file_type_escaped}'")
 
             if search:
-                search_escaped = search.replace("'", "''").replace('%', '\\%')
+                search_escaped = search.replace('\\', '\\\\').replace("'", "\\'").replace('%', '\\%')
                 where_clauses.append(f"(LOWER(`file_name`) LIKE LOWER('%{search_escaped}%') OR LOWER(`description`) LIKE LOWER('%{search_escaped}%'))")
 
             where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
@@ -282,7 +282,7 @@ class UploadKuduRepository:
     def get_upload_by_id(self, upload_id: str) -> Optional[Dict[str, Any]]:
         """Get upload by ID."""
         try:
-            upload_id_escaped = upload_id.replace("'", "''")
+            upload_id_escaped = upload_id.replace('\\', '\\\\').replace("'", "\\'")
             query = f"""
             SELECT *
             FROM {self.DATABASE}.{self.TABLE_NAME}

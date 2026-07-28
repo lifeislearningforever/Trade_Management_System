@@ -773,19 +773,19 @@ class Command(BaseCommand):
                 # Values come directly from Kudu (already clean) — escape only for SQL embedding.
                 pid      = row.get('position_id')
                 vid      = row.get('version_id')
-                port     = str(row.get('portfolio', '') or '').replace("'", "''")
-                sec      = str(row.get('security_label', '') or '').replace("'", "''")
-                basis    = str(row.get('position_basis', 'TRADED') or 'TRADED').replace("'", "''")
+                port     = str(row.get('portfolio', '') or '').replace('\\', '\\\\').replace("'", "\\'")
+                sec      = str(row.get('security_label', '') or '').replace('\\', '\\\\').replace("'", "\\'")
+                basis    = str(row.get('position_basis', 'TRADED') or 'TRADED').replace('\\', '\\\\').replace("'", "\\'")
                 pos_date = row.get('position_date', '')
-                src_sys  = str(row.get('src_system', '') or '').replace("'", "''")
-                proc_dt  = str(row.get('processing_date', '') or '').replace("'", "''")
+                src_sys  = str(row.get('src_system', '') or '').replace('\\', '\\\\').replace("'", "\\'")
+                proc_dt  = str(row.get('processing_date', '') or '').replace('\\', '\\\\').replace("'", "\\'")
 
                 def _fv(v):
                     return float(v) if v is not None else 0.0
 
                 isin_val = f"'{str(row.get('isin')).replace(chr(39), chr(39)*2)}'" if row.get('isin') else 'NULL'
                 src_tbl  = f"'{str(row.get('source_table')).replace(chr(39), chr(39)*2)}'" if row.get('source_table') else 'NULL'
-                ptype    = str(row.get('position_type', '') or '').replace("'", "''")
+                ptype    = str(row.get('position_type', '') or '').replace('\\', '\\\\').replace("'", "\\'")
 
                 impala_manager.execute_write(
                     f"""
@@ -881,7 +881,7 @@ class Command(BaseCommand):
                 return float(round(val, lc_dp))
 
             def _sq(v):
-                return str(v or '').replace("'", "''")
+                return str(v or '').replace('\\', '\\\\').replace("'", "\\'")
 
             portfolio = _sq(position.get('portfolio', ''))
             security  = _sq(position.get('security_label', ''))
@@ -1218,6 +1218,7 @@ class Command(BaseCommand):
         return False
 
     def _escape(self, value):
+        # Impala uses C-style \' escaping, not doubled quotes.
         if value is None:
             return ''
-        return str(value).replace("'", "''")
+        return str(value).replace('\\', '\\\\').replace("'", "\\'")

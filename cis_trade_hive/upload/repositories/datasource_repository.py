@@ -37,11 +37,12 @@ class DatasourceRepository:
 
     @staticmethod
     def escape_value(val: Any) -> str:
-        """Escape value for SQL query."""
+        """Escape value for SQL query. Impala uses C-style \\' escaping, not doubled quotes."""
         if val is None:
             return 'NULL'
         if isinstance(val, str):
-            return f"'{val.replace(chr(39), chr(39)+chr(39))}'"
+            s = val.replace('\\', '\\\\').replace(chr(39), '\\' + chr(39))
+            return f"'{s}'"
         if isinstance(val, bool):
             return str(val).lower()
         return str(val)
@@ -96,7 +97,7 @@ class DatasourceRepository:
             canonical = self._resolve_position_source_name(source_name)
             lookup_name = canonical if canonical else source_name
 
-            lookup_escaped = lookup_name.replace("'", "''")
+            lookup_escaped = lookup_name.replace('\\', '\\\\').replace("'", "\\'")
             query = f"""
             SELECT *
             FROM {self.DATABASE}.{self.TABLE_NAME}
@@ -117,7 +118,7 @@ class DatasourceRepository:
     def get_datasource_by_id(self, source_id: str) -> Optional[Dict[str, Any]]:
         """Get datasource configuration by source_id."""
         try:
-            source_id_escaped = source_id.replace("'", "''")
+            source_id_escaped = source_id.replace('\\', '\\\\').replace("'", "\\'")
             query = f"""
             SELECT *
             FROM {self.DATABASE}.{self.TABLE_NAME}

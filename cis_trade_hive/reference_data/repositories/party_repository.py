@@ -41,11 +41,11 @@ class PartyRepository(ImpalaReferenceRepository):
         query = f"SELECT * FROM {self.TABLE_NAME} WHERE 1=1"
 
         if search:
-            search_escaped = search.replace("'", "''")
+            search_escaped = search.replace('\\', '\\\\').replace("'", "\\'")
             query += f" AND (LOWER(party_short_name) LIKE '%{search_escaped.lower()}%' OR LOWER(party_full_name) LIKE '%{search_escaped.lower()}%')"
 
         if country:
-            country_escaped = country.replace("'", "''").upper()
+            country_escaped = country.replace('\\', '\\\\').replace("'", "\\'").upper()
             # Match by country label (code) OR country full_name (case-insensitive)
             # This handles cases where party.country might be "SG" or "Singapore" or "SINGAPORE"
             # The dropdown uses country labels (codes) from gmp_cis_sta_dly_country table
@@ -67,7 +67,7 @@ class PartyRepository(ImpalaReferenceRepository):
 
     def get_by_short_name(self, short_name: str) -> Optional[Dict]:
         """Get specific party by short name (primary key)"""
-        short_name_escaped = short_name.replace("'", "''")
+        short_name_escaped = short_name.replace('\\', '\\\\').replace("'", "\\'")
         query = f"SELECT * FROM {self.TABLE_NAME} WHERE party_short_name = '{short_name_escaped}' LIMIT 1"
 
         results = self._execute_query(query)
@@ -189,8 +189,8 @@ class PartyRepository(ImpalaReferenceRepository):
         Returns:
             True if successful, False otherwise
         """
-        short_name_escaped = short_name.replace("'", "''")
-        updated_by_escaped = updated_by.replace("'", "''")
+        short_name_escaped = short_name.replace('\\', '\\\\').replace("'", "\\'")
+        updated_by_escaped = updated_by.replace('\\', '\\\\').replace("'", "\\'")
 
         query = f"""
         UPSERT INTO {self.TABLE_NAME} (
@@ -224,8 +224,8 @@ class PartyRepository(ImpalaReferenceRepository):
         Returns:
             True if successful, False otherwise
         """
-        short_name_escaped = short_name.replace("'", "''")
-        updated_by_escaped = updated_by.replace("'", "''")
+        short_name_escaped = short_name.replace('\\', '\\\\').replace("'", "\\'")
+        updated_by_escaped = updated_by.replace('\\', '\\\\').replace("'", "\\'")
 
         query = f"""
         UPSERT INTO {self.TABLE_NAME} (
@@ -291,9 +291,9 @@ class PartyRepository(ImpalaReferenceRepository):
         Returns:
             True if successful
         """
-        short_name_escaped = short_name.replace("'", "''")
-        updated_by_escaped = updated_by.replace("'", "''")
-        status_escaped = status.replace("'", "''")
+        short_name_escaped = short_name.replace('\\', '\\\\').replace("'", "\\'")
+        updated_by_escaped = updated_by.replace('\\', '\\\\').replace("'", "\\'")
+        status_escaped = status.replace('\\', '\\\\').replace("'", "\\'")
 
         # Build SET clause for UPDATE (preserves all other columns)
         set_parts = [
@@ -303,11 +303,11 @@ class PartyRepository(ImpalaReferenceRepository):
         ]
 
         if status == self.STATUS_VALIDATED and validated_by:
-            validated_by_escaped = validated_by.replace("'", "''")
+            validated_by_escaped = validated_by.replace('\\', '\\\\').replace("'", "\\'")
             set_parts.append(f"validated_by = '{validated_by_escaped}'")
             # validated_at column does not exist in cis_party — use updated_at as proxy
             if validation_comments:
-                comments_escaped = validation_comments.replace("'", "''")
+                comments_escaped = validation_comments.replace('\\', '\\\\').replace("'", "\\'")
                 set_parts.append(f"validation_comments = '{comments_escaped}'")
 
         set_clause = ', '.join(set_parts)

@@ -177,7 +177,7 @@ class Command(BaseCommand):
 
         # String types
         if 'string' in col_type_lower or 'varchar' in col_type_lower or 'char' in col_type_lower:
-            escaped = str(value).replace("'", "''")
+            escaped = str(value).replace('\\', '\\\\').replace("'", "\\'")
             return f"'{escaped}'"
 
         # Numeric types
@@ -195,7 +195,7 @@ class Command(BaseCommand):
             return f"'{value}'"
 
         # Default: treat as string
-        escaped = str(value).replace("'", "''")
+        escaped = str(value).replace('\\', '\\\\').replace("'", "\\'")
         return f"'{escaped}'"
 
     def generate_insert_statements(

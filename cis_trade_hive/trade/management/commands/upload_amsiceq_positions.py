@@ -607,10 +607,10 @@ class Command(BaseCommand):
             return False
 
     def _escape_string(self, value) -> str:
-        """Escape single quotes for SQL."""
+        """Escape single quotes for SQL. Impala uses C-style \\' escaping, not doubled quotes."""
         if value is None:
             return ''
-        return str(value).replace("'", "''")
+        return str(value).replace('\\', '\\\\').replace("'", "\\'")
 
     def _format_nullable_string(self, value) -> str:
         """Format a nullable string value for SQL."""
