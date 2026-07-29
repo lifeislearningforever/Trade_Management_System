@@ -233,7 +233,7 @@ if [ -f "$PROJECT_ROOT/.venv/bin/activate" ]; then
 fi
 
 # Build command
-CMD="python $SCRIPT_DIR/extract_sit_ddl.py"
+CMD="python3 $SCRIPT_DIR/extract_sit_ddl.py"
 CMD="$CMD --host $SIT_HOST"
 CMD="$CMD --port $SIT_PORT"
 
