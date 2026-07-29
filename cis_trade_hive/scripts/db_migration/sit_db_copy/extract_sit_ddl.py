@@ -161,10 +161,14 @@ class ImpalaShellExtractor:
         try:
             cmd = self._build_impala_shell_cmd(query=query)
 
+            # stdout/stderr=PIPE + universal_newlines instead of capture_output/text
+            # (both Python 3.7+ only) -- this environment runs impala-shell under
+            # Python 3.6.8.
             result = subprocess.run(
                 cmd,
-                capture_output=True,
-                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
                 timeout=300  # 5 minute timeout
             )
 
