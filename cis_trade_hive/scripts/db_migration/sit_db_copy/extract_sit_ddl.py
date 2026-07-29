@@ -229,7 +229,15 @@ class ImpalaShellExtractor:
             f"SHOW CREATE TABLE {self.database}.{table_name}"
         )
         if success:
-            return '\n'.join(lines)
+            ddl = '\n'.join(lines)
+            # impala-shell's batch (-B) delimited output wraps STRING column
+            # values in double quotes (doubling any embedded "), and SHOW CREATE
+            # TABLE returns the whole multi-line DDL as one STRING field -- undo
+            # that quoting here, or every generated CREATE statement in the
+            # output .sql file fails with "Encountered: STRING LITERAL".
+            if ddl.startswith('"') and ddl.endswith('"'):
+                ddl = ddl[1:-1].replace('""', '"')
+            return ddl
         else:
             logger.error(f"Error getting DDL for {table_name}: {error}")
             return None
