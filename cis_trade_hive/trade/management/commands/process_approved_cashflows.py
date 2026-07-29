@@ -601,16 +601,30 @@ class Command(BaseCommand):
         run_type: str = 'EOD',
     ) -> Tuple[bool, str]:
         """
-        AVP reduction: avp_fc_new = avp_fc_old - (amount_fc / qty) -- always,
-        driven directly by the cash flow's own FC amount.
+        AVP reduction: total_cost_fc_new = total_cost_fc_old - amount_fc -- always,
+        an exact reduction by the cash flow's own FC amount. average_cost_fc is
+        then DERIVED as total_cost_fc_new / qty (the proper definition of
+        average cost), rather than reducing average_cost_fc first and
+        recomputing total cost from it.
 
-        avp_lc_new:
-          NON-REVALUED: avp_lc_old - (amount_lc / qty) -- trusts the cash
-            flow's own LC amount, same as FC.
-          REVALUED: avp_fc_new x current FX rate -- re-derived fresh rather
-            than reduced by the cash flow's raw LC amount, matching the AVP
-            engine's general REVAL rule (cost_lc always mirrors cost_fc x
-            current FX rate; see position_service._save_position).
+        This ordering matters: this position's stored total_cost_fc can already
+        be slightly out of sync with average_cost_fc x quantity (a pre-existing
+        data quirk, unrelated to any cash flow). Reducing average cost first and
+        then recomputing total_cost_fc = new_avp_fc x qty would silently snap
+        total cost to that inconsistent baseline, producing a swing far larger
+        than the cash flow's actual amount. Reducing the stored total_cost_fc
+        directly keeps the change exactly equal to amount_fc, regardless of any
+        pre-existing average/total mismatch.
+
+        total_cost_lc / avp_lc:
+          NON-REVALUED: total_cost_lc_old - amount_lc -- same exact-reduction
+            approach, trusting the cash flow's own LC amount; avp_lc derived
+            as total_cost_lc_new / qty.
+          REVALUED: total_cost_fc_new x current FX rate -- re-derived fresh
+            rather than reduced by the cash flow's raw LC amount, matching the
+            AVP engine's general REVAL rule (cost_lc always mirrors cost_fc x
+            current FX rate; see position_service._save_position). avp_lc is
+            avp_fc_new x current FX rate, per the same rule.
 
         unrealized_pnl_fc/lc are recalculated against the new (reduced) total
         cost -- previously left stale from the prior position version, which
@@ -625,18 +639,16 @@ class Command(BaseCommand):
         if qty <= 0:
             return False, f'{cf_type}: quantity is 0, cannot reduce AVP'
 
-        old_avp_fc = Decimal(str(position.get('average_cost_fc', 0) or 0))
-        old_avp_lc = Decimal(str(position.get('average_cost_lc', 0) or 0))
+        old_total_cost_fc = Decimal(str(position.get('total_cost_fc', 0) or 0))
+        old_total_cost_lc = Decimal(str(position.get('total_cost_lc', 0) or 0))
 
-        per_share_fc = round(amount_fc / qty, AVP_PRECISION)
-        new_avp_fc = max(Decimal('0'), round(old_avp_fc - per_share_fc, AVP_PRECISION))
-        new_total_cost_fc = round(new_avp_fc * qty, fc_dp)
+        new_total_cost_fc = max(Decimal('0'), round(old_total_cost_fc - amount_fc, fc_dp))
+        new_avp_fc = round(new_total_cost_fc / qty, AVP_PRECISION)
 
         reval_status = position_service._get_portfolio_revaluation_status(portfolio)
         if reval_status == 'NON-REVALUED':
-            per_share_lc = round(amount_lc / qty, AVP_PRECISION)
-            new_avp_lc = max(Decimal('0'), round(old_avp_lc - per_share_lc, AVP_PRECISION))
-            new_total_cost_lc = round(new_avp_lc * qty, lc_dp)
+            new_total_cost_lc = max(Decimal('0'), round(old_total_cost_lc - amount_lc, lc_dp))
+            new_avp_lc = round(new_total_cost_lc / qty, AVP_PRECISION)
             fx_rate = None
         else:
             sec_ccy = self._get_security_currency(security)
@@ -654,7 +666,8 @@ class Command(BaseCommand):
         if dry_run:
             return True, (
                 f'[DRY RUN] {cf_type} ({reval_status}{f", fx={fx_rate}" if fx_rate else ""}): '
-                f'avp_fc {old_avp_fc} - {per_share_fc} = {new_avp_fc} | avp_lc {old_avp_lc} → {new_avp_lc} | '
+                f'total_cost_fc {old_total_cost_fc} - {amount_fc} = {new_total_cost_fc} (avp_fc → {new_avp_fc}) | '
+                f'total_cost_lc {old_total_cost_lc} → {new_total_cost_lc} (avp_lc → {new_avp_lc}) | '
                 f'unrealized_pnl_fc → {new_unrealized_pnl_fc} | unrealized_pnl_lc → {new_unrealized_pnl_lc}'
             )
 
@@ -673,7 +686,11 @@ class Command(BaseCommand):
             fc_dp=fc_dp, lc_dp=lc_dp, pos_src=pos_src, run_type=run_type,
         )
         if success:
-            return True, f'{cf_type} ({reval_status}): avp_fc {old_avp_fc} → {new_avp_fc}, avp_lc {old_avp_lc} → {new_avp_lc}'
+            return True, (
+                f'{cf_type} ({reval_status}): total_cost_fc {old_total_cost_fc} → {new_total_cost_fc} '
+                f'(avp_fc → {new_avp_fc}), total_cost_lc {old_total_cost_lc} → {new_total_cost_lc} '
+                f'(avp_lc → {new_avp_lc})'
+            )
         return False, f'{cf_type}: failed to write position version'
 
     # =========================================================================
