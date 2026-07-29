@@ -36,6 +36,7 @@ Environment Variables:
 """
 
 import os
+import re
 import sys
 import argparse
 import logging
@@ -56,11 +57,45 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Database configuration
+# Default database name — used only as the CLI default for --source-database.
+# The extractor classes take the database as a constructor argument now (not
+# this module constant) so source and target can genuinely differ, which is
+# the whole point of this script when the target environment (e.g. a new SIT
+# database) is named differently from the source.
 DATABASE = 'gmp_cis'
 
 # Output directory
 OUTPUT_DIR = Path(__file__).parent / 'output'
+
+
+def requalify_ddl(ddl: str, source_db: str, target_db: str) -> str:
+    """
+    Rewrite `source_db.table` qualifiers embedded in extracted DDL text (Impala's
+    SHOW CREATE TABLE always fully-qualifies the table name in its output) to
+    `target_db.table`, so the generated DDL file can be deployed straight into a
+    differently-named target database instead of requiring a manual find/replace
+    on the output files first.
+    """
+    if not ddl or source_db == target_db:
+        return ddl
+    return re.sub(rf'\b{re.escape(source_db)}\.', f'{target_db}.', ddl)
+
+
+def ensure_if_not_exists(ddl: str) -> str:
+    """
+    Insert IF NOT EXISTS after CREATE [EXTERNAL] TABLE if not already present,
+    so re-running the generated DDL against a target that already has some of
+    these tables doesn't error out. Used as the default (non-destructive)
+    alternative to the old unconditional DROP TABLE IF EXISTS + CREATE TABLE.
+    """
+    if not ddl or re.search(r'(?i)create\s+(external\s+)?table\s+if\s+not\s+exists', ddl):
+        return ddl
+    return re.sub(
+        r'(?i)^(CREATE\s+(?:EXTERNAL\s+)?TABLE)\s+',
+        r'\1 IF NOT EXISTS ',
+        ddl,
+        count=1,
+    )
 
 
 class ImpalaShellExtractor:
@@ -76,7 +111,8 @@ class ImpalaShellExtractor:
         use_kerberos: bool = False,
         use_ssl: bool = False,
         principal: str = None,
-        ca_cert: str = None
+        ca_cert: str = None,
+        database: str = DATABASE,
     ):
         self.host = host
         self.port = port
@@ -84,6 +120,7 @@ class ImpalaShellExtractor:
         self.use_ssl = use_ssl
         self.principal = principal
         self.ca_cert = ca_cert
+        self.database = database
 
     def _build_impala_shell_cmd(self, query: str = None, query_file: str = None) -> List[str]:
         """Build impala-shell command with appropriate flags."""
@@ -93,7 +130,7 @@ class ImpalaShellExtractor:
         cmd.extend(['-i', f'{self.host}:{self.port}'])
 
         # Database
-        cmd.extend(['-d', DATABASE])
+        cmd.extend(['-d', self.database])
 
         # Kerberos authentication
         if self.use_kerberos:
@@ -164,11 +201,11 @@ class ImpalaShellExtractor:
         pass
 
     def get_all_tables(self) -> List[str]:
-        """Get all tables in gmp_cis database."""
-        success, lines, error = self._execute_query(f"SHOW TABLES IN {DATABASE}")
+        """Get all tables in the source database."""
+        success, lines, error = self._execute_query(f"SHOW TABLES IN {self.database}")
         if success:
             tables = [line.strip() for line in lines if line.strip()]
-            logger.info(f"Found {len(tables)} tables in {DATABASE}")
+            logger.info(f"Found {len(tables)} tables in {self.database}")
             return sorted(tables)
         else:
             logger.error(f"Error getting tables: {error}")
@@ -177,7 +214,7 @@ class ImpalaShellExtractor:
     def get_table_ddl(self, table_name: str) -> Optional[str]:
         """Get CREATE TABLE statement for a table."""
         success, lines, error = self._execute_query(
-            f"SHOW CREATE TABLE {DATABASE}.{table_name}"
+            f"SHOW CREATE TABLE {self.database}.{table_name}"
         )
         if success:
             return '\n'.join(lines)
@@ -188,7 +225,7 @@ class ImpalaShellExtractor:
     def get_table_columns(self, table_name: str) -> List[Dict[str, str]]:
         """Get column information for a table."""
         success, lines, error = self._execute_query(
-            f"DESCRIBE {DATABASE}.{table_name}"
+            f"DESCRIBE {self.database}.{table_name}"
         )
         if success:
             columns = []
@@ -208,7 +245,7 @@ class ImpalaShellExtractor:
     def get_table_row_count(self, table_name: str) -> int:
         """Get row count for a table."""
         success, lines, error = self._execute_query(
-            f"SELECT COUNT(*) FROM {DATABASE}.{table_name}"
+            f"SELECT COUNT(*) FROM {self.database}.{table_name}"
         )
         if success and lines:
             try:
@@ -226,7 +263,7 @@ class ImpalaShellExtractor:
 
         col_names = [col['name'] for col in columns]
 
-        query = f"SELECT * FROM {DATABASE}.{table_name}"
+        query = f"SELECT * FROM {self.database}.{table_name}"
         if limit:
             query += f" LIMIT {limit}"
 
@@ -279,12 +316,19 @@ class ImpalaShellExtractor:
         table_name: str,
         columns: List[Dict[str, str]],
         data: List[Dict[str, Any]],
-        batch_size: int = 100
+        batch_size: int = 100,
+        target_database: str = None,
     ) -> List[str]:
-        """Generate INSERT/UPSERT statements for table data."""
+        """Generate INSERT/UPSERT statements for table data.
+
+        target_database: database the UPSERT should write into. Defaults to
+        self.database (source == target) for backward compatibility, but is
+        normally the differently-named target database passed by extract_ddl().
+        """
         if not data:
             return []
 
+        target_db = target_database or self.database
         statements = []
         col_names = [col['name'] for col in columns]
         col_types = {col['name']: col['type'] for col in columns}
@@ -302,7 +346,7 @@ class ImpalaShellExtractor:
 
                 values_list.append(f"({', '.join(values)})")
 
-            stmt = f"UPSERT INTO {DATABASE}.{table_name} ({', '.join(col_names)})\nVALUES\n"
+            stmt = f"UPSERT INTO {target_db}.{table_name} ({', '.join(col_names)})\nVALUES\n"
             stmt += ',\n'.join(values_list) + ";"
 
             statements.append(stmt)
@@ -322,13 +366,15 @@ class PyHiveExtractor:
         port: int = 21050,
         auth: str = 'NOSASL',
         username: str = None,
-        password: str = None
+        password: str = None,
+        database: str = DATABASE,
     ):
         self.host = host
         self.port = port
         self.auth = auth
         self.username = username
         self.password = password
+        self.database = database
         self.connection = None
         self.cursor = None
 
@@ -343,7 +389,7 @@ class PyHiveExtractor:
                 'host': self.host,
                 'port': self.port,
                 'auth': self.auth,
-                'database': DATABASE
+                'database': self.database
             }
 
             if self.username:
@@ -375,11 +421,11 @@ class PyHiveExtractor:
         logger.info("Disconnected from Impala")
 
     def get_all_tables(self) -> List[str]:
-        """Get all tables in gmp_cis database."""
+        """Get all tables in the source database."""
         try:
-            self.cursor.execute(f"SHOW TABLES IN {DATABASE}")
+            self.cursor.execute(f"SHOW TABLES IN {self.database}")
             tables = [row[0] for row in self.cursor.fetchall()]
-            logger.info(f"Found {len(tables)} tables in {DATABASE}")
+            logger.info(f"Found {len(tables)} tables in {self.database}")
             return sorted(tables)
         except Exception as e:
             logger.error(f"Error getting tables: {str(e)}")
@@ -388,7 +434,7 @@ class PyHiveExtractor:
     def get_table_ddl(self, table_name: str) -> Optional[str]:
         """Get CREATE TABLE statement for a table."""
         try:
-            self.cursor.execute(f"SHOW CREATE TABLE {DATABASE}.{table_name}")
+            self.cursor.execute(f"SHOW CREATE TABLE {self.database}.{table_name}")
             result = self.cursor.fetchall()
             if result:
                 ddl = '\n'.join([row[0] for row in result])
@@ -401,7 +447,7 @@ class PyHiveExtractor:
     def get_table_columns(self, table_name: str) -> List[Dict[str, str]]:
         """Get column information for a table."""
         try:
-            self.cursor.execute(f"DESCRIBE {DATABASE}.{table_name}")
+            self.cursor.execute(f"DESCRIBE {self.database}.{table_name}")
             columns = []
             for row in self.cursor.fetchall():
                 columns.append({
@@ -417,7 +463,7 @@ class PyHiveExtractor:
     def get_table_row_count(self, table_name: str) -> int:
         """Get row count for a table."""
         try:
-            self.cursor.execute(f"SELECT COUNT(*) FROM {DATABASE}.{table_name}")
+            self.cursor.execute(f"SELECT COUNT(*) FROM {self.database}.{table_name}")
             result = self.cursor.fetchone()
             return result[0] if result else 0
         except Exception as e:
@@ -427,7 +473,7 @@ class PyHiveExtractor:
     def get_table_data(self, table_name: str, limit: int = None) -> List[Dict[str, Any]]:
         """Get data from a table."""
         try:
-            query = f"SELECT * FROM {DATABASE}.{table_name}"
+            query = f"SELECT * FROM {self.database}.{table_name}"
             if limit:
                 query += f" LIMIT {limit}"
 
@@ -469,12 +515,19 @@ class PyHiveExtractor:
         table_name: str,
         columns: List[Dict[str, str]],
         data: List[Dict[str, Any]],
-        batch_size: int = 100
+        batch_size: int = 100,
+        target_database: str = None,
     ) -> List[str]:
-        """Generate INSERT/UPSERT statements for table data."""
+        """Generate INSERT/UPSERT statements for table data.
+
+        target_database: database the UPSERT should write into. Defaults to
+        self.database (source == target) for backward compatibility, but is
+        normally the differently-named target database passed by extract_ddl().
+        """
         if not data:
             return []
 
+        target_db = target_database or self.database
         statements = []
         col_names = [col['name'] for col in columns]
         col_types = {col['name']: col['type'] for col in columns}
@@ -492,7 +545,7 @@ class PyHiveExtractor:
 
                 values_list.append(f"({', '.join(values)})")
 
-            stmt = f"UPSERT INTO {DATABASE}.{table_name} ({', '.join(col_names)})\nVALUES\n"
+            stmt = f"UPSERT INTO {target_db}.{table_name} ({', '.join(col_names)})\nVALUES\n"
             stmt += ',\n'.join(values_list) + ";"
 
             statements.append(stmt)
@@ -504,13 +557,33 @@ def extract_ddl(
     extractor,
     tables: List[str],
     include_data: bool = False,
-    data_limit: int = None
+    data_limit: int = None,
+    target_database: str = None,
+    drop_existing: bool = False,
 ) -> Dict[str, Any]:
-    """Extract DDL and optionally data for all tables."""
+    """
+    Extract DDL and optionally data for all tables.
+
+    target_database: if different from extractor.database (the source), every
+    extracted DDL statement is requalified from source_db.table to
+    target_db.table (Impala's SHOW CREATE TABLE always fully-qualifies the
+    name), and UPSERT data statements are generated against target_database
+    too. Defaults to the source database (no requalification) if not given.
+
+    drop_existing: if False (default), CREATE TABLE statements get IF NOT
+    EXISTS injected instead of being preceded by an unconditional
+    DROP TABLE IF EXISTS -- safe to re-run against a target that already has
+    some of these tables. Set True to restore the old drop-and-recreate
+    behaviour.
+    """
+    source_db = extractor.database
+    target_db = target_database or source_db
 
     result = {
         'timestamp': datetime.now().isoformat(),
-        'database': DATABASE,
+        'source_database': source_db,
+        'target_database': target_db,
+        'drop_existing': drop_existing,
         'tables': {},
         'summary': {
             'total_tables': 0,
@@ -532,9 +605,13 @@ def extract_ddl(
         }
 
         try:
-            # Get DDL
+            # Get DDL, requalified to the target database name and (unless
+            # drop_existing) made idempotent with IF NOT EXISTS.
             ddl = extractor.get_table_ddl(table_name)
             if ddl:
+                ddl = requalify_ddl(ddl, source_db, target_db)
+                if not drop_existing:
+                    ddl = ensure_if_not_exists(ddl)
                 table_info['ddl'] = ddl
                 table_info['status'] = 'success'
             else:
@@ -557,7 +634,7 @@ def extract_ddl(
                 data = extractor.get_table_data(table_name, limit=data_limit)
                 if data:
                     insert_stmts = extractor.generate_insert_statements(
-                        table_name, columns, data
+                        table_name, columns, data, target_database=target_db
                     )
                     table_info['insert_statements'] = insert_stmts
 
@@ -582,19 +659,29 @@ def write_output_files(result: Dict[str, Any], output_dir: Path, use_kerberos: b
     output_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    target_db = result.get('target_database') or result.get('database') or DATABASE
+    source_db = result.get('source_database', target_db)
+    drop_existing = result.get('drop_existing', False)
+    drop_line = (
+        (lambda t: f"DROP TABLE IF EXISTS {target_db}.{t};\n\n")
+        if drop_existing else (lambda t: "")
+    )
 
     # 1. Write combined DDL file
     ddl_file = output_dir / f'01_all_tables_ddl_{timestamp}.sql'
     with open(ddl_file, 'w') as f:
         f.write(f"-- ============================================\n")
-        f.write(f"-- GMP_CIS Database DDL - Extracted from SIT\n")
+        f.write(f"-- {target_db} Database DDL\n")
+        f.write(f"-- Source database : {source_db}\n")
+        f.write(f"-- Target database  : {target_db}\n")
         f.write(f"-- Generated: {result['timestamp']}\n")
         f.write(f"-- Tables: {result['summary']['total_tables']}\n")
+        f.write(f"-- drop_existing={drop_existing} (tables use IF NOT EXISTS when False)\n")
         f.write(f"-- ============================================\n\n")
 
         f.write(f"-- Create database if not exists\n")
-        f.write(f"CREATE DATABASE IF NOT EXISTS {DATABASE};\n")
-        f.write(f"USE {DATABASE};\n\n")
+        f.write(f"CREATE DATABASE IF NOT EXISTS {target_db};\n")
+        f.write(f"USE {target_db};\n\n")
 
         for table_name, table_info in result['tables'].items():
             if table_info['ddl']:
@@ -602,7 +689,7 @@ def write_output_files(result: Dict[str, Any], output_dir: Path, use_kerberos: b
                 f.write(f"-- Table: {table_name}\n")
                 f.write(f"-- Rows: {table_info['row_count']}\n")
                 f.write(f"-- ----------------------------------------\n")
-                f.write(f"DROP TABLE IF EXISTS {DATABASE}.{table_name};\n\n")
+                f.write(drop_line(table_name))
                 f.write(table_info['ddl'])
                 f.write(";\n\n")
 
@@ -619,7 +706,7 @@ def write_output_files(result: Dict[str, Any], output_dir: Path, use_kerberos: b
                 f.write(f"-- Table: {table_name}\n")
                 f.write(f"-- Extracted: {result['timestamp']}\n")
                 f.write(f"-- Rows: {table_info['row_count']}\n\n")
-                f.write(f"DROP TABLE IF EXISTS {DATABASE}.{table_name};\n\n")
+                f.write(drop_line(table_name))
                 f.write(table_info['ddl'])
                 f.write(";\n")
 
@@ -649,10 +736,10 @@ def write_output_files(result: Dict[str, Any], output_dir: Path, use_kerberos: b
         all_data_file = output_dir / f'02_all_tables_data_{timestamp}.sql'
         with open(all_data_file, 'w') as f:
             f.write(f"-- ============================================\n")
-            f.write(f"-- GMP_CIS Database Data - Extracted from SIT\n")
+            f.write(f"-- {target_db} Database Data - Extracted from {source_db}\n")
             f.write(f"-- Generated: {result['timestamp']}\n")
             f.write(f"-- ============================================\n\n")
-            f.write(f"USE {DATABASE};\n\n")
+            f.write(f"USE {target_db};\n\n")
 
             for table_name, table_info in result['tables'].items():
                 if table_info.get('insert_statements'):
@@ -673,7 +760,8 @@ def write_output_files(result: Dict[str, Any], output_dir: Path, use_kerberos: b
         f.write("SIT to UAT Migration Summary\n")
         f.write("=" * 60 + "\n\n")
         f.write(f"Extraction Time: {result['timestamp']}\n")
-        f.write(f"Database: {result['database']}\n\n")
+        f.write(f"Source Database: {source_db}\n")
+        f.write(f"Target Database: {target_db}\n\n")
 
         f.write("Summary:\n")
         f.write(f"  Total Tables: {result['summary']['total_tables']}\n")
@@ -854,6 +942,10 @@ Examples:
 
   # Extract specific tables
   python extract_sit_ddl.py --use-impala-shell --host sit-impala-host --tables cis_trade,cis_portfolio
+
+  # Copy all tables into a differently-named SIT database
+  python extract_sit_ddl.py --use-impala-shell --host sit-impala-host --kerberos \\
+      --source-database gmp_cis --target-database gmp_cis_dev --include-data
         """
     )
 
@@ -921,6 +1013,25 @@ Examples:
         help='Comma-separated list of tables to extract (default: all)'
     )
 
+    # Database naming (source vs target)
+    parser.add_argument(
+        '--source-database',
+        default=os.environ.get('SIT_IMPALA_DB', DATABASE),
+        help=f'Database to read DDL/data from (default: {DATABASE})'
+    )
+    parser.add_argument(
+        '--target-database',
+        default=None,
+        help='Database name to generate DDL/data for (default: same as --source-database). '
+             'Use this to restore into a differently-named SIT database.'
+    )
+    parser.add_argument(
+        '--drop-existing',
+        action='store_true',
+        help='Emit unconditional DROP TABLE IF EXISTS before each CREATE TABLE '
+             '(destructive; default is safe CREATE TABLE IF NOT EXISTS)'
+    )
+
     # Data extraction
     parser.add_argument(
         '--include-data',
@@ -951,7 +1062,8 @@ Examples:
             use_kerberos=args.kerberos,
             use_ssl=args.ssl,
             principal=args.principal,
-            ca_cert=args.ca_cert
+            ca_cert=args.ca_cert,
+            database=args.source_database
         )
     else:
         extractor = PyHiveExtractor(
@@ -959,7 +1071,8 @@ Examples:
             port=args.port,
             auth=args.auth,
             username=args.username,
-            password=args.password
+            password=args.password,
+            database=args.source_database
         )
 
     # Connect
@@ -978,14 +1091,20 @@ Examples:
             logger.error("No tables found")
             sys.exit(1)
 
-        logger.info(f"Extracting {len(tables)} tables...")
+        target_database = args.target_database or args.source_database
+        logger.info(
+            f"Extracting {len(tables)} tables from '{args.source_database}' "
+            f"-> '{target_database}'..."
+        )
 
         # Extract DDL and data
         result = extract_ddl(
             extractor,
             tables,
             include_data=args.include_data,
-            data_limit=args.data_limit
+            data_limit=args.data_limit,
+            target_database=target_database,
+            drop_existing=args.drop_existing
         )
 
         # Write output files
@@ -995,6 +1114,8 @@ Examples:
         print("\n" + "=" * 60)
         print("Extraction Complete!")
         print("=" * 60)
+        print(f"Source Database: {result['source_database']}")
+        print(f"Target Database: {result['target_database']}")
         print(f"Total Tables: {result['summary']['total_tables']}")
         print(f"Successful: {result['summary']['successful']}")
         print(f"Failed: {result['summary']['failed']}")

@@ -29,7 +29,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 # Default values
 SIT_HOST="${SIT_IMPALA_HOST:-localhost}"
@@ -42,6 +42,9 @@ CA_CERT=""
 INCLUDE_DATA=false
 TABLES=""
 DATA_LIMIT=""
+SOURCE_DATABASE=""
+TARGET_DATABASE=""
+DROP_EXISTING=false
 
 # Colors for output
 RED='\033[0;31m'
@@ -72,6 +75,13 @@ print_help() {
     echo "  --include-data      Extract table data as well"
     echo "  --data-limit N      Limit rows per table when extracting data"
     echo ""
+    echo "Database Naming:"
+    echo "  --source-database DB   Database to read DDL/data from (default: gmp_cis)"
+    echo "  --target-database DB   Database name to generate DDL/data for"
+    echo "                         (default: same as --source-database)"
+    echo "  --drop-existing        Emit DROP TABLE IF EXISTS before each CREATE TABLE"
+    echo "                         (destructive; default is safe CREATE TABLE IF NOT EXISTS)"
+    echo ""
     echo "Other:"
     echo "  --help, -h          Show this help message"
     echo ""
@@ -93,6 +103,10 @@ print_help() {
     echo ""
     echo "  # Extract with data"
     echo "  $0 --use-impala-shell --host impala-host --kerberos --include-data"
+    echo ""
+    echo "  # Copy into a differently-named SIT database"
+    echo "  $0 --use-impala-shell --host impala-host --kerberos --include-data \\"
+    echo "      --source-database gmp_cis --target-database gmp_cis_dev"
 }
 
 # Parse arguments
@@ -138,6 +152,18 @@ while [[ $# -gt 0 ]]; do
             DATA_LIMIT="$2"
             shift 2
             ;;
+        --source-database)
+            SOURCE_DATABASE="$2"
+            shift 2
+            ;;
+        --target-database)
+            TARGET_DATABASE="$2"
+            shift 2
+            ;;
+        --drop-existing)
+            DROP_EXISTING=true
+            shift
+            ;;
         --help|-h)
             print_help
             exit 0
@@ -172,6 +198,13 @@ if [ -n "$TABLES" ]; then
 else
     echo -e "Tables: ${GREEN}ALL${NC}"
 fi
+if [ -n "$SOURCE_DATABASE" ]; then
+    echo -e "Source Database: ${GREEN}$SOURCE_DATABASE${NC}"
+fi
+if [ -n "$TARGET_DATABASE" ]; then
+    echo -e "Target Database: ${GREEN}$TARGET_DATABASE${NC}"
+fi
+echo -e "Drop Existing: ${GREEN}$DROP_EXISTING${NC}"
 echo ""
 
 # Check Kerberos ticket if using Kerberos
@@ -234,6 +267,18 @@ fi
 
 if [ -n "$DATA_LIMIT" ]; then
     CMD="$CMD --data-limit $DATA_LIMIT"
+fi
+
+if [ -n "$SOURCE_DATABASE" ]; then
+    CMD="$CMD --source-database $SOURCE_DATABASE"
+fi
+
+if [ -n "$TARGET_DATABASE" ]; then
+    CMD="$CMD --target-database $TARGET_DATABASE"
+fi
+
+if [ "$DROP_EXISTING" = true ]; then
+    CMD="$CMD --drop-existing"
 fi
 
 # Run extraction
