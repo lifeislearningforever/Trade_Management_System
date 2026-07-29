@@ -31,16 +31,13 @@ Logic per cash_flow_type (ALL types accumulate — SA confirmed 2026-06-09):
   RETURN_OF_CAPITAL   → same as CAPITAL_DISTRIBUTION (see above)
   OTHER               → skip (log warning)
 
-send_receive sign convention (global):
-  SEND / INCREASE    → increase (positive)
-  RECEIVE / DECREASE → decrease (negative)
-  NULL               → treated as SEND (positive, logged)
+send_receive sign convention (SA-confirmed, uniform across every cash_flow_type
+above, no per-type exceptions):
+  SEND / INCREASE    → increase the respective field (positive)
+  RECEIVE / DECREASE → decrease the respective field (negative)
+  NULL               → treated as SEND/INCREASE (positive, logged)
   (CA-sourced cash flows use INCREASE/DECREASE; user-created CIS ones use
   SEND/RECEIVE — see ca_cash_flow_service.py vs load_migration_data.py)
-
-Exception — DIVIDEND / CASH_DIVIDEND:
-  RECEIVE / INCREASE → increase (fund received dividend)
-  SEND / DECREASE    → decrease (fund distributed/paid out dividend)
 
 Idempotency: once processed, cf_processed=true is set on the cash flow
 record so re-runs on the same date skip already-processed records.
@@ -134,17 +131,6 @@ def _sign(send_receive: str, cf_number: str) -> Decimal:
     if sr in ('RECEIVE', 'DECREASE'):
         return Decimal('-1')
     logger.warning(f"[CF {cf_number}] send_receive '{sr}' unrecognised — treating as SEND (positive)")
-    return Decimal('1')
-
-
-def _sign_dividend(send_receive: str, cf_number: str) -> Decimal:
-    """Dividend convention: RECEIVE/INCREASE=+1 (fund got paid), SEND/DECREASE=-1 (fund paid out)."""
-    sr = (send_receive or '').upper().strip()
-    if sr in ('SEND', 'DECREASE'):
-        return Decimal('-1')
-    if sr in ('RECEIVE', 'INCREASE'):
-        return Decimal('1')
-    logger.warning(f"[CF {cf_number}] send_receive '{sr}' unrecognised for DIVIDEND — treating as RECEIVE (positive)")
     return Decimal('1')
 
 
@@ -504,14 +490,12 @@ class Command(BaseCommand):
                 )
 
             elif cf_type in ('DIVIDEND', 'CASH_DIVIDEND'):
-                # DIVIDEND: RECEIVE=increase, SEND=decrease (opposite of global convention)
-                div_sign = _sign_dividend(send_receive, cf_number)
-                div_fc = round(amount_fc * div_sign, fc_dp)
-                div_lc = round(amount_lc * div_sign, lc_dp)
+                # Same shared _sign() convention as every other type: INCREASE
+                # increases dividend_fc/lc, DECREASE decreases it.
                 ok, msg = self._accumulate_field(
                     position, portfolio, security, payment_date,
                     fc_field='dividend_fc', lc_field='dividend_lc',
-                    delta_fc=div_fc, delta_lc=div_lc, **common
+                    delta_fc=signed_fc, delta_lc=signed_lc, **common
                 )
 
             elif cf_type in ('RETURN_OF_CAPITAL', 'CAPITAL_DISTRIBUTION'):
