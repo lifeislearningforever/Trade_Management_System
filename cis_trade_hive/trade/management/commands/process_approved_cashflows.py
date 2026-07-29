@@ -23,34 +23,45 @@ Logic per cash_flow_type (ALL types accumulate — SA confirmed 2026-06-09):
   OTHER               → skip (log warning)
 
 send_receive sign convention (global):
-  SEND    → increase (positive)
-  RECEIVE → decrease (negative)
-  NULL    → treated as SEND (positive, logged)
+  SEND / INCREASE    → increase (positive)
+  RECEIVE / DECREASE → decrease (negative)
+  NULL               → treated as SEND (positive, logged)
+  (CA-sourced cash flows use INCREASE/DECREASE; user-created CIS ones use
+  SEND/RECEIVE — see ca_cash_flow_service.py vs load_migration_data.py)
 
 Exception — DIVIDEND / CASH_DIVIDEND:
-  RECEIVE → increase (fund received dividend)
-  SEND    → decrease (fund distributed/paid out dividend)
+  RECEIVE / INCREASE → increase (fund received dividend)
+  SEND / DECREASE    → decrease (fund distributed/paid out dividend)
 
 Idempotency: once processed, cf_processed=true is set on the cash flow
 record so re-runs on the same date skip already-processed records.
+
+Position lookup: always the current is_latest=true row (cis_trade_position
+for CIS sources, cis_position for non-CIS) — this is the base every run
+increases/decreases the cost from, regardless of what position_type that
+latest row happens to be.
+
+average_cost precision: average_cost_fc/lc are a per-unit price, not a
+currency amount, and are always written at AVP_PRECISION (8dp) — never
+truncated to the currency's display decimal places (fc_dp/lc_dp).
 
 Run types
 ---------
   EOD  (default): Normal end-of-day run.
         - CF cutoff (payment_date <=) inferred from alldatesinfo reporting_date (prev_day).
-        - Looks up the latest open SETTLED position for each portfolio/security.
+        - Looks up the latest open SETTLED position (is_latest=true) for each portfolio/security.
         - Restricts position lookup to positions on reporting_date.
-        - Writes position_type = 'INT' into cis_trade_position / cis_position.
+        - Writes/updates position_type = 'INT' into cis_trade_position / cis_position,
+          marking the new row is_latest=true.
         - Override cutoff with --position-date if needed.
 
   CORR: Month-end correction run (scheduled D+1 … D+5 after month-end).
         - CF cutoff inferred as last calendar day of month before reporting_date.
+        - Looks up the latest open SETTLED position (is_latest=true) for each portfolio/security.
         - Restricts position lookup to positions on that last_month_end date.
-        - Writes position_type = 'INT' into cis_trade_position / cis_position.
+        - Writes position_type = 'CORR' into cis_trade_position / cis_position,
+          marking the new row is_latest=true.
         - Override cutoff with --position-date if needed.
-
-  In both cases the position_type written is always 'INT' — the CORR label is
-  applied by refresh_positions (which runs after this job).
 
 Usage:
     # Normal EOD — date inferred from alldatesinfo
@@ -98,22 +109,33 @@ def _escape(value: str) -> str:
 
 
 def _sign(send_receive: str, cf_number: str) -> Decimal:
-    """Global convention: SEND=+1, RECEIVE=-1, NULL=+1 (logged)."""
+    """Global convention: SEND/INCREASE=+1, RECEIVE/DECREASE=-1, NULL=+1 (logged).
+
+    Two vocabularies exist in this codebase's send_receive values: user-created
+    CIS cash flows use SEND/RECEIVE (see load_migration_data.py), while
+    CA-sourced ones use INCREASE/DECREASE (see ca_cash_flow_service.py, which
+    always sets 'INCREASE' today). INCREASE is grouped with SEND (+1) to match
+    the +1 the old bare default already gave it — DECREASE is new/never
+    emitted yet, but is grouped with RECEIVE (-1) so it doesn't silently fall
+    through to +1 the day it starts being used.
+    """
     sr = (send_receive or '').upper().strip()
-    if sr == 'RECEIVE':
+    if sr in ('SEND', 'INCREASE'):
+        return Decimal('1')
+    if sr in ('RECEIVE', 'DECREASE'):
         return Decimal('-1')
-    if not sr:
-        logger.warning(f"[CF {cf_number}] send_receive is NULL — treating as SEND (positive)")
+    logger.warning(f"[CF {cf_number}] send_receive '{sr}' unrecognised — treating as SEND (positive)")
     return Decimal('1')
 
 
 def _sign_dividend(send_receive: str, cf_number: str) -> Decimal:
-    """Dividend convention: RECEIVE=+1 (fund got paid), SEND=-1 (fund paid out)."""
+    """Dividend convention: RECEIVE/INCREASE=+1 (fund got paid), SEND/DECREASE=-1 (fund paid out)."""
     sr = (send_receive or '').upper().strip()
-    if sr == 'SEND':
+    if sr in ('SEND', 'DECREASE'):
         return Decimal('-1')
-    if not sr:
-        logger.warning(f"[CF {cf_number}] send_receive is NULL for DIVIDEND — treating as RECEIVE (positive)")
+    if sr in ('RECEIVE', 'INCREASE'):
+        return Decimal('1')
+    logger.warning(f"[CF {cf_number}] send_receive '{sr}' unrecognised for DIVIDEND — treating as RECEIVE (positive)")
     return Decimal('1')
 
 
@@ -434,7 +456,7 @@ class Command(BaseCommand):
                 cf_type=cf_type, cf_id=cf_id, cf_number=cf_number,
                 amount_fc=amount_fc, amount_lc=amount_lc,
                 fc_dp=fc_dp, lc_dp=lc_dp,
-                dry_run=dry_run, pos_src=pos_src,
+                dry_run=dry_run, pos_src=pos_src, run_type=run_type,
             )
 
             if cf_type in ('UNCALL_COMMITMENT',):
@@ -535,6 +557,7 @@ class Command(BaseCommand):
         lc_dp: int = DEFAULT_DP,
         dry_run: bool = False,
         pos_src: str = 'CIS',
+        run_type: str = 'EOD',
     ) -> Tuple[bool, str]:
         """Add delta to existing FC/LC field (running total)."""
         old_fc = Decimal(str(position.get(fc_field, 0) or 0))
@@ -552,7 +575,7 @@ class Command(BaseCommand):
             position, portfolio, security, position_date, cf_type, overrides,
             cf_id=cf_id, cf_number=cf_number,
             cf_amount_fc=float(round(amount_fc, fc_dp)), cf_amount_lc=float(round(amount_lc, lc_dp)),
-            fc_dp=fc_dp, lc_dp=lc_dp, pos_src=pos_src,
+            fc_dp=fc_dp, lc_dp=lc_dp, pos_src=pos_src, run_type=run_type,
         )
         if success:
             return True, f'{cf_type}: {fc_field} {old_fc} + {delta_fc} = {new_fc}'
@@ -575,6 +598,7 @@ class Command(BaseCommand):
         lc_dp: int = DEFAULT_DP,
         dry_run: bool = False,
         pos_src: str = 'CIS',
+        run_type: str = 'EOD',
     ) -> Tuple[bool, str]:
         """
         AVP reduction: avp_fc_new = avp_fc_old - (amount_fc / qty) -- always,
@@ -646,7 +670,7 @@ class Command(BaseCommand):
             position, portfolio, security, position_date, cf_type, overrides,
             cf_id=cf_id, cf_number=cf_number,
             cf_amount_fc=float(round(raw_amount_fc, fc_dp)), cf_amount_lc=float(round(raw_amount_lc, lc_dp)),
-            fc_dp=fc_dp, lc_dp=lc_dp, pos_src=pos_src,
+            fc_dp=fc_dp, lc_dp=lc_dp, pos_src=pos_src, run_type=run_type,
         )
         if success:
             return True, f'{cf_type} ({reval_status}): avp_fc {old_avp_fc} → {new_avp_fc}, avp_lc {old_avp_lc} → {new_avp_lc}'
@@ -678,8 +702,10 @@ class Command(BaseCommand):
         then sync to golden copy.
         For non-CIS positions (GMP, AMSICEQ, USER_UPLOAD): skip cis_trade_position
         entirely and write directly to cis_position (golden copy).
-        Always writes position_type='INT' — CORR label is applied by refresh_positions.
+        Writes position_type='CORR' when run_type='CORR', else 'INT' — either way
+        the new row is marked is_latest=true (it becomes the base for the next run).
         """
+        position_type = 'CORR' if run_type == 'CORR' else 'INT'
         try:
             # Non-CIS: golden copy only — no cis_trade_position ledger for these sources
             if pos_src != 'CIS':
@@ -697,6 +723,7 @@ class Command(BaseCommand):
                     fc_dp=fc_dp,
                     lc_dp=lc_dp,
                     src_system=pos_src,
+                    run_type=run_type,
                 )
                 return True
 
@@ -741,6 +768,12 @@ class Command(BaseCommand):
             def _flc(field, default=0):
                 return float(round(Decimal(str(_f(field, default))), lc_dp))
 
+            def _favp(field, default=0):
+                # average_cost is a per-unit price, not a currency amount — it
+                # must keep AVP_PRECISION (8dp), not be truncated to the
+                # currency's display decimal places (fc_dp/lc_dp, often 2).
+                return float(round(Decimal(str(_f(field, default))), AVP_PRECISION))
+
             def _b(field, default=True):
                 val = current.get(field, default)
                 return 'true' if val else 'false'
@@ -779,8 +812,8 @@ class Command(BaseCommand):
                 '{_escape(portfolio)}',
                 '{_escape(security)}',
                 {_f('quantity')},
-                {_ffc('average_cost_fc')}, {_ffc('total_cost_fc')},
-                {_flc('average_cost_lc')}, {_flc('total_cost_lc')},
+                {_favp('average_cost_fc')}, {_ffc('total_cost_fc')},
+                {_favp('average_cost_lc')}, {_flc('total_cost_lc')},
                 {_f('market_price')},      {_ffc('market_value_fc')}, {_flc('market_value_lc')},
                 {_ffc('realized_pnl_fc')}, {_ffc('unrealized_pnl_fc')},
                 {_flc('realized_pnl_lc')}, {_flc('unrealized_pnl_lc')},
@@ -789,7 +822,7 @@ class Command(BaseCommand):
                 {_ffc('pipeline_fc')},     {_flc('pipeline_lc')},
                 {_ffc('commit_fc')},       {_flc('commit_lc')},
                 {_ffc('provision_fc')},    {_flc('provision_lc')},
-                'INT',
+                '{position_type}',
                 {_s('trade_type', 'BUY')},
                 '{_escape(sec_ccy)}',
                 '{_escape(port_ccy)}',
@@ -822,6 +855,7 @@ class Command(BaseCommand):
                     cf_amount_lc=cf_amount_lc,
                     fc_dp=fc_dp,
                     lc_dp=lc_dp,
+                    run_type=run_type,
                 )
             return success
 
@@ -844,13 +878,16 @@ class Command(BaseCommand):
         fc_dp: int = DEFAULT_DP,
         lc_dp: int = DEFAULT_DP,
         src_system: str = 'CIS',
+        run_type: str = 'EOD',
     ) -> None:
         """
         Mirror the cash-flow position update into cis_position (golden copy).
         Looks up existing row for this portfolio+security across any src_system.
         If no row exists, creates a new one with a fresh position_id.
         Non-fatal: logs errors but does not fail the parent write.
+        Writes position_type='CORR' when run_type='CORR', else 'INT'.
         """
+        position_type = 'CORR' if run_type == 'CORR' else 'INT'
         try:
             # Look up the existing golden row for this exact date to determine
             # src_system — needed to compute the correct natural key hash.
@@ -910,13 +947,30 @@ class Command(BaseCommand):
             )
 
             def _gv(field, default=0.0):
-                """Prefer override → cis_trade_position current → golden row."""
-                if field in overrides:
-                    return float(overrides[field])
-                if current.get(field) is not None:
-                    return float(current[field])
-                v = row.get(field)
-                return float(v) if v is not None else float(default)
+                """Prefer override → cis_trade_position current → golden row.
+
+                `field` may be a single name or a list of aliases tried in
+                order: the CIS ledger (cis_trade_position) and the golden
+                schema (cis_position) use different column names for the same
+                value (total_cost_fc/lc vs cost_fc/lc). Checking only the
+                golden name here meant an override keyed 'total_cost_fc' was
+                never found, so cost_fc/cost_lc (and therefore net_book_value)
+                silently kept the stale pre-cashflow value on every RETURN_OF_
+                CAPITAL/CAPITAL_DISTRIBUTION sync, even though average_cost_fc
+                updated correctly.
+                """
+                names = field if isinstance(field, (list, tuple)) else [field]
+                for name in names:
+                    if name in overrides:
+                        return float(overrides[name])
+                for name in names:
+                    if current.get(name) is not None:
+                        return float(current[name])
+                for name in names:
+                    v = row.get(name)
+                    if v is not None:
+                        return float(v)
+                return float(default)
 
             def _gfc(field, default=0.0):
                 return float(round(Decimal(str(_gv(field, default))), fc_dp))
@@ -924,9 +978,14 @@ class Command(BaseCommand):
             def _glc(field, default=0.0):
                 return float(round(Decimal(str(_gv(field, default))), lc_dp))
 
+            def _gavp(field, default=0.0):
+                # average_cost is a per-unit price, not a currency amount — keep
+                # AVP_PRECISION (8dp) rather than truncating to fc_dp/lc_dp.
+                return float(round(Decimal(str(_gv(field, default))), AVP_PRECISION))
+
             # net_book_value = cost + unrealized_pnl - provision
-            cost_fc_val      = _gfc('cost_fc', _gv('total_cost_fc'))
-            cost_lc_val      = _glc('cost_lc', _gv('total_cost_lc'))
+            cost_fc_val      = _gfc(['total_cost_fc', 'cost_fc'])
+            cost_lc_val      = _glc(['total_cost_lc', 'cost_lc'])
             upnl_fc_val      = _gfc('unrealized_pnl_fc')
             upnl_lc_val      = _glc('unrealized_pnl_lc')
             provision_fc_val = _gfc('provision_fc')
@@ -960,8 +1019,8 @@ class Command(BaseCommand):
                 '{_escape(pos_basis)}', '{_escape(position_date)}',
                 '{_escape(effective_src)}', '{processing_date}',
                 {_gv('quantity')},
-                {_gfc('average_cost_fc')}, {cost_fc_val},
-                {_glc('average_cost_lc')}, {cost_lc_val},
+                {_gavp('average_cost_fc')}, {cost_fc_val},
+                {_gavp('average_cost_lc')}, {cost_lc_val},
                 {_gfc('market_value_fc')}, {_glc('market_value_lc')},
                 {nbv_fc}, {nbv_lc},
                 {upnl_fc_val}, {upnl_lc_val},
@@ -970,7 +1029,7 @@ class Command(BaseCommand):
                 {provision_fc_val}, {provision_lc_val},
                 {_gfc('uncall_fc')}, {_glc('uncall_lc')},
                 {_gfc('pipeline_fc')}, {_glc('pipeline_lc')},
-                'INT', true,
+                '{position_type}', true,
                 '{processing_timestamp}',
                 {f"'{_escape(isin)}'" if isin else 'NULL'},
                 {f"'{_escape(source_table)}'" if source_table else 'NULL'}
@@ -1091,7 +1150,7 @@ class Command(BaseCommand):
               AND position_basis = 'SETTLED'
               AND status = 'OPEN'
               AND is_active = true
-              AND (is_latest = true OR is_latest IS NULL)
+              AND is_latest = true
               {date_clause_tp}
             ORDER BY position_date DESC, version_id DESC
             LIMIT 1
@@ -1139,6 +1198,7 @@ class Command(BaseCommand):
               AND security_label = '{_escape(security)}'
               AND position_basis = 'SETTLED'
               AND quantity > 0
+              AND (is_latest = true OR is_latest IS NULL)
               {date_clause_gp}
             ORDER BY position_date DESC
             LIMIT 1
