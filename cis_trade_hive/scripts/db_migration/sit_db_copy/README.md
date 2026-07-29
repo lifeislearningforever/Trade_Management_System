@@ -30,27 +30,33 @@ between the source and target Impala clusters. It's two decoupled steps
 connected by flat files:
 
 ```
-[machine with access to SOURCE]  extract_sit_ddl.py  ->  output/*.sql, deploy_to_uat.sh
+[machine with access to SOURCE]  extract_sit_ddl.py  ->  output/ (+ single .tar.gz archive)
               |
-              |  copy the output/ folder over (scp, jump host, artifact
-              |  store, USB — any transport your org allows)
+              |  SFTP the .tar.gz to the target host
+              |  (no direct network path between source and target needed)
               v
-[machine with access to TARGET]  ./deploy_to_uat.sh --host target-host --kerberos --include-data
+[machine with access to TARGET]  tar -xzf <archive>.tar.gz && cd output
+                                  ./deploy_to_uat.sh --host target-host --kerberos --include-data
 ```
 
-1. **Extract** runs wherever you *can* reach the source (old SIT). It reads
+1. **Extract** runs wherever you *can* reach the source (e.g. UAT). It reads
    DDL and data over that connection and writes everything to local `.sql`
    files under `output/`. Nothing is sent to the target at this stage —
    the target host isn't even contacted.
-2. **Deploy** (`output/deploy_to_uat.sh`) runs wherever you *can* reach the
-   target (new SIT/UAT). It only reads those local `.sql` files and applies
-   them via `impala-shell` against whatever `--host` you give it.
+2. `run_extraction.sh` then packages the whole `output/` folder into one
+   `sit_db_copy_<source>_to_<target>_<timestamp>.tar.gz` archive alongside
+   it — this is the single file to hand off (e.g. via SFTP) when there is
+   **no direct network path from source to target at all** (not even for
+   copying files between them directly).
+3. **Deploy**: on the target side, extract that archive and run
+   `output/deploy_to_uat.sh` — it only reads the local `.sql` files inside
+   and applies them via `impala-shell` against whatever `--host` you give it.
 
 So the only thing that has to cross the network boundary between the two
-environments is the generated `output/` folder itself, not a database
-connection. If neither machine can reach both clusters, run extraction from
-a bastion/jump box that has access to the source, copy `output/` to one that
-has access to the target, and run `deploy_to_uat.sh` there.
+environments is that one archive file, not a database connection. If
+neither machine can reach both clusters, run extraction from a bastion/jump
+box that has access to the source, SFTP the archive to a box with access to
+the target, and run `deploy_to_uat.sh` there.
 
 ## Files
 
@@ -113,15 +119,27 @@ This produces, under `output/`:
 - `deploy_to_uat.sh` — executable script that runs the DDL (and data, with
   `--include-data`) against a target host via `impala-shell`
 
-### 2. Apply to the target
+### 2. Transfer to the target
+
+If the target is reachable directly from where you ran Step 1, just copy
+`output/` over. If not — e.g. UAT cannot reach SIT at all — `run_extraction.sh`
+already packaged everything into one archive next to `output/`:
+`sit_db_copy_<source>_to_<target>_<timestamp>.tar.gz`. SFTP that single file
+to a machine that *can* reach the target, then:
 
 ```bash
+tar -xzf sit_db_copy_gmp_cis_to_gmp_cis_dev_<timestamp>.tar.gz
 cd output
+```
+
+### 3. Apply to the target
+
+```bash
 ./deploy_to_uat.sh --host target-impala-host --kerberos            # DDL only
 ./deploy_to_uat.sh --host target-impala-host --kerberos --include-data   # DDL + data
 ```
 
-### 3. Verify the copy
+### 4. Verify the copy
 
 ```bash
 impala-shell -i target-impala-host:21050 -d gmp_cis_dev -q "SHOW TABLES"
@@ -145,6 +163,14 @@ from the extraction step.
 
 Run `python3 extract_sit_ddl.py --help` for the full list (host/port/SSL/auth
 options).
+
+**`--port`**: leave it unset unless you know you need it. In
+`--use-impala-shell` mode, omitting `--port` lets `impala-shell` fall back to
+its own built-in default port — some clusters only accept connections on
+that default and reject an explicitly-forced `21050`. Only pass `--port` if
+your working manual `impala-shell -i host ...` test needed one. PyHive mode
+(no `--use-impala-shell`) always needs a concrete port and falls back to
+`21050` if none is given.
 
 ## Testing this safely before a real SIT copy
 

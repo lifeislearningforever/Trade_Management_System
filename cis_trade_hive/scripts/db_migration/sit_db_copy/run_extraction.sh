@@ -33,7 +33,10 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 # Default values
 SIT_HOST="${SIT_IMPALA_HOST:-localhost}"
-SIT_PORT="${SIT_IMPALA_PORT:-21050}"
+# Left empty unless --port or SIT_IMPALA_PORT is set -- in --use-impala-shell
+# mode, no --port means impala-shell falls back to its own built-in default,
+# which is what some clusters actually require (forcing 21050 broke one).
+SIT_PORT="${SIT_IMPALA_PORT:-}"
 USE_IMPALA_SHELL=false
 USE_KERBEROS=false
 USE_SSL=false
@@ -62,7 +65,9 @@ print_help() {
     echo ""
     echo "Connection Options:"
     echo "  --host HOST         SIT Impala host (default: localhost)"
-    echo "  --port PORT         SIT Impala port (default: 21050)"
+    echo "  --port PORT         SIT Impala port (default: unset -- impala-shell mode"
+    echo "                      falls back to its own built-in default; PyHive mode"
+    echo "                      falls back to 21050)"
     echo ""
     echo "Authentication (for impala-shell):"
     echo "  --kerberos, -k      Use Kerberos authentication"
@@ -182,7 +187,7 @@ echo "============================================"
 echo ""
 echo -e "Connection Mode: ${GREEN}$([ "$USE_IMPALA_SHELL" = true ] && echo "impala-shell" || echo "PyHive")${NC}"
 echo -e "SIT Host: ${GREEN}$SIT_HOST${NC}"
-echo -e "SIT Port: ${GREEN}$SIT_PORT${NC}"
+echo -e "SIT Port: ${GREEN}${SIT_PORT:-<not set -- impala-shell will use its own default>}${NC}"
 
 if [ "$USE_IMPALA_SHELL" = true ]; then
     echo -e "Kerberos: ${GREEN}$USE_KERBEROS${NC}"
@@ -235,7 +240,10 @@ fi
 # Build command
 CMD="python3 $SCRIPT_DIR/extract_sit_ddl.py"
 CMD="$CMD --host $SIT_HOST"
-CMD="$CMD --port $SIT_PORT"
+
+if [ -n "$SIT_PORT" ]; then
+    CMD="$CMD --port $SIT_PORT"
+fi
 
 if [ "$USE_IMPALA_SHELL" = true ]; then
     CMD="$CMD --use-impala-shell"
@@ -297,13 +305,37 @@ if [ $EXIT_CODE -eq 0 ]; then
     echo -e "${GREEN}============================================${NC}"
     echo ""
     echo "Output files are in: $SCRIPT_DIR/output/"
+
+    # Package output/ into a single archive -- when there is no direct network
+    # path from this host to the target (e.g. UAT cannot reach SIT), this is
+    # the one file that needs to be sftp'd across instead of the whole folder.
+    ARCHIVE_LABEL="${SOURCE_DATABASE:-src}_to_${TARGET_DATABASE:-tgt}"
+    ARCHIVE_NAME="sit_db_copy_${ARCHIVE_LABEL}_$(date +%Y%m%d_%H%M%S).tar.gz"
+    ARCHIVE_PATH="$SCRIPT_DIR/$ARCHIVE_NAME"
     echo ""
-    echo "To deploy to UAT:"
-    echo "  1. Copy the output directory to UAT environment"
-    if [ "$USE_KERBEROS" = true ]; then
-        echo "  2. Run: ./deploy_to_uat.sh --host <uat-host> --kerberos"
+    echo "Packaging output/ into a single archive for SFTP transfer..."
+    if tar -czf "$ARCHIVE_PATH" -C "$SCRIPT_DIR" output; then
+        echo -e "${GREEN}Archive created: $ARCHIVE_PATH${NC}"
+        echo "  Size: $(du -h "$ARCHIVE_PATH" | cut -f1)"
     else
-        echo "  2. Run: ./deploy_to_uat.sh --host <uat-host> --port 21050"
+        echo -e "${RED}WARNING: Failed to create archive -- output/ folder is still available to copy manually.${NC}"
+        ARCHIVE_NAME=""
+    fi
+
+    echo ""
+    echo "To restore in the target environment (no direct network path required):"
+    if [ -n "$ARCHIVE_NAME" ]; then
+        echo "  1. sftp $ARCHIVE_NAME to the target host"
+        echo "  2. tar -xzf $ARCHIVE_NAME"
+        echo "  3. cd output"
+    else
+        echo "  1. sftp the entire output/ directory to the target host"
+        echo "  2. cd output"
+    fi
+    if [ "$USE_KERBEROS" = true ]; then
+        echo "  4. Run: ./deploy_to_uat.sh --host <target-host> --kerberos"
+    else
+        echo "  4. Run: ./deploy_to_uat.sh --host <target-host> --port 21050"
     fi
     echo ""
 else

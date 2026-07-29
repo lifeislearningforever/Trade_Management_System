@@ -107,7 +107,7 @@ class ImpalaShellExtractor:
     def __init__(
         self,
         host: str = 'localhost',
-        port: int = 21050,
+        port: Optional[int] = None,
         use_kerberos: bool = False,
         use_ssl: bool = False,
         principal: str = None,
@@ -115,6 +115,11 @@ class ImpalaShellExtractor:
         database: str = DATABASE,
     ):
         self.host = host
+        # None (no --port given) means: don't pass a port to impala-shell at
+        # all, let it use its own built-in default. Different Impala clusters
+        # expose different default ports for the impala-shell CLI (21000 vs
+        # 21050 depending on deployment) -- forcing a hardcoded default here
+        # broke a real environment where only `-i host` (no port) connects.
         self.port = port
         self.use_kerberos = use_kerberos
         self.use_ssl = use_ssl
@@ -126,8 +131,8 @@ class ImpalaShellExtractor:
         """Build impala-shell command with appropriate flags."""
         cmd = ['impala-shell']
 
-        # Connection
-        cmd.extend(['-i', f'{self.host}:{self.port}'])
+        # Connection -- only append :port when one was explicitly given.
+        cmd.extend(['-i', f'{self.host}:{self.port}' if self.port else self.host])
 
         # Database
         cmd.extend(['-d', self.database])
@@ -188,7 +193,10 @@ class ImpalaShellExtractor:
 
     def connect(self) -> bool:
         """Test connection to Impala."""
-        logger.info(f"Testing connection to {self.host}:{self.port} using impala-shell")
+        logger.info(
+            f"Testing connection to {self.host}"
+            f"{':' + str(self.port) if self.port else ''} using impala-shell"
+        )
         if self.use_kerberos:
             logger.info("Using Kerberos authentication")
 
@@ -969,8 +977,11 @@ Examples:
     parser.add_argument(
         '--port',
         type=int,
-        default=int(os.environ.get('SIT_IMPALA_PORT', '21050')),
-        help='SIT Impala port'
+        default=int(os.environ['SIT_IMPALA_PORT']) if os.environ.get('SIT_IMPALA_PORT') else None,
+        help='SIT Impala port. In --use-impala-shell mode, omitting this lets '
+             'impala-shell fall back to its own built-in default port instead '
+             'of forcing one -- some clusters only accept connections on that '
+             'default. Required (defaults to 21050) in PyHive mode.'
     )
 
     # Authentication
@@ -1070,9 +1081,12 @@ Examples:
             database=args.source_database
         )
     else:
+        # PyHive needs a concrete port (unlike impala-shell, it can't fall
+        # back to a CLI default) -- 21050 matches the documented local Docker
+        # setup (see CLAUDE.md).
         extractor = PyHiveExtractor(
             host=args.host,
-            port=args.port,
+            port=args.port or 21050,
             auth=args.auth,
             username=args.username,
             password=args.password,
