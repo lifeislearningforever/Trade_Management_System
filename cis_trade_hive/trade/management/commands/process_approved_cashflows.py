@@ -13,12 +13,21 @@ Logic per cash_flow_type (ALL types accumulate — SA confirmed 2026-06-09):
   DIVIDEND            → accumulate dividend_fc / dividend_lc
   CASH_DIVIDEND       → accumulate dividend_fc / dividend_lc
   INCOME_DISTRIBUTION → accumulate realized_pnl_fc / realized_pnl_lc
-  CAPITAL_DISTRIBUTION→ AVP reduction: avp_fc_new = avp_fc_old - (amount_fc / qty).
-                        avp_lc_new: NON-REVALUED uses the cash flow's own
-                        amount_lc the same way; REVALUED instead re-derives
-                        avp_lc_new = avp_fc_new x current FX rate.
+  CAPITAL_DISTRIBUTION→ AVP adjustment: total_cost_fc_new = total_cost_fc_old +
+                        signed_amount_fc (INCREASE adds, DECREASE subtracts —
+                        same send_receive sign as every other type below);
+                        avp_fc_new is then derived as total_cost_fc_new / qty.
+                        total_cost_lc_new: NON-REVALUED uses the cash flow's own
+                        signed amount_lc the same way; REVALUED instead re-derives
+                        total_cost_lc_new = total_cost_fc_new x current FX rate
+                        (avp_lc_new = avp_fc_new x current FX rate).
                         unrealized_pnl_fc/lc (and therefore net_book_value)
                         are recalculated against the new cost basis.
+                        CA-generated cash flows of this type default
+                        send_receive to DECREASE (a return of capital reduces
+                        cost basis — see ca_cash_flow_service.py's
+                        AVP_REDUCTION_CA_TYPES); user-created ones may specify
+                        either INCREASE or DECREASE and are applied as given.
   RETURN_OF_CAPITAL   → same as CAPITAL_DISTRIBUTION (see above)
   OTHER               → skip (log warning)
 
@@ -601,34 +610,42 @@ class Command(BaseCommand):
         run_type: str = 'EOD',
     ) -> Tuple[bool, str]:
         """
-        AVP reduction: total_cost_fc_new = total_cost_fc_old - amount_fc -- always,
-        an exact reduction by the cash flow's own FC amount. average_cost_fc is
-        then DERIVED as total_cost_fc_new / qty (the proper definition of
-        average cost), rather than reducing average_cost_fc first and
-        recomputing total cost from it.
+        AVP adjustment: total_cost_fc_new = total_cost_fc_old + amount_fc, where
+        amount_fc is already signed by send_receive (INCREASE=+1, DECREASE=-1
+        via _sign() in _apply_to_position) -- an INCREASE cash flow increases
+        cost, a DECREASE one decreases it. average_cost_fc is then DERIVED as
+        total_cost_fc_new / qty (the proper definition of average cost), rather
+        than adjusting average_cost_fc first and recomputing total cost from it.
 
-        This ordering matters: this position's stored total_cost_fc can already
-        be slightly out of sync with average_cost_fc x quantity (a pre-existing
-        data quirk, unrelated to any cash flow). Reducing average cost first and
-        then recomputing total_cost_fc = new_avp_fc x qty would silently snap
-        total cost to that inconsistent baseline, producing a swing far larger
-        than the cash flow's actual amount. Reducing the stored total_cost_fc
-        directly keeps the change exactly equal to amount_fc, regardless of any
-        pre-existing average/total mismatch.
+        send_receive convention for RETURN_OF_CAPITAL/CAPITAL_DISTRIBUTION:
+        CA-generated ROC cash flows default to DECREASE (a return of capital —
+        cash received — reduces cost basis; see ca_cash_flow_service.py's
+        AVP_REDUCTION_CA_TYPES). User-created ones may set either INCREASE or
+        DECREASE explicitly and are applied exactly as given.
+
+        This ordering (adjust total first, derive average second) matters
+        regardless of direction: this position's stored total_cost_fc can
+        already be slightly out of sync with average_cost_fc x quantity (a
+        pre-existing data quirk, unrelated to any cash flow). Adjusting average
+        cost first and then recomputing total_cost_fc = new_avp_fc x qty would
+        silently snap total cost to that inconsistent baseline, producing a
+        swing far larger than the cash flow's actual amount. Adjusting the
+        stored total_cost_fc directly keeps the change exactly equal to
+        amount_fc, regardless of any pre-existing average/total mismatch.
 
         total_cost_lc / avp_lc:
-          NON-REVALUED: total_cost_lc_old - amount_lc -- same exact-reduction
-            approach, trusting the cash flow's own LC amount; avp_lc derived
-            as total_cost_lc_new / qty.
+          NON-REVALUED: total_cost_lc_old + amount_lc -- same exact-adjustment
+            approach, trusting the cash flow's own signed LC amount; avp_lc
+            derived as total_cost_lc_new / qty.
           REVALUED: total_cost_fc_new x current FX rate -- re-derived fresh
-            rather than reduced by the cash flow's raw LC amount, matching the
+            rather than adjusted by the cash flow's raw LC amount, matching the
             AVP engine's general REVAL rule (cost_lc always mirrors cost_fc x
             current FX rate; see position_service._save_position). avp_lc is
             avp_fc_new x current FX rate, per the same rule.
 
-        unrealized_pnl_fc/lc are recalculated against the new (reduced) total
-        cost -- previously left stale from the prior position version, which
-        understated the unrealized gain a capital return actually produces.
+        unrealized_pnl_fc/lc are recalculated against the new total cost --
+        previously left stale from the prior position version, which
+        misstated the unrealized gain a capital return actually produces.
         net_book_value_fc/lc then follows automatically in
         _write_new_position_version's own nbv formula, since it reads
         unrealized_pnl_fc/lc through the same overrides dict.
@@ -637,17 +654,17 @@ class Command(BaseCommand):
 
         qty = Decimal(str(position.get('quantity', 0) or 0))
         if qty <= 0:
-            return False, f'{cf_type}: quantity is 0, cannot reduce AVP'
+            return False, f'{cf_type}: quantity is 0, cannot adjust AVP'
 
         old_total_cost_fc = Decimal(str(position.get('total_cost_fc', 0) or 0))
         old_total_cost_lc = Decimal(str(position.get('total_cost_lc', 0) or 0))
 
-        new_total_cost_fc = max(Decimal('0'), round(old_total_cost_fc - amount_fc, fc_dp))
+        new_total_cost_fc = max(Decimal('0'), round(old_total_cost_fc + amount_fc, fc_dp))
         new_avp_fc = round(new_total_cost_fc / qty, AVP_PRECISION)
 
         reval_status = position_service._get_portfolio_revaluation_status(portfolio)
         if reval_status == 'NON-REVALUED':
-            new_total_cost_lc = max(Decimal('0'), round(old_total_cost_lc - amount_lc, lc_dp))
+            new_total_cost_lc = max(Decimal('0'), round(old_total_cost_lc + amount_lc, lc_dp))
             new_avp_lc = round(new_total_cost_lc / qty, AVP_PRECISION)
             fx_rate = None
         else:
@@ -666,7 +683,7 @@ class Command(BaseCommand):
         if dry_run:
             return True, (
                 f'[DRY RUN] {cf_type} ({reval_status}{f", fx={fx_rate}" if fx_rate else ""}): '
-                f'total_cost_fc {old_total_cost_fc} - {amount_fc} = {new_total_cost_fc} (avp_fc → {new_avp_fc}) | '
+                f'total_cost_fc {old_total_cost_fc} + ({amount_fc}) = {new_total_cost_fc} (avp_fc → {new_avp_fc}) | '
                 f'total_cost_lc {old_total_cost_lc} → {new_total_cost_lc} (avp_lc → {new_avp_lc}) | '
                 f'unrealized_pnl_fc → {new_unrealized_pnl_fc} | unrealized_pnl_lc → {new_unrealized_pnl_lc}'
             )

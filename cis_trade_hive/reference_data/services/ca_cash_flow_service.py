@@ -593,6 +593,17 @@ class CACashFlowService:
             # Map CA type to cash flow type
             cf_type = self.CA_TO_CF_TYPE_MAP.get(ca_type, ca_type)
 
+            # send_receive drives cost-basis direction in process_approved_cashflows
+            # (_reduce_avp): INCREASE -> cost increases, DECREASE -> cost decreases.
+            # ROC/CAPITAL_DISTRIBUTION are a return of capital -- cash received
+            # reduces the cost basis -- so they default to DECREASE. Everything
+            # else (dividends, interest, coupons, income distribution) doesn't
+            # touch cost at all (it accumulates a separate running-total field),
+            # so it keeps the original INCREASE default.
+            default_send_receive = (
+                'DECREASE' if ca_type in self.AVP_REDUCTION_CA_TYPES else 'INCREASE'
+            )
+
             # Map to actual cis_cash_flow table field names
             # Following SA/BA specification for multi-currency cash flows
             # CA-generated cash flows are auto-validated (no four-eyes needed)
@@ -601,7 +612,7 @@ class CACashFlowService:
                 'portfolio_short_name': portfolio_short_name,
                 'security_label': security_name,
                 'cash_flow_type': cf_type,
-                'send_receive': 'INCREASE',  # Dividends increase the portfolio cash position
+                'send_receive': default_send_receive,
                 'cf_processed': False,
                 'value_date': ex_date,
                 'payment_date': payment_date,
