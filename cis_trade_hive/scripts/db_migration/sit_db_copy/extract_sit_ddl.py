@@ -819,7 +819,10 @@ def write_output_files(result: Dict[str, Any], output_dir: Path, use_kerberos: b
 
         f.write('# Default values\n')
         f.write('UAT_HOST="${UAT_IMPALA_HOST:-localhost}"\n')
-        f.write('UAT_PORT="${UAT_IMPALA_PORT:-21050}"\n')
+        # Left empty unless --port/UAT_IMPALA_PORT is set -- omitting the port
+        # lets impala-shell fall back to its own built-in default, which is
+        # what some clusters actually require (forcing 21050 breaks others).
+        f.write('UAT_PORT="${UAT_IMPALA_PORT:-}"\n')
         f.write('USE_KERBEROS=false\n')
         f.write('USE_SSL=false\n')
         f.write('PRINCIPAL=""\n')
@@ -842,7 +845,8 @@ def write_output_files(result: Dict[str, Any], output_dir: Path, use_kerberos: b
         f.write('            echo ""\n')
         f.write('            echo "Options:"\n')
         f.write('            echo "  --host HOST       UAT Impala host"\n')
-        f.write('            echo "  --port PORT       UAT Impala port (default: 21050)"\n')
+        f.write('            echo "  --port PORT       UAT Impala port (default: unset -- impala-shell"\n')
+        f.write('            echo "                    uses its own built-in default)"\n')
         f.write('            echo "  --kerberos, -k    Use Kerberos authentication"\n')
         f.write('            echo "  --ssl             Use SSL connection"\n')
         f.write('            echo "  --principal PRINC Kerberos principal"\n')
@@ -855,7 +859,11 @@ def write_output_files(result: Dict[str, Any], output_dir: Path, use_kerberos: b
         f.write('done\n\n')
 
         f.write('# Build impala-shell command\n')
-        f.write('IMPALA_CMD="impala-shell -i $UAT_HOST:$UAT_PORT"\n\n')
+        f.write('if [ -n "$UAT_PORT" ]; then\n')
+        f.write('    IMPALA_CMD="impala-shell -i $UAT_HOST:$UAT_PORT"\n')
+        f.write('else\n')
+        f.write('    IMPALA_CMD="impala-shell -i $UAT_HOST"\n')
+        f.write('fi\n\n')
 
         f.write('if [ "$USE_KERBEROS" = true ]; then\n')
         f.write('    IMPALA_CMD="$IMPALA_CMD -k"\n')
@@ -884,7 +892,7 @@ def write_output_files(result: Dict[str, Any], output_dir: Path, use_kerberos: b
         f.write('echo "========================================"\n')
         f.write('echo "UAT Database Deployment"\n')
         f.write('echo "========================================"\n')
-        f.write('echo "Host: $UAT_HOST:$UAT_PORT"\n')
+        f.write('echo "Host: $UAT_HOST${UAT_PORT:+:$UAT_PORT}"\n')
         f.write('echo "Kerberos: $USE_KERBEROS"\n')
         f.write('echo "SSL: $USE_SSL"\n')
         f.write('echo "Include Data: $INCLUDE_DATA"\n')
