@@ -939,6 +939,168 @@ def write_output_files(result: Dict[str, Any], output_dir: Path, use_kerberos: b
     deploy_script.chmod(0o755)
     logger.info(f"Written: {deploy_script}")
 
+    # 7. Write load_data_with_stats.sh -- runs every tables/data/*.sql file
+    # individually (rather than one combined data file), logging each run and
+    # reporting a per-table + total UPSERT row-count summary at the end.
+    load_data_script = output_dir / 'load_data_with_stats.sh'
+    with open(load_data_script, 'w') as f:
+        f.write(f'''#!/bin/bash
+#
+# Load Data From data/ Folder -- per-table UPSERT with logging and stats
+#
+# Runs every .sql file under data/ individually via impala-shell -f (instead
+# of the one combined 02_all_tables_data_*.sql file deploy_to_uat.sh uses),
+# so a failure on one table doesn't hide progress on the rest, and so you
+# get a per-table + total row-count summary at the end.
+#
+# Tables must already exist (run the DDL / deploy_to_uat.sh Step 1 first).
+#
+# Usage:
+#   ./load_data_with_stats.sh --host <host> [--port <port>] [--kerberos] [--ssl] \\
+#       [--database {target_db}] [--principal <princ>] [--ca-cert <file>]
+#
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+DATA_DIR="$SCRIPT_DIR/data"
+LOG_FILE="$SCRIPT_DIR/load_data_$(date +%Y%m%d_%H%M%S).log"
+
+HOST=""
+PORT=""
+DATABASE="{target_db}"
+USE_KERBEROS=false
+USE_SSL=false
+PRINCIPAL=""
+CA_CERT=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --host) HOST="$2"; shift 2 ;;
+        --port) PORT="$2"; shift 2 ;;
+        --database) DATABASE="$2"; shift 2 ;;
+        --kerberos|-k) USE_KERBEROS=true; shift ;;
+        --ssl) USE_SSL=true; shift ;;
+        --principal) PRINCIPAL="$2"; shift 2 ;;
+        --ca-cert) CA_CERT="$2"; shift 2 ;;
+        --help|-h)
+            echo "Usage: $0 --host HOST [--port PORT] [--kerberos] [--ssl] [--database DB]"
+            exit 0
+            ;;
+        *) echo "Unknown option: $1"; exit 1 ;;
+    esac
+done
+
+if [ -z "$HOST" ]; then
+    echo "ERROR: --host is required"
+    exit 1
+fi
+
+if [ ! -d "$DATA_DIR" ]; then
+    echo "ERROR: data directory not found: $DATA_DIR (did you run with --include-data?)"
+    exit 1
+fi
+
+# Build impala-shell command. Port is only appended if given -- omitting it
+# lets impala-shell fall back to its own built-in default, which some
+# clusters require.
+IMPALA_CMD="impala-shell -i $HOST${{PORT:+:$PORT}}"
+if [ "$USE_KERBEROS" = true ]; then
+    IMPALA_CMD="$IMPALA_CMD -k"
+    [ -n "$PRINCIPAL" ] && IMPALA_CMD="$IMPALA_CMD --principal $PRINCIPAL"
+    echo "Checking Kerberos ticket..."
+    if ! klist -s 2>/dev/null; then
+        echo "ERROR: No valid Kerberos ticket found. Run: kinit <username>@<REALM>"
+        exit 1
+    fi
+fi
+if [ "$USE_SSL" = true ]; then
+    IMPALA_CMD="$IMPALA_CMD --ssl"
+    [ -n "$CA_CERT" ] && IMPALA_CMD="$IMPALA_CMD --ca_cert $CA_CERT"
+fi
+IMPALA_CMD="$IMPALA_CMD -d $DATABASE"
+
+{{
+    echo "========================================"
+    echo "Data Load -- $(date)"
+    echo "Host: $HOST${{PORT:+:$PORT}}  Database: $DATABASE"
+    echo "========================================"
+}} | tee "$LOG_FILE"
+
+declare -a TABLE_NAMES
+declare -a TABLE_ROWS
+declare -a TABLE_STATUS
+
+TOTAL_ROWS=0
+TOTAL_OK=0
+TOTAL_FAIL=0
+
+shopt -s nullglob
+FILES=("$DATA_DIR"/*.sql)
+if [ ${{#FILES[@]}} -eq 0 ]; then
+    echo "No .sql files found in $DATA_DIR" | tee -a "$LOG_FILE"
+    exit 1
+fi
+
+for f in "${{FILES[@]}}"; do
+    table_name="$(basename "$f" .sql)"
+    table_name="${{table_name%_data}}"
+
+    {{
+        echo ""
+        echo "--- $table_name ($f) ---"
+    }} | tee -a "$LOG_FILE"
+
+    OUTPUT="$($IMPALA_CMD -f "$f" 2>&1)"
+    STATUS=$?
+    echo "$OUTPUT" | tee -a "$LOG_FILE"
+
+    # Impala prints a line like "Modified N row(s), M row error(s) in Xs"
+    # after a DML statement -- pull the first number out of it. If the
+    # installed Impala version phrases this differently, ROWS falls back
+    # to "n/a" rather than a misleading 0.
+    ROWS=$(echo "$OUTPUT" | grep -oEi 'modified [0-9]+ row' | grep -oE '[0-9]+' | tail -1)
+    ROWS=${{ROWS:-n/a}}
+
+    if [ $STATUS -eq 0 ]; then
+        TABLE_STATUS+=("OK")
+        TOTAL_OK=$((TOTAL_OK + 1))
+    else
+        TABLE_STATUS+=("FAILED")
+        TOTAL_FAIL=$((TOTAL_FAIL + 1))
+    fi
+    TABLE_NAMES+=("$table_name")
+    TABLE_ROWS+=("$ROWS")
+    if [[ "$ROWS" =~ ^[0-9]+$ ]]; then
+        TOTAL_ROWS=$((TOTAL_ROWS + ROWS))
+    fi
+done
+
+{{
+    echo ""
+    echo "========================================"
+    echo "Summary"
+    echo "========================================"
+    printf "%-40s %-15s %-10s\\n" "Table" "Rows Upserted" "Status"
+    printf -- '-%.0s' {{1..70}}; echo ""
+    for i in "${{!TABLE_NAMES[@]}}"; do
+        printf "%-40s %-15s %-10s\\n" "${{TABLE_NAMES[$i]}}" "${{TABLE_ROWS[$i]}}" "${{TABLE_STATUS[$i]}}"
+    done
+    printf -- '-%.0s' {{1..70}}; echo ""
+    echo "Total tables : ${{#TABLE_NAMES[@]}}  (OK: $TOTAL_OK, FAILED: $TOTAL_FAIL)"
+    echo "Total rows upserted (parsed): $TOTAL_ROWS"
+}} | tee -a "$LOG_FILE"
+
+echo ""
+echo "Log saved to: $LOG_FILE"
+
+if [ $TOTAL_FAIL -gt 0 ]; then
+    exit 1
+fi
+''')
+
+    load_data_script.chmod(0o755)
+    logger.info(f"Written: {load_data_script}")
+
     return output_dir
 
 
