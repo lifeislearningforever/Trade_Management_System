@@ -26,6 +26,28 @@ import os
 # Convert to uppercase to handle case-insensitivity
 CIS_ENV = os.environ.get('CIS_ENV', 'LOCAL').upper()
 
+# Plain-text override for the Impala/Kudu database name -- lets ops retarget
+# the app (e.g. gmp_cis -> gmp_cis_dev) by editing a file on the gateway host
+# instead of having to set an environment variable. One name per line, blank
+# lines/lines starting with # ignored. IMPALA_DB env var still wins if set.
+_DATABASE_TXT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'database.txt')
+
+
+def _resolve_database(env_var: str, default: str) -> str:
+    env_val = os.environ.get(env_var)
+    if env_val:
+        return env_val
+    try:
+        with open(_DATABASE_TXT_PATH) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    return line
+    except FileNotFoundError:
+        pass
+    return default
+
+
 # ============================================================================
 # IMPALA Configuration (for FAST READS)
 # ============================================================================
@@ -36,7 +58,7 @@ if CIS_ENV == 'SIT':
     IMPALA_CONFIG = {
         'HOST': os.environ.get('IMPALA_HOST', 'lxmrwtsgyodt1.sg.uobnet.com'),
         'PORT': int(os.environ.get('IMPALA_PORT', '21050')),
-        'DATABASE': os.environ.get('IMPALA_DB', 'gmp_cis'),
+        'DATABASE': _resolve_database('IMPALA_DB', 'gmp_cis'),
         'AUTH': os.environ.get('IMPALA_AUTH', 'GSSAPI'),  # Used by hybrid_connection.py
         'AUTH_MECHANISM': os.environ.get('IMPALA_AUTH', 'GSSAPI'),  # Used by impala_connection.py
         'USE_SSL': os.environ.get('IMPALA_USE_SSL', 'true').lower() == 'true',
@@ -50,7 +72,7 @@ elif CIS_ENV == 'UAT':
     IMPALA_CONFIG = {
         'HOST': os.environ.get('IMPALA_HOST', 'lxmrwtsgvqk2.sg.uobnet.com'),
         'PORT': int(os.environ.get('IMPALA_PORT', '21050')),
-        'DATABASE': os.environ.get('IMPALA_DB', 'gmp_cis'),
+        'DATABASE': _resolve_database('IMPALA_DB', 'gmp_cis'),
         'AUTH': os.environ.get('IMPALA_AUTH', 'GSSAPI'),
         'AUTH_MECHANISM': os.environ.get('IMPALA_AUTH', 'GSSAPI'),
         'USE_SSL': os.environ.get('IMPALA_USE_SSL', 'true').lower() == 'true',
@@ -63,7 +85,7 @@ elif CIS_ENV == 'PROD':
     IMPALA_CONFIG = {
         'HOST': os.environ.get('IMPALA_HOST', 'lxmrwtsgvqk2.sg.uobnet.com'),
         'PORT': int(os.environ.get('IMPALA_PORT', '21050')),
-        'DATABASE': os.environ.get('IMPALA_DB', 'gmp_cis'),
+        'DATABASE': _resolve_database('IMPALA_DB', 'gmp_cis'),
         'AUTH': os.environ.get('IMPALA_AUTH', 'GSSAPI'),
         'AUTH_MECHANISM': os.environ.get('IMPALA_AUTH', 'GSSAPI'),
         'USE_SSL': os.environ.get('IMPALA_USE_SSL', 'true').lower() == 'true',
@@ -76,7 +98,7 @@ elif CIS_ENV == 'DR':
     IMPALA_CONFIG = {
         'HOST': os.environ.get('IMPALA_HOST', 'lxmrwtsgvqk2.sg.uobnet.com'),
         'PORT': int(os.environ.get('IMPALA_PORT', '21050')),
-        'DATABASE': os.environ.get('IMPALA_DB', 'gmp_cis'),
+        'DATABASE': _resolve_database('IMPALA_DB', 'gmp_cis'),
         'AUTH': os.environ.get('IMPALA_AUTH', 'GSSAPI'),
         'AUTH_MECHANISM': os.environ.get('IMPALA_AUTH', 'GSSAPI'),
         'USE_SSL': os.environ.get('IMPALA_USE_SSL', 'true').lower() == 'true',
@@ -89,7 +111,7 @@ else:
     IMPALA_CONFIG = {
         'HOST': os.environ.get('IMPALA_HOST', 'localhost'),
         'PORT': int(os.environ.get('IMPALA_PORT', '21050')),
-        'DATABASE': os.environ.get('IMPALA_DB', 'gmp_cis'),
+        'DATABASE': _resolve_database('IMPALA_DB', 'gmp_cis'),
         'AUTH': os.environ.get('IMPALA_AUTH', 'NOSASL'),
         'AUTH_MECHANISM': os.environ.get('IMPALA_AUTH', 'NOSASL'),
         'USE_SSL': False,
