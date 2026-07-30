@@ -17,6 +17,7 @@ Date: 2026-03-03
 """
 
 import argparse
+import os
 from datetime import datetime
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
@@ -279,7 +280,7 @@ class PositionMasterETL:
         self.spark = spark
         self.processing_date = processing_date
         self.batch_id = batch_id or str(uuid.uuid4())
-        self.database = "gmp_cis"
+        self.database = os.environ.get('IMPALA_DB', 'gmp_cis')
 
     def transform_source(self, df, table_config: dict, source_table: str):
         """

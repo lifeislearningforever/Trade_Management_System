@@ -23,6 +23,7 @@ import logging
 from datetime import datetime
 from core.repositories.impala_connection import impala_manager
 from core.audit.audit_kudu_repository import AuditLogKuduRepository
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 class PortfolioDropdownRepository:
     """Repository for fetching dropdown data from Kudu/Impala tables."""
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     UDF_FIELD_TABLE = 'cis_udf_field'  # Simplified UDF table (ONLY table for UDF field definitions)
     CURRENCY_TABLE = 'gmp_cis_sta_dly_currency'
     COUNTRY_TABLE = 'gmp_cis_sta_dly_country'

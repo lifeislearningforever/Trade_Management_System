@@ -33,10 +33,11 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand, CommandError
 from core.repositories.impala_connection import impala_manager
 from trade.services.settlement_service import settlement_service
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-DATABASE = 'gmp_cis'
+DATABASE = settings.IMPALA_CONFIG['DATABASE']
 TRADE_TABLE = f'{DATABASE}.cis_trade'
 POSITION_TABLE = f'{DATABASE}.cis_trade_position'
 PORTFOLIO_TABLE = f'{DATABASE}.cis_portfolio'

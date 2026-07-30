@@ -87,7 +87,7 @@ logger = logging.getLogger('upload_equity_price_csv')
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-DB        = 'gmp_cis'
+DB        = os.environ.get('IMPALA_DB', 'gmp_cis')
 PRICE_TBL = f'{DB}.cis_equity_price'
 SRC_SYSTEM = 'CIS'
 

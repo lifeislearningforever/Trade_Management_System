@@ -11,6 +11,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from abc import ABC, abstractmethod
 
+from django.conf import settings
 from .hive_connection import HiveConnectionManager
 
 logger = logging.getLogger('hive_poc')
@@ -29,7 +30,7 @@ class HiveBaseRepository(ABC):
 
     def __init__(self):
         self.conn_manager = HiveConnectionManager()
-        self.database = 'gmp_cis'
+        self.database = settings.IMPALA_CONFIG['DATABASE']
 
     @property
     @abstractmethod

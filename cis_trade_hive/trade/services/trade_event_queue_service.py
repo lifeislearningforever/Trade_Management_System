@@ -33,6 +33,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from core.repositories.impala_connection import impala_manager
 from core.notifications import notify_user
 from core.notifications.constants import EVT_AVP_COMPLETED, EVT_AVP_FAILED, SEV_SUCCESS, SEV_ERROR
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class TradeEventQueueService:
     - POSITION_CANCEL: Reverse position when trade is cancelled
     """
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     EVENT_QUEUE_TABLE = 'cis_trade_event_queue'
     TRADE_TABLE = 'cis_trade'
     HISTORY_TABLE = 'cis_trade_history'

@@ -27,10 +27,11 @@ import sys
 import logging
 from django.core.management.base import BaseCommand, CommandError
 from core.repositories.impala_connection import impala_manager
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-DATABASE = 'gmp_cis'
+DATABASE = settings.IMPALA_CONFIG['DATABASE']
 SECURITY_TABLE = f'{DATABASE}.cis_security'
 
 _HEADER_VALUES = {

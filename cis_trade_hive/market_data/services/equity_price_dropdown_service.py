@@ -48,7 +48,7 @@ class EquityPriceDropdownService:
             """
 
             logger.info(f"Fetching currencies for user: {user}")
-            results = impala_manager.execute_query(query, database='gmp_cis')
+            results = impala_manager.execute_query(query)
 
             logger.info(f"Retrieved {len(results)} currencies")
             return results
@@ -102,7 +102,7 @@ class EquityPriceDropdownService:
             """
 
             logger.info(f"Fetching securities for currency: {currency_code or 'ALL'} (user: {user})")
-            results = impala_manager.execute_query(query, database='gmp_cis')
+            results = impala_manager.execute_query(query)
 
             logger.info(f"Retrieved {len(results)} securities")
             return results
@@ -160,7 +160,7 @@ class EquityPriceDropdownService:
             """
 
             logger.info(f"Fetching security details for: {security_id or security_name}")
-            results = impala_manager.execute_query(query, database='gmp_cis')
+            results = impala_manager.execute_query(query)
 
             if results:
                 logger.info(f"Retrieved security details: {results[0].get('security_name')}")

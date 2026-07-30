@@ -84,6 +84,7 @@ Usage:
     python manage.py process_approved_cashflows --position-date 2026-06-27
     python manage.py process_approved_cashflows --run-type CORR --position-date 2026-05-31
 """
+from django.conf import settings
 
 import logging
 from datetime import datetime, date, timedelta
@@ -98,7 +99,7 @@ from trade.services.position_id_service import position_id as _calc_position_id
 
 logger = logging.getLogger(__name__)
 
-DATABASE = 'gmp_cis'
+DATABASE = settings.IMPALA_CONFIG['DATABASE']
 POSITION_TABLE = 'cis_trade_position'   # versioned CIS ledger
 GOLDEN_TABLE   = 'cis_position'         # golden copy (all sources)
 CASH_FLOW_TABLE = 'cis_cash_flow'

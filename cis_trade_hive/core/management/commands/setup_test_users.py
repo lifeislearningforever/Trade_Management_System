@@ -25,7 +25,7 @@ class Command(BaseCommand):
             (cis_user_group_id, name, entity, description, is_deleted, updated_on, updated_by)
             VALUES (100, 'Makers', 'UOB', 'Portfolio Makers - can create and edit', false, unix_timestamp() * 1000, 'system')
             """
-            impala_manager.execute_write(makers_query, database='gmp_cis')
+            impala_manager.execute_write(makers_query)
 
             # 2. Create/Update Checkers group
             self.stdout.write('Creating Checkers group...')
@@ -34,7 +34,7 @@ class Command(BaseCommand):
             (cis_user_group_id, name, entity, description, is_deleted, updated_on, updated_by)
             VALUES (200, 'Checkers', 'UOB', 'Portfolio Checkers - can approve and reject', false, unix_timestamp() * 1000, 'system')
             """
-            impala_manager.execute_write(checkers_query, database='gmp_cis')
+            impala_manager.execute_write(checkers_query)
 
             # 3. Create Maker user
             self.stdout.write('Creating maker_user...')
@@ -45,7 +45,7 @@ class Command(BaseCommand):
             VALUES (1001, 'maker_user', 'Test Maker User', 'UOB', 'maker@testcis.com', 'UOB', 100,
                     false, true, unix_timestamp() * 1000, 'system', unix_timestamp() * 1000, 'system')
             """
-            impala_manager.execute_write(maker_user_query, database='gmp_cis')
+            impala_manager.execute_write(maker_user_query)
 
             # 4. Create Checker user
             self.stdout.write('Creating checker_user...')
@@ -56,7 +56,7 @@ class Command(BaseCommand):
             VALUES (2001, 'checker_user', 'Test Checker User', 'UOB', 'checker@testcis.com', 'UOB', 200,
                     false, true, unix_timestamp() * 1000, 'system', unix_timestamp() * 1000, 'system')
             """
-            impala_manager.execute_write(checker_user_query, database='gmp_cis')
+            impala_manager.execute_write(checker_user_query)
 
             # 5. Add Makers permissions
             self.stdout.write('Adding Makers permissions...')
@@ -65,7 +65,7 @@ class Command(BaseCommand):
             (cis_group_permissions_id, cis_user_group_id, permission, read_write, is_deleted, updated_on, updated_by)
             VALUES (100001, 100, 'cis-portfolio', 'WRITE', false, unix_timestamp() * 1000, 'system')
             """
-            impala_manager.execute_write(perm_query, database='gmp_cis')
+            impala_manager.execute_write(perm_query)
 
             # 6. Add Checkers permissions
             self.stdout.write('Adding Checkers permissions...')
@@ -74,7 +74,7 @@ class Command(BaseCommand):
             (cis_group_permissions_id, cis_user_group_id, permission, read_write, is_deleted, updated_on, updated_by)
             VALUES (200001, 200, 'cis-portfolio', 'WRITE', false, unix_timestamp() * 1000, 'system')
             """
-            impala_manager.execute_write(perm_query, database='gmp_cis')
+            impala_manager.execute_write(perm_query)
 
             self.stdout.write(self.style.SUCCESS('\n✅ Test users created successfully!'))
             self.stdout.write(self.style.SUCCESS('\nTest Credentials:'))

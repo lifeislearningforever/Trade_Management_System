@@ -12,6 +12,7 @@ import json
 import random
 
 from core.repositories.impala_connection import impala_manager
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 class CorporateActionRepository:
     """Repository for corporate action operations with Kudu via Impala"""
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     TABLE_NAME = 'cis_corporate_actions'
     HISTORY_TABLE = 'cis_corporate_actions_history'
 

@@ -20,6 +20,7 @@ import uuid
 from core.repositories.impala_connection import impala_manager
 from core.services.system_date_service import system_date_service
 from trade.services.position_service import position_service, PositionService
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ class SettlementService:
     - Backdated: Allowed up to previous month-end, triggers recalculation
     """
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     SETTLEMENT_QUEUE_TABLE = 'cis_settlement_queue'
     TRADE_TABLE = 'cis_trade'
 
@@ -221,7 +222,6 @@ class SettlementService:
                         _imp.execute_write(
                             f"DELETE FROM gmp_cis.cis_trade_position "
                             f"WHERE trade_id = {trade_id} AND position_basis = '{basis}'",
-                            database='gmp_cis'
                         )
                         logger.info(f"Cleared stale cis_trade_position for trade_id={trade_id} basis={basis}")
                     except Exception as _de:

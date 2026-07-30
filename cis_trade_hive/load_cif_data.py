@@ -84,7 +84,7 @@ def load_cif_data(file_path, batch_size=100):
                 if len(batch_statements) >= batch_size:
                     try:
                         for stmt in batch_statements:
-                            impala_manager.execute_write(stmt, database='gmp_cis')
+                            impala_manager.execute_write(stmt)
                         success_count += len(batch_statements)
                         print(f"Loaded batch: {success_count}/{total_records} records")
                         batch_statements = []
@@ -97,7 +97,7 @@ def load_cif_data(file_path, batch_size=100):
             if batch_statements:
                 try:
                     for stmt in batch_statements:
-                        impala_manager.execute_write(stmt, database='gmp_cis')
+                        impala_manager.execute_write(stmt)
                     success_count += len(batch_statements)
                     print(f"Loaded final batch: {success_count}/{total_records} records")
                 except Exception as e:

@@ -53,6 +53,7 @@ import json
 import sys
 from datetime import datetime
 from typing import Dict, List, Tuple
+import os
 
 try:
     from pyspark.sql import SparkSession
@@ -62,7 +63,7 @@ except ImportError:
     print("WARNING: PySpark not available.")
 
 
-DATABASE = "gmp_cis"
+DATABASE = os.environ.get('IMPALA_DB', 'gmp_cis')
 
 DEFAULT_CONFIG = {
     'kudu_master':     'kudu-master:7051',

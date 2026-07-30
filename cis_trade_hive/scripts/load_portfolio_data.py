@@ -46,7 +46,7 @@ class PortfolioDataLoader:
     and the script maps them to database columns based on configuration.
     """
 
-    DATABASE = 'gmp_cis'
+    DATABASE = os.environ.get('IMPALA_DB', 'gmp_cis')
     TABLE = 'cis_portfolio'
 
     # Database schema - columns in cis_portfolio table

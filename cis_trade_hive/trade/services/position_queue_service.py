@@ -28,6 +28,7 @@ from core.notifications.constants import (
     EVT_AVP_PROCESSING, EVT_AVP_COMPLETED, EVT_AVP_FAILED,
     EVT_AVP_DEAD_LETTER, EVT_AVP_SLA_BREACH,
 )
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ class PositionQueueService:
     - Dead letter queue for permanent failures
     """
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     QUEUE_TABLE = 'cis_position_queue'
 
     # Queue status
@@ -857,7 +858,7 @@ class PositionQueueService:
               AND CAST(contextual_today AS STRING) <= '{to_date_key}'
             ORDER BY biz_date ASC
             """
-            rows = impala_manager.execute_query(query, database='gmp_cis')
+            rows = impala_manager.execute_query(query)
             if rows:
                 result = []
                 for r in rows:

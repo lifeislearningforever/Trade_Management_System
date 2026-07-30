@@ -26,7 +26,7 @@ class SecurityDataLoader:
     """Loads security data from CSV to Kudu"""
 
     CSV_FILE = 'sql/sample_data/Security.csv'
-    DATABASE = 'gmp_cis'
+    DATABASE = os.environ.get('IMPALA_DB', 'gmp_cis')
     TABLE = 'cis_security'
 
     # CSV column to database column mapping

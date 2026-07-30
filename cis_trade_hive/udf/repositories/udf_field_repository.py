@@ -20,6 +20,7 @@ import logging
 from datetime import datetime
 
 from core.repositories.impala_connection import impala_manager
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 class UDFFieldRepository:
     """Repository for UDF field data access with composite primary key (object_type, field_name, field_value)."""
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     TABLE_NAME = 'cis_udf_field'
 
     def _escape_string(self, value: str) -> str:

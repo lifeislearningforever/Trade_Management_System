@@ -20,6 +20,7 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
+from django.conf import settings
 from core.repositories.impala_connection import impala_manager
 from core.repositories.acl_repository_v2 import ACLRepositoryV2
 from core.audit.audit_kudu_repository import AuditLogKuduRepository
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 _audit = AuditLogKuduRepository
 
-DB = 'gmp_cis'
+DB = settings.IMPALA_CONFIG['DATABASE']
 
 
 class RBACAdminRepository:

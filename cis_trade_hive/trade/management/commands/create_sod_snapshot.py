@@ -46,10 +46,11 @@ from datetime import datetime
 from django.core.management.base import BaseCommand, CommandError
 
 from core.repositories.impala_connection import impala_manager
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-DATABASE = 'gmp_cis'
+DATABASE = settings.IMPALA_CONFIG['DATABASE']
 ALL_SOURCES = ['CIS', 'GMP', 'AMS_STREET', 'USER_UPLOAD']
 AVP_PRECISION = Decimal('0.00000001')
 

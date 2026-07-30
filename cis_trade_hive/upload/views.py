@@ -393,7 +393,6 @@ def upload_create(request):
                             _imp2.execute_write(
                                 f"ALTER TABLE gmp_cis.{_t_target} "
                                 f"DROP IF EXISTS PARTITION (processing_date='{_t_pd}')",
-                                database='gmp_cis'
                             )
                             logger.warning(f"[upload:direct:bg] dropped partition processing_date={_t_pd}")
 
@@ -408,7 +407,7 @@ def upload_create(request):
                                     _chunk, _t_non_part, _t_fixed, _t_target, _t_pd,
                                     _overwrite=(_ci == 0)
                                 )
-                                _ok = _imp2.execute_write(_sql, database='gmp_cis')
+                                _ok = _imp2.execute_write(_sql)
                                 if _ok:
                                     _ins += len(_chunk)
                                     logger.warning(
@@ -429,7 +428,6 @@ def upload_create(request):
                                 try:
                                     _imp2.execute_write(
                                         f"INVALIDATE METADATA gmp_cis.{_t_target}",
-                                        database='gmp_cis'
                                     )
                                 except Exception:
                                     pass
@@ -842,7 +840,6 @@ def upload_ingest(request, upload_id: str):
                     _cnt_rows = impala_manager.execute_query(
                         f"SELECT COUNT(*) AS cnt FROM gmp_cis.{_target} "
                         f"WHERE src_id='{_src_id}' AND processing_date='{processing_date}'",
-                        database='gmp_cis'
                     )
                     _raw_count = int(_cnt_rows[0].get('cnt', 0)) if _cnt_rows else 0
                 except Exception as _ce:
@@ -1154,7 +1151,6 @@ def upload_detail(request, upload_id: str):
                 _cnt = _imp2.execute_query(
                     f"SELECT COUNT(*) AS cnt FROM gmp_cis.{_tgt} "
                     f"WHERE processing_date='{_pd2}'",
-                    database='gmp_cis'
                 )
                 hive_row_count = int(_cnt[0].get('cnt', 0)) if _cnt else None
                 logger.info(f"[detail] hive_row_count={hive_row_count} for {_tgt} pd={_pd2}")
@@ -1168,7 +1164,6 @@ def upload_detail(request, upload_id: str):
                     _imp2.execute_write(
                         f"REFRESH gmp_cis.position_upload_report "
                         f"PARTITION (processing_date='{_pd2}', src_id='{_tgt}')",
-                        database='gmp_cis'
                     )
                 except Exception as _ref_ex:
                     logger.warning(f"[detail] REFRESH position_upload_report failed: {_ref_ex}")
@@ -1178,7 +1173,6 @@ def upload_detail(request, upload_id: str):
                     f"SUM(CASE WHEN UPPER(TRIM(row_status))='FAIL' THEN 1 ELSE 0 END) AS failed "
                     f"FROM gmp_cis.position_upload_report "
                     f"WHERE src_id='{_tgt}' AND processing_date='{_pd2}'",
-                    database='gmp_cis'
                 )
                 if _rpt:
                     etl_total  = int(_rpt[0].get('total',  0) or 0)

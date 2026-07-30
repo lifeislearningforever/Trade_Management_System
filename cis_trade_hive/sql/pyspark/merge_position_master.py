@@ -68,13 +68,14 @@ from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 from pyspark.sql.types import StructType, StructField, StringType, DecimalType, LongType, BooleanType, IntegerType
+import os
 
 
 # ============================================================================
 # Configuration
 # ============================================================================
 
-DATABASE = "gmp_cis"
+DATABASE = os.environ.get('IMPALA_DB', 'gmp_cis')
 
 # Target tables (Hive/Parquet)
 TARGET_TABLE = f"{DATABASE}.cis_position_master"

@@ -16,10 +16,11 @@ Usage:
     python manage.py verify_rbac --group SG-TRADER
 """
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from core.repositories.impala_connection import impala_manager
 
-DB = 'gmp_cis'
+DB = settings.IMPALA_CONFIG['DATABASE']
 
 
 class Command(BaseCommand):

@@ -24,6 +24,7 @@ from core.repositories.impala_connection import impala_manager
 from core.services.system_date_service import system_date_service
 from trade.services.multicurrency_service import multicurrency_service
 from trade.services.position_id_service import position_id as _calc_position_id
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class PositionService:
     - SELL: avg_cost unchanged, realized P&L = (sell_price - avg_cost) * quantity
     """
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     POSITION_TABLE = 'cis_trade_position'  # Internal CIS position tracking
     POSITION_MASTER_TABLE = 'position_master'  # External Hive table (shared)
     AVP_PRECISION = Decimal('0.00000001')  # 8 decimal places

@@ -39,6 +39,7 @@ import argparse
 import sys
 from datetime import datetime
 from typing import List, Optional
+import os
 
 try:
     from pyspark.sql import SparkSession, DataFrame
@@ -134,7 +135,7 @@ ALL_TABLES = [
 DEFAULT_SKIP = []
 
 # Kudu table name format on Cloudera CML: <database>.<table> (no impala:: prefix)
-DATABASE = "gmp_cis"
+DATABASE = os.environ.get('IMPALA_DB', 'gmp_cis')
 
 
 # ============================================================================

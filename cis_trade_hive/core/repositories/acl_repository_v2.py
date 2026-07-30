@@ -40,6 +40,7 @@ from typing import Optional, List, Dict, Any, Set, Tuple
 from functools import lru_cache
 from datetime import datetime, timedelta
 
+from django.conf import settings
 from .impala_connection import impala_manager
 
 logger = logging.getLogger(__name__)
@@ -79,15 +80,15 @@ class ACLRepositoryV2:
     TABLE_USER_GROUP_MAPPING = 'cis_user_group_mapping_info'
     TABLE_GROUP_PERMISSION_MAP = 'cis_group_permission_map'
 
-    def __init__(self, database: str = 'gmp_cis'):
+    def __init__(self, database: str = None):
         """
         Initialize ACL Repository V2.
 
         Args:
-            database: Database name (default: 'gmp_cis')
+            database: Database name (default: settings.IMPALA_CONFIG['DATABASE'])
         """
         self.connection_manager = impala_manager
-        self.database = database
+        self.database = database or settings.IMPALA_CONFIG['DATABASE']
         self._cache: Dict[str, Any] = {}
         self._cache_timestamps: Dict[str, datetime] = {}
 

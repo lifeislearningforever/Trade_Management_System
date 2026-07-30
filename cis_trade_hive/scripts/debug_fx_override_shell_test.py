@@ -56,6 +56,5 @@ print("EXPECTED: average_cost_lc = 30.0  (gross_amount_lc=300 / quantity=10)")
 from core.repositories.impala_connection import impala_manager
 impala_manager.execute_write(
     f"DELETE FROM gmp_cis.cis_trade_position WHERE trade_id = {TEST_TRADE_ID}",
-    database='gmp_cis'
 )
 print(f"Cleaned up test row for trade_id={TEST_TRADE_ID}")

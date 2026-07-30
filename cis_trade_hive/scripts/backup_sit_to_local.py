@@ -58,7 +58,7 @@ except ImportError:
     SPARK_AVAILABLE = False
     print("WARNING: PySpark not available.")
 
-DATABASE = "gmp_cis"
+DATABASE = os.environ.get('IMPALA_DB', 'gmp_cis')
 
 # Table types
 TYPE_KUDU     = "KUDU"

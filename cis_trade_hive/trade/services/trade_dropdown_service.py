@@ -25,6 +25,7 @@ from django.core.cache import cache
 from core.repositories.impala_connection import impala_manager
 from trade.repositories.trade_validation_repository import trade_validation_repository
 from udf.repositories.udf_field_repository import udf_field_repository
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ DROPDOWN_CACHE_TIMEOUT = 120  # 2 minutes for full dropdown (shorter TTL)
 class TradeDropdownService:
     """Service for fetching dropdown options for trade forms with caching"""
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     OBJECT_TYPE = 'TRADE'  # UDF Object Type for Trade entity
 
     # List of UDF field names for batch loading

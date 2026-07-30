@@ -11,6 +11,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from core.repositories.impala_connection import impala_manager
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 class CACashFlowQueueRepository:
     """Repository for CA cash flow queue operations with Kudu via Impala"""
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     TABLE_NAME = 'cis_ca_cash_flow_queue'
     LOG_TABLE_NAME = 'cis_ca_cash_flow_log'
 

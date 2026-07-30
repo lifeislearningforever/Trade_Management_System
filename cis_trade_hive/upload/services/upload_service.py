@@ -21,6 +21,7 @@ from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
 
+from django.conf import settings
 from ..repositories.upload_kudu_repository import upload_kudu_repository, UploadKuduRepository
 from ..repositories.datasource_repository import datasource_repository
 
@@ -65,7 +66,7 @@ class UploadDTO:
     encoding: str = 'UTF-8'
     description: str = ''
     target_table_name: str = ''
-    target_database: str = 'gmp_cis'
+    target_database: str = settings.IMPALA_CONFIG['DATABASE']
     hdfs_path: str = ''
     schema: List[Dict[str, str]] = field(default_factory=list)
     sample_data: List[Dict[str, Any]] = field(default_factory=list)
@@ -2390,7 +2391,7 @@ class UploadService:
                 'message': f'Position ETL started for {src_id} ({processing_date})',
             })
 
-            db = 'gmp_cis'
+            db = settings.IMPALA_CONFIG['DATABASE']
 
             # ETL steps in order — used to compute % progress for the UI progress bar.
             _ETL_STEPS = [
@@ -5247,7 +5248,6 @@ class UploadService:
                   AND processing_date = '{processing_date}'
                 ORDER BY row_status, portfolio, security_full_name
                 """,
-                database='gmp_cis'
             )
             return rows or []
         except Exception as e:

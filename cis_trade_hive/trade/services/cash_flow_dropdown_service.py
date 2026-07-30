@@ -18,6 +18,7 @@ from django.core.cache import cache
 from core.repositories.impala_connection import impala_manager
 from udf.repositories.udf_field_repository import udf_field_repository
 from trade.repositories.trade_validation_repository import trade_validation_repository
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ CACHE_PREFIX = 'cf_dropdown_'
 class CashFlowDropdownService:
     """Service for fetching dropdown options for cash flow forms"""
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     OBJECT_TYPE = 'CASH_FLOW'  # UDF Object Type
 
     def get_all_dropdown_options(self) -> Dict[str, List[Dict[str, Any]]]:

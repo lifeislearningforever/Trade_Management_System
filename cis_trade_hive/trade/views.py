@@ -1056,7 +1056,7 @@ def trade_edit(request, trade_id):
             # Flush Impala's metadata cache so chain recalc sees the just-written
             # amended values and not the stale pre-amend row.
             try:
-                _im.execute_write("INVALIDATE METADATA gmp_cis.cis_trade", database='gmp_cis')
+                _im.execute_write("INVALIDATE METADATA gmp_cis.cis_trade")
             except Exception as _inv_err:
                 logger.warning(f"INVALIDATE METADATA cis_trade failed (non-fatal): {_inv_err}")
 
@@ -1299,7 +1299,7 @@ def trade_cancel(request, trade_id):
         _port = trade_data.get('portfolio_short_name', '')
         _sec  = trade_data.get('security_label', '')
         try:
-            _im.execute_write("INVALIDATE METADATA gmp_cis.cis_trade", database='gmp_cis')
+            _im.execute_write("INVALIDATE METADATA gmp_cis.cis_trade")
         except Exception as _inv_err:
             logger.warning(f"INVALIDATE METADATA failed (non-fatal): {_inv_err}")
         settlement_service._recalculate_position_chain(
@@ -1411,7 +1411,7 @@ def trade_reject_cancellation(request, trade_id):
         _port = trade_data.get('portfolio_short_name', '')
         _sec  = trade_data.get('security_label', '')
         try:
-            _im.execute_write("INVALIDATE METADATA gmp_cis.cis_trade", database='gmp_cis')
+            _im.execute_write("INVALIDATE METADATA gmp_cis.cis_trade")
         except Exception as _inv_err:
             logger.warning(f"INVALIDATE METADATA failed (non-fatal): {_inv_err}")
         settlement_service._recalculate_position_chain(
@@ -1472,7 +1472,7 @@ def trade_reactivate(request, trade_id):
             from trade.services.settlement_service import settlement_service
             from core.repositories.impala_connection import impala_manager as _im
             try:
-                _im.execute_write("INVALIDATE METADATA gmp_cis.cis_trade", database='gmp_cis')
+                _im.execute_write("INVALIDATE METADATA gmp_cis.cis_trade")
             except Exception as _inv_err:
                 logger.warning(f"INVALIDATE METADATA failed (non-fatal): {_inv_err}")
             settlement_service._recalculate_position_chain(

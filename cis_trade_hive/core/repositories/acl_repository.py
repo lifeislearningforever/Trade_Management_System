@@ -41,7 +41,7 @@ class ACLRepository:
                   AND enabled = true
             """
 
-            result = self.connection_manager.execute_query(query, database='gmp_cis')
+            result = self.connection_manager.execute_query(query)
 
             if not result or len(result) == 0:
                 return None
@@ -73,7 +73,7 @@ class ACLRepository:
                   AND is_deleted = false
             """
 
-            result = self.connection_manager.execute_query(query, database='gmp_cis')
+            result = self.connection_manager.execute_query(query)
             return result if result else []
 
         except Exception as e:
@@ -100,7 +100,7 @@ class ACLRepository:
                   AND is_deleted = false
             """
 
-            result = self.connection_manager.execute_query(query, database='gmp_cis')
+            result = self.connection_manager.execute_query(query)
 
             if not result or len(result) == 0:
                 return None
@@ -189,7 +189,7 @@ class ACLRepository:
                 WHERE is_deleted = false
             """
 
-            result = self.connection_manager.execute_query(query, database='gmp_cis')
+            result = self.connection_manager.execute_query(query)
             return result if result else []
 
         except Exception as e:

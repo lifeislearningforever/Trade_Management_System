@@ -146,7 +146,7 @@ def insert_batch_to_kudu(batch: list) -> bool:
         VALUES {', '.join(values_list)}
         """
 
-        return impala_manager.execute_write(upsert_query, database='gmp_cis')
+        return impala_manager.execute_write(upsert_query)
 
     except Exception as e:
         logger.error(f"Kudu batch insert failed: {e}")

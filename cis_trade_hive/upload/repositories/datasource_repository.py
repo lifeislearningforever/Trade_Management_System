@@ -15,6 +15,7 @@ import re
 from typing import Dict, List, Optional, Any
 
 from core.repositories.impala_connection import impala_manager
+from django.conf import settings
 
 logger = logging.getLogger('upload')
 
@@ -22,7 +23,7 @@ logger = logging.getLogger('upload')
 class DatasourceRepository:
     """Repository for datasource management operations."""
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     TABLE_NAME = 'cis_datasource_mng'
 
     # HDFS path for processing date file

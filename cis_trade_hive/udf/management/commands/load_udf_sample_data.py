@@ -169,7 +169,7 @@ class Command(BaseCommand):
                     {timestamp}
                 )
                 """
-                success = impala_manager.execute_write(query, database='gmp_cis')
+                success = impala_manager.execute_write(query)
                 if success:
                     self.stdout.write(self.style.SUCCESS(f'  ✓ Created UDF: {udf["field_name"]}'))
                 else:
@@ -197,7 +197,7 @@ class Command(BaseCommand):
                         {timestamp}
                     )
                     """
-                    success = impala_manager.execute_write(query, database='gmp_cis')
+                    success = impala_manager.execute_write(query)
                     if not success:
                         self.stdout.write(self.style.WARNING(f'    ⚠ Failed to insert option: {option_value}'))
 

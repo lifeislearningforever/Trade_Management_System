@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 
 from core.repositories.impala_connection import impala_manager
+from django.conf import settings
 
 logger = logging.getLogger('upload')
 
@@ -94,7 +95,7 @@ def _serialise_errors(errors) -> str:
 class UploadKuduRepository:
     """Repository for file upload operations with Kudu via Impala."""
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     TABLE_NAME = 'cis_file_upload'
     EXTERNAL_TABLE_PREFIX = 'ext_'
 

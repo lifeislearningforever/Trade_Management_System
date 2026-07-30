@@ -11,6 +11,7 @@ from datetime import datetime
 import json
 
 from core.repositories.impala_connection import impala_manager
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 class SecurityHiveRepository:
     """Repository for security operations with Kudu via Impala"""
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     TABLE_NAME = 'cis_security'
     HISTORY_TABLE = 'cis_security_history'
 

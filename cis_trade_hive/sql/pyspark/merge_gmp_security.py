@@ -58,13 +58,14 @@ from datetime import datetime
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
+import os
 
 
 # ============================================================================
 # Configuration
 # ============================================================================
 
-DATABASE = "gmp_cis"
+DATABASE = os.environ.get('IMPALA_DB', 'gmp_cis')
 
 # Kudu table names (used by PySpark Kudu connector)
 KUDU_SECURITY      = f"impala::{DATABASE}.cis_security_kudu"

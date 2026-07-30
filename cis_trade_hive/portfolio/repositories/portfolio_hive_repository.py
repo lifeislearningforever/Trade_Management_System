@@ -17,6 +17,7 @@ from typing import List, Dict, Any, Optional
 import logging
 from datetime import datetime
 from core.repositories.impala_connection import impala_manager
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 class PortfolioHiveRepository:
     """Repository for portfolio operations with Kudu via Impala."""
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     TABLE_NAME = 'cis_portfolio'
 
     # Workflow Status Constants

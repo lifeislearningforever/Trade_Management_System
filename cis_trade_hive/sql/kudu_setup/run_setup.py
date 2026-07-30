@@ -57,7 +57,7 @@ PRESETS = {
 
 DDL_FILENAME = "01_create_all_tables.sql"
 PLACEHOLDER  = "{{KUDU_MASTERS}}"
-DEFAULT_DATABASE = "gmp_cis"
+DEFAULT_DATABASE = os.environ.get('IMPALA_DB', 'gmp_cis')
 
 
 def resolve_kudu_masters(args) -> str:

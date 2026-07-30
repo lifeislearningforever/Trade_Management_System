@@ -76,7 +76,7 @@ logger = logging.getLogger('eod_ams_position_etl')
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-DB = 'gmp_cis'
+DB = os.environ.get('IMPALA_DB', 'gmp_cis')
 
 # All source tables: name → metadata dict.
 # position_basis=None means it is read from the source row (e.g. GMP's `line` column).

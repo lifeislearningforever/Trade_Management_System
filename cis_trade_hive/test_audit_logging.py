@@ -45,7 +45,7 @@ def get_audit_logs(entity_type: str = 'EQUITY_PRICE', limit: int = 10) -> list:
     ORDER BY audit_timestamp DESC
     LIMIT {limit}
     """
-    return impala_manager.execute_query(query, database='gmp_cis')
+    return impala_manager.execute_query(query)
 
 
 def test_create_operation():
@@ -227,7 +227,7 @@ def cleanup_test_data():
     """
 
     try:
-        success = impala_manager.execute_write(delete_query, database='gmp_cis')
+        success = impala_manager.execute_write(delete_query)
         if success:
             print("✓ Test data cleaned up")
         return success

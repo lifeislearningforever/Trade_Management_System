@@ -39,8 +39,9 @@ from django.core.management.base import BaseCommand, CommandError
 from core.repositories.impala_connection import impala_manager
 from reference_data.services.ca_cash_flow_service import ca_cash_flow_service
 from reference_data.repositories.ca_cash_flow_queue_repository import ca_cash_flow_queue_repository
+from django.conf import settings
 
-DATABASE = 'gmp_cis'
+DATABASE = settings.IMPALA_CONFIG['DATABASE']
 
 logger = logging.getLogger(__name__)
 
@@ -557,7 +558,7 @@ class Command(BaseCommand):
             ORDER BY created_at ASC
             """
 
-            stuck = impala_manager.execute_query(query, database='gmp_cis')
+            stuck = impala_manager.execute_query(query)
 
             if not stuck:
                 self.stdout.write(self.style.SUCCESS('No stuck PROCESSING entries found'))
@@ -580,7 +581,7 @@ class Command(BaseCommand):
                 WHERE queue_id = {queue_id}
                 """
 
-                success = impala_manager.execute_write(update_sql, database='gmp_cis')
+                success = impala_manager.execute_write(update_sql)
 
                 if success:
                     self.stdout.write(self.style.SUCCESS(f'  ✓ Reset to PENDING'))
@@ -611,7 +612,7 @@ class Command(BaseCommand):
             LIMIT 100
             """
 
-            failed = impala_manager.execute_query(query, database='gmp_cis')
+            failed = impala_manager.execute_query(query)
 
             if not failed:
                 self.stdout.write(self.style.SUCCESS('No failed entries to retry'))
@@ -722,7 +723,7 @@ class Command(BaseCommand):
             WHERE ca_number = '{ca_number}'
               AND (is_deleted = false OR is_deleted IS NULL)
             """
-            existing_cfs = impala_manager.execute_query(void_query, database='gmp_cis')
+            existing_cfs = impala_manager.execute_query(void_query)
             cf_ids = [row['cash_flow_id'] for row in (existing_cfs or []) if row.get('cash_flow_id')]
 
             self.stdout.write(f'  Found {len(cf_ids)} active cash flow(s) to void')
@@ -738,7 +739,7 @@ class Command(BaseCommand):
                         updated_at = '{now_str}'
                     WHERE cash_flow_id = {cf_id}
                     """
-                    ok = impala_manager.execute_write(void_sql, database='gmp_cis')
+                    ok = impala_manager.execute_write(void_sql)
                     if ok:
                         total_voided += 1
                         if verbose:
@@ -787,7 +788,7 @@ class Command(BaseCommand):
             """
 
             if not dry_run:
-                ok = impala_manager.execute_write(reset_sql, database='gmp_cis')
+                ok = impala_manager.execute_write(reset_sql)
                 if ok:
                     self.stdout.write(self.style.SUCCESS(f'  Queue {queue_id} reset to PENDING'))
                     queue_ids_to_reprocess.append(queue_id)

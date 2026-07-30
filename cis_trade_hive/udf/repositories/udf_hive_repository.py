@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class ImpalaConnection:
     """Manages Impala database connections for UDF module."""
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
 
     @staticmethod
     def execute_query(query: str) -> List[Dict[str, Any]]:

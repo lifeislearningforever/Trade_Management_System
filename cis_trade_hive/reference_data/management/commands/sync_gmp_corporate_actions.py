@@ -52,6 +52,7 @@ from django.core.management.base import BaseCommand
 from core.repositories.impala_connection import impala_manager
 from reference_data.repositories.corporate_action_repository import corporate_action_repository
 from reference_data.services.ca_cash_flow_service import ca_cash_flow_service
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,7 @@ GMP_CA_TYPE_MAP = {
 # GMP date formats to try
 GMP_DATE_FORMATS = ['%d/%m/%Y', '%Y-%m-%d', '%Y%m%d', '%d-%m-%Y', '%m/%d/%Y']
 
-GMP_DATABASE = 'gmp_cis'
+GMP_DATABASE = settings.IMPALA_CONFIG['DATABASE']
 GMP_SOURCE_TABLE = 'gmp_cis_sfa_dly_corporate_action'
 
 

@@ -10,6 +10,7 @@ import logging
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
 
+from django.conf import settings
 from core.repositories.impala_connection import impala_manager
 
 logger = logging.getLogger(__name__)
@@ -18,8 +19,8 @@ logger = logging.getLogger(__name__)
 class LookupKuduRepository:
     """Repository for dynamic lookup table management in Kudu"""
 
-    def __init__(self, database: str = 'gmp_cis'):
-        self.database = database
+    def __init__(self, database: str = None):
+        self.database = database or settings.IMPALA_CONFIG['DATABASE']
 
     # =========================================================================
     # TABLE DISCOVERY

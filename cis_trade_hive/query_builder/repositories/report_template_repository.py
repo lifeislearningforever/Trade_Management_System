@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 from core.repositories.impala_connection import impala_manager
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 class ReportTemplateRepository:
     """CRUD for the cis_report_template Kudu table."""
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     TABLE_NAME = 'cis_report_template'
 
     def __init__(self, connection_manager=None):

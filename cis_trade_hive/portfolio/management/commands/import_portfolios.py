@@ -131,7 +131,7 @@ class Command(BaseCommand):
             """
 
             # Execute UPSERT
-            success = impala_manager.execute_write(upsert_query, database='gmp_cis')
+            success = impala_manager.execute_write(upsert_query)
 
             if success:
                 logger.debug(f"Imported portfolio: {portfolio_data.get('name')}")

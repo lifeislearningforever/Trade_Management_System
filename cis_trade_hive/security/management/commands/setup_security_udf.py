@@ -246,7 +246,7 @@ class Command(BaseCommand):
             LIMIT 50
             """
 
-            result = impala_manager.execute_query(query, database='gmp_cis')
+            result = impala_manager.execute_query(query)
 
             if result and len(result) > 0:
                 values = [row.get(field_name) for row in result if row.get(field_name)]
@@ -277,7 +277,7 @@ class Command(BaseCommand):
             LIMIT 1
             """
 
-            result = impala_manager.execute_query(query, database='gmp_cis')
+            result = impala_manager.execute_query(query)
             return result and len(result) > 0
 
         except Exception as e:
@@ -302,7 +302,7 @@ class Command(BaseCommand):
         try:
             # Get starting ID
             query = "SELECT COALESCE(MAX(udf_id), 0) as max_id FROM gmp_cis.cis_udf_field"
-            result = impala_manager.execute_query(query, database='gmp_cis')
+            result = impala_manager.execute_query(query)
             next_id = (result[0].get('max_id', 0) if result else 0) + 1
 
             # Get field_code from udf_id (which is actually the field_code in our simplified version)
@@ -341,7 +341,7 @@ class Command(BaseCommand):
                     )
                     """
 
-                    success = impala_manager.execute_write(insert_query, database='gmp_cis')
+                    success = impala_manager.execute_write(insert_query)
                     if success:
                         created_count += 1
                         next_id += 1

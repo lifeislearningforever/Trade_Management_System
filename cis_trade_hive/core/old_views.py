@@ -385,7 +385,7 @@ def health_check(request):
 
     # Test Impala connectivity with a simple query
     try:
-        results = impala_manager.execute_query("SELECT 1 AS health_check", database='gmp_cis')
+        results = impala_manager.execute_query("SELECT 1 AS health_check")
         if results:
             health_status['checks']['impala_connectivity'] = {'status': 'healthy'}
         else:

@@ -14,6 +14,7 @@ from core.repositories.impala_connection import impala_manager
 from reference_data.repositories.ca_cash_flow_queue_repository import ca_cash_flow_queue_repository
 from trade.repositories.cash_flow_repository import CashFlowRepository
 from trade.services.multicurrency_service import multicurrency_service
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 class CACashFlowService:
     """Service for generating cash flows from corporate actions"""
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     POSITION_TABLE = 'cis_position'         # read: golden copy (all sources)
     WRITE_POSITION_TABLE = 'cis_trade_position'  # write: CIS working ledger (versioned)
 

@@ -29,10 +29,11 @@ import logging
 from io import StringIO
 from django.core.management.base import BaseCommand, CommandError
 from core.repositories.impala_connection import impala_manager
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-DATABASE = 'gmp_cis'
+DATABASE = settings.IMPALA_CONFIG['DATABASE']
 POSITION_TABLE = f'{DATABASE}.cis_position'
 TRADE_TABLE = f'{DATABASE}.cis_trade'
 

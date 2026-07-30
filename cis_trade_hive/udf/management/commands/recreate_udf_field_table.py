@@ -25,8 +25,8 @@ class Command(BaseCommand):
         drop_kudu_query = "DROP TABLE IF EXISTS gmp_cis.cis_udf_field_kudu"
 
         try:
-            impala_manager.execute_write(drop_external_query, database='gmp_cis')
-            impala_manager.execute_write(drop_kudu_query, database='gmp_cis')
+            impala_manager.execute_write(drop_external_query)
+            impala_manager.execute_write(drop_kudu_query)
             self.stdout.write(self.style.SUCCESS('  Existing tables dropped'))
         except Exception as e:
             self.stdout.write(self.style.WARNING(f'  Drop tables warning: {str(e)}'))
@@ -60,7 +60,7 @@ class Command(BaseCommand):
         try:
             # Execute create Kudu table
             self.stdout.write('Creating Kudu table...')
-            success = impala_manager.execute_write(create_kudu_query, database='gmp_cis')
+            success = impala_manager.execute_write(create_kudu_query)
             if success:
                 self.stdout.write(self.style.SUCCESS('  Kudu table created successfully'))
             else:
@@ -69,7 +69,7 @@ class Command(BaseCommand):
 
             # Execute create external table
             self.stdout.write('Creating external table mapping...')
-            success = impala_manager.execute_write(create_external_query, database='gmp_cis')
+            success = impala_manager.execute_write(create_external_query)
             if success:
                 self.stdout.write(self.style.SUCCESS('  External table created successfully'))
             else:
@@ -125,7 +125,7 @@ class Command(BaseCommand):
             ({data[0]}, '{data[1]}', '{data[2]}', '{data[3]}', {data[4]}, '{data[5]}', '{data[6]}', '{data[7]}', '{data[8]}')
             """
             try:
-                impala_manager.execute_write(query, database='gmp_cis')
+                impala_manager.execute_write(query)
             except Exception as e:
                 self.stdout.write(self.style.WARNING(f'  Warning inserting record {data[0]}: {str(e)}'))
 

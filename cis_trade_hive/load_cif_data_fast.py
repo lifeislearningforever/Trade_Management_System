@@ -78,7 +78,7 @@ def load_cif_data_fast(file_path, batch_size=500):
                     """
 
                     try:
-                        impala_manager.execute_write(upsert, database='gmp_cis')
+                        impala_manager.execute_write(upsert)
                         success_count += len(batch_values)
                         print(f"Loaded: {success_count}/{total_records} records")
                         batch_values = []
@@ -100,7 +100,7 @@ def load_cif_data_fast(file_path, batch_size=500):
                 """
 
                 try:
-                    impala_manager.execute_write(upsert, database='gmp_cis')
+                    impala_manager.execute_write(upsert)
                     success_count += len(batch_values)
                     print(f"Loaded final batch: {success_count}/{total_records}")
                 except Exception as e:

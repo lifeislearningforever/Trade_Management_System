@@ -14,6 +14,7 @@ from typing import Dict, Any, List, Tuple, Optional
 from django.core.cache import cache
 
 from core.repositories.impala_connection import impala_manager
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class QueryBuilderRepository:
     - Fetch and cache column schema for whitelisted tables
     """
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     MAX_CONCURRENT = 5          # max simultaneous query builder connections
     QUERY_TIMEOUT = 30          # seconds
     SCHEMA_CACHE_TTL = 3600     # 1 hour

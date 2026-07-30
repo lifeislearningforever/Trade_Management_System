@@ -62,8 +62,9 @@ from django.test import Client
 from django.urls import reverse
 
 from core.repositories.impala_connection import impala_manager
+from django.conf import settings
 
-DATABASE = 'gmp_cis'
+DATABASE = settings.IMPALA_CONFIG['DATABASE']
 
 # How long to poll after a UI action before giving up. The real background
 # workers poll every 5s (trade event) / 10s (position) — see config/cml_app.py

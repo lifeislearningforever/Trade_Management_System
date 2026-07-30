@@ -33,13 +33,14 @@ from datetime import datetime
 
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
+import os
 
 
 # ============================================================================
 # Configuration
 # ============================================================================
 
-DATABASE = "gmp_cis"
+DATABASE = os.environ.get('IMPALA_DB', 'gmp_cis')
 STAGING_TABLE = f"{DATABASE}.stg_gmp_equity_price"
 TARGET_TABLE = f"{DATABASE}.cis_equity_price"
 IMPALA_STAGING_TABLE = f"impala::{DATABASE}.stg_gmp_equity_price_kudu"

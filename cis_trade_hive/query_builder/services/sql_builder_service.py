@@ -11,6 +11,7 @@ by adding to the dict, not by modifying logic).
 import re
 import logging
 from typing import Dict, Any, List, Tuple
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 class SqlBuilderService:
     """Builds Impala SQL from a structured query config dict."""
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
 
     # Whitelisted tables — alias used in generated SQL
     TABLES: Dict[str, Dict] = {

@@ -56,7 +56,7 @@ class Command(BaseCommand):
         try:
             # Execute create Kudu table
             self.stdout.write('Creating Kudu table...')
-            success = impala_manager.execute_write(create_kudu_query, database='gmp_cis')
+            success = impala_manager.execute_write(create_kudu_query)
             if success:
                 self.stdout.write(self.style.SUCCESS('  Kudu table created successfully'))
             else:
@@ -65,7 +65,7 @@ class Command(BaseCommand):
 
             # Execute create external table
             self.stdout.write('Creating external table mapping...')
-            success = impala_manager.execute_write(create_external_query, database='gmp_cis')
+            success = impala_manager.execute_write(create_external_query)
             if success:
                 self.stdout.write(self.style.SUCCESS('  External table created successfully'))
             else:

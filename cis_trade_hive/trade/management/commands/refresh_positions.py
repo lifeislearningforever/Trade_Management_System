@@ -78,6 +78,7 @@ from datetime import datetime, date, timedelta
 from decimal import Decimal
 
 from django.core.management.base import BaseCommand
+from django.conf import settings
 
 from core.repositories.impala_connection import impala_manager
 from trade.services.multicurrency_service import multicurrency_service
@@ -85,7 +86,7 @@ from trade.services import position_id_service
 
 logger = logging.getLogger(__name__)
 
-DATABASE = 'gmp_cis'
+DATABASE = settings.IMPALA_CONFIG['DATABASE']
 
 ALL_SOURCES = ['CIS', 'GMP', 'AMS_STREET', 'USER_UPLOAD']
 

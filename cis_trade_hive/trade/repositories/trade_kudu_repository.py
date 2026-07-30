@@ -21,6 +21,7 @@ from datetime import datetime
 
 from core.repositories.impala_connection import impala_manager, query_cache
 from trade.repositories.trade_validation_repository import trade_validation_repository
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 class TradeKuduRepository:
     """Repository for trade operations with Kudu via Impala"""
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     TABLE_NAME = 'cis_trade'
     HISTORY_TABLE = 'cis_trade_history'
     NOTE_TABLE = 'cis_trade_note'

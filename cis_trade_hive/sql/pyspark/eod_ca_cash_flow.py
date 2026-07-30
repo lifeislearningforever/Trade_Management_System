@@ -47,13 +47,14 @@ from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 from pyspark.sql.types import LongType, StringType, DecimalType
+import os
 
 
 # ============================================================================
 # Configuration
 # ============================================================================
 
-DATABASE = "gmp_cis"
+DATABASE = os.environ.get('IMPALA_DB', 'gmp_cis')
 
 # GMP source (read-only — written by GMP ETL)
 GMP_CA_TABLE        = f"impala::{DATABASE}.gmp_cis_sfa_dly_corporate_action"

@@ -55,7 +55,7 @@ from core.repositories.impala_connection import impala_manager
 logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
 
-DATABASE = 'gmp_cis'
+DATABASE = os.environ.get('IMPALA_DB', 'gmp_cis')
 SRC_SYSTEM = 'CIS'
 
 

@@ -17,6 +17,7 @@ from datetime import datetime, date, timedelta
 from functools import lru_cache
 
 from core.repositories.impala_connection import impala_manager
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class MultiCurrencyService:
     - Combined P&L (not separate FX P&L)
     """
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     FX_RATE_TABLE = 'gmp_cis_sta_dly_fx_rates'
     PORTFOLIO_TABLE = 'cis_portfolio'
     SECURITY_TABLE = 'cis_security'

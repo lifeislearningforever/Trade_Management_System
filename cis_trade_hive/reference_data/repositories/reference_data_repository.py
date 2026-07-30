@@ -19,7 +19,7 @@ class ImpalaReferenceRepository:
 
     def __init__(self):
         self.config = settings.IMPALA_CONFIG
-        self.database = 'gmp_cis'
+        self.database = self.config['DATABASE']
 
     def _execute_query(self, query: str) -> List[Dict[str, Any]]:
         """

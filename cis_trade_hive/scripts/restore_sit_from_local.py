@@ -82,7 +82,7 @@ try:
 except ImportError:
     IMPYLA_AVAILABLE = False
 
-DATABASE = "gmp_cis"
+DATABASE = os.environ.get('IMPALA_DB', 'gmp_cis')
 
 TYPE_KUDU     = "KUDU"
 TYPE_EXTERNAL = "EXTERNAL"

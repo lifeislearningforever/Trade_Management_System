@@ -263,7 +263,7 @@ def start_trade_event_worker():
         from core.notifications import notify_user
         from core.notifications.constants import EVT_AVP_COMPLETED, EVT_AVP_FAILED
 
-        DATABASE = 'gmp_cis'
+        DATABASE = os.environ.get('IMPALA_DB', 'gmp_cis')
         EVENT_QUEUE_TABLE = 'cis_trade_event_queue'
         HISTORY_TABLE = 'cis_trade_history'
 
@@ -992,7 +992,6 @@ def start_worker_health_monitor():
                         ORDER BY created_at ASC
                         LIMIT 1
                         """,
-                        database='gmp_cis'
                     )
                     if _oldest_pending:
                         _age = _oldest_pending[0].get('age_seconds', 0)

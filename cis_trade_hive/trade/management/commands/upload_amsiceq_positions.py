@@ -27,7 +27,7 @@ from core.repositories.impala_connection import impala_manager
 
 logger = logging.getLogger(__name__)
 
-DATABASE = 'gmp_cis'
+DATABASE = settings.IMPALA_CONFIG['DATABASE']
 
 
 class Command(BaseCommand):

@@ -21,6 +21,7 @@ from typing import List, Dict, Any
 
 from core.repositories.impala_connection import impala_manager
 from core.audit.audit_kudu_repository import AuditLogKuduRepository
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 class SecurityDropdownRepository:
     """Repository for fetching dropdown options from Kudu tables"""
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     UDF_FIELD_TABLE = 'cis_udf_field'
     PARTY_TABLE = 'gmp_cis.cis_party'
     COUNTRY_TABLE = 'gmp_cis_sta_dly_country'

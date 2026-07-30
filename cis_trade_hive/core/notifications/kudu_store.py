@@ -18,10 +18,11 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-DATABASE   = 'gmp_cis'
+DATABASE = settings.IMPALA_CONFIG['DATABASE']
 TABLE      = 'cis_notification'
 FULL_TABLE = f'{DATABASE}.{TABLE}'
 

@@ -155,7 +155,6 @@ class Command(BaseCommand):
         try:
             rows = impala_manager.execute_query(
                 "SELECT contextual_today FROM gmp_cis_sta_dly_alldatesinfo LIMIT 1",
-                database='gmp_cis',
             )
             if rows:
                 val = rows[0].get('contextual_today')
@@ -203,7 +202,7 @@ class Command(BaseCommand):
               )
             ORDER BY t.settle_date, t.trade_id
             """
-            rows = impala_manager.execute_query(find_q, database='gmp_cis')
+            rows = impala_manager.execute_query(find_q)
             if not rows:
                 self.stdout.write('  No unqueued future-settle trades found.')
                 return 0, 0, 0
@@ -365,7 +364,7 @@ class Command(BaseCommand):
             LIMIT 20
             """
 
-            results = impala_manager.execute_query(query, database='gmp_cis')
+            results = impala_manager.execute_query(query)
 
             if results:
                 self.stdout.write('-' * 100)

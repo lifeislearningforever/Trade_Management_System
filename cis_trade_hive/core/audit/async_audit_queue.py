@@ -277,7 +277,7 @@ class AsyncAuditQueue:
             VALUES {', '.join(values_list)}
             """
 
-            success = impala_manager.execute_write(upsert_query, database='gmp_cis')
+            success = impala_manager.execute_write(upsert_query)
 
             if success:
                 logger.debug(f"Batch inserted {len(batch)} audit entries")

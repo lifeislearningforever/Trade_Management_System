@@ -9,6 +9,7 @@ from datetime import datetime
 from core.repositories.impala_connection import impala_manager
 import logging
 import uuid
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 class ImpalaAuditConnection:
     """Manages Impala database connections for audit logging."""
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
 
     @staticmethod
     def execute_query(query: str) -> List[Dict[str, Any]]:

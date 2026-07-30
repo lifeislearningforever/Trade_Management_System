@@ -18,6 +18,7 @@ import time
 
 from core.repositories.impala_connection import impala_manager
 from core.audit.audit_decorator import log_audit
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ class EquityPriceHiveRepository:
     """
 
     TABLE_NAME = "gmp_cis.cis_equity_price"
-    DATABASE = "gmp_cis"
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
     HISTORY_TABLE_NAME = "gmp_cis.cis_equity_price_history"
 
     @staticmethod

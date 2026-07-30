@@ -48,7 +48,6 @@ def test_kudu_read():
     try:
         results = hybrid_manager.kudu_read(
             "SELECT * FROM gmp_cis.cis_file_upload LIMIT 5",
-            database='gmp_cis'
         )
         print(f"   Result: {len(results)} rows")
         if results:
@@ -65,7 +64,6 @@ def test_hive_read():
     try:
         results = hybrid_manager.hive_read(
             "SHOW TABLES IN gmp_cis",
-            database='gmp_cis'
         )
         print(f"   Result: {len(results)} tables found")
         if results:
@@ -133,7 +131,6 @@ def test_hive_write_simple():
         # Simple DDL that shouldn't fail
         success = hybrid_manager.hive_write(
             "SHOW DATABASES",
-            database='gmp_cis'
         )
         print(f"   Result: {'OK' if success else 'FAILED'}")
         return success

@@ -20,6 +20,7 @@ from datetime import datetime, date
 
 from core.repositories.impala_connection import impala_manager, query_cache
 from core.services.system_date_service import system_date_service
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class ValidationResult:
 class TradeValidationRepository:
     """Repository for validating trade references against master data"""
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
 
     # Portfolio table
     PORTFOLIO_TABLE = 'cis_portfolio'

@@ -30,7 +30,7 @@ from core.repositories.impala_connection import impala_manager
 class Command(BaseCommand):
     help = 'Extract DDL from gmp_cis database for SIT to UAT migration'
 
-    DATABASE = 'gmp_cis'
+    DATABASE = settings.IMPALA_CONFIG['DATABASE']
 
     def add_arguments(self, parser):
         parser.add_argument(
