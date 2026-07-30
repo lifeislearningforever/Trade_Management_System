@@ -1379,6 +1379,28 @@ class SettlementService:
             total_cost_lc = float(total_cost_fc or 0) * float(fx_rate)
         unrealized_pnl_lc = 0.0 if is_equity_method else (market_value_lc - float(total_cost_lc or 0))
 
+        # Round amount fields (not average_cost, which stays at AVP_PRECISION)
+        # to currency-table precision per SA direction (Teams, 2026-07-30) --
+        # same treatment as _save_position. total_cost_fc/market_value_fc are
+        # normally already-rounded values carried straight from `source`, but
+        # re-rounding here is a harmless no-op for those and a safety net for
+        # any historical row written before this change.
+        fc_dp = self.position_service._get_currency_dp(security_currency)
+        lc_dp = self.position_service._get_currency_dp(portfolio_currency)
+        total_cost_fc = self.position_service._round_amount(float(total_cost_fc or 0), fc_dp)
+        total_cost_lc = self.position_service._round_amount(float(total_cost_lc or 0), lc_dp)
+        market_value_fc = self.position_service._round_amount(float(market_value_fc or 0), fc_dp)
+        market_value_lc = self.position_service._round_amount(market_value_lc, lc_dp)
+        unrealized_pnl_lc = self.position_service._round_amount(unrealized_pnl_lc, lc_dp)
+        source_unrealized_pnl_fc = self.position_service._round_amount(
+            float(source.get('unrealized_pnl_fc') or 0), fc_dp)
+        source_dividend_fc = self.position_service._round_amount(float(source.get('dividend_fc') or 0), fc_dp)
+        source_dividend_lc = self.position_service._round_amount(float(source.get('dividend_lc') or 0), lc_dp)
+        source_uncall_fc = self.position_service._round_amount(float(source.get('uncall_fc') or 0), fc_dp)
+        source_uncall_lc = self.position_service._round_amount(float(source.get('uncall_lc') or 0), lc_dp)
+        source_provision_fc = self.position_service._round_amount(float(source.get('provision_fc') or 0), fc_dp)
+        source_provision_lc = self.position_service._round_amount(float(source.get('provision_lc') or 0), lc_dp)
+
         def _f(val):
             if val is None:
                 return 'NULL'
@@ -1427,11 +1449,11 @@ class SettlementService:
          {_f(source.get('quantity'))},
          {_f(average_cost_fc)}, {_f(total_cost_fc)},
          {_f(average_cost_lc)}, {_f(total_cost_lc)},
-         {_f(source.get('realized_pnl_fc'))}, {_f(source.get('unrealized_pnl_fc'))},
+         {_f(source.get('realized_pnl_fc'))}, {_f(source_unrealized_pnl_fc)},
          {_f(source.get('realized_pnl_lc'))}, {_f(unrealized_pnl_lc)},
          {_f(source.get('market_price'))},
          {_f(market_value_fc)}, {_f(market_value_lc)},
-         {_f(source.get('dividend_fc'))}, {_f(source.get('dividend_lc'))},
+         {_f(source_dividend_fc)}, {_f(source_dividend_lc)},
          {source['trade_id'] if source.get('trade_id') else 'NULL'},
          {_s(source.get('trade_type'))},
          NULL, NULL, NULL,
@@ -1440,9 +1462,9 @@ class SettlementService:
          {_f(fx_rate)},
          {_s(source.get('status') or 'OPEN')},
          true, true,
-         {_f(source.get('uncall_fc'))}, {_f(source.get('uncall_lc'))},
+         {_f(source_uncall_fc)}, {_f(source_uncall_lc)},
          {_f(source.get('pipeline_fc'))}, {_f(source.get('pipeline_lc'))},
-         {_f(source.get('provision_fc'))}, {_f(source.get('provision_lc'))},
+         {_f(source_provision_fc)}, {_f(source_provision_lc)},
          {_s(source.get('position_type') or 'INT')},
          '{self._escape(updated_by)}', '{timestamp}',
          '{self._escape(updated_by)}', '{timestamp}'
@@ -1462,7 +1484,14 @@ class SettlementService:
             'total_cost_lc': total_cost_lc,
             'market_value_fc': market_value_fc,
             'market_value_lc': market_value_lc,
+            'unrealized_pnl_fc': source_unrealized_pnl_fc,
             'unrealized_pnl_lc': unrealized_pnl_lc,
+            'dividend_fc': source_dividend_fc,
+            'dividend_lc': source_dividend_lc,
+            'uncall_fc': source_uncall_fc,
+            'uncall_lc': source_uncall_lc,
+            'provision_fc': source_provision_fc,
+            'provision_lc': source_provision_lc,
             'fx_rate': float(fx_rate),
             'position_date': position_date,
             'isin': isin,

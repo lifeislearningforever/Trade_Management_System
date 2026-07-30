@@ -50,6 +50,55 @@ class PositionService:
         """Initialize the position service."""
         pass
 
+    # Fallback decimal places when a currency isn't found in gmp_cis_sta_dly_currency.
+    _DEFAULT_AMOUNT_DP = 2
+
+    def _get_currency_dp(self, currency_code: str) -> int:
+        """Return decimal places for a currency from gmp_cis_sta_dly_currency.
+
+        e.g. precision '0000000000.01' -> 2. Falls back to _DEFAULT_AMOUNT_DP
+        if not found. Same table/parsing convention as the identical helper in
+        trade/services/trade_dropdown_service.py and
+        trade/management/commands/process_approved_cashflows.py — kept
+        consistent deliberately rather than sharing a single implementation.
+        """
+        if not currency_code:
+            return self._DEFAULT_AMOUNT_DP
+        try:
+            escaped = currency_code.replace('\\', '\\\\').replace("'", "\\'")
+            results = impala_manager.execute_query(
+                f"SELECT precision FROM {self.DATABASE}.gmp_cis_sta_dly_currency "
+                f"WHERE iso_code = '{escaped}' "
+                f"  AND processing_date = ("
+                f"      SELECT MAX(processing_date) FROM {self.DATABASE}.gmp_cis_sta_dly_currency"
+                f"  ) "
+                f"LIMIT 1",
+                database=self.DATABASE
+            )
+            if results:
+                prec_str = str(results[0].get('precision') or '')
+                if '.' in prec_str:
+                    return len(prec_str.split('.')[1].rstrip('0') or '0')
+        except Exception as e:
+            logger.debug(f"Could not get currency precision for {currency_code}: {e}")
+        return self._DEFAULT_AMOUNT_DP
+
+    @staticmethod
+    def _round_amount(value: float, decimal_places: int) -> float:
+        """Round an FC/LC amount field to currency precision (ROUND_HALF_UP).
+
+        Applies to cost/market-value/unrealized-pnl/provision/dividend/uncall
+        fields per SA direction (Teams, 2026-07-30): those are amount fields
+        and should follow currency-table precision, unlike average_cost_fc/lc
+        which is a price field and stays on AVP_PRECISION (8dp). Consequence
+        (explicitly called out as expected): average_cost * quantity will not
+        exactly equal cost_fc/lc after this rounding.
+        """
+        if value is None:
+            return value
+        quantum = Decimal(1).scaleb(-decimal_places) if decimal_places > 0 else Decimal(1)
+        return float(Decimal(str(value)).quantize(quantum, rounding=ROUND_HALF_UP))
+
     # =========================================================================
     # AVP CALCULATION
     # =========================================================================
@@ -1140,6 +1189,34 @@ class PositionService:
                     f"REVALUED position {portfolio_id}/{security_id}: "
                     f"all LC values use current FX rate {fx_rate}"
                 )
+
+            # Round amount fields (not average_cost, which stays at AVP_PRECISION)
+            # to currency-table precision per SA direction (Teams, 2026-07-30):
+            # fc fields -> security currency, lc fields -> portfolio currency.
+            # Mutate position_data in place too, since provision_fc/lc and
+            # uncall_fc/lc are re-read straight from position_data further
+            # below (and by the cis_position gold-sync block) rather than
+            # through a local variable.
+            fc_dp = self._get_currency_dp(security_currency)
+            lc_dp = self._get_currency_dp(portfolio_currency)
+            total_cost = self._round_amount(total_cost, fc_dp)
+            total_cost_lc = self._round_amount(total_cost_lc, lc_dp)
+            market_value = self._round_amount(market_value, fc_dp)
+            market_value_lc = self._round_amount(market_value_lc, lc_dp)
+            unrealized_pnl = self._round_amount(unrealized_pnl, fc_dp)
+            unrealized_pnl_lc = self._round_amount(unrealized_pnl_lc, lc_dp)
+            position_data['total_cost_fc'] = total_cost
+            position_data['total_cost_lc'] = total_cost_lc
+            position_data['market_value_fc'] = market_value
+            position_data['market_value_lc'] = market_value_lc
+            position_data['unrealized_pnl_fc'] = unrealized_pnl
+            position_data['unrealized_pnl_lc'] = unrealized_pnl_lc
+            position_data['dividend_fc'] = self._round_amount(float(position_data.get('dividend_fc', 0) or 0), fc_dp)
+            position_data['dividend_lc'] = self._round_amount(float(position_data.get('dividend_lc', 0) or 0), lc_dp)
+            position_data['uncall_fc'] = self._round_amount(float(position_data.get('uncall_fc', 0) or 0), fc_dp)
+            position_data['uncall_lc'] = self._round_amount(float(position_data.get('uncall_lc', 0) or 0), lc_dp)
+            position_data['provision_fc'] = self._round_amount(float(position_data.get('provision_fc', 0) or 0), fc_dp)
+            position_data['provision_lc'] = self._round_amount(float(position_data.get('provision_lc', 0) or 0), lc_dp)
 
             # Match columns to cis_trade_position table structure (DDL: 13_avp_tables_kudu.sql)
             # FC = Foreign Currency (Security Currency)
