@@ -1937,6 +1937,7 @@ def api_calculate_charges(request):
     price = request.GET.get('price', '0')
     trade_type = request.GET.get('trade_type', 'BUY').strip()
     exchange = request.GET.get('exchange', '').strip()
+    currency = request.GET.get('currency', '').strip()
 
     if not broker:
         return JsonResponse({
@@ -1964,7 +1965,8 @@ def api_calculate_charges(request):
         quantity=qty,
         price=prc,
         trade_type=trade_type,
-        exchange=exchange if exchange else None
+        exchange=exchange if exchange else None,
+        currency=currency if currency else None
     )
 
     # Log the result for debugging

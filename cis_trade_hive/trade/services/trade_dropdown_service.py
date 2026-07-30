@@ -17,6 +17,7 @@ Required tables: cis_trade, cis_udf_field, cis_party, cis_portfolio, cis_securit
 """
 
 import logging
+from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN, ROUND_UP
 from typing import Dict, List, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -830,7 +831,7 @@ class TradeDropdownService:
             exchange_filter = f"AND exchange = '{exchange}'" if exchange else ""
 
             query = f"""
-            SELECT fee_type, broker, exchange, country_of_exchange, fee_rule, fee_value
+            SELECT fee_type, broker, exchange, country_of_exchange, fee_rule, fee_value, rounding_method
             FROM {self.DATABASE}.cis_trade_charge_lut
             WHERE (broker = '{escaped_broker}' OR UPPER(broker) = UPPER('{escaped_broker}')
                    OR broker LIKE '{base_broker}' OR UPPER(broker) LIKE UPPER('{base_broker}'))
@@ -847,6 +848,7 @@ class TradeDropdownService:
                         'country_of_exchange': r.get('country_of_exchange', '') or '',
                         'fee_rule': r.get('fee_rule', ''),
                         'fee_value': float(r.get('fee_value', 0) or 0),
+                        'rounding_method': r.get('rounding_method', '') or '',
                     }
                     for r in results
                 ]
@@ -855,8 +857,64 @@ class TradeDropdownService:
 
         return []
 
+    # Fallback decimal places when a currency isn't found in gmp_cis_sta_dly_currency.
+    _DEFAULT_FEE_ROUNDING_DP = 2
+
+    def _get_currency_dp(self, currency_code: str) -> int:
+        """Return decimal places for a currency from gmp_cis_sta_dly_currency.
+
+        e.g. precision '0000000000.01' -> 2. Falls back to
+        _DEFAULT_FEE_ROUNDING_DP if not found. Mirrors the identical helper
+        in trade/management/commands/process_approved_cashflows.py -- same
+        table, same string-parsing convention, kept consistent deliberately.
+        """
+        if not currency_code:
+            return self._DEFAULT_FEE_ROUNDING_DP
+        try:
+            escaped = currency_code.replace('\\', '\\\\').replace("'", "\\'")
+            # gmp_cis_sta_dly_currency is a daily-loaded Hive external table --
+            # filter to the latest processing_date so a stale prior day's row
+            # isn't picked up (same convention as security_dropdown_service.py).
+            results = impala_manager.execute_query(
+                f"SELECT precision FROM {self.DATABASE}.gmp_cis_sta_dly_currency "
+                f"WHERE iso_code = '{escaped}' "
+                f"  AND processing_date = ("
+                f"      SELECT MAX(processing_date) FROM {self.DATABASE}.gmp_cis_sta_dly_currency"
+                f"  ) "
+                f"LIMIT 1",
+                database=self.DATABASE
+            )
+            if results:
+                prec_str = str(results[0].get('precision') or '')
+                if '.' in prec_str:
+                    return len(prec_str.split('.')[1].rstrip('0') or '0')
+        except Exception as e:
+            logger.debug(f"Could not get currency precision for {currency_code}: {e}")
+        return self._DEFAULT_FEE_ROUNDING_DP
+
+    @staticmethod
+    def _round_fee(value: float, rounding_method: str, decimal_places: int) -> float:
+        """Round a calculated fee to currency precision per its LUT rounding_method.
+
+        'Round down' truncates towards zero, 'Round up' rounds away from zero,
+        and 'Rounding Nearest' (or anything unrecognized/blank) uses standard
+        half-up rounding -- not Python's built-in round(), which uses
+        banker's rounding (round-half-to-even) and would silently disagree
+        with the SA-specified convention on exact .005 boundaries.
+        """
+        method = (rounding_method or '').strip().lower()
+        if method == 'round down':
+            mode = ROUND_DOWN
+        elif method == 'round up':
+            mode = ROUND_UP
+        else:
+            mode = ROUND_HALF_UP
+        quantum = Decimal(1).scaleb(-decimal_places) if decimal_places > 0 else Decimal(1)
+        return float(Decimal(str(value)).quantize(quantum, rounding=mode))
+
     def calculate_trade_charges(self, broker: str, quantity: float, price: float,
-                                trade_type: str = 'BUY', exchange: str = None) -> Dict[str, Any]:
+                                trade_type: str = 'BUY', exchange: str = None,
+                                currency: str = None) -> Dict[str, Any]:
         """Calculate charges for a trade based on broker lookup.
 
         GST is applied on the sum of all other fees (brokerage + clearing +
@@ -864,12 +922,15 @@ class TradeDropdownService:
 
         Processing order:
           1. Calculate all non-GST fees against trade_value (or as flat).
-          2. Sum those fees → subtotal_fees.
-          3. Calculate GST as a % of subtotal_fees.
-          4. Total = subtotal_fees + gst.
+          2. Round each fee per its own rounding_method, at the traded
+             security's currency precision (from gmp_cis_sta_dly_currency).
+          3. Sum those rounded fees → subtotal_fees.
+          4. Calculate GST as a % of subtotal_fees, then round it the same way.
+          5. Total = subtotal_fees + rounded gst.
         """
         trade_value = float(quantity) * float(price)
         charges = self.get_broker_charges(broker, exchange)
+        fee_dp = self._get_currency_dp(currency)
 
         # --- Pass 1: calculate all non-GST fees ---
         non_gst_charges = []
@@ -886,14 +947,16 @@ class TradeDropdownService:
         for charge in non_gst_charges:
             fee_rule = charge.get('fee_rule', '')
             fee_value = float(charge.get('fee_value', 0))
+            rounding_method = charge.get('rounding_method', '')
 
             if fee_rule.lower() == 'percent':
-                calculated_fee = trade_value * (fee_value / 100)
+                raw_fee = trade_value * (fee_value / 100)
             elif fee_rule.lower() == 'flat':
-                calculated_fee = fee_value
+                raw_fee = fee_value
             else:
-                calculated_fee = 0.0
+                raw_fee = 0.0
 
+            calculated_fee = self._round_fee(raw_fee, rounding_method, fee_dp)
             subtotal_fees += calculated_fee
             calculated_charges.append({
                 'fee_type': charge.get('fee_type', ''),
@@ -901,28 +964,32 @@ class TradeDropdownService:
                 'fee_value': fee_value,
                 'exchange': charge.get('exchange', ''),
                 'country_of_exchange': charge.get('country_of_exchange', ''),
-                'calculated_fee': round(calculated_fee, 6),
+                'rounding_method': rounding_method,
+                'calculated_fee': calculated_fee,
             })
 
-        # --- Pass 2: apply GST on subtotal of other fees ---
+        # --- Pass 2: apply GST on subtotal of other (already-rounded) fees ---
         for charge in gst_charges:
             fee_rule = charge.get('fee_rule', '')
             fee_value = float(charge.get('fee_value', 0))
+            rounding_method = charge.get('rounding_method', '')
 
             if fee_rule.lower() == 'percent':
-                calculated_fee = subtotal_fees * (fee_value / 100)
+                raw_fee = subtotal_fees * (fee_value / 100)
             elif fee_rule.lower() == 'flat':
-                calculated_fee = fee_value
+                raw_fee = fee_value
             else:
-                calculated_fee = 0.0
+                raw_fee = 0.0
 
+            calculated_fee = self._round_fee(raw_fee, rounding_method, fee_dp)
             calculated_charges.append({
                 'fee_type': charge.get('fee_type', ''),
                 'fee_rule': fee_rule,
                 'fee_value': fee_value,
                 'exchange': charge.get('exchange', ''),
                 'country_of_exchange': charge.get('country_of_exchange', ''),
-                'calculated_fee': round(calculated_fee, 6),
+                'rounding_method': rounding_method,
+                'calculated_fee': calculated_fee,
             })
 
         total_charges = sum(c['calculated_fee'] for c in calculated_charges)
@@ -931,9 +998,9 @@ class TradeDropdownService:
         return {
             'broker': broker,
             'charges': calculated_charges,
-            'total_charges': round(total_charges, 6),
+            'total_charges': round(total_charges, 2),
             'trade_value': round(trade_value, 6),
-            'grand_total': round(grand_total, 6),
+            'grand_total': round(grand_total, 2),
             'trade_type': trade_type.upper(),
         }
 

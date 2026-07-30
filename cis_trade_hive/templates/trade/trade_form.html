@@ -1316,6 +1316,7 @@ function calculateBrokerCharges() {
     const priceField = document.getElementById('price');
     const tradeTypeField = document.getElementById('trade_type');
     const exchangeField = document.getElementById('charge_exchange');
+    const currencyField = document.getElementById('currency_code');
 
     // Check if required elements exist
     if (!brokersField || !quantityField || !priceField) {
@@ -1331,6 +1332,7 @@ function calculateBrokerCharges() {
     const price = parseFloat(priceField.value) || 0;
     const tradeType = tradeTypeField ? tradeTypeField.value : 'BUY';
     const exchange = exchangeField ? exchangeField.value : '';
+    const currency = currencyField ? currencyField.value : '';
 
     console.log('Input values:');
     console.log('  broker:', broker);
@@ -1379,6 +1381,9 @@ function calculateBrokerCharges() {
     let url = `/trade/api/calculate-charges/?broker=${encodeURIComponent(broker)}&quantity=${quantity}&price=${price}&trade_type=${tradeType}`;
     if (exchange) {
         url += `&exchange=${encodeURIComponent(exchange)}`;
+    }
+    if (currency) {
+        url += `&currency=${encodeURIComponent(currency)}`;
     }
 
     console.log('Fetching broker charges from:', url);
@@ -1954,6 +1959,7 @@ function calculateBrokerChargesSync(callback) {
     const priceField = document.getElementById('price');
     const tradeTypeField = document.getElementById('trade_type');
     const exchangeField = document.getElementById('charge_exchange');
+    const currencyField = document.getElementById('currency_code');
 
     if (!brokersField || !quantityField || !priceField) {
         console.log('Required form fields not found');
@@ -1966,6 +1972,7 @@ function calculateBrokerChargesSync(callback) {
     const price = parseFloat(priceField.value) || 0;
     const tradeType = tradeTypeField ? tradeTypeField.value : 'BUY';
     const exchange = exchangeField ? exchangeField.value : '';
+    const currency = currencyField ? currencyField.value : '';
 
     if (!broker || quantity <= 0 || price <= 0) {
         if (callback) callback();
@@ -1975,6 +1982,9 @@ function calculateBrokerChargesSync(callback) {
     let url = `/trade/api/calculate-charges/?broker=${encodeURIComponent(broker)}&quantity=${quantity}&price=${price}&trade_type=${tradeType}`;
     if (exchange) {
         url += `&exchange=${encodeURIComponent(exchange)}`;
+    }
+    if (currency) {
+        url += `&currency=${encodeURIComponent(currency)}`;
     }
 
     console.log('Sync fetch for charges:', url);
