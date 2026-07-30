@@ -1546,12 +1546,20 @@ class SettlementService:
         # rather than copied — this UPSERT previously omitted these two columns
         # entirely, which silently defaulted every carry-forward row's NBV to 0
         # in cis_position regardless of its actual cost/market value.
-        nbv_fc = (float(source.get('total_cost_fc') or 0)
-                  + float(source.get('unrealized_pnl_fc') or 0)
-                  - float(source.get('provision_fc') or 0))
-        nbv_lc = (float(source.get('total_cost_lc') or 0)
-                  + float(source.get('unrealized_pnl_lc') or 0)
-                  - float(source.get('provision_lc') or 0))
+        # Rounded to currency precision like the fields it's built from --
+        # summing/subtracting large floats here loses precision at exactly this
+        # magnitude (billions), producing artifacts like X.33984000 instead of
+        # the mathematically exact X.34.
+        fc_dp = self.position_service._get_currency_dp(source.get('security_currency'))
+        lc_dp = self.position_service._get_currency_dp(source.get('portfolio_currency'))
+        nbv_fc = self.position_service._round_amount(
+            float(source.get('total_cost_fc') or 0)
+            + float(source.get('unrealized_pnl_fc') or 0)
+            - float(source.get('provision_fc') or 0), fc_dp)
+        nbv_lc = self.position_service._round_amount(
+            float(source.get('total_cost_lc') or 0)
+            + float(source.get('unrealized_pnl_lc') or 0)
+            - float(source.get('provision_lc') or 0), lc_dp)
 
         try:
             query = f"""

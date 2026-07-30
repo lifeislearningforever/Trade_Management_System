@@ -1360,14 +1360,20 @@ class PositionService:
                 # See trade_kudu_repository.py TODO for full implementation plan.
                 provision_fc_val = float(position_data.get('provision_fc', 0) or 0)
                 provision_lc_val = float(position_data.get('provision_lc', 0) or 0)
-                net_book_value_fc_val = float(position_data.get(
+                # Rounded to currency precision like the other amount fields it's
+                # built from (cost/unrealized_pnl/provision) -- not just for
+                # consistency, but because summing/subtracting large floats here
+                # (values can run into the billions) loses precision at exactly
+                # this magnitude, e.g. cost + unrealized_pnl - 0 landing on
+                # X.33984000 instead of the mathematically exact X.34.
+                net_book_value_fc_val = self._round_amount(float(position_data.get(
                     'net_book_value_fc',
                     total_cost + unrealized_pnl - provision_fc_val
-                ) or 0)
-                net_book_value_lc_val = float(position_data.get(
+                ) or 0), fc_dp)
+                net_book_value_lc_val = self._round_amount(float(position_data.get(
                     'net_book_value_lc',
                     total_cost_lc + unrealized_pnl_lc - provision_lc_val
-                ) or 0)
+                ) or 0), lc_dp)
                 sync_data = {
                     'position_id': position_data['position_id'],
                     'version_id': version_id,
