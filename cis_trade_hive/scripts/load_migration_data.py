@@ -725,6 +725,8 @@ TRADE_ALIASES: Dict[str, str] = {
     'total_amount':             'total_amount',
     'total_amount_fc':          'total_amount_fc',
     'total_amount_lc':          'total_amount_lc',
+    'gross_amount_fc':          'gross_amount_fc',
+    'gross_amount_lc':          'gross_amount_lc',
 
     'charge_fee_type':          'charge_fee_type',
     'charge_exchange':          'charge_exchange',
@@ -822,6 +824,7 @@ TRADE_ALIASES: Dict[str, str] = {
 TRADE_DECIMAL_COLS = {
     'quantity', 'face_value', 'lot', 'price', 'commission', 'accrued_interest',
     'sec_fee', 'other_charges', 'total_amount', 'total_amount_fc', 'total_amount_lc',
+    'gross_amount_fc', 'gross_amount_lc',
     'charge_fee_value', 'calculated_commission', 'calculated_clearing_fee',
     'calculated_trading_fee', 'calculated_gst', 'calculated_other_fees',
     'total_calculated_charges', 'open_fx_rate', 'curr_dealing', 'open_dealing',
@@ -909,6 +912,19 @@ def load_trade(
         if not mapped.get('deal_number', '').strip():
             trade_date_str = mapped.get('trade_date', ts[:10]).replace('-', '')[:8]
             mapped['deal_number'] = f"DEAL-{trade_date_str}-{str(raw_id)[-4:].zfill(4)}"
+
+        # gross_amount_fc/lc: migration CSVs carry total_amount_fc/lc, not a
+        # separate gross_amount_fc/lc column. Default from the total_amount
+        # figure whenever the CSV didn't supply gross_amount_fc/lc explicitly,
+        # so cis_trade.gross_amount_fc/lc (used as the AVP cost-basis override
+        # -- see sql/ddl/80_trade_add_gross_amount_fc_lc.sql) is populated for
+        # every migrated trade instead of being left NULL.
+        if not str(mapped.get('gross_amount_fc', '') or '').strip():
+            if mapped.get('total_amount_fc'):
+                mapped['gross_amount_fc'] = mapped['total_amount_fc']
+        if not str(mapped.get('gross_amount_lc', '') or '').strip():
+            if mapped.get('total_amount_lc'):
+                mapped['gross_amount_lc'] = mapped['total_amount_lc']
 
         col_names = []
         col_vals = []
