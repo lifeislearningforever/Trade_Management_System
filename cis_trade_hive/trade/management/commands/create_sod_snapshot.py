@@ -47,6 +47,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from core.repositories.impala_connection import impala_manager
 from django.conf import settings
+from trade.services.position_id_service import position_id as _calc_position_id
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +283,19 @@ class Command(BaseCommand):
 
         # ── 6. Batch-insert SOD rows with is_latest=true ─────────────────────
         inserted = self._batch_insert_sod(sod_rows, sod_date, proc_date)
+
+        # ── 6B. Bootstrap cis_trade_position from SOD for chains with no AVP
+        # history yet ─────────────────────────────────────────────────────
+        # cis_trade_position (not cis_position) is what position_service.py
+        # reads as the base for the next trade's AVP calculation. A position
+        # that only ever existed in cis_position (e.g. fed purely from AMS/GMP,
+        # never traded through CIS) has no row there — so the first CIS trade
+        # against it would otherwise start the AVP chain from zero instead of
+        # resuming from this SOD balance. Seeded once, for both TRADED and
+        # SETTLED basis; never touches a chain that already has real history.
+        seeded = self._seed_cis_trade_position(sod_rows, sod_date)
+        if seeded:
+            self.stdout.write(f"cis_trade_position: seeded {seeded} baseline row(s) from SOD")
 
         # ── 7. Mark processed settlements as COMPLETED ───────────────────────
         if settled_queue_ids:
@@ -836,6 +850,169 @@ class Command(BaseCommand):
 
             total += len(chunk)
             self.stdout.write(f'  Inserted rows {i + 1}–{i + len(chunk)}')
+
+        return total
+
+    # ── cis_trade_position bootstrap (AVP chain seeding) ─────────────────────
+
+    def _get_existing_avp_chains(self, sod_rows) -> set:
+        """
+        Return the set of (portfolio, security_label, position_basis) triples
+        that already have an is_latest=true row in cis_trade_position — the
+        AVP engine's own table. These chains have real trade history and must
+        never be touched by SOD seeding.
+        """
+        portfolios = sorted({
+            str(r.get('portfolio', '') or '') for r in sod_rows if r.get('portfolio')
+        })
+        if not portfolios:
+            return set()
+
+        port_list = ', '.join(f"'{self._escape(p)}'" for p in portfolios)
+        try:
+            rows = impala_manager.execute_query(
+                f"""
+                SELECT DISTINCT portfolio_short_name, security_label, position_basis
+                FROM {DATABASE}.cis_trade_position
+                WHERE is_latest = true
+                  AND portfolio_short_name IN ({port_list})
+                """,
+                database=DATABASE
+            ) or []
+        except Exception as e:
+            logger.error(f'Error fetching existing cis_trade_position chains: {e}')
+            raise
+
+        return {
+            (
+                str(r.get('portfolio_short_name', '') or ''),
+                str(r.get('security_label', '') or ''),
+                str(r.get('position_basis', '') or ''),
+            )
+            for r in rows
+        }
+
+    def _seed_cis_trade_position(self, sod_rows, sod_date) -> int:
+        """
+        Bootstrap cis_trade_position with an SOD baseline row (position_type=
+        'SOD', trade_id=NULL, is_latest=true) for every (portfolio, security,
+        basis) in sod_rows that has no existing AVP chain yet.
+
+        This is what lets the next trade booked against a position that has
+        only ever existed in cis_position (e.g. fed purely from AMS/GMP, never
+        traded through CIS) resume AVP from the SOD balance instead of
+        starting from zero — _get_position_as_of_date() in position_service.py
+        already picks up whatever the latest row is for position_date <= the
+        trade's date, so once this row exists no other code needs to change.
+
+        Values are copied verbatim from the SOD row already computed for
+        cis_position (same FC/LC figures) — deliberately NOT re-derived via
+        _save_position()'s FX-rate/revaluation logic, which is for turning a
+        fresh trade's FC amount into an LC amount and would risk producing a
+        different LC figure than the one already tallied into this SOD row.
+
+        Bootstrap-only: never touches a (portfolio, security, basis) that
+        already has a row (i.e. real trade history) in cis_trade_position.
+        """
+        existing_chains = self._get_existing_avp_chains(sod_rows)
+        to_seed = [
+            r for r in sod_rows
+            if (
+                str(r.get('portfolio', '') or ''),
+                str(r.get('security_label', '') or ''),
+                str(r.get('position_basis', '') or ''),
+            ) not in existing_chains
+        ]
+
+        if not to_seed:
+            return 0
+
+        BATCH = 500
+        now_ms = int(datetime.now().timestamp() * 1000)
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        col_list = """(
+            version_id, position_id, position_date, position_basis,
+            portfolio_short_name, security_label,
+            quantity,
+            average_cost_fc, total_cost_fc,
+            average_cost_lc, total_cost_lc,
+            realized_pnl_fc, unrealized_pnl_fc,
+            realized_pnl_lc, unrealized_pnl_lc,
+            market_price, market_value_fc, market_value_lc,
+            dividend_fc, dividend_lc,
+            fx_rate,
+            status, is_active, is_latest,
+            uncall_fc, uncall_lc,
+            pipeline_fc, pipeline_lc,
+            provision_fc, provision_lc,
+            position_type,
+            created_by, created_at, updated_by, updated_at
+        )"""
+
+        def _val(v, default=0):
+            return float(v) if v is not None else float(default)
+
+        def _cast(v, default=0):
+            return f"CAST({_val(v, default)} AS DECIMAL(30,8))"
+
+        def _build_row(idx, row):
+            raw_portfolio = str(row.get('portfolio', '') or '')
+            raw_security  = str(row.get('security_label', '') or '')
+            raw_basis     = str(row.get('position_basis', 'TRADED') or 'TRADED')
+
+            portfolio = self._escape(raw_portfolio)
+            security  = self._escape(raw_security)
+            basis     = self._escape(raw_basis)
+
+            pos_id = _calc_position_id(raw_portfolio, raw_security, raw_basis, sod_date, 'CIS')
+            version_id = now_ms + idx
+
+            qty = _val(row.get('quantity'))
+            # cis_position calls the cost fields cost_fc/cost_lc; cis_trade_position
+            # (this table) calls the same concept total_cost_fc/total_cost_lc.
+            total_cost_fc = _val(row.get('cost_fc'))
+            total_cost_lc = _val(row.get('cost_lc'))
+            market_value_fc = _val(row.get('market_value_fc'))
+            # cis_position's SOD row has no standalone market_price column —
+            # back it out from market_value_fc / quantity (same relationship
+            # position_service.py itself uses: market_value = qty * market_price).
+            market_price = (market_value_fc / qty) if qty else 0.0
+            # Implied FX rate from the already-tallied LC/FC cost, same pattern
+            # _save_position() uses to carry fx_rate forward for NON-REVAL positions.
+            fx_rate_expr = (
+                _cast(total_cost_lc / total_cost_fc) if total_cost_fc else 'NULL'
+            )
+
+            return (
+                f"({version_id}, {pos_id}, '{sod_date}', '{basis}', "
+                f"'{portfolio}', '{security}', "
+                f"{_cast(qty)}, "
+                f"{_cast(row.get('average_cost_fc'))}, {_cast(total_cost_fc)}, "
+                f"{_cast(row.get('average_cost_lc'))}, {_cast(total_cost_lc)}, "
+                f"{_cast(row.get('realized_pnl_fc'))}, {_cast(row.get('unrealized_pnl_fc'))}, "
+                f"{_cast(row.get('realized_pnl_lc'))}, {_cast(row.get('unrealized_pnl_lc'))}, "
+                f"{_cast(market_price)}, {_cast(market_value_fc)}, {_cast(row.get('market_value_lc'))}, "
+                f"{_cast(row.get('dividend_fc'))}, {_cast(row.get('dividend_lc'))}, "
+                f"{fx_rate_expr}, "
+                f"'OPEN', true, true, "
+                f"{_cast(row.get('uncall_fc'))}, {_cast(row.get('uncall_lc'))}, "
+                f"{_cast(row.get('pipeline_fc'))}, {_cast(row.get('pipeline_lc'))}, "
+                f"{_cast(row.get('provision_fc'))}, {_cast(row.get('provision_lc'))}, "
+                f"'SOD', "
+                f"'SOD_SNAPSHOT', '{ts}', 'SOD_SNAPSHOT', '{ts}')"
+            )
+
+        total = 0
+        for i in range(0, len(to_seed), BATCH):
+            chunk = to_seed[i: i + BATCH]
+            values = ',\n'.join(_build_row(i + j, r) for j, r in enumerate(chunk))
+            impala_manager.execute_write(
+                f"UPSERT INTO {DATABASE}.cis_trade_position {col_list} VALUES {values}",
+                database=DATABASE
+            )
+            total += len(chunk)
+            self.stdout.write(f'  cis_trade_position seed rows {i + 1}–{i + len(chunk)}')
 
         return total
 
