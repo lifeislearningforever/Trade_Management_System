@@ -411,7 +411,19 @@ class PositionService:
             old_qty = Decimal(str(current.get('quantity', 0) or 0))
             # Use new column name average_cost_fc (fallback to average_cost for backward compat)
             old_avg_cost = Decimal(str(current.get('average_cost_fc') or current.get('average_cost', 0) or 0))
-            old_total_cost = old_qty * old_avg_cost
+            # Chain off the stored total_cost_fc (the exact tallied gross cost —
+            # see SA feedback, Venkata Narayana Adisetty, 30/07/2026: gross amount
+            # is stored directly as cost fc/lc, average_cost is a *derived*,
+            # AVP_PRECISION-rounded field). Reconstructing old_total_cost as
+            # old_qty * old_avg_cost instead would multiply back through the
+            # already-rounded average_cost on every subsequent BUY, compounding
+            # rounding drift further away from the tallied amount with each
+            # trade — exactly the LC branch below already avoids by reading
+            # total_cost_lc directly. Fall back to the qty*avg_cost
+            # reconstruction only for legacy rows with no total_cost_fc stored.
+            old_total_cost = Decimal(str(current.get('total_cost_fc') or current.get('total_cost', 0) or 0))
+            if old_total_cost == 0:
+                old_total_cost = old_qty * old_avg_cost
             # Use new column name realized_pnl_fc (fallback to realized_pnl for backward compat)
             old_realized_pnl = Decimal(str(current.get('realized_pnl_fc') or current.get('realized_pnl', 0) or 0))
 
