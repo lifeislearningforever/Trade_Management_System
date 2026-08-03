@@ -1035,9 +1035,15 @@ class TradeKuduRepository:
                 'portfolio_currency': portfolio_details.get('currency'),
                 'isin': security_details.get('isin'),
                 'security_name': security_details.get('security_name'),
-                # LC amounts for NON-REVAL portfolios (user-entered values)
+                # LC/FC amounts for NON-REVAL portfolios (user-entered/computed values).
+                # gross_amount_fc must be here too, not just gross_amount_lc -- without
+                # it, the SETTLEMENT event worker's event_data.get('gross_amount_fc')
+                # always reads None and cost_fc silently falls back to being
+                # recomputed as quantity * price instead of using the trade's own
+                # gross amount (SA feedback, Venkata Narayana Adisetty, 30/07/2026).
                 'total_amount_lc': str(trade_data.get('total_amount_lc', '') or ''),
                 'gross_amount_lc': str(trade_data.get('gross_amount_lc', '') or ''),
+                'gross_amount_fc': str(trade_data.get('gross_amount_fc', '') or ''),
                 # FX rate stored on the trade (user may have overridden the API rate)
                 'open_fx_rate': str(trade_data.get('open_fx_rate', '') or ''),
             }

@@ -850,6 +850,27 @@ def load_trade(
     errors: List[str] = []
     ts = _now()
 
+    # Broker code -> display name, from cis_party (mirrors how the trade UI's
+    # broker dropdown resolves party_short_name -> party_full_name). Migration
+    # CSVs typically carry only a broker code/short name column (mapped to
+    # `brokers`), never a separate display-name column, so broker_name is left
+    # NULL unless we resolve it here ourselves -- built once, not per row.
+    _broker_name_map: Dict[str, str] = {}
+    try:
+        _broker_rows = impala_manager.execute_query(
+            f"SELECT party_short_name, party_full_name FROM {DATABASE}.cis_party "
+            f"WHERE is_broker = true AND (is_deleted = false OR is_deleted IS NULL)",
+            database=DATABASE
+        ) or []
+        for _br in _broker_rows:
+            _short = str(_br.get('party_short_name', '') or '').strip().upper()
+            _full = str(_br.get('party_full_name', '') or '').strip()
+            if _short and _full:
+                _broker_name_map[_short] = _full
+        logger.info("Loaded %d broker name(s) from cis_party", len(_broker_name_map))
+    except Exception as _be:
+        logger.warning("Could not load broker names from cis_party: %s", _be)
+
     for i, raw in enumerate(rows, 1):
         mapped: Dict[str, Any] = {}
         for raw_col, raw_val in raw.items():
@@ -925,6 +946,15 @@ def load_trade(
         if not str(mapped.get('gross_amount_lc', '') or '').strip():
             if mapped.get('total_amount_lc'):
                 mapped['gross_amount_lc'] = mapped['total_amount_lc']
+
+        # broker_name: resolve from `brokers` (broker code) via cis_party when
+        # the CSV didn't supply a separate display-name column. Falls back to
+        # the code itself if no matching broker is found in cis_party, rather
+        # than leaving broker_name NULL.
+        if not str(mapped.get('broker_name', '') or '').strip():
+            _brokers_val = str(mapped.get('brokers', '') or '').strip()
+            if _brokers_val:
+                mapped['broker_name'] = _broker_name_map.get(_brokers_val.upper(), _brokers_val)
 
         col_names = []
         col_vals = []
