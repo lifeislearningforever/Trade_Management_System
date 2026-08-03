@@ -3282,10 +3282,24 @@ class UploadService:
                     logger.info(f"[position_etl] F5-STEP0-C: country map {len(_country_map)} keys in {_ct.time()-_ct0:.1f}s")
 
                     def _resolve_country(raw_val):
-                        """Look up country label from raw upload value using the pre-built map."""
+                        """Look up country label from raw upload value using the pre-built map.
+
+                        Format 5 sometimes sends a country name with a trailing
+                        qualifier -- e.g. "Jersey, Channel Islands", "Korea
+                        (South), Republic of", "Taiwan (Republic of China)" --
+                        that won't match the LUT's plain country name. Trim at
+                        the first "(" or "," before lookup (SA feedback,
+                        Venkata Narayana Adisetty, PORTIARP-6984 comment,
+                        30/07/2026). _normalize_country_key() alone doesn't
+                        solve this: it turns punctuation into spaces rather
+                        than truncating, so "Jersey, Channel Islands" would
+                        normalize to "JERSEY CHANNEL ISLANDS", not "JERSEY".
+                        """
                         if not raw_val:
                             return None
+                        import re as _re
                         key = str(raw_val).upper().strip()
+                        key = _re.split(r'[(,]', key, 1)[0].strip()
                         return _country_map.get(key) or _country_map.get(_normalize_country_key(key))
 
                     def _safe_str(v):
