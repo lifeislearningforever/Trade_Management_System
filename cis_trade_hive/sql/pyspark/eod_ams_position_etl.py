@@ -184,6 +184,230 @@ def normalize_ticker_suffix(col: str) -> str:
     )
 
 
+def abbreviate_security_name(name: str, max_len: int = 35) -> str:
+    """Abbreviate a company name to max_len chars using a word-level dict,
+    initialism fallback, then hard word-boundary truncation.
+
+    Mirrors upload_service.UploadService.run_position_etl()'s local helper
+    of the same name — kept as a duplicate here since this script has no
+    Django dependency and that helper is a nested closure, not importable.
+
+    Pre-processing strips punctuation (.,) so that variants like
+    'CO.,LTD', 'CO. LTD.', 'CO LTD' all normalise to 'CO LTD' before dict
+    substitution. Old GMP abbreviations (MGT) are also expanded back to
+    their full form so the dict can re-abbreviate them consistently.
+    """
+    import re as _re
+    _ABBREV = {
+        "CORPORATION":      "CORP",
+        "INCORPORATED":     "INC",
+        "BERHAD":           "BHD",
+        "SENDIRIAN":        "SDN",
+        "PRIVATE":          "PTE",
+        "LIMITED":          "LTD",
+        "COMPANY":          "CO",
+        "HOLDINGS":         "HLDGS",
+        "INTERNATIONAL":    "INTL",
+        "INVESTMENTS":      "INVT",
+        "INVESTMENT":       "INVT",
+        "MANAGEMENT":       "MGMT",
+        "INDUSTRIES":       "INDS",
+        "INDUSTRY":         "IND",
+        "TECHNOLOGIES":     "TECH",
+        "TECHNOLOGY":       "TECH",
+        "INFRASTRUCTURE":   "INFRA",
+        "DEVELOPMENT":      "DEV",
+        "ENTERPRISE":       "ENTPR",
+        "ENTERPRISES":      "ENTPR",
+        "RESOURCES":        "RES",
+        "PROPERTIES":       "PROP",
+        "CAPITAL":          "CAP",
+        "FINANCIAL":        "FIN",
+        "SERVICES":         "SVCS",
+        "SERVICE":          "SVC",
+        "GLOBAL":           "GLB",
+        "NATIONAL":         "NATL",
+        "REGIONAL":         "RGNL",
+        "INDUSTRIAL":       "INDL",
+        "MANUFACTURING":    "MFG",
+        "ENGINEERING":      "ENGG",
+        "CONSTRUCTION":     "CONST",
+        "DISTRIBUTION":     "DIST",
+        "ASSOCIATION":      "ASSOC",
+        "FOUNDATION":       "FNDN",
+        "EXCHANGE":         "EXCH",
+        "COMMUNICATIONS":   "COMM",
+        "COMMUNICATION":    "COMM",
+        "INSURANCE":        "INS",
+        "ASSURANCE":        "ASSUR",
+        "HEALTHCARE":       "HLTHCR",
+        "PHARMACEUTICALS":  "PHARMA",
+        "PHARMACEUTICAL":   "PHARMA",
+        "PLANTATIONS":      "PLANT",
+        "PLANTATION":       "PLANT",
+        "PETROLEUM":        "PETRO",
+        "BANK":             "BK",
+        "FUND":             "FD",
+        "GROUP":            "GRP",
+    }
+    _EXPAND = {
+        "MGT": "MANAGEMENT",
+    }
+    if not name:
+        return name
+    result = name.upper().strip()
+    result = _re.sub(r'[.,]+', ' ', result)
+    result = ' '.join(result.split())
+    for old_abbr, full in _EXPAND.items():
+        result = _re.sub(r'\b' + old_abbr + r'\b', full, result)
+    result = ' '.join(result.split())
+    for word, abbr in sorted(_ABBREV.items(), key=lambda x: -len(x[0])):
+        result = _re.sub(r'\b' + word + r'\b', abbr, result)
+    result = ' '.join(result.split())
+    if len(result) <= max_len:
+        return result
+    _abbrev_values = set(_ABBREV.values())
+    words = result.split()
+    for i, w in sorted(enumerate(words), key=lambda x: -len(x[1])):
+        if len(result) <= max_len:
+            break
+        if len(w) > 6 and w not in _abbrev_values and '.' not in w:
+            words[i] = w[:4] + '.'
+            result = ' '.join(words)
+    result = ' '.join(result.split())
+    if len(result) <= max_len:
+        return result
+    truncated = result[:max_len]
+    last_space = truncated.rfind(' ')
+    return truncated[:last_space] if last_space > 0 else truncated
+
+
+# Module-level cache for normalized(security_name / security_description) ->
+# list of candidate security dicts, used by the "Normalized Full Name" tiers
+# (5 and 9) of the security-matching cascade. A list (not a single winner)
+# so a normalized-name collision can be reported as MULTIPLE_MATCH instead
+# of silently keeping the first candidate found.
+_cis_normalized_cache: dict = {}
+_cis_normalized_cache_ts: float = 0.0
+_CIS_NORMALIZED_CACHE_TTL: int = 300  # seconds
+
+
+def _build_normalized_cache(force: bool = False) -> dict:
+    """Build/return the module-level normalized-name match cache."""
+    global _cis_normalized_cache, _cis_normalized_cache_ts
+    import time as _time_cache
+    _now_ts = _time_cache.time()
+    if (not force and _cis_normalized_cache and
+            _now_ts - _cis_normalized_cache_ts <= _CIS_NORMALIZED_CACHE_TTL):
+        return _cis_normalized_cache
+    _cis_rows = impala_manager.execute_query(
+        f"""
+        SELECT security_id, security_name, security_description,
+               isin, exchange_code, country_of_exchange, currency_code
+        FROM {DB}.cis_security WHERE is_active = true
+        """,
+        database=DB
+    ) or []
+    _cache: dict = {}
+    for _cs in _cis_rows:
+        _cand = {
+            'security_id':         int(_cs.get('security_id')),
+            'security_name':       _cs.get('security_name'),
+            'isin':                _cs.get('isin'),
+            'exchange_code':       _cs.get('exchange_code'),
+            'country_of_exchange': _cs.get('country_of_exchange'),
+            'currency_code':       _cs.get('currency_code'),
+        }
+        for _raw in (_cs.get('security_name'), _cs.get('security_description')):
+            _key = abbreviate_security_name(_raw or '')
+            if not _key:
+                continue
+            _bucket = _cache.setdefault(_key, [])
+            if not any(c['security_id'] == _cand['security_id'] for c in _bucket):
+                _bucket.append(_cand)
+    _cis_normalized_cache = _cache
+    _cis_normalized_cache_ts = _now_ts
+    print(f"[Step 4] Rebuilt normalized-name match cache ({len(_cache)} keys)")
+    return _cache
+
+
+def _apply_python_tier_result(matches: dict, multi_ids: set, tier_name: str, status_suffix: str = '_MATCH') -> None:
+    """Recreate pos_stage_4_security_fallback, applying Python-computed tier
+    results (matches / multi-match fails) to rows currently 'PENDING'; every
+    other row's existing result passes through unchanged. Impala Parquet
+    tables are immutable — recreate in place, matching this pipeline's
+    established pattern (see Step 4B in upload_service.run_position_etl()).
+    """
+    _match_ids = ', '.join(str(rid) for rid in matches.keys()) or '-1'
+    _multi_ids_sql = ', '.join(str(rid) for rid in multi_ids) or '-1'
+    _match_when = ' '.join(
+        f"WHEN row_id = {rid} THEN {c['security_id']}"
+        for rid, c in matches.items()
+    ) or "WHEN 1 = 0 THEN NULL"
+    impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_tier_update", database=DB)
+    impala_manager.execute_write(
+        f"""
+        CREATE TABLE pos_stage_4_tier_update
+        STORED AS PARQUET AS
+        SELECT
+            p.row_id, p.upload_isin, p.security_full_name, p.security_short_name,
+            p.desc_prefix, p.upload_exchange, p.portfolio_status, p.resolved_country,
+            p.clean_ticker,
+            p.final_security_id   AS prev_security_id,
+            p.final_security_name AS prev_security_name,
+            p.final_isin          AS prev_isin,
+            p.final_exchange      AS prev_exchange,
+            p.final_country       AS prev_country,
+            p.final_currency      AS prev_currency,
+            p.security_match_method AS prev_method,
+            p.security_status        AS prev_status,
+            CASE
+                WHEN p.row_id IN ({_match_ids}) THEN CASE {_match_when} ELSE NULL END
+                ELSE NULL
+            END AS matched_security_id,
+            CASE
+                WHEN p.row_id IN ({_match_ids}) THEN 'MATCHED'
+                WHEN p.row_id IN ({_multi_ids_sql}) THEN 'MULTI'
+                ELSE 'UNCHANGED'
+            END AS tier_outcome
+        FROM pos_stage_4_security_fallback p
+        """,
+        database=DB
+    )
+    impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=DB)
+    impala_manager.execute_write(
+        f"""
+        CREATE TABLE pos_stage_4_security_fallback
+        STORED AS PARQUET AS
+        SELECT
+            u.row_id, u.upload_isin, u.security_full_name, u.security_short_name,
+            u.desc_prefix, u.upload_exchange, u.portfolio_status, u.resolved_country,
+            u.clean_ticker,
+            CASE WHEN u.tier_outcome = 'MATCHED' THEN u.matched_security_id ELSE u.prev_security_id END AS final_security_id,
+            CASE WHEN u.tier_outcome = 'MATCHED' THEN sn.security_name ELSE u.prev_security_name END AS final_security_name,
+            CASE WHEN u.tier_outcome = 'MATCHED' THEN sn.isin ELSE u.prev_isin END AS final_isin,
+            CASE WHEN u.tier_outcome = 'MATCHED' THEN sn.exchange_code ELSE u.prev_exchange END AS final_exchange,
+            CASE WHEN u.tier_outcome = 'MATCHED' THEN sn.country_of_exchange ELSE u.prev_country END AS final_country,
+            CASE WHEN u.tier_outcome = 'MATCHED' THEN sn.currency_code ELSE u.prev_currency END AS final_currency,
+            CASE
+                WHEN u.tier_outcome = 'MATCHED' THEN '{tier_name}'
+                WHEN u.tier_outcome = 'MULTI'   THEN 'FAIL: MULTIPLE_MATCH_{tier_name}'
+                ELSE u.prev_method
+            END AS security_match_method,
+            CASE
+                WHEN u.tier_outcome = 'MATCHED' THEN '{tier_name}{status_suffix}'
+                WHEN u.tier_outcome = 'MULTI'   THEN 'FAIL: MULTIPLE_MATCH_{tier_name}'
+                ELSE u.prev_status
+            END AS security_status
+        FROM pos_stage_4_tier_update u
+        LEFT JOIN {DB}.cis_security sn
+            ON u.tier_outcome = 'MATCHED' AND sn.security_id = u.matched_security_id
+        """,
+        database=DB
+    )
+    impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_tier_update", database=DB)
+
+
 # ---------------------------------------------------------------------------
 # Step 0: standardization SQL per source table
 # Mirrors the STANDARDIZE_SELECT dict in upload_service.run_position_etl()
@@ -673,279 +897,423 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
     )
     print("[Step 2] Portfolio validation complete")
 
-    # ---- Step 3: security ISIN match ----
+    # ------------------------------------------------------------------
+    # Step 3+4: Security matching — 10-tier cascade per SA requirement
+    # (Venkata Narayana Adisetty, 30/07/2026 — "Change Position ETL
+    # security matching logic"):
+    #   1. Short Name           -> cis_security.security_name
+    #   2. ISIN + Country of Exchange
+    #   3. Ticker (trailing "EQUITY" stripped) + Country of Exchange
+    #   4. Full Name            -> cis_security.security_description + Country of Exchange
+    #   5. Normalized Full Name + Country of Exchange
+    #   6. ISIN only
+    #   7. Ticker only
+    #   8. Full Name only       -> cis_security.security_description
+    #   9. Normalized Full Name only
+    #   10. Create Security
+    #
+    # Rules: a tier is only evaluated when its required fields are
+    # populated; matching is case-insensitive and trimmed; per tier 0
+    # matches -> next tier, 1 match -> stop, >1 matches -> FAIL:
+    # MULTIPLE_MATCH_<TIER> and stop (no security is created for that
+    # row). security_match_method records which tier resolved the match
+    # ('NONE' if a new security had to be created). CIS security_name is
+    # treated as Short Name; security_description is treated as Full
+    # Name, per the SA's explicit mapping.
+    #
+    # pos_stage_1_base.country_of_exchange is already resolved per-source
+    # during Step 0 standardization (see _standardize_sql), so tiers that
+    # require Country of Exchange use it directly — no live LUT join
+    # needed here (unlike upload_service.py, whose upload sources
+    # sometimes only carry a raw exchange code).
+    #
+    # Tiers 1-4 and 6-8 are pure SQL (Stage A / Stage C). Tiers 5 and 9
+    # ("Normalized Full Name") reuse abbreviate_security_name() — a
+    # Python-side normalizer — so they run as Python passes (Stage B /
+    # Stage D) between the SQL stages, each only touching rows still
+    # 'PENDING' after the higher-priority tiers.
+    # ------------------------------------------------------------------
+
+    # ---- Stage A (SQL): Tier 1 Short Name, Tier 2 ISIN+Country,
+    #      Tier 3 Ticker+Country, Tier 4 Full Name(description)+Country ----
     impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_3_security", database=DB)
+    impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=DB)
     impala_manager.execute_write(
         f"""
-        CREATE TABLE pos_stage_3_security STORED AS PARQUET AS
-        WITH sec_join AS (
+        CREATE TABLE pos_stage_4_security_fallback
+        STORED AS PARQUET AS
+        WITH
+        base AS (
             SELECT
                 b.row_id,
                 b.isin                  AS upload_isin,
                 b.security_full_name,
                 b.security_short_name,
-                b.ticker,
                 b.`exchange`            AS upload_exchange,
                 p2.portfolio_status,
-                s.security_id,
-                s.security_name,
-                s.isin                  AS s_isin,
-                s.exchange_code,
-                s.country_of_exchange,
-                s.currency_code,
-                s.src_system            AS s_src_system,
-                -- 1 when this cis_security row also matches the upload exchange
-                CASE
-                    WHEN b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                     AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
-                    THEN 1 ELSE 0
-                END AS is_exchange_match,
-                -- How many cis_security rows match isin + exchange for this upload row
-                SUM(CASE
-                    WHEN b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                     AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
-                    THEN 1 ELSE 0
-                END) OVER (PARTITION BY b.row_id) AS cnt_isin_exchange,
-                -- How many cis_security rows match isin alone for this upload row
-                COUNT(s.security_id) OVER (PARTITION BY b.row_id) AS cnt_isin_only,
-                -- Priority: exact exchange match first, then CIS src, then lowest id
-                ROW_NUMBER() OVER (
-                    PARTITION BY b.row_id
-                    ORDER BY
-                        CASE WHEN s.is_active = true THEN 0 ELSE 1 END,
-                        CASE
-                            WHEN b.`exchange` IS NOT NULL AND TRIM(b.`exchange`) != ''
-                             AND UPPER(TRIM(b.`exchange`)) = UPPER(TRIM(COALESCE(s.country_of_exchange, '')))
-                            THEN 0 ELSE 1
-                        END,
-                        CASE WHEN s.src_system = 'GMP' THEN 0 ELSE 1 END,
-                        s.security_id
-                ) AS rn_priority
-            FROM pos_stage_1_base b
-            JOIN pos_stage_2_portfolio p2
-                ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
-            LEFT JOIN {DB}.cis_security s
-                ON  b.isin IS NOT NULL AND TRIM(b.isin) != ''
-                AND UPPER(TRIM(b.isin)) NOT IN ('NA', 'N/A', 'NIL', 'NONE', '-', 'N.A.', 'NAP')
-                AND b.isin = s.isin
-        )
-        SELECT
-            row_id,
-            upload_isin,
-            security_full_name,
-            security_short_name,
-            ticker,
-            upload_exchange,
-            portfolio_status,
-            CASE WHEN rn_priority = 1 AND cnt_isin_only >= 1 THEN security_id         ELSE NULL END AS matched_security_id,
-            CASE WHEN rn_priority = 1 AND cnt_isin_only >= 1 THEN security_name       ELSE NULL END AS matched_security_name,
-            CASE WHEN rn_priority = 1 AND cnt_isin_only >= 1 THEN s_isin              ELSE NULL END AS matched_isin,
-            CASE WHEN rn_priority = 1 AND cnt_isin_only >= 1 THEN exchange_code       ELSE NULL END AS matched_exchange,
-            CASE WHEN rn_priority = 1 AND cnt_isin_only >= 1 THEN country_of_exchange ELSE NULL END AS matched_country,
-            CASE WHEN rn_priority = 1 AND cnt_isin_only >= 1 THEN currency_code       ELSE NULL END AS matched_currency,
-            CASE
-                WHEN upload_isin IS NULL OR TRIM(upload_isin) = ''
-                  OR UPPER(TRIM(upload_isin)) IN ('NA', 'N/A', 'NIL', 'NONE', '-', 'N.A.', 'NAP')
-                    THEN 'NO_ISIN'
-                WHEN cnt_isin_only > 1 AND cnt_isin_exchange != 1
-                    THEN 'FAIL: Multiple securities found'
-                WHEN cnt_isin_only >= 1
-                    THEN 'ISIN_MATCH'
-                ELSE 'ISIN_NO_MATCH'
-            END AS match_type
-        FROM sec_join
-        WHERE rn_priority = 1
-        """,
-        database=DB
-    )
-    print("[Step 3] Security ISIN match complete")
-
-    # ---- Step 4: security fallback matching (short_name / ticker / desc_prefix) ----
-    # Priority order (applies to every row, regardless of source):
-    #
-    #   Tier 1 — short_name:   cis_security.security_name = security_short_name.
-    #             Checked FIRST, independent of whether ISIN already matched —
-    #             if the upload row carries a short_name and it exists in
-    #             cis_security, that match wins outright.
-    #             (GMP-specific data example: m_security_display_label e.g. "775 HK",
-    #             but this tier applies to any source, not just GMP.)
-    #
-    #   Tier 1.5 — ISIN match from Step 3 (b.matched_security_id) — only used
-    #             when short_name didn't match (absent, or no cis_security row
-    #             with that name).
-    #
-    #   Tier 2 — ticker:       cis_security.ticker = upload ticker
-    #             (AMS daily-limit rows always carry a ticker, rarely an ISIN)
-    #
-    #   Tier 3 — desc_prefix:  strip everything from "COMMON STOCK" onward in
-    #             security_full_name (= security_desc for AMS) and match the
-    #             prefix against cis_security.security_name.
-    #             e.g. "ABC COMPANY COMMON STOCK 1.2"  →  "ABC COMPANY"
-    #             If still no match, Step 5B creates the security using the
-    #             truncated desc_prefix as the security name.
-    #
-    # Priority within each tier: lowest security_id wins (stable tiebreak).
-    impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=DB)
-    impala_manager.execute_write(
-        f"""
-        CREATE TABLE pos_stage_4_security_fallback STORED AS PARQUET AS
-        WITH
-        -- Pre-compute desc_prefix: everything before "COMMON STOCK" (case-insensitive).
-        -- If "COMMON STOCK" is absent the full name is used as-is.
-        base_with_prefix AS (
-            SELECT
-                s3.*,
+                b.country_of_exchange   AS resolved_country,
+                NULLIF(regexp_replace(UPPER(TRIM(CAST(b.ticker AS STRING))), '\\s+EQUITY$', ''), '') AS clean_ticker,
                 TRIM(
                     CASE
-                        WHEN UPPER(s3.security_full_name) LIKE '%COMMON STOCK%'
-                          OR UPPER(s3.security_full_name) LIKE '%COMMON STICK%'
+                        WHEN UPPER(b.security_full_name) LIKE '%COMMON STOCK%'
+                          OR UPPER(b.security_full_name) LIKE '%COMMON STICK%'
                         THEN regexp_replace(
-                                s3.security_full_name,
+                                b.security_full_name,
                                 '(?i)\\s*COMMON\\s+(STOCK|STICK).*$',
                                 ''
                              )
-                        ELSE s3.security_full_name
+                        ELSE b.security_full_name
                     END
                 ) AS desc_prefix
-            FROM pos_stage_3_security s3
+            FROM pos_stage_1_base b
+            JOIN pos_stage_2_portfolio p2
+                ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
         ),
-        -- Tier 1: short_name match — tried regardless of ISIN status (no
-        -- b.match_type gate here), since short_name now takes priority over ISIN.
-        tier1 AS (
-            SELECT
-                b.row_id,
-                sn.security_id,
-                sn.security_name,
-                sn.isin,
-                sn.exchange_code,
-                sn.country_of_exchange,
-                sn.currency_code,
-                ROW_NUMBER() OVER (PARTITION BY b.row_id ORDER BY sn.security_id) AS rn
-            FROM base_with_prefix b
+        -- Tier 1: Short Name -> cis_security.security_name (no country requirement)
+        t1 AS (
+            SELECT base.row_id, sn.security_id, sn.security_name, sn.isin,
+                   sn.exchange_code, sn.country_of_exchange, sn.currency_code,
+                   ROW_NUMBER() OVER (PARTITION BY base.row_id ORDER BY sn.security_id) AS rn,
+                   COUNT(*) OVER (PARTITION BY base.row_id) AS cnt
+            FROM base
             JOIN {DB}.cis_security sn
-                ON  b.security_short_name IS NOT NULL
-                AND TRIM(b.security_short_name) != ''
-                AND sn.is_active = true
-                AND UPPER(TRIM(sn.security_name)) = UPPER(TRIM(b.security_short_name))
+                ON  sn.is_active = true
+                AND base.security_short_name IS NOT NULL AND TRIM(base.security_short_name) != ''
+                AND UPPER(TRIM(sn.security_name)) = UPPER(TRIM(base.security_short_name))
         ),
-        -- Tier 2: ticker match (AMS + GMP)
-        -- AMS ticker is a short code (e.g. "AAREIT SP").
-        -- GMP: m_security_code (e.g. "ANET UN") is now mapped to both isin and ticker
-        --   in the source query, so this tier catches GMP codes that match
-        --   cis_security.ticker and prevents Step 5B creating duplicate securities.
-        -- Match if cis_security.ticker equals the upload ticker exactly OR starts
-        -- with it followed by a space (handles "AAREIT SP" vs "AAREIT SP Equity").
-        tier2 AS (
-            SELECT
-                b.row_id,
-                sn.security_id,
-                sn.security_name,
-                sn.isin,
-                sn.exchange_code,
-                sn.country_of_exchange,
-                sn.currency_code,
-                ROW_NUMBER() OVER (PARTITION BY b.row_id ORDER BY sn.security_id) AS rn
-            FROM base_with_prefix b
+        -- Tier 2: ISIN + Country of Exchange
+        t2 AS (
+            SELECT base.row_id, sn.security_id, sn.security_name, sn.isin,
+                   sn.exchange_code, sn.country_of_exchange, sn.currency_code,
+                   ROW_NUMBER() OVER (PARTITION BY base.row_id ORDER BY sn.security_id) AS rn,
+                   COUNT(*) OVER (PARTITION BY base.row_id) AS cnt
+            FROM base
             JOIN {DB}.cis_security sn
-                ON  b.match_type IN ('ISIN_NO_MATCH', 'NO_ISIN')
-                AND b.ticker IS NOT NULL
-                AND TRIM(b.ticker) != ''
-                AND sn.is_active = true
+                ON  sn.is_active = true
+                AND base.upload_isin IS NOT NULL AND TRIM(base.upload_isin) != ''
+                AND UPPER(TRIM(base.upload_isin)) NOT IN ('NA', 'N/A', 'NIL', 'NONE', '-', 'N.A.', 'NAP')
+                AND UPPER(TRIM(CAST(base.upload_isin AS STRING))) = UPPER(TRIM(CAST(sn.isin AS STRING)))
+                AND base.resolved_country IS NOT NULL AND TRIM(base.resolved_country) != ''
                 AND (
-                    UPPER(TRIM(sn.ticker)) = UPPER(TRIM(b.ticker))
-                    OR UPPER(TRIM(sn.ticker)) LIKE CONCAT(UPPER(TRIM(b.ticker)), ' %')
+                    UPPER(TRIM(base.resolved_country)) = UPPER(TRIM(COALESCE(sn.exchange_code, '')))
+                    OR UPPER(TRIM(base.resolved_country)) = UPPER(TRIM(COALESCE(sn.country_of_exchange, '')))
                 )
         ),
-        -- Tier 3: desc_prefix match (AMS — truncated at "COMMON STOCK")
-        tier3 AS (
-            SELECT
-                b.row_id,
-                sn.security_id,
-                sn.security_name,
-                sn.isin,
-                sn.exchange_code,
-                sn.country_of_exchange,
-                sn.currency_code,
-                ROW_NUMBER() OVER (PARTITION BY b.row_id ORDER BY sn.security_id) AS rn
-            FROM base_with_prefix b
+        -- Tier 3: Ticker (trailing "EQUITY" stripped) + Country of Exchange
+        t3 AS (
+            SELECT base.row_id, sn.security_id, sn.security_name, sn.isin,
+                   sn.exchange_code, sn.country_of_exchange, sn.currency_code,
+                   ROW_NUMBER() OVER (PARTITION BY base.row_id ORDER BY sn.security_id) AS rn,
+                   COUNT(*) OVER (PARTITION BY base.row_id) AS cnt
+            FROM base
             JOIN {DB}.cis_security sn
-                ON  b.match_type IN ('ISIN_NO_MATCH', 'NO_ISIN')
-                AND b.desc_prefix IS NOT NULL
-                AND TRIM(b.desc_prefix) != ''
-                AND sn.is_active = true
-                AND UPPER(TRIM(sn.security_name)) = UPPER(TRIM(b.desc_prefix))
+                ON  sn.is_active = true
+                AND base.clean_ticker IS NOT NULL AND TRIM(base.clean_ticker) != ''
+                AND regexp_replace(UPPER(TRIM(CAST(sn.ticker AS STRING))), '\\s+EQUITY$', '') = base.clean_ticker
+                AND base.resolved_country IS NOT NULL AND TRIM(base.resolved_country) != ''
+                AND (
+                    UPPER(TRIM(base.resolved_country)) = UPPER(TRIM(COALESCE(sn.exchange_code, '')))
+                    OR UPPER(TRIM(base.resolved_country)) = UPPER(TRIM(COALESCE(sn.country_of_exchange, '')))
+                )
+        ),
+        -- Tier 4: Full Name -> cis_security.security_description + Country of Exchange
+        t4 AS (
+            SELECT base.row_id, sn.security_id, sn.security_name, sn.isin,
+                   sn.exchange_code, sn.country_of_exchange, sn.currency_code,
+                   ROW_NUMBER() OVER (PARTITION BY base.row_id ORDER BY sn.security_id) AS rn,
+                   COUNT(*) OVER (PARTITION BY base.row_id) AS cnt
+            FROM base
+            JOIN {DB}.cis_security sn
+                ON  sn.is_active = true
+                AND base.security_full_name IS NOT NULL AND TRIM(base.security_full_name) != ''
+                AND sn.security_description IS NOT NULL
+                AND UPPER(TRIM(sn.security_description)) = UPPER(TRIM(base.security_full_name))
+                AND base.resolved_country IS NOT NULL AND TRIM(base.resolved_country) != ''
+                AND (
+                    UPPER(TRIM(base.resolved_country)) = UPPER(TRIM(COALESCE(sn.exchange_code, '')))
+                    OR UPPER(TRIM(base.resolved_country)) = UPPER(TRIM(COALESCE(sn.country_of_exchange, '')))
+                )
         )
         SELECT
-            b.row_id,
-            b.upload_isin,
-            b.security_full_name,
-            b.security_short_name,
-            b.desc_prefix,
-            b.upload_exchange,
-            b.portfolio_status,
-            b.match_type AS isin_match_type,
-            -- Cascade: short_name → ISIN → ticker → desc_prefix.
-            -- t1 (short_name) is listed first in every COALESCE so it wins
-            -- outright whenever it matches, even if ISIN also matched.
+            base.row_id,
+            base.upload_isin,
+            base.security_full_name,
+            base.security_short_name,
+            base.desc_prefix,
+            base.upload_exchange,
+            base.portfolio_status,
+            base.resolved_country,
+            base.clean_ticker,
             COALESCE(
-                CASE WHEN t1.rn = 1 THEN t1.security_id   ELSE NULL END,
-                b.matched_security_id,
-                CASE WHEN t2.rn = 1 THEN t2.security_id   ELSE NULL END,
-                CASE WHEN t3.rn = 1 THEN t3.security_id   ELSE NULL END
+                CASE WHEN COALESCE(t1.cnt, 0) = 1 THEN t1.security_id END,
+                CASE WHEN COALESCE(t1.cnt, 0) = 0 AND COALESCE(t2.cnt, 0) = 1 THEN t2.security_id END,
+                CASE WHEN COALESCE(t1.cnt, 0) = 0 AND COALESCE(t2.cnt, 0) = 0 AND COALESCE(t3.cnt, 0) = 1 THEN t3.security_id END,
+                CASE WHEN COALESCE(t1.cnt, 0) = 0 AND COALESCE(t2.cnt, 0) = 0 AND COALESCE(t3.cnt, 0) = 0 AND COALESCE(t4.cnt, 0) = 1 THEN t4.security_id END
             ) AS final_security_id,
             COALESCE(
-                CASE WHEN t1.rn = 1 THEN t1.security_name ELSE NULL END,
-                b.matched_security_name,
-                CASE WHEN t2.rn = 1 THEN t2.security_name ELSE NULL END,
-                CASE WHEN t3.rn = 1 THEN t3.security_name ELSE NULL END
+                CASE WHEN COALESCE(t1.cnt, 0) = 1 THEN t1.security_name END,
+                CASE WHEN COALESCE(t1.cnt, 0) = 0 AND COALESCE(t2.cnt, 0) = 1 THEN t2.security_name END,
+                CASE WHEN COALESCE(t1.cnt, 0) = 0 AND COALESCE(t2.cnt, 0) = 0 AND COALESCE(t3.cnt, 0) = 1 THEN t3.security_name END,
+                CASE WHEN COALESCE(t1.cnt, 0) = 0 AND COALESCE(t2.cnt, 0) = 0 AND COALESCE(t3.cnt, 0) = 0 AND COALESCE(t4.cnt, 0) = 1 THEN t4.security_name END
             ) AS final_security_name,
             COALESCE(
-                CASE WHEN t1.rn = 1 THEN t1.isin          ELSE NULL END,
-                b.matched_isin,
-                CASE WHEN t2.rn = 1 THEN t2.isin          ELSE NULL END,
-                CASE WHEN t3.rn = 1 THEN t3.isin          ELSE NULL END
+                CASE WHEN COALESCE(t1.cnt, 0) = 1 THEN t1.isin END,
+                CASE WHEN COALESCE(t1.cnt, 0) = 0 AND COALESCE(t2.cnt, 0) = 1 THEN t2.isin END,
+                CASE WHEN COALESCE(t1.cnt, 0) = 0 AND COALESCE(t2.cnt, 0) = 0 AND COALESCE(t3.cnt, 0) = 1 THEN t3.isin END,
+                CASE WHEN COALESCE(t1.cnt, 0) = 0 AND COALESCE(t2.cnt, 0) = 0 AND COALESCE(t3.cnt, 0) = 0 AND COALESCE(t4.cnt, 0) = 1 THEN t4.isin END
             ) AS final_isin,
             COALESCE(
-                CASE WHEN t1.rn = 1 THEN t1.exchange_code ELSE NULL END,
-                b.matched_exchange,
-                CASE WHEN t2.rn = 1 THEN t2.exchange_code ELSE NULL END,
-                CASE WHEN t3.rn = 1 THEN t3.exchange_code ELSE NULL END
+                CASE WHEN COALESCE(t1.cnt, 0) = 1 THEN t1.exchange_code END,
+                CASE WHEN COALESCE(t1.cnt, 0) = 0 AND COALESCE(t2.cnt, 0) = 1 THEN t2.exchange_code END,
+                CASE WHEN COALESCE(t1.cnt, 0) = 0 AND COALESCE(t2.cnt, 0) = 0 AND COALESCE(t3.cnt, 0) = 1 THEN t3.exchange_code END,
+                CASE WHEN COALESCE(t1.cnt, 0) = 0 AND COALESCE(t2.cnt, 0) = 0 AND COALESCE(t3.cnt, 0) = 0 AND COALESCE(t4.cnt, 0) = 1 THEN t4.exchange_code END
             ) AS final_exchange,
             COALESCE(
-                CASE WHEN t1.rn = 1 THEN t1.country_of_exchange ELSE NULL END,
-                b.matched_country,
-                CASE WHEN t2.rn = 1 THEN t2.country_of_exchange ELSE NULL END,
-                CASE WHEN t3.rn = 1 THEN t3.country_of_exchange ELSE NULL END
+                CASE WHEN COALESCE(t1.cnt, 0) = 1 THEN t1.country_of_exchange END,
+                CASE WHEN COALESCE(t1.cnt, 0) = 0 AND COALESCE(t2.cnt, 0) = 1 THEN t2.country_of_exchange END,
+                CASE WHEN COALESCE(t1.cnt, 0) = 0 AND COALESCE(t2.cnt, 0) = 0 AND COALESCE(t3.cnt, 0) = 1 THEN t3.country_of_exchange END,
+                CASE WHEN COALESCE(t1.cnt, 0) = 0 AND COALESCE(t2.cnt, 0) = 0 AND COALESCE(t3.cnt, 0) = 0 AND COALESCE(t4.cnt, 0) = 1 THEN t4.country_of_exchange END
             ) AS final_country,
             COALESCE(
-                CASE WHEN t1.rn = 1 THEN t1.currency_code ELSE NULL END,
-                b.matched_currency,
-                CASE WHEN t2.rn = 1 THEN t2.currency_code ELSE NULL END,
-                CASE WHEN t3.rn = 1 THEN t3.currency_code ELSE NULL END
+                CASE WHEN COALESCE(t1.cnt, 0) = 1 THEN t1.currency_code END,
+                CASE WHEN COALESCE(t1.cnt, 0) = 0 AND COALESCE(t2.cnt, 0) = 1 THEN t2.currency_code END,
+                CASE WHEN COALESCE(t1.cnt, 0) = 0 AND COALESCE(t2.cnt, 0) = 0 AND COALESCE(t3.cnt, 0) = 1 THEN t3.currency_code END,
+                CASE WHEN COALESCE(t1.cnt, 0) = 0 AND COALESCE(t2.cnt, 0) = 0 AND COALESCE(t3.cnt, 0) = 0 AND COALESCE(t4.cnt, 0) = 1 THEN t4.currency_code END
             ) AS final_currency,
             CASE
-                WHEN t1.rn = 1 AND t1.security_id IS NOT NULL THEN 'SHORT_NAME'
-                WHEN b.match_type = 'ISIN_MATCH'           THEN 'ISIN_ONLY'
-                WHEN t2.rn = 1 AND t2.security_id IS NOT NULL THEN 'TICKER'
-                WHEN t3.rn = 1 AND t3.security_id IS NOT NULL THEN 'DESC_PREFIX'
-                ELSE                                             'NONE'
-            END AS match_method,
+                WHEN COALESCE(t1.cnt, 0) > 1 THEN 'FAIL: MULTIPLE_MATCH_SHORT_NAME'
+                WHEN COALESCE(t1.cnt, 0) = 1 THEN 'SHORT_NAME'
+                WHEN COALESCE(t2.cnt, 0) > 1 THEN 'FAIL: MULTIPLE_MATCH_ISIN'
+                WHEN COALESCE(t2.cnt, 0) = 1 THEN 'ISIN'
+                WHEN COALESCE(t3.cnt, 0) > 1 THEN 'FAIL: MULTIPLE_MATCH_TICKER'
+                WHEN COALESCE(t3.cnt, 0) = 1 THEN 'TICKER'
+                WHEN COALESCE(t4.cnt, 0) > 1 THEN 'FAIL: MULTIPLE_MATCH_FULL_NAME'
+                WHEN COALESCE(t4.cnt, 0) = 1 THEN 'FULL_NAME'
+                ELSE 'PENDING'
+            END AS security_match_method,
             CASE
-                WHEN t1.rn = 1 AND t1.security_id IS NOT NULL          THEN 'SHORT_NAME_MATCH'
-                WHEN b.match_type = 'FAIL: Multiple securities found'  THEN 'FAIL: Multiple securities found'
-                WHEN b.match_type = 'ISIN_MATCH'                       THEN 'ISIN_MATCH'
-                WHEN t2.rn = 1 AND t2.security_id IS NOT NULL          THEN 'TICKER_MATCH'
-                WHEN t3.rn = 1 AND t3.security_id IS NOT NULL          THEN 'DESC_PREFIX_MATCH'
-                ELSE                                                         'NOT_FOUND: Create new security'
+                WHEN COALESCE(t1.cnt, 0) > 1 THEN 'FAIL: MULTIPLE_MATCH_SHORT_NAME'
+                WHEN COALESCE(t1.cnt, 0) = 1 THEN 'SHORT_NAME_MATCH'
+                WHEN COALESCE(t2.cnt, 0) > 1 THEN 'FAIL: MULTIPLE_MATCH_ISIN'
+                WHEN COALESCE(t2.cnt, 0) = 1 THEN 'ISIN_MATCH'
+                WHEN COALESCE(t3.cnt, 0) > 1 THEN 'FAIL: MULTIPLE_MATCH_TICKER'
+                WHEN COALESCE(t3.cnt, 0) = 1 THEN 'TICKER_MATCH'
+                WHEN COALESCE(t4.cnt, 0) > 1 THEN 'FAIL: MULTIPLE_MATCH_FULL_NAME'
+                WHEN COALESCE(t4.cnt, 0) = 1 THEN 'FULL_NAME_MATCH'
+                ELSE 'PENDING'
             END AS security_status
-        FROM base_with_prefix b
-        LEFT JOIN tier1 t1 ON b.row_id = t1.row_id AND t1.rn = 1
-        LEFT JOIN tier2 t2 ON b.row_id = t2.row_id AND t2.rn = 1
-        LEFT JOIN tier3 t3 ON b.row_id = t3.row_id AND t3.rn = 1
+        FROM base
+        LEFT JOIN t1 ON base.row_id = t1.row_id AND t1.rn = 1
+        LEFT JOIN t2 ON base.row_id = t2.row_id AND t2.rn = 1
+        LEFT JOIN t3 ON base.row_id = t3.row_id AND t3.rn = 1
+        LEFT JOIN t4 ON base.row_id = t4.row_id AND t4.rn = 1
         """,
         database=DB
     )
-    print("[Step 4] Security fallback matching complete (short_name / ticker / desc_prefix)")
+    print("[Step 3] Stage A (tiers 1-4: short_name / isin+country / ticker+country / full_name+country) complete")
+
+    # ---- Stage B (Python): Tier 5 — Normalized Full Name + Country ----
+    _pending_b = impala_manager.execute_query(
+        "SELECT row_id, security_full_name, resolved_country "
+        "FROM pos_stage_4_security_fallback WHERE security_status = 'PENDING'",
+        database=DB
+    ) or []
+    if _pending_b:
+        _norm_cache = _build_normalized_cache()
+        _t5_match, _t5_multi = {}, set()
+        for _row in _pending_b:
+            _country = (_row.get('resolved_country') or '').strip()
+            if not _country:
+                continue  # required field not populated — tier 5 not evaluated
+            _key = abbreviate_security_name(_row.get('security_full_name') or '')
+            if not _key:
+                continue
+            _country_matches = [
+                c for c in _norm_cache.get(_key, [])
+                if _country.upper() == (c.get('exchange_code') or '').strip().upper()
+                or _country.upper() == (c.get('country_of_exchange') or '').strip().upper()
+            ]
+            if len(_country_matches) == 1:
+                _t5_match[_row['row_id']] = _country_matches[0]
+            elif len(_country_matches) > 1:
+                _t5_multi.add(_row['row_id'])
+        if _t5_match or _t5_multi:
+            _apply_python_tier_result(_t5_match, _t5_multi, 'NORMALIZED_FULL_NAME')
+        print(f"[Step 4] Stage B (Tier 5 normalized+country) — {len(_t5_match)} matched, {len(_t5_multi)} multi-match")
+    else:
+        print("[Step 4] Stage B (Tier 5): no PENDING rows")
+
+    # ---- Stage C (SQL): Tier 6 ISIN only, Tier 7 Ticker only, Tier 8 Full Name only ----
+    impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_tier_update", database=DB)
+    impala_manager.execute_write(
+        f"""
+        CREATE TABLE pos_stage_4_tier_update
+        STORED AS PARQUET AS
+        WITH
+        pending AS (
+            SELECT * FROM pos_stage_4_security_fallback WHERE security_status = 'PENDING'
+        ),
+        t6 AS (
+            SELECT p.row_id, sn.security_id, sn.security_name, sn.isin,
+                   sn.exchange_code, sn.country_of_exchange, sn.currency_code,
+                   ROW_NUMBER() OVER (PARTITION BY p.row_id ORDER BY sn.security_id) AS rn,
+                   COUNT(*) OVER (PARTITION BY p.row_id) AS cnt
+            FROM pending p
+            JOIN {DB}.cis_security sn
+                ON  sn.is_active = true
+                AND p.upload_isin IS NOT NULL AND TRIM(p.upload_isin) != ''
+                AND UPPER(TRIM(p.upload_isin)) NOT IN ('NA', 'N/A', 'NIL', 'NONE', '-', 'N.A.', 'NAP')
+                AND UPPER(TRIM(CAST(p.upload_isin AS STRING))) = UPPER(TRIM(CAST(sn.isin AS STRING)))
+        ),
+        t7 AS (
+            SELECT p.row_id, sn.security_id, sn.security_name, sn.isin,
+                   sn.exchange_code, sn.country_of_exchange, sn.currency_code,
+                   ROW_NUMBER() OVER (PARTITION BY p.row_id ORDER BY sn.security_id) AS rn,
+                   COUNT(*) OVER (PARTITION BY p.row_id) AS cnt
+            FROM pending p
+            JOIN {DB}.cis_security sn
+                ON  sn.is_active = true
+                AND p.clean_ticker IS NOT NULL AND TRIM(p.clean_ticker) != ''
+                AND regexp_replace(UPPER(TRIM(CAST(sn.ticker AS STRING))), '\\s+EQUITY$', '') = p.clean_ticker
+        ),
+        t8 AS (
+            SELECT p.row_id, sn.security_id, sn.security_name, sn.isin,
+                   sn.exchange_code, sn.country_of_exchange, sn.currency_code,
+                   ROW_NUMBER() OVER (PARTITION BY p.row_id ORDER BY sn.security_id) AS rn,
+                   COUNT(*) OVER (PARTITION BY p.row_id) AS cnt
+            FROM pending p
+            JOIN {DB}.cis_security sn
+                ON  sn.is_active = true
+                AND p.security_full_name IS NOT NULL AND TRIM(p.security_full_name) != ''
+                AND sn.security_description IS NOT NULL
+                AND UPPER(TRIM(sn.security_description)) = UPPER(TRIM(p.security_full_name))
+        )
+        SELECT
+            p.row_id, p.upload_isin, p.security_full_name, p.security_short_name,
+            p.desc_prefix, p.upload_exchange, p.portfolio_status, p.resolved_country, p.clean_ticker,
+            COALESCE(
+                CASE WHEN COALESCE(t6.cnt, 0) = 1 THEN t6.security_id END,
+                CASE WHEN COALESCE(t6.cnt, 0) = 0 AND COALESCE(t7.cnt, 0) = 1 THEN t7.security_id END,
+                CASE WHEN COALESCE(t6.cnt, 0) = 0 AND COALESCE(t7.cnt, 0) = 0 AND COALESCE(t8.cnt, 0) = 1 THEN t8.security_id END
+            ) AS final_security_id,
+            COALESCE(
+                CASE WHEN COALESCE(t6.cnt, 0) = 1 THEN t6.security_name END,
+                CASE WHEN COALESCE(t6.cnt, 0) = 0 AND COALESCE(t7.cnt, 0) = 1 THEN t7.security_name END,
+                CASE WHEN COALESCE(t6.cnt, 0) = 0 AND COALESCE(t7.cnt, 0) = 0 AND COALESCE(t8.cnt, 0) = 1 THEN t8.security_name END
+            ) AS final_security_name,
+            COALESCE(
+                CASE WHEN COALESCE(t6.cnt, 0) = 1 THEN t6.isin END,
+                CASE WHEN COALESCE(t6.cnt, 0) = 0 AND COALESCE(t7.cnt, 0) = 1 THEN t7.isin END,
+                CASE WHEN COALESCE(t6.cnt, 0) = 0 AND COALESCE(t7.cnt, 0) = 0 AND COALESCE(t8.cnt, 0) = 1 THEN t8.isin END
+            ) AS final_isin,
+            COALESCE(
+                CASE WHEN COALESCE(t6.cnt, 0) = 1 THEN t6.exchange_code END,
+                CASE WHEN COALESCE(t6.cnt, 0) = 0 AND COALESCE(t7.cnt, 0) = 1 THEN t7.exchange_code END,
+                CASE WHEN COALESCE(t6.cnt, 0) = 0 AND COALESCE(t7.cnt, 0) = 0 AND COALESCE(t8.cnt, 0) = 1 THEN t8.exchange_code END
+            ) AS final_exchange,
+            COALESCE(
+                CASE WHEN COALESCE(t6.cnt, 0) = 1 THEN t6.country_of_exchange END,
+                CASE WHEN COALESCE(t6.cnt, 0) = 0 AND COALESCE(t7.cnt, 0) = 1 THEN t7.country_of_exchange END,
+                CASE WHEN COALESCE(t6.cnt, 0) = 0 AND COALESCE(t7.cnt, 0) = 0 AND COALESCE(t8.cnt, 0) = 1 THEN t8.country_of_exchange END
+            ) AS final_country,
+            COALESCE(
+                CASE WHEN COALESCE(t6.cnt, 0) = 1 THEN t6.currency_code END,
+                CASE WHEN COALESCE(t6.cnt, 0) = 0 AND COALESCE(t7.cnt, 0) = 1 THEN t7.currency_code END,
+                CASE WHEN COALESCE(t6.cnt, 0) = 0 AND COALESCE(t7.cnt, 0) = 0 AND COALESCE(t8.cnt, 0) = 1 THEN t8.currency_code END
+            ) AS final_currency,
+            CASE
+                WHEN COALESCE(t6.cnt, 0) > 1 THEN 'FAIL: MULTIPLE_MATCH_ISIN_ONLY'
+                WHEN COALESCE(t6.cnt, 0) = 1 THEN 'ISIN_ONLY'
+                WHEN COALESCE(t7.cnt, 0) > 1 THEN 'FAIL: MULTIPLE_MATCH_TICKER_ONLY'
+                WHEN COALESCE(t7.cnt, 0) = 1 THEN 'TICKER_ONLY'
+                WHEN COALESCE(t8.cnt, 0) > 1 THEN 'FAIL: MULTIPLE_MATCH_FULL_NAME_ONLY'
+                WHEN COALESCE(t8.cnt, 0) = 1 THEN 'FULL_NAME_ONLY'
+                ELSE 'PENDING'
+            END AS security_match_method,
+            CASE
+                WHEN COALESCE(t6.cnt, 0) > 1 THEN 'FAIL: MULTIPLE_MATCH_ISIN_ONLY'
+                WHEN COALESCE(t6.cnt, 0) = 1 THEN 'ISIN_ONLY_MATCH'
+                WHEN COALESCE(t7.cnt, 0) > 1 THEN 'FAIL: MULTIPLE_MATCH_TICKER_ONLY'
+                WHEN COALESCE(t7.cnt, 0) = 1 THEN 'TICKER_ONLY_MATCH'
+                WHEN COALESCE(t8.cnt, 0) > 1 THEN 'FAIL: MULTIPLE_MATCH_FULL_NAME_ONLY'
+                WHEN COALESCE(t8.cnt, 0) = 1 THEN 'FULL_NAME_ONLY_MATCH'
+                ELSE 'PENDING'
+            END AS security_status
+        FROM pending p
+        LEFT JOIN t6 ON p.row_id = t6.row_id AND t6.rn = 1
+        LEFT JOIN t7 ON p.row_id = t7.row_id AND t7.rn = 1
+        LEFT JOIN t8 ON p.row_id = t8.row_id AND t8.rn = 1
+
+        UNION ALL
+
+        SELECT
+            row_id, upload_isin, security_full_name, security_short_name,
+            desc_prefix, upload_exchange, portfolio_status, resolved_country, clean_ticker,
+            final_security_id, final_security_name, final_isin, final_exchange,
+            final_country, final_currency, security_match_method, security_status
+        FROM pos_stage_4_security_fallback
+        WHERE security_status != 'PENDING'
+        """,
+        database=DB
+    )
+    impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=DB)
+    impala_manager.execute_write(
+        "CREATE TABLE pos_stage_4_security_fallback STORED AS PARQUET AS "
+        "SELECT * FROM pos_stage_4_tier_update",
+        database=DB
+    )
+    impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_tier_update", database=DB)
+    print("[Step 4] Stage C (tiers 6-8: isin_only / ticker_only / full_name_only) complete")
+
+    # ---- Stage D (Python): Tier 9 — Normalized Full Name only (no country) ----
+    _pending_d = impala_manager.execute_query(
+        "SELECT row_id, security_full_name "
+        "FROM pos_stage_4_security_fallback WHERE security_status = 'PENDING'",
+        database=DB
+    ) or []
+    if _pending_d:
+        _norm_cache = _build_normalized_cache()
+        _t9_match, _t9_multi = {}, set()
+        for _row in _pending_d:
+            _key = abbreviate_security_name(_row.get('security_full_name') or '')
+            if not _key:
+                continue
+            _candidates = _norm_cache.get(_key, [])
+            if len(_candidates) == 1:
+                _t9_match[_row['row_id']] = _candidates[0]
+            elif len(_candidates) > 1:
+                _t9_multi.add(_row['row_id'])
+        if _t9_match or _t9_multi:
+            _apply_python_tier_result(_t9_match, _t9_multi, 'NORMALIZED_FULL_NAME_ONLY')
+        print(f"[Step 4] Stage D (Tier 9 normalized only) — {len(_t9_match)} matched, {len(_t9_multi)} multi-match")
+    else:
+        print("[Step 4] Stage D (Tier 9): no PENDING rows")
+
+    # ---- Tier 10: anything still PENDING is a create-security candidate ----
+    impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_tier_update", database=DB)
+    impala_manager.execute_write(
+        """
+        CREATE TABLE pos_stage_4_tier_update
+        STORED AS PARQUET AS
+        SELECT
+            row_id, upload_isin, security_full_name, security_short_name,
+            desc_prefix, upload_exchange, portfolio_status, resolved_country, clean_ticker,
+            final_security_id, final_security_name, final_isin, final_exchange,
+            final_country, final_currency,
+            CASE WHEN security_status = 'PENDING' THEN 'NONE' ELSE security_match_method END AS security_match_method,
+            CASE WHEN security_status = 'PENDING' THEN 'NOT_FOUND: Create new security' ELSE security_status END AS security_status
+        FROM pos_stage_4_security_fallback
+        """,
+        database=DB
+    )
+    impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=DB)
+    impala_manager.execute_write(
+        "CREATE TABLE pos_stage_4_security_fallback STORED AS PARQUET AS "
+        "SELECT * FROM pos_stage_4_tier_update",
+        database=DB
+    )
+    impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_tier_update", database=DB)
+    print("[Step 4] Security fallback matching complete (10-tier cascade)")
 
     # ---- Step 5: price lookup ----
     impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_5_price", database=DB)
@@ -1087,6 +1455,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             p4.final_isin, p4.final_country AS country_resolved,
             p4.final_currency AS security_currency_resolved,
             p4.security_status,
+            p4.security_match_method,
             p5.final_market_price, p5.price_status,
             CASE WHEN b.quantity IS NOT NULL THEN CAST(b.quantity AS DECIMAL(30,8))
                  WHEN b.cost_fc IS NOT NULL  THEN CAST(b.cost_fc  AS DECIMAL(30,8))
@@ -1256,7 +1625,12 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             b.corp_code, b.branch_code, b.cost_centre, b.cels,
             b.bwcif_sg, b.bwcif_ovs, b.mas_6d_code_sg, b.mas_6d_code_ovs,
             b.position_basis, b.reporting_date, b.maturity_date,
-            b.src_system, b.source_table
+            b.src_system, b.source_table,
+            -- security_match_method is appended LAST: this INSERT OVERWRITE has
+            -- no explicit column list, so it maps positionally against the live
+            -- table schema — migration 85's ALTER TABLE ADD COLUMNS appends new
+            -- columns at the end, and this SELECT must match that exact order.
+            COALESCE(p4.security_match_method, s.security_match_method) AS security_match_method
         FROM pos_stage_1_base b
         LEFT JOIN pos_stage_2_portfolio         p2 ON b.row_id = p2.row_id
         LEFT JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id

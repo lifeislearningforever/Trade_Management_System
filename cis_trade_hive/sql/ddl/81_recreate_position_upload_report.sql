@@ -77,7 +77,11 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.position_upload_report (
     reporting_date              STRING,
     maturity_date               STRING,
     src_system                  STRING,
-    source_table                STRING
+    source_table                STRING,
+
+    -- Added by migration 85: which tier of the 10-tier security-matching
+    -- cascade resolved the match (or NONE if a new security was created).
+    security_match_method       STRING
 )
 COMMENT 'Position upload validation report — one row per uploaded row, with PASS/FAIL status'
 PARTITIONED BY (
