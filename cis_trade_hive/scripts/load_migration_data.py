@@ -1019,16 +1019,18 @@ def _trigger_position(
         #   'SETTLED' → 'SETTLED'
         svc_basis = None if position_basis == 'BOTH' else position_basis
 
-        # trade_lc / gross_amount_lc — same extraction as the UI settle path
-        # (trade_event_queue_service.py, position_queue_service.py): without
-        # these, NON-REVAL portfolios get cost_lc recomputed from the FX
-        # table instead of using the migrated LC amount, so migrated
-        # positions silently stop tallying with the migrated trade amounts
-        # (SA feedback, Venkata Narayana Adisetty, 30/07/2026).
+        # trade_lc / gross_amount_lc / gross_amount_fc — same extraction as the
+        # UI settle path (trade_event_queue_service.py, position_queue_service.py):
+        # without these, cost_fc/lc gets recomputed from quantity * price / the FX
+        # table instead of using the migrated amounts, so migrated positions
+        # silently stop tallying with the migrated trade amounts (SA feedback,
+        # Venkata Narayana Adisetty, 30/07/2026).
         _raw_glc = mapped.get('gross_amount_lc')
         _raw_tlc = mapped.get('total_amount_lc')
+        _raw_gfc = mapped.get('gross_amount_fc')
         gross_amount_lc = Decimal(str(_raw_glc)) if _raw_glc else None
         trade_lc = Decimal(str(_raw_tlc)) if _raw_tlc else None
+        gross_amount_fc = Decimal(str(_raw_gfc)) if _raw_gfc else None
 
         ok, msg, _ = settlement_service.process_trade_settlement(
             trade_id=int(raw_id),
@@ -1049,6 +1051,7 @@ def _trigger_position(
             position_basis=svc_basis,
             trade_lc=trade_lc,
             gross_amount_lc=gross_amount_lc,
+            gross_amount_fc=gross_amount_fc,
         )
         if ok:
             logger.info("Position OK  trade_id=%s %s %s qty=%s basis=%s",
@@ -1115,7 +1118,7 @@ def load_position(
         f"SELECT trade_id, trade_type, portfolio_short_name, security_label, "
         f"security_full_name, currency_code, portfolio_currency, isin, "
         f"quantity, price, commission, sec_fee, other_charges, "
-        f"gross_amount_lc, total_amount_lc, "
+        f"gross_amount_lc, total_amount_lc, gross_amount_fc, "
         f"trade_date, settle_date "
         f"FROM {DATABASE}.cis_trade WHERE {where} "
         f"ORDER BY trade_date, trade_id"

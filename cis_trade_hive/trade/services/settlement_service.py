@@ -85,6 +85,7 @@ class SettlementService:
         position_basis: str = None,  # None = dual (both bases). 'TRADED' or 'SETTLED' = single.
         trade_lc: Decimal = None,
         gross_amount_lc: Decimal = None,
+        gross_amount_fc: Decimal = None,
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """
         Process trade settlement based on settlement date.
@@ -203,6 +204,7 @@ class SettlementService:
                     settlement_type=basis_settlement_type,
                     trade_lc=trade_lc,
                     gross_amount_lc=gross_amount_lc,
+                    gross_amount_fc=gross_amount_fc,
                 )
 
                 if async_mode:
@@ -359,6 +361,7 @@ class SettlementService:
                 position_date=position_date or settle_date,
                 gross_amount_lc=kwargs.get('gross_amount_lc'),
                 total_amount_lc=kwargs.get('trade_lc'),
+                gross_amount_fc=kwargs.get('gross_amount_fc'),
             )
 
             if success:
@@ -429,8 +432,16 @@ class SettlementService:
         """Process immediate settlement - position calculated now."""
         logger.info(f"Processing immediate settlement for trade {trade_id}")
 
-        # Derive implied FX rate from trade LC/FC amounts (captures any user edits to LC)
-        _gross_fc = kwargs.get('gross_amount_fc') or (float(quantity) * float(price))
+        # gross_amount_fc/lc: pass the trade's exact tallied amount through so
+        # position_service stores cost fc/lc as-is instead of recomputing
+        # quantity * price (SA feedback, Venkata Narayana Adisetty,
+        # 30/07/2026). This was previously computed here as _gross_fc but
+        # never actually forwarded to calculate_position() -- position cost
+        # silently fell back to quantity * price every time, which is why
+        # cost_fc drifted from the trade's own Gross Amt FC on large trades
+        # where price has more precision than the stored `price` column.
+        _gross_fc = kwargs.get('gross_amount_fc')
+        _gross_amount_fc = Decimal(str(_gross_fc)) if _gross_fc else None
         _gross_lc = kwargs.get('gross_amount_lc')
         _gross_amount_lc = Decimal(str(_gross_lc)) if _gross_lc else None
 
@@ -453,6 +464,7 @@ class SettlementService:
             position_basis=kwargs.get('position_basis', 'TRADED'),
             trade_lc=kwargs.get('trade_lc'),
             gross_amount_lc=_gross_amount_lc,
+            gross_amount_fc=_gross_amount_fc,
         )
 
         if success:
@@ -492,6 +504,19 @@ class SettlementService:
             price_cast = f"CAST({float(price)} AS DECIMAL(20,8))"
             charges_cast = f"CAST({float(charges)} AS DECIMAL(20,8))"
 
+            # trade_lc / gross_amount_lc / gross_amount_fc — the trade's exact
+            # tallied amounts, stored so process_pending_settlements() (the EOD
+            # job that drains this queue) can pass them to calculate_position()
+            # instead of it recomputing cost from quantity * price / the FX
+            # table (SA feedback, Venkata Narayana Adisetty, 30/07/2026; see
+            # DDL 86).
+            _trade_lc_q = kwargs.get('trade_lc')
+            _gross_lc_q = kwargs.get('gross_amount_lc')
+            _gross_fc_q = kwargs.get('gross_amount_fc')
+            trade_lc_cast = f"CAST({float(_trade_lc_q)} AS DECIMAL(30,8))" if _trade_lc_q else 'NULL'
+            gross_lc_cast = f"CAST({float(_gross_lc_q)} AS DECIMAL(30,8))" if _gross_lc_q else 'NULL'
+            gross_fc_cast = f"CAST({float(_gross_fc_q)} AS DECIMAL(30,8))" if _gross_fc_q else 'NULL'
+
             # Insert into settlement queue (position_basis + position_date stored for worker)
             query = f"""
             INSERT INTO {self.DATABASE}.{self.SETTLEMENT_QUEUE_TABLE}
@@ -500,6 +525,7 @@ class SettlementService:
              status, retry_count, queued_at, queued_by,
              security_currency, portfolio_currency, isin, security_name,
              custodian, sub_custodian,
+             trade_lc, gross_amount_lc, gross_amount_fc,
              processing_date)
             VALUES (
                 {queue_id}, {trade_id},
@@ -516,6 +542,7 @@ class SettlementService:
                 {self._null_or_str(kwargs.get('security_name'))},
                 {self._null_or_str(kwargs.get('custodian'))},
                 {self._null_or_str(kwargs.get('sub_custodian'))},
+                {trade_lc_cast}, {gross_lc_cast}, {gross_fc_cast},
                 '{processing_date}'
             )
             """
@@ -600,6 +627,18 @@ class SettlementService:
                     basis = item.get('position_basis', 'SETTLED')
                     pos_date = item.get('position_date') or item['settle_date']
 
+                    # trade_lc / gross_amount_lc / gross_amount_fc — stored on the
+                    # queue row by _queue_for_settlement (see DDL 86). Without
+                    # these, cost fc/lc for every deferred (T+1/T+2) settlement
+                    # gets recomputed from quantity * price / the FX table
+                    # instead of using the trade's tallied amount.
+                    _raw_tlc = item.get('trade_lc')
+                    _raw_glc = item.get('gross_amount_lc')
+                    _raw_gfc = item.get('gross_amount_fc')
+                    _trade_lc = Decimal(str(_raw_tlc)) if _raw_tlc else None
+                    _gross_amount_lc = Decimal(str(_raw_glc)) if _raw_glc else None
+                    _gross_amount_fc = Decimal(str(_raw_gfc)) if _raw_gfc else None
+
                     success, message, position = self.position_service.calculate_position(
                         portfolio_id=item['portfolio_id'],
                         security_id=item['security_id'],
@@ -616,7 +655,10 @@ class SettlementService:
                         security_name=item.get('security_name'),
                         custodian=item.get('custodian'),
                         sub_custodian=item.get('sub_custodian'),
-                        position_basis=basis
+                        position_basis=basis,
+                        trade_lc=_trade_lc,
+                        gross_amount_lc=_gross_amount_lc,
+                        gross_amount_fc=_gross_amount_fc,
                     )
 
                     if success:
@@ -733,6 +775,8 @@ class SettlementService:
         # Step 1: Calculate position for the backdated date
         _gross_lc_bd = kwargs.get('gross_amount_lc')
         _gross_amount_lc_bd = Decimal(str(_gross_lc_bd)) if _gross_lc_bd else None
+        _gross_fc_bd = kwargs.get('gross_amount_fc')
+        _gross_amount_fc_bd = Decimal(str(_gross_fc_bd)) if _gross_fc_bd else None
 
         success, message, position = self.position_service.calculate_position(
             portfolio_id=portfolio_id,
@@ -753,6 +797,7 @@ class SettlementService:
             position_basis=position_basis,
             trade_lc=kwargs.get('trade_lc'),
             gross_amount_lc=_gross_amount_lc_bd,
+            gross_amount_fc=_gross_amount_fc_bd,
         )
 
         if not success:
@@ -839,7 +884,7 @@ class SettlementService:
                    t.trade_date, t.settle_date,
                    t.currency_code AS security_currency,
                    pf.currency     AS portfolio_currency,
-                   t.total_amount_lc, t.gross_amount_lc
+                   t.total_amount_lc, t.gross_amount_lc, t.gross_amount_fc
             FROM {self.DATABASE}.{self.TRADE_TABLE} t
             JOIN {self.DATABASE}.cis_portfolio pf
                 ON t.portfolio_short_name = pf.name
@@ -1057,6 +1102,8 @@ class SettlementService:
                         trade_lc = Decimal(str(raw_lc)) if raw_lc else None
                         raw_gross_lc = trade.get('gross_amount_lc')
                         gross_amount_lc = Decimal(str(raw_gross_lc)) if raw_gross_lc else None
+                        raw_gross_fc = trade.get('gross_amount_fc')
+                        gross_amount_fc = Decimal(str(raw_gross_fc)) if raw_gross_fc else None
                         success, msg, result = self.position_service.calculate_position(
                             portfolio_id=portfolio_id,
                             security_id=security_id,
@@ -1072,6 +1119,7 @@ class SettlementService:
                             base_position_override=base,
                             trade_lc=trade_lc,
                             gross_amount_lc=gross_amount_lc,
+                            gross_amount_fc=gross_amount_fc,
                             security_currency=trade.get('security_currency'),
                             portfolio_currency=trade.get('portfolio_currency'),
                             isin=sec_isin,

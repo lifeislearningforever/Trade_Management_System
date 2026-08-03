@@ -406,9 +406,11 @@ class TradeEventQueueService:
 
             _raw_tlc = event_data.get('total_amount_lc')
             _raw_glc = event_data.get('gross_amount_lc')
+            _raw_gfc = event_data.get('gross_amount_fc')
             _trade_lc = Decimal(str(_raw_tlc)) if _raw_tlc else None
             _gross_amount_lc = Decimal(str(_raw_glc)) if _raw_glc else None
-            logger.info(f"[DEBUG EVENT] trade_id={trade_id} event_data gross_amount_lc={_raw_glc!r} total_amount_lc={_raw_tlc!r} -> decimal gross={_gross_amount_lc} total={_trade_lc}")
+            _gross_amount_fc = Decimal(str(_raw_gfc)) if _raw_gfc else None
+            logger.info(f"[DEBUG EVENT] trade_id={trade_id} event_data gross_amount_lc={_raw_glc!r} total_amount_lc={_raw_tlc!r} gross_amount_fc={_raw_gfc!r} -> decimal gross={_gross_amount_lc} total={_trade_lc}")
 
             # Process settlement (synchronous within worker)
             success, msg, result = settlement_service.process_trade_settlement(
@@ -430,6 +432,7 @@ class TradeEventQueueService:
                 sub_custodian=event_data.get('sub_custodian', ''),
                 trade_lc=_trade_lc,
                 gross_amount_lc=_gross_amount_lc,
+                gross_amount_fc=_gross_amount_fc,
                 async_mode=False  # Process synchronously within worker
             )
 

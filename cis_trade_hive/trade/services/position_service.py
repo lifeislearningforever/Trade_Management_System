@@ -159,6 +159,7 @@ class PositionService:
         base_position_override: Dict[str, Any] = None,
         trade_lc: Decimal = None,
         gross_amount_lc: Decimal = None,
+        gross_amount_fc: Decimal = None,
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """
         Calculate position using weighted average method.
@@ -321,6 +322,7 @@ class PositionService:
                     position_basis=position_basis,
                     trade_lc=trade_lc,
                     gross_amount_lc=gross_amount_lc,
+                    gross_amount_fc=gross_amount_fc,
                 )
             elif trade_type == 'SELL':
                 return self._process_sell(
@@ -346,6 +348,7 @@ class PositionService:
                     position_basis=position_basis,
                     trade_lc=trade_lc,
                     gross_amount_lc=gross_amount_lc,
+                    gross_amount_fc=gross_amount_fc,
                 )
 
         except Exception as e:
@@ -377,15 +380,23 @@ class PositionService:
         position_basis: str = 'TRADED',
         trade_lc: Decimal = None,
         gross_amount_lc: Decimal = None,
+        gross_amount_fc: Decimal = None,
     ) -> Tuple[bool, str, Dict[str, Any]]:
         """
         Process BUY trade - increase position, recalculate AVP.
 
         Formula (gross only — charges excluded per SA PORTIARP-8206):
-            trade_cost    = buy_qty * buy_price          (no charges)
+            trade_cost    = gross_amount_fc from trade if supplied, else buy_qty * buy_price
             new_total_cost = old_total_cost + trade_cost
             new_quantity   = old_quantity + buy_qty
             new_avg_cost   = new_total_cost / new_quantity
+
+        FC cost rule (SA feedback, Venkata Narayana Adisetty, 30/07/2026): the
+        gross amount is stored directly as cost fc, unconditionally (no REVAL/
+        NON-REVAL gating — that distinction only governs how LC is *derived*
+        from FC, it has no meaning for FC itself). Falls back to quantity *
+        price only when the caller has no gross_amount_fc to supply (e.g. a
+        UI trade with no separate gross-amount entry).
 
         LC cost rules:
             NON-REVAL: trade_cost_lc = gross_amount_lc from trade (post user edits)
@@ -405,6 +416,14 @@ class PositionService:
         security_currency, portfolio_currency = self._resolve_currencies(
             portfolio_id, security_id, security_currency, portfolio_currency
         )
+
+        # Gross cost only — charges are a P&L item, not cost basis (SA PORTIARP-8206).
+        # Use the trade's exact gross_amount_fc when supplied (migration/UI-edited
+        # amount) rather than recomputing quantity * price — the two can differ by
+        # a small amount when the source system's price has more precision than
+        # what's stored in the `price` column, and SA direction is that the
+        # tallied amount wins (30/07/2026).
+        trade_cost = Decimal(str(gross_amount_fc)) if gross_amount_fc else quantity * price
 
         if current:
             # Existing position - add to it
@@ -427,8 +446,6 @@ class PositionService:
             # Use new column name realized_pnl_fc (fallback to realized_pnl for backward compat)
             old_realized_pnl = Decimal(str(current.get('realized_pnl_fc') or current.get('realized_pnl', 0) or 0))
 
-            # Gross cost only — charges are a P&L item, not cost basis (SA PORTIARP-8206)
-            trade_cost = quantity * price
             new_qty = old_qty + quantity
             new_total_cost = old_total_cost + trade_cost
             new_avg_cost = (new_total_cost / new_qty).quantize(
@@ -443,8 +460,6 @@ class PositionService:
             old_qty = Decimal('0')
             old_realized_pnl = Decimal('0')
 
-            # Gross cost only — charges excluded (SA PORTIARP-8206)
-            trade_cost = quantity * price
             new_qty = quantity
             new_total_cost = trade_cost
             new_avg_cost = (new_total_cost / new_qty).quantize(

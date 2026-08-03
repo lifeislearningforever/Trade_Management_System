@@ -1247,6 +1247,7 @@ class TradeKuduRepository:
 
             _tlc = updated_data.get('total_amount_lc') or current_trade.get('total_amount_lc')
             _glc = updated_data.get('gross_amount_lc') or current_trade.get('gross_amount_lc')
+            _gfc = updated_data.get('gross_amount_fc') or current_trade.get('gross_amount_fc')
             # Queue via settlement service (handles T+0, T+1/T+2, backdated)
             success, message, details = settlement_service.process_trade_settlement(
                 trade_id=trade_id,
@@ -1265,6 +1266,7 @@ class TradeKuduRepository:
                 security_name=current_trade.get('security_full_name', ''),
                 trade_lc=Decimal(str(_tlc)) if _tlc else None,
                 gross_amount_lc=Decimal(str(_glc)) if _glc else None,
+                gross_amount_fc=Decimal(str(_gfc)) if _gfc else None,
             )
 
             if success:

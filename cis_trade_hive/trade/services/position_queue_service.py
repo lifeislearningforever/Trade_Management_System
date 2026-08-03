@@ -95,6 +95,7 @@ class PositionQueueService:
         deal_number: str = '',
         gross_amount_lc: Decimal = None,
         total_amount_lc: Decimal = None,
+        gross_amount_fc: Decimal = None,
     ) -> Tuple[bool, str, Optional[int]]:
         """
         Add trade to position calculation queue.
@@ -123,13 +124,17 @@ class PositionQueueService:
             # For SETTLED basis: position_date = settle_date (default)
             effective_position_date = position_date or settle_date
 
-            # Encode LC amounts into error_message field (STRING column reused for metadata).
-            # Format: "LC:<gross_lc>:<total_lc>" or prepend to CHAIN_RECALC string.
+            # Encode LC/FC amounts into error_message field (STRING column reused
+            # for metadata). Format: "LC:<gross_lc>:<total_lc>:<gross_fc>" or
+            # prepend to CHAIN_RECALC string. The 3rd field (gross_fc) was added
+            # later (SA feedback, Venkata Narayana Adisetty, 30/07/2026) — the
+            # decoder tolerates old 2-field rows already in the queue.
             lc_meta = None
-            if gross_amount_lc is not None or total_amount_lc is not None:
+            if gross_amount_lc is not None or total_amount_lc is not None or gross_amount_fc is not None:
                 _glc = float(gross_amount_lc) if gross_amount_lc else 0
                 _tlc = float(total_amount_lc) if total_amount_lc else 0
-                lc_meta = f"LC:{_glc}:{_tlc}"
+                _gfc = float(gross_amount_fc) if gross_amount_fc else 0
+                lc_meta = f"LC:{_glc}:{_tlc}:{_gfc}"
 
             if chain_recalc_metadata and lc_meta:
                 effective_error_message = f"{lc_meta}|{chain_recalc_metadata}"
@@ -160,9 +165,10 @@ class PositionQueueService:
                 'queued_at': timestamp,
                 'queued_by': queued_by,
                 'error_message': effective_error_message,
-                # In-memory LC amounts (available immediately to worker)
+                # In-memory LC/FC amounts (available immediately to worker)
                 'gross_amount_lc': gross_amount_lc,
                 'total_amount_lc': total_amount_lc,
+                'gross_amount_fc': gross_amount_fc,
             }
 
             if use_db_queue:
@@ -453,29 +459,37 @@ class PositionQueueService:
             position_basis = item.get('position_basis', 'TRADED')
             position_date = item.get('position_date') or item['settle_date']
 
-            # LC amounts: read from queue item (in-memory path) or parse from error_message
-            # (DB path). Fall back to fetching from cis_trade only if both are missing.
+            # LC/FC amounts: read from queue item (in-memory path) or parse from
+            # error_message (DB path). Fall back to fetching from cis_trade only
+            # if all three are missing.
             _gross_amount_lc = item.get('gross_amount_lc')
             _trade_lc = item.get('total_amount_lc')
-            logger.info(f"[DEBUG PQ] queue_id={queue_id} trade_id={trade_id} item gross_lc={_gross_amount_lc} total_lc={_trade_lc} error_message={item.get('error_message')!r}")
+            _gross_amount_fc = item.get('gross_amount_fc')
+            logger.info(f"[DEBUG PQ] queue_id={queue_id} trade_id={trade_id} item gross_lc={_gross_amount_lc} total_lc={_trade_lc} gross_fc={_gross_amount_fc} error_message={item.get('error_message')!r}")
 
-            if _gross_amount_lc is None and _trade_lc is None:
-                # Try to parse from error_message: "LC:<gross>:<total>" or "LC:<gross>:<total>|CHAIN_RECALC:..."
+            if _gross_amount_lc is None and _trade_lc is None and _gross_amount_fc is None:
+                # Try to parse from error_message: "LC:<gross>:<total>:<gross_fc>"
+                # (or the older 2-field "LC:<gross>:<total>" for rows queued
+                # before gross_fc was added) — or "LC:...|CHAIN_RECALC:...".
                 _err_msg = item.get('error_message') or ''
                 if _err_msg.startswith('LC:'):
                     try:
                         _lc_part = _err_msg.split('|')[0]  # strip any trailing CHAIN_RECALC
-                        _, _glc_str, _tlc_str = _lc_part.split(':')
+                        _lc_fields = _lc_part.split(':')  # ['LC', glc, tlc] or ['LC', glc, tlc, gfc]
+                        _glc_str = _lc_fields[1] if len(_lc_fields) > 1 else '0'
+                        _tlc_str = _lc_fields[2] if len(_lc_fields) > 2 else '0'
+                        _gfc_str = _lc_fields[3] if len(_lc_fields) > 3 else '0'
                         _gross_amount_lc = Decimal(_glc_str) if float(_glc_str) != 0 else None
                         _trade_lc = Decimal(_tlc_str) if float(_tlc_str) != 0 else None
+                        _gross_amount_fc = Decimal(_gfc_str) if float(_gfc_str) != 0 else None
                     except Exception as _parse_ex:
-                        logger.warning(f"Could not parse LC from error_message '{_err_msg}': {_parse_ex}")
+                        logger.warning(f"Could not parse LC/FC from error_message '{_err_msg}': {_parse_ex}")
 
-            if _gross_amount_lc is None and _trade_lc is None:
+            if _gross_amount_lc is None and _trade_lc is None and _gross_amount_fc is None:
                 # Last resort: fetch from cis_trade (may have race condition on new trades)
                 try:
                     _trade_row = impala_manager.execute_query(
-                        f"SELECT total_amount_lc, gross_amount_lc "
+                        f"SELECT total_amount_lc, gross_amount_lc, gross_amount_fc "
                         f"FROM {self.DATABASE}.cis_trade "
                         f"WHERE trade_id = {trade_id} LIMIT 1",
                         database=self.DATABASE,
@@ -483,12 +497,14 @@ class PositionQueueService:
                     if _trade_row:
                         _raw_tlc = _trade_row[0].get('total_amount_lc')
                         _raw_glc = _trade_row[0].get('gross_amount_lc')
+                        _raw_gfc = _trade_row[0].get('gross_amount_fc')
                         _trade_lc = Decimal(str(_raw_tlc)) if _raw_tlc else None
                         _gross_amount_lc = Decimal(str(_raw_glc)) if _raw_glc else None
+                        _gross_amount_fc = Decimal(str(_raw_gfc)) if _raw_gfc else None
                 except Exception as _lc_ex:
-                    logger.warning(f"Could not fetch LC amounts for trade {trade_id}: {_lc_ex}")
+                    logger.warning(f"Could not fetch LC/FC amounts for trade {trade_id}: {_lc_ex}")
 
-            logger.info(f"[DEBUG PQ] trade_id={trade_id} FINAL gross_amount_lc={_gross_amount_lc} trade_lc={_trade_lc} -> calling calculate_position")
+            logger.info(f"[DEBUG PQ] trade_id={trade_id} FINAL gross_amount_lc={_gross_amount_lc} trade_lc={_trade_lc} gross_amount_fc={_gross_amount_fc} -> calling calculate_position")
             success, message, position = self.position_service.calculate_position(
                 portfolio_id=item['portfolio_id'],
                 security_id=item['security_id'],
@@ -506,6 +522,7 @@ class PositionQueueService:
                 position_basis=position_basis,
                 trade_lc=_trade_lc,
                 gross_amount_lc=_gross_amount_lc,
+                gross_amount_fc=_gross_amount_fc,
             )
 
             if success:
@@ -617,7 +634,8 @@ class PositionQueueService:
             query = f"""
             SELECT trade_id, trade_type, quantity, price,
                    COALESCE(commission, 0) + COALESCE(sec_fee, 0) + COALESCE(other_charges, 0) as charges,
-                   trade_date, settle_date
+                   trade_date, settle_date,
+                   total_amount_lc, gross_amount_lc, gross_amount_fc
             FROM {self.DATABASE}.cis_trade
             WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
               AND security_label = '{self._escape(security_id)}'
@@ -763,6 +781,8 @@ class PositionQueueService:
                             _glc = Decimal(str(_raw_glc)) if _raw_glc else None
                             _raw_tlc = trade.get('total_amount_lc')
                             _tlc = Decimal(str(_raw_tlc)) if _raw_tlc else None
+                            _raw_gfc = trade.get('gross_amount_fc')
+                            _gfc = Decimal(str(_raw_gfc)) if _raw_gfc else None
                             success, msg, result = self.position_service.calculate_position(
                                 portfolio_id=portfolio_id,
                                 security_id=security_id,
@@ -784,6 +804,7 @@ class PositionQueueService:
                                 base_position_override=last_position_by_basis.get(basis),
                                 trade_lc=_tlc,
                                 gross_amount_lc=_glc,
+                                gross_amount_fc=_gfc,
                             )
 
                             if success:
@@ -1175,6 +1196,8 @@ class PositionQueueService:
         _gross_amount_lc = Decimal(str(_raw_gross_lc)) if _raw_gross_lc else None
         _raw_trade_lc = kwargs.get('total_amount_lc') or kwargs.get('trade_lc')
         _trade_lc = Decimal(str(_raw_trade_lc)) if _raw_trade_lc else None
+        _raw_gross_fc = kwargs.get('gross_amount_fc')
+        _gross_amount_fc = Decimal(str(_raw_gross_fc)) if _raw_gross_fc else None
 
         return self.position_service.calculate_position(
             portfolio_id=portfolio_id,
@@ -1193,6 +1216,7 @@ class PositionQueueService:
             position_basis=position_basis,
             trade_lc=_trade_lc,
             gross_amount_lc=_gross_amount_lc,
+            gross_amount_fc=_gross_amount_fc,
         )
 
     # =========================================================================
