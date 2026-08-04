@@ -1458,6 +1458,125 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
     )
     print("[Step 5B] New securities created (if any)")
 
+    # ---- Step 5C: fail rows Step 5B silently skipped instead of creating ----
+    # The candidates CTE above excludes rows that collide with an existing
+    # security (by name/isin/ticker) or that lose the ROW_NUMBER() tiebreak
+    # against another row in this same batch wanting the same new name. Those
+    # rows are simply absent from the INSERT — nothing marks them as failed,
+    # so Step 6 would otherwise stamp them 'VALID: New security created' even
+    # though no security was ever created for them (cis_security has no
+    # unique constraint on security_name, so a duplicate write would have
+    # silently succeeded had this guard not existed — but silently skipping
+    # is just as wrong if the position is then reported as valid).
+    impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_5b_blocked", database=DB)
+    impala_manager.execute_write(
+        f"""
+        CREATE TABLE pos_stage_5b_blocked
+        STORED AS PARQUET AS
+        WITH candidates AS (
+            SELECT
+                COALESCE(
+                    p4.desc_prefix,
+                    b.security_short_name,
+                    TRIM(regexp_replace(b.security_full_name, '(?i)\\s*COMMON\\s+(STOCK|STICK).*$', '')),
+                    b.isin
+                ) AS security_name,
+                b.row_id,
+                existing.security_id        AS dup_security_id,
+                existing.isin                AS dup_isin,
+                existing.exchange_code       AS dup_exchange,
+                existing_isin.security_id    AS dup_isin_security_id,
+                existing_isin.exchange_code  AS dup_isin_exchange,
+                existing_ticker.security_id  AS dup_ticker_security_id,
+                existing_ticker.exchange_code AS dup_ticker_exchange,
+                ROW_NUMBER() OVER (
+                    PARTITION BY UPPER(TRIM(COALESCE(
+                        p4.desc_prefix,
+                        b.security_short_name,
+                        TRIM(regexp_replace(b.security_full_name, '(?i)\\s*COMMON\\s+(STOCK|STICK).*$', '')),
+                        b.isin
+                    )))
+                    ORDER BY b.row_id
+                ) AS rn
+            FROM pos_stage_1_base b
+            JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
+            JOIN pos_stage_2_portfolio p2
+                ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
+            LEFT JOIN {DB}.cis_security existing
+                ON UPPER(TRIM(existing.security_name)) = UPPER(TRIM(COALESCE(
+                    p4.desc_prefix,
+                    b.security_short_name,
+                    TRIM(regexp_replace(b.security_full_name, '(?i)\\s*COMMON\\s+(STOCK|STICK).*$', '')),
+                    b.isin
+                )))
+            LEFT JOIN {DB}.cis_security existing_isin
+                ON b.isin IS NOT NULL AND TRIM(b.isin) != ''
+                AND UPPER(TRIM(existing_isin.isin)) = UPPER(TRIM(b.isin))
+            LEFT JOIN {DB}.cis_security existing_ticker
+                ON b.ticker IS NOT NULL AND TRIM(b.ticker) != ''
+                AND UPPER(TRIM(existing_ticker.ticker)) = UPPER(TRIM(b.ticker))
+            WHERE p4.security_status = 'NOT_FOUND: Create new security'
+              AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
+        )
+        SELECT
+            row_id,
+            CASE
+                WHEN dup_security_id IS NOT NULL THEN CONCAT(
+                    'FAIL: DUPLICATE_NAME — security [', security_name,
+                    '] already exists (security_id=', CAST(dup_security_id AS STRING),
+                    ', isin=', COALESCE(dup_isin, 'N/A'),
+                    ', exchange=', COALESCE(dup_exchange, 'N/A'), ')')
+                WHEN dup_isin_security_id IS NOT NULL THEN CONCAT(
+                    'FAIL: DUPLICATE_ISIN — a security with this ISIN already exists ',
+                    '(security_id=', CAST(dup_isin_security_id AS STRING),
+                    ', exchange=', COALESCE(dup_isin_exchange, 'N/A'), ')')
+                WHEN dup_ticker_security_id IS NOT NULL THEN CONCAT(
+                    'FAIL: DUPLICATE_TICKER — a security with this ticker already exists ',
+                    '(security_id=', CAST(dup_ticker_security_id AS STRING),
+                    ', exchange=', COALESCE(dup_ticker_exchange, 'N/A'), ')')
+                ELSE CONCAT(
+                    'FAIL: DUPLICATE_NAME — security [', security_name,
+                    '] duplicates another new security in this same upload batch')
+            END AS block_reason
+        FROM candidates
+        WHERE rn > 1
+           OR dup_security_id IS NOT NULL
+           OR dup_isin_security_id IS NOT NULL
+           OR dup_ticker_security_id IS NOT NULL
+        """,
+        database=DB
+    )
+    _blocked_count = impala_manager.execute_query(
+        "SELECT COUNT(*) AS n FROM pos_stage_5b_blocked", database=DB
+    )
+    _blocked_count = int((_blocked_count or [{}])[0].get('n', 0))
+    if _blocked_count > 0:
+        impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_tier_update", database=DB)
+        impala_manager.execute_write(
+            f"""
+            CREATE TABLE pos_stage_4_tier_update
+            STORED AS PARQUET AS
+            SELECT
+                p.row_id, p.upload_isin, p.security_full_name, p.security_short_name,
+                p.desc_prefix, p.upload_exchange, p.portfolio_status, p.resolved_country,
+                p.clean_ticker, p.final_security_id, p.final_security_name, p.final_isin,
+                p.final_exchange, p.final_country, p.final_currency, p.security_match_method,
+                COALESCE(blk.block_reason, p.security_status) AS security_status
+            FROM pos_stage_4_security_fallback p
+            LEFT JOIN pos_stage_5b_blocked blk ON p.row_id = blk.row_id
+            """,
+            database=DB
+        )
+        impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=DB)
+        impala_manager.execute_write(
+            "CREATE TABLE pos_stage_4_security_fallback STORED AS PARQUET AS "
+            "SELECT * FROM pos_stage_4_tier_update",
+            database=DB
+        )
+        impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_tier_update", database=DB)
+        print(f"[Step 5C] {_blocked_count} row(s) blocked from security creation — marked FAIL instead of duplicating")
+    impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_5b_blocked", database=DB)
+
     # ---- Step 6: consolidated staging ----
     impala_manager.execute_write("DROP TABLE IF EXISTS position_upload_staging", database=DB)
     impala_manager.execute_write(

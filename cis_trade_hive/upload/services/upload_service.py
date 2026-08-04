@@ -4395,20 +4395,19 @@ class UploadService:
                 JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
                 JOIN pos_stage_2_portfolio p2
                     ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
-                LEFT JOIN {db}.cis_security existing
-                    ON existing.is_active = true
-                    AND UPPER(TRIM(existing.security_name)) = UPPER(TRIM(COALESCE(
-                        p4.desc_prefix,
-                        b.security_short_name,
-                        TRIM(regexp_replace(b.security_full_name, '(?i)\\\\s*COMMON\\\\s+(STOCK|STICK).*$', '')),
-                        b.isin
-                    )))
                 WHERE p4.security_status = 'NOT_FOUND: Create new security'
                   AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
-                  AND existing.security_id IS NULL
                 """,
                 database=db
             )
+            # NOTE: no SQL-side existing-security_name dedup here (removed —
+            # it compared the pre-abbreviation raw name against
+            # cis_security.security_name, which stores the POST-abbreviation
+            # form for every security this ETL previously created, so the
+            # comparison almost never matched and let real name collisions
+            # through). The dedup now happens below in Python, against
+            # abbreviate_security_name(raw_name) via the same cache tiers
+            # 5/9 use — the actual value that would be written.
 
             # 5B-ii: fetch distinct candidates (rn=1), abbreviate security_name in Python
             _candidates = impala_manager.execute_query(
@@ -4431,6 +4430,19 @@ class UploadService:
                 except (TypeError, ValueError):
                     return 'NULL'
 
+            # Duplicate-name guard: a candidate's FINAL name (post-abbreviation)
+            # may collide with a security that already exists under a
+            # different exchange/ISIN — e.g. the same issuer cross-listed and
+            # matched to the wrong country upstream. cis_security has no
+            # unique constraint on security_name (only security_id, the PK),
+            # so an unguarded INSERT would silently succeed and create a
+            # second, ambiguous security with the same name. Detect this via
+            # the same abbreviated-name cache tiers 5/9 already use, skip
+            # creating those rows, and fail them instead with a clear reason.
+            _norm_cache_5b = _build_normalized_cache()
+            _collision_rows: dict = {}   # row_id -> reason string
+            _pending_names: dict = {}    # sec_name -> row_id (catches collisions within this same batch)
+
             if _candidates:
                 _now = _time.strftime('%Y-%m-%d %H:%M:%S')
                 _base_ts = int(_time.time()) * 1000
@@ -4438,6 +4450,24 @@ class UploadService:
                 for _row in _candidates:
                     _sec_name = abbreviate_security_name(_row.get('raw_security_name') or '')
                     _row_id   = int(_row.get('row_id') or 0)
+
+                    _existing = _norm_cache_5b.get(_sec_name)
+                    if _existing:
+                        _e = _existing[0]
+                        _collision_rows[_row_id] = (
+                            f"FAIL: DUPLICATE_NAME — security '{_sec_name}' already exists "
+                            f"(security_id={_e.get('security_id')}, isin={_e.get('isin') or 'N/A'}, "
+                            f"exchange={_e.get('exchange_code') or _e.get('country_of_exchange') or 'N/A'})"
+                        )
+                        continue
+                    if _sec_name in _pending_names:
+                        _collision_rows[_row_id] = (
+                            f"FAIL: DUPLICATE_NAME — security '{_sec_name}' duplicates another "
+                            f"new security in this same upload batch (row_id={_pending_names[_sec_name]})"
+                        )
+                        continue
+                    _pending_names[_sec_name] = _row_id
+
                     _value_rows.append(
                         f"({_base_ts + _row_id},"
                         f"{_sql_str(_sec_name)},"
@@ -4460,19 +4490,60 @@ class UploadService:
                         f"'POSITION_UPLOAD','{_now}',"
                         f"'POSITION_UPLOAD','{_now}')"
                     )
+
                 # Single batch INSERT — one round trip regardless of row count
+                if _value_rows:
+                    impala_manager.execute_write(
+                        f"""
+                        INSERT INTO {db}.cis_security (
+                            security_id, security_name, isin, security_description,
+                            issuer, ticker, industry, security_type, investment_type,
+                            issuer_type, quoted_unquoted, country_of_incorporation,
+                            country_of_exchange, exchange_code, currency_code,
+                            shares_outstanding, fin_nonfin_ind, src_system, status,
+                            is_active, created_by, created_at, updated_by, updated_at
+                        ) VALUES {', '.join(_value_rows)}
+                        """,
+                        database=db
+                    )
+
+            if _collision_rows:
+                _coll_when = ' '.join(
+                    f"WHEN row_id = {rid} THEN {_sql_str(reason)}"
+                    for rid, reason in _collision_rows.items()
+                )
+                impala_manager.execute_write(
+                    "DROP TABLE IF EXISTS pos_stage_4_collision_update", database=db
+                )
                 impala_manager.execute_write(
                     f"""
-                    INSERT INTO {db}.cis_security (
-                        security_id, security_name, isin, security_description,
-                        issuer, ticker, industry, security_type, investment_type,
-                        issuer_type, quoted_unquoted, country_of_incorporation,
-                        country_of_exchange, exchange_code, currency_code,
-                        shares_outstanding, fin_nonfin_ind, src_system, status,
-                        is_active, created_by, created_at, updated_by, updated_at
-                    ) VALUES {', '.join(_value_rows)}
+                    CREATE TABLE pos_stage_4_collision_update
+                    STORED AS PARQUET AS
+                    SELECT
+                        row_id, upload_isin, security_full_name, security_short_name,
+                        desc_prefix, upload_exchange, portfolio_status, resolved_country,
+                        clean_ticker, final_security_id, final_security_name, final_isin,
+                        final_exchange, final_country, final_currency, security_match_method,
+                        CASE {_coll_when} ELSE security_status END AS security_status
+                    FROM pos_stage_4_security_fallback
                     """,
                     database=db
+                )
+                impala_manager.execute_write(
+                    "DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=db
+                )
+                impala_manager.execute_write(
+                    "CREATE TABLE pos_stage_4_security_fallback STORED AS PARQUET AS "
+                    "SELECT * FROM pos_stage_4_collision_update",
+                    database=db
+                )
+                impala_manager.execute_write(
+                    "DROP TABLE IF EXISTS pos_stage_4_collision_update", database=db
+                )
+                logger.warning(
+                    f"[position_etl] Step 5B: {len(_collision_rows)} row(s) blocked — "
+                    f"security name collides with an existing/pending security under a "
+                    f"different exchange or ISIN; marked FAIL instead of creating a duplicate"
                 )
 
             if _candidates:
@@ -4480,7 +4551,7 @@ class UploadService:
                 # on the next ETL run without waiting for TTL expiry
                 UploadService._cis_abbrev_cache_ts = 0.0
 
-            logger.info(f"[position_etl] Step 5B complete — {len(_candidates)} new securities created")
+            logger.info(f"[position_etl] Step 5B complete — {len(_candidates) - len(_collision_rows)} new securities created, {len(_collision_rows)} blocked as duplicates")
             if _candidates:
                 for _c in _candidates[:5]:
                     logger.info(f"[position_etl] Step 5B: created security label='{_c.get('security_label')}' isin='{_c.get('isin')}' currency='{_c.get('currency_code')}'")
@@ -5325,7 +5396,7 @@ class UploadService:
                 'pos_stage_1_base', 'pos_stage_2_portfolio',
                 'pos_stage_3_security',
                 'pos_stage_4_security_fallback', 'pos_stage_4b_abbrev_match',
-                'pos_stage_4_tier_update',
+                'pos_stage_4_tier_update', 'pos_stage_4_collision_update',
                 'pos_stage_5_price', 'pos_stage_5b_candidates',
                 'position_upload_staging',
             ]:
