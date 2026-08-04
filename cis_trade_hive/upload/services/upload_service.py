@@ -4004,7 +4004,8 @@ class UploadService:
             else:
                 logger.info("[position_etl] Stage B (Tier 5): no PENDING rows")
 
-            # ---- Stage C (SQL): Tier 6 ISIN only, Tier 7 Ticker only, Tier 8 Full Name only ----
+            # ---- Stage C (SQL): Tier 6 ISIN only, Tier 7 Ticker only, Tier 8 Full Name only
+            #      (all three: country-blank fallback, see t6/t7/t8 comment below) ----
             impala_manager.execute_write(
                 "DROP TABLE IF EXISTS pos_stage_4_tier_update", database=db
             )
@@ -4016,6 +4017,16 @@ class UploadService:
                 pending AS (
                     SELECT * FROM pos_stage_4_security_fallback WHERE security_status = 'PENDING'
                 ),
+                -- Tiers 6/7/8 are the ISIN-only / Ticker-only / Full-Name-only
+                -- fallback for rows whose upload country was genuinely blank (SA
+                -- spec: all of tiers 6-9 are the country-blank fallback group,
+                -- mirroring tiers 2-5's country-required group). Gating only on
+                -- "tiers 1-5 found nothing" was wrong -- it also fired when the
+                -- upload DID supply a country but that country didn't match any
+                -- cis_security row (e.g. same ISIN cross-listed under a different
+                -- country), silently matching the wrong listing instead of
+                -- respecting the country mismatch signal. Tier 9 (Python, Stage D)
+                -- has the same gate applied there.
                 t6 AS (
                     SELECT p.row_id, sn.security_id, sn.security_name, sn.isin,
                            sn.exchange_code, sn.country_of_exchange, sn.currency_code,
@@ -4024,6 +4035,7 @@ class UploadService:
                     FROM pending p
                     JOIN {db}.cis_security sn
                         ON  sn.is_active = true
+                        AND (p.resolved_country IS NULL OR TRIM(p.resolved_country) = '')
                         AND p.upload_isin IS NOT NULL AND TRIM(p.upload_isin) != ''
                         AND UPPER(TRIM(p.upload_isin)) NOT IN ('NA', 'N/A', 'NIL', 'NONE', '-', 'N.A.', 'NAP')
                         AND UPPER(TRIM(CAST(p.upload_isin AS STRING))) = UPPER(TRIM(CAST(sn.isin AS STRING)))
@@ -4036,6 +4048,7 @@ class UploadService:
                     FROM pending p
                     JOIN {db}.cis_security sn
                         ON  sn.is_active = true
+                        AND (p.resolved_country IS NULL OR TRIM(p.resolved_country) = '')
                         AND p.clean_ticker IS NOT NULL AND TRIM(p.clean_ticker) != ''
                         AND regexp_replace(UPPER(TRIM(CAST(sn.ticker AS STRING))), '\\\\s+EQUITY$', '') = p.clean_ticker
                 ),
@@ -4047,6 +4060,7 @@ class UploadService:
                     FROM pending p
                     JOIN {db}.cis_security sn
                         ON  sn.is_active = true
+                        AND (p.resolved_country IS NULL OR TRIM(p.resolved_country) = '')
                         AND p.security_full_name IS NOT NULL AND TRIM(p.security_full_name) != ''
                         AND sn.security_description IS NOT NULL
                         AND UPPER(TRIM(sn.security_description)) = UPPER(TRIM(p.security_full_name))
@@ -4134,9 +4148,9 @@ class UploadService:
             logger.info(f"[position_etl] Step 4 Stage C (tiers 6-8) complete: {_s34c_bd}")
             _t = _step_time("Step 4 (security fallback)", _t)
 
-            # ---- Stage D (Python): Tier 9 — Normalized Full Name only (no country) ----
+            # ---- Stage D (Python): Tier 9 — Normalized Full Name only (country blank) ----
             _pending_d = impala_manager.execute_query(
-                "SELECT row_id, security_full_name "
+                "SELECT row_id, security_full_name, resolved_country "
                 "FROM pos_stage_4_security_fallback WHERE security_status = 'PENDING'",
                 database=db
             ) or []
@@ -4144,6 +4158,8 @@ class UploadService:
                 _norm_cache = _build_normalized_cache()
                 _t9_match, _t9_multi = {}, set()
                 for _row in _pending_d:
+                    if (_row.get('resolved_country') or '').strip():
+                        continue  # tier 9 is the country-blank fallback — a mismatch stays PENDING
                     _key = abbreviate_security_name(_row.get('security_full_name') or '')
                     if not _key:
                         continue
