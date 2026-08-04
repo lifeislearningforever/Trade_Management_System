@@ -2449,13 +2449,24 @@ class UploadService:
                     logger.debug(f"[position_etl] _breakdown({table},{col}) failed: {_be}")
                     return ''
 
-            def _sample_fails(table: str, status_col: str, limit: int = 5) -> None:
-                """Log up to `limit` failing rows — portfolio + security + reason."""
+            def _sample_fails(table: str, status_col: str, limit: int = 5,
+                               portfolio_expr: str = 'portfolio',
+                               name_expr: str = 'security_full_name',
+                               isin_expr: str = 'isin',
+                               from_clause: str = None) -> None:
+                """Log up to `limit` failing rows — portfolio + security + reason.
+
+                `from_clause` lets callers whose table lacks a bare
+                portfolio/isin column (e.g. pos_stage_4_security_fallback,
+                which only has row_id + upload_isin) supply a JOIN back to a
+                table that has it, with matching *_expr overrides.
+                """
                 try:
                     rows = impala_manager.execute_query(
                         f"""
-                        SELECT portfolio, security_full_name, isin, {status_col}
-                        FROM {table}
+                        SELECT {portfolio_expr} AS portfolio, {name_expr} AS security_full_name,
+                               {isin_expr} AS isin, {status_col}
+                        FROM {from_clause or table}
                         WHERE {status_col} LIKE 'FAIL%'
                            OR {status_col} LIKE 'NOT_FOUND%'
                         LIMIT {limit}
@@ -4209,7 +4220,14 @@ class UploadService:
             _s4_notfound = _count('pos_stage_4_security_fallback', "security_status = 'NOT_FOUND: Create new security'")
             _s4_fail = _count('pos_stage_4_security_fallback', "security_status LIKE 'FAIL%'")
             if _s4_notfound > 0 or _s4_fail > 0:
-                _sample_fails('pos_stage_4_security_fallback', 'security_status')
+                _sample_fails(
+                    'pos_stage_4_security_fallback', 'security_status',
+                    portfolio_expr='b.portfolio',
+                    name_expr='p.security_full_name',
+                    isin_expr='p.upload_isin',
+                    from_clause='pos_stage_4_security_fallback p '
+                                'JOIN pos_stage_1_base b ON p.row_id = b.row_id'
+                )
             _t = _step_time("Step 4B", _t)
 
             # ------------------------------------------------------------------
