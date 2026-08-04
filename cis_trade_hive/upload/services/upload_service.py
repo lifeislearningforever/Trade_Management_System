@@ -4432,41 +4432,93 @@ class UploadService:
 
             # Duplicate-name guard: a candidate's FINAL name (post-abbreviation)
             # may collide with a security that already exists under a
-            # different exchange/ISIN — e.g. the same issuer cross-listed and
-            # matched to the wrong country upstream. cis_security has no
+            # different exchange — the common case is the same issuer
+            # cross-listed on more than one exchange. cis_security has no
             # unique constraint on security_name (only security_id, the PK),
             # so an unguarded INSERT would silently succeed and create a
-            # second, ambiguous security with the same name. Detect this via
-            # the same abbreviated-name cache tiers 5/9 already use, skip
-            # creating those rows, and fail them instead with a clear reason.
+            # second, ambiguous security with the same name.
+            #
+            # Resolution order per candidate:
+            #   1. No collision at all       -> create with the plain abbreviated name.
+            #   2. Collision on a DIFFERENT exchange (the cross-listing case)
+            #                                 -> disambiguate by appending the
+            #                                    exchange code, e.g. 'DBS' on
+            #                                    a second exchange becomes
+            #                                    'DBS (HK)'; create under that
+            #                                    name instead.
+            #   3. Collision on the SAME exchange, or the disambiguated name
+            #      *still* collides         -> genuinely ambiguous, can't be
+            #                                   resolved automatically — fail
+            #                                   the row instead of creating or
+            #                                   silently skipping it.
             _norm_cache_5b = _build_normalized_cache()
-            _collision_rows: dict = {}   # row_id -> reason string
-            _pending_names: dict = {}    # sec_name -> row_id (catches collisions within this same batch)
+            _collision_rows: dict = {}   # row_id -> FAIL reason string
+            _pending: dict = {}          # sec_name -> {'row_id':.., 'exchange':..} (this batch)
+
+            def _exch_key(d: dict) -> str:
+                return (d.get('country_of_exchange') or d.get('exchange_code')
+                        or d.get('exchange') or '').strip().upper()
+
+            def _lookup(name: str) -> list:
+                hits = list(_norm_cache_5b.get(name) or [])
+                _p = _pending.get(name)
+                if _p:
+                    hits.append({
+                        'security_id': f"pending row_id={_p['row_id']}",
+                        'exchange_code': _p['exchange'], 'country_of_exchange': _p['exchange'],
+                        'isin': None,
+                    })
+                return hits
 
             if _candidates:
                 _now = _time.strftime('%Y-%m-%d %H:%M:%S')
                 _base_ts = int(_time.time()) * 1000
                 _value_rows = []
                 for _row in _candidates:
-                    _sec_name = abbreviate_security_name(_row.get('raw_security_name') or '')
+                    _raw_name = _row.get('raw_security_name') or ''
                     _row_id   = int(_row.get('row_id') or 0)
+                    _cand_exch = _exch_key(_row)
+                    _base_name = abbreviate_security_name(_raw_name)
 
-                    _existing = _norm_cache_5b.get(_sec_name)
-                    if _existing:
-                        _e = _existing[0]
-                        _collision_rows[_row_id] = (
-                            f"FAIL: DUPLICATE_NAME — security '{_sec_name}' already exists "
-                            f"(security_id={_e.get('security_id')}, isin={_e.get('isin') or 'N/A'}, "
-                            f"exchange={_e.get('exchange_code') or _e.get('country_of_exchange') or 'N/A'})"
-                        )
+                    _sec_name = None
+                    _fail_reason = None
+                    _hits = _lookup(_base_name)
+                    if not _hits:
+                        _sec_name = _base_name
+                    else:
+                        _same_exch = next((h for h in _hits if _exch_key(h) == _cand_exch), None)
+                        if _same_exch:
+                            _fail_reason = (
+                                f"FAIL: DUPLICATE_NAME — security '{_base_name}' already exists on the "
+                                f"same exchange (security_id={_same_exch.get('security_id')}, "
+                                f"isin={_same_exch.get('isin') or 'N/A'}, exchange={_cand_exch or 'N/A'})"
+                            )
+                        else:
+                            # Cross-listed on a different exchange — disambiguate.
+                            _suffix = _cand_exch or 'UNK'
+                            _max_base = max(10, 35 - len(_suffix) - 3)
+                            _disamb_name = f"{abbreviate_security_name(_raw_name, max_len=_max_base)} ({_suffix})"
+                            _hits2 = _lookup(_disamb_name)
+                            if _hits2:
+                                _e = _hits2[0]
+                                _fail_reason = (
+                                    f"FAIL: DUPLICATE_NAME — security '{_base_name}' already exists under a "
+                                    f"different exchange (security_id={_e.get('security_id')}, "
+                                    f"exchange={_exch_key(_e) or 'N/A'}); disambiguated name '{_disamb_name}' "
+                                    f"also collides — needs manual resolution"
+                                )
+                            else:
+                                _sec_name = _disamb_name
+                                logger.info(
+                                    f"[position_etl] Step 5B: disambiguated '{_base_name}' -> '{_sec_name}' "
+                                    f"(candidate exchange={_cand_exch or 'N/A'}, existing exchange="
+                                    f"{_exch_key(_hits[0]) or 'N/A'})"
+                                )
+
+                    if _fail_reason:
+                        _collision_rows[_row_id] = _fail_reason
                         continue
-                    if _sec_name in _pending_names:
-                        _collision_rows[_row_id] = (
-                            f"FAIL: DUPLICATE_NAME — security '{_sec_name}' duplicates another "
-                            f"new security in this same upload batch (row_id={_pending_names[_sec_name]})"
-                        )
-                        continue
-                    _pending_names[_sec_name] = _row_id
+                    _pending[_sec_name] = {'row_id': _row_id, 'exchange': _cand_exch}
 
                     _value_rows.append(
                         f"({_base_ts + _row_id},"

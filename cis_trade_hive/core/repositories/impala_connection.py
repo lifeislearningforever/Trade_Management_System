@@ -107,12 +107,21 @@ class ImpalaConnectionManager:
 
             logger.info(f"IMPALA_CONFIG USE_SSL={use_ssl}, env IMPALA_USE_SSL={os.environ.get('IMPALA_USE_SSL', 'NOT_SET')}, CIS_ENV={os.environ.get('CIS_ENV', 'NOT_SET')}")
 
+            # Socket-level timeout for the underlying Thrift transport — bounds
+            # any single RPC (connect, ExecuteStatement, GetOperationStatus
+            # poll, FetchResults) that never gets a response, e.g. a network
+            # blip or a fully unresponsive daemon.
+            _socket_timeout = int(os.environ.get(
+                'IMPALA_TIMEOUT', config.get('TIMEOUT', 60)
+            ))
+
             # Build connection parameters
             conn_params = {
                 'host': config['HOST'],
                 'port': config['PORT'],
                 'database': db_name,
                 'auth_mechanism': auth_mode,
+                'timeout': _socket_timeout,
             }
 
             # Add SSL if enabled (for Work/CML environments)
@@ -137,6 +146,27 @@ class ImpalaConnectionManager:
             # Store creation time for recycling
             connection._created_at = time.time()
             connection._database = db_name
+
+            # Server-side query timeout (session-scoped Impala query option).
+            # The socket-level `timeout` above only bounds a single RPC round
+            # trip — impyla's cursor.execute() polls GetOperationStatus in a
+            # plain `while True` loop with NO overall cap (see
+            # impala.hiveserver2.HiveServer2Cursor._wait_to_finish), so a
+            # query that Impala's admission control queues indefinitely (each
+            # poll succeeds fine, just keeps reporting "still pending") hangs
+            # the calling thread forever and the pooled connection is never
+            # returned (return_connection() only runs after execute() itself
+            # returns). QUERY_TIMEOUT_S makes Impala's coordinator cancel the
+            # query itself once it's been idle/queued past the limit, which
+            # turns the poll loop's next GetOperationStatus into an error
+            # response instead of an infinite "still pending".
+            _query_timeout_s = int(os.environ.get('IMPALA_QUERY_TIMEOUT_S', '300'))
+            try:
+                _tcur = connection.cursor()
+                _tcur.execute(f"SET QUERY_TIMEOUT_S={_query_timeout_s}")
+                _tcur.close()
+            except Exception as _qte:
+                logger.warning(f"Could not set QUERY_TIMEOUT_S on new connection: {_qte}")
 
             # Log caller for connection leak tracing
             import traceback

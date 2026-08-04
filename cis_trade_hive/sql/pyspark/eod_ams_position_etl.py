@@ -1366,204 +1366,199 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
     print("[Step 5] Price lookup complete")
 
     # ---- Step 5B: auto-create new securities ----
+    # Python-driven (like upload_service.py's equivalent step) rather than a
+    # single SQL INSERT, because a plain name/isin/ticker collision check
+    # can only ever skip-or-fail a candidate. cis_security has no unique
+    # constraint on security_name (only security_id, the PK), so an
+    # unguarded INSERT on a name collision would silently succeed and
+    # create a second, ambiguous security — and skipping it silently is
+    # just as wrong, since Step 6 would still report the row VALID.
+    #
+    # Resolution order per candidate:
+    #   1. No collision at all        -> create with the plain name.
+    #   2. Collision on a DIFFERENT exchange (the common case: the same
+    #      issuer cross-listed on more than one exchange) -> disambiguate
+    #      by appending the exchange code, e.g. 'DBS' -> 'DBS (HK)'.
+    #   3. Collision on the SAME exchange, or the disambiguated name still
+    #      collides -> genuinely ambiguous, can't be resolved automatically
+    #      -> fail the row instead of creating or silently skipping it.
+    impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_5b_candidates", database=DB)
     impala_manager.execute_write(
         f"""
-        INSERT INTO {DB}.cis_security (
-            security_id, security_name, isin, security_description, issuer, ticker,
-            industry, security_type, investment_type, issuer_type, quoted_unquoted,
-            country_of_incorporation, country_of_exchange, exchange_code, currency_code,
-            shares_outstanding, fin_nonfin_ind, src_system, status, is_active,
-            created_by, created_at, updated_by, updated_at
-        )
-        WITH candidates AS (
-            SELECT
-                -- Use desc_prefix (COMMON STOCK/STICK already stripped in Step 4).
-                -- Fallback strips the suffix inline if desc_prefix is null/empty.
-                COALESCE(
-                    p4.desc_prefix,
-                    b.security_short_name,
-                    TRIM(regexp_replace(
-                        b.security_full_name,
-                        '(?i)\\s*COMMON\\s+(STOCK|STICK).*$',
-                        ''
-                    )),
-                    b.isin
-                ) AS security_name,
-                b.isin, b.security_full_name AS security_description,
-                b.ticker, b.industry, b.security_type, b.issuer_type, b.quoted_unquoted,
-                b.country_of_incorporation, b.country_of_exchange, b.`exchange`,
-                b.security_currency AS currency_code,
-                b.shares_outstanding, b.fin_nonfin_co,
-                b.row_id,
-                -- One row per unique security_name across all source tables in this batch
-                ROW_NUMBER() OVER (
-                    PARTITION BY UPPER(TRIM(COALESCE(
-                        p4.desc_prefix,
-                        b.security_short_name,
-                        TRIM(regexp_replace(b.security_full_name, '(?i)\\s*COMMON\\s+(STOCK|STICK).*$', '')),
-                        b.isin
-                    )))
-                    ORDER BY b.row_id
-                ) AS rn
-            FROM pos_stage_1_base b
-            JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
-            -- Only create security when portfolio also matched — prevents orphan securities
-            JOIN pos_stage_2_portfolio p2
-                ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
-            -- Dedup guard 1: skip if a security with the same name already exists
-            --   NOTE: intentionally includes inactive securities (is_active = false)
-            --   to avoid re-creating securities that were deactivated/merged.
-            LEFT JOIN {DB}.cis_security existing
-                ON UPPER(TRIM(existing.security_name)) = UPPER(TRIM(COALESCE(
-                    p4.desc_prefix,
-                    b.security_short_name,
-                    TRIM(regexp_replace(b.security_full_name, '(?i)\\s*COMMON\\s+(STOCK|STICK).*$', '')),
-                    b.isin
-                )))
-            -- Dedup guard 2: skip if a security with the same ISIN already exists
-            LEFT JOIN {DB}.cis_security existing_isin
-                ON b.isin IS NOT NULL AND TRIM(b.isin) != ''
-                AND UPPER(TRIM(existing_isin.isin)) = UPPER(TRIM(b.isin))
-            -- Dedup guard 3: skip if a security with the same ticker already exists
-            --   (GMP m_security_code mapped to ticker field, e.g. "ANET UN")
-            LEFT JOIN {DB}.cis_security existing_ticker
-                ON b.ticker IS NOT NULL AND TRIM(b.ticker) != ''
-                AND UPPER(TRIM(existing_ticker.ticker)) = UPPER(TRIM(b.ticker))
-            WHERE p4.security_status = 'NOT_FOUND: Create new security'
-              AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
-              AND existing.security_id IS NULL
-              AND existing_isin.security_id IS NULL
-              AND existing_ticker.security_id IS NULL
-        )
-        SELECT
-            (UNIX_TIMESTAMP() * 1000) + row_id AS security_id,
-            security_name,
-            isin, security_description,
-            NULL AS issuer, ticker, industry, security_type,
-            NULL AS investment_type, issuer_type, quoted_unquoted,
-            country_of_incorporation, country_of_exchange, `exchange`,
-            currency_code,
-            CAST(shares_outstanding AS BIGINT) AS shares_outstanding,
-            fin_nonfin_co AS fin_nonfin_ind,
-            'CIS' AS src_system,
-            'ACTIVE' AS status, TRUE AS is_active,
-            'EOD_AMS_ETL' AS created_by,
-            from_unixtime(UNIX_TIMESTAMP(), 'yyyy-MM-dd HH:mm:ss') AS created_at,
-            'EOD_AMS_ETL' AS updated_by,
-            from_unixtime(UNIX_TIMESTAMP(), 'yyyy-MM-dd HH:mm:ss') AS updated_at
-        FROM candidates
-        WHERE rn = 1
-        """,
-        database=DB
-    )
-    print("[Step 5B] New securities created (if any)")
-
-    # ---- Step 5C: fail rows Step 5B silently skipped instead of creating ----
-    # The candidates CTE above excludes rows that collide with an existing
-    # security (by name/isin/ticker) or that lose the ROW_NUMBER() tiebreak
-    # against another row in this same batch wanting the same new name. Those
-    # rows are simply absent from the INSERT — nothing marks them as failed,
-    # so Step 6 would otherwise stamp them 'VALID: New security created' even
-    # though no security was ever created for them (cis_security has no
-    # unique constraint on security_name, so a duplicate write would have
-    # silently succeeded had this guard not existed — but silently skipping
-    # is just as wrong if the position is then reported as valid).
-    impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_5b_blocked", database=DB)
-    impala_manager.execute_write(
-        f"""
-        CREATE TABLE pos_stage_5b_blocked
+        CREATE TABLE pos_stage_5b_candidates
         STORED AS PARQUET AS
-        WITH candidates AS (
-            SELECT
-                COALESCE(
-                    p4.desc_prefix,
-                    b.security_short_name,
-                    TRIM(regexp_replace(b.security_full_name, '(?i)\\s*COMMON\\s+(STOCK|STICK).*$', '')),
-                    b.isin
-                ) AS security_name,
-                b.row_id,
-                existing.security_id        AS dup_security_id,
-                existing.isin                AS dup_isin,
-                existing.exchange_code       AS dup_exchange,
-                existing_isin.security_id    AS dup_isin_security_id,
-                existing_isin.exchange_code  AS dup_isin_exchange,
-                existing_ticker.security_id  AS dup_ticker_security_id,
-                existing_ticker.exchange_code AS dup_ticker_exchange,
-                ROW_NUMBER() OVER (
-                    PARTITION BY UPPER(TRIM(COALESCE(
-                        p4.desc_prefix,
-                        b.security_short_name,
-                        TRIM(regexp_replace(b.security_full_name, '(?i)\\s*COMMON\\s+(STOCK|STICK).*$', '')),
-                        b.isin
-                    )))
-                    ORDER BY b.row_id
-                ) AS rn
-            FROM pos_stage_1_base b
-            JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
-            JOIN pos_stage_2_portfolio p2
-                ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
-            LEFT JOIN {DB}.cis_security existing
-                ON UPPER(TRIM(existing.security_name)) = UPPER(TRIM(COALESCE(
+        SELECT
+            COALESCE(
+                p4.desc_prefix,
+                b.security_short_name,
+                TRIM(regexp_replace(b.security_full_name, '(?i)\\s*COMMON\\s+(STOCK|STICK).*$', '')),
+                b.isin
+            ) AS raw_security_name,
+            b.isin, b.security_full_name AS security_description,
+            b.ticker, b.industry, b.security_type, b.issuer_type, b.quoted_unquoted,
+            b.country_of_incorporation, b.country_of_exchange, b.`exchange`,
+            b.security_currency AS currency_code,
+            b.shares_outstanding, b.fin_nonfin_co,
+            b.row_id,
+            ROW_NUMBER() OVER (
+                PARTITION BY UPPER(TRIM(COALESCE(
                     p4.desc_prefix,
                     b.security_short_name,
                     TRIM(regexp_replace(b.security_full_name, '(?i)\\s*COMMON\\s+(STOCK|STICK).*$', '')),
                     b.isin
                 )))
-            LEFT JOIN {DB}.cis_security existing_isin
-                ON b.isin IS NOT NULL AND TRIM(b.isin) != ''
-                AND UPPER(TRIM(existing_isin.isin)) = UPPER(TRIM(b.isin))
-            LEFT JOIN {DB}.cis_security existing_ticker
-                ON b.ticker IS NOT NULL AND TRIM(b.ticker) != ''
-                AND UPPER(TRIM(existing_ticker.ticker)) = UPPER(TRIM(b.ticker))
-            WHERE p4.security_status = 'NOT_FOUND: Create new security'
-              AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
-        )
-        SELECT
-            row_id,
-            CASE
-                WHEN dup_security_id IS NOT NULL THEN CONCAT(
-                    'FAIL: DUPLICATE_NAME — security [', security_name,
-                    '] already exists (security_id=', CAST(dup_security_id AS STRING),
-                    ', isin=', COALESCE(dup_isin, 'N/A'),
-                    ', exchange=', COALESCE(dup_exchange, 'N/A'), ')')
-                WHEN dup_isin_security_id IS NOT NULL THEN CONCAT(
-                    'FAIL: DUPLICATE_ISIN — a security with this ISIN already exists ',
-                    '(security_id=', CAST(dup_isin_security_id AS STRING),
-                    ', exchange=', COALESCE(dup_isin_exchange, 'N/A'), ')')
-                WHEN dup_ticker_security_id IS NOT NULL THEN CONCAT(
-                    'FAIL: DUPLICATE_TICKER — a security with this ticker already exists ',
-                    '(security_id=', CAST(dup_ticker_security_id AS STRING),
-                    ', exchange=', COALESCE(dup_ticker_exchange, 'N/A'), ')')
-                ELSE CONCAT(
-                    'FAIL: DUPLICATE_NAME — security [', security_name,
-                    '] duplicates another new security in this same upload batch')
-            END AS block_reason
-        FROM candidates
-        WHERE rn > 1
-           OR dup_security_id IS NOT NULL
-           OR dup_isin_security_id IS NOT NULL
-           OR dup_ticker_security_id IS NOT NULL
+                ORDER BY b.row_id
+            ) AS rn
+        FROM pos_stage_1_base b
+        JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
+        JOIN pos_stage_2_portfolio p2
+            ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
+        WHERE p4.security_status = 'NOT_FOUND: Create new security'
+          AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
         """,
         database=DB
     )
-    _blocked_count = impala_manager.execute_query(
-        "SELECT COUNT(*) AS n FROM pos_stage_5b_blocked", database=DB
-    )
-    _blocked_count = int((_blocked_count or [{}])[0].get('n', 0))
-    if _blocked_count > 0:
+    _candidates = impala_manager.execute_query(
+        "SELECT * FROM pos_stage_5b_candidates WHERE rn = 1", database=DB
+    ) or []
+
+    def _sql_str(v):
+        # Impala uses C-style \' escaping, not doubled quotes.
+        if v in (None, ''):
+            return 'NULL'
+        s = str(v).replace('\\', '\\\\').replace("'", "\\'")
+        return "'" + s + "'"
+
+    def _sql_bigint(v):
+        try:
+            return str(int(float(v)))
+        except (TypeError, ValueError):
+            return 'NULL'
+
+    _norm_cache_5b = _build_normalized_cache()
+    _collision_rows: dict = {}   # row_id -> FAIL reason string
+    _pending: dict = {}          # sec_name -> {'row_id':.., 'exchange':..} (this batch)
+
+    def _exch_key(d: dict) -> str:
+        return (d.get('country_of_exchange') or d.get('exchange_code')
+                or d.get('exchange') or '').strip().upper()
+
+    def _lookup(name: str) -> list:
+        hits = list(_norm_cache_5b.get(name) or [])
+        p = _pending.get(name)
+        if p:
+            hits.append({
+                'security_id': f"pending row_id={p['row_id']}",
+                'exchange_code': p['exchange'], 'country_of_exchange': p['exchange'],
+                'isin': None,
+            })
+        return hits
+
+    if _candidates:
+        _base_ts = int(datetime.now().timestamp()) * 1000
+        _now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        _value_rows = []
+        for _row in _candidates:
+            _raw_name = _row.get('raw_security_name') or ''
+            _row_id   = int(_row.get('row_id') or 0)
+            _cand_exch = _exch_key(_row)
+            _base_name = abbreviate_security_name(_raw_name)
+
+            _sec_name = None
+            _fail_reason = None
+            _hits = _lookup(_base_name)
+            if not _hits:
+                _sec_name = _base_name
+            else:
+                _same_exch = next((h for h in _hits if _exch_key(h) == _cand_exch), None)
+                if _same_exch:
+                    _fail_reason = (
+                        f"FAIL: DUPLICATE_NAME — security '{_base_name}' already exists on the "
+                        f"same exchange (security_id={_same_exch.get('security_id')}, "
+                        f"isin={_same_exch.get('isin') or 'N/A'}, exchange={_cand_exch or 'N/A'})"
+                    )
+                else:
+                    # Cross-listed on a different exchange — disambiguate.
+                    _suffix = _cand_exch or 'UNK'
+                    _max_base = max(10, 35 - len(_suffix) - 3)
+                    _disamb_name = f"{abbreviate_security_name(_raw_name, max_len=_max_base)} ({_suffix})"
+                    _hits2 = _lookup(_disamb_name)
+                    if _hits2:
+                        _e = _hits2[0]
+                        _fail_reason = (
+                            f"FAIL: DUPLICATE_NAME — security '{_base_name}' already exists under a "
+                            f"different exchange (security_id={_e.get('security_id')}, "
+                            f"exchange={_exch_key(_e) or 'N/A'}); disambiguated name '{_disamb_name}' "
+                            f"also collides — needs manual resolution"
+                        )
+                    else:
+                        _sec_name = _disamb_name
+                        print(
+                            f"[Step 5B] disambiguated '{_base_name}' -> '{_sec_name}' "
+                            f"(candidate exchange={_cand_exch or 'N/A'}, existing exchange="
+                            f"{_exch_key(_hits[0]) or 'N/A'})"
+                        )
+
+            if _fail_reason:
+                _collision_rows[_row_id] = _fail_reason
+                continue
+            _pending[_sec_name] = {'row_id': _row_id, 'exchange': _cand_exch}
+
+            _value_rows.append(
+                f"({_base_ts + _row_id},"
+                f"{_sql_str(_sec_name)},"
+                f"{_sql_str(_row.get('isin'))},"
+                f"{_sql_str(_row.get('security_description'))},"
+                f"NULL,"
+                f"{_sql_str(_row.get('ticker'))},"
+                f"{_sql_str(_row.get('industry'))},"
+                f"{_sql_str(_row.get('security_type'))},"
+                f"NULL,"
+                f"{_sql_str(_row.get('issuer_type'))},"
+                f"{_sql_str(_row.get('quoted_unquoted'))},"
+                f"{_sql_str(_row.get('country_of_incorporation'))},"
+                f"{_sql_str(_row.get('country_of_exchange'))},"
+                f"{_sql_str(_row.get('exchange'))},"
+                f"{_sql_str(_row.get('currency_code'))},"
+                f"{_sql_bigint(_row.get('shares_outstanding'))},"
+                f"{_sql_str(_row.get('fin_nonfin_co'))},"
+                f"'CIS','ACTIVE',TRUE,"
+                f"'EOD_AMS_ETL','{_now}',"
+                f"'EOD_AMS_ETL','{_now}')"
+            )
+
+        if _value_rows:
+            impala_manager.execute_write(
+                f"""
+                INSERT INTO {DB}.cis_security (
+                    security_id, security_name, isin, security_description,
+                    issuer, ticker, industry, security_type, investment_type,
+                    issuer_type, quoted_unquoted, country_of_incorporation,
+                    country_of_exchange, exchange_code, currency_code,
+                    shares_outstanding, fin_nonfin_ind, src_system, status,
+                    is_active, created_by, created_at, updated_by, updated_at
+                ) VALUES {', '.join(_value_rows)}
+                """,
+                database=DB
+            )
+
+    if _collision_rows:
+        _coll_when = ' '.join(
+            f"WHEN row_id = {rid} THEN {_sql_str(reason)}"
+            for rid, reason in _collision_rows.items()
+        )
         impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_tier_update", database=DB)
         impala_manager.execute_write(
             f"""
             CREATE TABLE pos_stage_4_tier_update
             STORED AS PARQUET AS
             SELECT
-                p.row_id, p.upload_isin, p.security_full_name, p.security_short_name,
-                p.desc_prefix, p.upload_exchange, p.portfolio_status, p.resolved_country,
-                p.clean_ticker, p.final_security_id, p.final_security_name, p.final_isin,
-                p.final_exchange, p.final_country, p.final_currency, p.security_match_method,
-                COALESCE(blk.block_reason, p.security_status) AS security_status
-            FROM pos_stage_4_security_fallback p
-            LEFT JOIN pos_stage_5b_blocked blk ON p.row_id = blk.row_id
+                row_id, upload_isin, security_full_name, security_short_name,
+                desc_prefix, upload_exchange, portfolio_status, resolved_country,
+                clean_ticker, final_security_id, final_security_name, final_isin,
+                final_exchange, final_country, final_currency, security_match_method,
+                CASE {_coll_when} ELSE security_status END AS security_status
+            FROM pos_stage_4_security_fallback
             """,
             database=DB
         )
@@ -1574,8 +1569,12 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             database=DB
         )
         impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_tier_update", database=DB)
-        print(f"[Step 5C] {_blocked_count} row(s) blocked from security creation — marked FAIL instead of duplicating")
-    impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_5b_blocked", database=DB)
+
+    print(
+        f"[Step 5B] {len(_candidates) - len(_collision_rows)} new securities created, "
+        f"{len(_collision_rows)} blocked as duplicates"
+    )
+    impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_5b_candidates", database=DB)
 
     # ---- Step 6: consolidated staging ----
     impala_manager.execute_write("DROP TABLE IF EXISTS position_upload_staging", database=DB)
