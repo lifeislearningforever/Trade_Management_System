@@ -2370,10 +2370,17 @@ class UploadService:
         upload_id: str,
         src_id: str,
         processing_date: str,
-        updated_by: str
+        updated_by: str,
+        auto_create_security: bool = False
     ) -> Tuple[bool, str, Dict[str, Any]]:
         """
         Execute the position upload transform pipeline for a given partition.
+
+        auto_create_security: defaults to False. When False (default), Step 5B
+          does not create any new cis_security records — every row that would
+          otherwise have been 'NOT_FOUND: Create new security' is failed
+          instead, and position_upload_report reflects it as INVALID. Pass
+          True to opt in to auto-creating new securities.
 
         Runs the Hive/Impala equivalent of position_upload_transform_optimized.sql:
           Step 1 — build pos_stage_1_base from position_upload_standardized
@@ -3639,6 +3646,117 @@ class UploadService:
             _t = _step_time("Step 1 (base staging)", _t)
 
             # ------------------------------------------------------------------
+            # Step 1B: universal country full-name -> code resolution (ALL
+            # formats). Previously only Format 5 resolved a country full name
+            # (e.g. "Taiwan (Republic of China)") to its code via the
+            # gmp_cis_sta_dly_country LUT -- formats 1-4 passed
+            # country_of_exchange/incorporation/risk/operation straight
+            # through. Applied here uniformly, after Step 1, so it works
+            # regardless of format. Safe for formats whose raw value is
+            # already a proper code: the LUT lookup simply finds no match and
+            # the original value passes through unchanged.
+            #
+            # Uses the same trim-at-"("-or-","-then-lookup approach as
+            # Format 5's _resolve_country(), against a small per-row Python
+            # dict lookup (NOT a SQL CASE WHEN across the ~250-row LUT --
+            # already found to be too slow for Impala's planner, see
+            # _build_country_map_for_format5's docstring). Only rewrites
+            # pos_stage_1_base when at least one row's value actually changed,
+            # and the CASE WHEN only spans the affected rows, not the LUT.
+            # ------------------------------------------------------------------
+            _univ_country_map = _build_country_map_for_format5(
+                impala_manager, db, processing_date, src_id
+            )
+            if _univ_country_map:
+                def _resolve_country_universal(raw_val):
+                    if not raw_val:
+                        return None
+                    import re as _re_ucr
+                    key = str(raw_val).upper().strip()
+                    key = _re_ucr.split(r'[(,]', key, 1)[0].strip()
+                    return _univ_country_map.get(key) or _univ_country_map.get(_normalize_country_key(key))
+
+                _country_cols = ('country_of_exchange', 'country_of_incorporation',
+                                  'country_of_risk', 'country_of_operation')
+                _s1b_rows = impala_manager.execute_query(
+                    f"SELECT row_id, {', '.join(_country_cols)} FROM pos_stage_1_base",
+                    database=db
+                ) or []
+
+                _overrides: dict = {}  # row_id -> {col: resolved_value}
+                for _r in _s1b_rows:
+                    _row_over = {}
+                    for _col in _country_cols:
+                        _raw = _r.get(_col)
+                        _resolved = _resolve_country_universal(_raw)
+                        if _resolved and _resolved != _raw:
+                            _row_over[_col] = _resolved
+                    if _row_over:
+                        _overrides[int(_r['row_id'])] = _row_over
+
+                if _overrides:
+                    def _sql_str_1b(v):
+                        if v in (None, ''):
+                            return 'NULL'
+                        s = str(v).replace('\\', '\\\\').replace("'", "\\'")
+                        return "'" + s + "'"
+
+                    def _case_for(col: str) -> str:
+                        _branches = ' '.join(
+                            f"WHEN row_id = {rid} THEN {_sql_str_1b(vals[col])}"
+                            for rid, vals in _overrides.items() if col in vals
+                        )
+                        if not _branches:
+                            return col
+                        return f"CASE {_branches} ELSE {col} END AS {col}"
+
+                    impala_manager.execute_write(
+                        "DROP TABLE IF EXISTS pos_stage_1b_country", database=db
+                    )
+                    impala_manager.execute_write(
+                        f"""
+                        CREATE TABLE pos_stage_1b_country
+                        STORED AS PARQUET AS
+                        SELECT
+                            row_id, portfolio, security_full_name, security_short_name,
+                            isin, ticker, quantity, shares_outstanding, shares_issued,
+                            pct_holding, market_price, average_cost, cost_fc,
+                            market_value_fc, net_book_value_fc, unrealized_pnl_fc,
+                            cost_lc, market_value_lc, net_book_value_lc,
+                            unrealized_pnl_lc, provision_lc, provision_fc, product_type,
+                            security_type, quoted_unquoted, industry, fin_nonfin_co,
+                            issuer_type, reits_or_fund_y_n, `exchange`, country_code,
+                            {_case_for('country_of_exchange')},
+                            {_case_for('country_of_incorporation')},
+                            {_case_for('country_of_risk')},
+                            {_case_for('country_of_operation')},
+                            security_currency, corp_code, branch_code, cost_centre,
+                            cels, bwcif_sg, bwcif_ovs, mas_6d_code_sg, mas_6d_code_ovs,
+                            position_basis, reporting_date, maturity_date, src_system,
+                            sub_system, data_cat, data_frq, source_table, etl_insert_ts,
+                            etl_batch_id, src_id, processing_date
+                        FROM pos_stage_1_base
+                        """,
+                        database=db
+                    )
+                    impala_manager.execute_write(
+                        "DROP TABLE IF EXISTS pos_stage_1_base", database=db
+                    )
+                    impala_manager.execute_write(
+                        "CREATE TABLE pos_stage_1_base STORED AS PARQUET AS "
+                        "SELECT * FROM pos_stage_1b_country",
+                        database=db
+                    )
+                    impala_manager.execute_write(
+                        "DROP TABLE IF EXISTS pos_stage_1b_country", database=db
+                    )
+                    logger.info(
+                        f"[position_etl] Step 1B: resolved country full-name -> code "
+                        f"for {len(_overrides)} row(s)"
+                    )
+            _t = _step_time("Step 1B (universal country resolution)", _t)
+
+            # ------------------------------------------------------------------
             # Step 2: Portfolio validation — join on pf.name (exact match)
             # ------------------------------------------------------------------
             impala_manager.execute_write(
@@ -4397,6 +4515,7 @@ class UploadService:
                     ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
                 WHERE p4.security_status = 'NOT_FOUND: Create new security'
                   AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
+                  AND {'TRUE' if auto_create_security else 'FALSE'}
                 """,
                 database=db
             )
@@ -4444,7 +4563,7 @@ class UploadService:
             #                                 -> disambiguate by appending the
             #                                    exchange code, e.g. 'DBS' on
             #                                    a second exchange becomes
-            #                                    'DBS (HK)'; create under that
+            #                                    'DBS HK'; create under that
             #                                    name instead.
             #   3. Collision on the SAME exchange, or the disambiguated name
             #      *still* collides         -> genuinely ambiguous, can't be
@@ -4496,8 +4615,8 @@ class UploadService:
                         else:
                             # Cross-listed on a different exchange — disambiguate.
                             _suffix = _cand_exch or 'UNK'
-                            _max_base = max(10, 35 - len(_suffix) - 3)
-                            _disamb_name = f"{abbreviate_security_name(_raw_name, max_len=_max_base)} ({_suffix})"
+                            _max_base = max(10, 35 - len(_suffix) - 1)
+                            _disamb_name = f"{abbreviate_security_name(_raw_name, max_len=_max_base)} {_suffix}"
                             _hits2 = _lookup(_disamb_name)
                             if _hits2:
                                 _e = _hits2[0]
@@ -4608,6 +4727,57 @@ class UploadService:
                 for _c in _candidates[:5]:
                     logger.info(f"[position_etl] Step 5B: created security label='{_c.get('security_label')}' isin='{_c.get('isin')}' currency='{_c.get('currency_code')}'")
             _t = _step_time("Step 5B (new security creation)", _t)
+
+            # ------------------------------------------------------------------
+            # Step 5D: when auto_create_security is False, pos_stage_5b_candidates
+            # was forced empty above so nothing got created — fail every row
+            # still sitting at 'NOT_FOUND: Create new security' instead of
+            # letting Step 6 report it as valid. Uses a broad status-only
+            # rewrite (not a per-row CASE) since every NOT_FOUND row gets the
+            # same reason here, unlike the per-row collision reasons above.
+            # ------------------------------------------------------------------
+            if not auto_create_security:
+                impala_manager.execute_write(
+                    "DROP TABLE IF EXISTS pos_stage_4_tier_update", database=db
+                )
+                impala_manager.execute_write(
+                    """
+                    CREATE TABLE pos_stage_4_tier_update
+                    STORED AS PARQUET AS
+                    SELECT
+                        row_id, upload_isin, security_full_name, security_short_name,
+                        desc_prefix, upload_exchange, portfolio_status, resolved_country,
+                        clean_ticker, final_security_id, final_security_name, final_isin,
+                        final_exchange, final_country, final_currency, security_match_method,
+                        CASE
+                            WHEN security_status = 'NOT_FOUND: Create new security'
+                                THEN 'FAIL: Security not found — auto-create disabled for this upload'
+                            ELSE security_status
+                        END AS security_status
+                    FROM pos_stage_4_security_fallback
+                    """,
+                    database=db
+                )
+                impala_manager.execute_write(
+                    "DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=db
+                )
+                impala_manager.execute_write(
+                    "CREATE TABLE pos_stage_4_security_fallback STORED AS PARQUET AS "
+                    "SELECT * FROM pos_stage_4_tier_update",
+                    database=db
+                )
+                impala_manager.execute_write(
+                    "DROP TABLE IF EXISTS pos_stage_4_tier_update", database=db
+                )
+                _notfound_failed = _count(
+                    'pos_stage_4_security_fallback',
+                    "security_status LIKE 'FAIL: Security not found%'"
+                )
+                logger.info(
+                    f"[position_etl] Step 5D: auto_create_security=False — "
+                    f"{_notfound_failed} row(s) failed instead of creating a new security"
+                )
+                _t = _step_time("Step 5D (auto-create disabled)", _t)
 
             # ------------------------------------------------------------------
             # Step 6: Final staging — INNER JOIN on portfolio PASS; compute
@@ -5445,7 +5615,7 @@ class UploadService:
 
             # Clean up intermediate staging tables (keep report + failed for UI)
             for tbl in [
-                'pos_stage_1_base', 'pos_stage_2_portfolio',
+                'pos_stage_1_base', 'pos_stage_1b_country', 'pos_stage_2_portfolio',
                 'pos_stage_3_security',
                 'pos_stage_4_security_fallback', 'pos_stage_4b_abbrev_match',
                 'pos_stage_4_tier_update', 'pos_stage_4_collision_update',

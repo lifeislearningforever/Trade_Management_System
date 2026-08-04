@@ -1378,7 +1378,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
     #   1. No collision at all        -> create with the plain name.
     #   2. Collision on a DIFFERENT exchange (the common case: the same
     #      issuer cross-listed on more than one exchange) -> disambiguate
-    #      by appending the exchange code, e.g. 'DBS' -> 'DBS (HK)'.
+    #      by appending the exchange code, e.g. 'DBS' -> 'DBS HK'.
     #   3. Collision on the SAME exchange, or the disambiguated name still
     #      collides -> genuinely ambiguous, can't be resolved automatically
     #      -> fail the row instead of creating or silently skipping it.
@@ -1480,8 +1480,8 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
                 else:
                     # Cross-listed on a different exchange — disambiguate.
                     _suffix = _cand_exch or 'UNK'
-                    _max_base = max(10, 35 - len(_suffix) - 3)
-                    _disamb_name = f"{abbreviate_security_name(_raw_name, max_len=_max_base)} ({_suffix})"
+                    _max_base = max(10, 35 - len(_suffix) - 1)
+                    _disamb_name = f"{abbreviate_security_name(_raw_name, max_len=_max_base)} {_suffix}"
                     _hits2 = _lookup(_disamb_name)
                     if _hits2:
                         _e = _hits2[0]

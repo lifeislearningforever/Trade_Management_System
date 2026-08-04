@@ -1434,6 +1434,8 @@ def run_position_etl(request, upload_id: str):
     # Derive src_id and processing_date
     src_id = (upload.get('target_table_name') or '').lower().split('.')[-1]
     processing_date = request.POST.get('processing_date', '').strip()
+    # Checkbox: present in POST (value 'on') when checked, absent when unchecked.
+    auto_create_security = 'auto_create_security' in request.POST
 
     if not processing_date:
         # Try to read from description
@@ -1466,6 +1468,7 @@ def run_position_etl(request, upload_id: str):
     _ua         = request.META.get('HTTP_USER_AGENT', '')
     _src_id     = src_id
     _proc_date  = processing_date
+    _auto_create_security = auto_create_security
 
     def _do_etl():
         import logging as _logging
@@ -1493,6 +1496,7 @@ def run_position_etl(request, upload_id: str):
                 src_id=_src_id,
                 processing_date=_proc_date,
                 updated_by=_username,
+                auto_create_security=_auto_create_security,
             )
             # Read current record to preserve user's original description
             _rec = upload_service.repository.get_upload_by_id(upload_id)
