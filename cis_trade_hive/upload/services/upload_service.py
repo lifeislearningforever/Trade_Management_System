@@ -634,6 +634,16 @@ def _normalize_country_key(name: str) -> str:
     return s
 
 
+def _trim_country_qualifier(s: str) -> str:
+    """Trim at the first '(' or ',' — mirrors the upload-side _resolve_country()
+    trim, so a LUT full_name carrying its own trailing qualifier (e.g.
+    'Taiwan (Republic of China)', 'Korea (South), Republic of') still matches
+    a plain upload value like 'Taiwan'. Comparison-only: the stored
+    gmp_cis_sta_dly_country.full_name value is never altered."""
+    import re
+    return re.split(r'[(,]', s, 1)[0].strip()
+
+
 def _build_country_map_for_format5(impala_manager, db: str, processing_date: str, src_id: str) -> dict:
     """
     Fetch the complete country name → label mapping from gmp_cis_sta_dly_country.
@@ -644,10 +654,17 @@ def _build_country_map_for_format5(impala_manager, db: str, processing_date: str
     mojibake as the DB.
 
     To match all variants without fragile Impala-side regex, we register up to
-    THREE keys per label in the returned dict:
-      1. raw  — UPPER(TRIM(full_name)) exactly as stored in DB (mojibake form)
-      2. fixed — mojibake decoded back to proper Unicode, then UPPER/TRIM
-      3. norm  — fully ASCII-normalized (NFKD accent-strip + punct → space)
+    FIVE keys per label in the returned dict:
+      1. raw     — UPPER(TRIM(full_name)) exactly as stored in DB (mojibake form)
+      2. fixed   — mojibake decoded back to proper Unicode, then UPPER/TRIM
+      3. norm    — fully ASCII-normalized (NFKD accent-strip + punct → space)
+      4. trimmed — raw, truncated at the first "(" or "," (e.g. a DB full_name
+                   of 'Taiwan (Republic of China)' also registers 'TAIWAN')
+      5. trimmed_fixed — same truncation applied to the mojibake-fixed form
+
+    Variants 4/5 are registered with setdefault (not overwrite) so an exact
+    raw/fixed/norm match for another row's full name always wins over a
+    truncated collision, regardless of row iteration order.
 
     The Impala CASE WHEN then uses a plain UPPER(TRIM(col)) comparison with no
     regex at all — simple, fast, and immune to encoding edge-cases.
@@ -698,6 +715,17 @@ def _build_country_map_for_format5(impala_manager, db: str, processing_date: str
         norm = _normalize_country_key(raw)
         if norm and norm not in (raw, fixed):
             result[norm] = label
+
+        # Variant 4 — raw truncated at first "(" or "," (comparison-only;
+        # does not alter what's stored in gmp_cis_sta_dly_country).
+        trimmed = _trim_country_qualifier(raw)
+        if trimmed and trimmed != raw and _is_safe_key(trimmed):
+            result.setdefault(trimmed, label)
+
+        # Variant 5 — mojibake-fixed form, same truncation.
+        trimmed_fixed = _trim_country_qualifier(fixed)
+        if trimmed_fixed and trimmed_fixed not in (raw, fixed, trimmed) and _is_safe_key(trimmed_fixed):
+            result.setdefault(trimmed_fixed, label)
 
     return result
 
