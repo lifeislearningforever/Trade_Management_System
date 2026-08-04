@@ -983,6 +983,14 @@ class PositionService:
         Returns the latest version (is_latest=true) with position_date <= or < as_of_date.
         A "not found" result is retried a couple of times with a short delay before
         being trusted — see _STALE_READ_RETRY_ATTEMPTS docstring above.
+
+        Falls back to cis_position (the golden/reporting copy) when
+        cis_trade_position has no row at all for this natural key — e.g. a
+        position fed purely from AMS/GMP that has never had a CIS trade booked
+        against it. Without this, the first CIS trade against such a position
+        would start its AVP chain from zero instead of resuming from the known
+        balance. Mirrors the same CIS-ledger-first/golden-copy-fallback pattern
+        already used by process_approved_cashflows.py's _get_current_positions().
         """
         date_operator = '<=' if include_same_date else '<'
 
@@ -1023,7 +1031,79 @@ class PositionService:
                 )
                 time.sleep(self._STALE_READ_RETRY_DELAY_SECONDS)
 
-        return None
+        return self._get_position_from_golden_copy(
+            portfolio_id, security_id, as_of_date, date_operator, position_basis
+        )
+
+    def _get_position_from_golden_copy(
+        self,
+        portfolio_id: str,
+        security_id: str,
+        as_of_date: str,
+        date_operator: str,
+        position_basis: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Fallback base for _get_position_as_of_date() when cis_trade_position has
+        no row: read the latest cis_position (golden copy) row and reshape it
+        into the same field names _process_buy/_process_sell read off `current`.
+
+        Only ever used as a *base to build on* — the resulting trade always
+        writes a proper new cis_trade_position row via _save_position()
+        regardless of whether `current` came from here or the real ledger, so
+        this doesn't need position_id/version_id/is_latest/trade_id semantics.
+        """
+        try:
+            rows = impala_manager.execute_query(
+                f"""
+                SELECT
+                    quantity,
+                    average_cost_fc,
+                    cost_fc            AS total_cost_fc,
+                    average_cost_lc,
+                    cost_lc            AS total_cost_lc,
+                    realized_pnl_fc,
+                    realized_pnl_lc,
+                    dividend_fc,
+                    dividend_lc,
+                    uncall_fc,
+                    uncall_lc,
+                    pipeline_fc,
+                    pipeline_lc,
+                    provision_fc,
+                    provision_lc,
+                    position_type,
+                    position_date,
+                    src_system
+                FROM {self.DATABASE}.cis_position
+                WHERE portfolio = '{self._escape(portfolio_id)}'
+                  AND security_label = '{self._escape(security_id)}'
+                  AND position_basis = '{position_basis}'
+                  AND position_date {date_operator} '{as_of_date}'
+                  AND quantity > 0
+                  AND (is_latest = true OR is_latest IS NULL)
+                ORDER BY position_date DESC
+                LIMIT 1
+                """,
+                database=self.DATABASE
+            )
+        except Exception as e:
+            logger.error(
+                f"Error reading cis_position fallback for {portfolio_id}/{security_id} "
+                f"basis={position_basis} as_of={as_of_date}: {str(e)}"
+            )
+            return None
+
+        if not rows:
+            return None
+
+        logger.info(
+            f"_get_position_as_of_date: no cis_trade_position row for "
+            f"{portfolio_id}/{security_id} basis={position_basis} — "
+            f"falling back to cis_position (src_system={rows[0].get('src_system')}, "
+            f"position_date={rows[0].get('position_date')})"
+        )
+        return rows[0]
 
     def get_position(self, portfolio_id: str, security_id: str) -> Optional[Dict[str, Any]]:
         """Public method to get current position."""

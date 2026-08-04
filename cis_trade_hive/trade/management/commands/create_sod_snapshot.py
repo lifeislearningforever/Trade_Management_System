@@ -40,20 +40,18 @@ Usage:
 """
 
 import logging
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 from datetime import datetime
 
 from django.core.management.base import BaseCommand, CommandError
 
 from core.repositories.impala_connection import impala_manager
 from django.conf import settings
-from trade.services.position_id_service import position_id as _calc_position_id
 
 logger = logging.getLogger(__name__)
 
 DATABASE = settings.IMPALA_CONFIG['DATABASE']
 ALL_SOURCES = ['CIS', 'GMP', 'AMS_STREET', 'USER_UPLOAD']
-AVP_PRECISION = Decimal('0.00000001')
 
 
 class Command(BaseCommand):
@@ -147,15 +145,22 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Found {len(eod_rows)} EOD row(s) to copy as SOD")
 
-        # ── 3. Apply today's pending settlements to EOD baseline ─────────────
+        # ── 3. Apply today's pending settlements through the real AVP engine ─
         #
         # Fetch cis_settlement_queue entries where settle_date == sod_date and
         # status = PENDING.  These are T+1/T+2 trades whose SETTLED position
-        # was deferred.  Apply each trade's effect to the matching EOD row so
-        # the resulting SOD row already reflects the settled quantity and cost.
+        # was deferred.  Each is applied via position_service.calculate_position()
+        # directly — the same engine trade/CA/cashflow already go through —
+        # instead of a hand-rolled reimplementation of the AVP formulas. This
+        # writes cis_trade_position (the ledger) and auto-syncs cis_position
+        # in one call, tagged position_type='SOD' so it lands in today's SOD
+        # partition exactly like a plain EOD-copy row would.
         #
-        # Trades that have no existing EOD position (new security settling today)
-        # are inserted as brand-new SOD rows with opening position.
+        # Positions touched this way are deliberately excluded from the plain
+        # EOD-copy batch below (_batch_insert_sod) — the engine already wrote
+        # their SOD row via cis_trade_position's own position_id scheme, and
+        # writing it a second time via _batch_insert_sod's separate scheme
+        # would create a duplicate row for the same natural key.
         #
         # After applying, each queue entry is marked COMPLETED so the async
         # worker does not double-process it.
@@ -178,82 +183,95 @@ class Command(BaseCommand):
 
         settled_queue_ids = []
         failed_queue_ids  = []
-        new_sod_rows      = []   # brand-new positions (no prior EOD)
+        affected_keys: set = set()  # (portfolio, security, basis) written by the engine below
 
-        # Cache portfolio revaluation status to avoid repeated DB calls
-        _reval_cache: dict = {}
+        if dry_run:
+            self.stdout.write(self.style.WARNING(
+                'DRY RUN — pending settlements will not be applied; '
+                'SOD preview below is a plain EOD copy only'
+            ))
+        else:
+            from trade.services.position_service import position_service
 
-        for item in pending_settlements:
-            portfolio  = item.get('portfolio_id', '')
-            security   = item.get('security_id', '')
-            basis      = item.get('position_basis', 'SETTLED')
-            trade_type = item.get('trade_type', '')
-            qty        = Decimal(str(item.get('quantity', 0) or 0))
-            price      = Decimal(str(item.get('price', 0) or 0))
-            charges    = Decimal(str(item.get('charges', 0) or 0))
-            queue_id   = item.get('queue_id')
-            trade_id   = item.get('trade_id')
-            raw_lc     = item.get('total_amount_lc')
-            trade_lc   = Decimal(str(raw_lc)) if raw_lc else None
+            # Delete any existing SOD rows for sod_date BEFORE the engine below
+            # writes — this is step "5" from the original flow, moved earlier.
+            # It must run first: the engine's cis_position sync (via
+            # position_service._sync_to_cis_position) happens inline with each
+            # calculate_position() call below, so a delete running afterwards
+            # would wipe out what was just correctly written. Skipped for
+            # --fill-gaps, which explicitly wants existing SOD rows preserved.
+            if not fill_gaps:
+                self._delete_existing_sod(sod_date, sources, portfolio_filter, security_filter)
 
-            if portfolio not in _reval_cache:
-                _reval_cache[portfolio] = self._get_portfolio_revaluation_status(portfolio)
-            reval_status = _reval_cache[portfolio]
+            for item in pending_settlements:
+                portfolio  = item.get('portfolio_id', '')
+                security   = item.get('security_id', '')
+                basis      = item.get('position_basis', 'SETTLED')
+                trade_type = item.get('trade_type', '')
+                qty        = Decimal(str(item.get('quantity', 0) or 0))
+                price      = Decimal(str(item.get('price', 0) or 0))
+                charges    = Decimal(str(item.get('charges', 0) or 0))
+                queue_id   = item.get('queue_id')
+                trade_id   = item.get('trade_id')
+                raw_lc     = item.get('total_amount_lc')
+                raw_glc    = item.get('gross_amount_lc')
+                raw_gfc    = item.get('gross_amount_fc')
+                trade_lc        = Decimal(str(raw_lc)) if raw_lc else None
+                gross_amount_lc = Decimal(str(raw_glc)) if raw_glc else None
+                gross_amount_fc = Decimal(str(raw_gfc)) if raw_gfc else None
 
-            key = (portfolio, security, basis)
-            existing = eod_index.get(key)
-
-            try:
-                updated = self._apply_settlement_to_position(
-                    existing=existing,
-                    trade_type=trade_type,
-                    quantity=qty,
-                    price=price,
-                    charges=charges,
-                    settle_date=sod_date,
-                    trade_id=trade_id,
-                    item=item,
-                    reval_status=reval_status,
-                    trade_lc=trade_lc,
-                )
-                if updated is None:
-                    # e.g. SELL with no existing position — skip
+                try:
+                    success, message, _ = position_service.calculate_position(
+                        portfolio_id=portfolio,
+                        security_id=security,
+                        trade_type=trade_type,
+                        quantity=qty,
+                        price=price,
+                        charges=charges,
+                        position_date=sod_date,
+                        trade_id=trade_id,
+                        updated_by='SOD_SNAPSHOT',
+                        security_currency=item.get('security_currency'),
+                        portfolio_currency=item.get('portfolio_currency'),
+                        isin=item.get('isin'),
+                        security_name=item.get('security_name'),
+                        custodian=item.get('custodian'),
+                        sub_custodian=item.get('sub_custodian'),
+                        position_basis=basis,
+                        position_type='SOD',
+                        trade_lc=trade_lc,
+                        gross_amount_lc=gross_amount_lc,
+                        gross_amount_fc=gross_amount_fc,
+                    )
+                    if success:
+                        settled_queue_ids.append(queue_id)
+                        affected_keys.add((portfolio, security, basis))
+                        self.stdout.write(
+                            f"  Applied {trade_type} {qty} {security} "
+                            f"({portfolio}/{basis}) -> cis_trade_position + cis_position (SOD)"
+                        )
+                    else:
+                        failed_queue_ids.append(queue_id)
+                        logger.error(
+                            f"[SOD settlement] queue_id={queue_id} trade_id={trade_id} "
+                            f"failed: {message}"
+                        )
+                except Exception as exc:
                     failed_queue_ids.append(queue_id)
                     logger.error(
-                        f"[SOD settlement] queue_id={queue_id} trade_id={trade_id} "
-                        f"SELL {qty} {security} but no existing position — skipped"
+                        f"[SOD settlement] Failed to apply queue_id={queue_id}: {exc}",
+                        exc_info=True
                     )
-                    continue
 
-                if existing:
-                    # Replace in eod_index so downstream insert uses the updated values
-                    eod_index[key] = updated
-                else:
-                    # New position — collect separately
-                    new_sod_rows.append(updated)
-                    eod_index[key] = updated   # prevent double-insert if same security queued twice
-
-                settled_queue_ids.append(queue_id)
-                self.stdout.write(
-                    f"  Applied {trade_type} {qty} {security} "
-                    f"({portfolio}/{basis}) → SOD position updated"
-                )
-
-            except Exception as exc:
-                failed_queue_ids.append(queue_id)
-                logger.error(
-                    f"[SOD settlement] Failed to apply queue_id={queue_id}: {exc}",
-                    exc_info=True
-                )
-
-        # Merge new_sod_rows into the main list so they get inserted as SOD
-        sod_rows = list(eod_index.values()) + [
-            r for r in new_sod_rows if r not in eod_index.values()
-        ]
+        # sod_rows: plain EOD-copy for every key NOT already written by the
+        # settlement engine above (untouched positions, and any that failed
+        # to apply — those fall back to their unmodified EOD figure rather
+        # than being silently dropped).
+        sod_rows = [row for key, row in eod_index.items() if key not in affected_keys]
 
         self.stdout.write(
-            f"SOD rows to write: {len(sod_rows)} "
-            f"({len(pending_settlements)} settlement(s) applied, "
+            f"SOD rows to write (plain EOD copy): {len(sod_rows)}  "
+            f"({len(settled_queue_ids)} settlement(s) applied via AVP engine, "
             f"{len(failed_queue_ids)} failed)"
         )
 
@@ -277,25 +295,11 @@ class Command(BaseCommand):
         # for sod_date. No need to touch the EOD rows at all.
 
         # ── 5. Delete any existing SOD rows for sod_date (idempotent re-run) ─
-        # Skip when --fill-gaps: existing SOD rows must be preserved.
-        if not fill_gaps:
-            self._delete_existing_sod(sod_date, sources, portfolio_filter, security_filter)
+        # Already done above (step 3), before the settlement-engine writes,
+        # so those writes survive. Nothing left to do here.
 
         # ── 6. Batch-insert SOD rows with is_latest=true ─────────────────────
         inserted = self._batch_insert_sod(sod_rows, sod_date, proc_date)
-
-        # ── 6B. Bootstrap cis_trade_position from SOD for chains with no AVP
-        # history yet ─────────────────────────────────────────────────────
-        # cis_trade_position (not cis_position) is what position_service.py
-        # reads as the base for the next trade's AVP calculation. A position
-        # that only ever existed in cis_position (e.g. fed purely from AMS/GMP,
-        # never traded through CIS) has no row there — so the first CIS trade
-        # against it would otherwise start the AVP chain from zero instead of
-        # resuming from this SOD balance. Seeded once, for both TRADED and
-        # SETTLED basis; never touches a chain that already has real history.
-        seeded = self._seed_cis_trade_position(sod_rows, sod_date)
-        if seeded:
-            self.stdout.write(f"cis_trade_position: seeded {seeded} baseline row(s) from SOD")
 
         # ── 7. Mark processed settlements as COMPLETED ───────────────────────
         if settled_queue_ids:
@@ -450,7 +454,7 @@ class Command(BaseCommand):
                     q.security_currency, q.portfolio_currency,
                     q.isin, q.security_name,
                     q.custodian, q.sub_custodian,
-                    t.total_amount_lc
+                    t.total_amount_lc, t.gross_amount_lc, t.gross_amount_fc
                 FROM {DATABASE}.cis_settlement_queue q
                 LEFT JOIN {DATABASE}.cis_trade t ON t.trade_id = q.trade_id
                 WHERE q.settle_date = '{settle_date}'
@@ -462,190 +466,6 @@ class Command(BaseCommand):
         except Exception as e:
             logger.error(f'Error fetching pending settlements for {settle_date}: {e}')
             return []
-
-    # ── Apply one settlement trade to an EOD baseline row ────────────────────
-
-    def _apply_settlement_to_position(
-        self,
-        existing: dict,
-        trade_type: str,
-        quantity: Decimal,
-        price: Decimal,
-        charges: Decimal,
-        settle_date: str,
-        trade_id,
-        item: dict,
-        reval_status: str = 'REVALUED',
-        trade_lc: Decimal = None,
-    ) -> dict:
-        """
-        Apply a BUY or SELL trade to an EOD position dict and return
-        an updated dict suitable for SOD insertion.
-
-        Returns None if the trade cannot be applied (e.g. SELL with no position).
-
-        AVP formulas (same as position_service):
-          BUY:  new_total_cost = old_total_cost + (qty × price) + charges
-                new_avg_cost   = new_total_cost / new_qty
-          SELL: avg_cost unchanged; realized_pnl += (price − avg_cost) × qty
-                (full close: avg_cost → 0, qty → 0)
-        """
-        def _f(v, default=0.0):
-            try:
-                return float(v) if v is not None else float(default)
-            except (TypeError, ValueError):
-                return float(default)
-
-        def _d(v, default=0):
-            try:
-                return Decimal(str(v)) if v is not None else Decimal(str(default))
-            except Exception:
-                return Decimal(str(default))
-
-        if trade_type == 'BUY':
-            old_qty      = _d(existing.get('quantity') if existing else None)
-            old_avg_fc   = _d(existing.get('average_cost_fc') if existing else None)
-            old_cost_fc  = old_qty * old_avg_fc
-            old_avg_lc   = _d(existing.get('average_cost_lc') if existing else None)
-            old_cost_lc  = old_qty * old_avg_lc
-
-            trade_cost_fc = (quantity * price) + charges
-            new_qty       = old_qty + quantity
-            new_cost_fc   = old_cost_fc + trade_cost_fc
-
-            new_avg_fc = (new_cost_fc / new_qty).quantize(
-                AVP_PRECISION, rounding=ROUND_HALF_UP
-            ) if new_qty > 0 else Decimal('0')
-
-            # LC cost for this trade:
-            #   NON-REVAL: use as-traded total_amount_lc (preserves the rate at booking time).
-            #              Fallback to fx_ratio proxy if trade_lc not available.
-            #   REVAL:     use the existing position's lc/fc ratio (latest FX applied at EOD).
-            if reval_status == 'NON-REVALUED' and trade_lc is not None:
-                trade_cost_lc = trade_lc
-            elif old_avg_fc > 0 and old_avg_lc > 0:
-                fx_ratio      = old_avg_lc / old_avg_fc
-                trade_cost_lc = trade_cost_fc * fx_ratio
-            else:
-                trade_cost_lc = trade_cost_fc   # same-currency fallback
-            new_cost_lc   = old_cost_lc + trade_cost_lc
-            new_avg_lc    = (new_cost_lc / new_qty).quantize(
-                AVP_PRECISION, rounding=ROUND_HALF_UP
-            ) if new_qty > 0 else Decimal('0')
-
-            # Build result — market value/unrealized_pnl carried from EOD (not recalculated
-            # here; EOD job will price them correctly at day-end)
-            base = dict(existing) if existing else {}
-            base.update({
-                'portfolio':       item.get('portfolio_id', base.get('portfolio', '')),
-                'security_label':  item.get('security_id', base.get('security_label', '')),
-                'position_basis':  item.get('position_basis', 'SETTLED'),
-                'src_system':      base.get('src_system', 'CIS'),
-                'isin':            item.get('isin') or base.get('isin'),
-                'source_table':    base.get('source_table', 'cis_settlement_queue'),
-                'quantity':        float(new_qty),
-                'average_cost_fc': float(new_avg_fc),
-                'cost_fc':         float(new_cost_fc),
-                'average_cost_lc': float(new_avg_lc),
-                'cost_lc':         float(new_cost_lc),
-                # market_value / unrealized_pnl: keep EOD values (will be re-priced at EOD tonight)
-                'market_value_fc':    _f(base.get('market_value_fc')),
-                'market_value_lc':    _f(base.get('market_value_lc')),
-                'unrealized_pnl_fc':  _f(base.get('unrealized_pnl_fc')),
-                'unrealized_pnl_lc':  _f(base.get('unrealized_pnl_lc')),
-                'net_book_value_fc':  float(new_cost_fc) + _f(base.get('unrealized_pnl_fc')) - _f(base.get('provision_fc')),
-                'net_book_value_lc':  float(new_cost_lc) + _f(base.get('unrealized_pnl_lc')) - _f(base.get('provision_lc')),
-                # carry all CA/CF fields unchanged
-                'realized_pnl_fc':  _f(base.get('realized_pnl_fc')),
-                'realized_pnl_lc':  _f(base.get('realized_pnl_lc')),
-                'dividend_fc':      _f(base.get('dividend_fc')),
-                'dividend_lc':      _f(base.get('dividend_lc')),
-                'provision_fc':     _f(base.get('provision_fc')),
-                'provision_lc':     _f(base.get('provision_lc')),
-                'uncall_fc':        _f(base.get('uncall_fc')),
-                'uncall_lc':        _f(base.get('uncall_lc')),
-                'pipeline_fc':      _f(base.get('pipeline_fc')),
-                'pipeline_lc':      _f(base.get('pipeline_lc')),
-            })
-            return base
-
-        elif trade_type == 'SELL':
-            if not existing:
-                return None   # cannot sell without a position
-
-            old_qty     = _d(existing.get('quantity'))
-            old_avg_fc  = _d(existing.get('average_cost_fc'))
-            old_avg_lc  = _d(existing.get('average_cost_lc'))
-            old_rpnl_fc = _d(existing.get('realized_pnl_fc'))
-            old_rpnl_lc = _d(existing.get('realized_pnl_lc'))
-
-            if quantity > old_qty:
-                logger.error(
-                    f"[SOD settlement] SELL {quantity} > position {old_qty} "
-                    f"for {existing.get('security_label')} — capped to available qty"
-                )
-                quantity = old_qty   # treat as full close
-
-            rpnl_this_fc = (price - old_avg_fc) * quantity
-            new_qty      = old_qty - quantity
-
-            # LC realized P&L (use historical avg_cost_lc as cost basis)
-            rpnl_this_lc = (price * _d(1 if old_avg_fc == 0 else old_avg_lc / old_avg_fc) - old_avg_lc) * quantity
-
-            base = dict(existing)
-            if new_qty <= 0:
-                # Full close
-                base.update({
-                    'quantity':        0.0,
-                    'average_cost_fc': 0.0,
-                    'cost_fc':         0.0,
-                    'average_cost_lc': 0.0,
-                    'cost_lc':         0.0,
-                    'market_value_fc': 0.0,
-                    'market_value_lc': 0.0,
-                    'unrealized_pnl_fc': 0.0,
-                    'unrealized_pnl_lc': 0.0,
-                    'net_book_value_fc': 0.0,
-                    'net_book_value_lc': 0.0,
-                    'realized_pnl_fc': float(old_rpnl_fc + rpnl_this_fc),
-                    'realized_pnl_lc': float(old_rpnl_lc + rpnl_this_lc),
-                    # CA/CF fields carried (obligations survive full close)
-                    'uncall_fc':   float(_d(base.get('uncall_fc'))),
-                    'uncall_lc':   float(_d(base.get('uncall_lc'))),
-                    'pipeline_fc': float(_d(base.get('pipeline_fc'))),
-                    'pipeline_lc': float(_d(base.get('pipeline_lc'))),
-                    'provision_fc': float(_d(base.get('provision_fc'))),
-                    'provision_lc': float(_d(base.get('provision_lc'))),
-                })
-            else:
-                # Partial sell — AVP unchanged
-                new_cost_fc  = new_qty * old_avg_fc
-                new_cost_lc  = new_qty * old_avg_lc
-                prov_fc      = _d(base.get('provision_fc'))
-                prov_lc      = _d(base.get('provision_lc'))
-                upnl_fc      = _d(base.get('unrealized_pnl_fc')) * (new_qty / old_qty)
-                upnl_lc      = _d(base.get('unrealized_pnl_lc')) * (new_qty / old_qty)
-                base.update({
-                    'quantity':        float(new_qty),
-                    'cost_fc':         float(new_cost_fc),
-                    'cost_lc':         float(new_cost_lc),
-                    'market_value_fc': float(_d(base.get('market_value_fc')) * (new_qty / old_qty)),
-                    'market_value_lc': float(_d(base.get('market_value_lc')) * (new_qty / old_qty)),
-                    'unrealized_pnl_fc': float(upnl_fc),
-                    'unrealized_pnl_lc': float(upnl_lc),
-                    'net_book_value_fc': float(new_cost_fc) + float(upnl_fc) - float(prov_fc),
-                    'net_book_value_lc': float(new_cost_lc) + float(upnl_lc) - float(prov_lc),
-                    'realized_pnl_fc': float(old_rpnl_fc + rpnl_this_fc),
-                    'realized_pnl_lc': float(old_rpnl_lc + rpnl_this_lc),
-                })
-            return base
-
-        else:
-            logger.warning(
-                f"[SOD settlement] Unsupported trade_type '{trade_type}' "
-                f"for queue_id — skipped"
-            )
-            return None
 
     # ── Delete existing SOD rows ─────────────────────────────────────────────
 
@@ -853,169 +673,6 @@ class Command(BaseCommand):
 
         return total
 
-    # ── cis_trade_position bootstrap (AVP chain seeding) ─────────────────────
-
-    def _get_existing_avp_chains(self, sod_rows) -> set:
-        """
-        Return the set of (portfolio, security_label, position_basis) triples
-        that already have an is_latest=true row in cis_trade_position — the
-        AVP engine's own table. These chains have real trade history and must
-        never be touched by SOD seeding.
-        """
-        portfolios = sorted({
-            str(r.get('portfolio', '') or '') for r in sod_rows if r.get('portfolio')
-        })
-        if not portfolios:
-            return set()
-
-        port_list = ', '.join(f"'{self._escape(p)}'" for p in portfolios)
-        try:
-            rows = impala_manager.execute_query(
-                f"""
-                SELECT DISTINCT portfolio_short_name, security_label, position_basis
-                FROM {DATABASE}.cis_trade_position
-                WHERE is_latest = true
-                  AND portfolio_short_name IN ({port_list})
-                """,
-                database=DATABASE
-            ) or []
-        except Exception as e:
-            logger.error(f'Error fetching existing cis_trade_position chains: {e}')
-            raise
-
-        return {
-            (
-                str(r.get('portfolio_short_name', '') or ''),
-                str(r.get('security_label', '') or ''),
-                str(r.get('position_basis', '') or ''),
-            )
-            for r in rows
-        }
-
-    def _seed_cis_trade_position(self, sod_rows, sod_date) -> int:
-        """
-        Bootstrap cis_trade_position with an SOD baseline row (position_type=
-        'SOD', trade_id=NULL, is_latest=true) for every (portfolio, security,
-        basis) in sod_rows that has no existing AVP chain yet.
-
-        This is what lets the next trade booked against a position that has
-        only ever existed in cis_position (e.g. fed purely from AMS/GMP, never
-        traded through CIS) resume AVP from the SOD balance instead of
-        starting from zero — _get_position_as_of_date() in position_service.py
-        already picks up whatever the latest row is for position_date <= the
-        trade's date, so once this row exists no other code needs to change.
-
-        Values are copied verbatim from the SOD row already computed for
-        cis_position (same FC/LC figures) — deliberately NOT re-derived via
-        _save_position()'s FX-rate/revaluation logic, which is for turning a
-        fresh trade's FC amount into an LC amount and would risk producing a
-        different LC figure than the one already tallied into this SOD row.
-
-        Bootstrap-only: never touches a (portfolio, security, basis) that
-        already has a row (i.e. real trade history) in cis_trade_position.
-        """
-        existing_chains = self._get_existing_avp_chains(sod_rows)
-        to_seed = [
-            r for r in sod_rows
-            if (
-                str(r.get('portfolio', '') or ''),
-                str(r.get('security_label', '') or ''),
-                str(r.get('position_basis', '') or ''),
-            ) not in existing_chains
-        ]
-
-        if not to_seed:
-            return 0
-
-        BATCH = 500
-        now_ms = int(datetime.now().timestamp() * 1000)
-        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-        col_list = """(
-            version_id, position_id, position_date, position_basis,
-            portfolio_short_name, security_label,
-            quantity,
-            average_cost_fc, total_cost_fc,
-            average_cost_lc, total_cost_lc,
-            realized_pnl_fc, unrealized_pnl_fc,
-            realized_pnl_lc, unrealized_pnl_lc,
-            market_price, market_value_fc, market_value_lc,
-            dividend_fc, dividend_lc,
-            fx_rate,
-            status, is_active, is_latest,
-            uncall_fc, uncall_lc,
-            pipeline_fc, pipeline_lc,
-            provision_fc, provision_lc,
-            position_type,
-            created_by, created_at, updated_by, updated_at
-        )"""
-
-        def _val(v, default=0):
-            return float(v) if v is not None else float(default)
-
-        def _cast(v, default=0):
-            return f"CAST({_val(v, default)} AS DECIMAL(30,8))"
-
-        def _build_row(idx, row):
-            raw_portfolio = str(row.get('portfolio', '') or '')
-            raw_security  = str(row.get('security_label', '') or '')
-            raw_basis     = str(row.get('position_basis', 'TRADED') or 'TRADED')
-
-            portfolio = self._escape(raw_portfolio)
-            security  = self._escape(raw_security)
-            basis     = self._escape(raw_basis)
-
-            pos_id = _calc_position_id(raw_portfolio, raw_security, raw_basis, sod_date, 'CIS')
-            version_id = now_ms + idx
-
-            qty = _val(row.get('quantity'))
-            # cis_position calls the cost fields cost_fc/cost_lc; cis_trade_position
-            # (this table) calls the same concept total_cost_fc/total_cost_lc.
-            total_cost_fc = _val(row.get('cost_fc'))
-            total_cost_lc = _val(row.get('cost_lc'))
-            market_value_fc = _val(row.get('market_value_fc'))
-            # cis_position's SOD row has no standalone market_price column —
-            # back it out from market_value_fc / quantity (same relationship
-            # position_service.py itself uses: market_value = qty * market_price).
-            market_price = (market_value_fc / qty) if qty else 0.0
-            # Implied FX rate from the already-tallied LC/FC cost, same pattern
-            # _save_position() uses to carry fx_rate forward for NON-REVAL positions.
-            fx_rate_expr = (
-                _cast(total_cost_lc / total_cost_fc) if total_cost_fc else 'NULL'
-            )
-
-            return (
-                f"({version_id}, {pos_id}, '{sod_date}', '{basis}', "
-                f"'{portfolio}', '{security}', "
-                f"{_cast(qty)}, "
-                f"{_cast(row.get('average_cost_fc'))}, {_cast(total_cost_fc)}, "
-                f"{_cast(row.get('average_cost_lc'))}, {_cast(total_cost_lc)}, "
-                f"{_cast(row.get('realized_pnl_fc'))}, {_cast(row.get('unrealized_pnl_fc'))}, "
-                f"{_cast(row.get('realized_pnl_lc'))}, {_cast(row.get('unrealized_pnl_lc'))}, "
-                f"{_cast(market_price)}, {_cast(market_value_fc)}, {_cast(row.get('market_value_lc'))}, "
-                f"{_cast(row.get('dividend_fc'))}, {_cast(row.get('dividend_lc'))}, "
-                f"{fx_rate_expr}, "
-                f"'OPEN', true, true, "
-                f"{_cast(row.get('uncall_fc'))}, {_cast(row.get('uncall_lc'))}, "
-                f"{_cast(row.get('pipeline_fc'))}, {_cast(row.get('pipeline_lc'))}, "
-                f"{_cast(row.get('provision_fc'))}, {_cast(row.get('provision_lc'))}, "
-                f"'SOD', "
-                f"'SOD_SNAPSHOT', '{ts}', 'SOD_SNAPSHOT', '{ts}')"
-            )
-
-        total = 0
-        for i in range(0, len(to_seed), BATCH):
-            chunk = to_seed[i: i + BATCH]
-            values = ',\n'.join(_build_row(i + j, r) for j, r in enumerate(chunk))
-            impala_manager.execute_write(
-                f"UPSERT INTO {DATABASE}.cis_trade_position {col_list} VALUES {values}",
-                database=DATABASE
-            )
-            total += len(chunk)
-            self.stdout.write(f'  cis_trade_position seed rows {i + 1}–{i + len(chunk)}')
-
-        return total
-
     # ── Mark settlement queue entries ────────────────────────────────────────
 
     def _mark_settlements_completed(self, queue_ids: list):
@@ -1059,26 +716,6 @@ class Command(BaseCommand):
             logger.error(f'Error marking settlements failed: {e}')
 
     # ── Helpers ───────────────────────────────────────────────────────────────
-
-    def _get_portfolio_revaluation_status(self, portfolio_id: str) -> str:
-        """Return 'REVALUED' or 'NON-REVALUED' for the given portfolio."""
-        try:
-            rows = impala_manager.execute_query(
-                f"""
-                SELECT revaluation_status
-                FROM {DATABASE}.cis_portfolio
-                WHERE name = '{self._escape(portfolio_id)}'
-                LIMIT 1
-                """,
-                database=DATABASE
-            )
-            if rows and rows[0].get('revaluation_status'):
-                status = rows[0]['revaluation_status'].upper()
-                if status in ('REVALUED', 'NON-REVALUED'):
-                    return status
-        except Exception as e:
-            logger.error(f'Error fetching revaluation status for {portfolio_id}: {e}')
-        return 'REVALUED'
 
     @staticmethod
     def _escape(value):
