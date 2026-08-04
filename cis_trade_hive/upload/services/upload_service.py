@@ -2971,13 +2971,13 @@ class UploadService:
                         CAST(NULL AS DECIMAL(30,8))                         AS market_price,
                         CAST(NULL AS DECIMAL(30,8))                         AS average_cost,
                         CAST(cost_fc AS DECIMAL(30,8))                      AS cost_fc,
-                        CAST(NULL AS DECIMAL(30,8))                         AS market_value_fc,
-                        CAST(net_book_value_fc AS DECIMAL(30,8))            AS net_book_value_fc,
+                        CAST(market_value_fc AS DECIMAL(30,8))              AS market_value_fc,
+                        CAST(NULL AS DECIMAL(30,8))                         AS net_book_value_fc,
                         CAST(NULL AS DECIMAL(30,8))                         AS unrealized_pnl_fc,
                         CAST(NULL AS DECIMAL(30,8))                         AS provision_fc,
                         CAST(cost_lc AS DECIMAL(30,8))                      AS cost_lc,
-                        CAST(NULL AS DECIMAL(30,8))                         AS market_value_lc,
-                        CAST(net_book_value_lc AS DECIMAL(30,8))            AS net_book_value_lc,
+                        CAST(market_value_lc AS DECIMAL(30,8))              AS market_value_lc,
+                        CAST(NULL AS DECIMAL(30,8))                         AS net_book_value_lc,
                         CAST(NULL AS DECIMAL(30,8))                         AS unrealized_pnl_lc,
                         CAST(NULL AS DECIMAL(30,8))                         AS provision_lc,
                         product_type                                        AS product_type,
@@ -3200,16 +3200,26 @@ class UploadService:
                         s = str(v).replace("'", "").replace("\\", "")
                         return "'" + s + "'"
 
-                    def _safe_dec(v):
+                    def _safe_dec(v, dec_type='DECIMAL(30,8)'):
+                        """Return an explicit CAST(literal AS dec_type) SQL fragment.
+
+                        Always wrapping in an explicit CAST (rather than a bare
+                        numeric literal) lets Impala narrow precision freely --
+                        a bare literal's inferred type is derived from its own
+                        digit count, and if that exceeds the target column's
+                        declared scale, Impala raises "Possible loss of
+                        precision" / "incompatible type" on the implicit cast
+                        (seen for pct_holding and market_price in SIT).
+                        """
                         import re as _re
                         if v is None:
-                            return 'NULL'
+                            return f'CAST(NULL AS {dec_type})'
                         s = str(v).strip()
                         s = _re.sub(r'[,$£€¥%]', '', s)
                         s = _re.sub(r'^\(([0-9.]+)\)$', r'-\1', s)
                         s = _re.sub(r'^[-–—]+$', '0', s)
                         m = _re.match(r'^-?[0-9]+\.?[0-9]*([eE][+-]?[0-9]+)?$', s)
-                        return s if m else 'NULL'
+                        return f'CAST({s} AS {dec_type})' if m else f'CAST(NULL AS {dec_type})'
 
                     logger.info(f"[position_etl] F4-STEP0-A: reading source rows from {src_id}")
                     _src_rows = impala_manager.execute_query(
@@ -3237,17 +3247,17 @@ class UploadService:
                             {_safe_dec(_r.get('quantity'))},
                             {_safe_dec(_r.get('no_of_shares_issues_by_the_company'))},
                             {_safe_dec(_r.get('no_of_shares_issues_by_the_company'))},
-                            CAST({_safe_dec(_r.get('pct_holdings'))} AS DECIMAL(10,6)),
+                            {_safe_dec(_r.get('pct_holdings'), 'DECIMAL(10,6)')},
                             NULL,
                             NULL,
                             {_safe_dec(_r.get('cost_fc'))},
+                            {_safe_dec(_r.get('market_value_fc'))},
                             NULL,
-                            {_safe_dec(_r.get('net_book_value_fc'))},
                             NULL,
                             NULL,
                             {_safe_dec(_r.get('cost_lc'))},
+                            {_safe_dec(_r.get('market_value_lc'))},
                             NULL,
-                            {_safe_dec(_r.get('net_book_value_lc'))},
                             NULL,
                             NULL,
                             {_safe_str(_r.get('product_type'))},
@@ -3350,17 +3360,26 @@ class UploadService:
                         s = str(v).replace("'", "").replace("\\", "")
                         return "'" + s + "'"
 
-                    def _safe_dec(v):
-                        """Return SQL decimal literal or NULL for unparseable values."""
+                    def _safe_dec(v, dec_type='DECIMAL(30,8)'):
+                        """Return an explicit CAST(literal AS dec_type) SQL fragment.
+
+                        Always wrapping in an explicit CAST (rather than a bare
+                        numeric literal) lets Impala narrow precision freely --
+                        a bare literal's inferred type is derived from its own
+                        digit count, and if that exceeds the target column's
+                        declared scale, Impala raises "Possible loss of
+                        precision" / "incompatible type" on the implicit cast
+                        (seen for pct_holding and market_price in SIT).
+                        """
                         import re as _re
                         if v is None:
-                            return 'NULL'
+                            return f'CAST(NULL AS {dec_type})'
                         s = str(v).strip()
                         s = _re.sub(r'[,$£€¥%]', '', s)
                         s = _re.sub(r'^\(([0-9.]+)\)$', r'-\1', s)
                         s = _re.sub(r'^[-–—]+$', '0', s)
                         m = _re.match(r'^-?[0-9]+\.?[0-9]*([eE][+-]?[0-9]+)?$', s)
-                        return s if m else 'NULL'
+                        return f'CAST({s} AS {dec_type})' if m else f'CAST(NULL AS {dec_type})'
 
                     logger.info(f"[position_etl] F5-STEP0-D: reading source rows from {src_id}")
                     _src_rows = impala_manager.execute_query(
@@ -3393,7 +3412,7 @@ class UploadService:
                             {_safe_dec(_r.get('quantity'))},
                             {_safe_dec(_r.get('no_of_shares_issues_by_the_company'))},
                             {_safe_dec(_r.get('no_of_shares_issues_by_the_company'))},
-                            CAST({_safe_dec(_r.get('pct_holdings'))} AS DECIMAL(10,6)),
+                            {_safe_dec(_r.get('pct_holdings'), 'DECIMAL(10,6)')},
                             {_safe_dec(_r.get('market_price_unit_fc'))},
                             {_safe_dec(_r.get('unit_avg_cost_unit_fc'))},
                             {_safe_dec(_r.get('cost_fc'))},
