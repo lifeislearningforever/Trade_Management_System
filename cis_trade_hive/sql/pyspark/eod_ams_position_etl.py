@@ -33,6 +33,7 @@ Control-M / cron usage:
   python eod_ams_position_etl.py --processing-date 20260227 --source ams_iceq
   python eod_ams_position_etl.py --processing-date 20260227 --source gmp_position
   python eod_ams_position_etl.py --processing-date 20260227 --dry-run
+  python eod_ams_position_etl.py --processing-date 20260227 --auto-create-security
 
 The script connects to Impala via the same ImpalaConnectionManager used by
 the Django app (reads IMPALA_* env vars or falls back to localhost:21050).
@@ -792,7 +793,13 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
 # ---------------------------------------------------------------------------
 # Core ETL — runs Steps 0–7B for one source table
 # ---------------------------------------------------------------------------
-def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
+def run_etl_for_table(table: str, processing_date: str, dry_run: bool,
+                       auto_create_security: bool = False) -> dict:
+    # auto_create_security defaults to False, matching upload_service.py's
+    # run_position_etl(): when False, Step 5B does not create any new
+    # cis_security records -- every row that would otherwise have been
+    # 'NOT_FOUND: Create new security' is failed instead, and
+    # position_upload_report reflects it as INVALID.
     src_id = table  # partition value in position_upload_standardized
     result = {'table': table, 'src_id': src_id, 'processing_date': processing_date,
               'total': 0, 'passed': 0, 'failed': 0, 'ok': False}
@@ -1110,9 +1117,9 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             FROM base
             JOIN {DB}.cis_security sn
                 ON  sn.is_active = true
-                AND base.security_full_name IS NOT NULL AND TRIM(base.security_full_name) != ''
+                AND base.desc_prefix IS NOT NULL AND TRIM(base.desc_prefix) != ''
                 AND sn.security_description IS NOT NULL
-                AND UPPER(TRIM(sn.security_description)) = UPPER(TRIM(base.security_full_name))
+                AND UPPER(TRIM(sn.security_description)) = UPPER(TRIM(base.desc_prefix))
                 AND base.resolved_country IS NOT NULL AND TRIM(base.resolved_country) != ''
                 AND (
                     UPPER(TRIM(base.resolved_country)) = UPPER(TRIM(COALESCE(sn.exchange_code, '')))
@@ -1198,8 +1205,13 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
     print("[Step 3] Stage A (tiers 1-4: short_name / isin+country / ticker+country / full_name+country) complete")
 
     # ---- Stage B (Python): Tier 5 — Normalized Full Name + Country ----
+    # Uses desc_prefix (COMMON STOCK/STICK suffix already stripped), NOT the
+    # raw security_full_name -- otherwise a row whose upload full name
+    # carries that suffix never matches cis_security.security_description
+    # (which doesn't), while a row without the suffix matches fine. Same
+    # fix as tiers 4/8/9.
     _pending_b = impala_manager.execute_query(
-        "SELECT row_id, security_full_name, resolved_country "
+        "SELECT row_id, desc_prefix, resolved_country "
         "FROM pos_stage_4_security_fallback WHERE security_status = 'PENDING'",
         database=DB
     ) or []
@@ -1210,7 +1222,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             _country = (_row.get('resolved_country') or '').strip()
             if not _country:
                 continue  # required field not populated — tier 5 not evaluated
-            _key = abbreviate_security_name(_row.get('security_full_name') or '')
+            _key = abbreviate_security_name(_row.get('desc_prefix') or '')
             if not _key:
                 continue
             _country_matches = [
@@ -1283,9 +1295,9 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             JOIN {DB}.cis_security sn
                 ON  sn.is_active = true
                 AND (p.resolved_country IS NULL OR TRIM(p.resolved_country) = '')
-                AND p.security_full_name IS NOT NULL AND TRIM(p.security_full_name) != ''
+                AND p.desc_prefix IS NOT NULL AND TRIM(p.desc_prefix) != ''
                 AND sn.security_description IS NOT NULL
-                AND UPPER(TRIM(sn.security_description)) = UPPER(TRIM(p.security_full_name))
+                AND UPPER(TRIM(sn.security_description)) = UPPER(TRIM(p.desc_prefix))
         )
         SELECT
             p.row_id, p.upload_isin, p.security_full_name, p.security_short_name,
@@ -1365,8 +1377,9 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
     print("[Step 4] Stage C (tiers 6-8: isin_only / ticker_only / full_name_only) complete")
 
     # ---- Stage D (Python): Tier 9 — Normalized Full Name only (country blank) ----
+    # Uses desc_prefix -- see Stage B (Tier 5) comment above for why.
     _pending_d = impala_manager.execute_query(
-        "SELECT row_id, security_full_name, resolved_country "
+        "SELECT row_id, desc_prefix, resolved_country "
         "FROM pos_stage_4_security_fallback WHERE security_status = 'PENDING'",
         database=DB
     ) or []
@@ -1376,7 +1389,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
         for _row in _pending_d:
             if (_row.get('resolved_country') or '').strip():
                 continue  # tier 9 is the country-blank fallback — a mismatch stays PENDING
-            _key = abbreviate_security_name(_row.get('security_full_name') or '')
+            _key = abbreviate_security_name(_row.get('desc_prefix') or '')
             if not _key:
                 continue
             _candidates = _norm_cache.get(_key, [])
@@ -1500,6 +1513,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
         WHERE p4.security_status = 'NOT_FOUND: Create new security'
           AND (b.quantity IS NOT NULL OR b.cost_fc IS NOT NULL)
+          AND {'TRUE' if auto_create_security else 'FALSE'}
         """,
         database=DB
     )
@@ -1660,6 +1674,41 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
         f"{len(_collision_rows)} blocked as duplicates"
     )
     impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_5b_candidates", database=DB)
+
+    # ---- Step 5D: when auto_create_security is False, pos_stage_5b_candidates
+    # was forced empty above so nothing got created -- fail every row still
+    # sitting at 'NOT_FOUND: Create new security' instead of letting Step 6
+    # report it as valid. Broad status-only rewrite (not per-row), since
+    # every NOT_FOUND row gets the same reason here, unlike the per-row
+    # collision reasons above.
+    if not auto_create_security:
+        impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_tier_update", database=DB)
+        impala_manager.execute_write(
+            """
+            CREATE TABLE pos_stage_4_tier_update
+            STORED AS PARQUET AS
+            SELECT
+                row_id, upload_isin, security_full_name, security_short_name,
+                desc_prefix, upload_exchange, portfolio_status, resolved_country,
+                clean_ticker, final_security_id, final_security_name, final_isin,
+                final_exchange, final_country, final_currency, security_match_method,
+                CASE
+                    WHEN security_status = 'NOT_FOUND: Create new security'
+                        THEN 'FAIL: Security not found — auto-create disabled for this run'
+                    ELSE security_status
+                END AS security_status
+            FROM pos_stage_4_security_fallback
+            """,
+            database=DB
+        )
+        impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_security_fallback", database=DB)
+        impala_manager.execute_write(
+            "CREATE TABLE pos_stage_4_security_fallback STORED AS PARQUET AS "
+            "SELECT * FROM pos_stage_4_tier_update",
+            database=DB
+        )
+        impala_manager.execute_write("DROP TABLE IF EXISTS pos_stage_4_tier_update", database=DB)
+        print("[Step 5D] auto_create_security=False — NOT_FOUND rows failed instead of creating a new security")
 
     # ---- Step 6: consolidated staging ----
     impala_manager.execute_write("DROP TABLE IF EXISTS position_upload_staging", database=DB)
@@ -1964,6 +2013,12 @@ def parse_args():
         '--dry-run', action='store_true',
         help='Check row counts and exit without writing'
     )
+    parser.add_argument(
+        '--auto-create-security', action='store_true',
+        help='Auto-create a new cis_security record when no match is found '
+             '(default: off -- those rows are failed instead, matching '
+             'upload_service.py\'s run_position_etl default)'
+    )
     return parser.parse_args()
 
 
@@ -1987,6 +2042,7 @@ def main():
     print(f'  processing_date : {processing_date}')
     print(f'  sources         : {", ".join(tables)}')
     print(f'  dry_run         : {args.dry_run}')
+    print(f'  auto_create_security : {args.auto_create_security}')
     print(f'  started         : {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
     print('=' * 70)
 
@@ -1994,7 +2050,8 @@ def main():
 
     for table in tables:
         try:
-            r = run_etl_for_table(table, processing_date, args.dry_run)
+            r = run_etl_for_table(table, processing_date, args.dry_run,
+                                   auto_create_security=args.auto_create_security)
             overall['total']  += r['total']
             overall['passed'] += r['passed']
             overall['failed'] += r['failed']

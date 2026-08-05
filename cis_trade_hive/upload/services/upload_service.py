@@ -4092,9 +4092,9 @@ class UploadService:
                     FROM base
                     JOIN {db}.cis_security sn
                         ON  sn.is_active = true
-                        AND base.security_full_name IS NOT NULL AND TRIM(base.security_full_name) != ''
+                        AND base.desc_prefix IS NOT NULL AND TRIM(base.desc_prefix) != ''
                         AND sn.security_description IS NOT NULL
-                        AND UPPER(TRIM(sn.security_description)) = UPPER(TRIM(base.security_full_name))
+                        AND UPPER(TRIM(sn.security_description)) = UPPER(TRIM(base.desc_prefix))
                         AND base.resolved_country IS NOT NULL AND TRIM(base.resolved_country) != ''
                         AND (
                             UPPER(TRIM(base.resolved_country)) = UPPER(TRIM(COALESCE(sn.exchange_code, '')))
@@ -4182,8 +4182,13 @@ class UploadService:
             _t = _step_time("Step 3 (ISIN match)", _t)
 
             # ---- Stage B (Python): Tier 5 — Normalized Full Name + Country ----
+            # Uses desc_prefix (COMMON STOCK/STICK suffix already stripped),
+            # NOT the raw security_full_name -- otherwise a row whose upload
+            # full name carries that suffix never matches
+            # cis_security.security_description (which doesn't), while a row
+            # without the suffix matches fine. Same fix as tiers 4/8/9.
             _pending_b = impala_manager.execute_query(
-                "SELECT row_id, security_full_name, resolved_country "
+                "SELECT row_id, desc_prefix, resolved_country "
                 "FROM pos_stage_4_security_fallback WHERE security_status = 'PENDING'",
                 database=db
             ) or []
@@ -4194,7 +4199,7 @@ class UploadService:
                     _country = (_row.get('resolved_country') or '').strip()
                     if not _country:
                         continue  # required field not populated — tier 5 not evaluated
-                    _key = abbreviate_security_name(_row.get('security_full_name') or '')
+                    _key = abbreviate_security_name(_row.get('desc_prefix') or '')
                     if not _key:
                         continue
                     _country_matches = [
@@ -4269,9 +4274,9 @@ class UploadService:
                     JOIN {db}.cis_security sn
                         ON  sn.is_active = true
                         AND (p.resolved_country IS NULL OR TRIM(p.resolved_country) = '')
-                        AND p.security_full_name IS NOT NULL AND TRIM(p.security_full_name) != ''
+                        AND p.desc_prefix IS NOT NULL AND TRIM(p.desc_prefix) != ''
                         AND sn.security_description IS NOT NULL
-                        AND UPPER(TRIM(sn.security_description)) = UPPER(TRIM(p.security_full_name))
+                        AND UPPER(TRIM(sn.security_description)) = UPPER(TRIM(p.desc_prefix))
                 )
                 SELECT
                     p.row_id, p.upload_isin, p.security_full_name, p.security_short_name,
@@ -4357,8 +4362,9 @@ class UploadService:
             _t = _step_time("Step 4 (security fallback)", _t)
 
             # ---- Stage D (Python): Tier 9 — Normalized Full Name only (country blank) ----
+            # Uses desc_prefix -- see Stage B (Tier 5) comment above for why.
             _pending_d = impala_manager.execute_query(
-                "SELECT row_id, security_full_name, resolved_country "
+                "SELECT row_id, desc_prefix, resolved_country "
                 "FROM pos_stage_4_security_fallback WHERE security_status = 'PENDING'",
                 database=db
             ) or []
@@ -4368,7 +4374,7 @@ class UploadService:
                 for _row in _pending_d:
                     if (_row.get('resolved_country') or '').strip():
                         continue  # tier 9 is the country-blank fallback — a mismatch stays PENDING
-                    _key = abbreviate_security_name(_row.get('security_full_name') or '')
+                    _key = abbreviate_security_name(_row.get('desc_prefix') or '')
                     if not _key:
                         continue
                     _candidates = _norm_cache.get(_key, [])
