@@ -22,8 +22,17 @@
 # no PYTHONPATH injection, no risk of the venv's packages shadowing the
 # cluster's own pyspark/py4j.
 
+# Bump this filename (or set VENV_TAR_NAME in the environment before calling
+# this script) whenever the archive's CONTENTS change but you suspect YARN's
+# NodeManager local cache isn't picking up the new file under the old name --
+# identical byte-for-byte errors persisting across otherwise-substantive
+# venv rebuilds is the tell. YARN keys its cache off the resource's
+# name/size/timestamp; reusing a filename across many iterations is the
+# single most common cause of "my fix didn't change anything" with --archives.
+VENV_TAR_NAME="${VENV_TAR_NAME:-cis_etl_env_tar.gz}"
+
 ENV_DIR="/app/CISGW/cis_etl_env_11"
-VENV_TAR="${ENV_DIR}/cis_etl_env_tar.gz"
+VENV_TAR="${ENV_DIR}/${VENV_TAR_NAME}"
 CIS_UTIL_ZIP="${ENV_DIR}/cis_util.zip"
 TEST_SCRIPT="test_venv_env.py"   # path to the script from this repo's scripts/ dir, copied onto the edge node
 
