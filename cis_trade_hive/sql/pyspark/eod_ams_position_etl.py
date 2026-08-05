@@ -73,6 +73,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger('eod_ams_position_etl')
 
+# impyla logs "Using database X as default" on every connection reuse and
+# "Closing active operation" on every cursor close — this pipeline issues
+# dozens of statements per table, so at INFO this drowns out the actual
+# [Step N] progress lines. Explicit here (not just relying on Django's
+# settings.LOGGING) since this script calls basicConfig() after
+# django.setup(), and basicConfig() is a no-op once the root logger already
+# has handlers — this makes the suppression work regardless of that timing.
+logging.getLogger('impala').setLevel(logging.WARNING)
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -804,8 +813,20 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
         print(f"[Step 0] FAILED — INSERT into position_upload_standardized failed")
         return result
 
+    # Targeted partition REFRESH, not a full-table INVALIDATE METADATA.
+    # INVALIDATE METADATA drops and reloads catalog metadata for every
+    # partition/file this table has ever accumulated across every src_id and
+    # processing_date this script (and upload_service.py) has ever written --
+    # on this SIT cluster's constrained resources that made later tables in
+    # the same run (e.g. gmp_cis_sta_dly_stat_street_ams_daily_limit, the 4th
+    # table processed) hang indefinitely right after this call, with the
+    # actual standardize INSERT above having already completed in ~20ms.
+    # Impala already knows about the partition it just wrote itself; REFRESH
+    # PARTITION only needs to resync that one partition's file listing.
     impala_manager.execute_write(
-        f"INVALIDATE METADATA {DB}.position_upload_standardized", database=DB
+        f"REFRESH {DB}.position_upload_standardized "
+        f"PARTITION (processing_date='{processing_date}', src_id='{src_id}')",
+        database=DB
     )
     std_rows_res = impala_manager.execute_query(
         f"SELECT COUNT(*) AS cnt FROM {DB}.position_upload_standardized "
@@ -1774,11 +1795,13 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
     )
     if not ok_7b:
         print("[Step 7B] FAILED — INSERT into position_upload_report failed")
+    # Targeted partition REFRESH — see comment on the equivalent
+    # position_upload_standardized call above for why this isn't a full
+    # INVALIDATE METADATA.
     impala_manager.execute_write(
-        f"INVALIDATE METADATA {DB}.position_upload_report", database=DB
-    )
-    impala_manager.execute_write(
-        f"REFRESH {DB}.position_upload_report", database=DB
+        f"REFRESH {DB}.position_upload_report "
+        f"PARTITION (processing_date='{processing_date}', src_id='{src_id}')",
+        database=DB
     )
     print("[Step 7B] position_upload_report written")
 

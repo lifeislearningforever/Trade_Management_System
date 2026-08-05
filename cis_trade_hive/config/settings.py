@@ -479,6 +479,16 @@ LOGGING = {
             'level': 'WARNING',
             'propagate': False,
         },
+        # impyla logs "Using database X as default" on every connection reuse
+        # and "Closing active operation" on every cursor close — the ETL
+        # pipelines issue dozens of statements per run, so at INFO this
+        # dwarfs every other log line and drowns out the app's own step
+        # progress messages. Nothing here is actionable; keep only WARNING+.
+        'impala': {
+            'handlers': ['console', 'file'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
     },
     # Safety net: any app logger not explicitly listed above (e.g. a new app,
     # or one added without updating this file) still reaches the log file
