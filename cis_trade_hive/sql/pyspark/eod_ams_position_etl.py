@@ -823,6 +823,32 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
 
     # ---- Step 0: standardize → position_upload_standardized ----
     std_sql = _standardize_sql(table, processing_date, src_id)
+
+    if table == 'gmp_cis_sta_dly_stat_street_ams_daily_limit':
+        # This table's standardize query joins against
+        # gmp_cis_sta_dly_ams_multi_hold (see _standardize_sql). External
+        # Parquet tables fed by daily INSERT OVERWRITEs don't get stats
+        # maintained automatically -- without them, Impala's planner has no
+        # real cardinality estimate for either side of the join and can pick
+        # a bad physical plan (e.g. broadcasting/shuffling the wrong side)
+        # regardless of how selective the query's own filters are. Seen
+        # taking ~400s with zero improvement after narrowing the join's
+        # input via a WHERE ... IN prefilter, which only helps if the
+        # optimizer's plan is actually informed by real row counts.
+        # INCREMENTAL + scoped to this one partition keeps it cheap (stats
+        # for just today's data, not a full-table rescan of every historical
+        # partition).
+        impala_manager.execute_write(
+            f"COMPUTE INCREMENTAL STATS {DB}.gmp_cis_sta_dly_ams_multi_hold "
+            f"PARTITION (processing_date='{processing_date}')",
+            database=DB
+        )
+        impala_manager.execute_write(
+            f"COMPUTE INCREMENTAL STATS {DB}.{table} "
+            f"PARTITION (processing_date='{processing_date}')",
+            database=DB
+        )
+
     # Drop this partition first to allow re-runs
     impala_manager.execute_write(
         f"ALTER TABLE {DB}.position_upload_standardized "
