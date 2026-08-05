@@ -17,6 +17,16 @@ VENV_TAR="${ENV_DIR}/cis_etl_env_tar.gz"
 CIS_UTIL_ZIP="${ENV_DIR}/cis_util.zip"
 TEST_SCRIPT="test_venv_env.py"   # path to the script from this repo's scripts/ dir, copied onto the edge node
 
+# Bare `spark-submit` on this edge node's PATH resolves to Spark 2 (deprecated
+# warning seen on first test run) -- the real wrapper script explicitly uses
+# /usr/bin/spark3-submit for exactly this reason. Override if that path is
+# different on your node (e.g. `which spark3-submit`).
+SPARK_SUBMIT_BIN="/usr/bin/spark3-submit"
+
+# Absolute, edge-node-local path to the venv's python3.11 -- NOT the same as
+# the relative ./myenv/bin/python3.11 used below for spark.pyspark.python.
+DRIVER_PYTHON_LOCAL="${ENV_DIR}/myenv/bin/python3.11"
+
 # ---------------------------------------------------------------------------
 # Step 1: Package the venv into a tarball (run once, and again whenever the
 # venv's installed packages change). Tar from INSIDE myenv/ -- not the
@@ -32,26 +42,36 @@ step1_package_venv() {
 # ---------------------------------------------------------------------------
 # Step 2a: Smoke test in client mode -- fastest iteration, driver output
 # prints straight to this terminal.
+#
+# In client mode the driver runs LOCALLY on this edge node, not inside a
+# YARN container -- --archives only auto-unpacks into container working
+# directories, so the relative ./myenv/... path Spark resolves for
+# executors doesn't exist for the driver process. driver.python must be
+# the real local filesystem path instead; only spark.pyspark.python
+# (the executors) uses the relative in-container path.
 # ---------------------------------------------------------------------------
 step2a_test_client_mode() {
-    spark-submit \
+    "${SPARK_SUBMIT_BIN}" \
         --master yarn \
         --deploy-mode client \
         --archives "${VENV_TAR}#myenv" \
         --py-files "${CIS_UTIL_ZIP}" \
         --conf spark.pyspark.python=./myenv/bin/python3.11 \
-        --conf spark.pyspark.driver.python=./myenv/bin/python3.11 \
+        --conf spark.pyspark.driver.python="${DRIVER_PYTHON_LOCAL}" \
         "${TEST_SCRIPT}"
 }
 
 # ---------------------------------------------------------------------------
 # Step 2b: Smoke test in cluster mode -- matches how the real ETL job is
 # submitted (see submitSparkNativeClientJob in cis_ingestion_wrapper.sh).
-# Driver runs inside a YARN container too, so nothing prints here -- capture
-# the appId spark-submit reports, then pull logs with step2c.
+# Driver ALSO runs inside a YARN container in this mode, so it DOES see the
+# relative ./myenv/... path correctly -- both driver.python and
+# spark.pyspark.python use the same relative path here, unlike client mode.
+# Nothing prints to this terminal either way -- capture the appId
+# spark-submit reports, then pull logs with step2c.
 # ---------------------------------------------------------------------------
 step2b_test_cluster_mode() {
-    spark-submit \
+    "${SPARK_SUBMIT_BIN}" \
         --master yarn \
         --deploy-mode cluster \
         --queue EOD_Queue \
