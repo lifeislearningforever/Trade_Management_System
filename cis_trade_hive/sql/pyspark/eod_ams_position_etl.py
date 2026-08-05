@@ -1676,6 +1676,42 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
         JOIN pos_stage_2_portfolio p2 ON b.row_id = p2.row_id AND p2.portfolio_status = 'PASS'
         JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
         LEFT JOIN pos_stage_5_price p5 ON b.row_id = p5.row_id
+
+        UNION ALL
+
+        -- Portfolio-failed rows never reach pos_stage_4/5 (those steps INNER
+        -- JOIN on portfolio_status='PASS' by design -- matching a security/
+        -- price for a row whose portfolio doesn't exist is meaningless work).
+        -- Without this branch these rows silently vanished from
+        -- position_upload_staging and therefore from the Step 7B report
+        -- entirely -- mirrors upload_service.py's identical UNION ALL branch,
+        -- so every ingested row appears in the report with a PASS/FAIL
+        -- status and reason, regardless of whether it made it into
+        -- cis_position.
+        SELECT
+            b.*,
+            p2.valid_portfolio, p2.portfolio_currency, p2.portfolio_status,
+            CAST(NULL AS BIGINT)          AS final_security_id,
+            CAST(NULL AS STRING)          AS matched_security_name,
+            CAST(NULL AS STRING)          AS final_isin,
+            CAST(NULL AS STRING)          AS country_resolved,
+            CAST(NULL AS STRING)          AS security_currency_resolved,
+            CAST(NULL AS STRING)          AS security_status,
+            CAST(NULL AS STRING)          AS security_match_method,
+            CAST(NULL AS DECIMAL(30,8))   AS final_market_price,
+            CAST(NULL AS STRING)          AS price_status,
+            CAST(NULL AS DECIMAL(30,8))   AS final_quantity,
+            CAST(NULL AS STRING)          AS quantity_status,
+            CAST(NULL AS DECIMAL(30,8))   AS final_shares_issued,
+            CAST(NULL AS STRING)          AS exchange_status,
+            CAST(NULL AS DECIMAL(30,8))   AS final_market_value_fc,
+            CAST(NULL AS DECIMAL(30,8))   AS final_net_book_value_fc,
+            CONCAT(
+                'INVALID: ',
+                regexp_replace(p2.portfolio_status, '^FAIL: ', '')
+            ) AS overall_status
+        FROM pos_stage_1_base b
+        JOIN pos_stage_2_portfolio p2 ON b.row_id = p2.row_id AND p2.portfolio_status != 'PASS'
         """,
         database=DB
     )
@@ -1760,62 +1796,81 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
         database=DB
     )
 
+    # Reads directly from position_upload_staging (single source), same as
+    # upload_service.py's equivalent Step 7B -- now safe because Step 6's
+    # UNION ALL branch guarantees position_upload_staging already has every
+    # pos_stage_1_base row (portfolio-fail rows included, with NULL security
+    # fields), so there is no need to re-derive completeness here via a
+    # separate LEFT JOIN chain back through pos_stage_1_base/2/4.
     ok_7b = impala_manager.execute_write(
         f"""
         INSERT OVERWRITE {DB}.position_upload_report
+        (
+            portfolio, security_full_name, security_short_name,
+            row_status, fail_reason, portfolio_status, security_status,
+            security_match_method, price_status, quantity_status,
+            exchange_status, matched_security_id, matched_security_name,
+            isin, ticker, quantity, shares_outstanding, shares_issued,
+            pct_holding, market_price, average_cost, cost_fc,
+            market_value_fc, net_book_value_fc, unrealized_pnl_fc,
+            provision_fc, cost_lc, market_value_lc, net_book_value_lc,
+            unrealized_pnl_lc, provision_lc, product_type, security_type,
+            quoted_unquoted, industry, fin_nonfin_co, issuer_type,
+            reits_or_fund_y_n, `exchange`, country_of_exchange,
+            country_of_incorporation, country_of_risk, country_of_operation,
+            security_currency, corp_code, branch_code, cost_centre, cels,
+            bwcif_sg, bwcif_ovs, mas_6d_code_sg, mas_6d_code_ovs,
+            position_basis, reporting_date, maturity_date, src_system,
+            source_table
+        )
         PARTITION (processing_date='{processing_date}', src_id='{src_id}')
+        -- Explicit column list above (matching upload_service.py's equivalent
+        -- INSERT) maps each SELECT expression by name to its target column,
+        -- immune to physical column order -- previously this INSERT had no
+        -- explicit list and relied on positional mapping, with
+        -- security_match_method deliberately kept last in the SELECT to
+        -- match migration 85 appending it at the end of the live schema.
         SELECT
-            -- Core identifiers (columns 1-4, matching DDL order)
-            b.portfolio,
-            COALESCE(b.security_full_name, b.security_short_name, b.isin) AS security_full_name,
-            b.security_short_name,
-            b.isin,
-            -- Validation result columns (columns 5-13, matching DDL order)
+            -- Core identifiers
+            s.portfolio,
+            COALESCE(s.security_full_name, s.security_short_name, s.isin) AS security_full_name,
+            s.security_short_name,
+            -- Validation result columns
             CASE
-                WHEN p2.portfolio_status LIKE 'FAIL%'    THEN 'FAIL'
-                WHEN p4.security_status  LIKE 'FAIL%'    THEN 'FAIL'
-                WHEN s.overall_status    LIKE 'INVALID%' THEN 'FAIL'
-                WHEN s.overall_status    LIKE 'VALID%'   THEN 'PASS'
+                WHEN s.overall_status LIKE 'INVALID%' THEN 'FAIL'
+                WHEN s.overall_status LIKE 'VALID%'   THEN 'PASS'
                 ELSE 'FAIL'
             END AS row_status,
             CASE
-                WHEN p2.portfolio_status LIKE 'FAIL%'    THEN 'Portfolio not found in cis_portfolio'
-                WHEN p4.security_status  LIKE 'FAIL%'    THEN p4.security_status
-                WHEN s.overall_status    LIKE 'INVALID%' THEN s.overall_status
+                WHEN s.overall_status LIKE 'INVALID%' THEN s.overall_status
                 ELSE NULL
             END AS fail_reason,
-            COALESCE(p2.portfolio_status, s.portfolio_status) AS portfolio_status,
-            COALESCE(p4.security_status,  s.security_status)  AS security_status,
+            s.portfolio_status,
+            s.security_status,
+            s.security_match_method,
             s.price_status,
             s.quantity_status,
             s.exchange_status,
             CAST(s.final_security_id AS STRING) AS matched_security_id,
             s.matched_security_name,
-            -- Original upload columns (columns 14+, matching DDL order)
-            b.ticker,
-            b.quantity, b.shares_outstanding, b.shares_issued, b.pct_holding,
-            b.market_price, b.average_cost, b.cost_fc, b.market_value_fc,
-            b.net_book_value_fc, b.unrealized_pnl_fc, b.provision_fc,
-            b.cost_lc, b.market_value_lc, b.net_book_value_lc,
-            b.unrealized_pnl_lc, b.provision_lc,
-            b.product_type, b.security_type, b.quoted_unquoted, b.industry,
-            b.fin_nonfin_co, b.issuer_type, b.reits_or_fund_y_n,
-            b.`exchange` AS `exchange`,
-            b.country_of_exchange, b.country_of_incorporation,
-            b.country_of_risk, b.country_of_operation, b.security_currency,
-            b.corp_code, b.branch_code, b.cost_centre, b.cels,
-            b.bwcif_sg, b.bwcif_ovs, b.mas_6d_code_sg, b.mas_6d_code_ovs,
-            b.position_basis, b.reporting_date, b.maturity_date,
-            b.src_system, b.source_table,
-            -- security_match_method is appended LAST: this INSERT OVERWRITE has
-            -- no explicit column list, so it maps positionally against the live
-            -- table schema — migration 85's ALTER TABLE ADD COLUMNS appends new
-            -- columns at the end, and this SELECT must match that exact order.
-            COALESCE(p4.security_match_method, s.security_match_method) AS security_match_method
-        FROM pos_stage_1_base b
-        LEFT JOIN pos_stage_2_portfolio         p2 ON b.row_id = p2.row_id
-        LEFT JOIN pos_stage_4_security_fallback p4 ON b.row_id = p4.row_id
-        LEFT JOIN position_upload_staging        s  ON b.row_id = s.row_id
+            -- Original upload columns
+            s.isin,
+            s.ticker,
+            s.quantity, s.shares_outstanding, s.shares_issued, s.pct_holding,
+            s.market_price, s.average_cost, s.cost_fc, s.market_value_fc,
+            s.net_book_value_fc, s.unrealized_pnl_fc, s.provision_fc,
+            s.cost_lc, s.market_value_lc, s.net_book_value_lc,
+            s.unrealized_pnl_lc, s.provision_lc,
+            s.product_type, s.security_type, s.quoted_unquoted, s.industry,
+            s.fin_nonfin_co, s.issuer_type, s.reits_or_fund_y_n,
+            s.`exchange` AS `exchange`,
+            s.country_of_exchange, s.country_of_incorporation,
+            s.country_of_risk, s.country_of_operation, s.security_currency,
+            s.corp_code, s.branch_code, s.cost_centre, s.cels,
+            s.bwcif_sg, s.bwcif_ovs, s.mas_6d_code_sg, s.mas_6d_code_ovs,
+            s.position_basis, s.reporting_date, s.maturity_date,
+            s.src_system, s.source_table
+        FROM position_upload_staging s
         """,
         database=DB
     )
