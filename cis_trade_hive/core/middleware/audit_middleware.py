@@ -60,12 +60,12 @@ class AuditMiddleware(MiddlewareMixin):
             return response
 
         try:
-            # Get client IP
-            x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-            if x_forwarded_for:
-                ip_address = x_forwarded_for.split(',')[0]
-            else:
-                ip_address = request.META.get('REMOTE_ADDR')
+            # Get client IP. REMOTE_ADDR is the actual TCP peer address the
+            # server saw, not a client/proxy-supplied header -- X-Forwarded-For
+            # is trivially spoofable by the caller and in this deployment
+            # doesn't reliably reflect the real client, so audit logs use
+            # REMOTE_ADDR as the authoritative source.
+            ip_address = request.META.get('REMOTE_ADDR')
 
             # Get user agent
             user_agent = request.META.get('HTTP_USER_AGENT', '')

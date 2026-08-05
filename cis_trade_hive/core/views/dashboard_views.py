@@ -169,13 +169,13 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
 
 
 def get_client_ip(request):
-    """Get client IP address from request."""
-    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-    if x_forwarded_for:
-        ip = x_forwarded_for.split(',')[0]
-    else:
-        ip = request.META.get('REMOTE_ADDR')
-    return ip
+    """Get client IP address from request.
+
+    Uses REMOTE_ADDR (the actual TCP peer address), not the
+    client/proxy-supplied X-Forwarded-For header -- see audit_models.py's
+    _get_client_ip for why.
+    """
+    return request.META.get('REMOTE_ADDR')
 
 
 @require_login

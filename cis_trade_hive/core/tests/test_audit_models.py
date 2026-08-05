@@ -198,16 +198,18 @@ class AuditEntryTestCase(TestCase):
 
         self.assertEqual(entry.request_method, 'POST')
 
-    def test_get_client_ip_x_forwarded_for(self):
+    def test_get_client_ip_ignores_x_forwarded_for(self):
+        # X-Forwarded-For is client/proxy-supplied and spoofable -- audit
+        # logging must use REMOTE_ADDR (the real TCP peer) regardless of it.
         request = MagicMock()
         request.META = {
             'HTTP_X_FORWARDED_FOR': '203.0.113.1, 198.51.100.2',
             'REMOTE_ADDR': '127.0.0.1',
         }
         ip = AuditEntry._get_client_ip(request)
-        self.assertEqual(ip, '203.0.113.1')
+        self.assertEqual(ip, '127.0.0.1')
 
-    def test_get_client_ip_remote_addr_fallback(self):
+    def test_get_client_ip_remote_addr(self):
         request = MagicMock()
         request.META = {'REMOTE_ADDR': '192.168.1.1'}
         ip = AuditEntry._get_client_ip(request)

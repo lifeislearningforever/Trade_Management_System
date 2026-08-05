@@ -34,10 +34,12 @@ logger = logging.getLogger(__name__)
 
 
 def get_client_ip(request):
-    """Helper to get client IP address"""
-    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-    if x_forwarded_for:
-        return x_forwarded_for.split(',')[0]
+    """Helper to get client IP address.
+
+    Uses REMOTE_ADDR (the actual TCP peer address), not the
+    client/proxy-supplied X-Forwarded-For header -- see audit_models.py's
+    _get_client_ip for why.
+    """
     return request.META.get('REMOTE_ADDR')
 
 

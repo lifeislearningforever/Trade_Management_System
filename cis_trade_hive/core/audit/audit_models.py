@@ -235,8 +235,11 @@ class AuditEntry:
 
     @staticmethod
     def _get_client_ip(request) -> Optional[str]:
-        """Extract client IP address from request."""
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            return x_forwarded_for.split(',')[0].strip()
+        """Extract client IP address from request.
+
+        Uses REMOTE_ADDR (the actual TCP peer address the server saw), not
+        X-Forwarded-For -- that header is client/proxy-supplied and trivially
+        spoofable, and doesn't reliably reflect the real client in this
+        deployment, so it isn't trustworthy for audit purposes.
+        """
         return request.META.get('REMOTE_ADDR')

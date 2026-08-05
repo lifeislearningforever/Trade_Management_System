@@ -1011,15 +1011,15 @@ class CounterpartyCIFAjaxViewsTestCase(TestCase):
 class GetClientIPTestCase(TestCase):
     """Test cases for get_client_ip helper function"""
 
-    def test_get_client_ip_from_forwarded_for(self):
-        """Test get_client_ip with X-Forwarded-For header"""
+    def test_get_client_ip_ignores_forwarded_for(self):
+        """X-Forwarded-For is client/proxy-supplied and spoofable -- must be ignored"""
         from reference_data.views import get_client_ip
 
         class MockRequest:
-            META = {'HTTP_X_FORWARDED_FOR': '192.168.1.1, 10.0.0.1'}
+            META = {'HTTP_X_FORWARDED_FOR': '192.168.1.1, 10.0.0.1', 'REMOTE_ADDR': '10.20.30.40'}
 
         ip = get_client_ip(MockRequest())
-        self.assertEqual(ip, '192.168.1.1')
+        self.assertEqual(ip, '10.20.30.40')
 
     def test_get_client_ip_from_remote_addr(self):
         """Test get_client_ip with REMOTE_ADDR"""
