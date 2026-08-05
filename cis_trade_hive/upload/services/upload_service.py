@@ -3691,13 +3691,30 @@ class UploadService:
             _univ_country_map = _build_country_map_for_format5(
                 impala_manager, db, processing_date, src_id
             )
-            if _univ_country_map:
+            # Placeholder values meaning "not supplied" -- same list clean_isin()
+            # already uses for the ISIN field. Country columns had no equivalent
+            # cleanup: a literal "NA" (seen verbatim in Format 4's raw
+            # country_of_exchange, alongside isin_code/ticker_code also "NA" on
+            # the same row) is neither NULL nor '', so it read as "a country WAS
+            # supplied" to the tier-matching gates -- failing Tier 4 (doesn't
+            # match any real cis_security value) AND skipping the Tier 6-9
+            # country-blank fallback (gate requires genuinely blank), even
+            # though the security matched exactly on full name with a blank
+            # country_of_exchange on the cis_security side. Always runs
+            # (unlike the LUT lookup below) since blanking a placeholder
+            # doesn't depend on the country-name LUT being populated.
+            _COUNTRY_PLACEHOLDERS = {'NA', 'N/A', 'NIL', 'NONE', '-', 'N.A.', 'NAP'}
+            if True:
                 def _resolve_country_universal(raw_val):
                     if not raw_val:
                         return None
                     import re as _re_ucr
                     key = str(raw_val).upper().strip()
                     key = _re_ucr.split(r'[(,]', key, 1)[0].strip()
+                    if key in _COUNTRY_PLACEHOLDERS:
+                        return ''  # blank out the placeholder
+                    if not _univ_country_map:
+                        return None
                     return _univ_country_map.get(key) or _univ_country_map.get(_normalize_country_key(key))
 
                 _country_cols = ('country_of_exchange', 'country_of_incorporation',
@@ -3713,7 +3730,9 @@ class UploadService:
                     for _col in _country_cols:
                         _raw = _r.get(_col)
                         _resolved = _resolve_country_universal(_raw)
-                        if _resolved and _resolved != _raw:
+                        # _resolved may legitimately be '' (blanking a
+                        # placeholder) -- only None means "no change".
+                        if _resolved is not None and _resolved != (_raw or ''):
                             _row_over[_col] = _resolved
                     if _row_over:
                         _overrides[int(_r['row_id'])] = _row_over
