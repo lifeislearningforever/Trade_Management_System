@@ -64,11 +64,18 @@ step2a_test_client_mode() {
 # ---------------------------------------------------------------------------
 # Step 2b: Smoke test in cluster mode -- matches how the real ETL job is
 # submitted (see submitSparkNativeClientJob in cis_ingestion_wrapper.sh).
-# Driver ALSO runs inside a YARN container in this mode, so it DOES see the
-# relative ./myenv/... path correctly -- both driver.python and
-# spark.pyspark.python use the same relative path here, unlike client mode.
-# Nothing prints to this terminal either way -- capture the appId
-# spark-submit reports, then pull logs with step2c.
+#
+# In cluster mode the driver runs as the YARN ApplicationMaster -- a
+# separately-launched container whose environment YARN sets up itself, not
+# something spark-submit forks locally. spark.pyspark.driver.python only
+# reliably controls the process spark-submit forks directly (client mode);
+# for the AM container it's spark.yarn.appMasterEnv.PYSPARK_PYTHON that
+# actually takes effect. Executors need the equivalent spark.executorEnv.*
+# form too -- a known Spark-on-YARN gotcha, confirmed by
+# "./myenv/bin/python3.11: No such file" persisting in cluster mode even
+# though the archive unpacks into every container's CWD correctly, driver
+# included. Kept spark.pyspark.python/driver.python set as well since they
+# don't hurt and cover older Spark versions where they DO propagate.
 # ---------------------------------------------------------------------------
 step2b_test_cluster_mode() {
     "${SPARK_SUBMIT_BIN}" \
@@ -79,6 +86,8 @@ step2b_test_cluster_mode() {
         --py-files "${CIS_UTIL_ZIP}" \
         --conf spark.pyspark.python=./myenv/bin/python3.11 \
         --conf spark.pyspark.driver.python=./myenv/bin/python3.11 \
+        --conf spark.yarn.appMasterEnv.PYSPARK_PYTHON=./myenv/bin/python3.11 \
+        --conf spark.executorEnv.PYSPARK_PYTHON=./myenv/bin/python3.11 \
         "${TEST_SCRIPT}"
 }
 
