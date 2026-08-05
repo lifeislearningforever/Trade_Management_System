@@ -33,6 +33,14 @@ except ImportError:
     logger.warning("Impala Python library not available. Impala/Kudu features will be disabled.")
 
 
+def _query_snippet(query: str, max_len: int = 150) -> str:
+    """Collapse whitespace and truncate a SQL statement to one short line,
+    for logging what's currently in flight without dumping the full
+    (sometimes multi-hundred-line generated) statement on every call."""
+    flat = ' '.join(query.split())
+    return flat if len(flat) <= max_len else flat[:max_len] + '...'
+
+
 class ImpalaConnectionManager:
     """
     Connection pool manager for Impala/Kudu database (Production-ready).
@@ -381,6 +389,14 @@ class ImpalaConnectionManager:
             logger.warning("Cannot execute query: Impala library not available")
             return []
 
+        # Logged BEFORE execute() (not just after) so a hung/slow statement
+        # still leaves a trail of what was actually in flight -- previously
+        # the log only showed the *previous* statement's completion, with
+        # total silence for anything currently running, making a genuine
+        # hang indistinguishable from "about to log completion any second".
+        _snippet = _query_snippet(query)
+        _t0 = time.time()
+        logger.info(f"Executing query: {_snippet}")
         try:
             with self.get_cursor(database) as cursor:
                 if cursor is None:
@@ -398,10 +414,12 @@ class ImpalaConnectionManager:
                 rows = cursor.fetchall()
 
                 # Convert to list of dictionaries
-                return [dict(zip(columns, row)) for row in rows]
+                result = [dict(zip(columns, row)) for row in rows]
+                logger.info(f"Query returned {len(result)} row(s) in {time.time()-_t0:.2f}s: {_snippet}")
+                return result
 
         except Exception as e:
-            logger.error(f"Failed to execute query: {str(e)}")
+            logger.error(f"Failed to execute query after {time.time()-_t0:.2f}s: {str(e)}")
             logger.error(f"Query: {query}")
             return []
 
@@ -422,6 +440,11 @@ class ImpalaConnectionManager:
             logger.warning("Cannot execute write: Impala library not available")
             return False
 
+        # Logged BEFORE execute() -- see execute_query() for why.
+        _snippet = _query_snippet(query)
+        _t0 = time.time()
+        logger.info(f"Executing write query: {_snippet}")
+
         connection = None
         cursor = None
         try:
@@ -439,11 +462,11 @@ class ImpalaConnectionManager:
             # Commit the transaction - critical for Kudu writes to persist
             connection.commit()
 
-            logger.info("Write query executed and committed successfully")
+            logger.info(f"Write query executed and committed successfully in {time.time()-_t0:.2f}s: {_snippet}")
             return True
 
         except Exception as e:
-            logger.error(f"Failed to execute write query: {str(e)}")
+            logger.error(f"Failed to execute write query after {time.time()-_t0:.2f}s: {str(e)}")
             logger.error(f"Query: {query}")
             if connection:
                 try:
