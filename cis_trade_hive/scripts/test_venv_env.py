@@ -7,21 +7,14 @@ Checks BOTH the driver process and an actual executor task (the executor
 always runs inside a real YARN container, so it's the only reliable proof
 the shipped venv -- not the edge node's own Python -- is what's in use).
 
-Usage (run from the edge node, deploy-mode client for fastest iteration --
-driver output prints straight to your terminal):
+Usage: see test_venv_env_commands.sh (step2a_test_client_mode /
+step2b_test_cluster_mode) for the actual spark-submit invocation -- it now
+points PYSPARK_PYTHON at the cluster's system python3.11 rather than the
+venv's own (non-relocatable symlink) bin/python3.11, and adds the shipped
+archive's site-packages to PYTHONPATH instead.
 
-    spark-submit \\
-        --master yarn \\
-        --deploy-mode client \\
-        --archives /app/CISGW/cis_etl_env_11/cis_etl_env_tar.gz#myenv \\
-        --py-files /app/CISGW/cis_etl_env_11/cis_util.zip \\
-        --conf spark.pyspark.python=./myenv/bin/python3.11 \\
-        --conf spark.pyspark.driver.python=./myenv/bin/python3.11 \\
-        test_venv_env.py
-
-Once that passes, re-run with --deploy-mode cluster to match how the real
-job is submitted -- in cluster mode the driver ALSO runs inside a YARN
-container, so this print output won't reach your terminal; fetch it via:
+In cluster mode the driver ALSO runs inside a YARN container, so this print
+output won't reach your terminal; fetch it via:
 
     yarn application -list -appStates RUNNING   # find the appId
     yarn logs -applicationId <appId>            # after it finishes
@@ -40,6 +33,16 @@ def report(where):
         lines.append(f"[{where}] CIS_UTIL_IMPORT=OK file={getattr(cis_util, '__file__', '?')}")
     except ImportError as e:
         lines.append(f"[{where}] CIS_UTIL_IMPORT=FAILED {e}")
+    # ruamel.yaml is installed in the venv's site-packages (confirmed via the
+    # tar listing) but is NOT part of the Python 3.11 stdlib and is NOT
+    # shipped via --py-files -- so this only succeeds if PYTHONPATH is
+    # correctly pointing at the shipped archive's site-packages, actually
+    # validating the fix rather than just re-checking --py-files.
+    try:
+        import ruamel.yaml
+        lines.append(f"[{where}] RUAMEL_YAML_IMPORT=OK file={getattr(ruamel.yaml, '__file__', '?')}")
+    except ImportError as e:
+        lines.append(f"[{where}] RUAMEL_YAML_IMPORT=FAILED {e}")
     return "\n".join(lines)
 
 
