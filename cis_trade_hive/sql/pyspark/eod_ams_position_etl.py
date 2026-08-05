@@ -695,6 +695,12 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
                 'eod_ams_etl'                                           AS etl_batch_id
             FROM {DB}.{table} dl
             LEFT JOIN (
+                -- Pre-filtered to only the security names daily_limit (dl)
+                -- actually has for this date -- without this, the subquery
+                -- scans and DISTINCTs the WHOLE day's multi_hold table (every
+                -- portfolio's full holdings) just to join against dl's ~176
+                -- rows. Seen taking 401s in SIT; this narrows multi_hold's
+                -- scan before the dedup and the join itself.
                 SELECT DISTINCT
                     UPPER(TRIM(security_name)) AS security_name,
                     UPPER(TRIM(country_code))  AS country_code,
@@ -703,6 +709,12 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
                 WHERE processing_date = '{processing_date}'
                   AND isin IS NOT NULL
                   AND TRIM(isin) != ''
+                  AND UPPER(TRIM(security_name)) IN (
+                      SELECT DISTINCT UPPER(TRIM(security_desc))
+                      FROM {DB}.{table}
+                      WHERE processing_date = '{processing_date}'
+                        AND security_desc IS NOT NULL
+                  )
             ) mh
                 ON  UPPER(TRIM(dl.security_desc))    = mh.security_name
                 AND UPPER(TRIM(dl.ctry_of_exchange)) = mh.country_code
