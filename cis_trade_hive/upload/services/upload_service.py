@@ -2531,11 +2531,18 @@ class UploadService:
             #   7. regexp_extract to pull only the leading -?digits.digits part
             #   8. NULLIF empty string → NULL
             #   9. Final CAST to target DECIMAL type
-            # Any value that still can't parse becomes NULL (never throws UDF error).
+            #  10. Integer-digit-count guard: if the cleaned value has more
+            #      integer digits than dec_type's precision-scale allows,
+            #      NULL it out before the CAST instead of letting Impala
+            #      raise "UDF ERROR: String to Decimal cast overflowed" --
+            #      a runtime error step 9 alone does NOT protect against,
+            #      and which aborts the entire batch INSERT, not just the
+            #      offending row.
             # ------------------------------------------------------------------
             def safe_decimal(col: str, dec_type: str) -> str:
-                return (
-                    f"CAST(NULLIF(regexp_extract("
+                import re as _re_sd
+                cleaned = (
+                    f"NULLIF(regexp_extract("
                     f"regexp_replace("
                     f"regexp_replace("
                     f"regexp_replace("
@@ -2546,7 +2553,15 @@ class UploadService:
                     f" '^\\\\(([0-9]+\\\\.?[0-9]*)\\\\)$', '-\\\\1')," # (123.45) → -123.45
                     f" '^[-–—]+$', '0'),"   # lone dash/en-dash → 0
                     f" '^-?[0-9]+(\\\\.?[0-9]*)?([eE][+-]?[0-9]+)?', 0),"
-                    f" '') AS {dec_type})"
+                    f" '')"
+                )
+                _m = _re_sd.match(r'DECIMAL\((\d+),\s*(\d+)\)', dec_type)
+                if not _m:
+                    return f"CAST({cleaned} AS {dec_type})"
+                _max_int_digits = int(_m.group(1)) - int(_m.group(2))
+                return (
+                    f"CAST(CASE WHEN LENGTH(REGEXP_EXTRACT({cleaned}, '^-?([0-9]+)', 1)) > {_max_int_digits} "
+                    f"THEN NULL ELSE {cleaned} END AS {dec_type})"
                 )
 
             def clean_isin(col: str) -> str:
@@ -3585,7 +3600,16 @@ class UploadService:
                     COALESCE(provision_fc,        CAST(0 AS DECIMAL(30,8))) AS provision_fc,
                     product_type,
                     security_type,
-                    quoted_unquoted,
+                    -- Normalize to exactly 'QUOTED' / 'UNQUOTED' regardless of
+                    -- how the raw upload sent it ('Q', 'Quoted', 'QUOTED',
+                    -- 'UNQUOTED', 'U', 'Unquoted', ...). Unrecognized/blank
+                    -- values stay NULL rather than guessing.
+                    CASE
+                        WHEN UPPER(TRIM(quoted_unquoted)) LIKE 'UNQ%'
+                          OR UPPER(TRIM(quoted_unquoted)) = 'U' THEN 'UNQUOTED'
+                        WHEN UPPER(TRIM(quoted_unquoted)) LIKE 'Q%' THEN 'QUOTED'
+                        ELSE NULL
+                    END AS quoted_unquoted,
                     industry,
                     fin_nonfin_co,
                     issuer_type,

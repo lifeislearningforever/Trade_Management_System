@@ -143,8 +143,9 @@ SOURCE_ALIASES = {
 # safe_decimal — identical to upload_service.py helper
 # ---------------------------------------------------------------------------
 def safe_decimal(col: str, dec_type: str) -> str:
-    return (
-        f"CAST(NULLIF(regexp_extract("
+    import re as _re
+    cleaned = (
+        f"NULLIF(regexp_extract("
         f"regexp_replace("
         f"regexp_replace("
         f"regexp_replace("
@@ -155,7 +156,22 @@ def safe_decimal(col: str, dec_type: str) -> str:
         f" '^\\\\(([0-9]+\\\\.?[0-9]*)\\\\)$', '-\\\\1'),"
         f" '^[-–—]+$', '0'),"
         f" '^-?[0-9]+(\\\\.?[0-9]*)?([eE][+-]?[0-9]+)?', 0),"
-        f" '') AS {dec_type})"
+        f" '')"
+    )
+
+    # Guard against "UDF ERROR: String to Decimal cast overflowed" -- a
+    # runtime error (not caught by NULLIF/regexp) that aborts the ENTIRE
+    # batch INSERT the instant Impala hits one row whose cleaned value has
+    # more integer digits than dec_type's precision-scale allows (e.g.
+    # pct_holding DECIMAL(10,6) only allows 4 integer digits). Null out the
+    # offending value instead of failing the whole statement.
+    m = _re.match(r'DECIMAL\((\d+),\s*(\d+)\)', dec_type)
+    if not m:
+        return f"CAST({cleaned} AS {dec_type})"
+    max_int_digits = int(m.group(1)) - int(m.group(2))
+    return (
+        f"CAST(CASE WHEN LENGTH(REGEXP_EXTRACT({cleaned}, '^-?([0-9]+)', 1)) > {max_int_digits} "
+        f"THEN NULL ELSE {cleaned} END AS {dec_type})"
     )
 
 
@@ -668,7 +684,7 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
                 dl.mas_6digit_code                                      AS mas_6d_code_sg,
                 NULL                                                    AS mas_6d_code_ovs,
                 '{pos_basis}'                                           AS position_basis,
-                COALESCE(dl.trade_date, dl.processing_date)             AS reporting_date,
+                dl.processing_date                                      AS reporting_date,
                 NULL                                                    AS maturity_date,
                 '{src_sys}'                                             AS src_system,
                 'ams'                                                   AS sub_system,
@@ -863,7 +879,17 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool) -> dict:
             COALESCE(unrealized_pnl_lc,  CAST(0 AS DECIMAL(30,8))) AS unrealized_pnl_lc,
             COALESCE(provision_lc,       CAST(0 AS DECIMAL(30,8))) AS provision_lc,
             COALESCE(provision_fc,       CAST(0 AS DECIMAL(30,8))) AS provision_fc,
-            product_type, security_type, quoted_unquoted, industry, fin_nonfin_co,
+            product_type, security_type,
+            -- Normalize to exactly 'QUOTED' / 'UNQUOTED' regardless of how the
+            -- raw source sent it ('Q', 'Quoted', 'QUOTED', 'UNQUOTED', 'U', ...).
+            -- Unrecognized/blank values stay NULL rather than guessing.
+            CASE
+                WHEN UPPER(TRIM(quoted_unquoted)) LIKE 'UNQ%'
+                  OR UPPER(TRIM(quoted_unquoted)) = 'U' THEN 'UNQUOTED'
+                WHEN UPPER(TRIM(quoted_unquoted)) LIKE 'Q%' THEN 'QUOTED'
+                ELSE NULL
+            END AS quoted_unquoted,
+            industry, fin_nonfin_co,
             issuer_type, reits_or_fund_y_n,
             `exchange` AS `exchange`,
             country_code, country_of_exchange, country_of_incorporation,
