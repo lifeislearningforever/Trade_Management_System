@@ -956,6 +956,22 @@ def load_trade(
             if _brokers_val:
                 mapped['broker_name'] = _broker_name_map.get(_brokers_val.upper(), _brokers_val)
 
+        # --- UOB KAY HIAN* + SGX broker charge rounding rule ---
+        # Mirrors the server-side guard in trade/views.py's create/edit trade
+        # flow (was missing here): SGX trades via UOB Kay Hian (any suffix)
+        # round broker charges to 2dp.
+        _broker_uc = str(mapped.get('brokers', '') or '').upper()
+        _charge_exchange_uc = str(mapped.get('charge_exchange', '') or '').upper()
+        if 'UOB KAY HIAN' in _broker_uc and _charge_exchange_uc == 'SGX':
+            for _charge_field in ('commission', 'calculated_commission',
+                                   'other_charges', 'total_calculated_charges'):
+                _val = mapped.get(_charge_field)
+                if _val not in (None, '', 0):
+                    try:
+                        mapped[_charge_field] = str(round(Decimal(str(_val)), 2))
+                    except (InvalidOperation, ValueError, TypeError):
+                        pass
+
         col_names = []
         col_vals = []
         for col, val in mapped.items():
