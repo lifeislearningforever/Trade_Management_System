@@ -956,6 +956,72 @@ def load_trade(
             if _brokers_val:
                 mapped['broker_name'] = _broker_name_map.get(_brokers_val.upper(), _brokers_val)
 
+        # Auto-calculate broker charges from cis_trade_charge_lut, same as the
+        # UI's trade form (api_calculate_charges -> calculate_trade_charges()),
+        # when the CSV doesn't already supply them. Migration previously just
+        # wrote whatever the CSV had for these columns (usually blank/0), so a
+        # broker/exchange combo that would auto-populate real fees on the live
+        # form came through as 0.00 here. Only fills in when genuinely
+        # missing -- an explicit non-zero value from the CSV (a real legacy
+        # charge amount) is always preserved as-is, matching this script's
+        # existing "trust the migrated amount" behavior elsewhere.
+        _has_charges = any(
+            str(mapped.get(_f, '') or '').strip() not in ('', '0', '0.0', '0.00')
+            for _f in ('commission', 'calculated_commission', 'total_calculated_charges')
+        )
+        if not _has_charges and mapped.get('brokers') and mapped.get('quantity') and mapped.get('price'):
+            try:
+                from trade.services.trade_dropdown_service import trade_dropdown_service
+                _charge_result = trade_dropdown_service.calculate_trade_charges(
+                    broker=str(mapped.get('brokers')),
+                    quantity=float(mapped.get('quantity') or 0),
+                    price=float(mapped.get('price') or 0),
+                    trade_type=str(mapped.get('trade_type') or 'BUY'),
+                    exchange=mapped.get('charge_exchange') or None,
+                    currency=mapped.get('currency_code') or None,
+                )
+                _by_type = {
+                    'calculated_commission': 0.0, 'calculated_clearing_fee': 0.0,
+                    'calculated_trading_fee': 0.0, 'calculated_gst': 0.0,
+                    'calculated_other_fees': 0.0,
+                }
+                for _c in _charge_result.get('charges', []):
+                    _ft = (_c.get('fee_type') or '').lower()
+                    _fee = _c.get('calculated_fee', 0) or 0
+                    if 'brokerage' in _ft:
+                        _by_type['calculated_commission'] += _fee
+                    elif 'clearing' in _ft:
+                        _by_type['calculated_clearing_fee'] += _fee
+                    elif 'trading' in _ft:
+                        _by_type['calculated_trading_fee'] += _fee
+                    elif 'gst' in _ft:
+                        _by_type['calculated_gst'] += _fee
+                    else:
+                        _by_type['calculated_other_fees'] += _fee
+                for _field, _amount in _by_type.items():
+                    mapped[_field] = str(_amount)
+                mapped['total_calculated_charges'] = str(_charge_result.get('total_charges', 0))
+                mapped['commission'] = str(_charge_result.get('total_charges', 0))
+                if _charge_result.get('charges'):
+                    _first = _charge_result['charges'][0]
+                    mapped['charge_fee_type'] = _first.get('fee_type', '')
+                    mapped['charge_fee_rule'] = _first.get('fee_rule', '')
+                    mapped['charge_fee_value'] = str(_first.get('fee_value', 0))
+                    if not str(mapped.get('charge_exchange', '') or '').strip():
+                        mapped['charge_exchange'] = _first.get('exchange', '')
+                    if not str(mapped.get('charge_country', '') or '').strip():
+                        mapped['charge_country'] = _first.get('country_of_exchange', '')
+                logger.info(
+                    "trade_id=%s: auto-calculated charges via cis_trade_charge_lut "
+                    "(broker=%s, total=%s)",
+                    raw_id, mapped.get('brokers'), mapped.get('total_calculated_charges')
+                )
+            except Exception as _charge_exc:
+                logger.warning(
+                    "trade_id=%s: charge auto-calculation failed, leaving as supplied: %s",
+                    raw_id, _charge_exc
+                )
+
         # --- UOB KAY HIAN* + SGX broker charge rounding rule ---
         # Mirrors the server-side guard in trade/views.py's create/edit trade
         # flow (was missing here): SGX trades via UOB Kay Hian (any suffix)
