@@ -1,0 +1,582 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Upload File - CisTrade{% endblock %}
+
+{% block breadcrumb %}
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item">Configuration</li>
+    <li class="breadcrumb-item"><a href="{% url 'upload:list' %}">File Uploads</a></li>
+    <li class="breadcrumb-item active">Upload File</li>
+{% endblock %}
+
+{% block content %}
+<div class="upload-form-container">
+    <!-- Page Header -->
+    <div class="content-header">
+        <h1 class="content-title">
+            <i class="bi bi-cloud-arrow-up text-primary"></i> Upload File
+        </h1>
+        <p class="content-subtitle">Upload files to ingest into Hive external tables</p>
+    </div>
+
+    <!-- Upload Form -->
+    <div class="row">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-file-earmark-plus"></i> File Upload
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <form id="uploadForm" method="post" enctype="multipart/form-data" action="{% url 'upload:create' %}">
+                        {% csrf_token %}
+
+                        <!-- Drag & Drop Zone -->
+                        <div id="dropZone" class="drop-zone mb-4">
+                            <div class="drop-zone-content">
+                                <i class="bi bi-cloud-arrow-up drop-zone-icon"></i>
+                                <p class="drop-zone-text">
+                                    Drag and drop your file here<br>
+                                    <span class="text-muted">or</span>
+                                </p>
+                                <label class="btn btn-primary">
+                                    <i class="bi bi-folder2-open"></i> Browse Files
+                                    <input type="file" id="fileInput" name="file" accept=".csv,.tsv,.json,.xlsx,.xls,.parquet" hidden>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- File Preview (Hidden initially) -->
+                        <div id="filePreview" class="file-preview d-none mb-4">
+                            <div class="d-flex align-items-center p-3 bg-light rounded">
+                                <i class="bi bi-file-earmark-text file-icon me-3"></i>
+                                <div class="flex-grow-1">
+                                    <div class="fw-bold" id="fileName">-</div>
+                                    <small class="text-muted">
+                                        <span id="fileSize">-</span> |
+                                        <span id="fileType">-</span>
+                                    </small>
+                                </div>
+                                <button type="button" class="btn btn-outline-danger btn-sm" id="removeFile">
+                                    <i class="bi bi-x-lg"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Validation Status -->
+                        <div id="validationStatus" class="d-none mb-4">
+                            <div class="alert alert-info d-flex align-items-center" id="validatingAlert">
+                                <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                                <span>Validating file...</span>
+                            </div>
+                            <div id="validationResult" class="d-none">
+                                <!-- Will be populated by JS -->
+                            </div>
+                        </div>
+
+                        <!-- Validation Details (shown after validation) -->
+                        <div id="validationDetails" class="d-none mb-4">
+                            <div class="card bg-light">
+                                <div class="card-header py-2">
+                                    <strong><i class="bi bi-check-circle text-success"></i> File Validated</strong>
+                                </div>
+                                <div class="card-body py-3">
+                                    <div class="row g-3">
+                                        <div class="col-md-4">
+                                            <small class="text-muted">Rows</small>
+                                            <div class="fw-bold" id="rowCount">-</div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <small class="text-muted">Columns</small>
+                                            <div class="fw-bold" id="columnCount">-</div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <small class="text-muted">Encoding</small>
+                                            <div class="fw-bold" id="encoding">-</div>
+                                        </div>
+                                    </div>
+                                    <div class="mt-3" id="columnsPreview">
+                                        <small class="text-muted">Columns:</small>
+                                        <div id="columnsList" class="mt-1">-</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Datasource Config Option (shown when matching config found) -->
+                        <div id="datasourceConfigOption" class="mb-4 d-none">
+                            <div class="alert alert-success">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="useDatasourceConfig"
+                                           name="use_datasource_config" value="true" checked>
+                                    <label class="form-check-label" for="useDatasourceConfig">
+                                        <strong><i class="bi bi-database-check"></i> Use Datasource Configuration</strong>
+                                    </label>
+                                </div>
+                                <div class="mt-2 small" id="datasourceConfigInfo">
+                                    <!-- Will be populated by JS -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Description -->
+                        <div class="mb-4">
+                            <label for="description" class="form-label">Description (Optional)</label>
+                            <textarea class="form-control" id="description" name="description" rows="3"
+                                      placeholder="Enter a description for this upload..."></textarea>
+                        </div>
+
+                        <!-- Actions -->
+                        <div class="d-flex gap-2">
+                            <button type="submit" class="btn btn-primary" id="uploadBtn" disabled>
+                                <i class="bi bi-cloud-upload"></i> Upload & Validate
+                            </button>
+                            <a href="{% url 'upload:list' %}" class="btn btn-outline-secondary">
+                                <i class="bi bi-x-lg"></i> Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Help Panel -->
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-info-circle"></i> Upload Guidelines
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <h6>Supported Formats</h6>
+                    <ul class="list-unstyled mb-4">
+                        <li><i class="bi bi-file-earmark-text text-success me-2"></i>CSV (Comma-separated)</li>
+                        <li><i class="bi bi-file-earmark-text text-success me-2"></i>TSV (Tab-separated)</li>
+                        <li><i class="bi bi-filetype-json text-info me-2"></i>JSON (Array of objects)</li>
+                        <li><i class="bi bi-file-earmark-excel text-success me-2"></i>Excel (.xlsx, .xls)</li>
+                        <li><i class="bi bi-file-earmark-binary text-primary me-2"></i>Parquet</li>
+                    </ul>
+
+                    <h6>Requirements</h6>
+                    <ul class="small text-muted">
+                        <li>Maximum file size: <strong>{{ max_file_size_mb }} MB</strong></li>
+                        <li>First row should contain column headers</li>
+                        <li>UTF-8 encoding recommended</li>
+                        <li>Avoid special characters in column names</li>
+                    </ul>
+
+                    <div class="alert alert-info small mb-0">
+                        <i class="bi bi-lightbulb"></i>
+                        <strong>Tip:</strong> After upload, you can edit column names and data types before ingesting into Hive.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sample Data Preview -->
+            <div class="card mt-3 d-none" id="samplePreviewCard">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-table"></i> Data Preview
+                    </h5>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped mb-0" id="sampleTable">
+                            <thead id="sampleTableHead"></thead>
+                            <tbody id="sampleTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.drop-zone {
+    border: 3px dashed #dee2e6;
+    border-radius: 12px;
+    padding: 60px 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.25s ease, background 0.25s ease, transform 0.25s ease;
+    background: #f8f9fa;
+}
+
+.drop-zone:hover {
+    border-color: #0d6efd;
+    background: rgba(13, 110, 253, 0.05);
+    transform: translateY(-2px);
+}
+
+.drop-zone.dragover {
+    border-color: #0d6efd;
+    background: rgba(13, 110, 253, 0.06);
+    transform: scale(1.01);
+}
+
+.drop-zone-icon {
+    font-size: 4rem;
+    color: #6c757d;
+    margin-bottom: 1rem;
+    transition: color 0.25s ease, transform 0.25s ease;
+}
+
+.drop-zone.dragover .drop-zone-icon {
+    color: #0d6efd;
+    animation: bounce 0.6s ease-in-out infinite;
+}
+
+@keyframes bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+}
+
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.file-preview, #validationStatus, #validationDetails, #datasourceConfigOption, #samplePreviewCard {
+    animation: fadeInUp 0.35s ease-out;
+}
+
+#sampleTableBody tr {
+    animation: fadeInUp 0.3s ease-out both;
+}
+#sampleTableBody tr:nth-child(1) { animation-delay: 0.03s; }
+#sampleTableBody tr:nth-child(2) { animation-delay: 0.08s; }
+#sampleTableBody tr:nth-child(3) { animation-delay: 0.13s; }
+#sampleTableBody tr:nth-child(4) { animation-delay: 0.18s; }
+#sampleTableBody tr:nth-child(5) { animation-delay: 0.23s; }
+
+.btn { transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.btn:hover { transform: translateY(-1px); }
+.btn:active { transform: translateY(0); }
+
+#validationResult .alert, #validationDetails .card {
+    animation: fadeInUp 0.3s ease-out;
+}
+
+.drop-zone-text {
+    font-size: 1.1rem;
+    color: #6c757d;
+    margin-bottom: 1rem;
+}
+
+.file-preview {
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+}
+
+.file-icon {
+    font-size: 2.5rem;
+    color: #0d6efd;
+}
+
+.validation-error {
+    color: #dc3545;
+}
+
+.validation-warning {
+    color: #ffc107;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    const dropZone = $('#dropZone');
+    const fileInput = $('#fileInput');
+    const filePreview = $('#filePreview');
+    const uploadBtn = $('#uploadBtn');
+    const validationStatus = $('#validationStatus');
+    const validationDetails = $('#validationDetails');
+    const samplePreviewCard = $('#samplePreviewCard');
+
+    // Drag & Drop handlers
+    dropZone.on('dragover', function(e) {
+        e.preventDefault();
+        $(this).addClass('dragover');
+    });
+
+    dropZone.on('dragleave', function(e) {
+        e.preventDefault();
+        $(this).removeClass('dragover');
+    });
+
+    dropZone.on('drop', function(e) {
+        e.preventDefault();
+        $(this).removeClass('dragover');
+        const files = e.originalEvent.dataTransfer.files;
+        if (files.length > 0) {
+            handleFile(files[0]);
+        }
+    });
+
+    // Click to browse
+    dropZone.on('click', function(e) {
+        if (e.target === this || $(e.target).hasClass('drop-zone-content') ||
+            $(e.target).hasClass('drop-zone-icon') || $(e.target).hasClass('drop-zone-text')) {
+            fileInput.click();
+        }
+    });
+
+    // File input change
+    fileInput.on('change', function() {
+        if (this.files.length > 0) {
+            handleFile(this.files[0]);
+        }
+    });
+
+    // Remove file
+    $('#removeFile').on('click', function() {
+        resetForm();
+    });
+
+    // Only CIS_External_upload_format_[1-5]-<anything>.csv files are accepted.
+    // Requires a dash after the format number.
+    // e.g. CIS_External_upload_format_2-SG.csv, CIS_External_upload_format_5-NTS31dly.csv
+    var CIS_FORMAT_PATTERN = /^CIS_External_upload_format_([1-5])-.*\.csv$/i;
+
+    function getFormatNumber(filename) {
+        var m = CIS_FORMAT_PATTERN.exec(filename);
+        return m ? m[1] : null;
+    }
+
+    function handleFile(file) {
+        // Enforce filename pattern before anything else
+        if (!CIS_FORMAT_PATTERN.test(file.name)) {
+            dropZone.addClass('d-none');
+            filePreview.removeClass('d-none');
+            $('#fileName').text(file.name);
+            $('#fileSize').text(formatFileSize(file.size));
+            $('#fileType').text(getFileTypeLabel(file.name));
+            validationStatus.removeClass('d-none');
+            $('#validatingAlert').addClass('d-none');
+            $('#validationResult').removeClass('d-none').html(
+                '<div class="alert alert-danger mb-0">' +
+                '  <div class="d-flex align-items-start mb-2">' +
+                '    <i class="bi bi-x-octagon-fill text-danger me-2 mt-1" style="font-size:1.2rem;flex-shrink:0;"></i>' +
+                '    <div>' +
+                '      <strong>Invalid filename</strong> &mdash; Only CIS position upload files are accepted.' +
+                '    </div>' +
+                '  </div>' +
+                '  <hr class="my-2">' +
+                '  <div class="mb-2">' +
+                '    <span class="text-muted small">Required format</span><br>' +
+                '    <code class="fs-6">CIS_External_upload_format_<em>N</em>-<em>anything</em>.csv</code>' +
+                '  </div>' +
+                '  <div class="mb-2 small text-muted">' +
+                '    where <strong>N</strong> = format number (1&ndash;5) &nbsp;|&nbsp; dash <strong>-</strong> after the number &nbsp;|&nbsp; <strong>anything</strong> = any suffix' +
+                '  </div>' +
+                '  <div class="mt-2">' +
+                '    <span class="text-muted small">Valid examples</span>' +
+                '    <ul class="mb-0 mt-1 small">' +
+                '      <li><code>CIS_External_upload_format_1-20260714.csv</code></li>' +
+                '      <li><code>CIS_External_upload_format_2-SG.csv</code></li>' +
+                '      <li><code>CIS_External_upload_format_3-Actual16_1.csv</code></li>' +
+                '      <li><code>CIS_External_upload_format_5-NTS31dly.csv</code></li>' +
+                '    </ul>' +
+                '  </div>' +
+                '</div>'
+            );
+            validationDetails.addClass('d-none');
+            uploadBtn.prop('disabled', true);
+            return;
+        }
+
+        // Show file preview
+        $('#fileName').text(file.name);
+        $('#fileSize').text(formatFileSize(file.size));
+        $('#fileType').text(getFileTypeLabel(file.name));
+
+        dropZone.addClass('d-none');
+        filePreview.removeClass('d-none');
+
+        // Validate file
+        validateFile(file);
+    }
+
+    function validateFile(file) {
+        validationStatus.removeClass('d-none');
+        $('#validatingAlert').removeClass('d-none');
+        $('#validationResult').addClass('d-none');
+        validationDetails.addClass('d-none');
+        samplePreviewCard.addClass('d-none');
+        uploadBtn.prop('disabled', true);
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        $.ajax({
+            url: "{% url 'upload:api_validate' %}",
+            type: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            success: function(response) {
+                $('#validatingAlert').addClass('d-none');
+                $('#validationResult').removeClass('d-none');
+
+                if (response.valid) {
+                    showValidationSuccess(response);
+                } else {
+                    showValidationError(response);
+                }
+            },
+            error: function(xhr) {
+                $('#validatingAlert').addClass('d-none');
+                $('#validationResult').removeClass('d-none').html(
+                    '<div class="alert alert-danger">' +
+                    '<i class="bi bi-x-circle"></i> Validation failed: ' +
+                    (xhr.responseJSON?.error || 'Unknown error') + '</div>'
+                );
+            }
+        });
+    }
+
+    function showValidationSuccess(data) {
+        let html = '<div class="alert alert-success d-flex align-items-center">' +
+                   '<i class="bi bi-check-circle-fill me-2"></i>' +
+                   '<span>File is valid and ready for upload</span></div>';
+
+        if (data.warnings && data.warnings.length > 0) {
+            html += '<div class="alert alert-warning">';
+            data.warnings.forEach(function(warning) {
+                html += '<div><i class="bi bi-exclamation-triangle"></i> ' + warning + '</div>';
+            });
+            html += '</div>';
+        }
+
+        $('#validationResult').html(html);
+
+        // Show validation details
+        $('#rowCount').text(data.row_count?.toLocaleString() || '-');
+        $('#columnCount').text(data.column_count || '-');
+        $('#encoding').text(data.encoding || 'UTF-8');
+
+        if (data.columns && data.columns.length > 0) {
+            let columnsHtml = '';
+            data.columns.forEach(function(col) {
+                columnsHtml += '<span class="badge bg-secondary me-1 mb-1">' +
+                              col.name + ' <small>(' + (col.type || col.hive_type || 'STRING') + ')</small></span>';
+            });
+            $('#columnsList').html(columnsHtml);
+        }
+
+        validationDetails.removeClass('d-none');
+
+        // Show datasource config option if found
+        if (data.datasource_config) {
+            let configInfo = '<strong>Target Table:</strong> ' + (data.datasource_config.target_table || 'N/A');
+            configInfo += '<br><strong>Separator:</strong> <code>' + (data.datasource_config.separator || ',') + '</code>';
+            if (data.datasource_config.source_id) {
+                configInfo += '<br><strong>Source ID:</strong> ' + data.datasource_config.source_id;
+            }
+            $('#datasourceConfigInfo').html(configInfo);
+            $('#datasourceConfigOption').removeClass('d-none');
+        } else {
+            $('#datasourceConfigOption').addClass('d-none');
+        }
+
+        // Show sample data preview
+        if (data.sample_data && data.sample_data.length > 0 && data.columns) {
+            showSamplePreview(data.columns, data.sample_data);
+        }
+
+        uploadBtn.prop('disabled', false);
+    }
+
+    function showValidationError(data) {
+        let html = '<div class="alert alert-danger">';
+
+        if (data.errors && data.errors.length > 0) {
+            data.errors.forEach(function(error) {
+                html += '<div><i class="bi bi-x-circle"></i> ' + error + '</div>';
+            });
+        } else {
+            html += '<div><i class="bi bi-x-circle"></i> File validation failed</div>';
+        }
+
+        html += '</div>';
+        $('#validationResult').html(html);
+    }
+
+    function showSamplePreview(columns, sampleData) {
+        // Build header
+        let headerHtml = '<tr>';
+        columns.forEach(function(col) {
+            headerHtml += '<th class="small">' + col.name + '</th>';
+        });
+        headerHtml += '</tr>';
+        $('#sampleTableHead').html(headerHtml);
+
+        // Build body
+        let bodyHtml = '';
+        sampleData.slice(0, 5).forEach(function(row) {
+            bodyHtml += '<tr>';
+            columns.forEach(function(col) {
+                const val = row[col.name] || '-';
+                bodyHtml += '<td class="small text-truncate" style="max-width: 150px;">' + val + '</td>';
+            });
+            bodyHtml += '</tr>';
+        });
+        $('#sampleTableBody').html(bodyHtml);
+
+        samplePreviewCard.removeClass('d-none');
+    }
+
+    function resetForm() {
+        fileInput.val('');
+        dropZone.removeClass('d-none');
+        filePreview.addClass('d-none');
+        validationStatus.addClass('d-none');
+        validationDetails.addClass('d-none');
+        samplePreviewCard.addClass('d-none');
+        $('#datasourceConfigOption').addClass('d-none');
+        uploadBtn.prop('disabled', true);
+    }
+
+    function formatFileSize(bytes) {
+        if (bytes >= 1048576) return (bytes / 1048576).toFixed(2) + ' MB';
+        if (bytes >= 1024) return (bytes / 1024).toFixed(2) + ' KB';
+        return bytes + ' B';
+    }
+
+    function getFileTypeLabel(filename) {
+        const ext = filename.split('.').pop().toLowerCase();
+        const labels = {
+            'csv': 'CSV File',
+            'tsv': 'TSV File',
+            'json': 'JSON File',
+            'xlsx': 'Excel Workbook',
+            'xls': 'Excel File',
+            'parquet': 'Parquet File'
+        };
+        return labels[ext] || ext.toUpperCase();
+    }
+
+    // Form submit handler with popup
+    $('#uploadForm').on('submit', function(e) {
+        if (!fileInput.val()) {
+            e.preventDefault();
+            alert('Please select a file to upload');
+            return false;
+        }
+
+        if (typeof submitWithPopup === 'function') {
+            submitWithPopup('create', 'Upload', this);
+            e.preventDefault();
+        }
+    });
+});
+</script>
+{% endblock %}
