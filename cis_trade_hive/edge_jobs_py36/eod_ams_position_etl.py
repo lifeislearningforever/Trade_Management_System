@@ -499,7 +499,8 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
                 'dly'                                                   AS data_frq,
                 '{table}'                                               AS source_table,
                 CURRENT_TIMESTAMP()                                     AS etl_insert_ts,
-                'eod_ams_etl'                                           AS etl_batch_id
+                'eod_ams_etl'                                           AS etl_batch_id,
+                CAST(NULL AS DECIMAL(30,8))                             AS dividend_fc
             FROM {DB}.{table}
             WHERE processing_date = '{processing_date}'
             GROUP BY
@@ -565,7 +566,8 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
                 'dly'                                                   AS data_frq,
                 '{table}'                                               AS source_table,
                 CURRENT_TIMESTAMP()                                     AS etl_insert_ts,
-                'eod_ams_etl'                                           AS etl_batch_id
+                'eod_ams_etl'                                           AS etl_batch_id,
+                CAST(NULL AS DECIMAL(30,8))                             AS dividend_fc
             FROM {DB}.{table}
             WHERE processing_date = '{processing_date}'
         """
@@ -625,7 +627,8 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
                 'mthly'                                                 AS data_frq,
                 '{table}'                                               AS source_table,
                 CURRENT_TIMESTAMP()                                     AS etl_insert_ts,
-                'eod_ams_etl'                                           AS etl_batch_id
+                'eod_ams_etl'                                           AS etl_batch_id,
+                CAST(NULL AS DECIMAL(30,8))                             AS dividend_fc
             FROM {DB}.{table}
             WHERE processing_date = '{processing_date}'
         """
@@ -688,7 +691,8 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
                 'dly'                                                   AS data_frq,
                 '{table}'                                               AS source_table,
                 CURRENT_TIMESTAMP()                                     AS etl_insert_ts,
-                'eod_ams_etl'                                           AS etl_batch_id
+                'eod_ams_etl'                                           AS etl_batch_id,
+                CAST(NULL AS DECIMAL(30,8))                             AS dividend_fc
             FROM {DB}.{table} dl
             LEFT JOIN (
                 -- Pre-filtered to only the security names daily_limit (dl)
@@ -741,8 +745,8 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
                 CAST(NULL AS DECIMAL(30,8))                             AS net_book_value_fc,
                 {safe_decimal('m_unrealized_pl_fc', 'DECIMAL(30,8)')}  AS unrealized_pnl_fc,
                 CAST(NULL AS DECIMAL(30,8))                             AS provision_fc,
-                CAST(NULL AS DECIMAL(30,8))                             AS cost_lc,
-                CAST(NULL AS DECIMAL(30,8))                             AS market_value_lc,
+                {safe_decimal('m_total_cost_sgd', 'DECIMAL(30,8)')}    AS cost_lc,
+                {safe_decimal('m_market_value_sgd', 'DECIMAL(30,8)')}  AS market_value_lc,
                 CAST(NULL AS DECIMAL(30,8))                             AS net_book_value_lc,
                 CAST(NULL AS DECIMAL(30,8))                             AS unrealized_pnl_lc,
                 CAST(NULL AS DECIMAL(30,8))                             AS provision_lc,
@@ -777,7 +781,8 @@ def _standardize_sql(table: str, processing_date: str, src_id: str) -> str:
                 'dly'                                                   AS data_frq,
                 '{table}'                                               AS source_table,
                 CURRENT_TIMESTAMP()                                     AS etl_insert_ts,
-                'eod_ams_etl'                                           AS etl_batch_id
+                'eod_ams_etl'                                           AS etl_batch_id,
+                {safe_decimal('m_dividend_fc', 'DECIMAL(30,8)')}       AS dividend_fc
             FROM {DB}.{table}
             WHERE processing_date = '{processing_date}'
         """
@@ -919,6 +924,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool,
             COALESCE(unrealized_pnl_lc,  CAST(0 AS DECIMAL(30,8))) AS unrealized_pnl_lc,
             COALESCE(provision_lc,       CAST(0 AS DECIMAL(30,8))) AS provision_lc,
             COALESCE(provision_fc,       CAST(0 AS DECIMAL(30,8))) AS provision_fc,
+            COALESCE(dividend_fc,        CAST(0 AS DECIMAL(30,8))) AS dividend_fc,
             product_type, security_type,
             -- Normalize to exactly 'QUOTED' / 'UNQUOTED' regardless of how the
             -- raw source sent it ('Q', 'Quoted', 'QUOTED', 'UNQUOTED', 'U', ...).
@@ -1839,8 +1845,12 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool,
             CAST(unrealized_pnl_lc       AS DECIMAL(30,8))  AS unrealized_pnl_lc,
             CAST(provision_lc            AS DECIMAL(30,8))  AS provision_lc,
             CAST(provision_fc            AS DECIMAL(30,8))  AS provision_fc,
-            CAST(0 AS DECIMAL(30,8))                        AS dividend_fc,
-            CAST(0 AS DECIMAL(30,8))                        AS dividend_lc,
+            COALESCE(CAST(dividend_fc AS DECIMAL(30,8)), CAST(0 AS DECIMAL(30,8))) AS dividend_fc,
+            CAST(
+                COALESCE(CAST(dividend_fc AS DECIMAL(30,8)), CAST(0 AS DECIMAL(30,8)))
+                * COALESCE(fx.spot_rate_d, CAST(1 AS DECIMAL(30,8)))
+                AS DECIMAL(30,8)
+            )                                                AS dividend_lc,
             CAST(0 AS DECIMAL(30,8))                        AS realized_pnl_fc,
             CAST(0 AS DECIMAL(30,8))                        AS realized_pnl_lc,
             COALESCE(final_isin, isin)                      AS isin,
@@ -1854,6 +1864,37 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool,
             '{position_type}'                               AS position_type,
             true                                             AS is_latest
         FROM position_upload_staging
+        LEFT JOIN (
+            -- Per-row_id latest FX spot rate (FC->LC) as of the row's own
+            -- reporting_date -- per SA requirement: "use latest fx rate
+            -- (fc currency to lc currency) as of position date to convert
+            -- from dividend fc to dividend lc". Uses the same
+            -- ref_quot_ccy='FC-LC' / spot_rate_d / date columns and
+            -- as-of-date semantics as multicurrency_service._lookup_rate()
+            -- (the app's own canonical FX lookup), reimplemented in plain
+            -- SQL here since this script has no Django dependency. Written
+            -- as a plain JOIN + ROW_NUMBER (not a correlated subquery,
+            -- which Impala doesn't support in a JOIN ON clause) so it
+            -- resolves a different rate per row when reporting_date
+            -- differs across rows in the same run.
+            SELECT row_id, spot_rate_d
+            FROM (
+                SELECT s.row_id, r.spot_rate_d,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY s.row_id ORDER BY r.`date` DESC
+                       ) AS rn
+                FROM position_upload_staging s
+                JOIN {DB}.gmp_cis_sta_dly_fx_rates r
+                    ON r.ref_quot_ccy = CONCAT(s.security_currency, '-', s.portfolio_currency)
+                   AND r.`date` <= REPLACE(s.reporting_date, '-', '')
+                WHERE s.overall_status LIKE 'VALID%'
+                  AND s.security_currency IS NOT NULL
+                  AND s.portfolio_currency IS NOT NULL
+                  AND s.security_currency != s.portfolio_currency
+                  AND s.dividend_fc IS NOT NULL
+            ) ranked
+            WHERE rn = 1
+        ) fx ON fx.row_id = position_upload_staging.row_id
         WHERE overall_status LIKE 'VALID%'
         """,
         database=DB

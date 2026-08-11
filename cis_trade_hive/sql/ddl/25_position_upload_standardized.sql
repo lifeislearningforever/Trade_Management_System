@@ -93,7 +93,13 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gmp_cis.position_upload_standardized (
     data_frq                    STRING,
     source_table                STRING,
     etl_insert_ts               TIMESTAMP,
-    etl_batch_id                STRING
+    etl_batch_id                STRING,
+
+    -- Added 2026-08-11 (sql/ddl/88_position_upload_standardized_add_dividend_fc.sql)
+    -- Accumulated dividend, foreign/security currency. Only GMP's daily
+    -- position source (gmp_cis_sta_dly_position, m_dividend_fc) populates
+    -- this; NULL for every other source.
+    dividend_fc                 DECIMAL(30,8)
 )
 COMMENT 'Unified position upload staging table — normalised from 5 user upload sources'
 PARTITIONED BY (

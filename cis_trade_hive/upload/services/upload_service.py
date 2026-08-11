@@ -2823,7 +2823,8 @@ class UploadService:
                         'adhoc'                                         AS data_frq,
                         'cis_user_sta_adhoc_position_1'                 AS source_table,
                         CURRENT_TIMESTAMP()                             AS etl_insert_ts,
-                        'python_etl'                                    AS etl_batch_id
+                        'python_etl'                                    AS etl_batch_id,
+                        CAST(NULL AS DECIMAL(30,8))                     AS dividend_fc
                     FROM {db}.cis_user_sta_adhoc_position_1 p1
                     LEFT JOIN (
                         -- Deduplicate LUT: one row per exchange_name.
@@ -2907,7 +2908,8 @@ class UploadService:
                         'adhoc'                                         AS data_frq,
                         'cis_user_sta_adhoc_position_2'                 AS source_table,
                         CURRENT_TIMESTAMP()                             AS etl_insert_ts,
-                        'python_etl'                                    AS etl_batch_id
+                        'python_etl'                                    AS etl_batch_id,
+                        CAST(NULL AS DECIMAL(30,8))                     AS dividend_fc
                     FROM {db}.cis_user_sta_adhoc_position_2
                     WHERE processing_date = '{processing_date}'
                       AND src_id = '{src_id}'
@@ -2975,7 +2977,8 @@ class UploadService:
                         'adhoc'                                         AS data_frq,
                         'cis_user_sta_adhoc_position_3'                 AS source_table,
                         CURRENT_TIMESTAMP()                             AS etl_insert_ts,
-                        'python_etl'                                    AS etl_batch_id
+                        'python_etl'                                    AS etl_batch_id,
+                        CAST(NULL AS DECIMAL(30,8))                     AS dividend_fc
                     FROM {db}.cis_user_sta_adhoc_position_3
                     WHERE processing_date = '{processing_date}'
                       AND src_id = '{src_id}'
@@ -3041,7 +3044,8 @@ class UploadService:
                         'adhoc'                                             AS data_frq,
                         'cis_user_sta_adhoc_position_4'                     AS source_table,
                         CURRENT_TIMESTAMP()                                 AS etl_insert_ts,
-                        'python_etl'                                        AS etl_batch_id
+                        'python_etl'                                        AS etl_batch_id,
+                        CAST(NULL AS DECIMAL(30,8))                         AS dividend_fc
                     FROM {db}.cis_user_sta_adhoc_position_4
                     WHERE processing_date = '{processing_date}'
                       AND src_id = '{src_id}'
@@ -3115,7 +3119,8 @@ class UploadService:
                         'adhoc'                                            AS data_frq,
                         'cis_user_sta_adhoc_position_5'                    AS source_table,
                         CURRENT_TIMESTAMP()                                AS etl_insert_ts,
-                        'python_etl'                                       AS etl_batch_id
+                        'python_etl'                                       AS etl_batch_id,
+                        CAST(NULL AS DECIMAL(30,8))                        AS dividend_fc
                     FROM {db}.cis_user_sta_adhoc_position_5 p5
                     LEFT JOIN country_lut cn_exc
                         ON cn_exc.full_name = UPPER(TRIM(CAST(p5.country_of_exchange AS STRING)))
@@ -3317,7 +3322,8 @@ class UploadService:
                             NULL,
                             'USER_UPLOAD', 'user', 'sta', 'adhoc',
                             'cis_user_sta_adhoc_position_4',
-                            now(), 'python_etl'
+                            now(), 'python_etl',
+                            NULL
                         )""")
 
                     _values_sql = ',\n'.join(_val_rows)
@@ -3482,7 +3488,8 @@ class UploadService:
                             {_safe_str(_r.get('maturity_date'))},
                             'USER_UPLOAD', 'user', 'sta', 'adhoc',
                             'cis_user_sta_adhoc_position_5',
-                            now(), 'python_etl'
+                            now(), 'python_etl',
+                            NULL
                         )""")
 
                     _values_sql = ',\n'.join(_val_rows)
