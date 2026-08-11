@@ -122,24 +122,42 @@ section "4. SASL Python packages"
 "${PY}" -m pip show impyla 2>&1
 
 echo ""
-echo "-- Which backend will thrift_sasl actually use? --"
+echo "-- Does impyla actually use puresasl regardless of 'sasl' being importable? --"
+# Confirmed empirically on 2026-08-11 against this exact venv: 'sasl' (the C
+# extension) WAS importable, yet the live connection traceback still showed
+# puresasl/client.py in the stack -- impyla's HiveServer2 GSSAPI path goes
+# through puresasl directly rather than preferring the 'sasl' package. So
+# the thing that actually matters is whether puresasl's GSSAPI mechanism has
+# what IT needs, not whether 'sasl' imports.
 "${PY}" -c "
-try:
-    import sasl
-    print('thrift_sasl will use: sasl (C extension) -- needs the OS-level')
-    print('  cyrus-sasl-gssapi package for GSSAPI specifically (see section 5)')
-except ImportError:
-    import puresasl
-    print('thrift_sasl will use: puresasl -- needs python kerberos/gssapi bindings')
+import puresasl
+print('puresasl version:', getattr(puresasl, '__version__', 'unknown'))
 "
+
+echo ""
+echo "-- puresasl's GSSAPI mechanism needs the separate 'kerberos' package --"
+# 'puresasl' emits 'SASLWarning: kerberos module not installed, will be
+# ignored' and then has NO usable GSSAPI mechanism at all when this is
+# missing -- this was the actual root cause found in this investigation,
+# manifesting as: Could not start SASL: None of the mechanisms listed meet
+# all required properties.
+"${PY}" -c "import kerberos; print('kerberos (pykerberos bindings): importable')" 2>&1
+"${PY}" -c "import gssapi; print('gssapi: importable')" 2>&1
+echo "If BOTH of the above show 'No module named' errors, that is the fix:"
+echo "  pip install kerberos"
+echo "(needs system krb5-devel to build -- separate from cyrus-sasl-devel;"
+echo " sudo yum install krb5-devel first if the pip install fails to compile)"
 
 #-------------------------------------------------------------------------------
 section "5. System-level Cyrus SASL GSSAPI plugin"
 #-------------------------------------------------------------------------------
-# The actual, most likely root cause given sections 2-4 all check out:
 # Cyrus SASL loads mechanism plugins (GSSAPI, PLAIN, etc.) as separate
 # shared objects at RUNTIME from this directory, independent of whether
-# the Python 'sasl' package imported successfully.
+# the Python 'sasl' package imported successfully. NOTE: confirmed present
+# and correctly installed in this investigation (libgssapiv2.so +
+# cyrus-sasl-gssapi RPM both found) -- the actual root cause turned out to
+# be the missing 'kerberos' Python package checked in section 4, not this.
+# Still worth checking on a fresh box since it's a real possible cause.
 
 echo "-- /usr/lib64/sasl2/ contents --"
 ls -la /usr/lib64/sasl2/ 2>&1
