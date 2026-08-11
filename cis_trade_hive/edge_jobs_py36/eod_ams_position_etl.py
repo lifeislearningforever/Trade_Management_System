@@ -1848,7 +1848,7 @@ def run_etl_for_table(table: str, processing_date: str, dry_run: bool,
             COALESCE(CAST(dividend_fc AS DECIMAL(30,8)), CAST(0 AS DECIMAL(30,8))) AS dividend_fc,
             CAST(
                 COALESCE(CAST(dividend_fc AS DECIMAL(30,8)), CAST(0 AS DECIMAL(30,8)))
-                * COALESCE(fx.spot_rate_d, CAST(1 AS DECIMAL(30,8)))
+                * COALESCE({safe_decimal('fx.spot_rate_d', 'DECIMAL(30,8)')}, CAST(1 AS DECIMAL(30,8)))
                 AS DECIMAL(30,8)
             )                                                AS dividend_lc,
             CAST(0 AS DECIMAL(30,8))                        AS realized_pnl_fc,
