@@ -240,6 +240,19 @@ default:
   this dependency closure, so nothing here needs 3.7+/3.8+/3.9+/3.10+
   syntax beyond `dataclasses`, which has an official PyPI backport for
   3.6).
+  **Caveat found in real use (2026-08-11):** `py_compile` only checks
+  syntax, not runtime semantics — `tuple[bool, Optional[int]]` (a bare
+  builtin generic subscript, PEP 585) is syntactically valid on every
+  Python 3 version, so `py_compile` never flags it, but `tuple` doesn't
+  support `[]` at all until 3.9; under 3.6 it raises `TypeError: 'type'
+  object is not subscriptable` at import time (annotations are evaluated
+  eagerly), not a `SyntaxError`. Found via a live failure on the SIT edge
+  node in `lib/corporate_action_repository.py`,
+  `lib/cash_flow_repository.py`, and `lib/trade_kudu_repository.py`;
+  fixed by importing `Tuple` from `typing` and using `Tuple[...]` instead.
+  If you add new code to this package, grep for bare
+  `tuple[`/`list[`/`dict[`/`set[`/`type[` before trusting `py_compile`
+  alone.
 - All 15 top-level scripts were imported standalone (not via `__main__`)
   under the project's actual Python 3.14 venv (no Django installed on the
   import path). The 13 command-style scripts additionally had their

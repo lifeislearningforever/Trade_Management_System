@@ -6,7 +6,7 @@ All queries execute via Impala (no Django ORM).
 """
 
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 import json
 import random
@@ -192,7 +192,7 @@ class CorporateActionRepository:
             return []
 
     @staticmethod
-    def insert(ca_data: Dict[str, Any], created_by: str) -> tuple[bool, Optional[int]]:
+    def insert(ca_data: Dict[str, Any], created_by: str) -> Tuple[bool, Optional[int]]:
         """
         Insert a new corporate action record into Kudu.
 

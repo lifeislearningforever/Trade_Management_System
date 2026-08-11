@@ -16,7 +16,7 @@ Trade Types:
 import logging
 import json
 import uuid
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 
 from .impala_connection import impala_manager, query_cache
@@ -119,7 +119,7 @@ class TradeKuduRepository:
         self,
         trade_data: Dict[str, Any],
         is_update: bool = False
-    ) -> tuple[bool, List[str], Dict[str, Any]]:
+    ) -> Tuple[bool, List[str], Dict[str, Any]]:
         """
         Validate trade data before insert/update.
         Returns validation results along with fetched entity details for reuse.

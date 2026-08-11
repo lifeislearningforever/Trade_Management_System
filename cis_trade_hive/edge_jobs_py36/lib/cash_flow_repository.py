@@ -10,7 +10,7 @@ Implements:
 
 import logging
 import json
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 
 from .impala_connection import impala_manager
@@ -271,7 +271,7 @@ class CashFlowRepository:
     # =========================================================================
 
     @staticmethod
-    def insert(cf_data: Dict[str, Any], created_by: str) -> tuple[bool, Optional[int]]:
+    def insert(cf_data: Dict[str, Any], created_by: str) -> Tuple[bool, Optional[int]]:
         """
         Insert a new cash flow record into Kudu.
 
