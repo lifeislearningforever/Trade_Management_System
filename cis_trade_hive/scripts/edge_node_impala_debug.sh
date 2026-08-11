@@ -24,7 +24,6 @@
 # Date: 2026-08-11
 #===============================================================================
 
-PY="${PY:-python3.6}"
 EDGE_JOBS_DIR="${EDGE_JOBS_DIR:-$(pwd)}"
 
 section() {
@@ -33,6 +32,38 @@ section() {
     echo "  $1"
     echo "==============================================================="
 }
+
+#-------------------------------------------------------------------------------
+section "0. Which Python will this script actually use?"
+#-------------------------------------------------------------------------------
+# A hardcoded 'python3.6' default here previously caused every downstream
+# check to silently run against the SYSTEM /usr/bin/python3.6 instead of
+# the activated venv, whenever the venv doesn't provide a binary literally
+# named python3.6 (e.g. a venv built from a python3.8 base, as this one
+# turned out to be) -- 'which python3.6' falls straight through PATH to
+# the system copy in that case, with no error to signal it happened.
+# Prefer $VIRTUAL_ENV/bin/python explicitly when a venv is active, since
+# that's unambiguous regardless of what's named what.
+
+if [[ -n "${VIRTUAL_ENV:-}" && -x "${VIRTUAL_ENV}/bin/python" ]]; then
+    PY="${VIRTUAL_ENV}/bin/python"
+    echo "VIRTUAL_ENV is active: ${VIRTUAL_ENV}"
+    echo "Using PY = ${PY}  (explicit \$VIRTUAL_ENV/bin/python)"
+else
+    PY="${PY:-python}"
+    echo "WARNING: VIRTUAL_ENV is not set -- no venv appears to be activated"
+    echo "  in this shell. If you meant to test inside one, activate it first:"
+    echo "    source /app/CISGW/cis_etl_env3.6/bin/activate"
+    echo "Using PY = ${PY}  (resolved via PATH: $(command -v "${PY}" 2>&1))"
+fi
+
+"${PY}" -c "import sys; print('Actual interpreter in use: sys.executable =', sys.executable); print('Version:', sys.version)"
+
+echo ""
+echo "If sys.executable above does NOT point inside the venv you expect"
+echo "(e.g. it says /usr/bin/python3.x instead of something under"
+echo "/app/CISGW/.../bin/), every section below will report false failures"
+echo "-- fix the venv activation before trusting anything past this point."
 
 #-------------------------------------------------------------------------------
 section "1. CIS_ENV / IMPALA_* environment variables"
