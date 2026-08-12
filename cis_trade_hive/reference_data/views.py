@@ -2155,11 +2155,19 @@ def corporate_action_list(request):
     page_number = request.GET.get('page', 1)
 
     try:
+        # Expand the filter value into every raw ca_type stored in the DB that
+        # should match it (e.g. 'CASH_DIVIDEND' also matches legacy 'DIVIDEND'
+        # rows synced before the rename).
+        ca_type_query_values = (
+            corporate_action_dropdown_service.get_ca_type_filter_values(ca_type_filter)
+            if ca_type_filter else None
+        )
+
         # Fetch data
         corporate_actions = corporate_action_service.list_all(
             search=search if search else None,
             status=status_filter if status_filter else None,
-            ca_type=ca_type_filter if ca_type_filter else None
+            ca_type=ca_type_query_values
         )
 
         # Get user info from session

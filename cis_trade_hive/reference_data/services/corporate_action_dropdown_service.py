@@ -116,6 +116,24 @@ class CorporateActionDropdownService:
         'other':                'OTHER',
     }
 
+    # canonical ca_type -> legacy stored codes that mean the same thing.
+    # Used to expand a filter/search value into every raw DB value it should
+    # match, since renaming a code (e.g. DIVIDEND -> CASH_DIVIDEND) does not
+    # rewrite already-stored rows.
+    LEGACY_CA_TYPE_SYNONYMS = {
+        'CASH_DIVIDEND': ['DIVIDEND'],
+    }
+
+    def get_ca_type_filter_values(self, canonical_value: str) -> List[str]:
+        """
+        Expand a canonical ca_type filter value into every raw ca_type value
+        stored in the DB that should match it (the canonical value itself
+        plus any legacy synonyms from LEGACY_CA_TYPE_SYNONYMS).
+        """
+        if not canonical_value:
+            return []
+        return [canonical_value] + self.LEGACY_CA_TYPE_SYNONYMS.get(canonical_value, [])
+
     def normalise_ca_type(self, raw_value: str) -> str:
         """Map any legacy/inconsistent ca_type string to the canonical dropdown value.
 

@@ -93,7 +93,11 @@ class CorporateActionRepository:
                 query += f"OR LOWER(security_name) LIKE LOWER({CorporateActionRepository.escape_value(search_term)}))"
 
             if ca_type:
-                query += f" AND ca_type = {CorporateActionRepository.escape_value(ca_type)}"
+                if isinstance(ca_type, (list, tuple, set)):
+                    values_csv = ', '.join(CorporateActionRepository.escape_value(v) for v in ca_type)
+                    query += f" AND ca_type IN ({values_csv})"
+                else:
+                    query += f" AND ca_type = {CorporateActionRepository.escape_value(ca_type)}"
 
             if security_name:
                 query += f" AND security_name = {CorporateActionRepository.escape_value(security_name)}"
