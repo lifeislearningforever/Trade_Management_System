@@ -93,11 +93,24 @@ class CorporateActionRepository:
                 query += f"OR LOWER(security_name) LIKE LOWER({CorporateActionRepository.escape_value(search_term)}))"
 
             if ca_type:
+                # Stored ca_type values are inconsistent across sources -- GMP sync
+                # writes canonical codes (e.g. 'CASH_DIVIDEND'), but older/migrated
+                # rows carry free-text variants like 'Cash Dividend' or 'CASH DIVIDEND'.
+                # Compare case- and space/underscore-insensitively on both sides
+                # instead of relying on an exact match against a fixed value list.
+                def _norm_ca_type(v: str) -> str:
+                    return str(v).strip().upper().replace(' ', '_')
+
                 if isinstance(ca_type, (list, tuple, set)):
-                    values_csv = ', '.join(CorporateActionRepository.escape_value(v) for v in ca_type)
-                    query += f" AND ca_type IN ({values_csv})"
+                    values_csv = ', '.join(
+                        CorporateActionRepository.escape_value(_norm_ca_type(v)) for v in ca_type
+                    )
+                    query += f" AND UPPER(REPLACE(ca_type, ' ', '_')) IN ({values_csv})"
                 else:
-                    query += f" AND ca_type = {CorporateActionRepository.escape_value(ca_type)}"
+                    query += (
+                        f" AND UPPER(REPLACE(ca_type, ' ', '_')) = "
+                        f"{CorporateActionRepository.escape_value(_norm_ca_type(ca_type))}"
+                    )
 
             if security_name:
                 query += f" AND security_name = {CorporateActionRepository.escape_value(security_name)}"
