@@ -472,8 +472,10 @@ class PositionService:
             )
 
         # Fetch market price for unrealized P&L (convert to Decimal for consistency)
+        # `is not None` (not truthiness) -- a genuine 0 market price must produce
+        # market_value = 0, not silently fall back to the trade price (SA, 2026-08-12).
         market_price_raw = self._get_market_price(security_id)
-        market_price = Decimal(str(market_price_raw)) if market_price_raw else price
+        market_price = Decimal(str(market_price_raw)) if market_price_raw is not None else price
         market_value = new_qty * market_price
         # Associates/subsidiaries are carried at cost (equity method) — no MTM.
         # Computed once and threaded through position_data as '_is_equity_method' so
@@ -840,8 +842,10 @@ class PositionService:
             new_total_cost = new_qty * old_avg_cost
             new_total_cost_lc = new_qty * old_avg_cost_lc  # LC cost unchanged per unit
 
+            # `is not None` (not truthiness) -- a genuine 0 market price must produce
+            # market_value = 0, not silently fall back to old_avg_cost (SA, 2026-08-12).
             market_price_raw = self._get_market_price(security_id)
-            market_price = Decimal(str(market_price_raw)) if market_price_raw else old_avg_cost
+            market_price = Decimal(str(market_price_raw)) if market_price_raw is not None else old_avg_cost
             market_value = new_qty * market_price
             market_value_lc = market_value * fx_rate  # Calculate market_value_lc
             # Associates/subsidiaries are carried at cost (equity method) — no MTM
