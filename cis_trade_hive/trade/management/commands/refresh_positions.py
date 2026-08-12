@@ -1,5 +1,5 @@
 """
-EOD / CORR Position Revaluation
+EOD / CORR / INT Position Revaluation
 
 Refreshes market values for all open positions in cis_position (the golden copy),
 covering all source systems: CIS, GMP, AMS_STREET, USER_UPLOAD.
@@ -10,7 +10,7 @@ For each position:
   3. unrealized_pnl = 0 if security_investment IN (ASSOC, SUBSI), else market_value_fc - cost_fc
   4. NON-REVALUED: LC columns recalculated from FC × latest FX rate (no MTM override)
   5. net_book_value = cost + unrealized_pnl - provision
-  6. Marks source row is_latest=false, inserts new EOD/CORR row with is_latest=true.
+  6. Marks source row is_latest=false, inserts new EOD/CORR/INT row with is_latest=true.
 
 Run types
 ---------
@@ -26,7 +26,22 @@ Run types
         - Writes position_type = 'CORR'.
         - Override with --position-date if needed.
 
-  In both cases processing_date = today (the actual run date).
+  INT:  Intraday mark-to-market refresh (e.g. scheduled 5pm daily). Revalues
+        today's live INT/SOD position in place with the latest price/FX --
+        quantity and cost pass through unchanged from the source row, only
+        market_value/unrealized_pnl/net_book_value are recalculated.
+        - position_date inferred as today's calendar date.
+        - Restricts to positions whose position_date = today.
+        - Writes position_type = 'INT' -- the SAME position_type live trade
+          bookings and process_approved_cashflows --run-type EOD already
+          write to. This is intentional: position_id is a deterministic
+          hash of (portfolio, security_label, position_basis, position_date,
+          src_system) and does not include position_type, so when today's
+          source row is itself 'INT', this run UPSERTs that exact row in
+          place -- a true refresh, not a competing copy. (PORTIARP-7494)
+        - Override with --position-date if needed.
+
+  In all cases processing_date = today (the actual run date).
 
 Source priority
 ---------------
@@ -49,9 +64,15 @@ Usage:
     python manage.py refresh_positions --run-type CORR --portfolio UOB-SG-TRADING
     python manage.py refresh_positions --run-type CORR --dry-run
 
-    # Override inferred date explicitly (both run types)
+    # Intraday INT — position_date inferred as today automatically
+    python manage.py refresh_positions --run-type INT
+    python manage.py refresh_positions --run-type INT --portfolio UOB-SG-TRADING
+    python manage.py refresh_positions --run-type INT --dry-run
+
+    # Override inferred date explicitly (any run type)
     python manage.py refresh_positions --position-date 2026-06-27
     python manage.py refresh_positions --run-type CORR --position-date 2026-05-31
+    python manage.py refresh_positions --run-type INT --position-date 2026-08-12
 
     # Fill-gaps mode — keep existing EOD rows, only create missing ones from SOD/INT
     # Use when EOD run was partially completed and you want to top-up without
@@ -94,7 +115,7 @@ AVP_PRECISION = 8  # average cost is price-per-unit, not an amount — always 8 
 
 
 class Command(BaseCommand):
-    help = 'EOD revaluation: refresh market values for all positions in cis_position (golden copy)'
+    help = 'EOD/CORR/INT revaluation: refresh market values for all positions in cis_position (golden copy)'
 
     def add_arguments(self, parser):
         parser.add_argument('--portfolio', type=str, help='Filter by portfolio short name (optional)')
@@ -106,15 +127,17 @@ class Command(BaseCommand):
         parser.add_argument('--dry-run', action='store_true',
                             help='Show what would be updated without writing to database')
         parser.add_argument(
-            '--run-type', type=str, choices=['EOD', 'CORR'], default='EOD',
-            help='EOD (default): normal end-of-day run. CORR: month-end correction run.'
+            '--run-type', type=str, choices=['EOD', 'CORR', 'INT'], default='EOD',
+            help='EOD (default): normal end-of-day run. CORR: month-end correction run. '
+                 'INT: intraday mark-to-market refresh.'
         )
         parser.add_argument(
             '--position-date', type=str, default=None,
             dest='position_date',
             help='Override the inferred position_date (YYYY-MM-DD). '
                  'EOD default: reporting_date from alldatesinfo. '
-                 'CORR default: last calendar day of previous month.'
+                 'CORR default: last calendar day of previous month. '
+                 'INT default: today.'
         )
         parser.add_argument(
             '--fill-gaps', action='store_true', default=False,
@@ -145,13 +168,15 @@ class Command(BaseCommand):
 
         # Infer position_date from alldatesinfo when not explicitly supplied
         if not position_date:
-            reporting_date, last_month_end = self._get_dates_from_alldatesinfo()
+            reporting_date, last_month_end, contextual_today = self._get_dates_from_alldatesinfo()
             if run_type == 'EOD':
                 position_date = reporting_date
-            else:
+            elif run_type == 'CORR':
                 position_date = last_month_end
+            else:  # INT
+                position_date = contextual_today
 
-        position_type = run_type  # 'EOD' or 'CORR'
+        position_type = run_type  # 'EOD', 'CORR', or 'INT'
 
         self.stdout.write(self.style.MIGRATE_HEADING('=' * 80))
         self.stdout.write(self.style.MIGRATE_HEADING(
@@ -171,7 +196,7 @@ class Command(BaseCommand):
         self.stdout.write(f"Sources    : {', '.join(sources)}")
         if fill_gaps:
             self.stdout.write(self.style.WARNING(
-                'Fill-gaps  : ON — only positions with no existing EOD row will be processed'
+                f'Fill-gaps  : ON — only positions with no existing {run_type} row will be processed'
             ))
         if ams_no_reval:
             self.stdout.write(self.style.WARNING(
@@ -188,7 +213,8 @@ class Command(BaseCommand):
 
         try:
             positions = self._get_open_positions(
-                portfolio_filter, sources, position_date, security_filter, fill_gaps=fill_gaps
+                portfolio_filter, sources, position_date, security_filter,
+                fill_gaps=fill_gaps, position_type=position_type
             )
 
             if not positions:
@@ -274,11 +300,13 @@ class Command(BaseCommand):
 
     def _get_dates_from_alldatesinfo(self):
         """
-        Query alldatesinfo for the two dates used by EOD and CORR runs.
+        Query alldatesinfo for the dates used by EOD, CORR, and INT runs.
 
-        Returns (reporting_date, last_month_end) as 'YYYY-MM-DD' strings.
+        Returns (reporting_date, last_month_end, contextual_today) as
+        'YYYY-MM-DD' strings.
 
-        reporting_date  = reporting_date column (T-1) — used by EOD.
+        reporting_date   = reporting_date column (T-1) — used by EOD.
+        contextual_today = contextual_today column (today) — used by INT.
 
         CORR last_month_end logic (SA rule):
           - If contextual_today and reporting_date are in DIFFERENT months
@@ -286,8 +314,8 @@ class Command(BaseCommand):
           - Else (same month)
             → last calendar day of month before reporting_date
 
-        Falls back to (yesterday, last calendar day of previous month) if the
-        table is unavailable.
+        Falls back to (yesterday, last calendar day of previous month, today)
+        if the table is unavailable.
         """
         try:
             rows = impala_manager.execute_query(
@@ -316,7 +344,8 @@ class Command(BaseCommand):
                 if raw_ct and raw_rd:
                     contextual_today = datetime.strptime(raw_ct, '%Y%m%d').date()
                     reporting_date   = datetime.strptime(raw_rd, '%Y%m%d').date()
-                    reporting_date_iso = reporting_date.strftime('%Y-%m-%d')
+                    reporting_date_iso   = reporting_date.strftime('%Y-%m-%d')
+                    contextual_today_iso = contextual_today.strftime('%Y-%m-%d')
 
                     # SA rule: different months → reporting_date is the month-end
                     if contextual_today.month != reporting_date.month or \
@@ -330,27 +359,28 @@ class Command(BaseCommand):
                         f"alldatesinfo: contextual_today={raw_ct} reporting_date={raw_rd} "
                         f"→ reporting_date_iso={reporting_date_iso} last_month_end={last_month_end}"
                     )
-                    return reporting_date_iso, last_month_end
+                    return reporting_date_iso, last_month_end, contextual_today_iso
         except Exception as e:
             logger.warning(f"Could not read alldatesinfo for date inference: {e}")
 
         # Fallback: use calendar dates
         today = date.today()
+        today_iso = today.strftime('%Y-%m-%d')
         yesterday = (today - timedelta(days=1)).strftime('%Y-%m-%d')
         first_of_month = today.replace(day=1)
         last_month_end = (first_of_month - timedelta(days=1)).strftime('%Y-%m-%d')
         logger.warning(
             f"alldatesinfo unavailable — falling back to reporting_date={yesterday}, "
-            f"last_month_end={last_month_end}"
+            f"last_month_end={last_month_end}, contextual_today={today_iso}"
         )
-        return yesterday, last_month_end
+        return yesterday, last_month_end, today_iso
 
     # -------------------------------------------------------------------------
     # Data fetching
     # -------------------------------------------------------------------------
 
     def _get_open_positions(self, portfolio_filter, sources, position_date=None,
-                            security_filter=None, fill_gaps=False):
+                            security_filter=None, fill_gaps=False, position_type='EOD'):
         """
         Fetch the single best source row per (portfolio, security_label, position_basis).
 
@@ -358,12 +388,16 @@ class Command(BaseCommand):
         - INT exists  → use it (authoritative running position, updated by every trade/CA).
         - INT missing → fall back to SOD (no new trades today; SOD carries forward yesterday's
           closing position and must still be revalued and published to cis_position_rep).
-        - EOD/CORR are never used as source (they are outputs, not inputs).
+        - EOD/CORR are never used as source (they are outputs, not inputs). Note: when this
+          run's own position_type is 'INT', the source query above can and does pick up an
+          'INT' row too -- that's the current live position this run is about to refresh in
+          place, not a self-referential loop (see module docstring's INT run type section).
 
-        fill_gaps=True: excludes natural keys that already have an EOD row for position_date.
-                        Use this to top-up missing EOD rows without touching existing ones.
+        fill_gaps=True: excludes natural keys that already have a row of THIS run's
+                        position_type for position_date. Use this to top-up missing
+                        rows without touching existing ones.
 
-        CORR run: restricts to rows whose position_date equals the supplied month-end date.
+        CORR/INT runs: restrict to rows whose position_date equals the supplied date.
         """
         try:
             src_list = "', '".join(self._escape(s) for s in sources)
@@ -380,16 +414,19 @@ class Command(BaseCommand):
                 if position_date else ""
             )
 
-            # --fill-gaps: exclude keys that already have an EOD row for this date
+            # --fill-gaps: exclude keys that already have a row of this run's
+            # position_type for this date (previously hardcoded to 'EOD', which
+            # silently made --fill-gaps a no-op check for CORR/INT runs).
             fill_gaps_join  = ""
             fill_gaps_where = ""
             if fill_gaps and position_date:
                 escaped_date = self._escape(position_date)
+                escaped_type = self._escape(position_type)
                 fill_gaps_join = f"""
                 LEFT JOIN (
                     SELECT DISTINCT portfolio, security_label, position_basis
                     FROM {DATABASE}.cis_position
-                    WHERE position_type = 'EOD'
+                    WHERE position_type = '{escaped_type}'
                       AND is_latest     = true
                       AND position_date = '{escaped_date}'
                 ) existing_eod
