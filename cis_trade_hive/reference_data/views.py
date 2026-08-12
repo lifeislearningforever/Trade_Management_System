@@ -2171,6 +2171,7 @@ def corporate_action_list(request):
         for ca in corporate_actions:
             ca['can_validate'] = corporate_action_service.can_user_validate(ca, username)
             ca['status_color'] = corporate_action_service.get_status_display_color(ca.get('status', ''))
+            ca['ca_type_label'] = corporate_action_dropdown_service.get_ca_type_label(ca.get('ca_type', ''))
 
         # CSV Export
         if export:
@@ -2272,6 +2273,8 @@ def corporate_action_detail(request, ca_id):
 
         # Get history
         history = corporate_action_service.get_history(int(ca_id))
+
+        ca['ca_type_label'] = corporate_action_dropdown_service.get_ca_type_label(ca.get('ca_type', ''))
 
         context = {
             'corporate_action': ca,
@@ -2563,6 +2566,7 @@ def corporate_action_pending_approvals(request):
         for ca in corporate_actions:
             ca['can_validate'] = corporate_action_service.can_user_validate(ca, username)
             ca['status_color'] = corporate_action_service.get_status_display_color(ca.get('status', ''))
+            ca['ca_type_label'] = corporate_action_dropdown_service.get_ca_type_label(ca.get('ca_type', ''))
 
         # Pagination
         paginator = Paginator(corporate_actions, 25)

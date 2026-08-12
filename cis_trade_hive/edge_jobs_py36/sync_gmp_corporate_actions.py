@@ -68,9 +68,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 GMP_CA_TYPE_MAP = {
     # Dividend variants
-    'cash dividend':          'DIVIDEND',
-    'dividend':               'DIVIDEND',
-    'div':                    'DIVIDEND',
+    'cash dividend':          'CASH_DIVIDEND',
+    'dividend':               'CASH_DIVIDEND',
+    'div':                    'CASH_DIVIDEND',
     'special dividend':       'SPECIAL_DIVIDEND',
     'special div':            'SPECIAL_DIVIDEND',
 
@@ -117,7 +117,7 @@ GMP_CA_TYPE_MAP = {
 
     # GMP specific codes
     'clas sp':                'SPECIAL_DIVIDEND',   # Classification Special
-    'd':                      'DIVIDEND',
+    'd':                      'CASH_DIVIDEND',
     'i':                      'INTEREST',
     'c':                      'COUPON',
     'b':                      'BONUS_ISSUE',

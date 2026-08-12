@@ -73,7 +73,7 @@
                                         {{ ca.ca_number|default:"-" }}
                                     </a>
                                 </td>
-                                <td>{{ ca.ca_type|default:"-" }}</td>
+                                <td>{{ ca.ca_type_label|default:ca.ca_type|default:"-" }}</td>
                                 <td>{{ ca.security_name|default:"-" }}</td>
                                 <td>{{ ca.ex_date|default:"-" }}</td>
                                 <td>{{ ca.payment_date|default:"-" }}</td>

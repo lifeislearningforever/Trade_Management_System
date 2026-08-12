@@ -27,8 +27,11 @@ class CACashFlowService:
     WRITE_POSITION_TABLE = 'cis_trade_position'  # write: CIS working ledger (versioned)
 
     # CA types that generate cash flows (payment to holder)
+    # DIVIDEND kept alongside CASH_DIVIDEND as a synonym for CAs synced before
+    # the sync_gmp_corporate_actions.py rename to CASH_DIVIDEND -- existing
+    # cis_corporate_actions/cis_cash_flow rows still carry ca_type='DIVIDEND'.
     CASH_FLOW_CA_TYPES = [
-        'DIVIDEND', 'SPECIAL_DIVIDEND', 'INTEREST', 'COUPON', 'ROC',
+        'CASH_DIVIDEND', 'DIVIDEND', 'SPECIAL_DIVIDEND', 'INTEREST', 'COUPON', 'ROC',
         'CAPITAL_DISTRIBUTION',
         'INCOME_DISTRIBUTION',  # New: like dividend but accumulates RL_fc/RL_lc
     ]
@@ -51,6 +54,7 @@ class CACashFlowService:
 
     # CA type to Cash Flow type mapping
     CA_TO_CF_TYPE_MAP = {
+        'CASH_DIVIDEND': 'CASH_DIVIDEND',
         'DIVIDEND': 'DIVIDEND',
         'SPECIAL_DIVIDEND': 'SPECIAL_DIVIDEND',
         'INTEREST': 'INTEREST',
@@ -62,7 +66,7 @@ class CACashFlowService:
 
     # CA types where AVP is unchanged (just cash distribution)
     NO_AVP_CHANGE_CA_TYPES = [
-        'DIVIDEND', 'SPECIAL_DIVIDEND', 'INTEREST', 'COUPON', 'INCOME_DISTRIBUTION',
+        'CASH_DIVIDEND', 'DIVIDEND', 'SPECIAL_DIVIDEND', 'INTEREST', 'COUPON', 'INCOME_DISTRIBUTION',
     ]
 
     # CA types where AVP = AVP_old - price_per_share (per-share cost basis reduction)
@@ -807,7 +811,7 @@ class CACashFlowService:
                     new_total_cost_lc = old_total_cost_lc
 
                 # --- Accumulation ---
-                if ca_type in ['DIVIDEND', 'SPECIAL_DIVIDEND', 'INTEREST', 'COUPON']:
+                if ca_type in ['CASH_DIVIDEND', 'DIVIDEND', 'SPECIAL_DIVIDEND', 'INTEREST', 'COUPON']:
                     new_dividend_fc     = (old_dividend_fc + cash_flow_amount_fc).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
                     new_dividend_lc     = (old_dividend_lc + cash_flow_amount_lc).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
                     new_realized_pnl_fc = realized_pnl_fc

@@ -32,8 +32,8 @@ class CorporateActionDropdownService:
 
     # Maps UDF display labels (field_value) → internal processing codes used by ca_cash_flow_service
     UDF_LABEL_TO_CODE = {
-        'cash dividend':        'DIVIDEND',
-        'dividend':             'DIVIDEND',
+        'cash dividend':        'CASH_DIVIDEND',
+        'dividend':             'CASH_DIVIDEND',
         'special dividend':     'SPECIAL_DIVIDEND',
         'capital distribution': 'CAPITAL_DISTRIBUTION',
         'income distribution':  'INCOME_DISTRIBUTION',
@@ -58,11 +58,14 @@ class CorporateActionDropdownService:
     # manual entry) to the canonical internal code used by the dropdown and service.
     # Keys are lowercased stripped values; values are canonical dropdown option values.
     CA_TYPE_NORMALISE_MAP = {
-        # Dividend variants (GMP sends 'DIVIDEND', CIS may have 'Cash Dividend' etc.)
-        'dividend':             'DIVIDEND',
-        'cash dividend':        'DIVIDEND',
-        'cash_dividend':        'DIVIDEND',
-        'cashdividend':         'DIVIDEND',
+        # Dividend variants -- also normalises the legacy stored code 'DIVIDEND'
+        # itself (pre-rename CAs synced before sync_gmp_corporate_actions.py
+        # switched to CASH_DIVIDEND) since normalise_ca_type() lowercases its
+        # input before lookup, so old and new records converge on one value.
+        'dividend':             'CASH_DIVIDEND',
+        'cash dividend':        'CASH_DIVIDEND',
+        'cash_dividend':        'CASH_DIVIDEND',
+        'cashdividend':         'CASH_DIVIDEND',
         # Special dividend
         'special dividend':     'SPECIAL_DIVIDEND',
         'special_dividend':     'SPECIAL_DIVIDEND',
@@ -125,6 +128,21 @@ class CorporateActionDropdownService:
             return raw_value
         key = raw_value.strip().lower()
         return self.CA_TYPE_NORMALISE_MAP.get(key, raw_value.strip().upper())
+
+    def get_ca_type_label(self, raw_ca_type: str) -> str:
+        """
+        Return the display label for a stored ca_type value, e.g. 'DIVIDEND'
+        or 'CASH_DIVIDEND' -> 'Cash Dividend'. Normalises first so legacy
+        codes converge on the current label. Falls back to the raw value if
+        no matching option is found.
+        """
+        if not raw_ca_type:
+            return raw_ca_type
+        canonical = self.normalise_ca_type(raw_ca_type)
+        for option in self.get_ca_types():
+            if option.get('value') == canonical:
+                return option.get('label', raw_ca_type)
+        return raw_ca_type
 
     def get_all_dropdown_options(self) -> Dict[str, List[Dict[str, Any]]]:
         """
@@ -302,7 +320,7 @@ class CorporateActionDropdownService:
 
         # Fallback to default options
         default_options = [
-            {'value': 'DIVIDEND', 'label': 'Dividend'},
+            {'value': 'CASH_DIVIDEND', 'label': 'Cash Dividend'},
             {'value': 'SPLIT', 'label': 'Split'},
             {'value': 'STOCK_SPLIT', 'label': 'Stock Split'},
             {'value': 'REVERSE_SPLIT', 'label': 'Reverse Split'},
