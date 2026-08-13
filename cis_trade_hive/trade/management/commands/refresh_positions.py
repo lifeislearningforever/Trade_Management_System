@@ -891,6 +891,56 @@ class Command(BaseCommand):
         BATCH  = 500
         now_ms = int(datetime.now().timestamp() * 1000)
 
+        # Accumulator fields (dividend, uncall, pipeline, realized_pnl,
+        # provision) are never computed by refresh_positions itself -- they're
+        # only ever updated by cash-flow/CA processing (process_approved_
+        # cashflows.py). That command writes position_type='CORR' when
+        # run_type='CORR', but refresh_positions's --run-type CORR sources
+        # exclusively from INT/SOD (EOD/CORR are outputs, never sources -- see
+        # _get_open_positions docstring). Without this pre-fetch, running
+        # process_approved_cashflows --run-type CORR followed by
+        # refresh_positions --run-type CORR silently overwrote the CORR row's
+        # freshly cashflow-adjusted accumulator fields with the stale INT/SOD
+        # source's values, since both writes UPSERT the identical
+        # (position_id, position_type='CORR') row.
+        #
+        # Pre-fetch whatever is currently stored in each row this run is about
+        # to overwrite; prefer those existing values over the INT/SOD source
+        # when present, so a same-type accumulator update always survives a
+        # subsequent revaluation run instead of being silently reverted.
+        existing_map = {}
+        _pending_ids = []
+        for row in insert_rows:
+            position = row['position']
+            raw_pos_date = position.get('position_date')
+            pos_date = str(raw_pos_date)[:10] if raw_pos_date else run_date
+            _pending_ids.append(position_id_service.position_id(
+                position.get('portfolio', ''),
+                position.get('security_label', ''),
+                position.get('position_basis', 'TRADED'),
+                pos_date,
+                position.get('src_system', 'CIS'),
+            ))
+        for i in range(0, len(_pending_ids), BATCH):
+            id_chunk = _pending_ids[i:i + BATCH]
+            if not id_chunk:
+                continue
+            ids_csv = ', '.join(str(pid) for pid in id_chunk)
+            rows = impala_manager.execute_query(
+                f"""
+                SELECT position_id, dividend_fc, dividend_lc,
+                       uncall_fc, uncall_lc, pipeline_fc, pipeline_lc,
+                       realized_pnl_fc, realized_pnl_lc,
+                       provision_fc, provision_lc
+                FROM {DATABASE}.cis_position
+                WHERE position_type = '{self._escape(position_type)}'
+                  AND position_id IN ({ids_csv})
+                """,
+                database=DATABASE
+            ) or []
+            for r in rows:
+                existing_map[r.get('position_id')] = r
+
         def _build_value(idx, row):
             position      = row['position']
             fc_dp         = row['fc_dp']
@@ -917,6 +967,7 @@ class Command(BaseCommand):
                 position.get('src_system', 'CIS'),
             )
             version_id = now_ms + idx  # records when this run executed
+            existing = existing_map.get(src_position_id) or {}
 
             def fc(v, default=0):
                 val = Decimal(str(v)) if v is not None else Decimal(str(default))
@@ -925,6 +976,27 @@ class Command(BaseCommand):
             def lc(v, default=0):
                 val = Decimal(str(v)) if v is not None else Decimal(str(default))
                 return float(round(val, lc_dp))
+
+            def _carry(field, default=0):
+                """Prefer the existing same-position_type row's accumulator
+                value (set by cash-flow/CA processing) over the INT/SOD
+                source's, so a same-type write always wins over a subsequent
+                revaluation run instead of being silently reverted."""
+                ev = existing.get(field)
+                return ev if ev is not None else position.get(field, default)
+
+            # net_book_value was computed upstream in _process_position using
+            # the SOURCE row's provision (nbv = cost + upnl - provision_source).
+            # If the carried (existing-row) provision differs, adjust nbv by
+            # the same delta so it stays internally consistent with whatever
+            # provision value actually gets written below, instead of nbv and
+            # provision silently disagreeing on this row.
+            _carried_prov_fc = Decimal(str(_carry('provision_fc', 0) or 0))
+            _carried_prov_lc = Decimal(str(_carry('provision_lc', 0) or 0))
+            _source_prov_fc  = Decimal(str(position.get('provision_fc') or 0))
+            _source_prov_lc  = Decimal(str(position.get('provision_lc') or 0))
+            nbv_fc = round(Decimal(str(nbv_fc)) + _source_prov_fc - _carried_prov_fc, fc_dp)
+            nbv_lc = round(Decimal(str(nbv_lc)) + _source_prov_lc - _carried_prov_lc, lc_dp)
 
             def _sq(v):
                 return str(v or '').replace('\\', '\\\\').replace("'", "\\'")
@@ -946,11 +1018,11 @@ class Command(BaseCommand):
                 f"{float(round(mkt_fc, fc_dp))}, {float(round(mkt_lc, lc_dp))}, "
                 f"{float(round(nbv_fc, fc_dp))}, {float(round(nbv_lc, lc_dp))}, "
                 f"{float(round(upnl_fc, fc_dp))}, {float(round(upnl_lc, lc_dp))}, "
-                f"{fc(position.get('realized_pnl_fc'))}, {lc(position.get('realized_pnl_lc'))}, "
-                f"{fc(position.get('provision_fc'))}, {lc(position.get('provision_lc'))}, "
-                f"{fc(position.get('dividend_fc'))}, {lc(position.get('dividend_lc'))}, "
-                f"{fc(position.get('uncall_fc'))}, {lc(position.get('uncall_lc'))}, "
-                f"{fc(position.get('pipeline_fc'))}, {lc(position.get('pipeline_lc'))}, "
+                f"{fc(_carry('realized_pnl_fc'))}, {lc(_carry('realized_pnl_lc'))}, "
+                f"{fc(_carry('provision_fc'))}, {lc(_carry('provision_lc'))}, "
+                f"{fc(_carry('dividend_fc'))}, {lc(_carry('dividend_lc'))}, "
+                f"{fc(_carry('uncall_fc'))}, {lc(_carry('uncall_lc'))}, "
+                f"{fc(_carry('pipeline_fc'))}, {lc(_carry('pipeline_lc'))}, "
                 f"'{position_type}', {isin_val}, {src_tbl}, true, "
                 f"'{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}')"
             )

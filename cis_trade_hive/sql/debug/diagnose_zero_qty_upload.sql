@@ -31,14 +31,48 @@ WHERE processing_date = '{PROCESSING_DATE}'
 ORDER BY portfolio, security_full_name;
 
 -- =============================================================================
--- STEP 3 (only if pos_stage_1_base / position_upload_staging still exist from
--- that run -- they're DROP-then-CREATE per run, so this only works if you
--- query immediately after, or re-run with a debug pause):
+-- CONFIRMED: Step 1 and Step 2 counts match, quantity=0 flows through correctly
+-- up to position_upload_standardized. The gap is between there and cis_position.
 -- =============================================================================
--- SELECT portfolio, security_full_name, quantity FROM gmp_cis.pos_stage_1_base
--- WHERE src_id = '{SRC_ID}' AND processing_date = '{PROCESSING_DATE}';
 
--- SELECT portfolio, security_full_name, quantity, final_quantity, quantity_status,
---        overall_status, security_status, portfolio_status
+-- =============================================================================
+-- STEP 3: cis_position -- is there ONE row for this natural key with the
+-- wrong (nonzero) quantity, or TWO is_latest=true rows (the original nonzero
+-- one AND a new zero one under a slightly different security_label)?
+--
+-- This is the same duplicate-is_latest pattern already found and fixed
+-- earlier in this session for CORR positions -- Step 7A's UPSERT computes
+-- position_id from a deterministic hash that includes security_label. If
+-- this reset upload's security matching (Step 4 tiers: ISIN / ticker /
+-- short name / full name) resolves to a DIFFERENT matched_security_name
+-- than whatever the original nonzero position was created under, the hash
+-- differs, and the UPSERT creates a second row instead of overwriting the
+-- first.
+-- =============================================================================
+SELECT position_id, portfolio, security_label, position_basis, position_date,
+       src_system, quantity, is_latest, version_id, processing_timestamp
+FROM gmp_cis.cis_position
+WHERE portfolio = '{PORTFOLIO}'
+  AND position_date = '{POSITION_DATE}'   -- e.g. '2026-08-13'
+  AND position_type = 'INT'
+  AND src_system = 'USER_UPLOAD'
+  AND (
+    security_label = '{SECURITY_LABEL}'
+    OR security_label LIKE '%{SECURITY_LABEL_PARTIAL}%'
+  )
+ORDER BY version_id DESC;
+
+-- =============================================================================
+-- STEP 4: What security did THIS reset upload's Step 6 staging actually
+-- match to for this row? Compare matched_security_name /
+-- security_match_method against whatever security_label the OLD nonzero
+-- cis_position row (Step 3) actually has.
+-- =============================================================================
+-- Only works if position_upload_staging still exists from the run you're
+-- chasing (it's DROP-then-CREATE each run):
+-- SELECT portfolio, security_full_name, matched_security_name, final_isin,
+--        security_status, security_match_method, final_quantity,
+--        quantity_status, overall_status
 -- FROM gmp_cis.position_upload_staging
--- WHERE src_id = '{SRC_ID}' AND processing_date = '{PROCESSING_DATE}';
+-- WHERE src_id = '{SRC_ID}' AND processing_date = '{PROCESSING_DATE}'
+--   AND portfolio = '{PORTFOLIO}';

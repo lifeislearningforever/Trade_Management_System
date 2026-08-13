@@ -66,6 +66,10 @@ class PositionRepository:
         """Build shared WHERE conditions. position_type accepts str or list."""
         e = self._escape
         conditions = []
+        # Position Viewer shows current state, not history -- without this,
+        # superseded rows left behind by pre-fix duplicate position_ids (or
+        # any other is_latest=false row) show up alongside the current one.
+        conditions.append(f"({prefix}is_latest = true OR {prefix}is_latest IS NULL)")
         if portfolios and len(portfolios) == 1:
             conditions.append(f"UPPER({prefix}portfolio) LIKE '%{e(portfolios[0].upper())}%'")
         elif portfolios and len(portfolios) > 1:
