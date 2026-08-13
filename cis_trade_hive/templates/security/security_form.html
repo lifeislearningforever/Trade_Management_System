@@ -503,15 +503,18 @@
 <script>
 $(document).ready(function() {
     var allDropdownIds = [
-        'issuer', 'industry', 'security_type', 'security_sub_type', 'investment_type',
-        'security_investment', 'issuer_type', 'quoted_unquoted', 'market',
+        'issuer', 'security_type', 'security_sub_type', 'investment_type',
+        'security_investment', 'quoted_unquoted',
         'country_of_incorporation', 'country_of_exchange', 'country_of_issue',
-        'country_of_primary_exchange', 'exchange_code', 'currency_code',
+        'country_of_primary_exchange', 'currency_code',
         'substantial_10_pct', 'pevc_s32_devest', 's32_representative',
         'approved_s32', 'fintech_speculative', 'unlistedeq_speculative', 'related_company',
         'mas_643_entity_type', 'fin_nonfin_ind', 'base_liv_fund',
         'fund_index_fund', 'core_noncore', 'management_limit_classification',
-        'relative_index', 'business_unit_head', 'person_in_charge'
+        'business_unit_head', 'person_in_charge'
+        // issuer_type, industry, market, exchange_code, relative_index removed --
+        // converted from <select> to free-text <input>; Select2 was still
+        // wrapping them since initByIds() force-inits by ID regardless of tag.
     ];
     CISSelect2.initByIds(allDropdownIds);
 });
