@@ -680,6 +680,7 @@ class PositionService:
         position_basis: str = 'TRADED',
         trade_lc: Decimal = None,
         gross_amount_lc: Decimal = None,
+        gross_amount_fc: Decimal = None,
     ) -> Tuple[bool, str, Dict[str, Any]]:
         """
         Process SELL trade - decrease position, AVP unchanged.
@@ -722,7 +723,12 @@ class PositionService:
         new_qty = old_qty - quantity
 
         # Cost basis uses gross amounts (qty × price), never total (which includes charges).
-        sell_fc = price * quantity
+        # Use the trade's exact gross_amount_fc when supplied (migration/UI-edited
+        # amount) rather than recomputing quantity * price -- the two can differ by
+        # a small amount when the source system's price has more precision than
+        # what's stored in the `price` column, and SA direction is that the
+        # tallied amount wins (30/07/2026) -- same rule _process_buy applies to trade_cost.
+        sell_fc = Decimal(str(gross_amount_fc)) if gross_amount_fc else price * quantity
         is_cross_currency = bool(
             security_currency and portfolio_currency and security_currency != portfolio_currency
         )
