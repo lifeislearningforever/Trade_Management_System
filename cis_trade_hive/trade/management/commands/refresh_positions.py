@@ -987,6 +987,73 @@ class Command(BaseCommand):
             )
             self.stdout.write(f"  Upserted {position_type} rows {i + 1}–{i + len(chunk)}")
 
+        self._cleanup_stale_duplicates(insert_rows, position_type, run_date)
+
+    def _cleanup_stale_duplicates(self, insert_rows, position_type, run_date):
+        """
+        Self-heal leftover duplicate is_latest=true rows for the natural keys
+        this run just upserted.
+
+        Before commit cb4b04f, position_id was timestamp-based rather than a
+        deterministic hash, so re-running for the same natural key created a
+        new row every time instead of upserting in place -- leaving orphaned
+        pre-fix rows (identifiable by processing_timestamp IS NULL) stranded
+        with is_latest=true alongside the correctly-hashed row this run just
+        wrote. Rather than requiring a separate cleanup_corr_duplicate_positions
+        run, flip is_latest=false here on any OTHER is_latest=true row sharing
+        the same (portfolio, security_label, position_basis, position_date,
+        position_type) but a different position_id -- i.e. exactly the stale
+        duplicates, never a row this run didn't touch.
+        """
+        BATCH = 200  # smaller batch — each row becomes a 5-condition OR clause
+        pairs = []
+        for row in insert_rows:
+            position = row['position']
+            raw_pos_date = position.get('position_date')
+            pos_date = str(raw_pos_date)[:10] if raw_pos_date else run_date
+            correct_id = position_id_service.position_id(
+                position.get('portfolio', ''),
+                position.get('security_label', ''),
+                position.get('position_basis', 'TRADED'),
+                pos_date,
+                position.get('src_system', 'CIS'),
+            )
+            pairs.append((
+                position.get('portfolio', ''),
+                position.get('security_label', ''),
+                position.get('position_basis', 'TRADED'),
+                pos_date,
+                correct_id,
+            ))
+
+        cleaned = 0
+        for i in range(0, len(pairs), BATCH):
+            chunk = pairs[i:i + BATCH]
+            or_clauses = [
+                f"(portfolio = '{self._escape(port)}' AND security_label = '{self._escape(sec)}' "
+                f"AND position_basis = '{self._escape(basis)}' AND position_date = '{pdate}' "
+                f"AND position_id != {correct_id})"
+                for port, sec, basis, pdate, correct_id in chunk
+                if pdate
+            ]
+            if not or_clauses:
+                continue
+            update_sql = (
+                f"UPDATE {DATABASE}.cis_position "
+                f"SET is_latest = false "
+                f"WHERE position_type = '{self._escape(position_type)}' "
+                f"AND is_latest = true "
+                f"AND ({' OR '.join(or_clauses)})"
+            )
+            impala_manager.execute_write(update_sql, database=DATABASE)
+            cleaned += len(or_clauses)
+
+        if cleaned:
+            self.stdout.write(self.style.WARNING(
+                f"  Self-heal: checked {cleaned} natural key(s) for stale duplicate "
+                f"{position_type} rows (pre-fix timestamp-based position_id)"
+            ))
+
     # -------------------------------------------------------------------------
     # INSERT new EOD row into cis_position (legacy single-row path, kept for reference)
     # -------------------------------------------------------------------------
