@@ -25,14 +25,20 @@ class LookupService:
     # TABLE DISCOVERY
     # =========================================================================
 
-    def get_all_lookup_tables(self) -> List[Dict[str, Any]]:
+    def get_all_lookup_tables(self, username: str = None) -> List[Dict[str, Any]]:
         """
         Get all lookup tables with metadata.
+
+        Args:
+            username: Logged-in user requesting the list. Not yet used to
+                filter results -- threaded through so per-user table
+                visibility can be added later without another signature
+                change.
 
         Returns:
             List of table info dictionaries
         """
-        return self.repository.discover_lookup_tables()
+        return self.repository.discover_lookup_tables(username)
 
     def get_table_metadata(self, table_name: str) -> Optional[Dict[str, Any]]:
         """

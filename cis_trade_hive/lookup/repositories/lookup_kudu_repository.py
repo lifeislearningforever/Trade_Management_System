@@ -26,10 +26,16 @@ class LookupKuduRepository:
     # TABLE DISCOVERY
     # =========================================================================
 
-    def discover_lookup_tables(self) -> List[Dict[str, Any]]:
+    def discover_lookup_tables(self, username: str = None) -> List[Dict[str, Any]]:
         """
         Discover all tables containing 'lut' in their name.
         Excludes tables with '_rep' prefix or suffix (report tables).
+
+        Args:
+            username: Logged-in user requesting discovery. Not yet used to
+                filter which tables are returned -- accepted now so
+                per-user table visibility can be added later without
+                another signature change.
 
         Returns:
             List of table metadata with name, columns, row count
@@ -61,7 +67,7 @@ class LookupKuduRepository:
                         if table_info:
                             tables.append(table_info)
 
-            logger.info(f"Discovered {len(tables)} lookup tables (lut)")
+            logger.info(f"Discovered {len(tables)} lookup tables (lut) for user={username or 'unknown'}")
             return sorted(tables, key=lambda x: x.get('table_name', ''))
 
         except Exception as e:

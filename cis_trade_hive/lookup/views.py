@@ -32,7 +32,8 @@ class LookupTableListView(View):
 
     def get(self, request):
         try:
-            tables = lookup_service.get_all_lookup_tables()
+            username = request.session.get('user_login', 'anonymous')
+            tables = lookup_service.get_all_lookup_tables(username)
 
             context = {
                 'tables': tables,
