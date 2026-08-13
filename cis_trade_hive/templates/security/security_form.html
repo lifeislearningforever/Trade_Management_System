@@ -124,22 +124,14 @@
 
                     <div class="col-md-4 mb-3">
                         <label for="issuer_type" class="form-label">Issuer Type</label>
-                        <select class="form-select" id="issuer_type" name="issuer_type">
-                            <option value="">Select Type</option>
-                            {% for it in dropdown_options.issuer_types %}
-                                <option value="{{ it.value }}" {% if security.issuer_type == it.value %}selected{% endif %}>{{ it.value }}</option>
-                            {% endfor %}
-                        </select>
+                        <input type="text" class="form-control" id="issuer_type" name="issuer_type"
+                               value="{{ security.issuer_type|default:'' }}" placeholder="Issuer type">
                     </div>
 
                     <div class="col-md-4 mb-3">
                         <label for="industry" class="form-label">Industry</label>
-                        <select class="form-select" id="industry" name="industry">
-                            <option value="">Select Industry</option>
-                            {% for ind in dropdown_options.industries %}
-                                <option value="{{ ind.value }}" {% if security.industry == ind.value %}selected{% endif %}>{{ ind.value }}</option>
-                            {% endfor %}
-                        </select>
+                        <input type="text" class="form-control" id="industry" name="industry"
+                               value="{{ security.industry|default:'' }}" placeholder="Industry">
                     </div>
 
                     <div class="col-md-4 mb-3">
@@ -154,12 +146,8 @@
 
                     <div class="col-md-4 mb-3">
                         <label for="market" class="form-label">Market</label>
-                        <select class="form-select" id="market" name="market">
-                            <option value="">Select Market</option>
-                            {% for mkt in dropdown_options.markets %}
-                                <option value="{{ mkt.value }}" {% if security.market == mkt.value %}selected{% endif %}>{{ mkt.value }}</option>
-                            {% endfor %}
-                        </select>
+                        <input type="text" class="form-control" id="market" name="market"
+                               value="{{ security.market|default:'' }}" placeholder="Market">
                     </div>
                 </div>
 
@@ -219,12 +207,8 @@
 
                     <div class="col-md-4 mb-3">
                         <label for="exchange_code" class="form-label">Exchange Code</label>
-                        <select class="form-select" id="exchange_code" name="exchange_code">
-                            <option value="">Select Exchange Code</option>
-                            {% for ec in dropdown_options.exchange_codes %}
-                                <option value="{{ ec.value }}" {% if security.exchange_code == ec.value %}selected{% endif %}>{{ ec.value }}</option>
-                            {% endfor %}
-                        </select>
+                        <input type="text" class="form-control" id="exchange_code" name="exchange_code"
+                               value="{{ security.exchange_code|default:'' }}" placeholder="Exchange code">
                     </div>
 
                     <div class="col-md-4 mb-3">
@@ -453,12 +437,8 @@
 
                     <div class="col-md-4 mb-3">
                         <label for="relative_index" class="form-label">Relative Index</label>
-                        <select class="form-select" id="relative_index" name="relative_index">
-                            <option value="">Select Option</option>
-                            {% for option in dropdown_options.relative_index_options %}
-                                <option value="{{ option.value }}" {% if security.relative_index == option.value %}selected{% endif %}>{{ option.value }}</option>
-                            {% endfor %}
-                        </select>
+                        <input type="text" class="form-control" id="relative_index" name="relative_index"
+                               value="{{ security.relative_index|default:'' }}" placeholder="Relative index">
                     </div>
 
                     <div class="col-md-4 mb-3">
