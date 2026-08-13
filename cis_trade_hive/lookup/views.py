@@ -14,8 +14,15 @@ from django.views import View
 from django.utils.safestring import mark_safe
 
 from lookup.services.lookup_service import lookup_service
+from core.audit.audit_kudu_repository import audit_log_kudu_repository
 
 logger = logging.getLogger(__name__)
+
+
+def get_client_ip(request):
+    """Helper to get client IP address. Uses REMOTE_ADDR (actual TCP peer),
+    not the client/proxy-supplied X-Forwarded-For header."""
+    return request.META.get('REMOTE_ADDR')
 
 
 class LookupTableListView(View):
@@ -202,6 +209,28 @@ class LookupRowCreateView(View):
             result = lookup_service.create_row(table_name, data)
 
             if result['success']:
+                username = request.session.get('user_login', 'anonymous')
+                user_id = str(request.session.get('user_id', ''))
+                user_email = request.session.get('user_email', '')
+                pk_value = result.get('pk_value')
+
+                audit_log_kudu_repository.log_action(
+                    user_id=user_id,
+                    username=username,
+                    user_email=user_email,
+                    action_type='CREATE',
+                    entity_type='LOOKUP_TABLE',
+                    entity_name=table_name,
+                    entity_id=str(pk_value) if pk_value is not None else table_name,
+                    action_description=f"Created row in lookup table '{table_name}' (pk={pk_value})",
+                    new_value=json.dumps(data, default=str),
+                    request_method=request.method,
+                    request_path=request.path,
+                    ip_address=get_client_ip(request),
+                    user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                    status='SUCCESS'
+                )
+
                 messages.success(request, result['message'])
                 return redirect('lookup:table_detail', table_name=table_name)
             else:
@@ -276,10 +305,49 @@ class LookupRowEditView(View):
 
                 data[col_name] = value
 
+            # Capture old state before update so the audit log can record a diff
+            old_row = lookup_service.get_row(table_name, pk_value) or {}
+
             # Update row
             result = lookup_service.update_row(table_name, pk_value, data)
 
             if result['success']:
+                username = request.session.get('user_login', 'anonymous')
+                user_id = str(request.session.get('user_id', ''))
+                user_email = request.session.get('user_email', '')
+
+                old_values = {}
+                new_values = {}
+                changed_fields = []
+                for field, new_val in data.items():
+                    old_val = old_row.get(field, '')
+                    if str(old_val) != str(new_val):
+                        old_values[field] = old_val
+                        new_values[field] = new_val
+                        changed_fields.append(field)
+
+                audit_log_kudu_repository.log_action(
+                    user_id=user_id,
+                    username=username,
+                    user_email=user_email,
+                    action_type='UPDATE',
+                    entity_type='LOOKUP_TABLE',
+                    entity_name=table_name,
+                    entity_id=str(pk_value),
+                    action_description=(
+                        f"Updated row in lookup table '{table_name}' (pk={pk_value}) - "
+                        f"Changed fields: {', '.join(changed_fields) if changed_fields else 'No changes'}"
+                    ),
+                    old_value=json.dumps(old_values, default=str) if old_values else None,
+                    new_value=json.dumps(new_values, default=str) if new_values else None,
+                    field_name=', '.join(changed_fields) if changed_fields else None,
+                    request_method=request.method,
+                    request_path=request.path,
+                    ip_address=get_client_ip(request),
+                    user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                    status='SUCCESS'
+                )
+
                 messages.success(request, result['message'])
                 return redirect('lookup:table_detail', table_name=table_name)
             else:
@@ -306,9 +374,33 @@ class LookupRowDeleteView(View):
 
     def post(self, request, table_name, pk_value):
         try:
+            # Capture the row before deletion so the audit log has old_value
+            old_row = lookup_service.get_row(table_name, pk_value) or {}
+
             result = lookup_service.delete_row(table_name, pk_value)
 
             if result['success']:
+                username = request.session.get('user_login', 'anonymous')
+                user_id = str(request.session.get('user_id', ''))
+                user_email = request.session.get('user_email', '')
+
+                audit_log_kudu_repository.log_action(
+                    user_id=user_id,
+                    username=username,
+                    user_email=user_email,
+                    action_type='DELETE',
+                    entity_type='LOOKUP_TABLE',
+                    entity_name=table_name,
+                    entity_id=str(pk_value),
+                    action_description=f"Deleted row from lookup table '{table_name}' (pk={pk_value})",
+                    old_value=json.dumps(old_row, default=str) if old_row else None,
+                    request_method=request.method,
+                    request_path=request.path,
+                    ip_address=get_client_ip(request),
+                    user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                    status='SUCCESS'
+                )
+
                 messages.success(request, result['message'])
             else:
                 messages.error(request, result['error'])
