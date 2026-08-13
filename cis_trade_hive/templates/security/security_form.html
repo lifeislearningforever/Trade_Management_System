@@ -164,7 +164,7 @@
                         <select class="form-select" id="country_of_incorporation" name="country_of_incorporation">
                             <option value="">Select Country</option>
                             {% for country in dropdown_options.countries %}
-                                <option value="{{ country.name }}" {% if security.country_of_incorporation == country.name %}selected{% endif %}>{{ country.name }}</option>
+                                <option value="{{ country.code }}" {% if security.country_of_incorporation == country.code or security.country_of_incorporation == country.name %}selected{% endif %}>{{ country.name }}</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -174,7 +174,7 @@
                         <select class="form-select" id="country_of_exchange" name="country_of_exchange">
                             <option value="">Select Country</option>
                             {% for country in dropdown_options.countries %}
-                                <option value="{{ country.name }}" {% if security.country_of_exchange == country.name %}selected{% endif %}>{{ country.name }}</option>
+                                <option value="{{ country.code }}" {% if security.country_of_exchange == country.code or security.country_of_exchange == country.name %}selected{% endif %}>{{ country.name }}</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -184,7 +184,7 @@
                         <select class="form-select" id="country_of_issue" name="country_of_issue">
                             <option value="">Select Country</option>
                             {% for option in dropdown_options.countries %}
-                                <option value="{{ option.name }}" {% if security.country_of_issue == option.name %}selected{% endif %}>{{ option.name }}</option>
+                                <option value="{{ option.code }}" {% if security.country_of_issue == option.code or security.country_of_issue == option.name %}selected{% endif %}>{{ option.name }}</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -194,7 +194,7 @@
                         <select class="form-select" id="country_of_primary_exchange" name="country_of_primary_exchange">
                             <option value="">Select Country</option>
                             {% for country in dropdown_options.countries %}
-                                <option value="{{ country.name }}" {% if security.country_of_primary_exchange == country.name %}selected{% endif %}>{{ country.name }}</option>
+                                <option value="{{ country.code }}" {% if security.country_of_primary_exchange == country.code or security.country_of_primary_exchange == country.name %}selected{% endif %}>{{ country.name }}</option>
                             {% endfor %}
                         </select>
                     </div>
