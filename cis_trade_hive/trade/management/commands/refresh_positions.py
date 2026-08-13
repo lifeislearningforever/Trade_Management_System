@@ -6,7 +6,8 @@ covering all source systems: CIS, GMP, AMS_STREET, USER_UPLOAD.
 
 For each position:
   1. Fetch latest price from cis_equity_price (always used; REVALUED and NON-REVALUED)
-  2. If no price found, keep existing market_value_fc; recalculate LC via latest FX rate
+  2. If no price found: EOD/CORR keep existing market_value_fc (recalculate LC via
+     latest FX rate); INT zeroes market_value_fc/lc instead of carrying it forward
   3. unrealized_pnl = 0 if security_investment IN (ASSOC, SUBSI), else market_value_fc - cost_fc
   4. NON-REVALUED: LC columns recalculated from FC × latest FX rate (no MTM override)
   5. net_book_value = cost + unrealized_pnl - provision
@@ -240,7 +241,7 @@ class Command(BaseCommand):
                     self.stdout.write(f"Processing {idx}/{total}...")
 
                 try:
-                    result = self._process_position(position, dry_run, today, ref, insert_rows, ams_no_reval=ams_no_reval)
+                    result = self._process_position(position, dry_run, today, ref, insert_rows, ams_no_reval=ams_no_reval, run_type=run_type)
                     if result == 'updated':
                         updated += 1
                     elif result == 'skipped':
@@ -490,7 +491,7 @@ class Command(BaseCommand):
     # Per-position processing
     # -------------------------------------------------------------------------
 
-    def _process_position(self, position, dry_run, run_date, ref, insert_rows, ams_no_reval=False):
+    def _process_position(self, position, dry_run, run_date, ref, insert_rows, ams_no_reval=False, run_type='EOD'):
         position_id = position.get('position_id')
         portfolio   = position.get('portfolio')
         security    = position.get('security_label')
@@ -555,7 +556,14 @@ class Command(BaseCommand):
         if latest_price is not None:
             price_dec       = Decimal(str(latest_price))
             market_value_fc = round(qty * price_dec, fc_dp)
+        elif run_type == 'INT':
+            # INT (intraday): no cis_equity_price row at all for this security --
+            # zero out rather than carry forward, so a live intraday view never
+            # shows a stale market value for a security with no price feed.
+            price_dec       = Decimal('0')
+            market_value_fc = Decimal('0')
         else:
+            # EOD/CORR: no price found -- keep existing market_value_fc unchanged
             price_dec       = Decimal(str(position.get('market_value_fc') or 0)) / qty if qty else Decimal('0')
             market_value_fc = round(Decimal(str(position.get('market_value_fc') or 0)), fc_dp)
 
