@@ -366,12 +366,21 @@ LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
+        # {module}/{funcName}/{lineno} come from the actual call site (the
+        # frame that called logger.info/.error/...), independent of what
+        # name the logger object itself was constructed with -- several
+        # repositories share one hardcoded logger name across a whole app
+        # (e.g. core/repositories/impala_connection.py uses
+        # getLogger('core')), which previously made every one of their log
+        # lines look identical ("core: Executing query: ..."). Adding these
+        # fields makes every line self-locating without touching those
+        # call sites.
         'verbose': {
-            'format': '[{levelname}] {asctime} {name} {module} {process:d} {thread:d} {message}',
+            'format': '[{levelname}] {asctime} {name} {module}.{funcName}:{lineno} {process:d} {thread:d} {message}',
             'style': '{',
         },
         'simple': {
-            'format': '[{levelname}] {asctime} {name}: {message}',
+            'format': '[{levelname}] {asctime} {name} {module}.{funcName}:{lineno} {message}',
             'style': '{',
         },
     },

@@ -299,7 +299,10 @@ class TradeKuduRepository:
             _ck = f"trade_list_v2:{status or ''}:{trade_type or ''}:{limit}"
             _cached = query_cache.get(_ck)
             if _cached is not None:
-                logger.debug(f"[CACHE HIT] trade_list {_ck}")
+                # Was logger.debug -- invisible at UAT's default INFO log
+                # level, so a stale-cache-serving-empty-list window looked
+                # identical to "nothing happened at all" in the app log.
+                logger.info(f"[TRADE_LIST_QUERY] [CACHE HIT] {_ck} -> {len(_cached)} row(s)")
                 return _cached
 
         try:
@@ -354,6 +357,17 @@ class TradeKuduRepository:
                 where_clauses.append(f"t.settle_date <= {self.escape_value(settle_date_to)}")
 
             where_clause = " AND ".join(where_clauses) if where_clauses else "1=1"
+
+            # Marker log: the SELECT column list alone exceeds the 150-char
+            # snippet logged by execute_query(), so the WHERE clause (status,
+            # trade_type, etc.) never appears in "Executing query: ..." --
+            # every call site sharing this method logs an identical-looking
+            # line. This makes the actual filter grep-able on its own.
+            logger.info(
+                f"[TRADE_LIST_QUERY] status={status!r} trade_type={trade_type!r} "
+                f"src_system={src_system!r} portfolios={portfolios!r} "
+                f"securities={securities!r} limit={limit} where={where_clause}"
+            )
 
             query = f"""
             SELECT
@@ -411,6 +425,7 @@ class TradeKuduRepository:
 
             results = impala_manager.execute_query(query, database=self.DATABASE)
             out = results if results else []
+            logger.info(f"[TRADE_LIST_QUERY] status={status!r} -> {len(out)} row(s) returned to caller")
             if _is_simple:
                 query_cache.set(_ck, out, 20)  # 20s TTL — short enough to stay fresh
             return out
