@@ -155,8 +155,13 @@ def _describe_formatted_via_impala(database: str, table: str, impala_host: str, 
         return None
     cmd = ['impala-shell', '-i', impala_host, '-d', database]
     cmd += shlex.split(impala_shell_flags) if impala_shell_flags else []
-    cmd += ['-B', '--output_delimiter=\t', '--print_header=false',
-            '-q', f'DESCRIBE FORMATTED {table}']
+    # -B (batch mode) already suppresses the header row by default -- this
+    # cluster's impala-shell (v4.0) defines --print_header as a plain
+    # store_true flag with no value, so the previously-passed
+    # --print_header=false broke its own argument parser outright
+    # ("error: --print_header option does not take a value"), which made
+    # EVERY DESCRIBE FORMATTED call fail regardless of host/port/auth.
+    cmd += ['-B', '--output_delimiter=\t', '-q', f'DESCRIBE FORMATTED {table}']
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if result.returncode != 0:

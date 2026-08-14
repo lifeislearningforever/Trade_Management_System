@@ -83,8 +83,10 @@ def _describe_formatted_via_impala(database: str, table: str, impala_host: str, 
         return None
     cmd = ['impala-shell', '-i', impala_host, '-d', database]
     cmd += shlex.split(impala_shell_flags) if impala_shell_flags else []
-    cmd += ['-B', '--output_delimiter=\t', '--print_header=false',
-            '-q', f'DESCRIBE FORMATTED {table}']
+    # -B (batch mode) already suppresses the header row by default -- see
+    # kudu_full_backup.py's _describe_formatted_via_impala for why
+    # --print_header=false is deliberately not passed here.
+    cmd += ['-B', '--output_delimiter=\t', '-q', f'DESCRIBE FORMATTED {table}']
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if result.returncode != 0:
