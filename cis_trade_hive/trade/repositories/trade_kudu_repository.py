@@ -309,7 +309,12 @@ class TradeKuduRepository:
                 where_clauses.append(f"t.trade_type = {self.escape_value(trade_type)}")
 
             if status:
-                where_clauses.append(f"t.status = {self.escape_value(status)}")
+                # Case-insensitive: get_trade_statistics() buckets rows by
+                # status.upper() in Python, so a status value written with
+                # different casing (e.g. 'Validated') still counts toward
+                # pending_settlement there but was silently excluded here by
+                # this literal, case-sensitive Impala string match.
+                where_clauses.append(f"UPPER(t.status) = {self.escape_value(status.upper())}")
 
             # Source system filter (per SA feedback #2)
             if src_system:
