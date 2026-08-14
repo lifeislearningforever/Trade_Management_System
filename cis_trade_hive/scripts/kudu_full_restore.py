@@ -791,7 +791,11 @@ Examples:
     )
 
     parser.add_argument('--table', '-t', type=str, required=True,
-                        help='Target table name to restore to')
+                        help='Target table name to restore to, or comma-separated list of table '
+                             'names (e.g. dr_drill_test_kudu,dr_drill_test_hive). Multiple tables '
+                             'require --backup-root + --latest (each table\'s own most-recent backup '
+                             'is auto-discovered) -- --backup-path is one exact path and only works '
+                             'for a single table.')
     parser.add_argument('--backup-path', '-b', type=str,
                         help='Exact path to a full/<TS> backup directory. Alternative to '
                              '--backup-root + --latest, which auto-discovers this for you.')
@@ -833,11 +837,21 @@ def main():
     """Main entry point."""
     args = parse_args()
 
-    if args.latest:
+    tables = [t.strip() for t in args.table.split(',') if t.strip()]
+    multi = len(tables) > 1
+
+    if multi:
+        if not (args.latest and args.backup_root):
+            print("ERROR: Multiple --table names require --backup-root + --latest "
+                  "(--backup-path is one exact path and only works for a single table)")
+            sys.exit(1)
+        # Per-table backup_path resolved individually below, in the loop.
+        backup_path = None
+    elif args.latest:
         if not args.backup_root:
             print("ERROR: --latest requires --backup-root")
             sys.exit(1)
-        backup_path = find_latest_full_backup(args.backup_root, args.database, args.table)
+        backup_path = find_latest_full_backup(args.backup_root, args.database, tables[0])
         if not backup_path:
             sys.exit(1)
     elif args.backup_path:
@@ -863,8 +877,11 @@ def main():
     print(f"  Kudu Master:   {config['kudu_master']}")
     print(f"  Impala Host:   {config['impala_host'] or '(NOT SET — type detection will fail)'}")
     print(f"  Database:      {config['database']}")
-    print(f"  Table:         {args.table}")
-    print(f"  Backup Path:   {backup_path}" + ("  (auto-discovered via --latest)" if args.latest else ""))
+    print(f"  Table(s):      {', '.join(tables)}")
+    if multi:
+        print(f"  Backup Root:   {args.backup_root}  (each table's latest backup auto-discovered)")
+    else:
+        print(f"  Backup Path:   {backup_path}" + ("  (auto-discovered via --latest)" if args.latest else ""))
     print(f"  Mode:          {args.mode}")
     print(f"  Dry Run:       {args.dry_run}")
     print("=" * 70)
@@ -890,36 +907,77 @@ def main():
         sys.exit(1)
 
     try:
-        # Run restore
-        result = restore.restore_table(
-            args.table,
-            backup_path,
-            mode=args.mode,
-            dry_run=args.dry_run
-        )
+        if not multi:
+            # Single table — unchanged detailed summary.
+            result = restore.restore_table(
+                tables[0],
+                backup_path,
+                mode=args.mode,
+                dry_run=args.dry_run
+            )
 
-        # Validate if requested
-        if args.validate and result['status'] == 'success':
-            restore.validate_restore(args.table, result['rows_restored'])
+            if args.validate and result['status'] == 'success':
+                restore.validate_restore(tables[0], result['rows_restored'])
 
-        # Print summary
+            print("\n" + "=" * 70)
+            print("  RESTORE SUMMARY")
+            print("=" * 70)
+            print(f"  Table:          {result['full_table_name']}")
+            print(f"  Status:         {result['status']}")
+            print(f"  Rows in Backup: {result['rows_in_backup']:,}")
+            print(f"  Rows Restored:  {result['rows_restored']:,}")
+            if result.get('rows_deleted'):
+                print(f"  Rows Deleted:   {result['rows_deleted']:,}  (stale, not in backup)")
+            print(f"  Duration:       {result['duration_seconds']:.2f}s")
+            if result['error']:
+                print(f"  Error:          {result['error']}")
+            print("=" * 70)
+
+            sys.exit(1 if result['status'] == 'failed' else 0)
+
+        # Multiple tables — resolve each one's latest backup independently
+        # and restore in sequence, then print a combined summary (same
+        # style as kudu_full_restore_from_manifest.py's MANIFEST RESTORE
+        # SUMMARY).
+        results = []
+        for i, table_name in enumerate(tables, 1):
+            print(f"\n[{i}/{len(tables)}] {table_name}")
+            table_backup_path = find_latest_full_backup(args.backup_root, args.database, table_name)
+            if not table_backup_path:
+                results.append({
+                    'table': table_name, 'full_table_name': f"{args.database}.{table_name}",
+                    'status': 'failed', 'rows_in_backup': 0, 'rows_restored': 0,
+                    'rows_deleted': 0, 'duration_seconds': 0,
+                    'error': 'No backup found under --backup-root for this table',
+                })
+                continue
+
+            r = restore.restore_table(table_name, table_backup_path, mode=args.mode, dry_run=args.dry_run)
+            if args.validate and r['status'] == 'success' and not args.dry_run:
+                restore.validate_restore(table_name, r['rows_restored'])
+            results.append(r)
+
+        ok = [r for r in results if r['status'] in ('success', 'dry_run')]
+        failed = [r for r in results if r['status'] == 'failed']
+
         print("\n" + "=" * 70)
         print("  RESTORE SUMMARY")
         print("=" * 70)
-        print(f"  Table:          {result['full_table_name']}")
-        print(f"  Status:         {result['status']}")
-        print(f"  Rows in Backup: {result['rows_in_backup']:,}")
-        print(f"  Rows Restored:  {result['rows_restored']:,}")
-        if result.get('rows_deleted'):
-            print(f"  Rows Deleted:   {result['rows_deleted']:,}  (stale, not in backup)")
-        print(f"  Duration:       {result['duration_seconds']:.2f}s")
-        if result['error']:
-            print(f"  Error:          {result['error']}")
+        print(f"  {'Table':<40} {'Status':<10} {'Rows':>10} {'Deleted':>10}")
+        print(f"  {'-'*40} {'-'*10} {'-'*10} {'-'*10}")
+        for r in results:
+            print(f"  {r.get('table', r.get('full_table_name', '?')):<40} "
+                  f"{r['status']:<10} {r['rows_restored']:>10,} {r.get('rows_deleted', 0):>10,}")
+
+        print(f"\n  Restored : {len(ok)}")
+        print(f"  Failed   : {len(failed)}")
+        if failed:
+            print("\n  ERRORS:")
+            for r in failed:
+                print(f"    {r.get('table')}: {r.get('error')}")
         print("=" * 70)
 
-        if result['status'] == 'failed':
-            sys.exit(1)
-        sys.exit(0)
+        sys.exit(1 if failed else 0)
 
     finally:
         restore.close()
