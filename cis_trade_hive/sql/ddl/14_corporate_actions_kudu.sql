@@ -45,7 +45,7 @@ CREATE TABLE cis_corporate_actions (
     subscription_end_date STRING COMMENT 'Subscription End Date (YYYY-MM-DD)',
 
     -- Price Information
-    price DECIMAL(20, 6) COMMENT 'Price/Rate/Ratio for the corporate action',
+    price DECIMAL(20, 7) COMMENT 'Price/Rate/Ratio for the corporate action',
     currency STRING COMMENT 'Currency code (e.g., USD, SGD)',
 
     -- Source System

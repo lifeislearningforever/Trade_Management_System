@@ -1242,7 +1242,7 @@ CREATE TABLE IF NOT EXISTS cis_corporate_actions (
     effective_date             STRING,
     subscription_start_date    STRING,
     subscription_end_date      STRING,
-    price                      DECIMAL(20, 6),
+    price                      DECIMAL(20, 7),
     currency                   STRING,
     src_system                 STRING,
     status                     STRING,
