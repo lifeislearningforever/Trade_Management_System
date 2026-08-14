@@ -128,23 +128,53 @@ class KuduIncrementalBackup:
 
     def get_last_backup_timestamp(self, table_name: str) -> Optional[datetime]:
         """
-        Get timestamp of last backup from manifest files.
+        Find the most recent SUCCESSFUL incremental backup for this table and
+        return that run's own timestamp, to use as the next run's --since.
 
-        Args:
-            table_name: Table name
+        A run counts as successful only if its _metadata directory exists --
+        backup_table() only calls _write_metadata() after a successful
+        Parquet write (or the row_count==0 empty-marker case), never on the
+        exception path, so _metadata's presence is a reliable success signal
+        without needing a separate status file.
 
-        Returns:
-            Last backup timestamp or None
+        Uses the same Hadoop FileSystem JVM-bridge directory-listing pattern
+        already established in kudu_full_restore_from_manifest.py's
+        find_latest_manifest(), rather than a Spark DataFrame read, since
+        we're listing directory names, not reading data.
         """
+        incremental_root = f"{self.config['backup_path']}/{self.config['database']}/{table_name}/incremental"
         try:
-            manifest_path = f"{self.config['backup_path']}/{self.config['database']}/{table_name}/incremental/"
+            hadoop_conf = self.spark.sparkContext._jsc.hadoopConfiguration()
+            fs = self.spark._jvm.org.apache.hadoop.fs.FileSystem.get(
+                self.spark._jvm.java.net.URI.create(incremental_root), hadoop_conf
+            )
+            root_path = self.spark._jvm.org.apache.hadoop.fs.Path(incremental_root)
+            if not fs.exists(root_path):
+                print(f"  No prior incremental backups at {incremental_root}")
+                return None
 
-            # Try to read manifest files to find last backup
-            # This is a simplified version - in production, use a proper manifest store
-            print(f"  Looking for last backup in {manifest_path}")
+            run_dirs = sorted(
+                (s.getPath().getName() for s in fs.listStatus(root_path) if s.isDirectory()),
+                reverse=True,
+            )
 
-            # For now, return None to indicate no previous backup found
-            # In production, implement proper manifest reading
+            for run_ts in run_dirs:
+                meta_path = self.spark._jvm.org.apache.hadoop.fs.Path(
+                    f"{incremental_root}/{run_ts}/_metadata"
+                )
+                if not fs.exists(meta_path):
+                    continue  # failed/incomplete run -- skip, try the next-oldest
+                try:
+                    rdd = self.spark.sparkContext.textFile(f"{incremental_root}/{run_ts}/_metadata/part-*")
+                    metadata = json.loads('\n'.join(rdd.collect()))
+                    last_ts = datetime.strptime(metadata['timestamp'], '%Y-%m-%d_%H%M%S')
+                    print(f"  Last successful incremental backup: {run_ts} (since={metadata.get('since_timestamp')})")
+                    return last_ts
+                except Exception as e:
+                    print(f"  Could not read metadata for run {run_ts} ({e}), trying next-oldest")
+                    continue
+
+            print(f"  No successful incremental backup found under {incremental_root}")
             return None
 
         except Exception as e:
