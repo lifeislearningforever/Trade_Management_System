@@ -242,6 +242,40 @@ class ImpalaConnectionManager:
             logger.debug(f"Connection validation failed: {str(e)}")
             return False
 
+    def _ensure_database(self, connection, database: Optional[str]) -> bool:
+        """
+        Re-scope a reused pooled connection to the requested database if it
+        currently differs.
+
+        get_connection() previously handed back pooled connections without
+        ever checking this -- a connection created for one database (e.g.
+        the legacy Hive 'cis' audit queries in core/audit/audit_hive_repository.py,
+        still reachable via core/old_views.py's /audit-log/ route) could sit
+        in the SAME shared pool as every gmp_cis connection and later be
+        handed out for an unrelated gmp_cis query while still scoped to
+        'cis'. Every call site here fully-qualifies its tables
+        (gmp_cis.cis_trade), so this alone wasn't proven to explain any
+        specific empty-result report, but a pooled connection silently
+        drifting from the database its caller asked for is a correctness
+        bug regardless -- catalog/session behavior (e.g. permissions) can
+        legitimately differ by default database.
+        """
+        if not database:
+            return True
+        current = getattr(connection, '_database', None)
+        if current == database:
+            return True
+        try:
+            cursor = connection.cursor()
+            cursor.execute(f"USE {database}")
+            cursor.close()
+            connection._database = database
+            logger.info(f"[CONN_REUSE] Switched pooled connection {current!r} -> {database!r}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to switch pooled connection to database {database!r}: {e}")
+            return False
+
     def get_connection(self, database: Optional[str] = None):
         """
         Get a connection from the pool.
@@ -259,10 +293,10 @@ class ImpalaConnectionManager:
         try:
             connection = self._pool.get(block=False)
             ImpalaConnectionManager._connection_reuse_count += 1
-            if self._validate_connection(connection):
+            if self._validate_connection(connection) and self._ensure_database(connection, database):
                 connection._last_used = time.time()
                 return connection
-            # Stale — discard and decrement so we can create a fresh one below
+            # Stale, or couldn't switch database — discard and decrement so we can create a fresh one below
             try:
                 connection.close()
             except Exception:
@@ -302,10 +336,10 @@ class ImpalaConnectionManager:
             ImpalaConnectionManager._pool_wait_total_time += wait_time
             if wait_time > 5:
                 logger.warning(f"Pool wait took {wait_time:.1f}s")
-            if self._validate_connection(connection):
+            if self._validate_connection(connection) and self._ensure_database(connection, database):
                 connection._last_used = time.time()
                 return connection
-            # Stale — close and give up (don't try to create; still at limit)
+            # Stale, or couldn't switch database — close and give up (don't try to create; still at limit)
             try:
                 connection.close()
             except Exception:
