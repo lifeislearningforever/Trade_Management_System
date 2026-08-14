@@ -184,6 +184,16 @@ class KuduFullRestore:
 
             builder = builder.config("spark.default.parallelism", str(self.config['parallelism']))
             builder = builder.config("spark.sql.shuffle.partitions", str(self.config['parallelism']))
+            # Required for insertInto() against a PARTITIONED Hive/external
+            # table (e.g. dr_drill_test_hive, partitioned by processing_date)
+            # -- Hive's default STRICT dynamic-partition mode refuses a write
+            # with no static partition column at all ("Dynamic partition
+            # strict mode requires at least one static partition column"),
+            # which every restore hits since the restored DataFrame carries
+            # the partition column as just another data column, not a fixed
+            # value. kudu_full_backup.py already sets this for its own Hive
+            # reads; kudu_full_restore.py never did for its writes.
+            builder = builder.config("spark.hadoop.hive.exec.dynamic.partition.mode", "nonstrict")
             # Hive catalog access (DESCRIBE FORMATTED for type detection, and
             # spark.sql()-based writes for Hive/external tables).
             builder = builder.enableHiveSupport()
