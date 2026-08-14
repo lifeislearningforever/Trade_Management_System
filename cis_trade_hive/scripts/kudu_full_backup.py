@@ -65,6 +65,7 @@ Date: 2026-05-28
 
 import argparse
 import json
+import shlex
 import subprocess
 import sys
 from datetime import datetime
@@ -89,6 +90,11 @@ DEFAULT_CONFIG = {
     'parallelism':     8,
     'scan_timeout_ms': 30000,
     'impala_host':     os.environ.get('IMPALA_HOST', ''),
+    # Every real environment in this codebase (SIT/UAT/PROD/DR) uses GSSAPI
+    # Kerberos + TLS (config/environments.py) -- default to what a plain
+    # `impala-shell -i host -d db` needs on those clusters. Override to ''
+    # for a NOSASL/local cluster.
+    'impala_shell_flags': os.environ.get('IMPALA_SHELL_FLAGS', '-k --ssl'),
 }
 
 TYPE_KUDU     = 'KUDU'
@@ -101,7 +107,7 @@ TYPE_UNKNOWN  = 'UNKNOWN'
 # Table discovery
 # ─────────────────────────────────────────────────────────────────────────────
 
-def discover_tables(spark: SparkSession, database: str, impala_host: str) -> List[Dict]:
+def discover_tables(spark: SparkSession, database: str, impala_host: str, impala_shell_flags: str) -> List[Dict]:
     """
     Auto-discover all tables in the database via SHOW TABLES + DESCRIBE FORMATTED.
     Returns list of {name, type, location}.
@@ -120,14 +126,14 @@ def discover_tables(spark: SparkSession, database: str, impala_host: str) -> Lis
 
     tables = []
     for name in sorted(table_names):
-        ttype, location = _detect_type(database, name, impala_host)
+        ttype, location = _detect_type(database, name, impala_host, impala_shell_flags)
         tables.append({"name": name, "type": ttype, "location": location})
         print(f"    {name:<55} [{ttype}]")
 
     return tables
 
 
-def _describe_formatted_via_impala(database: str, table: str, impala_host: str) -> Optional[str]:
+def _describe_formatted_via_impala(database: str, table: str, impala_host: str, impala_shell_flags: str = '') -> Optional[str]:
     """
     Run DESCRIBE FORMATTED via the impala-shell binary and return its raw
     tab-delimited output, or None on failure.
@@ -147,11 +153,10 @@ def _describe_formatted_via_impala(database: str, table: str, impala_host: str) 
     if not impala_host:
         print("    ERROR: --impala-host not set — required for table type detection")
         return None
-    cmd = [
-        'impala-shell', '-i', impala_host, '-d', database,
-        '-B', '--output_delimiter=\t', '--print_header=false',
-        '-q', f'DESCRIBE FORMATTED {table}',
-    ]
+    cmd = ['impala-shell', '-i', impala_host, '-d', database]
+    cmd += shlex.split(impala_shell_flags) if impala_shell_flags else []
+    cmd += ['-B', '--output_delimiter=\t', '--print_header=false',
+            '-q', f'DESCRIBE FORMATTED {table}']
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if result.returncode != 0:
@@ -163,7 +168,7 @@ def _describe_formatted_via_impala(database: str, table: str, impala_host: str) 
         return None
 
 
-def _detect_type(database: str, table: str, impala_host: str) -> Tuple[str, str]:
+def _detect_type(database: str, table: str, impala_host: str, impala_shell_flags: str = '') -> Tuple[str, str]:
     """Detect table type via DESCRIBE FORMATTED (through impala-shell — see
     _describe_formatted_via_impala for why not spark.sql).
 
@@ -172,7 +177,7 @@ def _detect_type(database: str, table: str, impala_host: str) -> Tuple[str, str]
     (e.g. 'impala::gmp_cis.cis_trade') extracted from table properties,
     which is what the Kudu Spark connector requires.
     """
-    raw = _describe_formatted_via_impala(database, table, impala_host)
+    raw = _describe_formatted_via_impala(database, table, impala_host, impala_shell_flags)
     if raw is None:
         return TYPE_UNKNOWN, ""
 
@@ -424,6 +429,10 @@ Examples:
                     help='Impala coordinator host:port (e.g. impalad:21050) used for table type '
                          'detection via impala-shell. Required — DESCRIBE FORMATTED cannot go '
                          'through Spark for Kudu tables (see _describe_formatted_via_impala).')
+    p.add_argument('--impala-shell-flags', default=DEFAULT_CONFIG['impala_shell_flags'],
+                    help="Extra flags passed to impala-shell for type detection "
+                         f"(default: {DEFAULT_CONFIG['impala_shell_flags']!r} for Kerberos+TLS "
+                         "clusters; pass '' for NOSASL/local)")
     p.add_argument('--database',    default=DEFAULT_CONFIG['database'])
     p.add_argument('--backup-path', default=DEFAULT_CONFIG['backup_path'])
     p.add_argument('--compression', default=DEFAULT_CONFIG['compression'],
@@ -445,6 +454,7 @@ def main():
         'parallelism':     args.parallelism,
         'scan_timeout_ms': DEFAULT_CONFIG['scan_timeout_ms'],
         'impala_host':     args.impala_host,
+        'impala_shell_flags': args.impala_shell_flags,
     }
 
     skip = {t.strip() for t in args.skip_tables.split(',') if t.strip()}
@@ -470,11 +480,15 @@ def main():
     try:
         if args.table:
             # Single table — detect type via DESCRIBE FORMATTED
-            ttype, loc = _detect_type(config['database'], args.table, config['impala_host'])
+            ttype, loc = _detect_type(
+                config['database'], args.table, config['impala_host'], config['impala_shell_flags']
+            )
             tables = [{"name": args.table, "type": ttype, "location": loc}]
         else:
             # Auto-discover ALL tables in the database
-            tables = discover_tables(backup.spark, config['database'], config['impala_host'])
+            tables = discover_tables(
+                backup.spark, config['database'], config['impala_host'], config['impala_shell_flags']
+            )
 
             # Apply type filter
             if args.kudu_only:

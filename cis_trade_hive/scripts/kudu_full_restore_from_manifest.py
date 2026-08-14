@@ -139,6 +139,10 @@ Examples:
     parser.add_argument('--impala-host', type=str, default=_RESTORE_DEFAULTS.get('impala_host', ''),
                          help='Impala coordinator host:port, used for table type detection via '
                               'impala-shell instead of spark.sql (required — see kudu_full_restore.py)')
+    parser.add_argument('--impala-shell-flags', type=str,
+                         default=_RESTORE_DEFAULTS.get('impala_shell_flags', '-k --ssl'),
+                         help="Extra flags passed to impala-shell for type detection "
+                              "(default: '-k --ssl' for Kerberos+TLS clusters; pass '' for NOSASL/local)")
     parser.add_argument('--database', type=str, default=_RESTORE_DEFAULTS['database'])
     parser.add_argument('--parallelism', type=int, default=_RESTORE_DEFAULTS['parallelism'])
     parser.add_argument('--skip-tables', default='',
@@ -164,6 +168,7 @@ def main():
         'batch_size': _RESTORE_DEFAULTS['batch_size'],
         'operation_timeout_ms': _RESTORE_DEFAULTS['operation_timeout_ms'],
         'impala_host': args.impala_host,
+        'impala_shell_flags': args.impala_shell_flags,
     }
 
     skip = {t.strip() for t in args.skip_tables.split(',') if t.strip()}

@@ -30,6 +30,7 @@ Date: 2026-04-01
 
 import argparse
 import json
+import shlex
 import subprocess
 import sys
 import os
@@ -53,10 +54,15 @@ DEFAULT_CONFIG = {
     'batch_size': 10000,
     'operation_timeout_ms': 60000,
     'impala_host': os.environ.get('IMPALA_HOST', ''),
+    # Every real environment in this codebase (SIT/UAT/PROD/DR) uses GSSAPI
+    # Kerberos + TLS (config/environments.py) -- default to what a plain
+    # `impala-shell -i host -d db` needs on those clusters. Override to ''
+    # for a NOSASL/local cluster.
+    'impala_shell_flags': os.environ.get('IMPALA_SHELL_FLAGS', '-k --ssl'),
 }
 
 
-def _describe_formatted_via_impala(database: str, table: str, impala_host: str) -> Optional[str]:
+def _describe_formatted_via_impala(database: str, table: str, impala_host: str, impala_shell_flags: str = '') -> Optional[str]:
     """
     Run DESCRIBE FORMATTED via the impala-shell binary and return its raw
     tab-delimited output, or None on failure.
@@ -75,11 +81,10 @@ def _describe_formatted_via_impala(database: str, table: str, impala_host: str) 
     if not impala_host:
         print("    WARNING: --impala-host not set — table type detection will fail")
         return None
-    cmd = [
-        'impala-shell', '-i', impala_host, '-d', database,
-        '-B', '--output_delimiter=\t', '--print_header=false',
-        '-q', f'DESCRIBE FORMATTED {table}',
-    ]
+    cmd = ['impala-shell', '-i', impala_host, '-d', database]
+    cmd += shlex.split(impala_shell_flags) if impala_shell_flags else []
+    cmd += ['-B', '--output_delimiter=\t', '--print_header=false',
+            '-q', f'DESCRIBE FORMATTED {table}']
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if result.returncode != 0:
@@ -210,7 +215,8 @@ class KuduFullRestore:
         """
         full_table_name = f"{self.config['database']}.{table_name}"
         raw = _describe_formatted_via_impala(
-            self.config['database'], table_name, self.config.get('impala_host', '')
+            self.config['database'], table_name,
+            self.config.get('impala_host', ''), self.config.get('impala_shell_flags', '')
         )
         if raw is None:
             print(f"  Could not DESCRIBE {full_table_name} — assuming Kudu (new table)")
@@ -248,7 +254,8 @@ class KuduFullRestore:
         """
         full_table_name = f"{self.config['database']}.{table_name}"
         raw = _describe_formatted_via_impala(
-            self.config['database'], table_name, self.config.get('impala_host', '')
+            self.config['database'], table_name,
+            self.config.get('impala_host', ''), self.config.get('impala_shell_flags', '')
         )
         if raw is None:
             print(f"  Could not DESCRIBE {full_table_name}, "
@@ -716,6 +723,10 @@ Examples:
                         help='Impala coordinator host:port (e.g. impalad:21050), used for table '
                              'type detection via impala-shell instead of spark.sql (Spark cannot '
                              'DESCRIBE FORMATTED a Kudu table -- see _describe_formatted_via_impala)')
+    parser.add_argument('--impala-shell-flags', type=str, default=DEFAULT_CONFIG['impala_shell_flags'],
+                        help="Extra flags passed to impala-shell for type detection "
+                             f"(default: {DEFAULT_CONFIG['impala_shell_flags']!r} for Kerberos+TLS "
+                             "clusters; pass '' for NOSASL/local)")
     parser.add_argument('--database', '-d', type=str, default=DEFAULT_CONFIG['database'],
                         help=f"Database name (default: {DEFAULT_CONFIG['database']})")
     parser.add_argument('--parallelism', type=int, default=DEFAULT_CONFIG['parallelism'],
@@ -742,6 +753,7 @@ def main():
         'batch_size': DEFAULT_CONFIG['batch_size'],
         'operation_timeout_ms': DEFAULT_CONFIG['operation_timeout_ms'],
         'impala_host': args.impala_host,
+        'impala_shell_flags': args.impala_shell_flags,
     }
 
     print("=" * 70)
