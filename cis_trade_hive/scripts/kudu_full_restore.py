@@ -97,14 +97,40 @@ def _describe_formatted_via_impala(database: str, table: str, impala_host: str, 
 
 
 def _parse_describe_formatted(raw: str) -> Dict[str, str]:
-    rows = {}
+    """
+    Parse impala-shell's tab-delimited DESCRIBE FORMATTED output into a flat
+    {key: value} dict.
+
+    Confirmed against a real impalad v4.0.0.7.1.9.1054-4 response for a
+    native Kudu table -- Impala reuses the same 3-column (name, type,
+    comment) layout for two structurally different row shapes:
+      - Top-level metadata, e.g. `Location:  <TAB>  hdfs://...  <TAB>` --
+        key is column 1 (WITH a trailing colon Impala includes as literal
+        text), value is column 2.
+      - Table Parameters sub-rows, e.g. `<TAB>  storage_handler  <TAB>
+        org.apache.hadoop.hive.kudu.KuduStorageHandler` -- column 1 (name)
+        is BLANK, key is column 2, value is column 3. This is where
+        storage_handler/kudu.table_name/kudu.master_addresses live -- there
+        is no top-level "Storage Handler:" row the way Hive CLI/Spark's
+        DESCRIBE FORMATTED has, which is what the original (broken)
+        2-column-only parser assumed.
+    Trailing colons on top-level keys are stripped so callers don't need to
+    know which shape produced a given key.
+    """
+    rows: Dict[str, str] = {}
     for line in raw.splitlines():
-        fields = line.split('\t')
-        if len(fields) >= 2:
-            key = fields[0].strip()
-            val = fields[1].strip() if fields[1] else ""
+        fields = [f.strip() for f in line.split('\t')]
+        while len(fields) < 3:
+            fields.append('')
+        name, type_col, comment = fields[0], fields[1], fields[2]
+        if name.startswith('#'):
+            continue
+        if name:
+            key = name.rstrip(':').strip()
             if key:
-                rows[key] = val
+                rows[key] = type_col
+        elif type_col:
+            rows[type_col] = comment
     return rows
 
 # Restore modes
@@ -226,7 +252,7 @@ class KuduFullRestore:
 
         try:
             rows = _parse_describe_formatted(raw)
-            storage_handler = rows.get("Storage Handler", "").lower()
+            storage_handler = rows.get("storage_handler", "").lower()
             table_type_raw = rows.get("Table Type", "").upper()
 
             if "kudu" in storage_handler:
