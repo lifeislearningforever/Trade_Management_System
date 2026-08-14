@@ -453,7 +453,10 @@ Examples:
       --backup-path hdfs:///backups/gmp_cis --dry-run
         """
     )
-    p.add_argument('--table',       help='Single table name to backup')
+    p.add_argument('--table',       help='Table name to backup, or comma-separated list of table '
+                                          'names (e.g. dr_drill_test_kudu,dr_drill_test_hive) -- '
+                                          'each is type-detected independently, so Kudu and Hive/'
+                                          'external tables can be mixed in one run')
     p.add_argument('--kudu-only',   action='store_true',
                    help='Backup only Kudu tables (skip Hive/external)')
     p.add_argument('--hive-only',   action='store_true',
@@ -515,11 +518,16 @@ def main():
 
     try:
         if args.table:
-            # Single table — detect type via DESCRIBE FORMATTED
-            ttype, loc = _detect_type(
-                config['database'], args.table, config['impala_host'], config['impala_shell_flags']
-            )
-            tables = [{"name": args.table, "type": ttype, "location": loc}]
+            # One or more explicit tables (comma-separated) — each detected
+            # independently, so a Kudu table and a Hive/external table can
+            # be passed together in the same --table value.
+            requested = [t.strip() for t in args.table.split(',') if t.strip()]
+            tables = []
+            for name in requested:
+                ttype, loc = _detect_type(
+                    config['database'], name, config['impala_host'], config['impala_shell_flags']
+                )
+                tables.append({"name": name, "type": ttype, "location": loc})
         else:
             # Auto-discover ALL tables in the database
             tables = discover_tables(
