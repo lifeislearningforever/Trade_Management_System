@@ -42,22 +42,43 @@ Pipeline:
            cis_cash_flow (one per portfolio holding the security)
 """
 
-import logging
-from datetime import datetime
-from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, List, Optional, Tuple
-
 import os
 import sys
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
+
+def _apply_early_env_override(argv):
+    """
+    Apply --env to os.environ['CIS_ENV'] *before* any lib.* module below is
+    imported. lib/config.py resolves CIS_ENV (Impala host/port/auth) at
+    import time, so parsing --env the normal way inside handle() would run
+    too late -- the connection pool would already be built against whatever
+    CIS_ENV was in the OS environment when the process started.
+    """
+    for i, arg in enumerate(argv):
+        if arg == '--env' and i + 1 < len(argv):
+            os.environ['CIS_ENV'] = argv[i + 1].upper()
+            return
+        if arg.startswith('--env='):
+            os.environ['CIS_ENV'] = arg.split('=', 1)[1].upper()
+            return
+
+
+_apply_early_env_override(sys.argv)
+
+import logging
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
+from typing import Any, Dict, List, Optional, Tuple
+
 from lib.management_base import BaseCommand, CommandError, run_command
 
 from lib.impala_connection import impala_manager
-from lib.corporate_action_repository import corporate_action_repository
-from lib.ca_cash_flow_service import ca_cash_flow_service
+from lib.corporate_action_repository import corporate_action_repository, CorporateActionRepository
+from lib.ca_cash_flow_service import ca_cash_flow_service, CACashFlowService
+from lib.ca_cash_flow_queue_repository import CACashFlowQueueRepository
 from lib.config import settings
 
 logger = logging.getLogger(__name__)
@@ -174,7 +195,27 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
-            '-d', '--date',
+            '--env',
+            type=str,
+            default=None,
+            choices=['LOCAL', 'SIT', 'UAT', 'PROD', 'DR'],
+            help=(
+                'Override CIS_ENV (Impala host/port/auth) for this run. '
+                'NOTE: this is read directly from sys.argv before argparse runs '
+                '(see _apply_early_env_override) -- it is declared here only so '
+                'it shows up in --help and gets validated; the actual override '
+                'already happened by the time this parses.'
+            )
+        )
+        parser.add_argument(
+            '--database',
+            type=str,
+            default=None,
+            help='Override target Kudu database name (default: from CIS_ENV config, e.g. gmp_cis)'
+        )
+        parser.add_argument(
+            '-d', '--date', '--processing-date',
+            dest='date',
             type=str,
             default=None,
             help='Filter GMP records by processing_date (YYYY-MM-DD or YYYYMMDD). Default: all unprocessed'
@@ -209,6 +250,10 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------------
     def handle(self, *args, **options):
+        global GMP_DATABASE
+
+        env_override = options.get('env')
+        database_override = options.get('database')
         processing_date = options['date']
         dry_run = options['dry_run']
         full_sync = options['full_sync']
@@ -216,7 +261,16 @@ class Command(BaseCommand):
         run_by = options['user']
         batch_size = options['batch_size']
 
-        self._print_header(processing_date, dry_run, run_by)
+        # --database overrides every repository's DATABASE constant so the
+        # whole pipeline (source read, cis_corporate_actions write, cash
+        # flow queue write) targets the same schema for this run.
+        if database_override:
+            GMP_DATABASE = database_override
+            CorporateActionRepository.DATABASE = database_override
+            CACashFlowService.DATABASE = database_override
+            CACashFlowQueueRepository.DATABASE = database_override
+
+        self._print_header(processing_date, dry_run, run_by, env_override, database_override)
 
         # 1. Fetch GMP records
         gmp_records = self._fetch_gmp_records(processing_date, batch_size)
@@ -298,9 +352,9 @@ class Command(BaseCommand):
         that were sourced from GMP (src_system='GMP').
         """
         try:
-            query = """
+            query = f"""
             SELECT ca_number
-            FROM gmp_cis.cis_corporate_actions
+            FROM {GMP_DATABASE}.cis_corporate_actions
             WHERE src_system = 'GMP'
               AND (is_deleted = false OR is_deleted IS NULL)
             """
@@ -433,14 +487,15 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-    def _print_header(self, processing_date, dry_run, run_by):
+    def _print_header(self, processing_date, dry_run, run_by, env_override=None, database_override=None):
         self.stdout.write(self.style.HTTP_INFO('=' * 70))
         self.stdout.write(self.style.HTTP_INFO('  CIS Trade Hive — GMP Corporate Action Sync'))
         self.stdout.write(self.style.HTTP_INFO('=' * 70))
         self.stdout.write(f'Started      : {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
         self.stdout.write(f'Run by       : {run_by}')
+        self.stdout.write(f'CIS_ENV      : {os.environ.get("CIS_ENV", "LOCAL")}' + (' (overridden)' if env_override else ''))
         self.stdout.write(f'Source table : {GMP_DATABASE}.{GMP_SOURCE_TABLE}')
-        self.stdout.write(f'Target table : gmp_cis.cis_corporate_actions')
+        self.stdout.write(f'Target table : {GMP_DATABASE}.cis_corporate_actions' + (' (overridden)' if database_override else ''))
         if processing_date:
             self.stdout.write(f'Date filter  : {processing_date}')
         if dry_run:
