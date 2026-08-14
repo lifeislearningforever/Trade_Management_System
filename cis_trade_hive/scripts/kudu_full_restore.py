@@ -30,6 +30,7 @@ Date: 2026-04-01
 
 import argparse
 import json
+import subprocess
 import sys
 import os
 from datetime import datetime
@@ -51,7 +52,53 @@ DEFAULT_CONFIG = {
     'parallelism': 8,
     'batch_size': 10000,
     'operation_timeout_ms': 60000,
+    'impala_host': os.environ.get('IMPALA_HOST', ''),
 }
+
+
+def _describe_formatted_via_impala(database: str, table: str, impala_host: str) -> Optional[str]:
+    """
+    Run DESCRIBE FORMATTED via the impala-shell binary and return its raw
+    tab-delimited output, or None on failure.
+
+    NOT spark.sql("DESCRIBE FORMATTED ...") -- Spark isolates its Hive
+    Metastore client in a separate classloader (controlled by
+    spark.sql.hive.metastore.jars), independent of whatever is passed via
+    --jars. Resolving a Kudu-backed table's metadata through that isolated
+    client requires org.apache.hadoop.hive.kudu.KuduSerDe to be on ITS
+    classpath specifically -- adding the kudu-hive jar to --jars does not
+    reach it, so every Kudu table describe fails with
+    "MetaException(message:java.lang.ClassNotFoundException
+    org.apache.hadoop.hive.kudu.KuduSerDe)" regardless of --jars content.
+    Same fix as scripts/kudu_full_backup.py's _describe_formatted_via_impala.
+    """
+    if not impala_host:
+        print("    WARNING: --impala-host not set — table type detection will fail")
+        return None
+    cmd = [
+        'impala-shell', '-i', impala_host, '-d', database,
+        '-B', '--output_delimiter=\t', '--print_header=false',
+        '-q', f'DESCRIBE FORMATTED {table}',
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            return None
+        return result.stdout
+    except Exception:
+        return None
+
+
+def _parse_describe_formatted(raw: str) -> Dict[str, str]:
+    rows = {}
+    for line in raw.splitlines():
+        fields = line.split('\t')
+        if len(fields) >= 2:
+            key = fields[0].strip()
+            val = fields[1].strip() if fields[1] else ""
+            if key:
+                rows[key] = val
+    return rows
 
 # Restore modes
 RESTORE_MODES = {
@@ -162,12 +209,15 @@ class KuduFullRestore:
         existing Hive table by that name instead.
         """
         full_table_name = f"{self.config['database']}.{table_name}"
+        raw = _describe_formatted_via_impala(
+            self.config['database'], table_name, self.config.get('impala_host', '')
+        )
+        if raw is None:
+            print(f"  Could not DESCRIBE {full_table_name} — assuming Kudu (new table)")
+            return TYPE_KUDU
+
         try:
-            desc_df = self.spark.sql(f"DESCRIBE FORMATTED {full_table_name}")
-            rows = {
-                row[0].strip(): (row[1].strip() if row[1] else "")
-                for row in desc_df.collect()
-            }
+            rows = _parse_describe_formatted(raw)
             storage_handler = rows.get("Storage Handler", "").lower()
             table_type_raw = rows.get("Table Type", "").upper()
 
@@ -179,7 +229,7 @@ class KuduFullRestore:
                 return TYPE_HIVE
 
         except Exception as e:
-            print(f"  Could not DESCRIBE {full_table_name} ({e}) — assuming Kudu (new table)")
+            print(f"  Could not parse DESCRIBE {full_table_name} ({e}) — assuming Kudu (new table)")
             return TYPE_KUDU
 
     def _resolve_kudu_table_name(self, table_name: str) -> str:
@@ -197,12 +247,16 @@ class KuduFullRestore:
         new Kudu table under whatever name it's given.
         """
         full_table_name = f"{self.config['database']}.{table_name}"
+        raw = _describe_formatted_via_impala(
+            self.config['database'], table_name, self.config.get('impala_host', '')
+        )
+        if raw is None:
+            print(f"  Could not DESCRIBE {full_table_name}, "
+                  f"falling back to impala::{full_table_name}")
+            return f"impala::{full_table_name}"
+
         try:
-            desc_df = self.spark.sql(f"DESCRIBE FORMATTED {full_table_name}")
-            rows = {
-                row[0].strip(): (row[1].strip() if row[1] else "")
-                for row in desc_df.collect()
-            }
+            rows = _parse_describe_formatted(raw)
             return (
                 rows.get("kudu.table_name")
                 or rows.get("kudu.table")
@@ -658,6 +712,10 @@ Examples:
                         help='Restore mode (default: truncate_insert)')
     parser.add_argument('--kudu-master', '-m', type=str, default=DEFAULT_CONFIG['kudu_master'],
                         help=f"Kudu master address (default: {DEFAULT_CONFIG['kudu_master']})")
+    parser.add_argument('--impala-host', type=str, default=DEFAULT_CONFIG['impala_host'],
+                        help='Impala coordinator host:port (e.g. impalad:21050), used for table '
+                             'type detection via impala-shell instead of spark.sql (Spark cannot '
+                             'DESCRIBE FORMATTED a Kudu table -- see _describe_formatted_via_impala)')
     parser.add_argument('--database', '-d', type=str, default=DEFAULT_CONFIG['database'],
                         help=f"Database name (default: {DEFAULT_CONFIG['database']})")
     parser.add_argument('--parallelism', type=int, default=DEFAULT_CONFIG['parallelism'],
@@ -683,12 +741,14 @@ def main():
         'parallelism': args.parallelism,
         'batch_size': DEFAULT_CONFIG['batch_size'],
         'operation_timeout_ms': DEFAULT_CONFIG['operation_timeout_ms'],
+        'impala_host': args.impala_host,
     }
 
     print("=" * 70)
     print("  KUDU FULL RESTORE")
     print("=" * 70)
     print(f"  Kudu Master:   {config['kudu_master']}")
+    print(f"  Impala Host:   {config['impala_host'] or '(NOT SET — type detection will fail)'}")
     print(f"  Database:      {config['database']}")
     print(f"  Table:         {args.table}")
     print(f"  Backup Path:   {args.backup_path}")

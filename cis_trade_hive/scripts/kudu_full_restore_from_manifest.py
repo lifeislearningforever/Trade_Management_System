@@ -136,6 +136,9 @@ Examples:
                          choices=list(RESTORE_MODES.keys()),
                          help='Restore mode applied to every table (default: truncate_insert)')
     parser.add_argument('--kudu-master', type=str, default=_RESTORE_DEFAULTS['kudu_master'])
+    parser.add_argument('--impala-host', type=str, default=_RESTORE_DEFAULTS.get('impala_host', ''),
+                         help='Impala coordinator host:port, used for table type detection via '
+                              'impala-shell instead of spark.sql (required — see kudu_full_restore.py)')
     parser.add_argument('--database', type=str, default=_RESTORE_DEFAULTS['database'])
     parser.add_argument('--parallelism', type=int, default=_RESTORE_DEFAULTS['parallelism'])
     parser.add_argument('--skip-tables', default='',
@@ -160,6 +163,7 @@ def main():
         'parallelism': args.parallelism,
         'batch_size': _RESTORE_DEFAULTS['batch_size'],
         'operation_timeout_ms': _RESTORE_DEFAULTS['operation_timeout_ms'],
+        'impala_host': args.impala_host,
     }
 
     skip = {t.strip() for t in args.skip_tables.split(',') if t.strip()}
@@ -168,6 +172,7 @@ def main():
     print("  FULL RESTORE FROM MANIFEST (Kudu + Hive)")
     print("=" * 70)
     print(f"  Kudu Master: {config['kudu_master']}")
+    print(f"  Impala Host: {config['impala_host'] or '(NOT SET — type detection will fail)'}")
     print(f"  Database:    {config['database']}")
     print(f"  Mode:        {args.mode}")
     print(f"  Dry Run:     {args.dry_run}")

@@ -11,37 +11,52 @@ each one up as Parquet:
 No hardcoded table lists — any new table added to the database is picked up
 automatically on the next backup run.
 
+Table type detection (Kudu vs Hive/external) runs DESCRIBE FORMATTED via
+the impala-shell binary, NOT spark.sql() -- Spark isolates its Hive
+Metastore client in its own classloader, which lacks
+org.apache.hadoop.hive.kudu.KuduSerDe regardless of what's passed via
+--jars, so describing a Kudu-backed table through Spark's Hive catalog
+fails with a ClassNotFoundException. --impala-host is therefore required
+for every mode below except when impala-shell isn't needed at all (it
+always is, for now).
+
 Usage:
     # Backup everything (auto-discover Kudu + Hive)
     spark-submit \\
         --jars /jars/kudu/kudu-spark3_2.12-1.17.0.jar \\
         kudu_full_backup.py \\
         --backup-path hdfs:///backups/gmp_cis \\
-        --kudu-master kudu-master:7051
+        --kudu-master kudu-master:7051 \\
+        --impala-host impalad:21050
 
     # Hive/external tables only (no Kudu JAR needed)
     spark-submit kudu_full_backup.py \\
         --hive-only \\
-        --backup-path hdfs:///backups/gmp_cis
+        --backup-path hdfs:///backups/gmp_cis \\
+        --impala-host impalad:21050
 
     # Kudu tables only
     spark-submit --jars /jars/kudu/*.jar kudu_full_backup.py \\
         --kudu-only \\
-        --backup-path hdfs:///backups/gmp_cis
+        --backup-path hdfs:///backups/gmp_cis \\
+        --impala-host impalad:21050
 
     # Single table
     spark-submit --jars /jars/kudu/*.jar kudu_full_backup.py \\
         --table cis_trade \\
-        --backup-path hdfs:///backups/gmp_cis
+        --backup-path hdfs:///backups/gmp_cis \\
+        --impala-host impalad:21050
 
     # Dry run (discover + count rows, no write)
     spark-submit --jars /jars/kudu/*.jar kudu_full_backup.py \\
-        --backup-path hdfs:///backups/gmp_cis --dry-run
+        --backup-path hdfs:///backups/gmp_cis --dry-run \\
+        --impala-host impalad:21050
 
     # Skip specific tables
     spark-submit --jars /jars/kudu/*.jar kudu_full_backup.py \\
         --backup-path hdfs:///backups/gmp_cis \\
-        --skip-tables pos_stage_1_base,pos_stage_2_portfolio
+        --skip-tables pos_stage_1_base,pos_stage_2_portfolio \\
+        --impala-host impalad:21050
 
 Author: CIS Trade Hive Team
 Version: 3.0
@@ -50,9 +65,10 @@ Date: 2026-05-28
 
 import argparse
 import json
+import subprocess
 import sys
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 import os
 
 try:
@@ -72,6 +88,7 @@ DEFAULT_CONFIG = {
     'compression':     'snappy',
     'parallelism':     8,
     'scan_timeout_ms': 30000,
+    'impala_host':     os.environ.get('IMPALA_HOST', ''),
 }
 
 TYPE_KUDU     = 'KUDU'
@@ -84,7 +101,7 @@ TYPE_UNKNOWN  = 'UNKNOWN'
 # Table discovery
 # ─────────────────────────────────────────────────────────────────────────────
 
-def discover_tables(spark: SparkSession, database: str) -> List[Dict]:
+def discover_tables(spark: SparkSession, database: str, impala_host: str) -> List[Dict]:
     """
     Auto-discover all tables in the database via SHOW TABLES + DESCRIBE FORMATTED.
     Returns list of {name, type, location}.
@@ -103,27 +120,72 @@ def discover_tables(spark: SparkSession, database: str) -> List[Dict]:
 
     tables = []
     for name in sorted(table_names):
-        ttype, location = _detect_type(spark, database, name)
+        ttype, location = _detect_type(database, name, impala_host)
         tables.append({"name": name, "type": ttype, "location": location})
         print(f"    {name:<55} [{ttype}]")
 
     return tables
 
 
-def _detect_type(spark: SparkSession, database: str, table: str) -> Tuple[str, str]:
-    """Detect table type via DESCRIBE FORMATTED.
+def _describe_formatted_via_impala(database: str, table: str, impala_host: str) -> Optional[str]:
+    """
+    Run DESCRIBE FORMATTED via the impala-shell binary and return its raw
+    tab-delimited output, or None on failure.
+
+    NOT spark.sql("DESCRIBE FORMATTED ...") -- Spark isolates its Hive
+    Metastore client in a separate classloader (controlled by
+    spark.sql.hive.metastore.jars), independent of whatever is passed via
+    --jars. Resolving a Kudu-backed table's metadata through that isolated
+    client requires org.apache.hadoop.hive.kudu.KuduSerDe to be on ITS
+    classpath specifically -- adding the kudu-hive jar to --jars does not
+    reach it, so every Kudu table describe fails with
+    "MetaException(message:java.lang.ClassNotFoundException
+    org.apache.hadoop.hive.kudu.KuduSerDe)" regardless of --jars content.
+    impala-shell talks to the Impala coordinator directly and never touches
+    Spark's Hive client, sidestepping the issue entirely.
+    """
+    if not impala_host:
+        print("    ERROR: --impala-host not set — required for table type detection")
+        return None
+    cmd = [
+        'impala-shell', '-i', impala_host, '-d', database,
+        '-B', '--output_delimiter=\t', '--print_header=false',
+        '-q', f'DESCRIBE FORMATTED {table}',
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            print(f"    WARNING: impala-shell DESCRIBE FORMATTED {table} failed: {result.stderr.strip()}")
+            return None
+        return result.stdout
+    except Exception as e:
+        print(f"    WARNING: Could not run impala-shell for {table}: {e}")
+        return None
+
+
+def _detect_type(database: str, table: str, impala_host: str) -> Tuple[str, str]:
+    """Detect table type via DESCRIBE FORMATTED (through impala-shell — see
+    _describe_formatted_via_impala for why not spark.sql).
 
     Returns (type, kudu_table_name_or_location).
     For Kudu tables the second element is the internal Kudu table name
     (e.g. 'impala::gmp_cis.cis_trade') extracted from table properties,
     which is what the Kudu Spark connector requires.
     """
+    raw = _describe_formatted_via_impala(database, table, impala_host)
+    if raw is None:
+        return TYPE_UNKNOWN, ""
+
     try:
-        desc_df = spark.sql(f"DESCRIBE FORMATTED {database}.{table}")
-        rows = {
-            row[0].strip(): (row[1].strip() if row[1] else "")
-            for row in desc_df.collect()
-        }
+        rows = {}
+        for line in raw.splitlines():
+            fields = line.split('\t')
+            if len(fields) >= 2:
+                key = fields[0].strip()
+                val = fields[1].strip() if fields[1] else ""
+                if key:
+                    rows[key] = val
+
         storage_handler = rows.get("Storage Handler", "").lower()
         table_type_raw  = rows.get("Table Type", "").upper()
         location        = rows.get("Location", "")
@@ -147,7 +209,7 @@ def _detect_type(spark: SparkSession, database: str, table: str) -> Tuple[str, s
             return TYPE_HIVE, location
 
     except Exception as e:
-        print(f"    WARNING: Could not describe {table}: {e}")
+        print(f"    WARNING: Could not parse DESCRIBE FORMATTED for {table}: {e}")
         return TYPE_UNKNOWN, ""
 
 
@@ -358,6 +420,10 @@ Examples:
     p.add_argument('--skip-tables', default='',
                    help='Comma-separated table names to skip')
     p.add_argument('--kudu-master', default=DEFAULT_CONFIG['kudu_master'])
+    p.add_argument('--impala-host', default=DEFAULT_CONFIG['impala_host'],
+                    help='Impala coordinator host:port (e.g. impalad:21050) used for table type '
+                         'detection via impala-shell. Required — DESCRIBE FORMATTED cannot go '
+                         'through Spark for Kudu tables (see _describe_formatted_via_impala).')
     p.add_argument('--database',    default=DEFAULT_CONFIG['database'])
     p.add_argument('--backup-path', default=DEFAULT_CONFIG['backup_path'])
     p.add_argument('--compression', default=DEFAULT_CONFIG['compression'],
@@ -378,6 +444,7 @@ def main():
         'compression':     args.compression,
         'parallelism':     args.parallelism,
         'scan_timeout_ms': DEFAULT_CONFIG['scan_timeout_ms'],
+        'impala_host':     args.impala_host,
     }
 
     skip = {t.strip() for t in args.skip_tables.split(',') if t.strip()}
@@ -386,6 +453,7 @@ def main():
     print("  FULL BACKUP — Auto-discover Kudu + Hive/Parquet")
     print("=" * 70)
     print(f"  Kudu master  : {config['kudu_master']}")
+    print(f"  Impala host  : {config['impala_host'] or '(NOT SET — type detection will fail)'}")
     print(f"  Database     : {config['database']}")
     print(f"  Backup path  : {config['backup_path']}")
     print(f"  Compression  : {config['compression']}")
@@ -402,11 +470,11 @@ def main():
     try:
         if args.table:
             # Single table — detect type via DESCRIBE FORMATTED
-            ttype, loc = _detect_type(backup.spark, config['database'], args.table)
+            ttype, loc = _detect_type(config['database'], args.table, config['impala_host'])
             tables = [{"name": args.table, "type": ttype, "location": loc}]
         else:
             # Auto-discover ALL tables in the database
-            tables = discover_tables(backup.spark, config['database'])
+            tables = discover_tables(backup.spark, config['database'], config['impala_host'])
 
             # Apply type filter
             if args.kudu_only:
