@@ -96,6 +96,48 @@ def _describe_formatted_via_impala(database: str, table: str, impala_host: str, 
         return None
 
 
+def find_latest_full_backup(backup_root: str, database: str, table: str) -> Optional[str]:
+    """
+    Auto-discover the most recent full/<TS> backup directory for a single
+    table, so a restore doesn't require knowing/pasting the exact timestamp
+    up front. Mirrors the exact path convention kudu_full_backup.py itself
+    writes to: {backup_root}/{database}/{table}/full/{TS} (see its
+    backup_table()'s out_path construction).
+
+    Uses `hdfs dfs -ls` via subprocess rather than Spark's Hadoop FileSystem
+    JVM bridge (the pattern kudu_full_restore_from_manifest.py's
+    find_latest_manifest() uses) so this can run before init_spark(), the
+    same way _describe_formatted_via_impala() avoids needing a Spark session.
+    """
+    full_root = f"{backup_root.rstrip('/')}/{database}/{table}/full"
+    try:
+        result = subprocess.run(
+            ['hdfs', 'dfs', '-ls', full_root], capture_output=True, text=True, timeout=60
+        )
+        if result.returncode != 0:
+            print(f"  ERROR: Could not list {full_root}: {result.stderr.strip()}")
+            return None
+
+        run_dirs = []
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            # `hdfs dfs -ls` directory rows: permissions (starts with 'd'), ..., path (last field)
+            if len(parts) >= 8 and parts[0].startswith('d'):
+                run_dirs.append(parts[-1].rstrip('/').rsplit('/', 1)[-1])
+
+        if not run_dirs:
+            print(f"  ERROR: No backup timestamps found under {full_root}")
+            return None
+
+        latest = sorted(run_dirs)[-1]
+        print(f"  Latest backup for {table}: {latest}")
+        return f"{full_root}/{latest}"
+
+    except Exception as e:
+        print(f"  ERROR listing {full_root}: {e}")
+        return None
+
+
 def _parse_describe_formatted(raw: str) -> Dict[str, str]:
     """
     Parse impala-shell's tab-delimited DESCRIBE FORMATTED output into a flat
@@ -750,8 +792,16 @@ Examples:
 
     parser.add_argument('--table', '-t', type=str, required=True,
                         help='Target table name to restore to')
-    parser.add_argument('--backup-path', '-b', type=str, required=True,
-                        help='Path to backup directory')
+    parser.add_argument('--backup-path', '-b', type=str,
+                        help='Exact path to a full/<TS> backup directory. Alternative to '
+                             '--backup-root + --latest, which auto-discovers this for you.')
+    parser.add_argument('--backup-root', type=str,
+                        help='Backup root (e.g. hdfs:///cis/backup/gmp_cis, no trailing /<database>/<table>/...) '
+                             '-- combined with --database/--table and --latest to auto-discover the most '
+                             'recent full/<TS> backup, instead of having to know/paste the exact timestamp.')
+    parser.add_argument('--latest', action='store_true',
+                        help='Auto-discover the most recent backup under '
+                             '--backup-root/<database>/<table>/full/ (requires --backup-root, not --backup-path)')
     parser.add_argument('--mode', '-M', type=str, default='truncate_insert',
                         choices=list(RESTORE_MODES.keys()),
                         help='Restore mode (default: truncate_insert)')
@@ -783,6 +833,19 @@ def main():
     """Main entry point."""
     args = parse_args()
 
+    if args.latest:
+        if not args.backup_root:
+            print("ERROR: --latest requires --backup-root")
+            sys.exit(1)
+        backup_path = find_latest_full_backup(args.backup_root, args.database, args.table)
+        if not backup_path:
+            sys.exit(1)
+    elif args.backup_path:
+        backup_path = args.backup_path
+    else:
+        print("ERROR: Must specify --backup-path, or --backup-root together with --latest")
+        sys.exit(1)
+
     # Build configuration
     config = {
         'kudu_master': args.kudu_master,
@@ -801,7 +864,7 @@ def main():
     print(f"  Impala Host:   {config['impala_host'] or '(NOT SET — type detection will fail)'}")
     print(f"  Database:      {config['database']}")
     print(f"  Table:         {args.table}")
-    print(f"  Backup Path:   {args.backup_path}")
+    print(f"  Backup Path:   {backup_path}" + ("  (auto-discovered via --latest)" if args.latest else ""))
     print(f"  Mode:          {args.mode}")
     print(f"  Dry Run:       {args.dry_run}")
     print("=" * 70)
@@ -830,7 +893,7 @@ def main():
         # Run restore
         result = restore.restore_table(
             args.table,
-            args.backup_path,
+            backup_path,
             mode=args.mode,
             dry_run=args.dry_run
         )
