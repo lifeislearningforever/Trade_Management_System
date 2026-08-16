@@ -353,6 +353,11 @@ CSRF_COOKIE_SECURE = not DEBUG
 
 # Security Settings (Production)
 if not DEBUG:
+    # CML terminates TLS at its proxy and forwards plain HTTP to the app on
+    # loopback (see config/cml_app.py bind = 127.0.0.1:<port>), so without this
+    # Django never sees the request as secure and SECURE_SSL_REDIRECT below
+    # causes every request to redirect endlessly / never resolve.
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SECURE_SSL_REDIRECT = True
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
