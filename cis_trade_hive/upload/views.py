@@ -387,77 +387,99 @@ def upload_create(request):
                             from core.notifications import notify_user as _notify
                             from core.notifications.constants import EVT_UPLOAD_COMPLETED, EVT_UPLOAD_FAILED
 
-                            # DROP PARTITION cleans the metastore entry.
-                            # The physical HDFS overwrite is handled by INSERT OVERWRITE
-                            # on the first chunk below.
-                            _imp2.execute_write(
-                                f"ALTER TABLE gmp_cis.{_t_target} "
-                                f"DROP IF EXISTS PARTITION (processing_date='{_t_pd}')",
-                            )
-                            logger.warning(f"[upload:direct:bg] dropped partition processing_date={_t_pd}")
-
-                            # Split rows into chunks and INSERT one chunk at a time.
-                            _total = len(_t_rows)
-                            _chunks = [_t_rows[i:i + _CHUNK] for i in range(0, _total, _CHUNK)]
-                            _ins = 0
-                            _fail_chunks = 0
-
-                            for _ci, _chunk in enumerate(_chunks):
-                                _sql = _build_chunk_sql(
-                                    _chunk, _t_non_part, _t_fixed, _t_target, _t_pd,
-                                    _overwrite=(_ci == 0)
+                            try:
+                                # DROP PARTITION cleans the metastore entry.
+                                # The physical HDFS overwrite is handled by INSERT OVERWRITE
+                                # on the first chunk below.
+                                _imp2.execute_write(
+                                    f"ALTER TABLE gmp_cis.{_t_target} "
+                                    f"DROP IF EXISTS PARTITION (processing_date='{_t_pd}')",
                                 )
-                                _ok = _imp2.execute_write(_sql)
-                                if _ok:
-                                    _ins += len(_chunk)
-                                    logger.warning(
-                                        f"[upload:direct:bg] chunk {_ci+1}/{len(_chunks)} "
-                                        f"({len(_chunk)} rows) OK — {_ins}/{_total} total"
-                                    )
-                                else:
-                                    _fail_chunks += 1
-                                    logger.error(
-                                        f"[upload:direct:bg] chunk {_ci+1}/{len(_chunks)} FAILED. "
-                                        f"SQL[:300]={_sql[:300]}"
-                                    )
-                                    if _fail_chunks >= 3:
-                                        logger.error("[upload:direct:bg] 3 consecutive chunk failures — aborting")
-                                        break
+                                logger.warning(f"[upload:direct:bg] dropped partition processing_date={_t_pd}")
 
-                            if _ins > 0:
-                                try:
-                                    _imp2.execute_write(
-                                        f"INVALIDATE METADATA gmp_cis.{_t_target}",
+                                # Split rows into chunks and INSERT one chunk at a time.
+                                _total = len(_t_rows)
+                                _chunks = [_t_rows[i:i + _CHUNK] for i in range(0, _total, _CHUNK)]
+                                _ins = 0
+                                _fail_chunks = 0
+
+                                for _ci, _chunk in enumerate(_chunks):
+                                    _sql = _build_chunk_sql(
+                                        _chunk, _t_non_part, _t_fixed, _t_target, _t_pd,
+                                        _overwrite=(_ci == 0)
                                     )
+                                    _ok = _imp2.execute_write(_sql)
+                                    if _ok:
+                                        _ins += len(_chunk)
+                                        logger.warning(
+                                            f"[upload:direct:bg] chunk {_ci+1}/{len(_chunks)} "
+                                            f"({len(_chunk)} rows) OK — {_ins}/{_total} total"
+                                        )
+                                    else:
+                                        _fail_chunks += 1
+                                        logger.error(
+                                            f"[upload:direct:bg] chunk {_ci+1}/{len(_chunks)} FAILED. "
+                                            f"SQL[:300]={_sql[:300]}"
+                                        )
+                                        if _fail_chunks >= 3:
+                                            logger.error("[upload:direct:bg] 3 consecutive chunk failures — aborting")
+                                            break
+
+                                if _ins > 0:
+                                    try:
+                                        _imp2.execute_write(
+                                            f"INVALIDATE METADATA gmp_cis.{_t_target}",
+                                        )
+                                    except Exception:
+                                        pass
+                                    _final_desc = _t_desc + f"\n{_ins}/{_total} rows inserted"
+                                    _repo2.update_upload(_t_upload_id, {
+                                        'status': UploadKuduRepository.STATUS_COMPLETED,
+                                        'description': _final_desc,
+                                        'row_count': _ins,
+                                    }, _t_username)
+                                    logger.warning(f"[upload:direct:bg] DONE — {_ins} rows into {_t_target}")
+                                    _notify(_t_username, EVT_UPLOAD_COMPLETED, {
+                                        'upload_id': _t_upload_id,
+                                        'file_name': _t_file_name,
+                                        'target_table': _t_target,
+                                        'processing_date': _t_pd,
+                                        'rows_inserted': _ins,
+                                        'message': f'Upload complete: {_ins} rows inserted into {_t_target} (processing_date={_t_pd})',
+                                    })
+                                else:
+                                    _repo2.update_upload(_t_upload_id, {
+                                        'status': UploadKuduRepository.STATUS_FAILED,
+                                        'description': f"{_t_desc}\nAll chunks failed to insert",
+                                    }, _t_username)
+                                    logger.error(f"[upload:direct:bg] FAILED — 0 rows inserted into {_t_target}")
+                                    _notify(_t_username, EVT_UPLOAD_FAILED, {
+                                        'upload_id': _t_upload_id,
+                                        'file_name': _t_file_name,
+                                        'target_table': _t_target,
+                                        'message': f'Upload failed: no rows inserted into {_t_target}',
+                                    })
+                            except Exception as _dex:
+                                logger.error(
+                                    f"[upload:direct:bg] EXCEPTION upload_id={_t_upload_id}: {_dex}",
+                                    exc_info=True
+                                )
+                                try:
+                                    _repo2.update_upload(_t_upload_id, {
+                                        'status': UploadKuduRepository.STATUS_FAILED,
+                                        'description': f"{_t_desc}\nUpload exception: {str(_dex)[:400]}",
+                                    }, _t_username)
                                 except Exception:
                                     pass
-                                _final_desc = _t_desc + f"\n{_ins}/{_total} rows inserted"
-                                _repo2.update_upload(_t_upload_id, {
-                                    'status': UploadKuduRepository.STATUS_COMPLETED,
-                                    'description': _final_desc,
-                                    'row_count': _ins,
-                                }, _t_username)
-                                logger.warning(f"[upload:direct:bg] DONE — {_ins} rows into {_t_target}")
-                                _notify(_t_username, EVT_UPLOAD_COMPLETED, {
-                                    'upload_id': _t_upload_id,
-                                    'file_name': _t_file_name,
-                                    'target_table': _t_target,
-                                    'processing_date': _t_pd,
-                                    'rows_inserted': _ins,
-                                    'message': f'Upload complete: {_ins} rows inserted into {_t_target} (processing_date={_t_pd})',
-                                })
-                            else:
-                                _repo2.update_upload(_t_upload_id, {
-                                    'status': UploadKuduRepository.STATUS_FAILED,
-                                    'description': f"{_t_desc}\nAll chunks failed to insert",
-                                }, _t_username)
-                                logger.error(f"[upload:direct:bg] FAILED — 0 rows inserted into {_t_target}")
-                                _notify(_t_username, EVT_UPLOAD_FAILED, {
-                                    'upload_id': _t_upload_id,
-                                    'file_name': _t_file_name,
-                                    'target_table': _t_target,
-                                    'message': f'Upload failed: no rows inserted into {_t_target}',
-                                })
+                                try:
+                                    _notify(_t_username, EVT_UPLOAD_FAILED, {
+                                        'upload_id': _t_upload_id,
+                                        'file_name': _t_file_name,
+                                        'target_table': _t_target,
+                                        'message': f'Upload failed for {_t_file_name}: {str(_dex)[:200]}',
+                                    })
+                                except Exception:
+                                    pass
 
                         import threading as _threading
                         _t = _threading.Thread(
