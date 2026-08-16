@@ -10,6 +10,15 @@ from django.shortcuts import redirect
 
 from core.views.auth_views import LoginView, LogoutView, auto_login_tmp3rc
 from core.views.dashboard_views import dashboard_view, global_search_view
+from core.views import error_views
+
+# Custom application-level error pages (used whenever DEBUG=False, i.e.
+# SIT/UAT/PROD) so users see a branded message instead of Django's
+# default error page or a raw traceback.
+handler400 = error_views.bad_request
+handler403 = error_views.permission_denied
+handler404 = error_views.page_not_found
+handler500 = error_views.server_error
 
 # Redirect home to login page (requires proper authentication)
 def home_view(request):

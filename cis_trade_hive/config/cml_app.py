@@ -231,8 +231,17 @@ def start_trade_event_worker():
         return
 
     # --- Process-level lock: only ONE gunicorn worker runs the background thread ---
+    # Namespaced by CIS_ENV + app port (CDSW_APP_PORT is unique per running CML
+    # Application instance) so two separate CML apps landing on the same host/
+    # /tmp filesystem — e.g. two environments, or replicas — never contend for
+    # the same lock file. A global '/tmp/cis_trade_event_worker.lock' path let
+    # a second, unrelated app's flock() fail on the first app's lock, silently
+    # skipping start_trade_event_worker() there — trades booked in that app
+    # would queue events that were never picked up by any worker.
     import fcntl as _fcntl
-    _lock_path = '/tmp/cis_trade_event_worker.lock'
+    _lock_env = os.environ.get("CIS_ENV", "unknown")
+    _lock_port = os.environ.get("CDSW_APP_PORT") or os.environ.get("PORT", "unknown")
+    _lock_path = f"/tmp/cis_trade_event_worker_{_lock_env}_{_lock_port}.lock"
     try:
         _worker_lock_fd = open(_lock_path, 'w')
         _fcntl.flock(_worker_lock_fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
