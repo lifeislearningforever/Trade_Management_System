@@ -469,7 +469,6 @@ class Command(BaseCommand):
                     WHERE src_system IN ('{src_list}')
                       AND position_type IN ('INT', 'SOD')
                       AND is_latest = true
-                      AND quantity > 0
                       {portfolio_clause}
                       {security_clause}
                       {date_clause}
@@ -496,8 +495,11 @@ class Command(BaseCommand):
         portfolio   = position.get('portfolio')
         security    = position.get('security_label')
         quantity    = position.get('quantity')
-
-        if not quantity:
+        if quantity is None or str(quantity).strip() == '':
+            return 'skipped'
+        try:
+            qty = Decimal(str(quantity))
+        except Exception:
             return 'skipped'
 
         # AMS no-reval mode: for AMS_STREET/SETTLED positions only, copy the
@@ -508,7 +510,6 @@ class Command(BaseCommand):
                 and position.get('position_basis') == 'SETTLED':
             return self._copy_position_unchanged(position, dry_run, ref, insert_rows)
 
-        qty          = Decimal(str(quantity))
         cost_fc_dec  = Decimal(str(position.get('cost_fc') or 0))
         cost_lc_dec  = Decimal(str(position.get('cost_lc') or 0))
         provision_fc = Decimal(str(position.get('provision_fc') or 0))

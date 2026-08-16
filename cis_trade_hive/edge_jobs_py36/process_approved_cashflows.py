@@ -45,7 +45,9 @@ record so re-runs on the same date skip already-processed records.
 Position lookup: always the current is_latest=true row (cis_trade_position
 for CIS sources, cis_position for non-CIS) — this is the base every run
 increases/decreases the cost from, regardless of what position_type that
-latest row happens to be.
+latest row happens to be. If no current row exists, UNCALL_COMMITMENT and
+PIPELINE seed a zero-quantity SETTLED CIS position for the run date and then
+apply the cash flow to that first version.
 
 average_cost precision: average_cost_fc/lc are a per-unit price, not a
 currency amount, and are always written at AVP_PRECISION (8dp) — never
@@ -112,6 +114,7 @@ CASH_FLOW_TABLE = 'cis_cash_flow'
 PRECISION = Decimal('0.00000001')
 DEFAULT_DP = 2
 AVP_PRECISION = 8  # average cost is price-per-unit, not an amount
+SEED_POSITION_CF_TYPES = {'UNCALL_COMMITMENT', 'PIPELINE'}
 
 
 def _escape(value: str) -> str:
@@ -432,6 +435,16 @@ class Command(BaseCommand):
 
         # Fetch positions for both bases; apply to each independently
         positions = self._get_current_positions(portfolio, security, position_date=position_date)
+        if not positions and cf_type in SEED_POSITION_CF_TYPES:
+            positions = [(
+                self._build_seed_position(
+                    portfolio=portfolio,
+                    security=security,
+                    position_date=position_date or payment_date,
+                ),
+                'CIS',
+            )]
+
         if not positions:
             return False, f'No open position for {portfolio}/{security} in cis_trade_position or cis_position'
 
@@ -537,6 +550,66 @@ class Command(BaseCommand):
     # =========================================================================
     # POSITION UPDATE HELPERS
     # =========================================================================
+
+    def _build_seed_position(
+        self,
+        portfolio: str,
+        security: str,
+        position_date: str,
+    ) -> Dict[str, Any]:
+        """Build a zero-quantity SETTLED CIS position used to seed CF-only rows."""
+        sec_ccy = self._get_security_currency(security)
+        port_ccy = self._get_portfolio_currency(portfolio)
+        fx_rate = Decimal('1')
+        try:
+            fx_rate, _ = multicurrency_service.get_fx_rate(sec_ccy, port_ccy, position_date)
+        except Exception as e:
+            logger.warning(
+                f'Could not derive FX rate for seeded CF position {portfolio}/{security}: {e}'
+            )
+
+        return {
+            'position_id': _calc_position_id(
+                portfolio=portfolio,
+                security_label=security,
+                position_basis='SETTLED',
+                position_date=position_date,
+                src_system='CIS',
+            ),
+            'position_basis': 'SETTLED',
+            'position_date': position_date,
+            'portfolio_short_name': portfolio,
+            'security_label': security,
+            'quantity': 0,
+            'average_cost_fc': 0,
+            'total_cost_fc': 0,
+            'average_cost_lc': 0,
+            'total_cost_lc': 0,
+            'market_price': 0,
+            'market_value_fc': 0,
+            'market_value_lc': 0,
+            'realized_pnl_fc': 0,
+            'unrealized_pnl_fc': 0,
+            'realized_pnl_lc': 0,
+            'unrealized_pnl_lc': 0,
+            'dividend_fc': 0,
+            'dividend_lc': 0,
+            'uncall_fc': 0,
+            'uncall_lc': 0,
+            'pipeline_fc': 0,
+            'pipeline_lc': 0,
+            'commit_fc': 0,
+            'commit_lc': 0,
+            'provision_fc': 0,
+            'provision_lc': 0,
+            'trade_type': 'BUY',
+            'security_currency': sec_ccy,
+            'portfolio_currency': port_ccy,
+            'fx_rate': float(fx_rate),
+            'status': 'OPEN',
+            'is_active': True,
+            'is_latest': True,
+        }
 
     def _accumulate_field(
         self,
@@ -754,6 +827,18 @@ class Command(BaseCommand):
 
             old_version_id = current.get('version_id')
             position_id = current.get('position_id')
+            if not position_id:
+                if old_version_id:
+                    raise ValueError(
+                        f'Missing position_id on existing position for {portfolio}/{security}'
+                    )
+                position_id = _calc_position_id(
+                    portfolio=portfolio,
+                    security_label=security,
+                    position_basis=current.get('position_basis') or 'SETTLED',
+                    position_date=position_date,
+                    src_system='CIS',
+                )
 
             # Look up currencies from reference tables (not position row — may be empty)
             sec_ccy  = self._get_security_currency(security)
@@ -762,12 +847,13 @@ class Command(BaseCommand):
             # Mark old as not latest
             ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             processing_date = datetime.now().strftime('%Y%m%d')  # YYYYMMDD to match INT records
-            impala_manager.execute_write(
-                f"""UPDATE {DATABASE}.{POSITION_TABLE}
-                    SET is_latest = false, updated_at = '{ts}'
-                    WHERE version_id = {old_version_id}""",
-                database=DATABASE
-            )
+            if old_version_id:
+                impala_manager.execute_write(
+                    f"""UPDATE {DATABASE}.{POSITION_TABLE}
+                        SET is_latest = false, updated_at = '{ts}'
+                        WHERE version_id = {old_version_id}""",
+                    database=DATABASE
+                )
 
             new_version_id = int(datetime.now().timestamp() * 1000)
 
