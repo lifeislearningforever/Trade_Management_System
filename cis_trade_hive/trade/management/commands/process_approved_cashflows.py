@@ -820,13 +820,19 @@ class Command(BaseCommand):
                 return True
 
             old_version_id = current.get('version_id')
-            position_id = current.get('position_id') or _calc_position_id(
-                portfolio=portfolio,
-                security_label=security,
-                position_basis=current.get('position_basis') or 'SETTLED',
-                position_date=position_date,
-                src_system='CIS',
-            )
+            position_id = current.get('position_id')
+            if not position_id:
+                if old_version_id:
+                    raise ValueError(
+                        f'Missing position_id on existing position for {portfolio}/{security}'
+                    )
+                position_id = _calc_position_id(
+                    portfolio=portfolio,
+                    security_label=security,
+                    position_basis=current.get('position_basis') or 'SETTLED',
+                    position_date=position_date,
+                    src_system='CIS',
+                )
 
             # Look up currencies from reference tables (not position row — may be empty)
             sec_ccy  = self._get_security_currency(security)
