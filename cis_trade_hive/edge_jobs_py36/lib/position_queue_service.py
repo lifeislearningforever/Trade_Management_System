@@ -640,7 +640,7 @@ class PositionQueueService:
             WHERE portfolio_short_name = '{self._escape(portfolio_id)}'
               AND security_label = '{self._escape(security_id)}'
               AND (trade_date >= '{from_date}' OR settle_date >= '{from_date}')
-              AND settle_date <= '{today_str}'
+              AND trade_date <= '{today_str}'
               AND (trade_status IN ('INITIAL', 'MODIFIED', 'VALIDATED', 'SETTLED') OR status IN ('INITIAL', 'MODIFIED', 'VALIDATED', 'SETTLED'))
               AND (is_deleted = false OR is_deleted IS NULL)
             ORDER BY trade_date ASC, settle_date ASC, trade_id ASC
@@ -755,8 +755,23 @@ class PositionQueueService:
                 # consecutive writes in the same chain recalc loop.
                 # Sentinel: {} means "start from zero" (first trade for this basis).
                 # None means "not set yet — look up from DB" (used outside chain recalc).
-                # We initialise to {} so the first trade always starts clean without a DB read.
+                # Seed each basis from the last position BEFORE from_date so SELL chain
+                # recalcs start from the pre-existing holding instead of zero.
                 last_position_by_basis = {'TRADED': {}, 'SETTLED': {}}
+                for basis in ('TRADED', 'SETTLED'):
+                    seed_rows = self.position_service._get_position_as_of_date(
+                        portfolio_id=portfolio_id,
+                        security_id=security_id,
+                        as_of_date=from_date,
+                        include_same_date=False,
+                        position_basis=basis,
+                    )
+                    if seed_rows:
+                        last_position_by_basis[basis] = seed_rows
+                        logger.info(
+                            f"Chain recalc seed for {basis}: qty={seed_rows.get('quantity')} "
+                            f"avg={seed_rows.get('average_cost_fc')} before {from_date}"
+                        )
 
                 for trade in trades:
                     settle_date = trade.get('settle_date') or ''
@@ -774,6 +789,18 @@ class PositionQueueService:
                             logger.warning(
                                 f"Skipping basis={basis} for trade {trade.get('trade_id')}: "
                                 f"pos_date is empty (trade_date={trade_date!r}, settle_date={settle_date!r})"
+                            )
+                            continue
+                        if pos_date < from_date:
+                            logger.debug(
+                                f"Skipping basis={basis} for trade {trade.get('trade_id')}: "
+                                f"pos_date={pos_date} < from_date={from_date} (already in seed)"
+                            )
+                            continue
+                        if pos_date > today_str:
+                            logger.debug(
+                                f"Skipping basis={basis} for trade {trade.get('trade_id')}: "
+                                f"pos_date={pos_date} > today={today_str} (future settlement, queued separately)"
                             )
                             continue
                         try:
