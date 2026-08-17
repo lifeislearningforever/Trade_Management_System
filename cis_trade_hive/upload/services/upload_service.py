@@ -1299,7 +1299,48 @@ class UploadService:
             if not target_table:
                 return False, "No target_table defined in datasource configuration"
 
-            # Get processing date from HDFS if not provided
+            # Get processing_date, preferring the uploaded file's OWN reporting_date
+            # column over the system/HDFS/calendar date -- keeps the ETL's
+            # processing_date partition consistent with the reporting_date values
+            # the rows themselves carry (see normalise_date for the formats this
+            # accepts). Falls back to the old GMP-system-date/HDFS/calendar-today
+            # chain if no explicit override was passed and no reporting_date can
+            # be found/parsed from a sample row, so behavior is unchanged for
+            # uploads that don't carry that column.
+            if not processing_date:
+                _preview_rows = sample_data
+                if not _preview_rows and upload:
+                    _raw_sample = upload.get('sample_data_json', [])
+                    if isinstance(_raw_sample, str):
+                        try:
+                            import json as _json_mod
+                            _preview_rows = _json_mod.loads(_raw_sample)
+                        except Exception:
+                            _preview_rows = []
+                    else:
+                        _preview_rows = _raw_sample or []
+
+                if _preview_rows:
+                    _first_row = _preview_rows[0] or {}
+                    _rd_key = next(
+                        (k for k in _first_row if str(k).strip().lower() == 'reporting_date'),
+                        None
+                    )
+                    if _rd_key and _first_row.get(_rd_key):
+                        _rd_val = self.normalise_date(str(_first_row[_rd_key]))
+                        if _rd_val and len(_rd_val) == 8 and _rd_val.isdigit():
+                            processing_date = _rd_val
+                            logger.info(
+                                f"[ingest:svc] processing_date derived from uploaded "
+                                f"file's reporting_date column: {processing_date}"
+                            )
+                        else:
+                            logger.warning(
+                                f"[ingest:svc] Found reporting_date column but could not "
+                                f"parse its value ('{_first_row[_rd_key]}') to YYYYMMDD -- "
+                                f"falling back to system processing_date"
+                            )
+
             if not processing_date:
                 processing_date = datasource_repository.get_processing_date()
 
