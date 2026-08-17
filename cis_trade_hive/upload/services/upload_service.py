@@ -3638,18 +3638,40 @@ class UploadService:
                     mas_6d_code_ovs,
                     position_basis,
                     from_timestamp(
+                        -- Broad, defensive date-format normalizer -- this is the ONE
+                        -- centralized place all 5 upload formats' reporting_date values
+                        -- pass through (Step 0 standardizes each format's raw column into
+                        -- position_upload_standardized as STRING; this Step 1 CTAS is what
+                        -- actually parses it), so adding a format here covers every
+                        -- format/source uniformly rather than needing 5 separate edits.
+                        -- Ordered most-specific-pattern-first; each branch is a no-op
+                        -- (returns NULL, doesn't error) if reporting_date doesn't actually
+                        -- match that format, so branches are safe to stack.
                         CASE
-                            WHEN reporting_date LIKE '%/%/%' AND length(reporting_date) = 10 THEN
+                            WHEN reporting_date LIKE '__/__/____' THEN
                                 CAST(unix_timestamp(reporting_date, 'dd/MM/yyyy') AS TIMESTAMP)
                             WHEN reporting_date LIKE '__-__-____' THEN
                                 CAST(unix_timestamp(reporting_date, 'dd-MM-yyyy') AS TIMESTAMP)
+                            WHEN reporting_date LIKE '__.__.____' THEN
+                                CAST(unix_timestamp(reporting_date, 'dd.MM.yyyy') AS TIMESTAMP)
                             WHEN reporting_date LIKE '____-__-__' AND length(reporting_date) = 10 THEN
                                 CAST(unix_timestamp(reporting_date, 'yyyy-MM-dd') AS TIMESTAMP)
-                            WHEN length(reporting_date) = 8 THEN
+                            WHEN reporting_date LIKE '____/__/__' THEN
+                                CAST(unix_timestamp(reporting_date, 'yyyy/MM/dd') AS TIMESTAMP)
+                            WHEN reporting_date LIKE '____.__.__' THEN
+                                CAST(unix_timestamp(reporting_date, 'yyyy.MM.dd') AS TIMESTAMP)
+                            WHEN length(reporting_date) = 8 AND reporting_date RLIKE '^[0-9]{8}$' THEN
                                 CAST(unix_timestamp(reporting_date, 'yyyyMMdd') AS TIMESTAMP)
-                            WHEN reporting_date LIKE '%-%-% %:%:%' THEN
-                                CAST(regexp_replace(reporting_date, ' .*', '') AS TIMESTAMP)
+                            WHEN reporting_date LIKE '%-%-%T%:%:%' OR reporting_date LIKE '%-%-% %:%:%' THEN
+                                CAST(regexp_replace(reporting_date, '[T ].*', '') AS TIMESTAMP)
+                            WHEN reporting_date RLIKE '^[0-9]{1,2} [A-Za-z]{3} [0-9]{4}$' THEN
+                                CAST(unix_timestamp(reporting_date, 'dd MMM yyyy') AS TIMESTAMP)
+                            WHEN reporting_date RLIKE '^[A-Za-z]{3} [0-9]{1,2},? [0-9]{4}$' THEN
+                                CAST(unix_timestamp(regexp_replace(reporting_date, ',', ''), 'MMM dd yyyy') AS TIMESTAMP)
                             ELSE
+                                -- Last resort: Impala's own implicit STRING->TIMESTAMP cast
+                                -- (handles ISO-ish formats not caught above). Returns NULL
+                                -- rather than erroring if it still doesn't match anything.
                                 CAST(reporting_date AS TIMESTAMP)
                         END,
                         'yyyy-MM-dd'
