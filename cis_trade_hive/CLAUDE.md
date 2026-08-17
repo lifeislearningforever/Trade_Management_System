@@ -312,29 +312,33 @@ The AVP system tracks portfolio positions with weighted average cost calculation
 ### AVP Formulas
 
 ```
-BUY:  new_avg_cost = (old_total_cost + (qty × price) + charges) / new_qty
+BUY:  new_avg_cost = (old_total_cost + (qty × price)) / new_qty
 SELL: avg_cost unchanged; realized_pnl = (sell_price - avg_cost) × qty
 ```
 
 - **Precision:** 8 decimal places (DECIMAL(20,8))
-- **Charges included:** commission + sec_fee + other_charges
+- **Charges excluded from cost basis:** commission + sec_fee + other_charges are a
+  P&L item, not cost basis (SA PORTIARP-8206, 2026-07-30) — see
+  `trade/services/position_service.py` `_process_buy`. Charges still flow into
+  the audit/history record and settlement P&L, just not into `average_cost_fc`
+  or `total_cost_fc`.
 
 ### AVP Calculation Examples
 
 ```
 # First BUY
 Trade: BUY 100 @ $175.00, Commission $10.00
-→ Qty: 100, Avg Cost: $175.10, Total: $17,510.00
+→ Qty: 100, Avg Cost: $175.00, Total: $17,500.00
 
 # Second BUY (adding to position)
-Existing: 100 @ $175.10
+Existing: 100 @ $175.00
 Trade: BUY 50 @ $180.00, Commission $5.00
-→ Qty: 150, Avg Cost: $176.77, Total: $26,515.00
+→ Qty: 150, Avg Cost: $176.67, Total: $26,500.00
 
 # SELL (partial)
-Existing: 150 @ $176.77
+Existing: 150 @ $176.67
 Trade: SELL 30 @ $185.00
-→ Qty: 120, Avg Cost: $176.77 (unchanged), Realized P&L: $246.90
+→ Qty: 120, Avg Cost: $176.67 (unchanged), Realized P&L: $250.00
 ```
 
 ### Settlement Logic

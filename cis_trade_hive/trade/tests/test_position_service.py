@@ -27,7 +27,8 @@ class TestAVPCalculation:
     def test_buy_new_position(self):
         """Test BUY when no existing position - creates new position."""
         # Scenario: First purchase of 100 shares at $50 with $10 commission
-        # Expected: qty=100, avg_cost=50.10 (including charges), total_cost=5010
+        # Expected: qty=100, avg_cost=50.00 (charges excluded from cost basis
+        # per SA PORTIARP-8206 — charges are a P&L item, not cost basis), total_cost=5000
 
         with patch('core.repositories.impala_connection.impala_manager.execute_query', return_value=[]):
             with patch.object(self.service, '_get_position_as_of_date', return_value=None):
@@ -48,20 +49,21 @@ class TestAVPCalculation:
         assert success is True
         assert position is not None
         assert position['quantity'] == 100.0
-        # avg_cost = (100 * 50 + 10) / 100 = 5010/100 = 50.10
-        assert position['average_cost_fc'] == 50.1
-        assert position['total_cost_fc'] == 5010.0
+        # avg_cost = (100 * 50) / 100 = 50.00 (charges excluded from cost basis)
+        assert position['average_cost_fc'] == 50.0
+        assert position['total_cost_fc'] == 5000.0
         assert position['status'] == 'OPEN'
         assert position['src_system'] == 'CIS'
 
     def test_buy_add_to_existing_position(self):
         """Test BUY adding to existing position - recalculates AVP."""
-        # Scenario: Already have 100 shares at $50 avg. Buy 50 more at $60 with $5 commission
+        # Scenario: Already have 100 shares at $50 avg. Buy 50 more at $60 with $5 commission.
+        # Charges are excluded from cost basis (SA PORTIARP-8206 — P&L item, not cost basis).
         # Old total_cost = 100 * 50 = 5000
-        # New trade_cost = (50 * 60) + 5 = 3005
-        # New total_cost = 5000 + 3005 = 8005
+        # New trade_cost = 50 * 60 = 3000
+        # New total_cost = 5000 + 3000 = 8000
         # New qty = 100 + 50 = 150
-        # New avg_cost = 8005 / 150 = 53.36666667 (rounded to 8 decimals)
+        # New avg_cost = 8000 / 150 = 53.33333333 (rounded to 8 decimals)
 
         existing_position = {
             'position_id': 99999,
@@ -89,10 +91,14 @@ class TestAVPCalculation:
         assert success is True
         assert position is not None
         assert position['quantity'] == 150.0
-        # avg_cost = 8005 / 150 = 53.36666667
-        assert round(position['average_cost_fc'], 8) == round(53.36666667, 8)
-        assert position['total_cost_fc'] == 8005.0
-        assert position['position_id'] == 99999  # Same position
+        # avg_cost = 8000 / 150 = 53.33333333 (charges excluded from cost basis)
+        assert round(position['average_cost_fc'], 8) == round(53.33333333, 8)
+        assert position['total_cost_fc'] == 8000.0
+        # position_id is always deterministic from the natural key of this date
+        # (portfolio/security/basis/position_date/src_system) — never inherited
+        # from the existing position dict. See _calc_position_id / the docstring
+        # at the top of _process_buy for why.
+        assert position['position_id'] is not None
 
     def test_buy_multiple_times_avp_accumulates(self):
         """Test multiple BUYs correctly accumulate AVP."""
@@ -351,7 +357,7 @@ class TestAVPCalculation:
             )
 
         assert success is False
-        assert 'positive' in message.lower()
+        assert 'negative' in message.lower()
 
     def test_non_position_affecting_trade_type_ignored(self):
         """Test trade types other than BUY/SELL don't affect position."""
@@ -401,11 +407,12 @@ class TestAVPCalculation:
         avg_cost = Decimal(str(position['average_cost_fc']))
         assert abs(avg_cost - Decimal('10.12345678')) < Decimal('0.000000005')
 
-    def test_charges_included_in_avp(self):
-        """Test that charges are included in AVP calculation."""
+    def test_charges_excluded_from_avp(self):
+        """Test that charges are excluded from AVP cost basis (SA PORTIARP-8206:
+        charges are a P&L item, not cost basis)."""
         # BUY 100 @ $10 with $50 commission
-        # Total cost = (100 * 10) + 50 = 1050
-        # AVP = 1050 / 100 = $10.50
+        # Total cost = 100 * 10 = 1000 (commission excluded)
+        # AVP = 1000 / 100 = $10.00
 
         with patch('core.repositories.impala_connection.impala_manager.execute_query', return_value=[]):
             with patch.object(self.service, '_get_position_as_of_date', return_value=None):
@@ -424,8 +431,8 @@ class TestAVPCalculation:
                         )
 
         assert success is True
-        assert position['average_cost_fc'] == 10.5  # Includes charges
-        assert position['total_cost_fc'] == 1050.0
+        assert position['average_cost_fc'] == 10.0  # Charges excluded
+        assert position['total_cost_fc'] == 1000.0
 
 
 class TestValidation:

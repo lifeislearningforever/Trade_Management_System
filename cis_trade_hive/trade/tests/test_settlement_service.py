@@ -358,9 +358,18 @@ class TestRecalculationChain:
                 updated_by='test_user'
             )
 
-            assert result['recalculated'] == 2
+            # result['recalculated'] also counts carry-forward day-fills from
+            # from_date through today (see _fill_carry_forward_positions), so it
+            # is >= the number of real trades reprocessed, not equal to it.
+            # The trade-driven recalc itself is verified via calculate_position's
+            # call count below — that's what actually proves both backdated
+            # trades were reprocessed.
+            assert result['recalculated'] >= 2
             assert result['errors'] == 0
-            assert mock_position_service.calculate_position.call_count == 2
+            # Each trade is recalculated for both position bases (TRADED and
+            # SETTLED) — see settlement_service.py's "Recalculating N trades
+            # (both bases)" log line — so 2 trades => 4 calculate_position calls.
+            assert mock_position_service.calculate_position.call_count == 4
 
 
 class TestIntegration:
