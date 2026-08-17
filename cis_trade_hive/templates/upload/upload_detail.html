@@ -570,6 +570,12 @@
                         {% endif %}{% endif %}
 
                         {% if can_run_position %}
+                        <div class="alert alert-warning small py-2 px-2 mb-2">
+                            <i class="bi bi-calendar-event"></i>
+                            This file's <code>reporting_date</code> column (first row) determines
+                            the processing date used below — not today's date. Falls back to the
+                            system date only if that column is missing or unparseable.
+                        </div>
                         <form method="post" action="{% url 'upload:run_position' upload.upload_id %}"
                               id="runPositionFormSidebar">
                             {% csrf_token %}
