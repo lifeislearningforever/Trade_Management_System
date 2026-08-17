@@ -508,12 +508,12 @@ class TradeDropdownService:
 
     def get_gl_account_codes(self) -> List[Dict[str, Any]]:
         """GL Account Code options — distinct gl_account values from
-        cis_gl_mapping_lut where cat2_dec = 'Cost GL'."""
+        cis_gl_mapping_lut where cat2_def = 'Cost GL'."""
         try:
             query = f"""
             SELECT DISTINCT gl_account AS value, gl_account AS label
             FROM {self.DATABASE}.cis_gl_mapping_lut
-            WHERE cat2_dec = 'Cost GL'
+            WHERE cat2_def = 'Cost GL'
               AND gl_account IS NOT NULL AND gl_account != ''
             ORDER BY gl_account
             """

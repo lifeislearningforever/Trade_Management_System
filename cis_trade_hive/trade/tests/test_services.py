@@ -247,7 +247,7 @@ class TradeDropdownServiceTestCase(TestCase):
     @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_gl_account_codes_from_lookup_table(self, mock_execute):
         """GL Account Code options come from cis_gl_mapping_lut filtered on
-        cat2_dec = 'Cost GL', not UDF."""
+        cat2_def = 'Cost GL', not UDF."""
         mock_execute.return_value = [
             {'value': 'ACC-1001', 'label': 'ACC-1001'},
         ]
@@ -257,7 +257,7 @@ class TradeDropdownServiceTestCase(TestCase):
         self.assertEqual(len(result), 1)
         called_sql = mock_execute.call_args[0][0]
         self.assertIn('cis_gl_mapping_lut', called_sql)
-        self.assertIn("cat2_dec = 'Cost GL'", called_sql)
+        self.assertIn("cat2_def = 'Cost GL'", called_sql)
 
     @patch('core.repositories.impala_connection.impala_manager.execute_query')
     def test_get_gl_account_codes_empty_when_query_fails(self, mock_execute):
