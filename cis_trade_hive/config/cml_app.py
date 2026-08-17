@@ -1095,9 +1095,16 @@ def main():
     # TODO: set UAT to False once static file serving is confirmed working
     if cis_env in ("PROD", "DR"):
         os.environ.setdefault("DJANGO_DEBUG", "False")
-        os.environ["DJANGO_COLLECT_STATIC"] = "1"
     else:
         os.environ.setdefault("DJANGO_DEBUG", "True")
+
+    # collectstatic must run for every deployed env except SIT (SIT serves static
+    # files another way — see settings.py comment on STATICFILES_STORAGE). UAT was
+    # previously excluded here, which left STATIC_ROOT empty and 404'd every
+    # static asset since urls.py's static() serves from STATIC_ROOT, not
+    # STATICFILES_DIRS.
+    if cis_env != "SIT":
+        os.environ["DJANGO_COLLECT_STATIC"] = "1"
 
     # ==================== REST Proxy Configuration ====================
     # Enable REST proxy mode for Hive operations (bypasses direct Hive connections)
