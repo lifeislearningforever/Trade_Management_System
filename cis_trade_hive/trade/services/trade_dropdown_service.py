@@ -363,6 +363,7 @@ class TradeDropdownService:
                 'full_name': full_name,
                 'currency': currency,
                 'manager': manager,
+                'cost_centre': p.get('cost_centre_code', '') or '',
             })
         return result
 
@@ -436,17 +437,26 @@ class TradeDropdownService:
         ]
 
     def get_custodians(self) -> List[Dict[str, Any]]:
-        """Get custodian options from cis_party table where is_custodian=true."""
+        """
+        Get custodian options from cis_party table where is_custodian=true,
+        joined to cis_custodian_acc_details_lut for cus_code -- embedded as
+        'cus_code' so the trade form can auto-populate udf_sub_custodian when
+        a custodian is selected (see autoSelectSubCustodianFromCustodian() in
+        trade_form.html).
+        """
         try:
             query = f"""
-            SELECT party_short_name as value,
-                   COALESCE(party_full_name, party_short_name) as label,
-                   country
-            FROM {self.DATABASE}.cis_party
-            WHERE is_custodian = true
-              AND is_active = true
-              AND (is_deleted = false OR is_deleted IS NULL)
-            ORDER BY party_short_name
+            SELECT p.party_short_name as value,
+                   COALESCE(p.party_full_name, p.party_short_name) as label,
+                   p.country,
+                   lut.cus_code AS cus_code
+            FROM {self.DATABASE}.cis_party p
+            LEFT JOIN {self.DATABASE}.cis_custodian_acc_details_lut lut
+                ON lut.custodian_short_name = p.party_short_name
+            WHERE p.is_custodian = true
+              AND p.is_active = true
+              AND (p.is_deleted = false OR p.is_deleted IS NULL)
+            ORDER BY p.party_short_name
             LIMIT 200
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
@@ -455,7 +465,8 @@ class TradeDropdownService:
                     {
                         'value': r.get('value', ''),
                         'label': f"{r.get('label', '')} ({r.get('value', '')})" if r.get('label') != r.get('value') else r.get('value', ''),
-                        'country': r.get('country', '')
+                        'country': r.get('country', ''),
+                        'cus_code': r.get('cus_code', '') or '',
                     }
                     for r in results
                 ]
@@ -470,27 +481,47 @@ class TradeDropdownService:
             {'value': 'HSBC', 'label': 'HSBC'},
         ]
 
-    # =========================================================================
-    # UDF-BASED OPTIONS (Try UDF first, then use defaults)
-    # =========================================================================
-
     def get_gl_fund_types(self) -> List[Dict[str, Any]]:
-        """Get GL fund type options — UDF-driven only, no hardcoded fallback.
-        An empty result means this UDF field isn't configured yet in UDF admin,
-        not that placeholder values should be shown in the dropdown."""
-        return self._get_udf_options('GL Fund Type')
+        """GL Fund Type options — distinct values from cis_glfundtype_mapping_lut."""
+        try:
+            query = f"""
+            SELECT DISTINCT gl_fund_type AS value, gl_fund_type AS label
+            FROM {self.DATABASE}.cis_glfundtype_mapping_lut
+            WHERE gl_fund_type IS NOT NULL AND gl_fund_type != ''
+            ORDER BY gl_fund_type
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            return [{'value': r.get('value', ''), 'label': r.get('label', '')} for r in results] if results else []
+        except Exception as e:
+            logger.debug(f"Could not load GL fund types: {str(e)}")
+            return []
 
     def get_gl_cost_centres(self) -> List[Dict[str, Any]]:
-        """Get GL cost centre options — UDF-driven only, no hardcoded fallback.
-        An empty result means this UDF field isn't configured yet in UDF admin,
-        not that placeholder values should be shown in the dropdown."""
-        return self._get_udf_options('GL Cost Centre')
+        """
+        GL Cost Centre is NOT a free-choice dropdown -- it's auto-populated
+        from the selected portfolio's cost_centre_code (see get_portfolios()
+        and autoPopulateCostCentreFromPortfolio() in trade_form.html). This
+        returns no independent option list; kept only so callers/templates
+        that still reference dropdown_options.gl_cost_centres don't break.
+        """
+        return []
 
     def get_gl_account_codes(self) -> List[Dict[str, Any]]:
-        """Get GL account code options — UDF-driven only, no hardcoded fallback.
-        An empty result means this UDF field isn't configured yet in UDF admin,
-        not that placeholder values should be shown in the dropdown."""
-        return self._get_udf_options('GL Account Code')
+        """GL Account Code options — distinct gl_account values from
+        cis_gl_mapping_lut where cat2_dec = 'Cost GL'."""
+        try:
+            query = f"""
+            SELECT DISTINCT gl_account AS value, gl_account AS label
+            FROM {self.DATABASE}.cis_gl_mapping_lut
+            WHERE cat2_dec = 'Cost GL'
+              AND gl_account IS NOT NULL AND gl_account != ''
+            ORDER BY gl_account
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            return [{'value': r.get('value', ''), 'label': r.get('label', '')} for r in results] if results else []
+        except Exception as e:
+            logger.debug(f"Could not load GL account codes: {str(e)}")
+            return []
 
     def get_selling_rules(self) -> List[Dict[str, Any]]:
         """Get selling rule options."""

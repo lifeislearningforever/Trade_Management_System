@@ -189,7 +189,7 @@ class TradeValidationRepository:
         """
         try:
             # Check cache first (only for non-search queries)
-            cache_key = f"portfolios_v2:{search or 'all'}:{limit}"  # v2: includes description
+            cache_key = f"portfolios_v3:{search or 'all'}:{limit}"  # v3: includes cost_centre_code
             if not search:  # Cache only full list queries
                 cached = query_cache.get(cache_key)
                 if cached:
@@ -203,7 +203,8 @@ class TradeValidationRepository:
                    currency,
                    manager,
                    settlement_ccy,
-                   status
+                   status,
+                   cost_centre_code
             FROM {self.DATABASE}.{self.PORTFOLIO_TABLE}
             WHERE UPPER(status) IN ('VALIDATED', 'SETTLED')
               AND is_active = true

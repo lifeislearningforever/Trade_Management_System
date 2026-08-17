@@ -205,27 +205,24 @@ class TradeDropdownServiceTestCase(TestCase):
     # GL FUND TYPES TESTS
     # =========================================================================
 
-    @patch.object(TradeDropdownService, '_get_udf_options')
-    def test_get_gl_fund_types_from_udf(self, mock_udf):
-        """Test fetching GL fund types from UDF"""
-        mock_udf.return_value = [
-            {'value': 'TRADING', 'label': 'Trading'},
-            {'value': 'BANKING', 'label': 'Banking'}
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
+    def test_get_gl_fund_types_from_lookup_table(self, mock_execute):
+        """GL Fund Type options come from cis_glfundtype_mapping_lut, not UDF."""
+        mock_execute.return_value = [
+            {'value': 'TRADING', 'label': 'TRADING'},
+            {'value': 'BANKING', 'label': 'BANKING'},
         ]
 
         result = self.service.get_gl_fund_types()
 
         self.assertEqual(len(result), 2)
-        mock_udf.assert_called_with('GL Fund Type')
+        called_sql = mock_execute.call_args[0][0]
+        self.assertIn('cis_glfundtype_mapping_lut', called_sql)
 
-    @patch.object(TradeDropdownService, '_get_udf_options')
     @patch('core.repositories.impala_connection.impala_manager.execute_query')
-    def test_get_gl_fund_types_empty_when_udf_not_configured(self, mock_execute, mock_udf):
-        """GL Fund Type is purely UDF-driven — no hardcoded fallback. An empty
-        UDF result means the field isn't configured yet, so the dropdown
-        should be empty rather than showing fake placeholder values."""
-        mock_udf.return_value = []
-        mock_execute.return_value = []
+    def test_get_gl_fund_types_empty_when_query_fails(self, mock_execute):
+        """No hardcoded fallback — an empty/failed lookup means an empty dropdown."""
+        mock_execute.side_effect = Exception('connection error')
 
         result = self.service.get_gl_fund_types()
 
@@ -235,33 +232,41 @@ class TradeDropdownServiceTestCase(TestCase):
     # GL COST CENTRES TESTS
     # =========================================================================
 
-    @patch.object(TradeDropdownService, '_get_udf_options')
-    def test_get_gl_cost_centres_from_udf(self, mock_udf):
-        """Test fetching GL cost centres from UDF"""
-        mock_udf.return_value = [
-            {'value': 'CC-001', 'label': 'Treasury'}
-        ]
-
+    def test_get_gl_cost_centres_always_empty(self):
+        """GL Cost Centre is not a dropdown at all — it's auto-populated
+        client-side from the selected portfolio's cost_centre_code. This
+        method returns no independent option list."""
         result = self.service.get_gl_cost_centres()
 
-        self.assertEqual(len(result), 1)
-        mock_udf.assert_called_with('GL Cost Centre')
+        self.assertEqual(result, [])
 
     # =========================================================================
     # GL ACCOUNT CODES TESTS
     # =========================================================================
 
-    @patch.object(TradeDropdownService, '_get_udf_options')
-    def test_get_gl_account_codes_from_udf(self, mock_udf):
-        """Test fetching GL account codes from UDF"""
-        mock_udf.return_value = [
-            {'value': 'ACC-1001', 'label': 'Trading Securities'}
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
+    def test_get_gl_account_codes_from_lookup_table(self, mock_execute):
+        """GL Account Code options come from cis_gl_mapping_lut filtered on
+        cat2_dec = 'Cost GL', not UDF."""
+        mock_execute.return_value = [
+            {'value': 'ACC-1001', 'label': 'ACC-1001'},
         ]
 
         result = self.service.get_gl_account_codes()
 
         self.assertEqual(len(result), 1)
-        mock_udf.assert_called_with('GL Account Code')
+        called_sql = mock_execute.call_args[0][0]
+        self.assertIn('cis_gl_mapping_lut', called_sql)
+        self.assertIn("cat2_dec = 'Cost GL'", called_sql)
+
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
+    def test_get_gl_account_codes_empty_when_query_fails(self, mock_execute):
+        """No hardcoded fallback — an empty/failed lookup means an empty dropdown."""
+        mock_execute.side_effect = Exception('connection error')
+
+        result = self.service.get_gl_account_codes()
+
+        self.assertEqual(result, [])
 
     # =========================================================================
     # SELLING RULES TESTS
@@ -695,15 +700,6 @@ class TradeDropdownServiceFallbackTestCase(TestCase):
     # =========================================================================
     # TEST DEFAULT FALLBACKS (when UDF returns empty)
     # =========================================================================
-
-    @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    def test_get_gl_cost_centres_empty_when_udf_not_configured(self, mock_udf_repo):
-        """GL Cost Centre is purely UDF-driven — no hardcoded fallback."""
-        mock_udf_repo.get_field_values.return_value = []
-
-        result = self.service.get_gl_cost_centres()
-
-        self.assertEqual(result, [])
 
     @patch('trade.services.trade_dropdown_service.udf_field_repository')
     def test_get_fund_types_fallback_defaults(self, mock_udf_repo):
