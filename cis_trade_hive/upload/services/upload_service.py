@@ -2365,44 +2365,6 @@ class UploadService:
         target = (upload.get('target_table_name') or '').lower().split('.')[-1]
         return target in self.POSITION_TARGET_TABLES
 
-    def _execute_write_with_timeout(self, query: str, database: str, step_label: str,
-                                     timeout_s: int = 300) -> bool:
-        """
-        Run impala_manager.execute_write() with a client-side wall-clock timeout.
-
-        impyla's cursor.execute() polls GetOperationStatus in a plain while-True
-        loop with no overall cap (see core/repositories/impala_connection.py's
-        QUERY_TIMEOUT_S comment) — a query Impala itself never finishes (stuck
-        in admission control, a bad plan, a wedged coordinator) blocks the
-        calling thread forever with no exception and nothing logged. That's
-        exactly what happened to a real Step 0 INSERT OVERWRITE run: 751 rows,
-        ~15 minutes, zero log output, zero exception, the ETL just silently
-        stuck. QUERY_TIMEOUT_S only cancels a query that's idle, not one
-        that's actively (if badly) executing, so it doesn't protect against
-        this case.
-
-        A throwaway single-worker executor per call — not shared — lets an
-        abandoned/hung query keep running in the background (its result
-        discarded) without blocking anything after it; see
-        config/cml_app.py's identical pattern for the Trade Event Worker's
-        poll query, added for the same reason.
-        """
-        from core.repositories.impala_connection import impala_manager
-        import concurrent.futures as _cf
-        executor = _cf.ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"ETL-{step_label}")
-        try:
-            future = executor.submit(impala_manager.execute_write, query, database=database)
-            return future.result(timeout=timeout_s)
-        except _cf.TimeoutError:
-            logger.error(
-                f"[position_etl] {step_label} exceeded {timeout_s}s with no response from "
-                f"Impala — abandoning this attempt and failing the ETL run. The query may "
-                f"still be running in Impala; check Cloudera Manager / the impalad web UI "
-                f"for a query matching this step's SQL to find the actual cause (admission "
-                f"control queueing, a bad plan, a wedged coordinator, etc.)."
-            )
-            return False
-
     def run_position_etl(
         self,
         upload_id: str,
@@ -3561,20 +3523,16 @@ class UploadService:
                 _t = _etl_t0
                 logger.info(f"[position_etl] Step 0 starting — INSERT OVERWRITE position_upload_standardized for {src_id}")
                 logger.info(f"[position_etl] Step 0 SQL length={len(std_select)} chars")
-                ok = self._execute_write_with_timeout(
+                ok = impala_manager.execute_write(
                     f"""
                     INSERT OVERWRITE {db}.position_upload_standardized
                     PARTITION (processing_date='{processing_date}', src_id='{src_id}')
                     {std_select}
                     """,
-                    database=db,
-                    step_label='Step 0 (standardize)',
+                    database=db
                 )
                 if not ok:
-                    return False, (
-                        "Step 0 INSERT into position_upload_standardized failed or timed out — "
-                        "see the [position_etl] Step 0 (standardize) log entries for details"
-                    ), result
+                    return False, f"Step 0 INSERT into position_upload_standardized failed — check Impala logs", result
                 impala_manager.execute_write(
                     f"REFRESH {db}.position_upload_standardized PARTITION (processing_date='{processing_date}', src_id='{src_id}')",
                     database=db
@@ -3620,7 +3578,7 @@ class UploadService:
             impala_manager.execute_write(
                 "DROP TABLE IF EXISTS pos_stage_1_base", database=db
             )
-            ok = self._execute_write_with_timeout(
+            ok = impala_manager.execute_write(
                 f"""
                 CREATE TABLE pos_stage_1_base
                 STORED AS PARQUET AS
@@ -3710,15 +3668,10 @@ class UploadService:
                 WHERE src_id = '{src_id}'
                   AND processing_date = '{processing_date}'
                 """,
-                database=db,
-                step_label='Step 1 (base staging)',
+                database=db
             )
             if not ok:
-                return False, (
-                    "Step 1 CREATE TABLE pos_stage_1_base failed or timed out — see the "
-                    "[position_etl] Step 1 (base staging) log entries for details "
-                    "(likely column mismatch in position_upload_standardized, or a hung query)"
-                ), result
+                return False, "Step 1 CREATE TABLE pos_stage_1_base failed — check Impala logs (likely column mismatch in position_upload_standardized)", result
             _s1_rows = _count('pos_stage_1_base')
             logger.info(f"[position_etl] Step 1 complete — {_s1_rows} rows in pos_stage_1_base")
             _t = _step_time("Step 1 (base staging)", _t)
