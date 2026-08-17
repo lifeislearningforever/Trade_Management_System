@@ -13,6 +13,12 @@ from queue import Queue
 from trade.services.position_queue_service import PositionQueueService, position_queue_service
 
 
+TODAY_STR = '2026-07-03'
+YESTERDAY_STR = '2026-07-02'
+TWO_DAYS_AGO_STR = '2026-07-01'
+FUTURE_STR = '2026-07-10'
+
+
 class TestQueueEnqueue:
     """Test queue enqueue operations."""
 
@@ -377,6 +383,62 @@ class TestQueueStatistics:
             assert stats['completed'] == 100
             assert stats['failed'] == 2
             assert stats['total'] == 112
+
+
+class TestChainRecalculationRegression:
+    def setup_method(self):
+        self.service = PositionQueueService()
+
+    def test_backdated_future_settle_sell_uses_seeded_traded_base_and_skips_future_settled(self):
+        trades = [{
+            'trade_id': 2001,
+            'trade_type': 'SELL',
+            'quantity': 40,
+            'price': 90.0,
+            'charges': 0.0,
+            'trade_date': YESTERDAY_STR,
+            'settle_date': FUTURE_STR,
+            'total_amount_lc': None,
+            'gross_amount_lc': None,
+            'gross_amount_fc': None,
+        }]
+        prior_traded = {
+            'quantity': 100,
+            'average_cost_fc': 50.0,
+            'position_date': TWO_DAYS_AGO_STR,
+            'position_basis': 'TRADED',
+        }
+
+        self.service.position_service.calculate_position = MagicMock(
+            return_value=(True, 'ok', {'quantity': 60})
+        )
+        self.service.position_service._get_position_as_of_date = MagicMock(
+            side_effect=lambda portfolio_id, security_id, as_of_date, include_same_date, position_basis, exclude_trade_id=None: (
+                prior_traded if position_basis == 'TRADED' else None
+            )
+        )
+
+        with patch('trade.services.position_queue_service.system_date_service.get_system_date',
+                   return_value=datetime.strptime(TODAY_STR, '%Y-%m-%d').date()):
+            with patch('trade.services.position_queue_service.impala_manager.execute_query',
+                       side_effect=[trades, []]) as mock_query:
+                with patch('trade.services.position_queue_service.impala_manager.execute_write'):
+                    with patch('trade.services.position_queue_service.time.sleep'):
+                        with patch.object(self.service, '_carry_forward_to_today'):
+                            result = self.service._process_chain_recalculation({
+                                'portfolio_id': 'FUND-001',
+                                'security_id': 'AAPL',
+                                'from_date': YESTERDAY_STR,
+                            })
+
+        assert result['errors'] == 0
+        assert result['recalculated'] == 1
+        self.service.position_service.calculate_position.assert_called_once()
+        kwargs = self.service.position_service.calculate_position.call_args.kwargs
+        assert kwargs['position_basis'] == 'TRADED'
+        assert kwargs['position_date'] == YESTERDAY_STR
+        assert kwargs['base_position_override'] == prior_traded
+        assert f"trade_date <= '{TODAY_STR}'" in mock_query.call_args_list[0].args[0]
 
 
 class TestWorkerLifecycle:
