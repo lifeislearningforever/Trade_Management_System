@@ -168,6 +168,20 @@
                         <li>Avoid special characters in column names</li>
                     </ul>
 
+                    <div class="alert alert-warning small mb-3">
+                        <i class="bi bi-calendar-event"></i>
+                        <strong>Position files:</strong> if your file has a
+                        <code>reporting_date</code> column, its value (from the
+                        <strong>first row</strong>) is used as the ETL's
+                        processing date instead of today's system date —
+                        double-check it before uploading, especially for
+                        backdated files. Accepted formats include
+                        <code>DD/MM/YYYY</code>, <code>YYYY-MM-DD</code>,
+                        <code>YYYYMMDD</code>, and common variants. If the
+                        column is missing or its value can't be parsed, the
+                        upload falls back to today's system date.
+                    </div>
+
                     <div class="alert alert-info small mb-0">
                         <i class="bi bi-lightbulb"></i>
                         <strong>Tip:</strong> After upload, you can edit column names and data types before ingesting into Hive.
