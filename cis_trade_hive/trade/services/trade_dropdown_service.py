@@ -475,37 +475,22 @@ class TradeDropdownService:
     # =========================================================================
 
     def get_gl_fund_types(self) -> List[Dict[str, Any]]:
-        """Get GL fund type options."""
-        options = self._get_udf_options('GL Fund Type')
-        if options:
-            return options
-        return [
-            {'value': 'TRADING', 'label': 'Trading Book'},
-            {'value': 'BANKING', 'label': 'Banking Book'},
-            {'value': 'INVESTMENT', 'label': 'Investment Book'},
-        ]
+        """Get GL fund type options — UDF-driven only, no hardcoded fallback.
+        An empty result means this UDF field isn't configured yet in UDF admin,
+        not that placeholder values should be shown in the dropdown."""
+        return self._get_udf_options('GL Fund Type')
 
     def get_gl_cost_centres(self) -> List[Dict[str, Any]]:
-        """Get GL cost centre options."""
-        options = self._get_udf_options('GL Cost Centre')
-        if options:
-            return options
-        return [
-            {'value': 'CC-001', 'label': 'Treasury'},
-            {'value': 'CC-002', 'label': 'Investment Management'},
-            {'value': 'CC-003', 'label': 'Trading Desk'},
-        ]
+        """Get GL cost centre options — UDF-driven only, no hardcoded fallback.
+        An empty result means this UDF field isn't configured yet in UDF admin,
+        not that placeholder values should be shown in the dropdown."""
+        return self._get_udf_options('GL Cost Centre')
 
     def get_gl_account_codes(self) -> List[Dict[str, Any]]:
-        """Get GL account code options."""
-        options = self._get_udf_options('GL Account Code')
-        if options:
-            return options
-        return [
-            {'value': 'ACC-1001', 'label': 'Trading Securities'},
-            {'value': 'ACC-1002', 'label': 'Available for Sale'},
-            {'value': 'ACC-1003', 'label': 'Held to Maturity'},
-        ]
+        """Get GL account code options — UDF-driven only, no hardcoded fallback.
+        An empty result means this UDF field isn't configured yet in UDF admin,
+        not that placeholder values should be shown in the dropdown."""
+        return self._get_udf_options('GL Account Code')
 
     def get_selling_rules(self) -> List[Dict[str, Any]]:
         """Get selling rule options."""

@@ -220,16 +220,16 @@ class TradeDropdownServiceTestCase(TestCase):
 
     @patch.object(TradeDropdownService, '_get_udf_options')
     @patch('core.repositories.impala_connection.impala_manager.execute_query')
-    def test_get_gl_fund_types_fallback(self, mock_execute, mock_udf):
-        """Test GL fund types fallback when UDF empty"""
+    def test_get_gl_fund_types_empty_when_udf_not_configured(self, mock_execute, mock_udf):
+        """GL Fund Type is purely UDF-driven — no hardcoded fallback. An empty
+        UDF result means the field isn't configured yet, so the dropdown
+        should be empty rather than showing fake placeholder values."""
         mock_udf.return_value = []
         mock_execute.return_value = []
 
         result = self.service.get_gl_fund_types()
 
-        # Should return hardcoded fallback
-        self.assertIsInstance(result, list)
-        self.assertGreater(len(result), 0)
+        self.assertEqual(result, [])
 
     # =========================================================================
     # GL COST CENTRES TESTS
@@ -697,15 +697,13 @@ class TradeDropdownServiceFallbackTestCase(TestCase):
     # =========================================================================
 
     @patch('trade.services.trade_dropdown_service.udf_field_repository')
-    def test_get_gl_cost_centres_fallback_defaults(self, mock_udf_repo):
-        """Test GL cost centres falls back to hardcoded defaults"""
+    def test_get_gl_cost_centres_empty_when_udf_not_configured(self, mock_udf_repo):
+        """GL Cost Centre is purely UDF-driven — no hardcoded fallback."""
         mock_udf_repo.get_field_values.return_value = []
 
         result = self.service.get_gl_cost_centres()
 
-        self.assertEqual(len(result), 3)
-        values = [r['value'] for r in result]
-        self.assertIn('CC-001', values)
+        self.assertEqual(result, [])
 
     @patch('trade.services.trade_dropdown_service.udf_field_repository')
     def test_get_fund_types_fallback_defaults(self, mock_udf_repo):
