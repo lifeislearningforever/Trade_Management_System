@@ -247,22 +247,47 @@ def upload_create(request):
                         import re as _re
                         from datetime import datetime as _dt
 
-                        # Determine processing_date from GMP system date (contextual_today
-                        # from gmp_cis_sta_dly_alldatesinfo). This is the business date
-                        # shown in the breadcrumb (e.g. 2026-03-02 → 20260302).
-                        # Fall back to today's calendar date only if alldates is unavailable.
-                        try:
-                            from core.services.system_date_service import system_date_service as _sds_pd
-                            _processing_date = _sds_pd.get_system_date_str('%Y%m%d')
-                            logger.warning(f"[upload:direct] processing_date={_processing_date} (from alldates system_date)")
-                        except Exception as _sds_err:
-                            logger.warning(f"[upload:direct] system_date_service failed ({_sds_err}), falling back to today")
-                            _processing_date = _dt.now().strftime('%Y%m%d')
-                        logger.warning(f"[upload:direct] processing_date={_processing_date}")
-
                         # all_data is already fully parsed by validate_with_datasource_config.
                         # No file re-read. No service layer fallback chain. Direct INSERT.
                         _all_rows = list(validation_result.all_data)
+
+                        # Determine processing_date, preferring the uploaded file's OWN
+                        # reporting_date column (first row) over the GMP system date —
+                        # keeps the ETL's processing_date partition consistent with the
+                        # reporting_date values the rows themselves carry. Falls back to
+                        # GMP system date (contextual_today from gmp_cis_sta_dly_alldatesinfo),
+                        # then today's calendar date, if no reporting_date column is found
+                        # or its value can't be parsed to YYYYMMDD.
+                        _processing_date = None
+                        if _all_rows:
+                            _first_row = _all_rows[0] or {}
+                            _rd_key = next(
+                                (k for k in _first_row if str(k).strip().lower() == 'reporting_date'),
+                                None
+                            )
+                            if _rd_key and _first_row.get(_rd_key):
+                                _rd_val = upload_service.normalise_date(str(_first_row[_rd_key]))
+                                if _rd_val and len(_rd_val) == 8 and _rd_val.isdigit():
+                                    _processing_date = _rd_val
+                                    logger.warning(
+                                        f"[upload:direct] processing_date={_processing_date} "
+                                        f"(from file's reporting_date column)"
+                                    )
+                                else:
+                                    logger.warning(
+                                        f"[upload:direct] Found reporting_date column but could not "
+                                        f"parse its value ('{_first_row[_rd_key]}') to YYYYMMDD — "
+                                        f"falling back to system processing_date"
+                                    )
+                        if not _processing_date:
+                            try:
+                                from core.services.system_date_service import system_date_service as _sds_pd
+                                _processing_date = _sds_pd.get_system_date_str('%Y%m%d')
+                                logger.warning(f"[upload:direct] processing_date={_processing_date} (from alldates system_date)")
+                            except Exception as _sds_err:
+                                logger.warning(f"[upload:direct] system_date_service failed ({_sds_err}), falling back to today")
+                                _processing_date = _dt.now().strftime('%Y%m%d')
+                        logger.warning(f"[upload:direct] processing_date={_processing_date}")
                         _target_table = datasource_config.get('target_table', '')
                         _src_id = _target_table.lower().split('.')[-1]
                         logger.warning(f"[upload:direct] {len(_all_rows)} rows → {_target_table} "
