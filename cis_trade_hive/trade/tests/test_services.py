@@ -330,17 +330,28 @@ class TradeDropdownServiceTestCase(TestCase):
     # SUB CUSTODIANS TESTS
     # =========================================================================
 
-    @patch.object(TradeDropdownService, '_get_udf_options')
-    def test_get_sub_custodians_from_udf(self, mock_udf):
-        """Test fetching sub custodians from UDF"""
-        mock_udf.return_value = [
-            {'value': 'DBS-SG', 'label': 'DBS Bank Singapore'}
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
+    def test_get_sub_custodians_from_lookup_table(self, mock_execute):
+        """Test fetching sub custodians from cis_custodian_acc_details_lut"""
+        mock_execute.return_value = [
+            {'value': 'CUS001', 'label': 'CUS001', 'custodian_short_name': 'DBS-SG'}
         ]
 
         result = self.service.get_sub_custodians()
 
         self.assertEqual(len(result), 1)
-        mock_udf.assert_called_with('Sub Custodian')
+        self.assertEqual(result[0]['custodian_short_name'], 'DBS-SG')
+        call_args = mock_execute.call_args[0][0]
+        self.assertIn('cis_custodian_acc_details_lut', call_args)
+
+    @patch('core.repositories.impala_connection.impala_manager.execute_query')
+    def test_get_sub_custodians_empty_when_query_fails(self, mock_execute):
+        """Test sub custodians returns empty list on query failure"""
+        mock_execute.side_effect = Exception("Database error")
+
+        result = self.service.get_sub_custodians()
+
+        self.assertEqual(result, [])
 
     # =========================================================================
     # OPEN CLOSE OPTIONS TESTS

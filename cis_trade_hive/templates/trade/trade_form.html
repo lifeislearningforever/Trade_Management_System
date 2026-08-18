@@ -332,30 +332,30 @@
                                 <small class="text-muted" id="broker_charge_info"></small>
                             </div>
 
-                            <!-- Custodian (moved from GL & Broker tab) -->
+                            <!-- Sub Custodian (cis_custodian_acc_details_lut.cus_code) -->
                             <div class="col-md-3">
-                                <label class="form-label">Custodian</label>
-                                <select class="form-select" name="custodian" id="custodian">
-                                    <option value="">Select Custodian</option>
-                                    {% for cust in dropdown_options.custodians %}
-                                    <option value="{{ cust.value }}"
-                                        {% if trade.custodian == cust.value %}selected{% endif %}
-                                        data-cus_code="{{ cust.cus_code }}">
-                                        {{ cust.label }}
+                                <label class="form-label">Sub Custodian</label>
+                                <select class="form-select" name="udf_sub_custodian" id="udf_sub_custodian">
+                                    <option value="">Select Sub Custodian</option>
+                                    {% for sc in dropdown_options.sub_custodians %}
+                                    <option value="{{ sc.value }}"
+                                        {% if trade.udf_sub_custodian == sc.value %}selected{% endif %}
+                                        data-custodian="{{ sc.custodian_short_name }}">
+                                        {{ sc.label }}
                                     </option>
                                     {% endfor %}
                                 </select>
                             </div>
 
-                            <!-- Sub Custodian (auto-set from custodian's cus_code, cis_custodian_acc_details_lut) -->
+                            <!-- Custodian (auto-set from sub custodian's custodian_short_name, cis_custodian_acc_details_lut) -->
                             <div class="col-md-3">
-                                <label class="form-label">Sub Custodian</label>
-                                <input type="text" class="form-control bg-light" id="udf_sub_custodian_display"
-                                       value="{{ trade.udf_sub_custodian|default:'' }}"
+                                <label class="form-label">Custodian</label>
+                                <input type="text" class="form-control bg-light" id="custodian_display"
+                                       value="{{ trade.custodian|default:'' }}"
                                        readonly placeholder="-">
-                                <input type="hidden" name="udf_sub_custodian" id="udf_sub_custodian"
-                                       value="{{ trade.udf_sub_custodian|default:'' }}">
-                                <small class="text-muted">Auto-set from custodian</small>
+                                <input type="hidden" name="custodian" id="custodian"
+                                       value="{{ trade.custodian|default:'' }}">
+                                <small class="text-muted">Auto-set from sub custodian</small>
                             </div>
 
                             <!-- Exchange -->
@@ -794,10 +794,10 @@ document.getElementById('portfolio_short_name').addEventListener('change', funct
         });
 });
 
-// Auto-fill sub-custodian when custodian changes (native fallback -- Select2's
+// Auto-fill custodian when sub custodian changes (native fallback -- Select2's
 // select2:select handler covers the usual dropdown-click path).
-document.getElementById('custodian').addEventListener('change', function() {
-    autoPopulateSubCustodianFromCustodian();
+document.getElementById('udf_sub_custodian').addEventListener('change', function() {
+    autoPopulateCustodianFromSubCustodian();
 });
 
 // Validate security on selection change
@@ -1078,6 +1078,12 @@ document.addEventListener('DOMContentLoaded', function() {
             autoPopulateCurrencyFromPortfolio();
         }
         autoPopulateCostCentreFromPortfolio();
+    }
+
+    // If editing and sub custodian is already set, auto-populate custodian display
+    const subCustodianEl = document.getElementById('udf_sub_custodian');
+    if (subCustodianEl && subCustodianEl.value) {
+        autoPopulateCustodianFromSubCustodian();
     }
 
     // If editing and security is already set, auto-populate currency display only
@@ -1686,21 +1692,21 @@ function autoPopulateCurrencyFromSecurityNoFx() {
     // No fetchFxRate() — keep trade.open_fx_rate as stored
     calculateTotal();
 }
-// Sub Custodian is auto-set from the selected custodian's cus_code
-// (cis_custodian_acc_details_lut.cus_code) -- readonly, not a user-editable dropdown.
-function autoPopulateSubCustodianFromCustodian() {
-    const custodianEl = document.getElementById('custodian');
-    const subHidden = document.getElementById('udf_sub_custodian');
-    const subDisplay = document.getElementById('udf_sub_custodian_display');
-    if (!custodianEl || !subHidden || !subDisplay) return;
-    const selectedOption = custodianEl.options[custodianEl.selectedIndex];
+// Custodian is auto-set from the selected sub custodian's custodian_short_name
+// (cis_custodian_acc_details_lut) -- readonly, not a user-editable dropdown.
+function autoPopulateCustodianFromSubCustodian() {
+    const subCustodianEl = document.getElementById('udf_sub_custodian');
+    const custHidden = document.getElementById('custodian');
+    const custDisplay = document.getElementById('custodian_display');
+    if (!subCustodianEl || !custHidden || !custDisplay) return;
+    const selectedOption = subCustodianEl.options[subCustodianEl.selectedIndex];
 
-    if (selectedOption && selectedOption.dataset.cus_code) {
-        subHidden.value = selectedOption.dataset.cus_code;
-        subDisplay.value = selectedOption.dataset.cus_code;
+    if (selectedOption && selectedOption.dataset.custodian) {
+        custHidden.value = selectedOption.dataset.custodian;
+        custDisplay.value = selectedOption.dataset.custodian;
     } else {
-        subHidden.value = '';
-        subDisplay.value = '';
+        custHidden.value = '';
+        custDisplay.value = '';
     }
 }
 
@@ -1824,13 +1830,13 @@ $(document).ready(function() {
         'gl_fund_type',
         // gl_cost_centre is now a readonly auto-populated field, not a Select2 dropdown
         'gl_account_code',
-        'custodian',
+        // custodian is now a readonly auto-populated field, not a Select2 dropdown
+        'udf_sub_custodian',
         'selling_rule',
         'amor_accr_method',
         // UDF Tab
         'udf_fund_type',
         'udf_section_31_26',
-        // udf_sub_custodian is now a readonly auto-populated field, not a Select2 dropdown
         'udf_uobn_uobn_hk',
         'udf_income_exp_type',
         'udf_revision_code'
@@ -1890,9 +1896,9 @@ $(document).ready(function() {
         autoPopulateCostCentreFromPortfolio();
     });
 
-    // Add Select2 change event for custodian dropdown to trigger sub-custodian auto-fill
-    $('#custodian').on('select2:select', function(e) {
-        autoPopulateSubCustodianFromCustodian();
+    // Add Select2 change event for sub custodian dropdown to trigger custodian auto-fill
+    $('#udf_sub_custodian').on('select2:select', function(e) {
+        autoPopulateCustodianFromSubCustodian();
     });
 
     // Add Select2 change event for security dropdown to trigger currency and price update

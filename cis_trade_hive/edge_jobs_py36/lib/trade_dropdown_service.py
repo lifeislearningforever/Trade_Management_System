@@ -438,21 +438,17 @@ class TradeDropdownService:
 
     def get_custodians(self) -> List[Dict[str, Any]]:
         """
-        Get custodian options from cis_party table where is_custodian=true,
-        joined to cis_custodian_acc_details_lut for cus_code -- embedded as
-        'cus_code' so the trade form can auto-populate udf_sub_custodian when
-        a custodian is selected (see autoSelectSubCustodianFromCustodian() in
-        trade_form.html).
+        Get custodian options from cis_party table where is_custodian=true.
+        Custodian itself is now a readonly field auto-populated from the
+        selected Sub Custodian (see get_sub_custodians() and
+        autoPopulateCustodianFromSubCustodian() in trade_form.html).
         """
         try:
             query = f"""
             SELECT p.party_short_name as value,
                    COALESCE(p.party_full_name, p.party_short_name) as label,
-                   p.country,
-                   lut.cus_code AS cus_code
+                   p.country
             FROM {self.DATABASE}.cis_party p
-            LEFT JOIN {self.DATABASE}.cis_custodian_acc_details_lut lut
-                ON lut.custodian_short_name = p.party_short_name
             WHERE p.is_custodian = true
               AND p.is_active = true
               AND (p.is_deleted = false OR p.is_deleted IS NULL)
@@ -466,7 +462,6 @@ class TradeDropdownService:
                         'value': r.get('value', ''),
                         'label': f"{r.get('label', '')} ({r.get('value', '')})" if r.get('label') != r.get('value') else r.get('value', ''),
                         'country': r.get('country', ''),
-                        'cus_code': r.get('cus_code', '') or '',
                     }
                     for r in results
                 ]
@@ -536,15 +531,37 @@ class TradeDropdownService:
         ]
 
     def get_sub_custodians(self) -> List[Dict[str, Any]]:
-        """Get sub-custodian options."""
-        options = self._get_udf_options('Sub Custodian')
-        if options:
-            return options
-        return [
-            {'value': 'DBS-SG', 'label': 'DBS Bank Singapore'},
-            {'value': 'SCB-SG', 'label': 'Standard Chartered SG'},
-            {'value': 'CITI-SG', 'label': 'Citibank Singapore'},
-        ]
+        """
+        Get sub-custodian options: distinct cus_code values from
+        cis_custodian_acc_details_lut, embedded with the mapped
+        custodian_short_name so the trade form can auto-populate Custodian
+        when a Sub Custodian is selected (see
+        autoPopulateCustodianFromSubCustodian() in trade_form.html).
+        """
+        try:
+            query = f"""
+            SELECT cus_code AS value,
+                   cus_code AS label,
+                   MIN(custodian_short_name) AS custodian_short_name
+            FROM {self.DATABASE}.cis_custodian_acc_details_lut
+            WHERE cus_code IS NOT NULL AND cus_code != ''
+            GROUP BY cus_code
+            ORDER BY cus_code
+            """
+            results = impala_manager.execute_query(query, database=self.DATABASE)
+            if results:
+                return [
+                    {
+                        'value': r.get('value', ''),
+                        'label': r.get('label', ''),
+                        'custodian_short_name': r.get('custodian_short_name', '') or '',
+                    }
+                    for r in results
+                ]
+        except Exception as e:
+            logger.debug(f"Could not load sub custodians: {str(e)}")
+
+        return []
 
     def get_open_close_options(self) -> List[Dict[str, Any]]:
         """Get open/close position options."""
