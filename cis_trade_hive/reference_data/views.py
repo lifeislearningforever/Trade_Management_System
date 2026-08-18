@@ -2176,17 +2176,24 @@ def corporate_action_list(request):
         user_id = str(request.session.get('user_id', ''))
         user_email = request.session.get('user_email', '')
 
-        # Bulk-fetch security full names for all rows in one query
-        security_names_map = SecurityHiveRepository.get_security_names_map(
-            [ca.get('security_name', '') for ca in corporate_actions]
-        )
+        # security_name can be a comma-separated list of multiple securities;
+        # collect every individual name across all rows for the bulk lookup.
+        all_security_names = []
+        for ca in corporate_actions:
+            all_security_names.extend(
+                s.strip() for s in (ca.get('security_name', '') or '').split(',') if s.strip()
+            )
+        security_names_map = SecurityHiveRepository.get_security_names_map(all_security_names)
 
         # Add can_validate flag to each record
         for ca in corporate_actions:
             ca['can_validate'] = corporate_action_service.can_user_validate(ca, username)
             ca['status_color'] = corporate_action_service.get_status_display_color(ca.get('status', ''))
             ca['ca_type_label'] = corporate_action_dropdown_service.get_ca_type_label(ca.get('ca_type', ''))
-            ca['security_full_name'] = security_names_map.get(ca.get('security_name', ''), '')
+            names = [s.strip() for s in (ca.get('security_name', '') or '').split(',') if s.strip()]
+            ca['security_full_name'] = ', '.join(
+                security_names_map.get(name, '') for name in names if security_names_map.get(name, '')
+            )
 
         # CSV Export
         if export:
@@ -2292,8 +2299,11 @@ def corporate_action_detail(request, ca_id):
 
         ca['ca_type_label'] = corporate_action_dropdown_service.get_ca_type_label(ca.get('ca_type', ''))
 
-        security = SecurityHiveRepository.get_security_by_name(ca.get('security_name', ''))
-        ca['security_full_name'] = security.get('security_description', '') if security else ''
+        security_names = [s.strip() for s in (ca.get('security_name', '') or '').split(',') if s.strip()]
+        security_names_map = SecurityHiveRepository.get_security_names_map(security_names)
+        ca['security_full_name'] = ', '.join(
+            security_names_map.get(name, '') for name in security_names if security_names_map.get(name, '')
+        )
 
         context = {
             'corporate_action': ca,
