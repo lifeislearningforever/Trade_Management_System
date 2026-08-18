@@ -60,6 +60,10 @@
                             <p class="mb-2 fw-bold text-primary">{{ corporate_action.security_name|default:"-" }}</p>
                         </div>
                         <div class="col-md-6">
+                            <label class="text-muted small">Security Full Name</label>
+                            <p class="mb-2 fw-bold">{{ corporate_action.security_full_name|default:"-" }}</p>
+                        </div>
+                        <div class="col-md-6">
                             <label class="text-muted small">Source System</label>
                             <p class="mb-2">
                                 {% if corporate_action.src_system|upper == 'CIS' %}

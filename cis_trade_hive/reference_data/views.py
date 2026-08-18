@@ -28,6 +28,7 @@ from .services.reference_data_service import (
 from .services.counterparty_cif_service import counterparty_cif_service
 from .services.party_service import party_service, party_cif_service
 from .services.corporate_action_service import corporate_action_service
+from security.repositories.security_hive_repository import SecurityHiveRepository
 from .services.corporate_action_dropdown_service import corporate_action_dropdown_service
 
 logger = logging.getLogger('reference_data')
@@ -2283,6 +2284,9 @@ def corporate_action_detail(request, ca_id):
         history = corporate_action_service.get_history(int(ca_id))
 
         ca['ca_type_label'] = corporate_action_dropdown_service.get_ca_type_label(ca.get('ca_type', ''))
+
+        security = SecurityHiveRepository.get_security_by_name(ca.get('security_name', ''))
+        ca['security_full_name'] = security.get('security_description', '') if security else ''
 
         context = {
             'corporate_action': ca,

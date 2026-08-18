@@ -132,6 +132,35 @@ class SecurityHiveRepository:
             return None
 
     @staticmethod
+    def get_security_by_name(security_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch a single security by security_name (denormalized name used
+        elsewhere, e.g. on corporate actions).
+
+        Args:
+            security_name: Security name
+
+        Returns:
+            Security dictionary or None
+        """
+        if not security_name:
+            return None
+        try:
+            query = f"""
+            SELECT *
+            FROM {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
+            WHERE security_name = {SecurityHiveRepository.escape_value(security_name)}
+            LIMIT 1
+            """
+
+            result = impala_manager.execute_query(query, database=SecurityHiveRepository.DATABASE)
+            return result[0] if result and len(result) > 0 else None
+
+        except Exception as e:
+            logger.error(f"Error fetching security by name {security_name}: {str(e)}")
+            return None
+
+    @staticmethod
     def get_security_by_isin(isin: str) -> Optional[Dict[str, Any]]:
         """
         Fetch a single security by ISIN.
