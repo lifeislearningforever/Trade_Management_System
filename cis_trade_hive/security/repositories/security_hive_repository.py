@@ -161,6 +161,39 @@ class SecurityHiveRepository:
             return None
 
     @staticmethod
+    def get_security_names_map(security_names: List[str]) -> Dict[str, str]:
+        """
+        Bulk-fetch security_description ("full name") for a list of
+        security_name values in one query.
+
+        Args:
+            security_names: List of security_name values to look up
+
+        Returns:
+            Dict mapping security_name -> security_description
+        """
+        unique_names = sorted({n for n in security_names if n})
+        if not unique_names:
+            return {}
+        try:
+            in_clause = ', '.join(SecurityHiveRepository.escape_value(n) for n in unique_names)
+            query = f"""
+            SELECT security_name, security_description
+            FROM {SecurityHiveRepository.DATABASE}.{SecurityHiveRepository.TABLE_NAME}
+            WHERE security_name IN ({in_clause})
+            """
+
+            result = impala_manager.execute_query(query, database=SecurityHiveRepository.DATABASE)
+            return {
+                row.get('security_name'): row.get('security_description', '') or ''
+                for row in (result or [])
+            }
+
+        except Exception as e:
+            logger.error(f"Error bulk-fetching security names: {str(e)}")
+            return {}
+
+    @staticmethod
     def get_security_by_isin(isin: str) -> Optional[Dict[str, Any]]:
         """
         Fetch a single security by ISIN.

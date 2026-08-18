@@ -2176,11 +2176,17 @@ def corporate_action_list(request):
         user_id = str(request.session.get('user_id', ''))
         user_email = request.session.get('user_email', '')
 
+        # Bulk-fetch security full names for all rows in one query
+        security_names_map = SecurityHiveRepository.get_security_names_map(
+            [ca.get('security_name', '') for ca in corporate_actions]
+        )
+
         # Add can_validate flag to each record
         for ca in corporate_actions:
             ca['can_validate'] = corporate_action_service.can_user_validate(ca, username)
             ca['status_color'] = corporate_action_service.get_status_display_color(ca.get('status', ''))
             ca['ca_type_label'] = corporate_action_dropdown_service.get_ca_type_label(ca.get('ca_type', ''))
+            ca['security_full_name'] = security_names_map.get(ca.get('security_name', ''), '')
 
         # CSV Export
         if export:
@@ -2189,7 +2195,7 @@ def corporate_action_list(request):
 
             writer = csv.writer(response)
             writer.writerow([
-                'CA Number', 'CA Type', 'Security', 'Announcement Date',
+                'CA Number', 'CA Type', 'Security', 'Security Full Name', 'Announcement Date',
                 'Ex Date', 'Record Date', 'Payment Date', 'Effective Date',
                 'Subscription Start', 'Subscription End', 'Price', 'Currency',
                 'Status', 'Created By', 'Created At'
@@ -2200,6 +2206,7 @@ def corporate_action_list(request):
                     ca.get('ca_number', ''),
                     ca.get('ca_type', ''),
                     ca.get('security_name', ''),
+                    ca.get('security_full_name', ''),
                     ca.get('announcement_date', ''),
                     ca.get('ex_date', ''),
                     ca.get('record_date', ''),
