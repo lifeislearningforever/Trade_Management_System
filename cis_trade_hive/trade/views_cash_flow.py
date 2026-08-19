@@ -121,11 +121,19 @@ def cash_flow_list(request):
         user_id = str(request.session.get('user_id', ''))
         user_email = request.session.get('user_email', '')
 
+        # Expand the filter value into every raw cash_flow_type stored in the
+        # DB that should match it (e.g. 'RETURN_OF_CAPITAL' also matches
+        # 'ROC' rows written by CA processing).
+        cf_type_query_values = (
+            cash_flow_dropdown_service.get_cash_flow_type_filter_values(cf_type_filter)
+            if cf_type_filter else None
+        )
+
         # Fetch data
         cash_flows = cash_flow_service.list_all(
             search=search if search else None,
             status=status_filter if status_filter else None,
-            cash_flow_type=cf_type_filter if cf_type_filter else None,
+            cash_flow_type=cf_type_query_values,
             portfolios=portfolio_filter if portfolio_filter else None
         )
 
