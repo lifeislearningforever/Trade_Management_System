@@ -227,6 +227,51 @@ default:
     sync_gmp_corporate_actions.py
 ```
 
+## Running as YARN applications via spark-submit
+
+`run_via_spark.py` is a thin generic wrapper (added for ops that want each
+job registered as a real YARN application — ResourceManager UI visibility,
+`yarn logs -applicationId ...` retrieval, queue accounting — rather than a
+bare background process). It opens a minimal `SparkSession` purely to
+register the app, then runs the target script's unmodified `__main__`
+block via `runpy`. No job logic is duplicated here; the six EOD/CORR
+scripts (and the maintenance ones) are unchanged.
+
+```bash
+cd edge_jobs_py36
+source /app/CISGW/cis_etl_env_11/edge_py36_env/bin/activate
+
+/usr/bin/spark3-submit --master yarn --deploy-mode client \
+    run_via_spark.py sync_gmp_corporate_actions.py
+
+/usr/bin/spark3-submit --master yarn --deploy-mode client \
+    run_via_spark.py process_corporate_actions.py
+
+/usr/bin/spark3-submit --master yarn --deploy-mode client \
+    run_via_spark.py process_approved_cashflows.py --run-type EOD
+
+/usr/bin/spark3-submit --master yarn --deploy-mode client \
+    run_via_spark.py process_settlements.py
+
+/usr/bin/spark3-submit --master yarn --deploy-mode client \
+    run_via_spark.py refresh_positions.py --run-type EOD
+
+/usr/bin/spark3-submit --master yarn --deploy-mode client \
+    run_via_spark.py create_sod_snapshot.py
+```
+
+Each invocation shows up in the YARN ResourceManager UI as
+`cis_edge_job:<script>.py`. Job-specific arguments go **after** the target
+script name, exactly as they would with a plain `python3.6 <script>.py`
+call — `run_via_spark.py` only intercepts `sys.argv[0]` to register the
+Spark app, then hands the rest through untouched.
+
+Requires `pyspark` in the edge node's Python 3.6 venv
+(`pip install pyspark==<version matching the cluster's Spark3>`), on top
+of the packages listed above. `deploy-mode cluster` also works if ops
+prefers it, but client mode keeps job stdout/stderr on the invoking
+terminal, which is usually more convenient for Control-M log capture.
+
 ## Verification performed
 
 - Every file in this package was diffed against its original: only import
