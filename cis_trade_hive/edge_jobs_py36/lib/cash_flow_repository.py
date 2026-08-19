@@ -10,7 +10,7 @@ Implements:
 
 import logging
 import json
-from typing import Dict, List, Optional, Any, Tuple, Union
+from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 
 from .impala_connection import impala_manager
@@ -76,7 +76,7 @@ class CashFlowRepository:
         search: Optional[str] = None,
         portfolio_short_name: Optional[str] = None,
         portfolios: Optional[List[str]] = None,
-        cash_flow_type: Optional[Union[str, List[str]]] = None,
+        cash_flow_type: Optional[str] = None,
         include_deleted: bool = False
     ) -> List[Dict[str, Any]]:
         """
@@ -124,13 +124,7 @@ class CashFlowRepository:
 
             if cash_flow_type:
                 # Case-insensitive match to handle 'Cash Dividend' vs 'CASH_DIVIDEND' etc. (item 10)
-                if isinstance(cash_flow_type, (list, tuple, set)):
-                    values_csv = ', '.join(
-                        f"LOWER({CashFlowRepository.escape_value(v)})" for v in cash_flow_type
-                    )
-                    query += f" AND LOWER(cash_flow_type) IN ({values_csv})"
-                else:
-                    query += f" AND LOWER(cash_flow_type) = LOWER({CashFlowRepository.escape_value(cash_flow_type)})"
+                query += f" AND LOWER(cash_flow_type) = LOWER({CashFlowRepository.escape_value(cash_flow_type)})"
 
             # Order by most recent first
             query += " ORDER BY created_at DESC"

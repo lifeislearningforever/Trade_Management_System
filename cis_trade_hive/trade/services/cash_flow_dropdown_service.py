@@ -33,26 +33,6 @@ class CashFlowDropdownService:
     DATABASE = settings.IMPALA_CONFIG['DATABASE']
     OBJECT_TYPE = 'CASH_FLOW'  # UDF Object Type
 
-    # canonical cash_flow_type -> legacy/alternate stored codes that mean the
-    # same thing. Used to expand a filter value into every raw DB value it
-    # should match, since e.g. CA processing writes 'ROC' for what the
-    # dropdown presents as 'RETURN_OF_CAPITAL' (see CA_TO_CF_TYPE_MAP in
-    # reference_data/services/ca_cash_flow_service.py).
-    LEGACY_CF_TYPE_SYNONYMS = {
-        'RETURN_OF_CAPITAL': ['ROC'],
-    }
-
-    def get_cash_flow_type_filter_values(self, canonical_value: str) -> List[str]:
-        """
-        Expand a canonical cash_flow_type filter value into every raw
-        cash_flow_type value stored in the DB that should match it (the
-        canonical value itself plus any legacy synonyms from
-        LEGACY_CF_TYPE_SYNONYMS).
-        """
-        if not canonical_value:
-            return []
-        return [canonical_value] + self.LEGACY_CF_TYPE_SYNONYMS.get(canonical_value, [])
-
     def get_all_dropdown_options(self) -> Dict[str, List[Dict[str, Any]]]:
         """
         Get all dropdown options for cash flow form.
@@ -220,10 +200,6 @@ class CashFlowDropdownService:
         default_options = [
             {'value': 'CAPITAL_DISTRIBUTION', 'label': 'Capital Distribution'},
             {'value': 'CASH_DIVIDEND',        'label': 'Cash Dividend'},
-            {'value': 'DIVIDEND',             'label': 'Dividend'},
-            {'value': 'SPECIAL_DIVIDEND',     'label': 'Special Dividend'},
-            {'value': 'INTEREST',             'label': 'Interest'},
-            {'value': 'COUPON',               'label': 'Coupon'},
             {'value': 'INCOME_DISTRIBUTION',  'label': 'Income Distribution'},
             {'value': 'PIPELINE',             'label': 'Pipeline'},
             {'value': 'PROVISION',            'label': 'Provision'},

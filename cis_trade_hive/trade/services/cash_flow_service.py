@@ -12,7 +12,7 @@ Status Flow (same as Portfolio):
 
 import logging
 import json
-from typing import Dict, Optional, Any, List, Union
+from typing import Dict, Optional, Any, List
 from datetime import datetime
 
 from trade.repositories.cash_flow_repository import cash_flow_repository
@@ -42,7 +42,7 @@ class CashFlowService:
         search: Optional[str] = None,
         portfolio_short_name: Optional[str] = None,
         portfolios: Optional[List[str]] = None,
-        cash_flow_type: Optional[Union[str, List[str]]] = None
+        cash_flow_type: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         List all cash flows with optional filters.
