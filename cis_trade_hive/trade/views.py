@@ -39,6 +39,32 @@ from trade.services.trade_dropdown_service import trade_dropdown_service
 from trade.services.multicurrency_service import multicurrency_service
 
 
+# Numeric fields rendered into <input type="number"> on the trade edit form.
+# Some legacy/migrated rows have these stored with a thousands-separator
+# comma baked into the value (e.g. "115,000.000000") -- floatformat on the
+# detail page silently passes such strings through unchanged so it looks
+# fine there, but a number input can't parse a comma and just renders blank.
+_NUMERIC_TRADE_FIELDS = [
+    'quantity', 'face_value', 'lot', 'price',
+    'commission', 'accrued_interest', 'sec_fee', 'other_charges', 'total_amount',
+    'total_amount_fc', 'total_amount_lc', 'gross_amount_fc', 'gross_amount_lc',
+    'open_fx_rate', 'curr_dealing', 'open_dealing', 'input_tax_oth', 'qty_entitled',
+    'cash_balance', 'lots_held', 'quantity_held',
+    'charge_fee_value', 'calculated_commission', 'calculated_clearing_fee',
+    'calculated_trading_fee', 'calculated_gst', 'calculated_other_fees',
+    'total_calculated_charges',
+]
+
+
+def _strip_numeric_commas(trade_data):
+    """Strip stray thousands-separator commas from numeric fields in place."""
+    for field in _NUMERIC_TRADE_FIELDS:
+        value = trade_data.get(field)
+        if isinstance(value, str) and ',' in value:
+            trade_data[field] = value.replace(',', '')
+    return trade_data
+
+
 class TradeWrapper:
     """Wrapper to convert Kudu dict data to object with attributes for template compatibility."""
 
@@ -1110,7 +1136,7 @@ def trade_edit(request, trade_id):
         dropdown_options = trade_dropdown_service.get_all_dropdown_options()
 
     context = {
-        'trade': trade_data,
+        'trade': _strip_numeric_commas(trade_data),
         'dropdown_options': dropdown_options,
         'is_edit': True,
     }
