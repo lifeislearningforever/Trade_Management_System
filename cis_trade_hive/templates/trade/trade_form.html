@@ -1861,7 +1861,13 @@ $(document).ready(function() {
     function shortNameSelection(item) {
         return $('<span>' + (item.text || item.id || '') + '</span>');
     }
-    // Reinit portfolio and security with two-line display
+    // Reinit portfolio and security with two-line display.
+    // In edit mode these fields are disabled <select>s never handed to
+    // CISSelect2.initByIds (see the `{% if not is_edit %}` guard above), so
+    // calling .select2('destroy') on them throws (no instance to destroy)
+    // and aborts the rest of this ready() handler before the select2:select
+    // bindings below get attached.
+    {% if not is_edit %}
     $('#portfolio_short_name').select2('destroy').select2({
         theme: 'bootstrap-5', placeholder: 'Select Portfolio', allowClear: true, width: '100%',
         templateResult: twoLineResult, templateSelection: shortNameSelection,
@@ -1870,6 +1876,7 @@ $(document).ready(function() {
         theme: 'bootstrap-5', placeholder: 'Select Security', allowClear: true, width: '100%',
         templateResult: twoLineResult, templateSelection: shortNameSelection,
     });
+    {% endif %}
     $('#counterparty').select2('destroy').select2({
         theme: 'bootstrap-5', placeholder: 'Select Counterparty', allowClear: true, width: '100%',
         templateResult: twoLineResult, templateSelection: shortNameSelection,
