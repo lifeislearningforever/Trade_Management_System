@@ -1863,7 +1863,7 @@ $(document).ready(function() {
     }
     // Reinit portfolio and security with two-line display.
     // In edit mode these fields are disabled <select>s never handed to
-    // CISSelect2.initByIds (see the `{% if not is_edit %}` guard above), so
+    // CISSelect2.initByIds (see the "not is_edit" guard above), so
     // calling .select2('destroy') on them throws (no instance to destroy)
     // and aborts the rest of this ready() handler before the select2:select
     // bindings below get attached.
