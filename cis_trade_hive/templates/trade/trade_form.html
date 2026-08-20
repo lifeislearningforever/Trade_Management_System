@@ -730,6 +730,24 @@
 <script src="{% static 'js/select2-init.js' %}"></script>
 
 <script>
+// Some environments render/display numeric <input type="number"> fields with a
+// thousands-separator comma in the value (server-side data and template are
+// confirmed clean -- this guards against it regardless of source, e.g. a
+// browser extension or regional number formatting reformatting the field).
+// A number input silently discards .value the instant it can't parse the
+// attribute, but getAttribute('value') still returns the original raw text,
+// so re-normalize from that on load.
+(function() {
+    document.querySelectorAll('input[type="number"]').forEach(function(el) {
+        var raw = el.getAttribute('value');
+        if (raw && /[,]/.test(raw)) {
+            var cleaned = raw.replace(/,/g, '');
+            el.setAttribute('value', cleaned);
+            el.value = cleaned;
+        }
+    });
+})();
+
 // Track pending validation requests to prevent race conditions
 let pendingPortfolioRequest = null;
 let pendingSecurityRequest = null;
