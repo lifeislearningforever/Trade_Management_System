@@ -935,6 +935,10 @@ def trade_create(request, trade_type=None):
 def trade_edit(request, trade_id):
     """Edit trade (Maker action: Update -> MODIFIED)."""
     trade_data = trade_kudu_repository.get_trade_by_id(trade_id)
+    logger.warning(
+        f"DEBUG trade_edit {trade_id} quantity type={type(trade_data.get('quantity')).__name__ if trade_data else 'N/A'} "
+        f"raw={trade_data.get('quantity') if trade_data else 'N/A'!r}"
+    )
 
     if not trade_data:
         messages.error(request, f'Trade {trade_id} not found')
