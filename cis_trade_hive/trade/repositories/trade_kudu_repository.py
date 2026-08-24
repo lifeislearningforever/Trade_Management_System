@@ -1792,17 +1792,34 @@ class TradeKuduRepository:
     # POSITION MANAGEMENT (Versioned Snapshots)
     # =========================================================================
 
-    def get_position(self, portfolio_name: str, security_label: str) -> Optional[Dict[str, Any]]:
-        """Get current position (latest version) for portfolio-security combination."""
+    def get_position(
+        self,
+        portfolio_name: str,
+        security_label: str,
+        position_basis: str = 'TRADED'
+    ) -> Optional[Dict[str, Any]]:
+        """Get current position (latest version) for portfolio-security combination.
+
+        Scoped to a single position_basis — cis_trade_position keeps separate
+        TRADED and SETTLED version chains for the same natural key, and
+        `ORDER BY version_id DESC` alone (with no basis filter) can return
+        whichever basis was written most recently rather than the one
+        relevant to the caller, since version_id is assigned globally across
+        both chains. Defaults to TRADED, since that reflects the position
+        immediately as of trade date — the basis that should gate an
+        immediate SELL rejection.
+        """
         try:
             query = f"""
             SELECT *
             FROM {self.DATABASE}.{self.TRADE_POSITION_TABLE}
             WHERE portfolio_short_name = {self.escape_value(portfolio_name)}
               AND security_label = {self.escape_value(security_label)}
+              AND position_basis = {self.escape_value(position_basis)}
               AND status = 'OPEN'
               AND is_active = true
-            ORDER BY version_id DESC
+              AND (is_latest = true OR is_latest IS NULL)
+            ORDER BY position_date DESC, version_id DESC
             LIMIT 1
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
@@ -1811,9 +1828,14 @@ class TradeKuduRepository:
             logger.error(f"Error getting position: {str(e)}")
             return None
 
-    def get_trade_detail(self, portfolio_name: str, security_label: str) -> Optional[Dict[str, Any]]:
+    def get_trade_detail(
+        self,
+        portfolio_name: str,
+        security_label: str,
+        position_basis: str = 'TRADED'
+    ) -> Optional[Dict[str, Any]]:
         """Alias for backward compatibility - used by validation."""
-        return self.get_position(portfolio_name, security_label)
+        return self.get_position(portfolio_name, security_label, position_basis)
 
     def get_position_by_id(self, position_id: int) -> Optional[Dict[str, Any]]:
         """Get latest version of a position by position_id."""
