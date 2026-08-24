@@ -377,7 +377,8 @@ class Command(BaseCommand):
 
             success, message, cf_count, amount = ca_cash_flow_service.process_ca_cash_flows(
                 queue_id=queue_id,
-                dry_run=dry_run
+                dry_run=dry_run,
+                run_type='CORR'
             )
 
             if success:
@@ -468,7 +469,8 @@ class Command(BaseCommand):
 
             success, message, cf_count, amount = ca_cash_flow_service.process_ca_cash_flows(
                 queue_id=queue_id,
-                dry_run=dry_run
+                dry_run=dry_run,
+                run_type='EOD'
             )
 
             if success:
@@ -505,7 +507,8 @@ class Command(BaseCommand):
 
         success, message, cf_count, amount = ca_cash_flow_service.process_ca_cash_flows(
             queue_id=queue_id,
-            dry_run=dry_run
+            dry_run=dry_run,
+            run_type='CORR'
         )
 
         if success:
@@ -541,7 +544,8 @@ class Command(BaseCommand):
 
             success, message, cf_count, amount = ca_cash_flow_service.process_ca_cash_flows(
                 queue_id=queue_id,
-                dry_run=dry_run
+                dry_run=dry_run,
+                run_type='CORR'
             )
 
             if success:
@@ -639,7 +643,8 @@ class Command(BaseCommand):
                 # Process
                 success, message, cf_count, amount = ca_cash_flow_service.process_ca_cash_flows(
                     queue_id=queue_id,
-                    dry_run=False
+                    dry_run=False,
+                    run_type='CORR'
                 )
 
                 if success:
@@ -819,7 +824,8 @@ class Command(BaseCommand):
 
                 success, message, cf_count, amount = ca_cash_flow_service.process_ca_cash_flows(
                     queue_id=queue_id,
-                    dry_run=False
+                    dry_run=False,
+                    run_type='CORR'
                 )
                 if success:
                     total_cf_created += cf_count

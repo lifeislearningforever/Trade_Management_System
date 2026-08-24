@@ -14,6 +14,7 @@ from core.repositories.impala_connection import impala_manager
 from reference_data.repositories.ca_cash_flow_queue_repository import ca_cash_flow_queue_repository
 from trade.repositories.cash_flow_repository import CashFlowRepository
 from trade.services.multicurrency_service import multicurrency_service
+from trade.services.position_id_service import position_id as _calc_position_id
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -190,7 +191,8 @@ class CACashFlowService:
     def process_ca_cash_flows(
         self,
         queue_id: int,
-        dry_run: bool = False
+        dry_run: bool = False,
+        run_type: str = 'EOD'
     ) -> Tuple[bool, str, int, Decimal]:
         """
         Process a queued CA based on type.
@@ -250,7 +252,8 @@ class CACashFlowService:
                 return self._process_position_adjustment_ca(
                     queue_id=queue_id,
                     queue_entry=queue_entry,
-                    dry_run=dry_run
+                    dry_run=dry_run,
+                    run_type=run_type
                 )
 
             # Cash flow generating types - require price
@@ -1014,7 +1017,8 @@ class CACashFlowService:
         self,
         queue_id: int,
         queue_entry: Dict[str, Any],
-        dry_run: bool = False
+        dry_run: bool = False,
+        run_type: str = 'EOD'
     ) -> Tuple[bool, str, int, Decimal]:
         """
         Process position adjustment CA types (no cash flow generated).
@@ -1093,7 +1097,8 @@ class CACashFlowService:
                             security_currency=security_currency,
                             portfolio_currency=portfolio_currency,
                             updated_by=created_by,
-                            dry_run=dry_run
+                            dry_run=dry_run,
+                            run_type=run_type
                         )
                     elif ca_type in ['SPLIT', 'STOCK_SPLIT']:
                         # Price field stores the split ratio directly.
@@ -1113,7 +1118,8 @@ class CACashFlowService:
                             security_currency=security_currency,
                             portfolio_currency=portfolio_currency,
                             updated_by=created_by,
-                            dry_run=dry_run
+                            dry_run=dry_run,
+                            run_type=run_type
                         )
                     elif ca_type == 'REVERSE_SPLIT':
                         # Reverse Split: 3:1 means 3 shares become 1 share
@@ -1133,7 +1139,8 @@ class CACashFlowService:
                             security_currency=security_currency,
                             portfolio_currency=portfolio_currency,
                             updated_by=created_by,
-                            dry_run=dry_run
+                            dry_run=dry_run,
+                            run_type=run_type
                         )
                     elif ca_type == 'CONSOLIDATION':
                         # Consolidation is same as reverse split
@@ -1150,7 +1157,8 @@ class CACashFlowService:
                             security_currency=security_currency,
                             portfolio_currency=portfolio_currency,
                             updated_by=created_by,
-                            dry_run=dry_run
+                            dry_run=dry_run,
+                            run_type=run_type
                         )
                     elif ca_type in ['RIGHTS_ENTITLEMENT', 'RIGHTS_ISSUE', 'RIGHTS', 'WARRANT_ENTITLEMENT', 'WARRANTS']:
                         # Creates a new position for the rights/warrant security.
@@ -1224,7 +1232,8 @@ class CACashFlowService:
         security_currency: str,
         portfolio_currency: str,
         updated_by: str,
-        dry_run: bool = False
+        dry_run: bool = False,
+        run_type: str = 'EOD'
     ) -> bool:
         """
         Process BONUS_ISSUE: qty_new = qty_old × (1 + ratio), AVP = total_cost / new_qty
@@ -1264,7 +1273,8 @@ class CACashFlowService:
                 ex_date=ex_date,
                 security_currency=security_currency,
                 portfolio_currency=portfolio_currency,
-                updated_by=updated_by
+                updated_by=updated_by,
+                run_type=run_type
             )
 
         except Exception as e:
@@ -1284,7 +1294,8 @@ class CACashFlowService:
         security_currency: str,
         portfolio_currency: str,
         updated_by: str,
-        dry_run: bool = False
+        dry_run: bool = False,
+        run_type: str = 'EOD'
     ) -> bool:
         """
         Process STOCK SPLIT (Forward Split): qty_new = qty_old × ratio, AVP = AVP_old / ratio
@@ -1325,7 +1336,8 @@ class CACashFlowService:
                 ex_date=ex_date,
                 security_currency=security_currency,
                 portfolio_currency=portfolio_currency,
-                updated_by=updated_by
+                updated_by=updated_by,
+                run_type=run_type
             )
 
         except Exception as e:
@@ -1345,7 +1357,8 @@ class CACashFlowService:
         security_currency: str,
         portfolio_currency: str,
         updated_by: str,
-        dry_run: bool = False
+        dry_run: bool = False,
+        run_type: str = 'EOD'
     ) -> bool:
         """
         Process REVERSE SPLIT: qty_new = qty_old / ratio, AVP = AVP_old × ratio
@@ -1385,7 +1398,8 @@ class CACashFlowService:
                 ex_date=ex_date,
                 security_currency=security_currency,
                 portfolio_currency=portfolio_currency,
-                updated_by=updated_by
+                updated_by=updated_by,
+                run_type=run_type
             )
 
         except Exception as e:
@@ -1405,13 +1419,29 @@ class CACashFlowService:
         ex_date: str,
         security_currency: str,
         portfolio_currency: str,
-        updated_by: str
+        updated_by: str,
+        run_type: str = 'EOD'
     ) -> bool:
-        """Update existing INT rows in cis_position for a position adjustment CA (BONUS, SPLIT).
+        """Write the post-CA position into the INT row dated at ex_date.
 
-        SA rule: STOCK_SPLIT / BONUS_ISSUE / REVERSE_SPLIT must UPDATE the existing
-        INT records in place — no new position type. Both TRADE_DATE and SETTLE_DATE
-        basis rows are updated. position_type stays INT throughout.
+        Rule: STOCK_SPLIT / BONUS_ISSUE / REVERSE_SPLIT never generate a new
+        position_type — the result always lands in an INT row. But the row
+        used as the CALCULATION BASIS and the row that gets WRITTEN are not
+        necessarily the same record:
+
+          - Basis: the latest position as-of ex_date. For a normal EOD run
+            that's the latest of SOD/INT; for a CORR (catch-up) run it can
+            also be an EOD row, since by the time a backdated CA is caught
+            up, later EOD snapshots may already exist.
+          - Target: the INT row dated exactly at ex_date. Since position_id
+            is a deterministic hash of (portfolio, security_label,
+            position_basis, position_date, src_system), we can compute the
+            target id directly instead of doing a second lookup — if an INT
+            row already exists for that exact date, the UPSERT lands on it;
+            if not, the UPSERT creates it. This avoids clobbering a
+            historical INT row that predates ex_date (the old bug: the
+            basis row's own position_id/position_date was reused as the
+            write target, silently overwriting history).
         """
         try:
             timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -1444,9 +1474,18 @@ class CACashFlowService:
 
             updated_any = False
 
+            # Basis for calculation: normal runs use the latest of SOD/INT as of
+            # ex_date; a CORR (catch-up) run may also need to look at EOD, since
+            # later EOD snapshots can already exist by the time a backdated CA
+            # is processed.
+            basis_position_types = ['SOD', 'INT']
+            if (run_type or '').strip().upper() == 'CORR':
+                basis_position_types.append('EOD')
+            basis_types_sql = ", ".join(f"'{t}'" for t in basis_position_types)
+
             # cis_position stores position_basis as 'TRADED' / 'SETTLED'
             for cp_basis in ('TRADED', 'SETTLED'):
-                # Find the existing INT row for this basis — INT only, never EOD/SOD/CORR
+                # Find the latest position as-of ex_date to use as the calc basis
                 find_q = f"""
                 SELECT position_id, version_id, market_value_fc, quantity,
                        cost_lc,
@@ -1458,20 +1497,27 @@ class CACashFlowService:
                 WHERE portfolio = '{self._escape(portfolio_short_name)}'
                   AND security_label = '{self._escape(security_name)}'
                   AND src_system = 'CIS'
-                  AND position_type = 'INT'
+                  AND position_type IN ({basis_types_sql})
                   AND position_basis = '{cp_basis}'
+                  AND position_date <= '{self._escape(str(ex_date))}'
                   AND quantity > 0
                 ORDER BY position_date DESC, version_id DESC
                 LIMIT 1
                 """
                 rows = impala_manager.execute_query(find_q, database=self.DATABASE)
                 if not rows:
-                    logger.info(f"[POS_ADJ] No CIS {cp_basis} row found for {portfolio_short_name}/{security_name} — skipping basis")
+                    logger.info(f"[POS_ADJ] No CIS {cp_basis} row found for {portfolio_short_name}/{security_name} as of {ex_date} — skipping basis")
                     continue
 
                 row = rows[0]
-                position_id   = row.get('position_id')
-                position_date = row.get('position_date') or ex_date
+                # Target row is always the INT row dated at ex_date — computed
+                # deterministically so the UPSERT lands on an existing same-date
+                # INT row if one exists, or creates a new one if not. This is
+                # deliberately NOT the basis row's own position_id/position_date.
+                position_id   = _calc_position_id(
+                    portfolio_short_name, security_name, cp_basis, str(ex_date), 'CIS'
+                )
+                position_date = str(ex_date)
                 old_qty       = Decimal(str(row.get('quantity') or 0))
                 old_mv_fc     = Decimal(str(row.get('market_value_fc') or 0))
                 market_price  = (old_mv_fc / old_qty).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP) if old_qty else Decimal('0')
@@ -1557,9 +1603,10 @@ class CACashFlowService:
                 ok = impala_manager.execute_write(upsert_sql, database=self.DATABASE)
                 if ok:
                     logger.info(
-                        f"[POS_ADJ] Updated {cp_basis} INT row: portfolio={portfolio_short_name} "
-                        f"security={security_name} position_id={position_id} "
-                        f"new_qty={new_quantity} new_avg_cost_fc={new_avg_cost} ca_type={ca_type}"
+                        f"[POS_ADJ] Wrote {cp_basis} INT row at position_date={position_date}: "
+                        f"portfolio={portfolio_short_name} security={security_name} "
+                        f"position_id={position_id} new_qty={new_quantity} "
+                        f"new_avg_cost_fc={new_avg_cost} ca_type={ca_type}"
                     )
                     updated_any = True
                 else:
