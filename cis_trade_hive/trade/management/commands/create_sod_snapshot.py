@@ -13,7 +13,7 @@ worker skips them.
 
 Date logic (from gmp_cis_sta_dly_alldatesinfo):
   - src_system='gmp', sub_system='cis', data_frq='dly', record_type='D'
-  - prev_day          → find EOD rows with this position_date  (e.g. 20260226)
+  - reporting_date    → find EOD rows with this position_date  (e.g. 20260226)
   - contextual_today  → SOD rows get this as position_date     (e.g. 20260302)
 
 Dates in the reference table are YYYYMMDD strings; converted to YYYY-MM-DD
@@ -74,7 +74,7 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             '--eod-date', type=str, default=None,
-            help='Override source EOD date to copy from (YYYY-MM-DD). Default: alldatesinfo.prev_day'
+            help='Override source EOD date to copy from (YYYY-MM-DD). Default: alldatesinfo.reporting_date'
         )
         parser.add_argument(
             '--fill-gaps', action='store_true', default=False,
@@ -98,22 +98,22 @@ class Command(BaseCommand):
         self.stdout.write('')
 
         # ── 1. Get business dates (alldatesinfo or manual override) ─────────
-        today_yyyymmdd, prev_yyyymmdd = self._get_business_dates()
+        today_yyyymmdd, reporting_yyyymmdd = self._get_business_dates()
 
         if options.get('sod_date') or options.get('eod_date'):
             # Manual override — at least one date was supplied
             sod_date  = options['sod_date'] or self._to_iso(today_yyyymmdd)
-            eod_date  = options['eod_date'] or self._to_iso(prev_yyyymmdd)
+            eod_date  = options['eod_date'] or self._to_iso(reporting_yyyymmdd)
             proc_date = sod_date.replace('-', '')
             date_source = 'manual override'
         else:
-            if not today_yyyymmdd or not prev_yyyymmdd:
+            if not today_yyyymmdd or not reporting_yyyymmdd:
                 raise CommandError(
                     'Could not read business dates from gmp_cis_sta_dly_alldatesinfo. '
                     'Use --sod-date and --eod-date to override.'
                 )
-            sod_date  = self._to_iso(today_yyyymmdd)   # SOD position_date  e.g. 2026-03-02
-            eod_date  = self._to_iso(prev_yyyymmdd)    # source EOD date    e.g. 2026-02-26
+            sod_date  = self._to_iso(today_yyyymmdd)       # SOD position_date  e.g. 2026-03-02
+            eod_date  = self._to_iso(reporting_yyyymmdd)   # source EOD date    e.g. 2026-02-26
             proc_date = today_yyyymmdd
             date_source = 'alldatesinfo'
 
@@ -121,7 +121,7 @@ class Command(BaseCommand):
             f"Business date (contextual_today) : {today_yyyymmdd}  →  SOD position_date = {sod_date}  (from {date_source})"
         )
         self.stdout.write(
-            f"Previous day  (prev_day)         : {prev_yyyymmdd}  →  source EOD date   = {eod_date}  (from {date_source})"
+            f"Reporting date (reporting_date)   : {reporting_yyyymmdd}  →  source EOD date   = {eod_date}  (from {date_source})"
         )
         self.stdout.write('')
 
@@ -131,7 +131,7 @@ class Command(BaseCommand):
                 f'{sod_date} will be created'
             ))
 
-        # ── 2. Fetch EOD rows for prev_day ───────────────────────────────────
+        # ── 2. Fetch EOD rows for reporting_date ─────────────────────────────
         sources   = [source_filter] if source_filter else ALL_SOURCES
         eod_rows  = self._get_eod_rows(eod_date, sources, portfolio_filter,
                                         security_filter=security_filter,
@@ -326,13 +326,19 @@ class Command(BaseCommand):
 
     def _get_business_dates(self):
         """
-        Return (contextual_today, prev_day) as YYYYMMDD strings from the
+        Return (contextual_today, reporting_date) as YYYYMMDD strings from the
         gmp_cis_sta_dly_alldatesinfo reference table.
+
+        contextual_today gives the SOD position_date (today's business date).
+        reporting_date gives the source EOD date to copy forward as SOD — not
+        prev_day, since prev_day is just calendar T-1 and can diverge from the
+        last date EOD data was actually reported for (e.g. after a holiday or
+        a data-load lag).
         """
         try:
             rows = impala_manager.execute_query(
                 f"""
-                SELECT contextual_today, prev_day
+                SELECT contextual_today, reporting_date
                 FROM {DATABASE}.gmp_cis_sta_dly_alldatesinfo
                 WHERE src_system   = 'gmp'
                   AND sub_system   = 'cis'
@@ -351,7 +357,7 @@ class Command(BaseCommand):
                 database=DATABASE
             )
             if rows:
-                return rows[0].get('contextual_today'), rows[0].get('prev_day')
+                return rows[0].get('contextual_today'), rows[0].get('reporting_date')
         except Exception as e:
             logger.error(f'Error reading business dates: {e}')
         return None, None
