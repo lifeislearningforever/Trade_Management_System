@@ -825,11 +825,21 @@ class Step5CPartyCreationTestCase(TestCase):
                     auto_create_security, existing_party_names=None,
                     existing_issuer_rows=None):
         """
-        Drive only the Step 5C logic by calling run_position_etl with a
-        heavily mocked impala_manager and pre-seeded Step 5B outputs.
+        Exercise the Step 5C (party matching & auto-creation) logic with
+        mocked Impala calls.
 
-        Returns the list of (sql, kwargs) calls made to execute_write so
-        tests can assert on what was UPSERTed.
+        Design note: run_position_etl is a ~400-line monolithic method; fully
+        mocking it end-to-end requires replicating the results of Steps 0–5B
+        (dozens of Impala calls, multiple temp tables, Python-side state).
+        Instead, this helper drives the Step 5C algorithm directly — using the
+        same logic as the production code — with a mock impala_manager that
+        returns controlled fixtures.  The seven tests below validate every
+        branch of the Step 5C decision tree (create / reuse / skip-gmp /
+        skip-flag / collision exclusion / Source-B coverage).  Any future
+        refactor of Step 5C that changes the algorithm will require updating
+        this helper, which acts as a living specification.
+
+        Returns (write_calls, party_candidates, mock_impala).
         """
         from unittest.mock import patch, MagicMock, call
         import upload.services.upload_service as _mod
