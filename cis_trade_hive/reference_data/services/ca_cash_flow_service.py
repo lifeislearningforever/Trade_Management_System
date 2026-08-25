@@ -1796,28 +1796,55 @@ class CACashFlowService:
             td_position = self._get_current_position(
                 portfolio_short_name, security_name, position_basis=position_basis
             )
-            if not td_position:
-                logger.warning(
+            is_new_row = td_position is None
+            if is_new_row:
+                # No cis_trade_position row exists yet for this natural key —
+                # e.g. a SOD-only/upload-only position that was never traded
+                # through the app. Previously this was silently skipped,
+                # leaving cis_trade_position permanently empty for the
+                # position even after the CA correctly landed in cis_position.
+                # Create the row instead, using the same deterministic
+                # position_id scheme cis_trade_position rows get on first
+                # creation elsewhere (position_service.py's first-ever BUY).
+                logger.info(
                     f"[POS_ADJ] No {position_basis} position found in cis_trade_position for "
-                    f"{portfolio_short_name}/{security_name} — skipping {position_basis} update "
-                    f"(may be AMS/upload-only position)"
+                    f"{portfolio_short_name}/{security_name} — creating it from the CA-adjusted "
+                    f"{position_basis} value (source was SOD/upload-only)"
                 )
-                return True  # Not a hard failure
-
-            td_version_id = td_position.get('version_id')
-            td_position_id = td_position.get('position_id')
-            td_market_price = Decimal(str(td_position.get('market_price', 0) or 0))
-            td_dividend_fc = Decimal(str(td_position.get('dividend_fc', 0) or 0))
-            td_dividend_lc = Decimal(str(td_position.get('dividend_lc', 0) or 0))
-            uncall_fc = float(td_position.get('uncall_fc', 0) or 0)
-            uncall_lc = float(td_position.get('uncall_lc', 0) or 0)
-            pipeline_fc = float(td_position.get('pipeline_fc', 0) or 0)
-            pipeline_lc = float(td_position.get('pipeline_lc', 0) or 0)
-            commit_fc = float(td_position.get('commit_fc', 0) or 0)
-            commit_lc = float(td_position.get('commit_lc', 0) or 0)
-            provision_fc_val = float(td_position.get('provision_fc', 0) or 0)
-            provision_lc_val = float(td_position.get('provision_lc', 0) or 0)
-            position_type = td_position.get('position_type') or 'NORMAL'
+                td_version_id = None
+                td_position_id = _calc_position_id(
+                    portfolio_short_name, security_name, position_basis, str(ex_date), 'CIS'
+                )
+                # No existing market_price to carry — use the new average cost
+                # as a neutral placeholder (unrealized P&L = 0) until the next
+                # revaluation run sets a real market price.
+                td_market_price = new_avg_cost
+                td_dividend_fc = Decimal('0')
+                td_dividend_lc = Decimal('0')
+                uncall_fc = 0.0
+                uncall_lc = 0.0
+                pipeline_fc = 0.0
+                pipeline_lc = 0.0
+                commit_fc = 0.0
+                commit_lc = 0.0
+                provision_fc_val = 0.0
+                provision_lc_val = 0.0
+                position_type = 'INT'
+            else:
+                td_version_id = td_position.get('version_id')
+                td_position_id = td_position.get('position_id')
+                td_market_price = Decimal(str(td_position.get('market_price', 0) or 0))
+                td_dividend_fc = Decimal(str(td_position.get('dividend_fc', 0) or 0))
+                td_dividend_lc = Decimal(str(td_position.get('dividend_lc', 0) or 0))
+                uncall_fc = float(td_position.get('uncall_fc', 0) or 0)
+                uncall_lc = float(td_position.get('uncall_lc', 0) or 0)
+                pipeline_fc = float(td_position.get('pipeline_fc', 0) or 0)
+                pipeline_lc = float(td_position.get('pipeline_lc', 0) or 0)
+                commit_fc = float(td_position.get('commit_fc', 0) or 0)
+                commit_lc = float(td_position.get('commit_lc', 0) or 0)
+                provision_fc_val = float(td_position.get('provision_fc', 0) or 0)
+                provision_lc_val = float(td_position.get('provision_lc', 0) or 0)
+                position_type = td_position.get('position_type') or 'NORMAL'
 
             market_value_fc = (new_quantity * td_market_price).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
             market_value_lc = (market_value_fc * fx_rate).quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
@@ -1840,7 +1867,7 @@ class CACashFlowService:
             except Exception:
                 _reval_status = 'REVALUED'
 
-            if _reval_status == 'NON-REVALUED':
+            if _reval_status == 'NON-REVALUED' and not is_new_row:
                 old_total_cost_lc = Decimal(str(td_position.get('total_cost_lc') or 0))
                 new_total_cost_lc = old_total_cost_lc
                 new_avg_cost_lc = (new_total_cost_lc / new_quantity).quantize(
@@ -1853,7 +1880,8 @@ class CACashFlowService:
             unrealized_pnl_fc = market_value_fc - new_total_cost
             unrealized_pnl_lc = market_value_lc - new_total_cost_lc
 
-            self._mark_old_version_not_latest(td_version_id)
+            if not is_new_row:
+                self._mark_old_version_not_latest(td_version_id)
 
             timestamp = datetime.now()
             timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
