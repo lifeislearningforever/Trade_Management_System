@@ -47,9 +47,13 @@ Run types
 Source priority
 ---------------
   For each natural key (portfolio, security_label, position_basis):
-    INT exists  → use INT (authoritative running position, updated by every trade/CA)
-    INT missing → fall back to SOD (no new trades today; SOD carries yesterday's closing
-                  position and must still be revalued and published to cis_position_rep)
+    INT exists       → use INT (authoritative running position, updated by every trade/CA)
+    INT missing      → fall back to SOD (no new trades today; SOD carries yesterday's closing
+                       position and must still be revalued and published to cis_position_rep)
+    INT/SOD missing  → fall back to EOD (needed for CORR runs targeting a past date, since
+                       daily processing advances is_latest forward every day -- an older
+                       date's INT/SOD rows are long since superseded by the time a correction
+                       is needed, even though they still physically exist)
 
 Usage:
     # Normal EOD — position_date inferred from alldatesinfo reporting_date
@@ -385,11 +389,16 @@ class Command(BaseCommand):
         """
         Fetch the single best source row per (portfolio, security_label, position_basis).
 
-        Priority: INT > SOD.
+        Priority: INT > SOD > EOD.
         - INT exists  → use it (authoritative running position, updated by every trade/CA).
         - INT missing → fall back to SOD (no new trades today; SOD carries forward yesterday's
           closing position and must still be revalued and published to cis_position_rep).
-        - EOD/CORR are never used as source (they are outputs, not inputs). Note: when this
+        - INT and SOD both missing → fall back to EOD. This matters for CORR runs targeting a
+          past date: daily processing advances is_latest forward every day, so by the time a
+          correction is needed for an older date, that date's INT/SOD rows have long since been
+          superseded (is_latest=false) even though they still physically exist -- only that
+          date's EOD row is still is_latest=true. Without this fallback CORR could never find a
+          source for any date once time had moved on, defeating its purpose. Note: when this
           run's own position_type is 'INT', the source query above can and does pick up an
           'INT' row too -- that's the current live position this run is about to refresh in
           place, not a self-referential loop (see module docstring's INT run type section).
@@ -457,17 +466,18 @@ class Command(BaseCommand):
                     p.position_type, p.isin, p.source_table
                 FROM {DATABASE}.cis_position p
                 INNER JOIN (
-                    -- For each natural key pick INT if it exists, else fall back to SOD.
-                    -- INT has priority=2, SOD has priority=1; COALESCE picks INT first.
+                    -- For each natural key pick INT if it exists, else SOD, else EOD.
+                    -- COALESCE picks INT first, then SOD, then EOD as a last resort.
                     SELECT
                         portfolio, security_label, position_basis,
                         COALESCE(
                             MAX(CASE WHEN position_type = 'INT' THEN position_id END),
-                            MAX(CASE WHEN position_type = 'SOD' THEN position_id END)
+                            MAX(CASE WHEN position_type = 'SOD' THEN position_id END),
+                            MAX(CASE WHEN position_type = 'EOD' THEN position_id END)
                         ) AS best_position_id
                     FROM {DATABASE}.cis_position
                     WHERE src_system IN ('{src_list}')
-                      AND position_type IN ('INT', 'SOD')
+                      AND position_type IN ('INT', 'SOD', 'EOD')
                       AND is_latest = true
                       {portfolio_clause}
                       {security_clause}
@@ -897,7 +907,7 @@ class Command(BaseCommand):
         # only ever updated by cash-flow/CA processing (process_approved_
         # cashflows.py). That command writes position_type='CORR' when
         # run_type='CORR', but refresh_positions's --run-type CORR sources
-        # exclusively from INT/SOD (EOD/CORR are outputs, never sources -- see
+        # from INT/SOD (falling back to EOD only if neither exists -- see
         # _get_open_positions docstring). Without this pre-fetch, running
         # process_approved_cashflows --run-type CORR followed by
         # refresh_positions --run-type CORR silently overwrote the CORR row's
