@@ -1609,6 +1609,28 @@ class CACashFlowService:
                         f"new_avg_cost_fc={new_avg_cost} ca_type={ca_type}"
                     )
                     updated_any = True
+
+                    # Propagate the same adjustment into cis_trade_position (the
+                    # live AVP working ledger) — without this, SELL validation,
+                    # api_get_position, and any future rollforward job keep
+                    # reading the stale pre-CA quantity indefinitely, since
+                    # nothing else ever updates cis_trade_position after a CA.
+                    self._apply_ca_to_trade_date_position(
+                        portfolio_short_name=portfolio_short_name,
+                        security_name=security_name,
+                        new_quantity=new_quantity,
+                        new_avg_cost=new_avg_cost,
+                        new_total_cost=new_total_cost,
+                        ca_id=ca_id,
+                        ca_number=ca_number,
+                        ca_type=ca_type,
+                        ex_date=str(position_date),
+                        security_currency=security_currency,
+                        portfolio_currency=portfolio_currency,
+                        fx_rate=fx_rate,
+                        updated_by=updated_by,
+                        position_basis=cp_basis
+                    )
                 else:
                     logger.error(
                         f"[POS_ADJ] Failed to update {cp_basis} INT row for "
@@ -1757,21 +1779,28 @@ class CACashFlowService:
         security_currency: str,
         portfolio_currency: str,
         fx_rate: Decimal,
-        updated_by: str
+        updated_by: str,
+        position_basis: str = 'TRADED'
     ) -> bool:
-        """Update the TRADED position after a CA split/bonus/reverse-split.
+        """Update cis_trade_position (the live AVP working ledger) after a CA
+        split/bonus/reverse-split, for the given position_basis.
 
-        Keeps committed-exposure (TRADED) view consistent with the settled
-        position after a corporate action adjusts qty and AVP.
+        This closes a gap where CA position adjustments were written only to
+        cis_position (the golden/reporting copy) via
+        _create_position_adjustment_version, and never propagated back to
+        cis_trade_position — leaving downstream consumers of the live ledger
+        (SELL short-sell validation, api_get_position, and any future
+        rollforward job) reading stale pre-CA quantities indefinitely.
         """
         try:
             td_position = self._get_current_position(
-                portfolio_short_name, security_name, position_basis='TRADED'
+                portfolio_short_name, security_name, position_basis=position_basis
             )
             if not td_position:
                 logger.warning(
-                    f"[POS_ADJ] No TRADED position found for {portfolio_short_name}/{security_name} "
-                    f"— skipping TRADED update (may be AMS/upload-only position)"
+                    f"[POS_ADJ] No {position_basis} position found in cis_trade_position for "
+                    f"{portfolio_short_name}/{security_name} — skipping {position_basis} update "
+                    f"(may be AMS/upload-only position)"
                 )
                 return True  # Not a hard failure
 
@@ -1828,7 +1857,10 @@ class CACashFlowService:
 
             timestamp = datetime.now()
             timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
-            new_version_id = int(timestamp.timestamp() * 1000) + 1  # +1 to avoid collision with SETTLED version
+            # +1 for TRADED / +2 for SETTLED to avoid collision when both bases
+            # are written back-to-back in the same millisecond by the caller's loop
+            _basis_offset = 1 if position_basis == 'TRADED' else 2
+            new_version_id = int(timestamp.timestamp() * 1000) + _basis_offset
 
             insert_sql = f"""
             UPSERT INTO {self.DATABASE}.{self.WRITE_POSITION_TABLE} (
@@ -1855,7 +1887,7 @@ class CACashFlowService:
                 {new_version_id},
                 {td_position_id},
                 '{ex_date}',
-                'TRADED',
+                '{self._escape(position_basis)}',
                 '{self._escape(portfolio_short_name)}',
                 '{self._escape(security_name)}',
                 {float(new_quantity)},
@@ -1902,18 +1934,19 @@ class CACashFlowService:
             td_success = impala_manager.execute_write(insert_sql, database=self.DATABASE)
             if td_success:
                 logger.info(
-                    f"[POS_ADJ] SUCCESS - Created new TRADED position version {new_version_id} "
-                    f"for {ca_type}. New qty={new_quantity}, avg_cost={new_avg_cost}"
+                    f"[POS_ADJ] SUCCESS - Created new {position_basis} cis_trade_position "
+                    f"version {new_version_id} for {ca_type}. "
+                    f"New qty={new_quantity}, avg_cost={new_avg_cost}"
                 )
             else:
                 logger.error(
-                    f"[POS_ADJ] FAILED - Could not update TRADED position for "
+                    f"[POS_ADJ] FAILED - Could not update {position_basis} cis_trade_position for "
                     f"{portfolio_short_name}/{security_name} after {ca_type}"
                 )
             return td_success
 
         except Exception as e:
-            logger.error(f"[POS_ADJ] Error updating TRADED position after {ca_type}: {str(e)}")
+            logger.error(f"[POS_ADJ] Error updating {position_basis} cis_trade_position after {ca_type}: {str(e)}")
             return False
 
     def _create_rights_warrant_position(
