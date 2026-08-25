@@ -52,37 +52,31 @@ class SecurityService:
             if not security_data.get('security_name'):
                 return False, None, "Security name is required"
 
-            # Check for duplicate ISIN if provided
+            # Check for a true duplicate — same natural key (ISIN+exchange,
+            # ISIN+country, or ISIN alone as a fallback), not just the same
+            # ISIN. Cross-listed securities legitimately share an ISIN across
+            # different exchanges (e.g. ANZ Banking Group on ASX vs NZX), so
+            # a bare ISIN match is not itself a duplicate.
             isin = security_data.get('isin')
-            if isin:
-                existing = security_hive_repository.get_security_by_isin(isin)
-                if existing:
-                    return False, None, f"Security with ISIN '{isin}' already exists"
+            existing_id = security_hive_repository.natural_key_exists(security_data)
+            if existing_id:
+                return False, None, (
+                    f"A security with this natural key already exists "
+                    f"(security_id={existing_id}) — "
+                    f"{'same ISIN and exchange/country' if isin else 'same name/exchange'}"
+                )
 
             # Set initial status
             security_data['status'] = 'INITIAL'
 
             # Insert security
-            success = security_hive_repository.insert_security(security_data, created_by=username)
+            success, security_id = security_hive_repository.insert_security(security_data, created_by=username)
 
             if not success:
                 return False, None, "Failed to create security in database"
 
-            # Get the created security (to get security_id)
-            if isin:
-                created_security = security_hive_repository.get_security_by_isin(isin)
-            else:
-                # Query by name if no ISIN
-                securities = security_hive_repository.get_all_securities(
-                    limit=1,
-                    search=security_data.get('security_name')
-                )
-                created_security = securities[0] if securities else None
-
-            if not created_security:
+            if not security_id:
                 return False, None, "Security created but could not retrieve ID"
-
-            security_id = created_security.get('security_id')
 
             # Insert history record
             security_hive_repository.insert_security_history(

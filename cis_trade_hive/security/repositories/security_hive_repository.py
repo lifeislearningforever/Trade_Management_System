@@ -350,7 +350,33 @@ class SecurityHiveRepository:
         return new_id
 
     @staticmethod
-    def insert_security(security_data: Dict[str, Any], created_by: str) -> bool:
+    def natural_key_exists(security_data: Dict[str, Any]) -> Optional[int]:
+        """
+        Check whether a security with the same natural key already exists.
+
+        Natural key is ISIN+exchange_code > ISIN+country > ISIN alone >
+        name+exchange > name+country > name (see _build_natural_key) — this
+        correctly allows cross-listed securities that share an ISIN but
+        trade on different exchanges (e.g. ANZ Banking Group on ASX vs NZX),
+        while still catching a true duplicate (same ISIN AND same exchange).
+
+        Returns the existing security_id if the natural key is already
+        registered, else None.
+        """
+        natural_key, _key_type = SecurityHiveRepository._build_natural_key(security_data)
+        db = SecurityHiveRepository.DATABASE
+        esc = SecurityHiveRepository.escape_value
+        lookup_sql = f"""
+            SELECT security_id
+            FROM {db}.{SecurityHiveRepository.REGISTRY_TABLE}
+            WHERE natural_key = {esc(natural_key)}
+            LIMIT 1
+        """
+        rows = impala_manager.execute_query(lookup_sql, database=db)
+        return int(rows[0]['security_id']) if rows else None
+
+    @staticmethod
+    def insert_security(security_data: Dict[str, Any], created_by: str) -> tuple[bool, Optional[int]]:
         """
         Insert a new security record into cis_security via the ID registry.
 
@@ -363,7 +389,8 @@ class SecurityHiveRepository:
             created_by: Username creating the security
 
         Returns:
-            True if successful, False otherwise
+            Tuple of (success, security_id) — security_id is the stable
+            registry-allocated ID, present whenever success is True.
         """
         try:
             # Stable 12-digit ID from registry (replaces timestamp-based ID)
@@ -462,11 +489,11 @@ class SecurityHiveRepository:
             if success:
                 logger.info(f"Successfully inserted security {security_id}")
 
-            return success
+            return success, (security_id if success else None)
 
         except Exception as e:
             logger.error(f"Error inserting security: {str(e)}")
-            return False
+            return False, None
 
     @staticmethod
     def update_security(security_id: int, security_data: Dict[str, Any], updated_by: str) -> bool:
