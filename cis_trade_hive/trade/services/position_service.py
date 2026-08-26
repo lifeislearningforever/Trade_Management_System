@@ -483,7 +483,7 @@ class PositionService:
         # _save_position doesn't need its own query to gate unrealized_pnl_lc — see
         # the '_reval_status' passthrough above for why a second, independent query
         # for the same fact is a real bug class here, not just theoretical.
-        is_equity_method = self._is_equity_method_security(security_id)
+        is_equity_method = self._is_equity_method_portfolio(portfolio_id)
         if is_equity_method:
             unrealized_pnl = Decimal('0')
         else:
@@ -738,7 +738,7 @@ class PositionService:
         # Computed once here (not per-branch) and threaded through position_data as
         # '_is_equity_method' so _save_position doesn't need its own query to gate
         # unrealized_pnl_lc.
-        is_equity_method = self._is_equity_method_security(security_id)
+        is_equity_method = self._is_equity_method_portfolio(portfolio_id)
 
         _effective_sell_lc = (
             Decimal(str(gross_amount_lc)) if gross_amount_lc and is_cross_currency else None
@@ -1229,17 +1229,19 @@ class PositionService:
                 self._get_portfolio_revaluation_status(portfolio_id)
             logger.debug(f"Portfolio {portfolio_id} revaluation_status: {revaluation_status}")
 
-            # Equity-method securities (ASSOC/SUBSI) are carried at cost — no MTM.
+            # Positions in an equity-method portfolio (investment_type in
+            # EQUITY_METHOD_INVESTMENT_TYPES: SUBSIDIARY CO / ASSOCIATED CO /
+            # RESTRUCTURED EQUITY-NEW) are carried at cost — no MTM.
             # _process_buy/_process_sell already zero out unrealized_pnl_fc for these
-            # via _is_equity_method_security() and thread the answer through as
+            # via _is_equity_method_portfolio() and thread the answer through as
             # '_is_equity_method' (same passthrough pattern as '_reval_status' above,
             # for the same reason: a second independent query here could disagree).
             # Without this gate, unrealized_pnl_lc below is computed fresh from
             # market_value_lc regardless of investment type, so it comes out non-zero
-            # for equity-method securities even though unrealized_pnl_fc is correctly 0.
+            # for equity-method positions even though unrealized_pnl_fc is correctly 0.
             is_equity_method = position_data.get('_is_equity_method')
             if is_equity_method is None:
-                is_equity_method = self._is_equity_method_security(security_id)
+                is_equity_method = self._is_equity_method_portfolio(portfolio_id)
 
             # LC calculations based on revaluation_status
             # fx_rate = security_currency -> portfolio_currency (e.g., USD/SGD = 1.35)
@@ -1902,21 +1904,33 @@ class PositionService:
             logger.error(f"Error fetching market price for {security_label}: {str(e)}")
             return None
 
-    def _is_equity_method_security(self, security_label: str) -> bool:
-        """Return True if security_investment is ASSOC or SUBSI (carried at cost, no MTM)."""
+    # Portfolio investment_type values carried at cost (equity method) -- no MTM.
+    EQUITY_METHOD_INVESTMENT_TYPES = ('SUBSIDIARY CO', 'ASSOCIATED CO', 'RESTRUCTURED EQUITY-NEW')
+
+    def _is_equity_method_portfolio(self, portfolio_id: str) -> bool:
+        """Return True if the PORTFOLIO's investment_type is one of
+        EQUITY_METHOD_INVESTMENT_TYPES (carried at cost, no MTM).
+
+        Sourced from cis_portfolio.investment_type -- this is a portfolio-level
+        static attribute, not a per-security one. Previously checked the
+        SECURITY's own security_investment field (ASSOC/SUBSI short codes);
+        moved to the portfolio per SA direction, since equity-method treatment
+        is a property of the portfolio (e.g. a subsidiary/associate holding
+        vehicle), not of the individual security it holds.
+        """
         try:
             query = f"""
-            SELECT security_investment
-            FROM {self.DATABASE}.cis_security
-            WHERE security_name = '{self._escape(security_label)}'
+            SELECT investment_type
+            FROM {self.DATABASE}.cis_portfolio
+            WHERE name = '{self._escape(portfolio_id)}'
             LIMIT 1
             """
             results = impala_manager.execute_query(query, database=self.DATABASE)
             if results:
-                inv_type = (results[0].get('security_investment') or '').upper()
-                return inv_type in ('ASSOC', 'SUBSI')
+                inv_type = (results[0].get('investment_type') or '').upper()
+                return inv_type in self.EQUITY_METHOD_INVESTMENT_TYPES
         except Exception as e:
-            logger.error(f"Error checking security_investment for {security_label}: {str(e)}")
+            logger.error(f"Error checking portfolio investment_type for {portfolio_id}: {str(e)}")
         return False
 
     def _get_fx_rate(

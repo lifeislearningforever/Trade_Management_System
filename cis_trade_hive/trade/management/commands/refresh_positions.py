@@ -8,7 +8,8 @@ For each position:
   1. Fetch latest price from cis_equity_price (always used; REVALUED and NON-REVALUED)
   2. If no price found: EOD/CORR keep existing market_value_fc (recalculate LC via
      latest FX rate); INT zeroes market_value_fc/lc instead of carrying it forward
-  3. unrealized_pnl = 0 if security_investment IN (ASSOC, SUBSI), else market_value_fc - cost_fc
+  3. unrealized_pnl = 0 if the portfolio's investment_type IN (SUBSIDIARY CO,
+     ASSOCIATED CO, RESTRUCTURED EQUITY-NEW), else market_value_fc - cost_fc
   4. NON-REVALUED: LC columns recalculated from FC × latest FX rate (no MTM override)
   5. net_book_value = cost + unrealized_pnl - provision
   6. Marks source row is_latest=false, inserts new EOD/CORR/INT row with is_latest=true.
@@ -117,6 +118,10 @@ DATABASE = settings.IMPALA_CONFIG['DATABASE']
 ALL_SOURCES = ['CIS', 'GMP', 'AMS_STREET', 'USER_UPLOAD']
 
 AVP_PRECISION = 8  # average cost is price-per-unit, not an amount — always 8 dp
+
+# Portfolio investment_type values carried at cost (equity method) -- no MTM.
+# Must match trade/services/position_service.py's EQUITY_METHOD_INVESTMENT_TYPES.
+EQUITY_METHOD_INVESTMENT_TYPES = ('SUBSIDIARY CO', 'ASSOCIATED CO', 'RESTRUCTURED EQUITY-NEW')
 
 
 class Command(BaseCommand):
@@ -530,7 +535,7 @@ class Command(BaseCommand):
         port_ccy     = port_info.get('currency')
         reval_status = (port_info.get('revaluation_status') or '').strip().upper()
         sec_ccy      = ref['sec_ccy'].get(security)
-        is_equity    = ref['equity_method'].get(security, False)
+        is_equity    = ref['equity_method'].get(portfolio, False)
         latest_price = ref['prices'].get(security)
         fx_pair      = f'{sec_ccy}-{port_ccy}' if sec_ccy and port_ccy and sec_ccy != port_ccy else None
         fx_rate      = ref['fx_rates'].get(fx_pair, Decimal('1')) if fx_pair else Decimal('1')
@@ -656,7 +661,10 @@ class Command(BaseCommand):
         Load all reference data needed for EOD revaluation in ~6 queries.
         Returns a dict with keys:
           sec_ccy        : {security_label: currency_code}
-          equity_method  : {security_label: bool}  (True if ASSOC/SUBSI)
+          equity_method  : {portfolio: bool}  (True if the PORTFOLIO's investment_type
+                           is SUBSIDIARY CO / ASSOCIATED CO / RESTRUCTURED EQUITY-NEW —
+                           equity-method treatment is a portfolio-level attribute, not
+                           a per-security one)
           port_info      : {portfolio: {currency, revaluation_status}}
           prices         : {security_label: Decimal}  (latest closing price)
           fx_rates       : {'SEC-PORT': Decimal}  (spot_rate_d)
@@ -681,38 +689,38 @@ class Command(BaseCommand):
         def _placeholders(items):
             return ', '.join(['%s'] * len(items))
 
-        # 1. Securities: currency_code + security_investment
+        # 1. Securities: currency_code
         # Bound as query params (not string-interpolated) — security names can
         # contain apostrophes (e.g. "CD INT'L ENT"), and PyHive's SQL parser
         # rejects escaped '' quotes inside long IN (...) literal lists.
         if securities:
             rows = impala_manager.execute_query(
-                f"SELECT security_name, currency_code, security_investment "
+                f"SELECT security_name, currency_code "
                 f"FROM {DATABASE}.cis_security "
                 f"WHERE security_name IN ({_placeholders(securities)})",
                 securities,
                 database=DATABASE
             ) or []
             for r in rows:
-                lbl = r.get('security_name')
-                ref['sec_ccy'][lbl] = r.get('currency_code')
-                inv = (r.get('security_investment') or '').upper()
-                ref['equity_method'][lbl] = inv in ('ASSOC', 'SUBSI')
+                ref['sec_ccy'][r.get('security_name')] = r.get('currency_code')
 
-        # 2. Portfolios: currency + revaluation_status
+        # 2. Portfolios: currency + revaluation_status + investment_type
         if portfolios:
             rows = impala_manager.execute_query(
-                f"SELECT name, currency, revaluation_status "
+                f"SELECT name, currency, revaluation_status, investment_type "
                 f"FROM {DATABASE}.cis_portfolio "
                 f"WHERE name IN ({_placeholders(portfolios)})",
                 portfolios,
                 database=DATABASE
             ) or []
             for r in rows:
-                ref['port_info'][r.get('name')] = {
+                name = r.get('name')
+                ref['port_info'][name] = {
                     'currency': r.get('currency'),
                     'revaluation_status': r.get('revaluation_status'),
                 }
+                inv = (r.get('investment_type') or '').upper()
+                ref['equity_method'][name] = inv in EQUITY_METHOD_INVESTMENT_TYPES
 
         # 3. Latest closing prices for all securities
         if securities:
