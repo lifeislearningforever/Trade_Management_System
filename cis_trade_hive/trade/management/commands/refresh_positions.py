@@ -11,6 +11,8 @@ For each position:
   3. unrealized_pnl = 0 if the portfolio's investment_type IN (SUBSIDIARY CO,
      ASSOCIATED CO, RESTRUCTURED EQUITY-NEW), else market_value_fc - cost_fc
   4. NON-REVALUED: LC columns recalculated from FC × latest FX rate (no MTM override)
+     -- provision_lc now follows the exact same REVAL/NON-REVAL FX branch as
+     cost_lc (req 4), instead of always carrying the stored value forward
   5. net_book_value = cost + unrealized_pnl - provision
   6. Marks source row is_latest=false, inserts new EOD/CORR/INT row with is_latest=true.
 
@@ -542,14 +544,18 @@ class Command(BaseCommand):
         fc_dp        = ref['currency_dp'].get(sec_ccy, 2)
         lc_dp        = ref['currency_dp'].get(port_ccy, 2)
 
-        # cost_lc rules (SA):
+        # cost_lc / provision_lc rules (SA, req 4) -- same FX treatment for both:
         #   NON-REVAL: always carry forward the as-traded LC (never recompute)
         #   REVAL: use latest FX rate if it is >= position_date (the traded date);
         #          otherwise keep the as-traded LC stored on the position
+        # Provision(LC) previously just carried the stored value forward
+        # unconditionally regardless of reval_status -- never FX-recomputed at
+        # all, unlike Cost(LC). Now mirrors the exact same branch.
         average_cost_fc = Decimal(str(position.get('average_cost_fc') or 0))
         if reval_status == 'NON-REVALUED':
-            average_cost_lc = Decimal(str(position.get('average_cost_lc') or 0))
-            cost_lc_write   = cost_lc_dec
+            average_cost_lc  = Decimal(str(position.get('average_cost_lc') or 0))
+            cost_lc_write    = cost_lc_dec
+            provision_lc_write = provision_lc
         else:
             # Determine whether the latest FX rate is more recent than the traded rate
             raw_pos_date = position.get('position_date')
@@ -561,12 +567,14 @@ class Command(BaseCommand):
 
             if fx_rate_date and pos_date_str and fx_rate_date >= pos_date_str:
                 # Latest FX rate is as-of or after the trade date — use it
-                average_cost_lc = round(average_cost_fc * fx_rate, AVP_PRECISION)
-                cost_lc_write   = round(cost_fc_dec * fx_rate, lc_dp)
+                average_cost_lc    = round(average_cost_fc * fx_rate, AVP_PRECISION)
+                cost_lc_write      = round(cost_fc_dec * fx_rate, lc_dp)
+                provision_lc_write = round(provision_fc * fx_rate, lc_dp)
             else:
                 # Latest FX rate predates the trade — keep as-traded LC
-                average_cost_lc = Decimal(str(position.get('average_cost_lc') or 0))
-                cost_lc_write   = cost_lc_dec
+                average_cost_lc    = Decimal(str(position.get('average_cost_lc') or 0))
+                cost_lc_write      = cost_lc_dec
+                provision_lc_write = provision_lc
 
         # Market value
         if latest_price is not None:
@@ -595,7 +603,7 @@ class Command(BaseCommand):
 
         # net_book_value = cost + unrealized_pnl - provision
         nbv_fc = round(cost_fc_dec + unrealized_pnl_fc - provision_fc, fc_dp)
-        nbv_lc = round(cost_lc_write + unrealized_pnl_lc - provision_lc, lc_dp)
+        nbv_lc = round(cost_lc_write + unrealized_pnl_lc - provision_lc_write, lc_dp)
 
         if not dry_run:
             insert_rows.append({
@@ -605,6 +613,7 @@ class Command(BaseCommand):
                 'unrealized_pnl_fc': unrealized_pnl_fc, 'unrealized_pnl_lc': unrealized_pnl_lc,
                 'nbv_fc': nbv_fc, 'nbv_lc': nbv_lc,
                 'average_cost_lc': average_cost_lc, 'cost_lc_write': cost_lc_write,
+                'provision_lc_write': provision_lc_write,
                 'fc_dp': fc_dp, 'lc_dp': lc_dp,
             })
 
@@ -647,6 +656,7 @@ class Command(BaseCommand):
                 'nbv_lc': Decimal(str(position.get('net_book_value_lc') or 0)),
                 'average_cost_lc': Decimal(str(position.get('average_cost_lc') or 0)),
                 'cost_lc_write': Decimal(str(position.get('cost_lc') or 0)),
+                'provision_lc_write': Decimal(str(position.get('provision_lc') or 0)),
                 'fc_dp': fc_dp, 'lc_dp': lc_dp,
             })
 
@@ -966,6 +976,7 @@ class Command(BaseCommand):
             lc_dp         = row['lc_dp']
             avg_cost_lc   = row['average_cost_lc']
             cost_lc_write = row['cost_lc_write']
+            provision_lc_write = row['provision_lc_write']
             mkt_fc        = row['market_value_fc']
             mkt_lc        = row['market_value_lc']
             upnl_fc       = row['unrealized_pnl_fc']
@@ -1010,10 +1021,18 @@ class Command(BaseCommand):
             # the same delta so it stays internally consistent with whatever
             # provision value actually gets written below, instead of nbv and
             # provision silently disagreeing on this row.
+            #
+            # provision_lc specifically falls back to provision_lc_write (the
+            # req-4 FX-recomputed value from _process_position), not the raw
+            # source position's stale provision_lc -- same fallback swap
+            # cost_lc/cost_lc_write already gets, so a first-time write (no
+            # existing row to carry from) picks up the FX-recomputed value
+            # instead of whatever was last stored.
             _carried_prov_fc = Decimal(str(_carry('provision_fc', 0) or 0))
-            _carried_prov_lc = Decimal(str(_carry('provision_lc', 0) or 0))
+            _carried_prov_lc_raw = existing.get('provision_lc')
+            _carried_prov_lc = Decimal(str(_carried_prov_lc_raw)) if _carried_prov_lc_raw is not None else Decimal(str(provision_lc_write))
             _source_prov_fc  = Decimal(str(position.get('provision_fc') or 0))
-            _source_prov_lc  = Decimal(str(position.get('provision_lc') or 0))
+            _source_prov_lc  = Decimal(str(provision_lc_write))
             nbv_fc = round(Decimal(str(nbv_fc)) + _source_prov_fc - _carried_prov_fc, fc_dp)
             nbv_lc = round(Decimal(str(nbv_lc)) + _source_prov_lc - _carried_prov_lc, lc_dp)
 
@@ -1038,7 +1057,7 @@ class Command(BaseCommand):
                 f"{float(round(nbv_fc, fc_dp))}, {float(round(nbv_lc, lc_dp))}, "
                 f"{float(round(upnl_fc, fc_dp))}, {float(round(upnl_lc, lc_dp))}, "
                 f"{fc(_carry('realized_pnl_fc'))}, {lc(_carry('realized_pnl_lc'))}, "
-                f"{fc(_carry('provision_fc'))}, {lc(_carry('provision_lc'))}, "
+                f"{fc(_carry('provision_fc'))}, {lc(_carried_prov_lc)}, "
                 f"{fc(_carry('dividend_fc'))}, {lc(_carry('dividend_lc'))}, "
                 f"{fc(_carry('uncall_fc'))}, {lc(_carry('uncall_lc'))}, "
                 f"{fc(_carry('pipeline_fc'))}, {lc(_carry('pipeline_lc'))}, "
