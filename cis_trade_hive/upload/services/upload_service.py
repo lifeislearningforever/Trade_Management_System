@@ -2421,7 +2421,7 @@ class UploadService:
           does not create any new cis_security records — every row that would
           otherwise have been 'NOT_FOUND: Create new security' is failed
           instead, and position_upload_report reflects it as INVALID. Pass
-          True to opt in to auto-creating new securities.
+          True to opt in to auto-creating new securities AND parties (Step 5C).
 
         Runs the Hive/Impala equivalent of position_upload_transform_optimized.sql:
           Step 1 — build pos_stage_1_base from position_upload_standardized
@@ -2429,6 +2429,10 @@ class UploadService:
           Step 3 — security ISIN match
           Step 4 — security fallback match
           Step 5 — price lookup
+          Step 5B — auto-create new cis_security records (when auto_create_security=True)
+          Step 5C — auto-create new cis_party (issuer) records for non-GMP uploads
+                    (when auto_create_security=True); reuses existing parties where
+                    possible; never creates duplicates; skipped for GMP src_ids.
           Step 6 — consolidated staging
           Step 7A — upsert into cis_position
           Step 7B — write position_upload_report
@@ -2476,7 +2480,7 @@ class UploadService:
             # ETL steps in order — used to compute % progress for the UI progress bar.
             _ETL_STEPS = [
                 'Step 0', 'Step 1', 'Step 2', 'Step 3', 'Step 4',
-                'Step 4B', 'Step 5', 'Step 5B', 'Step 6', 'Step 6B',
+                'Step 4B', 'Step 5', 'Step 5B', 'Step 5C', 'Step 6', 'Step 6B',
                 'Step 6C', 'Step 7A', 'Step 7A2', 'Step 7B',
             ]
             _step_index = [0]  # mutable counter for closure
@@ -4846,6 +4850,184 @@ class UploadService:
                 for _c in _candidates[:5]:
                     logger.info(f"[position_etl] Step 5B: created security label='{_c.get('security_label')}' isin='{_c.get('isin')}' currency='{_c.get('currency_code')}'")
             _t = _step_time("Step 5B (new security creation)", _t)
+
+            # ------------------------------------------------------------------
+            # Step 5C: Party (issuer) matching & auto-creation.
+            #
+            # Guarded by:
+            #   1. GMP exclusion: skipped when src_id starts with 'gmp' (GMP
+            #      daily positions are managed through their own sync path).
+            #   2. auto_create_security flag: follows the same opt-in gate as
+            #      Step 5B; when False, party creation is also disabled.
+            #
+            # For each upload row that has a resolvable issuer name we:
+            #   a. Collect issuer names from newly created securities (Step 5B
+            #      _candidates minus collisions) AND from existing securities
+            #      (already matched in Step 4) — covering the case where the
+            #      security exists but no party record does.
+            #   b. Abbreviate the raw name using the same abbreviate_security_name()
+            #      function, making the party_short_name (PK) consistent with
+            #      cis_security.security_name.
+            #   c. Collapse multiple securities that share the same issuer name
+            #      into a single party candidate (DISTINCT on party_short_name).
+            #   d. Query cis_party once to find already-existing parties; skip
+            #      those — reuse rather than duplicate.
+            #   e. Batch UPSERT the remaining new parties in a single round-trip.
+            # ------------------------------------------------------------------
+            _is_gmp_src = src_id.lower().startswith('gmp')
+            if auto_create_security and not _is_gmp_src:
+                # ---- Collect raw issuer names from two sources ----
+                #
+                # Source A: securities created in Step 5B (use the raw_security_name
+                # field from _candidates, minus the collision rows).
+                #
+                # Source B: existing-security rows matched in Step 4 — join
+                # pos_stage_4_security_fallback (has final_security_id) back to
+                # cis_security to get the issuer field.  We fetch these from
+                # Impala in one query so we don't have to read the full
+                # pos_stage_4 table in Python.
+
+                # A: names from newly created securities
+                _created_row_ids = {
+                    int(_row.get('row_id') or 0): _row.get('raw_security_name') or ''
+                    for _row in _candidates
+                    if int(_row.get('row_id') or 0) not in _collision_rows
+                }
+
+                # B: names from existing matched securities (issuer stored in cis_security)
+                _existing_issuer_rows = impala_manager.execute_query(
+                    f"""
+                    SELECT DISTINCT s.issuer AS raw_issuer_name,
+                           b.industry, b.issuer_type,
+                           b.country_of_incorporation, b.cels
+                    FROM pos_stage_4_security_fallback p4
+                    JOIN pos_stage_1_base b ON b.row_id = p4.row_id
+                    JOIN {db}.cis_security s ON s.security_id = p4.final_security_id
+                    WHERE p4.final_security_id IS NOT NULL
+                      AND s.issuer IS NOT NULL
+                      AND TRIM(s.issuer) != ''
+                    """,
+                    database=db
+                ) or []
+
+                # ---- Build unified candidate dict keyed by party_short_name ----
+                # Multiple securities → one party: last-write-wins for metadata
+                # (all rows for the same issuer carry essentially the same fields).
+                _party_candidates: dict = {}  # party_short_name -> metadata dict
+
+                # Add Source B first (existing securities) so Source A (new
+                # securities, which have richer metadata from the upload) can
+                # override if the same issuer appears in both.
+                for _er in _existing_issuer_rows:
+                    _raw = (_er.get('raw_issuer_name') or '').strip()
+                    if not _raw:
+                        continue
+                    _pname = abbreviate_security_name(_raw)
+                    if not _pname:
+                        continue
+                    _party_candidates[_pname] = {
+                        'party_full_name':         _raw,
+                        'industry':                _er.get('industry'),
+                        'issuer_type':             _er.get('issuer_type'),
+                        'country_of_incorporation': _er.get('country_of_incorporation'),
+                        'cels':                    _er.get('cels'),
+                    }
+
+                # Source A: newly created securities
+                for _row in _candidates:
+                    if int(_row.get('row_id') or 0) in _collision_rows:
+                        continue
+                    _raw = (_row.get('raw_security_name') or '').strip()
+                    if not _raw:
+                        continue
+                    _pname = abbreviate_security_name(_raw)
+                    if not _pname:
+                        continue
+                    _party_candidates[_pname] = {
+                        'party_full_name':         _raw,
+                        'industry':                _row.get('industry'),
+                        'issuer_type':             _row.get('issuer_type'),
+                        'country_of_incorporation': _row.get('country_of_incorporation'),
+                        'cels':                    _row.get('cels'),
+                    }
+
+                if _party_candidates:
+                    # ---- Deduplicate against existing cis_party rows ----
+                    _existing_names_in_list = ', '.join(
+                        _sql_str(n) for n in _party_candidates
+                    )
+                    _existing_party_rows = impala_manager.execute_query(
+                        f"""
+                        SELECT party_short_name
+                        FROM {db}.cis_party
+                        WHERE party_short_name IN ({_existing_names_in_list})
+                        """,
+                        database=db
+                    ) or []
+                    _existing_party_names = {
+                        r.get('party_short_name') for r in _existing_party_rows
+                    }
+
+                    _new_parties = {
+                        name: meta
+                        for name, meta in _party_candidates.items()
+                        if name not in _existing_party_names
+                    }
+
+                    _reused_count = len(_party_candidates) - len(_new_parties)
+                    logger.info(
+                        f"[position_etl] Step 5C: {len(_party_candidates)} issuer(s) found — "
+                        f"{_reused_count} already in cis_party (reused), "
+                        f"{len(_new_parties)} to create"
+                    )
+
+                    # ---- Batch UPSERT new parties (one round-trip) ----
+                    if _new_parties:
+                        _party_now = _time.strftime('%Y-%m-%d %H:%M:%S')
+                        _party_value_rows = []
+                        for _pname, _meta in _new_parties.items():
+                            _country = _meta.get('country_of_incorporation')
+                            _party_value_rows.append(
+                                f"({_sql_str(_pname)},"
+                                f"{_sql_str(_meta.get('party_full_name'))},"
+                                f"{_sql_str(_meta.get('issuer_type'))},"
+                                f"{_sql_str(_meta.get('industry'))},"
+                                f"{_sql_str(_country)},"
+                                f"{_sql_str(_country)},"
+                                f"{_sql_str(_meta.get('cels'))},"
+                                f"FALSE,FALSE,TRUE,FALSE,FALSE,FALSE,"
+                                f"'POSITION_UPLOAD',"
+                                f"'INITIAL',"
+                                f"TRUE,FALSE,"
+                                f"{_sql_str(updated_by)},'{_party_now}',"
+                                f"{_sql_str(updated_by)},'{_party_now}')"
+                            )
+                        impala_manager.execute_write(
+                            f"""
+                            UPSERT INTO {db}.cis_party (
+                                party_short_name, party_full_name, record_type,
+                                industry, country_of_incorporation, country,
+                                cels_code,
+                                is_broker, is_custodian, is_issuer, is_bank,
+                                is_subsidiary, is_corporate,
+                                src_system, status,
+                                is_active, is_deleted,
+                                created_by, created_at, updated_by, updated_at
+                            ) VALUES {', '.join(_party_value_rows)}
+                            """,
+                            database=db
+                        )
+                        for _pn in list(_new_parties)[:5]:
+                            logger.info(f"[position_etl] Step 5C: created party party_short_name='{_pn}'")
+                else:
+                    logger.info("[position_etl] Step 5C: no issuer candidates — nothing to create")
+
+            else:
+                if _is_gmp_src:
+                    logger.info("[position_etl] Step 5C: skipped (GMP source — party sync handled separately)")
+                else:
+                    logger.info("[position_etl] Step 5C: skipped (auto_create_security=False)")
+            _t = _step_time("Step 5C (party matching & creation)", _t)
 
             # ------------------------------------------------------------------
             # Step 5D: when auto_create_security is False, pos_stage_5b_candidates
