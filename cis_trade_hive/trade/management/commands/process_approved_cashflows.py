@@ -1257,9 +1257,9 @@ class Command(BaseCommand):
             f"AND position_date = '{_escape(position_date)}'" if position_date else ""
         )
 
-        try:
-            selected: List[Tuple[Dict[str, Any], str]] = []
-            for basis in basis_order:
+        selected_by_basis: Dict[str, Tuple[Dict[str, Any], str]] = {}
+        for basis in basis_order:
+            try:
                 query = f"""
                 SELECT *
                 FROM {DATABASE}.{POSITION_TABLE}
@@ -1275,16 +1275,18 @@ class Command(BaseCommand):
                 """
                 rows = impala_manager.execute_query(query, database=DATABASE)
                 if rows:
-                    selected.append((rows[0], 'CIS'))
-            if selected:
-                return selected
-        except Exception as e:
-            logger.error(f'Error fetching CIS position for {portfolio}/{security}: {e}')
+                    selected_by_basis[basis] = (rows[0], 'CIS')
+            except Exception as e:
+                logger.error(f'Error fetching CIS position for {portfolio}/{security} basis={basis}: {e}')
+        if selected_by_basis and (not include_traded or len(selected_by_basis) == len(basis_order)):
+            return [selected_by_basis[b] for b in basis_order if b in selected_by_basis]
 
         # Fallback: golden copy for non-CIS sources
-        try:
-            selected: List[Tuple[Dict[str, Any], str]] = []
-            for basis in basis_order:
+        golden_bases: List[str] = []
+        for basis in basis_order:
+            if basis in selected_by_basis:
+                continue
+            try:
                 golden_query = f"""
                 SELECT
                     position_id,
@@ -1328,14 +1330,17 @@ class Command(BaseCommand):
                 rows = impala_manager.execute_query(golden_query, database=DATABASE)
                 if rows:
                     row = rows[0]
-                    selected.append((row, row.get('src_system') or 'GMP'))
-            if selected:
+                    selected_by_basis[basis] = (row, row.get('src_system') or 'GMP')
+                    golden_bases.append(basis)
+            except Exception as e:
+                logger.error(f'Error fetching golden position for {portfolio}/{security} basis={basis}: {e}')
+        if selected_by_basis:
+            selected = [selected_by_basis[b] for b in basis_order if b in selected_by_basis]
+            if golden_bases:
                 logger.info(
-                    f'[CF] No CIS position for {portfolio}/{security} — '
-                    f'using golden copy for {", ".join([r[0].get("position_basis") or "SETTLED" for r in selected])}'
+                    f'[CF] Using golden copy for {portfolio}/{security} '
+                    f'basis={", ".join(golden_bases)}'
                 )
-                return selected
-        except Exception as e:
-            logger.error(f'Error fetching golden position for {portfolio}/{security}: {e}')
+            return selected
 
         return []
