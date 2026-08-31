@@ -1249,16 +1249,12 @@ class Command(BaseCommand):
         Returns list of (position_dict, src_system).
         First tries cis_trade_position (CIS versioned ledger).
         Falls back to cis_position (golden copy) for non-CIS sources.
-        include_traded=True fetches both SETTLED and TRADED bases; otherwise
-        only SETTLED is returned.
+        include_traded=True fetches both SETTLED and TRADED bases.
 
         position_date (CORR only): when supplied, restricts the lookup to rows
         whose position_date equals this value (the month-end date being corrected).
         For EOD (None): picks the most recent position across all dates.
         """
-        basis_filter = (
-            "('SETTLED', 'TRADED')" if include_traded else "('SETTLED')"
-        )
         basis_order = ['SETTLED', 'TRADED'] if include_traded else ['SETTLED']
         date_clause_tp = (
             f"AND position_date = '{_escape(position_date)}'" if position_date else ""
@@ -1268,67 +1264,34 @@ class Command(BaseCommand):
         )
 
         try:
-            query = f"""
-            SELECT *
-            FROM (
-                SELECT *,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY position_basis
-                           ORDER BY position_date DESC, version_id DESC
-                       ) AS rn
+            selected: List[Tuple[Dict[str, Any], str]] = []
+            for basis in basis_order:
+                query = f"""
+                SELECT *
                 FROM {DATABASE}.{POSITION_TABLE}
                 WHERE portfolio_short_name = '{_escape(portfolio)}'
                   AND security_label = '{_escape(security)}'
-                  AND position_basis IN {basis_filter}
+                  AND position_basis = '{_escape(basis)}'
                   AND status = 'OPEN'
                   AND is_active = true
                   AND is_latest = true
                   {date_clause_tp}
-            ) t
-            WHERE rn = 1
-            """
-            cis_rows = impala_manager.execute_query(query, database=DATABASE)
-            if cis_rows:
-                by_basis = {(row.get('position_basis') or 'SETTLED'): row for row in cis_rows}
-                selected = [(by_basis[b], 'CIS') for b in basis_order if b in by_basis]
-                if selected:
-                    return selected
+                ORDER BY position_date DESC, version_id DESC
+                LIMIT 1
+                """
+                rows = impala_manager.execute_query(query, database=DATABASE)
+                if rows:
+                    selected.append((rows[0], 'CIS'))
+            if selected:
+                return selected
         except Exception as e:
             logger.error(f'Error fetching CIS position for {portfolio}/{security}: {e}')
 
         # Fallback: golden copy for non-CIS sources
         try:
-            golden_query = f"""
-            SELECT
-                position_id,
-                version_id,
-                portfolio_short_name,
-                security_label,
-                position_basis,
-                position_date,
-                src_system,
-                quantity,
-                average_cost_fc,
-                total_cost_fc,
-                average_cost_lc,
-                total_cost_lc,
-                market_value_fc,
-                market_value_lc,
-                unrealized_pnl_fc,
-                unrealized_pnl_lc,
-                realized_pnl_fc,
-                realized_pnl_lc,
-                dividend_fc,
-                dividend_lc,
-                provision_fc,
-                provision_lc,
-                uncall_fc,
-                uncall_lc,
-                pipeline_fc,
-                pipeline_lc,
-                isin,
-                source_table
-            FROM (
+            selected: List[Tuple[Dict[str, Any], str]] = []
+            for basis in basis_order:
+                golden_query = f"""
                 SELECT
                     position_id,
                     position_id        AS version_id,
@@ -1357,35 +1320,27 @@ class Command(BaseCommand):
                     pipeline_fc,
                     pipeline_lc,
                     isin,
-                    source_table,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY position_basis
-                        ORDER BY position_date DESC, position_id DESC
-                    ) AS rn
+                    source_table
                 FROM {DATABASE}.{GOLDEN_TABLE}
                 WHERE portfolio = '{_escape(portfolio)}'
                   AND security_label = '{_escape(security)}'
-                  AND position_basis IN {basis_filter}
+                  AND position_basis = '{_escape(basis)}'
                   AND quantity > 0
                   AND (is_latest = true OR is_latest IS NULL)
                   {date_clause_gp}
-            ) t
-            WHERE rn = 1
-            """
-            golden_rows = impala_manager.execute_query(golden_query, database=DATABASE)
-            if golden_rows:
-                by_basis = {(row.get('position_basis') or 'SETTLED'): row for row in golden_rows}
-                selected: List[Tuple[Dict[str, Any], str]] = []
-                for basis in basis_order:
-                    row = by_basis.get(basis)
-                    if row:
-                        selected.append((row, row.get('src_system') or 'GMP'))
-                if selected:
-                    logger.info(
-                        f'[CF] No CIS position for {portfolio}/{security} — '
-                        f'using golden copy for {", ".join([r[0].get("position_basis") or "SETTLED" for r in selected])}'
-                    )
-                    return selected
+                ORDER BY position_date DESC, position_id DESC
+                LIMIT 1
+                """
+                rows = impala_manager.execute_query(golden_query, database=DATABASE)
+                if rows:
+                    row = rows[0]
+                    selected.append((row, row.get('src_system') or 'GMP'))
+            if selected:
+                logger.info(
+                    f'[CF] No CIS position for {portfolio}/{security} — '
+                    f'using golden copy for {", ".join([r[0].get("position_basis") or "SETTLED" for r in selected])}'
+                )
+                return selected
         except Exception as e:
             logger.error(f'Error fetching golden position for {portfolio}/{security}: {e}')
 
