@@ -1270,24 +1270,27 @@ class Command(BaseCommand):
         try:
             query = f"""
             SELECT *
-            FROM {DATABASE}.{POSITION_TABLE}
-            WHERE portfolio_short_name = '{_escape(portfolio)}'
-              AND security_label = '{_escape(security)}'
-              AND position_basis IN {basis_filter}
-              AND status = 'OPEN'
-              AND is_active = true
-              AND is_latest = true
-              {date_clause_tp}
-            ORDER BY position_basis ASC, position_date DESC, version_id DESC
+            FROM (
+                SELECT *,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY position_basis
+                           ORDER BY position_date DESC, version_id DESC
+                       ) AS rn
+                FROM {DATABASE}.{POSITION_TABLE}
+                WHERE portfolio_short_name = '{_escape(portfolio)}'
+                  AND security_label = '{_escape(security)}'
+                  AND position_basis IN {basis_filter}
+                  AND status = 'OPEN'
+                  AND is_active = true
+                  AND is_latest = true
+                  {date_clause_tp}
+            ) t
+            WHERE rn = 1
             """
             cis_rows = impala_manager.execute_query(query, database=DATABASE)
             if cis_rows:
-                latest_by_basis: Dict[str, Dict[str, Any]] = {}
-                for row in cis_rows:
-                    basis = row.get('position_basis') or 'SETTLED'
-                    if basis not in latest_by_basis:
-                        latest_by_basis[basis] = row
-                selected = [(latest_by_basis[b], 'CIS') for b in basis_order if b in latest_by_basis]
+                by_basis = {(row.get('position_basis') or 'SETTLED'): row for row in cis_rows}
+                selected = [(by_basis[b], 'CIS') for b in basis_order if b in by_basis]
                 if selected:
                     return selected
         except Exception as e:
@@ -1298,17 +1301,17 @@ class Command(BaseCommand):
             golden_query = f"""
             SELECT
                 position_id,
-                position_id        AS version_id,
-                portfolio          AS portfolio_short_name,
+                version_id,
+                portfolio_short_name,
                 security_label,
                 position_basis,
                 position_date,
                 src_system,
                 quantity,
                 average_cost_fc,
-                cost_fc            AS total_cost_fc,
+                total_cost_fc,
                 average_cost_lc,
-                cost_lc            AS total_cost_lc,
+                total_cost_lc,
                 market_value_fc,
                 market_value_lc,
                 unrealized_pnl_fc,
@@ -1325,25 +1328,56 @@ class Command(BaseCommand):
                 pipeline_lc,
                 isin,
                 source_table
-            FROM {DATABASE}.{GOLDEN_TABLE}
-            WHERE portfolio = '{_escape(portfolio)}'
-              AND security_label = '{_escape(security)}'
-              AND position_basis IN {basis_filter}
-              AND quantity > 0
-              AND (is_latest = true OR is_latest IS NULL)
-              {date_clause_gp}
-            ORDER BY position_basis ASC, position_date DESC
+            FROM (
+                SELECT
+                    position_id,
+                    position_id        AS version_id,
+                    portfolio          AS portfolio_short_name,
+                    security_label,
+                    position_basis,
+                    position_date,
+                    src_system,
+                    quantity,
+                    average_cost_fc,
+                    cost_fc            AS total_cost_fc,
+                    average_cost_lc,
+                    cost_lc            AS total_cost_lc,
+                    market_value_fc,
+                    market_value_lc,
+                    unrealized_pnl_fc,
+                    unrealized_pnl_lc,
+                    realized_pnl_fc,
+                    realized_pnl_lc,
+                    dividend_fc,
+                    dividend_lc,
+                    provision_fc,
+                    provision_lc,
+                    uncall_fc,
+                    uncall_lc,
+                    pipeline_fc,
+                    pipeline_lc,
+                    isin,
+                    source_table,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY position_basis
+                        ORDER BY position_date DESC, position_id DESC
+                    ) AS rn
+                FROM {DATABASE}.{GOLDEN_TABLE}
+                WHERE portfolio = '{_escape(portfolio)}'
+                  AND security_label = '{_escape(security)}'
+                  AND position_basis IN {basis_filter}
+                  AND quantity > 0
+                  AND (is_latest = true OR is_latest IS NULL)
+                  {date_clause_gp}
+            ) t
+            WHERE rn = 1
             """
             golden_rows = impala_manager.execute_query(golden_query, database=DATABASE)
             if golden_rows:
-                latest_by_basis: Dict[str, Dict[str, Any]] = {}
-                for row in golden_rows:
-                    basis = row.get('position_basis') or 'SETTLED'
-                    if basis not in latest_by_basis:
-                        latest_by_basis[basis] = row
+                by_basis = {(row.get('position_basis') or 'SETTLED'): row for row in golden_rows}
                 selected: List[Tuple[Dict[str, Any], str]] = []
                 for basis in basis_order:
-                    row = latest_by_basis.get(basis)
+                    row = by_basis.get(basis)
                     if row:
                         selected.append((row, row.get('src_system') or 'GMP'))
                 if selected:

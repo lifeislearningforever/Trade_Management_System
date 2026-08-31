@@ -187,7 +187,7 @@ class TestProcessApprovedCashflowsSeedPositions:
         assert processed_bases == ['SETTLED', 'TRADED']
 
     def test_apply_to_position_non_roc_uses_settled_only_lookup(self):
-        with patch.object(self.command, '_get_current_positions', return_value=[] ) as get_positions_mock:
+        with patch.object(self.command, '_get_current_positions', return_value=[]) as get_positions_mock:
             success, _ = self.command._apply_to_position(
                 cf=self.cash_flow,
                 cf_type='DIVIDEND',
