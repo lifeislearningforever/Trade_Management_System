@@ -153,3 +153,56 @@ class TestProcessApprovedCashflowsSeedPositions:
         sql = write_sql.call_args.args[0].lstrip()
         assert sql.startswith('INSERT INTO')
         sync_mock.assert_called_once()
+
+    def test_apply_to_position_return_of_capital_updates_settled_and_traded(self):
+        positions = [
+            ({'position_basis': 'SETTLED', 'quantity': 100}, 'CIS'),
+            ({'position_basis': 'TRADED', 'quantity': 100}, 'CIS'),
+        ]
+        with patch.object(self.command, '_get_current_positions', return_value=positions) as get_positions_mock, \
+             patch.object(self.command, '_get_security_currency', return_value='USD'), \
+             patch.object(self.command, '_get_portfolio_currency', return_value='SGD'), \
+             patch.object(self.command, '_get_currency_dp', return_value=2), \
+             patch.object(self.command, '_reduce_avp', return_value=(True, 'ok')) as reduce_mock:
+            success, _ = self.command._apply_to_position(
+                cf=self.cash_flow,
+                cf_type='RETURN_OF_CAPITAL',
+                portfolio='PORT-1',
+                security='SEC-1',
+                amount_fc=Decimal('10'),
+                amount_lc=Decimal('13'),
+                send_receive='DECREASE',
+                payment_date='2026-08-15',
+                dry_run=False,
+                run_type='EOD',
+                position_date='2026-08-15',
+            )
+
+        assert success is True
+        get_positions_mock.assert_called_once_with(
+            'PORT-1', 'SEC-1', position_date='2026-08-15', include_traded=True
+        )
+        assert reduce_mock.call_count == 2
+        processed_bases = [call.args[0]['position_basis'] for call in reduce_mock.call_args_list]
+        assert processed_bases == ['SETTLED', 'TRADED']
+
+    def test_apply_to_position_non_roc_uses_settled_only_lookup(self):
+        with patch.object(self.command, '_get_current_positions', return_value=[] ) as get_positions_mock:
+            success, _ = self.command._apply_to_position(
+                cf=self.cash_flow,
+                cf_type='DIVIDEND',
+                portfolio='PORT-1',
+                security='SEC-1',
+                amount_fc=Decimal('10'),
+                amount_lc=Decimal('13'),
+                send_receive='SEND',
+                payment_date='2026-08-15',
+                dry_run=False,
+                run_type='EOD',
+                position_date='2026-08-15',
+            )
+
+        assert success is False
+        get_positions_mock.assert_called_once_with(
+            'PORT-1', 'SEC-1', position_date='2026-08-15', include_traded=False
+        )
