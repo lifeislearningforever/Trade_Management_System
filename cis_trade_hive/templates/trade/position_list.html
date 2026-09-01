@@ -453,6 +453,9 @@
                             style="min-width:80px;" onclick="sortBy('position_type')">
                             Type <span class="sort-icon"></span>
                         </th>
+                        <th style="min-width:80px;" title="Whether this is the current/authoritative version for its natural key (portfolio + security + basis + date)">
+                            Latest
+                        </th>
                         <th class="sort-th text-end {% if sb == 'quantity' %}sorted-{{ sd|lower }}{% endif %}"
                             style="min-width:110px;" onclick="sortBy('quantity')">
                             Quantity <span class="sort-icon"></span>
@@ -530,7 +533,7 @@
                 </thead>
                 <tbody>
                     {% for p in positions %}
-                    <tr>
+                    <tr class="{% if p.is_latest == False %}table-secondary opacity-75{% endif %}">
                         <td style="position:sticky; left:0; background:#fff; z-index:1;">
                             {% if p.portfolio %}
                                 <a href="{% url 'portfolio:detail' p.portfolio %}" class="text-primary fw-semibold">
@@ -591,6 +594,13 @@
                                 <span class="badge bg-info text-dark">CORR</span>
                             {% else %}
                                 <span class="badge bg-secondary">{{ p.position_type|default:"-" }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if p.is_latest == False %}
+                                <span class="badge bg-secondary" title="Superseded — an older version, no longer authoritative">Prior</span>
+                            {% else %}
+                                <span class="badge bg-success" title="Current authoritative version for this natural key">Latest</span>
                             {% endif %}
                         </td>
                         <td class="text-end num">{{ p.quantity|default:0|floatformat:4|intcomma }}</td>

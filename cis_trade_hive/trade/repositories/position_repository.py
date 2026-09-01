@@ -155,6 +155,7 @@ class PositionRepository:
                     pos.uncall_fc, pos.uncall_lc,
                     pos.pipeline_fc, pos.pipeline_lc,
                     pos.position_type,
+                    pos.is_latest,
                     pos.isin,
                     pos.processing_timestamp,
                     COALESCE(p.revaluation_status, '') AS revaluation_status,
